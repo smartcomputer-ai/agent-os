@@ -159,9 +159,9 @@ async fn control_channel_round_trip() {
     // defs-list
     let defs_ls = RequestEnvelope {
         v: 1,
-        id: "defs-list".into(),
-        cmd: "defs-list".into(),
-        payload: json!({ "kinds": ["schema"], "prefix": "demo/" }),
+        id: "def-list".into(),
+        cmd: "def-list".into(),
+        payload: json!({ "kinds": ["schema"], "prefix": "com.acme/" }),
     };
     let resp = client.request(&defs_ls).await.unwrap();
     assert!(resp.ok);

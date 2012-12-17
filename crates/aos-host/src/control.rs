@@ -316,7 +316,7 @@ async fn handle_request(
                     "meta": meta_to_json(&meta),
                 }))
             }
-                        "def-get" => {
+            "def-get" | "defs-get" => {
                 let name = req
                     .payload
                     .get("name")
@@ -333,7 +333,7 @@ async fn handle_request(
                 let def = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "def": def }))
             }
-            "def-list" => {
+            "def-list" | "defs-list" => {
                 let kinds: Option<Vec<String>> = req
                     .payload
                     .get("kinds")
@@ -765,7 +765,7 @@ impl ControlClient {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "def-list".into(),
+            cmd: "defs-list".into(),
             payload: serde_json::Value::Object(payload),
         };
         self.request(&env).await
