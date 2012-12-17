@@ -55,22 +55,22 @@ Response:
 
 ## Verbs (v1.1 control/introspection)
 
-- `send-event { schema, value_b64 }` → enqueues a DomainEvent and runs one daemon cycle. `value_b64` must be canonical CBOR. Timers still wait for their deadlines.
-- `inject-receipt { intent_hash, adapter_id, payload_b64 }` → injects an effect receipt (CBOR base64 payload).
-- `manifest-read { consistency?: "head"|"exact:<h>"|"at_least:<h>" }` → returns `{ manifest, journal_height, snapshot_hash?, manifest_hash }`.
-- `query-state { reducer, key_b64?, consistency?: "..."} ` → returns `{ state_b64?, meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
-- `list-cells { reducer }` → returns `{ cells:[{ key_b64, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
-- `defs-get { name }` → returns `{ def }` where `def` is the manifest entry for that name (`defschema`/`defmodule`/`defplan`/`defcap`/`defeffect`/`defpolicy`/`defsecret`); errors if missing.
-- `defs-ls { kinds?: ["schema"|"module"|"plan"|"cap"|"effect"|"policy"|"secret"], prefix?: "..." }` → returns `{ defs:[{ kind, name, cap_type?, params_schema?, receipt_schema?, plan_steps?, policy_rules? }], meta }` sorted by name.
+- `event-send { schema, value_b64 }` → enqueues a DomainEvent and runs one daemon cycle. `value_b64` must be canonical CBOR. Timers still wait for their deadlines.
+- `receipt-inject { intent_hash, adapter_id, payload_b64 }` → injects an effect receipt (CBOR base64 payload).
+- `manifest-get { consistency?: "head"|"exact:<h>"|"at_least:<h>" }` → returns `{ manifest, journal_height, snapshot_hash?, manifest_hash }`.
+- `state-get { reducer, key_b64?, consistency?: "..."} ` → returns `{ state_b64?, meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
+- `state-list { reducer }` → returns `{ cells:[{ key_b64, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
+- `def-get { name }` → returns `{ def }` where `def` is the manifest entry for that name (`defschema`/`defmodule`/`defplan`/`defcap`/`defeffect`/`defpolicy`); errors if missing.
+- `def-list { kinds?: ["defschema"|"defmodule"|"defplan"|"defcap"|"defeffect"|"defpolicy"|"schema"|"module"|"plan"|"cap"|"effect"|"policy"], prefix?: "..." }` → returns `{ defs:[{ kind, name, cap_type?, params_schema?, receipt_schema?, plan_steps?, policy_rules? }], meta }` sorted by name (aliases normalized to `$kind`).
 - `journal-head {}` → returns `{ journal_height, snapshot_hash?, manifest_hash }`.
-- `put-blob { data_b64 }` → stores blob in CAS; returns `{ hash: "sha256:..." }`.
+- `blob-put { data_b64 }` → stores blob in CAS; returns `{ hash: "sha256:..." }`.
 - `blob-get { hash }` → returns `{ data_b64 }` (CAS lookup).
 - `snapshot {}` → forces snapshot; `result` is empty object.
 - `shutdown {}` → graceful drain, snapshot, shutdown; server and daemon stop.
-- `propose { patch_b64, description? }` → submits a governance proposal. `patch_b64` is base64 of either (a) `ManifestPatch` CBOR or (b) `PatchDocument` JSON. PatchDocuments are validated against `spec/schemas/patch.schema.json` (with `common.schema.json` embedded) before compilation; ManifestPatch skips schema validation. Returns `{ proposal_id: <u64> }`.
-- `shadow { proposal_id }` → runs shadow for a proposal; returns a JSON `ShadowSummary` `{ manifest_hash, predicted_effects?, pending_receipts?, plan_results?, ledger_deltas? }`.
-- `approve { proposal_id, decision?, approver? }` → records an approval decision. `decision` is `"approve"` (default) or `"reject"`; `approver` defaults to `"control-client"`. Returns `{}`.
-- `apply { proposal_id }` → applies an approved proposal; returns `{}`.
+- `gov-propose { patch_b64, description? }` → submits a governance proposal. `patch_b64` is base64 of either (a) `ManifestPatch` CBOR or (b) `PatchDocument` JSON. PatchDocuments are validated against `spec/schemas/patch.schema.json` (with `common.schema.json` embedded) before compilation; ManifestPatch skips schema validation. Returns `{ proposal_id: <u64> }`.
+- `gov-shadow { proposal_id }` → runs shadow for a proposal; returns a JSON `ShadowSummary` `{ manifest_hash, predicted_effects?, pending_receipts?, plan_results?, ledger_deltas? }`.
+- `gov-approve { proposal_id, decision?, approver? }` → records an approval decision. `decision` is `"approve"` (default) or `"reject"`; `approver` defaults to `"control-client"`. Returns `{}`.
+- `gov-apply { proposal_id }` → applies an approved proposal; returns `{}`.
 
 Deferred verbs:
 - Stdio/streaming uploads for `put-blob`.
@@ -102,5 +102,4 @@ Deferred verbs:
 
 - Stdio framing and CBOR framing not implemented.
 - Streaming blob upload (stdin/file) not implemented; current path is base64 inline.
-- Governance verbs pending.
 - Journal tail/streaming pending.

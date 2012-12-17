@@ -43,7 +43,7 @@ pub async fn cmd_manifest(opts: &WorldOpts, args: &ManifestArgs) -> Result<()> {
                 return Ok(());
             }
             Err(err) => {
-                eprintln!("control manifest-read failed, falling back to local read: {err}");
+                eprintln!("control manifest-get failed, falling back to local read: {err}");
             }
         }
     }

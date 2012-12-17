@@ -170,7 +170,7 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
                 .context("connect control socket")?;
             let resp = send_req(
                 &mut client,
-                "propose",
+                "gov-propose",
                 serde_json::json!({
                     "patch_b64": BASE64_STANDARD.encode(patch_bytes),
                     "description": propose_args.description
@@ -186,7 +186,7 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
                 .context("connect control socket")?;
             let resp = send_req(
                 &mut client,
-                "shadow",
+                "gov-shadow",
                 serde_json::json!({ "proposal_id": proposal_id }),
             )
             .await?;
@@ -204,7 +204,7 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
                 .context("connect control socket")?;
             let resp = send_req(
                 &mut client,
-                "approve",
+                "gov-approve",
                 serde_json::json!({
                     "proposal_id": proposal_id,
                     "decision": approve_args.decision,
@@ -221,7 +221,7 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
                 .context("connect control socket")?;
             let resp = send_req(
                 &mut client,
-                "apply",
+                "gov-apply",
                 serde_json::json!({ "proposal_id": proposal_id }),
             )
             .await?;

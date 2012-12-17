@@ -34,6 +34,6 @@ pub use secret::{
 };
 pub use shadow::{ShadowConfig, ShadowExecutor, ShadowSummary};
 pub use world::{
-    Kernel, KernelBuilder, KernelConfig, KernelHeights, PlanResultEntry, TailIntent, TailReceipt,
-    TailScan,
+    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, PlanResultEntry, TailIntent,
+    TailReceipt, TailScan,
 };

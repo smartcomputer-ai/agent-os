@@ -80,7 +80,6 @@ pub struct Kernel<S: Store> {
     manifest: Manifest,
     manifest_hash: Hash,
     secrets: Vec<SecretDecl>,
-    secret_defs: HashMap<Name, SecretDecl>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
     plan_defs: HashMap<Name, DefPlan>,
     cap_defs: HashMap<Name, DefCap>,
@@ -169,6 +168,18 @@ fn def_kind_allowed(kind: &str, filter: Option<&std::collections::HashSet<&str>>
         set.contains(kind)
     } else {
         true
+    }
+}
+
+fn normalize_def_kind(input: &str) -> Option<&'static str> {
+    match input {
+        "defschema" | "schema" => Some("defschema"),
+        "defmodule" | "module" => Some("defmodule"),
+        "defplan" | "plan" => Some("defplan"),
+        "defcap" | "cap" => Some("defcap"),
+        "defeffect" | "effect" => Some("defeffect"),
+        "defpolicy" | "policy" => Some("defpolicy"),
+        _ => None,
     }
 }
 
@@ -468,11 +479,6 @@ impl<S: Store + 'static> Kernel<S> {
         let effect_defs = loaded.effects.clone();
         let policy_defs = loaded.policies.clone();
         let schema_defs = loaded.schemas.clone();
-        let secret_defs = loaded
-            .secrets
-            .iter()
-            .map(|s| (s.name.clone(), s.clone()))
-            .collect();
 
         // Persist the loaded manifest + defs into the store so governance/patch doc
         // compilation can resolve the base manifest hash from CAS.
@@ -492,7 +498,6 @@ impl<S: Store + 'static> Kernel<S> {
             effect_defs,
             policy_defs,
             schema_defs,
-            secret_defs,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
             reducers: ReducerRegistry::new(store, config.module_cache_dir.clone())?,
@@ -1320,13 +1325,9 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(def) = self.policy_defs.get(name) {
             return Some(AirNode::Defpolicy(def.clone()));
         }
-        if let Some(def) = self.effect_defs.get(name) {
-            return Some(AirNode::Defeffect(def.clone()));
-        }
-        if let Some(def) = self.secret_defs.get(name) {
-            return Some(AirNode::Defsecret(def.clone()));
-        }
-        None
+        self.effect_defs
+            .get(name)
+            .map(|def| AirNode::Defeffect(def.clone()))
     }
 
     /// Hash of the most recent snapshot blob, if any.
@@ -1339,18 +1340,22 @@ impl<S: Store + 'static> Kernel<S> {
         let prefix = prefix.unwrap_or("");
         let kind_filter: Option<std::collections::HashSet<&str>> = kinds.map(|ks| {
             ks.iter()
-                .map(|k| k.as_str())
+                .filter_map(|k| normalize_def_kind(k.as_str()))
                 .collect::<std::collections::HashSet<&str>>()
         });
 
         let mut entries = Vec::new();
 
-        let push_if = |entries: &mut Vec<DefListing>,
-                       kind: &str,
-                       name: &str,
-                       build: impl Fn() -> DefListing,
-                       filter: &Option<std::collections::HashSet<&str>>,
-                       prefix: &str| {
+        fn push_if<F>(
+            entries: &mut Vec<DefListing>,
+            kind: &str,
+            name: &str,
+            build: F,
+            filter: &Option<std::collections::HashSet<&str>>,
+            prefix: &str,
+        ) where
+            F: FnOnce() -> DefListing,
+        {
             if !name.starts_with(prefix) {
                 return;
             }
@@ -1358,12 +1363,12 @@ impl<S: Store + 'static> Kernel<S> {
                 return;
             }
             entries.push(build());
-        };
+        }
 
         for (name, _def) in self.schema_defs.iter() {
             push_if(
                 &mut entries,
-                "schema",
+                "defschema",
                 name.as_str(),
                 || DefListing {
                     kind: "defschema".into(),
@@ -1382,7 +1387,7 @@ impl<S: Store + 'static> Kernel<S> {
         for (name, _def) in self.module_defs.iter() {
             push_if(
                 &mut entries,
-                "module",
+                "defmodule",
                 name.as_str(),
                 || DefListing {
                     kind: "defmodule".into(),
@@ -1402,7 +1407,7 @@ impl<S: Store + 'static> Kernel<S> {
             let steps = def.steps.len();
             push_if(
                 &mut entries,
-                "plan",
+                "defplan",
                 name.as_str(),
                 || DefListing {
                     kind: "defplan".into(),
@@ -1421,7 +1426,7 @@ impl<S: Store + 'static> Kernel<S> {
         for (name, def) in self.cap_defs.iter() {
             push_if(
                 &mut entries,
-                "cap",
+                "defcap",
                 name.as_str(),
                 || DefListing {
                     kind: "defcap".into(),
@@ -1440,14 +1445,14 @@ impl<S: Store + 'static> Kernel<S> {
         for (name, def) in self.effect_defs.iter() {
             push_if(
                 &mut entries,
-                "effect",
+                "defeffect",
                 name.as_str(),
                 || DefListing {
                     kind: "defeffect".into(),
                     name: name.clone(),
                     cap_type: Some(def.cap_type.as_str().to_string()),
-                    params_schema: Some(def.params_schema.reference.clone()),
-                    receipt_schema: Some(def.receipt_schema.reference.clone()),
+                    params_schema: Some(def.params_schema.as_str().to_string()),
+                    receipt_schema: Some(def.receipt_schema.as_str().to_string()),
                     plan_steps: None,
                     policy_rules: None,
                 },
@@ -1459,7 +1464,7 @@ impl<S: Store + 'static> Kernel<S> {
         for (name, def) in self.policy_defs.iter() {
             push_if(
                 &mut entries,
-                "policy",
+                "defpolicy",
                 name.as_str(),
                 || DefListing {
                     kind: "defpolicy".into(),
@@ -1469,25 +1474,6 @@ impl<S: Store + 'static> Kernel<S> {
                     receipt_schema: None,
                     plan_steps: None,
                     policy_rules: Some(def.rules.len()),
-                },
-                &kind_filter,
-                prefix,
-            );
-        }
-
-        for (name, _def) in self.secret_defs.iter() {
-            push_if(
-                &mut entries,
-                "secret",
-                name.as_str(),
-                || DefListing {
-                    kind: "defsecret".into(),
-                    name: name.clone(),
-                    cap_type: None,
-                    params_schema: None,
-                    receipt_schema: None,
-                    plan_steps: None,
-                    policy_rules: None,
                 },
                 &kind_filter,
                 prefix,

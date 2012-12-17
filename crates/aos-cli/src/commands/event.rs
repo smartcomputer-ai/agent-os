@@ -33,7 +33,7 @@ pub async fn cmd_event(opts: &WorldOpts, args: &EventArgs) -> Result<()> {
     if let Some(mut client) = try_control_client(&dirs).await {
         let resp = client.send_event("cli-event", &args.schema, &cbor).await?;
         if !resp.ok {
-            anyhow::bail!("send-event failed: {:?}", resp.error);
+            anyhow::bail!("event-send failed: {:?}", resp.error);
         }
         println!("Event enqueued: {}", args.schema);
         return Ok(());

@@ -39,7 +39,7 @@ async fn daemon_fires_timer_and_routes_event() {
     let start_value = serde_cbor::to_vec(&serde_json::json!({ "id": "t1" })).unwrap();
     let (resp_tx, resp_rx) = oneshot::channel();
     control_tx
-        .send(ControlMsg::SendEvent {
+        .send(ControlMsg::EventSend {
             event: ExternalEvent::DomainEvent {
                 schema: START_SCHEMA.into(),
                 value: start_value,

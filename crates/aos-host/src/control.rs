@@ -205,211 +205,6 @@ async fn handle_request(
             ));
         }
         match req.cmd.as_str() {
-            "send-event" => {
-                let schema = req
-                    .payload
-                    .get("schema")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing schema"))?;
-                let value_b64 = req
-                    .payload
-                    .get("value_b64")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ControlError::invalid_request("missing value_b64"))?;
-                let bytes = BASE64_STANDARD
-                    .decode(value_b64)
-                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
-                let (tx, rx) = oneshot::channel();
-                let evt = ExternalEvent::DomainEvent {
-                    schema,
-                    value: bytes,
-                };
-                let _ = control_tx
-                    .send(ControlMsg::SendEvent {
-                        event: evt,
-                        resp: tx,
-                    })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({}))
-            }
-            "inject-receipt" => {
-                let p: InjectReceiptPayload = serde_json::from_value(req.payload.clone())
-                    .map_err(|e| ControlError::decode(format!("{e}")))?;
-                let payload = BASE64_STANDARD
-                    .decode(p.payload_b64)
-                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
-                let receipt = EffectReceipt {
-                    intent_hash: p.intent_hash,
-                    adapter_id: p.adapter_id,
-                    status: ReceiptStatus::Ok,
-                    payload_cbor: payload,
-                    cost_cents: None,
-                    signature: vec![],
-                };
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::InjectReceipt { receipt, resp: tx })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({}))
-            }
-            "query-state" => {
-                let reducer = req
-                    .payload
-                    .get("reducer")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
-                let key = req
-                    .payload
-                    .get("key_b64")
-                    .and_then(|v| v.as_str())
-                    .map(|s| BASE64_STANDARD.decode(s).unwrap_or_default());
-                let consistency = req
-                    .payload
-                    .get("consistency")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("head");
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::QueryState {
-                        reducer,
-                        key,
-                        consistency: consistency.to_string(),
-                        resp: tx,
-                    })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                match inner.map_err(ControlError::host)? {
-                    Some((meta, bytes_opt)) => {
-                        let state_b64 = bytes_opt.map(|b| BASE64_STANDARD.encode(b));
-                        Ok(serde_json::json!({
-                            "state_b64": state_b64,
-                            "meta": meta_to_json(&meta),
-                        }))
-                    }
-                    None => Ok(serde_json::json!({
-                        "state_b64": null,
-                        "meta": meta_to_json(&world_meta(&control_tx).await?),
-                    })),
-                }
-            }
-            "defs-get" => {
-                let name = req
-                    .payload
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing name"))?;
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::GetDef { name, resp: tx })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                let def = inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({ "def": def }))
-            }
-            "defs-ls" => {
-                let kinds: Option<Vec<String>> = req
-                    .payload
-                    .get("kinds")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    });
-                let prefix = req
-                    .payload
-                    .get("prefix")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::ListDefs {
-                        kinds,
-                        prefix,
-                        resp: tx,
-                    })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                let defs: Vec<DefListing> = inner.map_err(ControlError::host)?;
-                let meta = world_meta(&control_tx).await?;
-                Ok(serde_json::json!({
-                    "defs": defs,
-                    "meta": meta_to_json(&meta),
-                }))
-            }
-            "list-cells" => {
-                let reducer = req
-                    .payload
-                    .get("reducer")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::ListCells { reducer, resp: tx })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                let metas = inner.map_err(ControlError::host)?;
-                let cells: Vec<serde_json::Value> = metas
-                    .into_iter()
-                    .map(|m| {
-                        let key_b64 = BASE64_STANDARD.encode(&m.key_bytes);
-                        let state_hash = Hash::from_bytes(&m.state_hash)
-                            .map(|h| h.to_hex())
-                            .unwrap_or_else(|_| hex::encode(m.state_hash));
-                        serde_json::json!({
-                            "key_b64": key_b64,
-                            "state_hash_hex": state_hash,
-                            "size": m.size,
-                            "last_active_ns": m.last_active_ns,
-                        })
-                    })
-                    .collect();
-                let meta = world_meta(&control_tx).await?;
-                Ok(serde_json::json!({ "cells": cells, "meta": meta_to_json(&meta) }))
-            }
-            "manifest-read" => {
-                let consistency = req
-                    .payload
-                    .get("consistency")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("head")
-                    .to_string();
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::ReadManifest {
-                        consistency,
-                        resp: tx,
-                    })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                let (meta, manifest_bytes) = inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({
-                    "manifest_b64": BASE64_STANDARD.encode(manifest_bytes),
-                    "meta": meta_to_json(&meta),
-                }))
-            }
             "snapshot" => {
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx.send(ControlMsg::Snapshot { resp: tx }).await;
@@ -442,6 +237,213 @@ async fn handle_request(
                 let meta = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "meta": meta_to_json(&meta) }))
             }
+            "event-send" => {
+                let schema = req
+                    .payload
+                    .get("schema")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing schema"))?;
+                let value_b64 = req
+                    .payload
+                    .get("value_b64")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ControlError::invalid_request("missing value_b64"))?;
+                let bytes = BASE64_STANDARD
+                    .decode(value_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let (tx, rx) = oneshot::channel();
+                let evt = ExternalEvent::DomainEvent {
+                    schema,
+                    value: bytes,
+                };
+                let _ = control_tx
+                    .send(ControlMsg::EventSend {
+                        event: evt,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({}))
+            }
+            "receipt-inject" => {
+                let p: InjectReceiptPayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let payload = BASE64_STANDARD
+                    .decode(p.payload_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let receipt = EffectReceipt {
+                    intent_hash: p.intent_hash,
+                    adapter_id: p.adapter_id,
+                    status: ReceiptStatus::Ok,
+                    payload_cbor: payload,
+                    cost_cents: None,
+                    signature: vec![],
+                };
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::ReceiptInject { receipt, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({}))
+            }
+            "manifest-get" => {
+                let consistency = req
+                    .payload
+                    .get("consistency")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("head")
+                    .to_string();
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::ManifestGet {
+                        consistency,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let (meta, manifest_bytes) = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({
+                    "manifest_b64": BASE64_STANDARD.encode(manifest_bytes),
+                    "meta": meta_to_json(&meta),
+                }))
+            }
+                        "def-get" => {
+                let name = req
+                    .payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing name"))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::DefGet { name, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let def = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "def": def }))
+            }
+            "def-list" => {
+                let kinds: Option<Vec<String>> = req
+                    .payload
+                    .get("kinds")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    });
+                let prefix = req
+                    .payload
+                    .get("prefix")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::DefList {
+                        kinds,
+                        prefix,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let defs: Vec<DefListing> = inner.map_err(ControlError::host)?;
+                let meta = world_meta(&control_tx).await?;
+                Ok(serde_json::json!({
+                    "defs": defs,
+                    "meta": meta_to_json(&meta),
+                }))
+            }
+            "state-get" => {
+                let reducer = req
+                    .payload
+                    .get("reducer")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
+                let key = req
+                    .payload
+                    .get("key_b64")
+                    .and_then(|v| v.as_str())
+                    .map(|s| BASE64_STANDARD.decode(s).unwrap_or_default());
+                let consistency = req
+                    .payload
+                    .get("consistency")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("head");
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::StateGet {
+                        reducer,
+                        key,
+                        consistency: consistency.to_string(),
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                match inner.map_err(ControlError::host)? {
+                    Some((meta, bytes_opt)) => {
+                        let state_b64 = bytes_opt.map(|b| BASE64_STANDARD.encode(b));
+                        Ok(serde_json::json!({
+                            "state_b64": state_b64,
+                            "meta": meta_to_json(&meta),
+                        }))
+                    }
+                    None => Ok(serde_json::json!({
+                        "state_b64": null,
+                        "meta": meta_to_json(&world_meta(&control_tx).await?),
+                    })),
+                }
+            }
+            "state-list" => {
+                let reducer = req
+                    .payload
+                    .get("reducer")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::StateList { reducer, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let metas = inner.map_err(ControlError::host)?;
+                let cells: Vec<serde_json::Value> = metas
+                    .into_iter()
+                    .map(|m| {
+                        let key_b64 = BASE64_STANDARD.encode(&m.key_bytes);
+                        let state_hash = Hash::from_bytes(&m.state_hash)
+                            .map(|h| h.to_hex())
+                            .unwrap_or_else(|_| hex::encode(m.state_hash));
+                        serde_json::json!({
+                            "key_b64": key_b64,
+                            "state_hash_hex": state_hash,
+                            "size": m.size,
+                            "last_active_ns": m.last_active_ns,
+                        })
+                    })
+                    .collect();
+                let meta = world_meta(&control_tx).await?;
+                Ok(serde_json::json!({ "cells": cells, "meta": meta_to_json(&meta) }))
+            }
+
+           
             "blob-get" => {
                 let hash_hex = req
                     .payload
@@ -459,7 +461,7 @@ async fn handle_request(
                 let bytes = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "data_b64": BASE64_STANDARD.encode(bytes) }))
             }
-            "put-blob" => {
+            "blob-put" => {
                 let payload: PutBlobPayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let data = BASE64_STANDARD
@@ -475,7 +477,7 @@ async fn handle_request(
                 let hash_hex = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "hash": hash_hex }))
             }
-            "propose" => {
+            "gov-propose" => {
                 let payload: ProposePayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let patch_bytes = BASE64_STANDARD
@@ -499,7 +501,7 @@ async fn handle_request(
                     };
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::Propose {
+                    .send(ControlMsg::GovPropose {
                         patch,
                         description: payload.description,
                         resp: tx,
@@ -511,12 +513,12 @@ async fn handle_request(
                 let proposal_id = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "proposal_id": proposal_id }))
             }
-            "shadow" => {
+            "gov-shadow" => {
                 let payload: ShadowPayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::Shadow {
+                    .send(ControlMsg::GovShadow {
                         proposal_id: payload.proposal_id,
                         resp: tx,
                     })
@@ -529,7 +531,7 @@ async fn handle_request(
                     .map_err(|e| ControlError::decode(format!("encode summary json: {e}")))?;
                 Ok(value)
             }
-            "approve" => {
+            "gov-approve" => {
                 let payload: ApprovePayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let decision = match payload.decision.as_str() {
@@ -541,7 +543,7 @@ async fn handle_request(
                 };
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::Approve {
+                    .send(ControlMsg::GovApprove {
                         proposal_id: payload.proposal_id,
                         approver: payload.approver,
                         decision,
@@ -554,12 +556,12 @@ async fn handle_request(
                 inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({}))
             }
-            "apply" => {
+            "gov-apply" => {
                 let payload: ApplyPayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::Apply {
+                    .send(ControlMsg::GovApply {
                         proposal_id: payload.proposal_id,
                         resp: tx,
                     })
@@ -721,7 +723,7 @@ impl ControlClient {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "send-event".into(),
+            cmd: "event-send".into(),
             payload: serde_json::json!({
                 "schema": schema,
                 "value_b64": BASE64_STANDARD.encode(value_cbor),
@@ -738,7 +740,7 @@ impl ControlClient {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "defs-get".into(),
+            cmd: "def-get".into(),
             payload: serde_json::json!({ "name": name }),
         };
         self.request(&env).await
@@ -763,7 +765,7 @@ impl ControlClient {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "defs-ls".into(),
+            cmd: "def-list".into(),
             payload: serde_json::Value::Object(payload),
         };
         self.request(&env).await
@@ -787,7 +789,7 @@ impl ControlClient {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "query-state".into(),
+            cmd: "state-get".into(),
             payload,
         };
         self.request(&env).await
@@ -801,7 +803,7 @@ impl ControlClient {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "list-cells".into(),
+            cmd: "state-list".into(),
             payload: serde_json::json!({ "reducer": reducer }),
         };
         self.request(&env).await
@@ -835,7 +837,7 @@ impl ControlClient {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "put-blob".into(),
+            cmd: "blob-put".into(),
             payload: serde_json::json!({ "data_b64": BASE64_STANDARD.encode(data) }),
         };
         self.request(&env).await
@@ -854,28 +856,28 @@ impl ControlClient {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "manifest-read".into(),
+            cmd: "manifest-get".into(),
             payload,
         };
         let resp = self.request(&env).await?;
         if !resp.ok {
             return Err(io_err(format!(
-                "manifest-read failed: {:?}",
+                "manifest-get failed: {:?}",
                 resp.error.map(|e| e.message)
             )));
         }
         let result = resp
             .result
-            .ok_or_else(|| io_err("manifest-read missing result"))?;
+            .ok_or_else(|| io_err("manifest-get missing result"))?;
         let meta = parse_meta(
             result
                 .get("meta")
-                .ok_or_else(|| io_err("manifest-read missing meta"))?,
+                .ok_or_else(|| io_err("manifest-get missing meta"))?,
         )?;
         let manifest_b64 = result
             .get("manifest_b64")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| io_err("manifest-read missing manifest_b64"))?;
+            .ok_or_else(|| io_err("manifest-get missing manifest_b64"))?;
         let bytes = BASE64_STANDARD
             .decode(manifest_b64)
             .map_err(|e| io_err(format!("decode manifest_b64: {e}")))?;
@@ -893,17 +895,17 @@ impl ControlClient {
         let resp = self.query_state(id, reducer, key, consistency).await?;
         if !resp.ok {
             return Err(io_err(format!(
-                "query-state failed: {:?}",
+                "state-get failed: {:?}",
                 resp.error.map(|e| e.message)
             )));
         }
         let result = resp
             .result
-            .ok_or_else(|| io_err("query-state missing result"))?;
+            .ok_or_else(|| io_err("state-get missing result"))?;
         let meta = parse_meta(
             result
                 .get("meta")
-                .ok_or_else(|| io_err("query-state missing meta"))?,
+                .ok_or_else(|| io_err("state-get missing meta"))?,
         )?;
         let state_b64 = result.get("state_b64").and_then(|v| v.as_str());
         let state = match state_b64 {
@@ -926,16 +928,16 @@ impl ControlClient {
         let resp = self.list_cells(id, reducer).await?;
         if !resp.ok {
             return Err(io_err(format!(
-                "list-cells failed: {:?}",
+                "state-list failed: {:?}",
                 resp.error.map(|e| e.message)
             )));
         }
         let result = resp
             .result
-            .ok_or_else(|| io_err("list-cells missing result"))?;
+            .ok_or_else(|| io_err("state-list missing result"))?;
         let meta_val = result
             .get("meta")
-            .ok_or_else(|| io_err("list-cells missing meta"))?;
+            .ok_or_else(|| io_err("state-list missing meta"))?;
         let meta = parse_meta(meta_val)?;
         let list = result
             .get("cells")

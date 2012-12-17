@@ -34,7 +34,7 @@ async fn control_governance_propose_shadow_apply_flow() {
     // Propose
     let (resp_tx, resp_rx) = oneshot::channel();
     control_tx
-        .send(ControlMsg::Propose {
+        .send(ControlMsg::GovPropose {
             patch: aos_host::modes::daemon::GovernancePatchInput::Manifest(patch),
             description: Some("ctrl gov test".into()),
             resp: resp_tx,
@@ -46,7 +46,7 @@ async fn control_governance_propose_shadow_apply_flow() {
     // Shadow
     let (shadow_tx, shadow_rx) = oneshot::channel();
     control_tx
-        .send(ControlMsg::Shadow {
+        .send(ControlMsg::GovShadow {
             proposal_id,
             resp: shadow_tx,
         })
@@ -58,7 +58,7 @@ async fn control_governance_propose_shadow_apply_flow() {
     // Approve
     let (approve_tx, approve_rx) = oneshot::channel();
     control_tx
-        .send(ControlMsg::Approve {
+        .send(ControlMsg::GovApprove {
             proposal_id,
             approver: "test-approver".into(),
             decision: aos_kernel::journal::ApprovalDecisionRecord::Approve,
@@ -71,7 +71,7 @@ async fn control_governance_propose_shadow_apply_flow() {
     // Apply
     let (apply_tx, apply_rx) = oneshot::channel();
     control_tx
-        .send(ControlMsg::Apply {
+        .send(ControlMsg::GovApply {
             proposal_id,
             resp: apply_tx,
         })
