@@ -1,17 +1,16 @@
 mod commands;
 mod input;
+mod output;
 mod opts;
 mod util;
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 
-use commands::cells::CellsArgs;
 use commands::event::EventArgs;
 use commands::gov::GovArgs;
 use commands::init::InitArgs;
 use commands::manifest::ManifestArgs;
-use commands::put_blob::PutBlobArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
 use opts::WorldOpts;
@@ -19,94 +18,110 @@ use opts::WorldOpts;
 #[derive(Parser, Debug)]
 #[command(name = "aos", version, about = "AgentOS CLI")]
 struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// World management commands
-    World(WorldCommand),
-}
-
-#[derive(Args, Debug)]
-struct WorldCommand {
     #[command(flatten)]
     opts: WorldOpts,
 
     #[command(subcommand)]
-    cmd: WorldSubcommand,
+    command: Command,
 }
 
 #[derive(Subcommand, Debug)]
-enum WorldSubcommand {
+enum Command {
     /// Initialize a world directory
     Init(InitArgs),
 
-    /// Display world summary info
-    Info,
+    /// Show world status
+    Status,
 
     /// Run world (daemon mode by default, --batch for batch mode)
     Run(RunArgs),
 
-    /// Send a domain event
-    Event(EventArgs),
+    /// Stop a running daemon
+    Stop,
+
+    /// Event-related commands
+    #[command(subcommand)]
+    Event(EventCommand),
 
     /// Query reducer state
-    State(StateArgs),
+    #[command(subcommand)]
+    State(StateCommand),
 
-    /// List cells for a keyed reducer
-    Cells(CellsArgs),
-
-    /// Force a snapshot
-    Snapshot,
-
-    /// Replay journal to head (experimental)
-    Replay(commands::replay::ReplayArgs),
-
-    /// Show journal head
-    Head,
+    /// Show journal information
+    #[command(subcommand)]
+    Journal(JournalCommand),
 
     /// Display active manifest
-    Manifest(ManifestArgs),
+    #[command(subcommand)]
+    Manifest(ManifestCommand),
 
-    /// Upload a blob to the CAS
-    #[command(name = "put-blob")]
-    PutBlob(PutBlobArgs),
-
-    /// Shutdown running daemon
-    Shutdown,
+    /// Force a snapshot
+    #[command(subcommand)]
+    Snapshot(SnapshotCommand),
 
     /// Governance commands
     Gov(GovArgs),
 }
 
+#[derive(Subcommand, Debug)]
+enum EventCommand {
+    /// Send a domain event
+    Send(EventArgs),
+}
+
+#[derive(Subcommand, Debug)]
+enum StateCommand {
+    /// Get reducer state
+    Get(StateArgs),
+}
+
+#[derive(Subcommand, Debug)]
+enum ManifestCommand {
+    /// Fetch the active manifest
+    Get(ManifestArgs),
+}
+
+#[derive(Subcommand, Debug)]
+enum JournalCommand {
+    /// Show journal head
+    Head,
+
+    /// Replay journal to head (experimental)
+    Replay(commands::replay::ReplayArgs),
+}
+
+#[derive(Subcommand, Debug)]
+enum SnapshotCommand {
+    /// Create a snapshot
+    Create,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let opts = &cli.opts;
 
     match cli.command {
-        Commands::World(world) => {
-            let opts = &world.opts;
-            match world.cmd {
-                WorldSubcommand::Init(args) => commands::init::cmd_init(&args),
-                WorldSubcommand::Info => commands::info::cmd_info(opts).await,
-                WorldSubcommand::Run(args) => commands::run::cmd_run(opts, &args).await,
-                WorldSubcommand::Event(args) => commands::event::cmd_event(opts, &args).await,
-                WorldSubcommand::State(args) => commands::state::cmd_state(opts, &args).await,
-                WorldSubcommand::Cells(args) => commands::cells::cmd_cells(opts, &args).await,
-                WorldSubcommand::Snapshot => commands::snapshot::cmd_snapshot(opts).await,
-                WorldSubcommand::Replay(args) => commands::replay::cmd_replay(opts, &args).await,
-                WorldSubcommand::Head => commands::head::cmd_head(opts).await,
-                WorldSubcommand::Manifest(args) => {
-                    commands::manifest::cmd_manifest(opts, &args).await
-                }
-                WorldSubcommand::PutBlob(args) => {
-                    commands::put_blob::cmd_put_blob(opts, &args).await
-                }
-                WorldSubcommand::Shutdown => commands::shutdown::cmd_shutdown(opts).await,
-                WorldSubcommand::Gov(args) => commands::gov::cmd_gov(opts, &args).await,
-            }
-        }
+        Command::Init(args) => commands::init::cmd_init(&args),
+        Command::Status => commands::info::cmd_info(opts).await,
+        Command::Run(args) => commands::run::cmd_run(opts, &args).await,
+        Command::Stop => commands::stop::cmd_stop(opts).await,
+        Command::Event(cmd) => match cmd {
+            EventCommand::Send(args) => commands::event::cmd_event(opts, &args).await,
+        },
+        Command::State(cmd) => match cmd {
+            StateCommand::Get(args) => commands::state::cmd_state(opts, &args).await,
+        },
+        Command::Manifest(cmd) => match cmd {
+            ManifestCommand::Get(args) => commands::manifest::cmd_manifest(opts, &args).await,
+        },
+        Command::Journal(cmd) => match cmd {
+            JournalCommand::Head => commands::head::cmd_head(opts).await,
+            JournalCommand::Replay(args) => commands::replay::cmd_replay(opts, &args).await,
+        },
+        Command::Snapshot(cmd) => match cmd {
+            SnapshotCommand::Create => commands::snapshot::cmd_snapshot(opts).await,
+        },
+        Command::Gov(args) => commands::gov::cmd_gov(opts, &args).await,
     }
 }

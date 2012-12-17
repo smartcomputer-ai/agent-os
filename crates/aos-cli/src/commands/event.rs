@@ -1,4 +1,4 @@
-//! `aos world event` command.
+//! `aos event send` command.
 
 use anyhow::{Context, Result};
 use aos_host::host::ExternalEvent;
@@ -7,10 +7,11 @@ use clap::Args;
 use serde_json::Value as JsonValue;
 
 use crate::input::parse_input_value;
-use crate::opts::{WorldOpts, resolve_dirs};
+use crate::opts::{Mode, WorldOpts, resolve_dirs};
+use crate::output::print_success;
 use crate::util::load_world_env;
 
-use super::{create_host, prepare_world, try_control_client};
+use super::{create_host, prepare_world, should_use_control, try_control_client};
 
 #[derive(Args, Debug)]
 pub struct EventArgs {
@@ -30,13 +31,26 @@ pub async fn cmd_event(opts: &WorldOpts, args: &EventArgs) -> Result<()> {
     let cbor = serde_cbor::to_vec(&parsed).context("encode event value as CBOR")?;
 
     // If daemon is running, send via control channel (enqueue only, daemon processes)
-    if let Some(mut client) = try_control_client(&dirs).await {
-        let resp = client.send_event("cli-event", &args.schema, &cbor).await?;
-        if !resp.ok {
-            anyhow::bail!("event-send failed: {:?}", resp.error);
+    if should_use_control(opts) {
+        if let Some(mut client) = try_control_client(&dirs).await {
+            let resp = client.send_event("cli-event", &args.schema, &cbor).await?;
+            if !resp.ok {
+                anyhow::bail!("event-send failed: {:?}", resp.error);
+            }
+            return print_success(
+                opts,
+                serde_json::json!({ "enqueued": args.schema }),
+                None,
+                vec![],
+            );
+        } else if matches!(opts.mode, Mode::Daemon) {
+            anyhow::bail!(
+                "daemon mode requested but no control socket at {}",
+                dirs.control_socket.display()
+            );
+        } else if !opts.quiet {
+            // fall through to batch
         }
-        println!("Event enqueued: {}", args.schema);
-        return Ok(());
     }
 
     // No daemon: run in batch mode (enqueue + process until quiescent)
@@ -51,10 +65,19 @@ pub async fn cmd_event(opts: &WorldOpts, args: &EventArgs) -> Result<()> {
         value: cbor,
     }];
     let res = runner.step(events).await?;
-    println!(
-        "ok (events={} effects={} receipts={})",
-        res.events_injected, res.cycle.effects_dispatched, res.cycle.receipts_applied
-    );
-
-    Ok(())
+    print_success(
+        opts,
+        serde_json::json!({
+            "status": "ok",
+            "events": res.events_injected,
+            "effects": res.cycle.effects_dispatched,
+            "receipts": res.cycle.receipts_applied
+        }),
+        None,
+        if opts.quiet {
+            vec![]
+        } else {
+            vec!["daemon unavailable; using batch mode".into()]
+        },
+    )
 }

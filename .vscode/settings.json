@@ -6,5 +6,5 @@
   // so rust-analyzer doesn't keep passing `--features all`.
   "rust-analyzer.cargo.features": [],
   // Use the rustup-provided rust-analyzer (stable toolchain) to avoid bundled-server regressions.
-  "rust-analyzer.server.path": "/Users/lukas/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rust-analyzer"
+  //"rust-analyzer.server.path": "/Users/lukas/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rust-analyzer"
 }

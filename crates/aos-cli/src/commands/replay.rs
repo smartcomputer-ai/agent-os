@@ -1,4 +1,4 @@
-//! `aos world replay` command (experimental).
+//! `aos journal replay` command (experimental).
 //!
 //! Opens a world, replays journal + snapshot to head, and reports heights/state hashes.
 

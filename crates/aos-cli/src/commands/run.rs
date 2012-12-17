@@ -1,4 +1,4 @@
-//! `aos world run` command.
+//! `aos run` command.
 
 use anyhow::Result;
 use aos_host::control::{ControlClient, ControlMode, ControlServer, RequestEnvelope};
@@ -27,7 +27,7 @@ pub async fn cmd_run(opts: &WorldOpts, args: &RunArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
 
     // Check for existing daemon
-    let control_path = dirs.control_socket();
+    let control_path = dirs.control_socket.clone();
     if control_path.exists() {
         match ControlClient::connect(&control_path).await {
             Ok(mut client) => {

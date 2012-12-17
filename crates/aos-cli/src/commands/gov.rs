@@ -1,18 +1,19 @@
-//! `aos world gov` governance commands (stubs).
+//! `aos gov` governance commands (stubs).
 
 use std::fs;
 use std::path::PathBuf;
 
-use crate::commands::gov_control::send_req;
 use crate::opts::{ResolvedDirs, WorldOpts, resolve_dirs};
 use crate::util::validate_patch_json;
 use anyhow::{Context, Result};
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
 use aos_host::manifest_loader::load_from_assets;
-use aos_host::{control::ControlClient, manifest_loader::ZERO_HASH_SENTINEL};
+use aos_host::control::{ControlClient, RequestEnvelope, ResponseEnvelope};
+use aos_host::{manifest_loader::ZERO_HASH_SENTINEL};
 use aos_store::{FsStore, Store};
 use base64::prelude::*;
+use serde_json::Value;
 use clap::{Args, Subcommand};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -165,7 +166,7 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
                 }
             };
 
-            let mut client = ControlClient::connect(&dirs.control_socket())
+            let mut client = ControlClient::connect(&dirs.control_socket)
                 .await
                 .context("connect control socket")?;
             let resp = send_req(
@@ -181,7 +182,7 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
         }
         GovSubcommand::Shadow(shadow_args) => {
             let proposal_id: u64 = shadow_args.id.parse().context("proposal id must be u64")?;
-            let mut client = ControlClient::connect(&dirs.control_socket())
+            let mut client = ControlClient::connect(&dirs.control_socket)
                 .await
                 .context("connect control socket")?;
             let resp = send_req(
@@ -199,7 +200,7 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
         }
         GovSubcommand::Approve(approve_args) => {
             let proposal_id: u64 = approve_args.id.parse().context("proposal id must be u64")?;
-            let mut client = ControlClient::connect(&dirs.control_socket())
+            let mut client = ControlClient::connect(&dirs.control_socket)
                 .await
                 .context("connect control socket")?;
             let resp = send_req(
@@ -216,7 +217,7 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
         }
         GovSubcommand::Apply(apply_args) => {
             let proposal_id: u64 = apply_args.id.parse().context("proposal id must be u64")?;
-            let mut client = ControlClient::connect(&dirs.control_socket())
+            let mut client = ControlClient::connect(&dirs.control_socket)
                 .await
                 .context("connect control socket")?;
             let resp = send_req(
@@ -555,6 +556,31 @@ fn build_patchdoc_from_dir(
         "patches": patches,
     }))
 }
+
+
+pub async fn send_req(
+    client: &mut ControlClient,
+    cmd: &str,
+    payload: Value,
+) -> Result<ResponseEnvelope> {
+    let env = RequestEnvelope {
+        v: 1,
+        id: format!("gov-{cmd}"),
+        cmd: cmd.into(),
+        payload,
+    };
+    let resp = client.request(&env).await?;
+    if !resp.ok {
+        let msg = resp
+            .error
+            .as_ref()
+            .map(|e| format!("{}: {}", e.code, e.message))
+            .unwrap_or_else(|| "unknown error".into());
+        anyhow::bail!("control {} failed: {}", cmd, msg);
+    }
+    Ok(resp)
+}
+
 
 #[cfg(test)]
 mod tests {

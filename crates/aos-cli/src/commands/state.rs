@@ -1,13 +1,14 @@
-//! `aos world state` command.
+//! `aos state get` command.
 
 use anyhow::Result;
 use clap::Args;
 use serde_json::Value as JsonValue;
 
-use crate::opts::{WorldOpts, resolve_dirs};
+use crate::opts::{Mode, WorldOpts, resolve_dirs};
+use crate::output::print_success;
 use crate::util::load_world_env;
 
-use super::{create_host, prepare_world, try_control_client};
+use super::{create_host, prepare_world, should_use_control, try_control_client};
 
 #[derive(Args, Debug)]
 pub struct StateArgs {
@@ -44,29 +45,34 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
         None
     };
 
-    if let Some(mut client) = try_control_client(&dirs).await {
-        let (meta, state_opt) = client
-            .query_state_decoded(
-                "cli-state",
-                &args.reducer_name,
-                key_bytes_opt,
-                consistency.as_deref(),
-            )
-            .await?;
-        println!(
-            "meta: {}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "journal_height": meta.journal_height,
-                "snapshot_hash": meta.snapshot_hash.as_ref().map(|h| h.to_hex()),
-                "manifest_hash": meta.manifest_hash.to_hex(),
-            }))?
-        );
-        if let Some(state_bytes) = state_opt {
-            print_state(&state_bytes, args.raw)?;
-        } else {
-            println!("(no state)");
+    if should_use_control(opts) {
+        if let Some(mut client) = try_control_client(&dirs).await {
+            let (meta, state_opt) = client
+                .query_state_decoded(
+                    "cli-state",
+                    &args.reducer_name,
+                    key_bytes_opt,
+                    consistency.as_deref(),
+                )
+                .await?;
+            let (data, warning) = state_opt
+                .map(|bytes| decode_state(&bytes, args.raw))
+                .transpose()?
+                .unwrap_or_else(|| (serde_json::json!(null), None));
+            return print_success(
+                opts,
+                data,
+                Some(meta_to_json(&meta)),
+                warning.into_iter().collect(),
+            );
+        } else if matches!(opts.mode, Mode::Daemon) {
+            anyhow::bail!(
+                "daemon mode requested but no control socket at {}",
+                dirs.control_socket.display()
+            );
+        } else if !opts.quiet {
+            // fall through to batch
         }
-        return Ok(());
     }
 
     // Fall back to batch mode
@@ -84,21 +90,31 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
             .unwrap_or(aos_kernel::Consistency::Head),
     );
     if let Some(read) = read {
-        println!(
-            "meta: {}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "journal_height": read.meta.journal_height,
-                "snapshot_hash": read.meta.snapshot_hash.as_ref().map(|h| h.to_hex()),
-                "manifest_hash": read.meta.manifest_hash.to_hex(),
-            }))?
-        );
-        if let Some(state) = read.value {
-            print_state(&state, args.raw)?;
-        } else {
-            println!("(no state for reducer '{}')", args.reducer_name);
-        }
+        let (data, warning) = read
+            .value
+            .map(|bytes| decode_state(&bytes, args.raw))
+            .transpose()?
+            .unwrap_or_else(|| (serde_json::json!(null), None));
+        print_success(
+            opts,
+            data,
+            Some(meta_to_json(&read.meta)),
+            warning
+                .into_iter()
+                .chain(if opts.quiet {
+                    None
+                } else {
+                    Some("daemon unavailable; using batch mode".into())
+                })
+                .collect(),
+        )?;
     } else {
-        println!("(read failed)");
+        print_success(
+            opts,
+            serde_json::json!(null),
+            None,
+            vec!["read failed".into()],
+        )?;
     }
 
     Ok(())
@@ -115,21 +131,35 @@ fn parse_consistency(s: &str) -> aos_kernel::Consistency {
     .unwrap_or(aos_kernel::Consistency::Head)
 }
 
-fn print_state(state: &[u8], raw: bool) -> Result<()> {
-    // Try to decode as CBOR -> JSON
+fn meta_to_json(meta: &aos_kernel::ReadMeta) -> JsonValue {
+    serde_json::json!({
+        "journal_height": meta.journal_height,
+        "snapshot_hash": meta.snapshot_hash.as_ref().map(|h| h.to_hex()),
+        "manifest_hash": meta.manifest_hash.to_hex(),
+    })
+}
+
+fn decode_state(state: &[u8], raw: bool) -> Result<(JsonValue, Option<String>)> {
     match serde_cbor::from_slice::<JsonValue>(state) {
         Ok(json) => {
-            if raw {
-                println!("{}", serde_json::to_string(&json)?);
+            let value = if raw {
+                serde_json::json!({ "state": json, "raw": true })
             } else {
-                println!("{}", serde_json::to_string_pretty(&json)?);
-            }
+                json
+            };
+            Ok((value, None))
         }
         Err(_) => {
-            // Fall back to hex dump
-            println!("(binary data, {} bytes)", state.len());
-            println!("{}", hex::encode(state));
+            let hex_str = hex::encode(state);
+            let value = if raw {
+                serde_json::json!({ "state_hex": hex_str })
+            } else {
+                serde_json::json!({
+                    "state_hex": hex_str,
+                    "bytes": state.len(),
+                })
+            };
+            Ok((value, Some("state is binary; returning hex-encoded data".into())))
         }
     }
-    Ok(())
 }

@@ -1,17 +1,14 @@
 //! CLI command handlers.
 
-pub mod cells;
 pub mod event;
 pub mod gov;
-mod gov_control;
 pub mod head;
 pub mod info;
 pub mod init;
 pub mod manifest;
-pub mod put_blob;
 pub mod replay;
 pub mod run;
-pub mod shutdown;
+pub mod stop;
 pub mod snapshot;
 pub mod state;
 
@@ -25,17 +22,22 @@ use aos_host::util::has_placeholder_modules;
 use aos_kernel::LoadedManifest;
 use aos_store::FsStore;
 
-use crate::opts::{ResolvedDirs, WorldOpts};
+use crate::opts::{Mode, ResolvedDirs, WorldOpts};
 use crate::util;
 
 /// Try to connect to a running daemon via control socket.
 pub async fn try_control_client(dirs: &ResolvedDirs) -> Option<ControlClient> {
-    let socket_path = dirs.control_socket();
+    let socket_path = &dirs.control_socket;
     if socket_path.exists() {
         ControlClient::connect(&socket_path).await.ok()
     } else {
         None
     }
+}
+
+/// Decide whether to attempt control based on mode selection.
+pub fn should_use_control(opts: &WorldOpts) -> bool {
+    matches!(opts.mode, Mode::Auto | Mode::Daemon)
 }
 
 /// Prepare the world for running: compile reducer, load manifest, patch modules.

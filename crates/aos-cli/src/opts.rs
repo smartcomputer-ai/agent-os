@@ -1,18 +1,47 @@
 //! Global CLI options and world resolution.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::Args;
+use clap::ValueEnum;
 
-/// Global options for world commands.
+/// Global options for CLI commands.
 ///
-/// These options apply to all `aos world` subcommands and can be set via env vars.
+/// These options apply to all commands and can be set via env vars.
 #[derive(Args, Debug, Clone)]
 pub struct WorldOpts {
     /// World directory (env: AOS_WORLD)
     #[arg(short = 'w', long, global = true, env = "AOS_WORLD")]
     pub world: Option<PathBuf>,
+
+    /// Mode selection: auto prefers daemon when available
+    #[arg(long, value_enum, default_value_t = Mode::Auto, global = true, env = "AOS_MODE")]
+    pub mode: Mode,
+
+    /// Control socket override (env: AOS_CONTROL)
+    #[arg(long, global = true, env = "AOS_CONTROL")]
+    pub control: Option<PathBuf>,
+
+    /// JSON output envelope
+    #[arg(long, global = true)]
+    pub json: bool,
+
+    /// Pretty-print JSON output (implies --json)
+    #[arg(long, global = true)]
+    pub pretty: bool,
+
+    /// Suppress notices (e.g., batch fallback)
+    #[arg(long, global = true)]
+    pub quiet: bool,
+
+    /// Client-side control timeout in milliseconds (env: AOS_TIMEOUT_MS)
+    #[arg(long, global = true, env = "AOS_TIMEOUT_MS")]
+    pub timeout_ms: Option<u64>,
+
+    /// Drop provenance metadata in JSON output
+    #[arg(long, global = true)]
+    pub no_meta: bool,
 
     /// AIR assets directory (env: AOS_AIR, default: <world>/air)
     #[arg(long, global = true, env = "AOS_AIR")]
@@ -47,6 +76,14 @@ pub struct WorldOpts {
     pub no_llm: bool,
 }
 
+/// Execution mode for CLI reads/writes.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Auto,
+    Daemon,
+    Batch,
+}
+
 /// Resolved directory paths for a world.
 #[derive(Debug, Clone)]
 pub struct ResolvedDirs {
@@ -58,13 +95,8 @@ pub struct ResolvedDirs {
     pub reducer_dir: PathBuf,
     /// Store root directory (contains .aos/).
     pub store_root: PathBuf,
-}
-
-impl ResolvedDirs {
-    /// Path to the control socket.
-    pub fn control_socket(&self) -> PathBuf {
-        self.store_root.join(".aos/control.sock")
-    }
+    /// Control socket path.
+    pub control_socket: PathBuf,
 }
 
 /// Resolve the world directory from options.
@@ -72,7 +104,7 @@ impl ResolvedDirs {
 /// Priority:
 /// 1. `--world` / `-w` flag
 /// 2. `AOS_WORLD` env var (handled by Clap)
-/// 3. CWD if it looks like a world (contains air/, .aos/, or manifest.air.json)
+/// 3. Walk up from CWD to find a world marker (air/, .aos/, manifest.air.json)
 /// 4. Error
 pub fn resolve_world(opts: &WorldOpts) -> Result<PathBuf> {
     // 1 & 2: Explicit flag or env var (Clap handles env with `env = "..."`)
@@ -80,14 +112,11 @@ pub fn resolve_world(opts: &WorldOpts) -> Result<PathBuf> {
         return Ok(w.clone());
     }
 
-    // 3: CWD detection
+    // 3: Walk up from CWD to find a marker
     let cwd = std::env::current_dir().context("get current directory")?;
-    if cwd.join("air").exists()
-        || cwd.join(".aos").exists()
-        || cwd.join("manifest.air.json").exists()
-    {
-        return Ok(cwd);
-    }
+    if let Some(found) = find_world_root(&cwd) {
+        return Ok(found);
+    };
 
     // 4: Error
     anyhow::bail!(
@@ -119,11 +148,32 @@ pub fn resolve_dirs(opts: &WorldOpts) -> Result<ResolvedDirs> {
         .clone()
         .map(|p| if p.is_relative() { world.join(p) } else { p })
         .unwrap_or_else(|| world.clone());
+    let control_socket = opts
+        .control
+        .clone()
+        .map(|p| if p.is_relative() { store_root.join(p) } else { p })
+        .unwrap_or_else(|| store_root.join(".aos/control.sock"));
 
     Ok(ResolvedDirs {
         world,
         air_dir,
         reducer_dir,
         store_root,
+        control_socket,
     })
+}
+
+/// Walk upward from a starting directory looking for a world marker.
+fn find_world_root(start: &Path) -> Option<PathBuf> {
+    let mut current = Some(start.to_path_buf());
+    while let Some(dir) = current {
+        if dir.join("air").exists()
+            || dir.join(".aos").exists()
+            || dir.join("manifest.air.json").exists()
+        {
+            return Some(dir);
+        }
+        current = dir.parent().map(|p| p.to_path_buf());
+    }
+    None
 }
