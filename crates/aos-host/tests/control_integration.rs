@@ -99,20 +99,10 @@ async fn control_channel_round_trip() {
     let resp = client.request(&evt).await.unwrap();
     assert!(resp.ok, "send-event failed: {:?}", resp.error);
 
-    // step
-    let step = RequestEnvelope {
-        v: 1,
-        id: "2".into(),
-        cmd: "step".into(),
-        payload: json!({}),
-    };
-    let resp = client.request(&step).await.unwrap();
-    assert!(resp.ok);
-
     // query-state
     let query = RequestEnvelope {
         v: 1,
-        id: "3".into(),
+        id: "2".into(),
         cmd: "query-state".into(),
         payload: json!({ "reducer": "com.acme/Echo@1" }),
     };
@@ -129,7 +119,7 @@ async fn control_channel_round_trip() {
     // query-state with key_b64 on a non-keyed reducer should return null (state keyed lookup unsupported)
     let query_key = RequestEnvelope {
         v: 1,
-        id: "3b".into(),
+        id: "2b".into(),
         cmd: "query-state".into(),
         payload: json!({ "reducer": "com.acme/Echo@1", "key_b64": BASE64_STANDARD.encode(b"k1") }),
     };

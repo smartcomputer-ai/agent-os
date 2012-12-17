@@ -368,15 +368,6 @@ async fn handle_request(
                 inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({}))
             }
-            "step" => {
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx.send(ControlMsg::Step { resp: tx }).await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({ "stepped": true }))
-            }
             "shutdown" => {
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
@@ -684,16 +675,6 @@ impl ControlClient {
                 "schema": schema,
                 "value_b64": BASE64_STANDARD.encode(value_cbor),
             }),
-        };
-        self.request(&env).await
-    }
-
-    pub async fn step(&mut self, id: impl Into<String>) -> std::io::Result<ResponseEnvelope> {
-        let env = RequestEnvelope {
-            v: PROTOCOL_VERSION,
-            id: id.into(),
-            cmd: "step".into(),
-            payload: serde_json::json!({}),
         };
         self.request(&env).await
     }

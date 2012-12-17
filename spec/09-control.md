@@ -55,7 +55,7 @@ Response:
 
 ## Verbs (v1.1 control/introspection)
 
-- `send-event { schema, value_b64 }` → enqueues a DomainEvent (no auto-step). `value_b64` must be canonical CBOR.
+- `send-event { schema, value_b64 }` → enqueues a DomainEvent and runs one daemon cycle. `value_b64` must be canonical CBOR. Timers still wait for their deadlines.
 - `inject-receipt { intent_hash, adapter_id, payload_b64 }` → injects an effect receipt (CBOR base64 payload).
 - `manifest-read { consistency?: "head"|"exact:<h>"|"at_least:<h>" }` → returns `{ manifest, journal_height, snapshot_hash?, manifest_hash }`.
 - `query-state { reducer, key_b64?, consistency?: "..."} ` → returns `{ state_b64?, meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
@@ -64,7 +64,6 @@ Response:
 - `put-blob { data_b64 }` → stores blob in CAS; returns `{ hash: "sha256:..." }`.
 - `blob-get { hash }` → returns `{ data_b64 }` (CAS lookup).
 - `snapshot {}` → forces snapshot; `result` is empty object.
-- `step {}` → runs one daemon cycle (`RunMode::Daemon`); result `{ "stepped": true }`.
 - `shutdown {}` → graceful drain, snapshot, shutdown; server and daemon stop.
 - `propose { patch_b64, description? }` → submits a governance proposal. `patch_b64` is base64 of either (a) `ManifestPatch` CBOR or (b) `PatchDocument` JSON. PatchDocuments are validated against `spec/schemas/patch.schema.json` (with `common.schema.json` embedded) before compilation; ManifestPatch skips schema validation. Returns `{ proposal_id: <u64> }`.
 - `shadow { proposal_id }` → runs shadow for a proposal; returns a JSON `ShadowSummary` `{ manifest_hash, predicted_effects?, pending_receipts?, plan_results?, ledger_deltas? }`.
@@ -78,7 +77,7 @@ Deferred verbs:
 ## Daemon Integration
 
 - `WorldDaemon` owns `ControlServer`; shutdown via control propagates to daemon loop and server.
-- Timers are partitioned in `RunMode::Daemon`; control `step` uses the daemon path (not batch).
+- Timers are partitioned in `RunMode::Daemon`; control requests run the daemon path (not batch).
 - Socket reuse: CLI checks for a healthy control socket before starting a new daemon; refuses to overwrite a live or unhealthy socket.
 
 ## Client Expectations

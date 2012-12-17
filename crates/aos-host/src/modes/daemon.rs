@@ -58,9 +58,6 @@ pub enum ControlMsg {
     Snapshot {
         resp: oneshot::Sender<Result<(), HostError>>,
     },
-    Step {
-        resp: oneshot::Sender<Result<(), HostError>>,
-    },
     QueryState {
         reducer: String,
         key: Option<Vec<u8>>,
@@ -314,11 +311,6 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 tracing::info!("Creating snapshot (by request)");
                 let res = self.host.snapshot();
                 let _ = resp.send(res);
-            }
-            ControlMsg::Step { resp } => {
-                tracing::debug!("Running step (by request)");
-                let res = self.run_daemon_cycle().await;
-                let _ = resp.send(res.map(|_| ()));
             }
             ControlMsg::QueryState {
                 reducer,
