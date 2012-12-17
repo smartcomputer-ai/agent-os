@@ -11,6 +11,7 @@
 
 use std::time::Duration;
 
+use aos_air_types::AirNode;
 use aos_cbor::Hash;
 use aos_effects::EffectReceipt;
 use aos_kernel::StateReader;
@@ -63,6 +64,15 @@ pub enum ControlMsg {
         key: Option<Vec<u8>>,
         consistency: String,
         resp: oneshot::Sender<Result<Option<(aos_kernel::ReadMeta, Option<Vec<u8>>)>, HostError>>,
+    },
+    GetDef {
+        name: String,
+        resp: oneshot::Sender<Result<AirNode, HostError>>,
+    },
+    ListDefs {
+        kinds: Option<Vec<String>>,
+        prefix: Option<String>,
+        resp: oneshot::Sender<Result<Vec<aos_kernel::DefListing>, HostError>>,
     },
     ListCells {
         reducer: String,
@@ -324,6 +334,20 @@ impl<S: Store + 'static> WorldDaemon<S> {
                     .query_state(&reducer, key.as_deref(), consistency)
                     .map(|read| (read.meta, read.value));
                 let _ = resp.send(Ok(result));
+            }
+            ControlMsg::GetDef { name, resp } => {
+                let res = self.host.get_def(&name);
+                let _ = resp.send(res);
+            }
+            ControlMsg::ListDefs {
+                kinds,
+                prefix,
+                resp,
+            } => {
+                let res = self
+                    .host
+                    .list_defs(kinds.as_deref(), prefix.as_deref());
+                let _ = resp.send(res);
             }
             ControlMsg::ListCells { reducer, resp } => {
                 let res = self.host.list_cells(&reducer);

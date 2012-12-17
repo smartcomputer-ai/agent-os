@@ -8,6 +8,7 @@ use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::PatchDocument;
 use aos_kernel::shadow::ShadowSummary;
+use aos_kernel::DefListing;
 use base64::prelude::*;
 use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize};
@@ -302,6 +303,56 @@ async fn handle_request(
                         "meta": meta_to_json(&world_meta(&control_tx).await?),
                     })),
                 }
+            }
+            "defs-get" => {
+                let name = req
+                    .payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing name"))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::GetDef { name, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let def = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "def": def }))
+            }
+            "defs-ls" => {
+                let kinds: Option<Vec<String>> = req
+                    .payload
+                    .get("kinds")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    });
+                let prefix = req
+                    .payload
+                    .get("prefix")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::ListDefs {
+                        kinds,
+                        prefix,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let defs: Vec<DefListing> = inner.map_err(ControlError::host)?;
+                let meta = world_meta(&control_tx).await?;
+                Ok(serde_json::json!({
+                    "defs": defs,
+                    "meta": meta_to_json(&meta),
+                }))
             }
             "list-cells" => {
                 let reducer = req
@@ -675,6 +726,45 @@ impl ControlClient {
                 "schema": schema,
                 "value_b64": BASE64_STANDARD.encode(value_cbor),
             }),
+        };
+        self.request(&env).await
+    }
+
+    pub async fn get_def(
+        &mut self,
+        id: impl Into<String>,
+        name: &str,
+    ) -> std::io::Result<ResponseEnvelope> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "defs-get".into(),
+            payload: serde_json::json!({ "name": name }),
+        };
+        self.request(&env).await
+    }
+
+    pub async fn list_defs(
+        &mut self,
+        id: impl Into<String>,
+        kinds: Option<&[&str]>,
+        prefix: Option<&str>,
+    ) -> std::io::Result<ResponseEnvelope> {
+        let kinds_val = kinds.map(|ks| serde_json::Value::Array(
+            ks.iter().map(|k| serde_json::Value::String(k.to_string())).collect()
+        ));
+        let mut payload = serde_json::Map::new();
+        if let Some(k) = kinds_val {
+            payload.insert("kinds".into(), k);
+        }
+        if let Some(p) = prefix {
+            payload.insert("prefix".into(), serde_json::Value::String(p.to_string()));
+        }
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "defs-ls".into(),
+            payload: serde_json::Value::Object(payload),
         };
         self.request(&env).await
     }

@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
-    AirNode, DefModule, Manifest, Name, NamedRef, SecretDecl, SecretEntry, TypeExpr, builtins,
-    catalog::EffectCatalog,
+    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name, NamedRef,
+    SecretDecl, SecretEntry, TypeExpr, builtins, catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
 };
@@ -14,6 +14,7 @@ use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
+use serde::Serialize;
 use serde_cbor;
 use serde_cbor::Value as CborValue;
 
@@ -79,7 +80,13 @@ pub struct Kernel<S: Store> {
     manifest: Manifest,
     manifest_hash: Hash,
     secrets: Vec<SecretDecl>,
+    secret_defs: HashMap<Name, SecretDecl>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
+    plan_defs: HashMap<Name, DefPlan>,
+    cap_defs: HashMap<Name, DefCap>,
+    effect_defs: HashMap<Name, DefEffect>,
+    policy_defs: HashMap<Name, DefPolicy>,
+    schema_defs: HashMap<Name, DefSchema>,
     reducers: ReducerRegistry<S>,
     router: HashMap<String, Vec<RouteBinding>>,
     plan_registry: PlanRegistry,
@@ -121,6 +128,22 @@ pub struct KernelHeights {
     pub head: JournalSeq,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DefListing {
+    pub kind: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cap_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params_schema: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receipt_schema: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_steps: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_rules: Option<usize>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TailIntent {
     pub seq: JournalSeq,
@@ -139,6 +162,14 @@ pub struct TailScan {
     pub to: JournalSeq,
     pub intents: Vec<TailIntent>,
     pub receipts: Vec<TailReceipt>,
+}
+
+fn def_kind_allowed(kind: &str, filter: Option<&std::collections::HashSet<&str>>) -> bool {
+    if let Some(set) = filter {
+        set.contains(kind)
+    } else {
+        true
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -432,6 +463,16 @@ impl<S: Store + 'static> Kernel<S> {
             }
             None => Box::new(AllowAllPolicy),
         };
+        let plan_defs = loaded.plans.clone();
+        let cap_defs = loaded.caps.clone();
+        let effect_defs = loaded.effects.clone();
+        let policy_defs = loaded.policies.clone();
+        let schema_defs = loaded.schemas.clone();
+        let secret_defs = loaded
+            .secrets
+            .iter()
+            .map(|s| (s.name.clone(), s.clone()))
+            .collect();
 
         // Persist the loaded manifest + defs into the store so governance/patch doc
         // compilation can resolve the base manifest hash from CAS.
@@ -446,6 +487,12 @@ impl<S: Store + 'static> Kernel<S> {
             manifest: loaded.manifest.clone(),
             manifest_hash,
             module_defs: loaded.modules,
+            plan_defs,
+            cap_defs,
+            effect_defs,
+            policy_defs,
+            schema_defs,
+            secret_defs,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
             reducers: ReducerRegistry::new(store, config.module_cache_dir.clone())?,
@@ -1256,9 +1303,199 @@ impl<S: Store + 'static> Kernel<S> {
         self.manifest_hash
     }
 
+    /// Look up a def node by name from the active manifest.
+    pub fn get_def(&self, name: &str) -> Option<AirNode> {
+        if let Some(def) = self.schema_defs.get(name) {
+            return Some(AirNode::Defschema(def.clone()));
+        }
+        if let Some(def) = self.module_defs.get(name) {
+            return Some(AirNode::Defmodule(def.clone()));
+        }
+        if let Some(def) = self.plan_defs.get(name) {
+            return Some(AirNode::Defplan(def.clone()));
+        }
+        if let Some(def) = self.cap_defs.get(name) {
+            return Some(AirNode::Defcap(def.clone()));
+        }
+        if let Some(def) = self.policy_defs.get(name) {
+            return Some(AirNode::Defpolicy(def.clone()));
+        }
+        if let Some(def) = self.effect_defs.get(name) {
+            return Some(AirNode::Defeffect(def.clone()));
+        }
+        if let Some(def) = self.secret_defs.get(name) {
+            return Some(AirNode::Defsecret(def.clone()));
+        }
+        None
+    }
+
     /// Hash of the most recent snapshot blob, if any.
     pub fn snapshot_hash(&self) -> Option<Hash> {
         self.last_snapshot_hash
+    }
+
+    /// List defs from the active manifest with optional kind/prefix filters.
+    pub fn list_defs(&self, kinds: Option<&[String]>, prefix: Option<&str>) -> Vec<DefListing> {
+        let prefix = prefix.unwrap_or("");
+        let kind_filter: Option<std::collections::HashSet<&str>> = kinds.map(|ks| {
+            ks.iter()
+                .map(|k| k.as_str())
+                .collect::<std::collections::HashSet<&str>>()
+        });
+
+        let mut entries = Vec::new();
+
+        let push_if = |entries: &mut Vec<DefListing>,
+                       kind: &str,
+                       name: &str,
+                       build: impl Fn() -> DefListing,
+                       filter: &Option<std::collections::HashSet<&str>>,
+                       prefix: &str| {
+            if !name.starts_with(prefix) {
+                return;
+            }
+            if !def_kind_allowed(kind, filter.as_ref()) {
+                return;
+            }
+            entries.push(build());
+        };
+
+        for (name, _def) in self.schema_defs.iter() {
+            push_if(
+                &mut entries,
+                "schema",
+                name.as_str(),
+                || DefListing {
+                    kind: "defschema".into(),
+                    name: name.clone(),
+                    cap_type: None,
+                    params_schema: None,
+                    receipt_schema: None,
+                    plan_steps: None,
+                    policy_rules: None,
+                },
+                &kind_filter,
+                prefix,
+            );
+        }
+
+        for (name, _def) in self.module_defs.iter() {
+            push_if(
+                &mut entries,
+                "module",
+                name.as_str(),
+                || DefListing {
+                    kind: "defmodule".into(),
+                    name: name.clone(),
+                    cap_type: None,
+                    params_schema: None,
+                    receipt_schema: None,
+                    plan_steps: None,
+                    policy_rules: None,
+                },
+                &kind_filter,
+                prefix,
+            );
+        }
+
+        for (name, def) in self.plan_defs.iter() {
+            let steps = def.steps.len();
+            push_if(
+                &mut entries,
+                "plan",
+                name.as_str(),
+                || DefListing {
+                    kind: "defplan".into(),
+                    name: name.clone(),
+                    cap_type: None,
+                    params_schema: None,
+                    receipt_schema: None,
+                    plan_steps: Some(steps),
+                    policy_rules: None,
+                },
+                &kind_filter,
+                prefix,
+            );
+        }
+
+        for (name, def) in self.cap_defs.iter() {
+            push_if(
+                &mut entries,
+                "cap",
+                name.as_str(),
+                || DefListing {
+                    kind: "defcap".into(),
+                    name: name.clone(),
+                    cap_type: Some(def.cap_type.as_str().to_string()),
+                    params_schema: None,
+                    receipt_schema: None,
+                    plan_steps: None,
+                    policy_rules: None,
+                },
+                &kind_filter,
+                prefix,
+            );
+        }
+
+        for (name, def) in self.effect_defs.iter() {
+            push_if(
+                &mut entries,
+                "effect",
+                name.as_str(),
+                || DefListing {
+                    kind: "defeffect".into(),
+                    name: name.clone(),
+                    cap_type: Some(def.cap_type.as_str().to_string()),
+                    params_schema: Some(def.params_schema.reference.clone()),
+                    receipt_schema: Some(def.receipt_schema.reference.clone()),
+                    plan_steps: None,
+                    policy_rules: None,
+                },
+                &kind_filter,
+                prefix,
+            );
+        }
+
+        for (name, def) in self.policy_defs.iter() {
+            push_if(
+                &mut entries,
+                "policy",
+                name.as_str(),
+                || DefListing {
+                    kind: "defpolicy".into(),
+                    name: name.clone(),
+                    cap_type: None,
+                    params_schema: None,
+                    receipt_schema: None,
+                    plan_steps: None,
+                    policy_rules: Some(def.rules.len()),
+                },
+                &kind_filter,
+                prefix,
+            );
+        }
+
+        for (name, _def) in self.secret_defs.iter() {
+            push_if(
+                &mut entries,
+                "secret",
+                name.as_str(),
+                || DefListing {
+                    kind: "defsecret".into(),
+                    name: name.clone(),
+                    cap_type: None,
+                    params_schema: None,
+                    receipt_schema: None,
+                    plan_steps: None,
+                    policy_rules: None,
+                },
+                &kind_filter,
+                prefix,
+            );
+        }
+
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        entries
     }
 
     /// List all cells for a keyed reducer using the persisted CellIndex.

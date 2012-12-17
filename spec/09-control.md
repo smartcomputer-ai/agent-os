@@ -60,6 +60,8 @@ Response:
 - `manifest-read { consistency?: "head"|"exact:<h>"|"at_least:<h>" }` → returns `{ manifest, journal_height, snapshot_hash?, manifest_hash }`.
 - `query-state { reducer, key_b64?, consistency?: "..."} ` → returns `{ state_b64?, meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
 - `list-cells { reducer }` → returns `{ cells:[{ key_b64, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
+- `defs-get { name }` → returns `{ def }` where `def` is the manifest entry for that name (`defschema`/`defmodule`/`defplan`/`defcap`/`defeffect`/`defpolicy`/`defsecret`); errors if missing.
+- `defs-ls { kinds?: ["schema"|"module"|"plan"|"cap"|"effect"|"policy"|"secret"], prefix?: "..." }` → returns `{ defs:[{ kind, name, cap_type?, params_schema?, receipt_schema?, plan_steps?, policy_rules? }], meta }` sorted by name.
 - `journal-head {}` → returns `{ journal_height, snapshot_hash?, manifest_hash }`.
 - `put-blob { data_b64 }` → stores blob in CAS; returns `{ hash: "sha256:..." }`.
 - `blob-get { hash }` → returns `{ data_b64 }` (CAS lookup).

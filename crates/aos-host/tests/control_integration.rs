@@ -116,6 +116,46 @@ async fn control_channel_round_trip() {
     let state = BASE64_STANDARD.decode(state_b64).unwrap();
     assert_eq!(state, vec![0xAA]);
 
+    // defs-get
+    let defs_get = RequestEnvelope {
+        v: 1,
+        id: "defs".into(),
+        cmd: "defs-get".into(),
+        payload: json!({ "name": START_SCHEMA }),
+    };
+    let resp = client.request(&defs_get).await.unwrap();
+    assert!(resp.ok);
+    let def_kind = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("def"))
+        .and_then(|d| d.get("$kind"))
+        .and_then(|k| k.as_str())
+        .unwrap_or_default();
+    assert_eq!(def_kind, "defschema");
+
+    // defs-ls
+    let defs_ls = RequestEnvelope {
+        v: 1,
+        id: "defs-ls".into(),
+        cmd: "defs-ls".into(),
+        payload: json!({ "kinds": ["schema"], "prefix": "demo/" }),
+    };
+    let resp = client.request(&defs_ls).await.unwrap();
+    assert!(resp.ok);
+    let defs = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("defs"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        defs.iter()
+            .any(|d| d.get("name").and_then(|n| n.as_str()) == Some(START_SCHEMA)),
+        "defs-ls should include the schema"
+    );
+
     // query-state with key_b64 on a non-keyed reducer should return null (state keyed lookup unsupported)
     let query_key = RequestEnvelope {
         v: 1,

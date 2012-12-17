@@ -114,7 +114,8 @@ Notes:
 ### manifest / defs
 - `manifest get [--raw] [--consistency ...]` (optional meta; pairs with `state` semantics).
 - `manifest stat` fast path: manifest hash + head height + snapshot hash.
-- `defs get <name>` reads a `defschema/defcap/defeffect` entry from the active manifest (JSON only; consider `--raw` for canonical form if useful).
+- `defs get <name>` reads a `defschema/defcap/defeffect/defmodule/defplan/defpolicy` entry from the active manifest (JSON only; consider `--raw` for canonical form if useful).
+- `defs ls [--kind schema|module|plan|cap|effect|policy|secret]... [--prefix STR] [--json|--pretty]` lists defs from the active manifest, sorted by name. Human: table `KIND | NAME | DETAIL` (cap→cap_type; effect→params/receipt schema refs; module→reducer; plan→steps count; policy→rules count; schema empty). JSON: `{ data: { defs: [ { kind, name, cap_type?, params?, receipt? } ] }, meta }` with `--no-meta` to drop meta.
 
 ### journal / snapshot
 - `journal head` returns height (and optional meta if paired with manifest reads).
@@ -132,4 +133,10 @@ Notes:
 ## Open Follow-ups
 - Control `step` removed; keep CLI surface aligned and ensure no tooling depends on it.
 - Confirm `ObjectCatalog` reducer/API matches the desired `obj` UX (versions, tags, depth view).
-- Ensure `defs get` is implemented (control verb + batch path) so schema/cap/effect defs are addressable like other resources.
+
+## Implementation Plan (CLI Refresh)
+1) Control + batch plumbing: finalize verb map (no `step`, no legacy aliases), add `defs get` control/batch paths, ensure `send-event`/`inject-receipt` run a cycle, and align daemon/batch meta payloads.
+2) CLI foundation: implement universal flags + world resolution, shared control/batch client wrapper, and unified output rendering (stdout data, stderr meta/notices; JSON envelope with optional meta).
+3) Event/state ergonomics: add key derivation/encoding (`key_schema` + routing `key_field`) for `event send`, key parsing for overrides, `state get/ls` consistency handling, and schema-aware state decoding with `--raw`.
+4) Object/blob/manifest/defs surfaces: build `obj ls/get/stat` atop `ObjectCatalog` + `blob get` safeguards, implement blob put/get/stat UX defaults, and wire `manifest get/stat` + `defs get` from control/batch with meta where applicable.
+5) UX polish + coverage: completions, CLI help text, update docs to the new nouns/verbs (no aliases), and golden/control tests for state/obj/blob/manifest/defs flows (daemon-first with batch fallback, provenance asserted).

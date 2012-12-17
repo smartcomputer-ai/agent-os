@@ -3,11 +3,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use aos_air_types::AirNode;
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::{
-    Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent, TailScan,
-    cell_index::CellMeta,
+    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent,
+    TailScan, cell_index::CellMeta,
 };
 use aos_store::{FsStore, Store};
 
@@ -292,6 +293,20 @@ impl<S: Store + 'static> WorldHost<S> {
     /// List all cells for a keyed reducer. Returns empty if reducer is not keyed or has no cells.
     pub fn list_cells(&self, reducer: &str) -> Result<Vec<CellMeta>, HostError> {
         self.kernel.list_cells(reducer).map_err(HostError::from)
+    }
+
+    pub fn list_defs(
+        &self,
+        kinds: Option<&[String]>,
+        prefix: Option<&str>,
+    ) -> Result<Vec<DefListing>, HostError> {
+        Ok(self.kernel.list_defs(kinds, prefix))
+    }
+
+    pub fn get_def(&self, name: &str) -> Result<AirNode, HostError> {
+        self.kernel
+            .get_def(name)
+            .ok_or_else(|| HostError::Manifest(format!("definition '{name}' not found")))
     }
 
     pub fn snapshot(&mut self) -> Result<(), HostError> {
