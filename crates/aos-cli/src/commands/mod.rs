@@ -1,11 +1,13 @@
 //! CLI command handlers.
 
 pub mod event;
+pub mod defs;
 pub mod gov;
 pub mod head;
 pub mod info;
 pub mod init;
 pub mod manifest;
+pub mod blob;
 pub mod replay;
 pub mod run;
 pub mod stop;
