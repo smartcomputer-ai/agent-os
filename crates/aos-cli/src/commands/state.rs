@@ -7,6 +7,7 @@ use serde_json::Value as JsonValue;
 use crate::opts::{Mode, WorldOpts, resolve_dirs};
 use crate::output::print_success;
 use crate::util::load_world_env;
+use crate::key::{KeyOverrides, encode_key_for_reducer};
 
 use super::{create_host, prepare_world, should_use_control, try_control_client};
 
@@ -15,9 +16,21 @@ pub struct StateArgs {
     /// Reducer name (e.g., demo/Counter@1)
     pub reducer_name: String,
 
-    /// Key for keyed reducers (future)
+    /// Key for keyed reducers (UTF-8)
     #[arg(long)]
     pub key: Option<String>,
+
+    /// Key as JSON literal
+    #[arg(long)]
+    pub key_json: Option<String>,
+
+    /// Key as hex-encoded bytes
+    #[arg(long)]
+    pub key_hex: Option<String>,
+
+    /// Key as base64-encoded bytes
+    #[arg(long)]
+    pub key_b64: Option<String>,
 
     /// Require exact journal height
     #[arg(long)]
@@ -36,7 +49,7 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
 
     // Try daemon first
-    let key_bytes_opt = args.key.as_ref().map(|k| k.as_bytes());
+    let key_bytes_opt = resolve_key(&dirs, args)?;
     let consistency = if let Some(h) = args.exact_height {
         Some(format!("exact:{h}"))
     } else if let Some(h) = args.at_least_height {
@@ -51,10 +64,10 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
                 .query_state_decoded(
                     "cli-state",
                     &args.reducer_name,
-                    key_bytes_opt,
-                    consistency.as_deref(),
-                )
-                .await?;
+                key_bytes_opt.as_deref(),
+                consistency.as_deref(),
+            )
+            .await?;
             let (data, warning) = state_opt
                 .map(|bytes| decode_state(&bytes, args.raw))
                 .transpose()?
@@ -83,7 +96,7 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
     // Query state directly from host
     let read = host.query_state(
         &args.reducer_name,
-        key_bytes_opt,
+        key_bytes_opt.as_deref(),
         consistency
             .as_deref()
             .map(parse_consistency)
@@ -118,6 +131,23 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn resolve_key(dirs: &crate::opts::ResolvedDirs, args: &StateArgs) -> Result<Option<Vec<u8>>> {
+    let overrides = KeyOverrides {
+        utf8: args.key.clone(),
+        json: args.key_json.clone(),
+        hex: args.key_hex.clone(),
+        b64: args.key_b64.clone(),
+    };
+    if overrides.utf8.is_none()
+        && overrides.json.is_none()
+        && overrides.hex.is_none()
+        && overrides.b64.is_none()
+    {
+        return Ok(None);
+    }
+    encode_key_for_reducer(dirs, &args.reducer_name, &overrides).map(Some)
 }
 
 fn parse_consistency(s: &str) -> aos_kernel::Consistency {

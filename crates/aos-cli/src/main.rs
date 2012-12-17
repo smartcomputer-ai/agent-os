@@ -1,5 +1,6 @@
 mod commands;
 mod input;
+mod key;
 mod output;
 mod opts;
 mod util;
