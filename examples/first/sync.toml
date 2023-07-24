@@ -1,0 +1,17 @@
+[agent]
+name = "first"
+
+[all]
+push="./examples/first/common:/common"
+
+[[actors]]
+name="frontend"
+push="./examples/first/frontend:/"
+wit="/:frontend_wit:app"
+wit_query="/:frontend_queries:app"
+
+[[actors]]
+name="head"
+push="./examples/first/head:/"
+wit="/:head_wit:app"
+notify="frontend"
