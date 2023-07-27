@@ -5,7 +5,13 @@ description = "A library and runtime to build autonomous AI agents."
 authors = []
 license = "MIT"
 readme = "README.md"
-packages = [{include = "src"}]
+packages = [
+    {include = "grit", from = "src"}, 
+    {include = "wit", from = "src"}, 
+    {include = "sync", from = "src"}, 
+    {include = "web", from = "src"}, 
+    {include = "runtime", from = "src"}
+]
 repository = "https://github.com/lukebuehler/agent-os"
 
 [tool.poetry.dependencies]

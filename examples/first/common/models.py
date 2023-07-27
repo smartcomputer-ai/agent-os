@@ -17,6 +17,13 @@ async def chat_completion(messages:list[ChatMessage],
     top_p:float = 1.0,
     actor_id:ActorId|None=None) -> ChatMessage:
     
+    # make it work even if the api_key is not set,
+    # since this example is used to try the OS for the first time.
+    if(openai.api_key is None):
+        return ChatMessage.from_actor(
+            "I am a helpful assistant, and I want to reply to your question, but the OpenAI API key is not set", 
+            actor_id)
+
     if(system_message is None):
         system_message = "You are a helpful assistant."
     messages_completion = []

@@ -26,7 +26,7 @@ poetry run aos --help
 ```
 
 ## Your First Agent 🤖 
-To run your first agent, put an `.env` file in the project root that contains the OpenAI API key, like so:
+To run your first agent, put an `.env` file in the project root that contains an OpenAI API key. (It also works without an `.env` file or key if you just want to give the project a quick spin.)
 ```
 OPENAI_API_KEY=sk-myspecialkey
 ```
