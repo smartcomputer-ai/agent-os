@@ -1,10 +1,12 @@
 [tool.poetry]
-name = "agent-os"
+name = "agent-os-py"
 version = "0.0.1"
 description = "A library and runtime to build autonomous AI agents."
 authors = []
+license = "MIT"
 readme = "README.md"
-packages = [{include = "runtime", from = "src"}]
+packages = [{include = "src"}]
+repository = "https://github.com/lukebuehler/agent-os"
 
 [tool.poetry.dependencies]
 python = "^3.10"
