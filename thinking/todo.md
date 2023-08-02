@@ -54,7 +54,7 @@
 - [ ] resolver cache clearing/invalidation, especially for CoreResolvers
 - [ ] support sync wits (the objective is to support libraries like LangChain):
    - [X] sync alternative in object store
-   - [ ] sync version of data_model
+   - [X] sync version of data_model
    - [ ] allow sync wits, execute them in a thread
 - [ ] consider renaming 'inbox' and 'outbox' to 'inputs' and 'outputs', makes it sound more neural-netty (I remember being somewhat put off by F#'s "MailboxProcessor".when I first saw it, which was really a simple actor model.) 'Mailbox' can become 'Channels'
 - [ ] finalize url naming scheme for the web api. 

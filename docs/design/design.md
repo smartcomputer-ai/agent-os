@@ -31,7 +31,7 @@ For those familiar with technical jargon: the Agent OS follows a [virtual](https
 In the Agent OS, there are the following sub-systems or components:
  - **Grit**: the data persistence layer, which borrows liberally from the design of Git, but operates more like a database and file system
  - **Wit**: the state transition function of an actor, which takes as its input its current state and new messages, and then produces a new state and output messages
- - **Runtime**: the orchestrator that makes sure the wit function of an actor executes properly and that messages are routed between actors. It also controls access to Grit
+ - **Runtime**: the orchestrator that makes sure the Wit function of an actor executes properly and that messages are routed between actors. It also controls access to Grit
 
 One of the explicit design goals is that the execution and persistence models are simple enough that different programming languages can be trivially supported. It should take only 1000-2000 lines of code to implement an executor that can host actors written in a particular programming language. (The runtime is a bit more complicated, but the runtime does not have to be re-implemented for each programming language). Since we want to be able to run parts of an agent on different platforms—e.g., local machine, mobile, cloud, browser—this will come in handy.
 
@@ -81,7 +81,7 @@ Generally, when talking about actor models, the key insight is that actors run i
 
 An actor does not need to do any data locking internally. This is because actors communicate by message passing: if an actor wants information from another actor, it has to be done via message. They never share mutable memory or state. For example, actor A sends a "request for X" message to actor B. Actor B then sends a "response with X" message to actor A. That's all there is to the actor model. Implementing this model is mostly about creating a runtime that executes the actors in parallel and ensure that messages are delivered to the correct actor.
 
-At the heart of our actor model there is the "wit." The wit is the state transition function that accepts a message and applies it to a state variable in order to create a new state. The exact definition of a wit function is given below after going into the details of Grit, because that's a prerequisite. But for now, what you need to know is that an actor consists of its internal state and a wit function. It accepts input messages from other actors, modifies its internal state, and produces output messages which address other actors. Finally, a wit is not an actor, because the same wit can be used in different actors; an actor is wit+state.
+At the heart of our actor model there is the "Wit." The Wit is the state transition function that accepts a message and applies it to a state variable in order to create a new state. The exact definition of a Wit function is given below after going into the details of Grit, because that's a prerequisite. But for now, what you need to know is that an actor consists of its internal state and a Wit function. It accepts input messages from other actors, modifies its internal state, and produces output messages which address other actors. Finally, a Wit is not an actor, because the same Wit can be used in different actors; an actor is Wit+state.
 
 What is unique about our actor model is that it is built right into our persistence layer, Grit. Many other actor implementations are persistence agnostic. In the Agent OS, messages are just persisted `message` objects, and an agent's state is the latest saved `step` object. More on that shortly.
 
@@ -211,21 +211,24 @@ Let's look at each object type in Grit.
 #### Blob & Tree
 In the Grit object model, `blob`s and `tree`s are basically the same as in Git, except that blobs can have headers and in Git they don't.
 
+All actual contents, of all data, is stored in the end as a blob. Trees are just a way to organize blobs; just like we use directories in a normal file system. However, unlike a traditional file system, it is not possible to create an empty tree. A tree must either contain more trees or at least one blob object.
+
+
 #### Message & Mailbox
 A `message` points to a blob or tree as its actual contents. It can also have `headers`, which are sometimes utilized by the runtime or actors for message dispatching. A message object can function like a linked list if it has a reference to a `previous` message. We utilize this to build message queues. If there is no previous message id, we consider a message to be a signal, and signals can override each other in rapid succession, interrupting the current execution of the actor. Queues, on the other hand, should be processed in order. 
 
 Since messages don't carry any sender or recipient information, we need one more data structure. The `mailbox` dictionary can be used to either contain pairs of `(sender_id, message_id)` or pairs of `(recipient_id, message_id)`, where the senders or recipients refer to other actors. Mailboxes are used in the `step` object if you look at the `inbox` and `outbox` fields.
 
 #### Step
-`step` objects are the result of running a wit state transition function, i.e., they are the output of a wit. Each time an agent is run—which means its wit is run with new messages and its current state—a new step gets created.
+`step` objects are the result of running a Wit state transition function, i.e., they are the output of a Wit. Each time an agent is run—which means its Wit is run with new messages and its current state—a new step gets created.
 
 A step must reference a `core`, which is just a tree that points to the root of the step's internal state, both code and data. The runtime expects a core to be of a certain shape, or rather, contain a few items structured in a certain way—mostly a `/wit` node that defines the entry point for the state transition function and some other details, all of which we will investigate below. Other than that, the core can contain anything, possibly terabytes of data. 
 
-Tangentially, an actor is identified by the hash of the *first* core of the *first* step. This id remains the same for the lifetime of the actor, even as the hash of the core changes as the actor updates its state. Remember, an actor is wit+state, and so an actor's id is `hash(initial state+initial wit)`, or equivalently: `hash(initial core)`. This is an important detail for the virtual actor model considered further on.
+Tangentially, an actor is identified by the hash of the *first* core of the *first* step. This id remains the same for the lifetime of the actor, even as the hash of the core changes as the actor updates its state. Remember, an actor is Wit+state, and so an actor's id is `hash(initial state+initial wit)`, or equivalently: `hash(initial core)`. This is an important detail for the virtual actor model considered further on.
 
 The `outbox` field of a new step contains all the messages that the actor is sending to other actors. It's a mapping of recipient actor ids to message ids. It's optional for a step to produce or update an outbox. If the outbox has contents, the runtime compares the outbox from the previous step with the outbox of the new step to see if there are any new messages to be sent to other actors, and if so, routes them.
 
-A step's `inbox` contain *the messages that the actor has read so far*. So, it's more a "read inbox". It's a mapping of sender actor ids to message ids. It does not contain newly routed messages from other outboxes. New messages are proposed by the runtime separately when it executes the wit function. The actor then decides to "accept" or "process" a message by making it part of its inbox when it generates a new step. If a message is a linked list of messages, the inbox can be a "cursor" of up to where the agent has read the inbox. This allows a wit to implement single message processing or batch processing. Also note that message ordering is only guaranteed from an individual sender, not from all senders across, because each sender has its own queue (but only if the sender links the messages using `message.previous`).
+A step's `inbox` contain *the messages that the actor has read so far*. So, it's more a "read inbox". It's a mapping of sender actor ids to message ids. It does not contain newly routed messages from other outboxes. New messages are proposed by the runtime separately when it executes the Wit function. The actor then decides to "accept" or "process" a message by making it part of its inbox when it generates a new step. If a message is a linked list of messages, the inbox can be a "cursor" of up to where the agent has read the inbox. This allows a Wit to implement single message processing or batch processing. Also note that message ordering is only guaranteed from an individual sender, not from all senders across, because each sender has its own queue (but only if the sender links the messages using `message.previous`).
 
 The `step.previous` property creates a linked list, or "event log," of all the steps since the beginning of an actor. In reality, though, that link needs to be broken sometimes so that old data can get pruned. Unlike Git, where the `parents` field of a commit is immensely important for the history of a repository (commits, branches, and merges), it fulfils a more transitory function in Grit (for example, if there are accidental multiple parallel executions of the same agent of the same step). 
 
@@ -264,16 +267,16 @@ If you squint at it, especially the progression of steps, you can see that Grit 
 
 The goal is to keep Grit so simple that it will rarely change, if ever. Basically the [*serialization format* of Grit](/src/grit/object_serialization.py) is the primary protocol of how components talk to each other in the Agent OS. And as long as components implement that protocol, they can play and operate in the OS.
 
-The object model is structured in such a way that it allows the implementation of an actor model on top of Grit, although Grit itself does not actually execute or run any actor. A runtime is required to make the OS move. But first let's learn how the wit state transition function generates steps.
+The object model is structured in such a way that it allows the implementation of an actor model on top of Grit, although Grit itself does not actually execute or run any actor. A runtime is required to make the OS move. But first let's learn how the Wit state transition function generates steps.
 
 
 ## Wit: State Transition Function
-An agent consists of several actors, and each actor is defined by its state transition function. A state transition function is a procedure that takes in `current state + new data` and computes `new state`. We call this function the "wit" of an actor. The inputs and outputs of this function are exactly defined in terms of Grit objects. 
+An agent consists of several actors, and each actor is defined by its state transition function. A state transition function is a procedure that takes in `current state + new data` and computes `new state`. We call this function the "Wit" of an actor. The inputs and outputs of this function are exactly defined in terms of Grit objects. 
 
-*Note: our "wit" functions have nothing to do with [wit.ai](https://wit.ai), the NLP platform by Meta for chatbots. The naming clash is just an unfortunate coincidence. In the worst case, it will force us to rename our concept of strongly persistent actors with a fixed state transition function to something different.*
+*Note: our "Wit" functions have nothing to do with [wit.ai](https://wit.ai), the NLP platform by Meta for chatbots. The naming clash is just an unfortunate coincidence. In the worst case, it will force us to rename our concept of strongly persistent actors with a fixed state transition function to something different.*
  
 ### Creating Steps
-Here is the definition of the wit function:
+Here is the definition of the Wit function:
 ```
 current step + new messages -> new step
 ```
@@ -281,9 +284,9 @@ Or using the Grit object model definitions from above:
 ```Python
 def wit(last_step_id:StepId, new_messages:Mailbox) -> StepId
 ```
-A wit takes in the last step id, and then "applies" the new messages to its internal state and in doing so produces a new step id. The process usually consists in modifying its core, but minimally it updates the inbox of the step to mark the new messages as read.
+A Wit takes in the last step id, and then "applies" the new messages to its internal state and in doing so produces a new step id. The process usually consists in modifying its core, but minimally it updates the inbox of the step to mark the new messages as read.
 
-You might have noticed that there is a problem: how to get from last step *id* to new *id*? Clearly, more is required than what is provided in the function inputs to generate a new step id. This is especially the case if you expected the transition function to be deterministic and side-effect free. However, in the Agent OS, *wit functions can have side effects*! So, technically speaking, the function definition as it stands is correct, because the function implementer can call other APIs or libraries to generate the new step. Now, in practice, since the data store and other services are managed by the runtime, these dependencies are injected into the wit function, giving us the following function:
+You might have noticed that there is a problem: how to get from last step *id* to new *id*? Clearly, more is required than what is provided in the function inputs to generate a new step id. This is especially the case if you expected the transition function to be deterministic and side-effect free. However, in the Agent OS, *Wit functions can have side effects*! So, technically speaking, the function definition as it stands is correct, because the function implementer can call other APIs or libraries to generate the new step. Now, in practice, since the data store and other services are managed by the runtime, these dependencies are injected into the Wit function, giving us the following function:
 ```
 current step + new messages + object store + other dependencies -> new step
 ```
@@ -295,14 +298,14 @@ def wit(last_step_id:StepId, new_messages:Mailbox, object_store:ObjectStore, **k
 ```
 Where the `kwargs` (which is a dictionary) contains things like the object store and information about the environment (in other similar systems this is usually called the "context").
 
-When an agent's wit produces a new step, all the runtime is concerned with is the internal consistency of Grit and updating the Grit references to the latest step id (i.e. set `refs/heads/<agent id>` to `<new step id>`). Besides that, the wit can do whatever it wants. It can utilize external resources, such as services, files, databases, ML models, and APIs, at will. The only thing to consider when doing this is that the execution of a wit can fail or be canceled by the runtime and retried later, so it is the developer's job to make external write operations idempotent or implement other safeguards.
+When an agent's Wit produces a new step, all the runtime is concerned with is the internal consistency of Grit and updating the Grit references to the latest step id (i.e. set `refs/heads/<agent id>` to `<new step id>`). Besides that, the Wit can do whatever it wants. It can utilize external resources, such as services, files, databases, ML models, and APIs, at will. The only thing to consider when doing this is that the execution of a Wit can fail or be canceled by the runtime and retried later, so it is the developer's job to make external write operations idempotent or implement other safeguards.
 
 ### Low-Level API
 The basic low-level API basically consists entirely of using the object store to load and persist Grit objects.
 
-It is expected that developers will rarely implement a wit function in its raw definition, because it will require too much boilerplate code to read the state of the old step, modify the state, and then generate the new step id. 
+It is expected that developers will rarely implement a Wit function in its raw definition, because it will require too much boilerplate code to read the state of the old step, modify the state, and then generate the new step id. 
 
-Nonetheless, here is how a wit function will look like if it just utilizes the object store and no higher-level library. It is long but it is helpful to see at least once how a wit would be implemented manually.
+Nonetheless, here is how a Wit function will look like if it just utilizes the object store and no higher-level library. It is long but it is helpful to see at least once how Wit would be implemented manually.
 ```Python
 # a wit that saves greetings to its own core
 async def wit(last_step_id:StepId, new_messages:Mailbox, store:ObjectStore, **kwargs) -> StepId:
@@ -362,7 +365,7 @@ The APIs that a developer will use should be more ergonomic. There are two kinds
 
 In the Python library, the [data model classes](/src/wit/data_model.py) are called `BlobObject`, `TreeObject`, `Core`, `Inbox`, and `Outbox`. The `Core` class is a special type of `TreeObject`. All these types allow the developer much simpler access to the object store, new input messages, and sending messages to other actors.
 
-The [function decorators](/src/wit/wit_api.py) wrap the wit functions by moving a lot of the load and persistence work out of the function implementation, thus reducing boilerplate.
+The [function decorators](/src/wit/wit_api.py) wrap the Wit functions by moving a lot of the load and persistence work out of the function implementation, thus reducing boilerplate.
 
 For example, here is the how the above code changes if we utilize the high-level API:
 ```Python
@@ -378,38 +381,38 @@ async def handle_greeting(greeting:str, core:Core):
 The `core` object makes Grit modifications feel much more like standard filesystem operations: e.g., creating a file on a certain directory path, then saving contents to that file. Moreover, there is a lot going on under the hood [to route the message](/src/wit/wit_routers.py) to that function and make the message contents available in the variable `greeting:str`, and then to persists the modified core and produce the new step id. But what is hidden is also not much different from what we did above in the drawn-out example, and so the developer should be able to understand what happens between this level of abstraction and the low-level API.
 
 ### Wit Entry Point
-A core can have whatever data in it, but the runtime expects the core to also define where to find the wit code that gets executed.
+A core can have whatever data in it, but the runtime expects the core to also define where to find the Wit code that gets executed.
 
-In the root of the core, there must be a node called `wit` which defines the entry point for the wit function. The contents of the `wit` node are largely programming language specific. In the future, there will be other nodes that define the runtime and package versions, but not yet.
+In the root of the core, there must be a node called `wit` which defines the entry point for the Wit function. The contents of the `wit` node are largely programming language specific. In the future, there will be other nodes that define the runtime and package versions, but not yet.
 
-Whenever the runtime wants to execute an actor, because there are new messages, it looks up the last step id from the references (`refs/heads/<actor id>` ), then loads the last step, finds the `wit` node in the step’s core, resolves the associated state transition function either by loading it from the core itself or externally, then executes the function passing it the last step id and the new messages. If the wit function succeeds, the runtime updates the references so that `refs/heads/<actor id>` points to the last step id.
+Whenever the runtime wants to execute an actor, because there are new messages, it looks up the last step id from the references (`refs/heads/<actor id>` ), then loads the last step, finds the `wit` node in the step’s core, resolves the associated state transition function either by loading it from the core itself or externally, then executes the function passing it the last step id and the new messages. If the Wit function succeeds, the runtime updates the references so that `refs/heads/<actor id>` points to the last step id.
 
-In Python, the `wit` node must be in the root of the core—i.e., the path must be `/wit`—and it can point either to external code or to internal code. External code just means the code gets executed from the filesystem and not from the contents of the core itself. This is only used for built-in wit functions or during development. Internal means the wit code is actually loaded from Grit and executed from there. The runtime has a custom Python module loader for this, and the runtime uses a custom function "resolver" to load the function depending on the wit reference type. 
+In Python, the `wit` node must be in the root of the core—i.e., the path must be `/wit`—and it can point either to external code or to internal code. External code just means the code gets executed from the filesystem and not from the contents of the core itself. This is only used for built-in Wit functions or during development. Internal means the Wit code is actually loaded from Grit and executed from there. The runtime has a custom Python module loader for this, and the runtime uses a custom function "resolver" to load the function depending on the Wit reference type. 
 
 As for how code get's into Grit, we will discuss this later in the "Actor Lifecycle" section.
 
 
 ### Side Effects & Determinism
-A wit *can* have side effects. For some this might be anathema in an event-driven system.
+A Wit *can* have side effects. For some this might be anathema in an event-driven system.
 
 First, we are decidedly not aiming to build an [event-sourced system](https://martinfowler.com/eaaDev/EventSourcing.html). Event sourcing means that the current state can always be recomputed from the events that went into the system. And for that to work deterministically, the functions that compute the state transitions cannot have any side effects, otherwise the final state will always be different. We do not believe recomputability is a desirable property, mostly because it is not worth the effort. Agents will live in the real-time digital world of their users. Events come and go, and we are only interested in maintaining the latest state.
 
-Now, you can go back and recompute a step, but this is not something that we want to do with the entire history, only if the last computation crashed or the final step id was not persisted for some reason. In other words, we only use recomputability to retry wit executions and to give more flexibility to the scheduler of the runtime. So, it is still advisable that a wit function, insofar it modifies external resources, is implemented with safeguards in case the wit is executed multiple times with the same messages.
+Now, you can go back and recompute a step, but this is not something that we want to do with the entire history, only if the last computation crashed or the final step id was not persisted for some reason. In other words, we only use recomputability to retry Wit executions and to give more flexibility to the scheduler of the runtime. So, it is still advisable that a Wit function, insofar it modifies external resources, is implemented with safeguards in case the Wit is executed multiple times with the same messages.
 
 As for modifications of the internal state of an actor when it creates a new step, this can certainly be implemented quite side effect free. But not fully, because we support programming languages that are neigh impossible to put into a deterministic straitjacket. 
 
-We are trying to offer the best of both worlds in terms of determinism. Wit functions in their raw form are very easy to reason about (step in, step out), but they can have side effects and are expected to do so. For example, a wit that calls out to an LLM will just import the relevant libraries and make the call itself, usually asynchronously. The problem with trying to make functions pure is that the complications of the world must be dealt with somewhere nonetheless, which usually means building complex support structures that color the entire stack. In the Agent OS, a wit developer can choose to make certain functions pure and reason about them in a certain way and make others messy and involved and figure out how to deal with them separately.
+We are trying to offer the best of both worlds in terms of determinism. Wit functions in their raw form are very easy to reason about (step in, step out), but they can have side effects and are expected to do so. For example, a Wit that calls out to an LLM will just import the relevant libraries and make the call itself, usually asynchronously. The problem with trying to make functions pure is that the complications of the world must be dealt with somewhere nonetheless, which usually means building complex support structures that color the entire stack. In the Agent OS, a Wit developer can choose to make certain functions pure and reason about them in a certain way and make others messy and involved and figure out how to deal with them separately.
 
 Finally, it must also be mentioned that working with Grit produces side effects too: each time an object is stored, all kinds of I/O occurs. However, Grit is thread and multi-process safe, and since it is append-only, it cannot be corrupted. So, it is benign if a step runs multiple times, producing the same objects over-and-over. What matters in the end is the adoption of a new step id by the runtime, which is well-structured logic and easy to reason about.
 
 ### Wit Queries
 Not all code that runs against a step must necessarily make changes to it. So, the Agent OS also supports read-only operations that do not run as a state transition function. We call these "queries."
 
-Queries are possible because the data in each step is static because the object store is append-only. Consequently, if step N contains code to run queries against its own state, we can do that safely without worrying that a separate wit execution will conflict with the query.
+Queries are possible because the data in each step is static because the object store is append-only. Consequently, if step N contains code to run queries against its own state, we can do that safely without worrying that a separate Wit execution will conflict with the query.
 
-Now, a query is generally addressed to an actor and not a specific step. For a query, the runtime tries to use the very last step that has been generated by a wit, but this is not guaranteed. If this is a dealbreaker, then one can always communicate via normal messages that are executed as part of a state transition.
+Now, a query is generally addressed to an actor and not a specific step. For a query, the runtime tries to use the very last step that has been generated by a Wit, but this is not guaranteed. If this is a dealbreaker, then one can always communicate via normal messages that are executed as part of a state transition.
 
-Since a query is not a wit, it has a different definition or protocol:
+Since a query is not a Wit, it has a different definition or protocol:
 ```
 step + query name + query args -> blob or tree
 ```
@@ -433,19 +436,19 @@ async def on_query_messages(core:Core, messagekey:str=None):
 ```
 One thing we haven't talked about is that there is also a web server. This particular query reads messages that are stored in the core and renders them using an HTML template that is also stored in the same core. Queries can be accessed through the web server, and if the resulting blob contains HTML, it is rendered accordingly. So, here the query serves an external endpoint for the user, but actors can also query other actors.
 
-#### Wut Queries
-As a convention, wit queries should implement a special query name called "wut." This particular query functions as an actor API descriptor. It returns information about the messages and queries an actor supports.
+#### "Wut" Queries
+As a convention, Wit queries should implement a special query name called "wut." This particular query functions as an actor API descriptor. It returns information about the messages and queries an actor supports.
 
 This has two purposes. First, to generate automatic API specs for external clients. For example, it supports the generation of [OpenAPI](https://www.openapis.org/) specs.
 
 Second, a different actor can use an LLM to make sense of the capabilities of an actor through its "wut" spec and so interact with it without having to have hard coded dependencies between them, such as shared message types and other code. We believe this is a forthcoming novel way of composing software components: a new actor can just be dropped into the system and other actors can learn to make sense of it and use it without manual coding. ChatGPT plugins work like that. The Actor OS aims to make extensive use of this pattern.
 
 ### Wit Summary
-At the heart of the actor model is the wit function, which is the name of a state transition function of the form: `step + new messages -> new step`. And since such a function produces Grit objects, the actor model is deeply tied into the object model of our persistence layer.
+At the heart of the actor model is the Wit function, which is the name of a state transition function of the form: `step + new messages -> new step`. And since such a function produces Grit objects, the actor model is deeply tied into the object model of our persistence layer.
 
-The actual code of a wit lives inside the core of the step that is part of the input to the wit itself. This kind of recursive setup makes it trivial for wits to update their own code, or other actors to update it through a message. In other words, the design is quite suitable for hot code reloading, which is a desirable feature for a system that will write its own code through LLMs.
+The actual code of a Wit lives inside the core of the step that is part of the input to the Wit itself. This kind of recursive setup makes it trivial for wits to update their own code, or other actors to update it through a message. In other words, the design is quite suitable for hot code reloading, which is a desirable feature for a system that will write its own code through LLMs.
 
-However, it will not just be machines that write wit code. Much of the API surface design work goes into providing a good development experience for people who will spend substantial time writing wit functions and queries. Therefore, it is paramount that the high-level abstractions are ergonomic and powerful.
+However, it will not just be machines that write Wit code. Much of the API surface design work goes into providing a good development experience for people who will spend substantial time writing Wit functions and queries. Therefore, it is paramount that the high-level abstractions are ergonomic and powerful.
 
 Before we look at how the runtime works, let's now consider the entire lifecycle of an actor.
 
@@ -456,22 +459,22 @@ We now understand all the parts to fully consider the lifecycle of an actor.
 Most of the time, actors are designed by developers. But how does the code get into the OS and start executing? Bootstrapping actors begins outside the Agent OS.
 
 #### Development and Push
-A developer writes a wit function in an IDE and pushes the wit and associated data regularly into Grit and executes it via the runtime. 
+A developer writes a Wit function in an IDE and pushes the Wit and associated data regularly into Grit and executes it via the runtime. 
 
-On the programmer's filesystem, at the root of the project folder, there must be a `sync.toml` file that describes which actors should be instantiated with what wit function and initial data. The sync file basically describes your agent as a dev workspace. All relevant data and code that is mentioned in the sync file gets pushed to Grit.
+On the programmer's filesystem, at the root of the project folder, there must be a `sync.toml` file that describes which actors should be instantiated with what Wit function and initial data. The sync file basically describes your agent as a dev workspace. All relevant data and code that is mentioned in the sync file gets pushed to Grit.
 
-Often there is a one-to-one correspondence between wit and actor, but just like how in OOP a class can be instantiated many times, so too a wit can be instantiated as different actors. All this is defined in the sync file.
+Often there is a one-to-one correspondence between Wit and actor, but just like how in OOP a class can be instantiated many times, so too a Wit can be instantiated as different actors. All this is defined in the sync file.
 
 There is a CLI that that pushes the code (and other contents such as HTML files or images) to Grit. For example, `aos -d my_agent/ push` would push the directory  `./my_agent` with the assumption that it contains a `sync.toml` file which points to other contents in sub-directories. (It's also possible to sync the other way, from Grit to the filesystem, for debugging and other reasons.)
 
 Once Wit code has been pushed to Grit, and the runtime is started, the proper lifecycle of an actor begins.
 
 #### 1) Genesis Message
-It's not possible to just create an actor, one has to send a "genesis message" to a not-yet-exiting actor, which then brings it into existence by executing the first step transition function. How does this work?
+It's not possible to just create an actor, one has to send a "genesis message" to a not-yet-existing actor, which then brings it into existence by executing the first step transition function. How does this work?
 
-A genesis message is just a normal message as defined in the Grit object model. But the message contains the entire initial core of an actor, including the wit code and any other initializing data. Concretely, this means that the content id of the genesis message points to a tree id which is structured like a core. Now, if you remember, the actor id *is* the object id of the *initial* core of an actor. So, we know who the recipient of the genesis message needs to be: the recipient id is same as the object id of the core. 
+A genesis message is just a normal message as defined in the Grit object model. But the message contains the entire initial core of an actor, including the Wit code and any other initializing data. Concretely, this means that the content id of the genesis message points to a tree id which is structured like a core. Now, if you remember, the actor id *is* the object id of the *initial* core of an actor. So, we know who the recipient of the genesis message needs to be: the recipient id is same as the object id of the core. 
 
-This is something that the runtime enforces. And when the runtime routes a message and realizes an actor doesn't exist yet, it creates it. In the case of a genesis message, the runtime locates the wit to execute not in the last step, but in the core of the genesis message itself.
+This is something that the runtime enforces. And when the runtime routes a message and realizes an actor doesn't exist yet, it creates it. In the case of a genesis message, the runtime locates the Wit to execute not in the last step, but in the core of the genesis message itself.
  
 Consequently, a code push to Grit doesn't directly instantiate the actor, it just creates a genesis message. (Or, if the actor already exists, a push creates an update message.)
 
@@ -482,19 +485,19 @@ Once one actor knows the actor id of a different actor, it can start messaging i
 
 Anything that changes an actor—that is, creates a new step id—must be initiated via a message to that actor.
 
-Actors are usually not long running and never run arbitrarily. They are only executed when they receive a message. Technically, an actor never just "runs;" the runtime just executes the wit state transition function whenever there is one or more new messages. And that's all there is to an actor.
+Actors are usually not long running and never run arbitrarily. They are only executed when they receive a message. Technically, an actor never just "runs;" the runtime just executes the Wit state transition function whenever there is one or more new messages. And that's all there is to an actor.
 
-Whenever the runtime routes a message to an existing actor, it locates the previous step (using the references store), resolves the wit function from the core of that step, and then runs the function with the new messages to create a new step (and then saves the new step id in the reference store). The only times where the runtime executes code from inside the message itself is when handling a genesis message or an update message, otherwise the code is from the previous step. 
+Whenever the runtime routes a message to an existing actor, it locates the previous step (using the references store), resolves the Wit function from the core of that step, and then runs the function with the new messages to create a new step (and then saves the new step id in the reference store). The only times where the runtime executes code from inside the message itself is when handling a genesis message or an update message, otherwise the code is from the previous step. 
 
 #### 3) Updates
-Since only the wit function can change itself, we have a problem if we want to update the wit function itself; especially if the wit function is faulty. Hence, there is a special message type, aptly called "update," which is treated a bit differently than other messages.
+Since only the Wit function can change itself, we have a problem if we want to update the Wit function itself; especially if the Wit function is faulty. Hence, there is a special message type, aptly called "update," which is treated a bit differently than other messages.
 
-Just like the genesis message, the runtime looks for a wit in the message itself (not the previous step). Here, the optional core node is called `/wit_update` which should point to a special wit transition function that does just updates but has the same signature as a normal wit. It is optional because if the update message does not contain such update code, a default procedure is applied. The default procedure simply merges the tree in the message into the target code. Most of the time this is exactly what is desired. A custom update wit is only needed if more complicated state upgrades are desired.
+Just like the genesis message, the runtime looks for a Wit in the message itself (not the previous step). Here, the optional core node is called `/wit_update` which should point to a special Wit transition function that does just updates but has the same signature as a normal Wit. It is optional because if the update message does not contain such update code, a default procedure is applied. The default procedure simply merges the tree in the message into the target code. Most of the time this is exactly what is desired. A custom update Wit is only needed if more complicated state upgrades are desired.
 
 So, most of the time, the expectation is that an update message contains a partial core, or tree, with updates to the target core. From the example above, if we want to update `/code/greetings_wit.py`, we just send a new tree that contains just this file: `/code/greetings_wit.py`. (If these updates are initiated by the developer, the CLI `push` command will do the right thing.)
 
 #### 4) Cleanup
-Something that is not implemented right now, but is planned, is another special message type that prompts a wit to do internal cleanup.
+Something that is not implemented right now, but is planned, is another special message type that prompts a Wit to do internal cleanup.
 
 Most significantly, such a message should instruct an agent to create a new step that does not reference a previous step. Which will then allow the underlying Grit garbage collector, or pruner, to delete a lot of unused and unreferenced data that was generated in previous steps. Since the event log is append only, this is necessary. (There is a similar problem with messages that reference previous messages, i.e., are linked lists, but we'll not get into this right now, although we do have an idea how to solve it.)
 
@@ -504,7 +507,7 @@ The runtime will give special guarantees when it executes such a message, such a
 An actor is considered to be "end of life" if none of the outboxes of all the other actors point to it. The runtime then deletes the head step reference, which then allows the pruner to clean it up.
 
 ### Actor Lifetime
-A quick note on the expected lifetime of an actor. Because we want our agent to be consistent and usable over a long time, the whole system is designed to make data persistence and wit executions explicit in the step object. Actors are designed to be long-lived once they have processed their genesis step. Possibly actors will endure for many years.
+A quick note on the expected lifetime of an actor. Because we want our agent to be consistent and usable over a long time, the whole system is designed to make data persistence and Wit executions explicit in the step object. Actors are designed to be long-lived once they have processed their genesis step. Possibly actors will endure for many years.
 
 If you shut down the runtime and start it again, the actors persist and will just continue operating, because their state is stored in Grit. Therefore, developers do not need to re-instantiate any actors on startup like they have to in traditional programs with objects or other data structures when such a program runs.
 
@@ -512,7 +515,7 @@ As an aside, you might wonder if we are not introducing reference counting or a 
 
 
 ## Runtime
-The runtime is what ties Grit and wit functions together. Its fundamental responsibility is to route messages between actors and execute the wit transition function for individual actors once they have new messages.
+The runtime is what ties Grit and Wit functions together. Its fundamental responsibility is to route messages between actors and execute the Wit transition function for individual actors once they have new messages.
 
 ### Current State
 The runtime, as it currently stands, is very simple. It's about a 1000 lines of code and it runs itself and all actors in a single process. It is designed to run on a person's private machine.
@@ -533,8 +536,8 @@ The executor runs whenever there is a new message for its actor. Here is how it 
 
   1) The executor knows the current "read inbox" of an actor, which is the inbox of the last step. It knows this because it can retrieve the step head from the reference store. And the step contains the last known inbox.
   2) It also maintains a "current inbox" for the actor, which contains the messages that the runtime has routed to it, but the actor has not processed yet.
-  3) If the "read inbox" and "current inbox" do not match, the executor runs the wit state transition function with the last step id and the new messages (see wit definition above). If there is no previous step, because it is a genesis message, then the step id is empty or null.
-  4) If the execution of a wit function succeeds, there is now a new step id. The executor persists that step id in the reference store. With that, the actor has successfully progressed one step forward. And if the runtime would die after that moment, the actor would continue from that step next time. 
+  3) If the "read inbox" and "current inbox" do not match, the executor runs the Wit state transition function with the last step id and the new messages (see Wit definition above). If there is no previous step, because it is a genesis message, then the step id is empty or null.
+  4) If the execution of a Wit function succeeds, there is now a new step id. The executor persists that step id in the reference store. With that, the actor has successfully progressed one step forward. And if the runtime would die after that moment, the actor would continue from that step next time. 
   5) However, there is one more thing to do, to keep the runtime spinning: the executor compares the outbox of the previous and new step to see if the actor sent a new message. If so, the executor calls back to the runtime with the new message(s), which then puts the new message into the runtime’s message queue. And we continue from step 4) in the runtime above.
   6) The executor then waits until it is signaled by the runtime that there are new messages for its actor.
 
@@ -543,25 +546,25 @@ So far, we have touched very little on error handling. This is primarily because
 
 However, for queries this is easy, errors just bubble up to the caller, be it a different actor or an external system.
 
-For wit functions, errors are trickier, because everything happens through asynchronous messaging. Here we enter the treacherous territory of dead letter queues, poison messages, delivery of error receipts, and so on. But the current approach is that an actor should try to handle all messages, if possible, by catching errors, and marking even faulty messages as read. This is also known as the “dumb pipes, smart endpoints” principle. However, if an actor repeatedly fails on message delivery, the runtime will exponentially back off, until it finally marks an actor as irrecoverable.
+For Wit functions, errors are trickier, because everything happens through asynchronous messaging. Here we enter the treacherous territory of dead letter queues, poison messages, delivery of error receipts, and so on. But the current approach is that an actor should try to handle all messages, if possible, by catching errors, and marking even faulty messages as read. This is also known as the “dumb pipes, smart endpoints” principle. However, if an actor repeatedly fails on message delivery, the runtime will exponentially back off, until it finally marks an actor as irrecoverable.
 
 We will still have to decide if there should be error receipts that go to the message sender, indicating that the recipient is not available (basically bubbling exceptions). 
 
 If an actor becomes irrecoverable, the only option is to send it an update that fixes the error. The nice thing is that we could have "healing" actors that read error messages originating from a different actor and use LLMs to generate code fixes.
 
 ### Performance
-The current performance is acceptable; the runtime can process about 5 wit transitions per millisecond, or about 300,000 executions per minute. Since actor executions are expected to be quite granular, i.e., doing quite a bit of work per execution, this is sufficient for now to build highly concurrent and versatile agents that consist of possibly thousands of actors.
+The current performance is acceptable; the runtime can process about 5 Wit transitions per millisecond, or about 300,000 executions per minute. Since actor executions are expected to be quite granular, i.e., doing quite a bit of work per execution, this is sufficient for now to build highly concurrent and versatile agents that consist of possibly thousands of actors.
 
-Still, the tidiness of the architecture comes at the expense of performance and efficiency, but it’s a tradeoff we are willing to make *at the level of implementing actors*. On the other hand, at the level of the wit functions executions, e.g., when running Python code, this is not so much a problem because the penalty is only paid for those things that are persisted to the object store and which are split up between actors and thus need messaging. The rest of the code can make full use of the speed and optimizations of Python, or any other programming language that implements the Grit and Wit protocol. In other words, actors are at the right level of abstraction where to pay the toll of Grit persistence.
+Still, the tidiness of the architecture comes at the expense of performance and efficiency, but it’s a tradeoff we are willing to make *at the level of implementing actors*. On the other hand, at the level of the Wit functions executions, e.g., when running Python code, this is not so much a problem because the penalty is only paid for those things that are persisted to the object store and which are split up between actors and thus need messaging. The rest of the code can make full use of the speed and optimizations of Python, or any other programming language that implements the Grit and Wit protocol. In other words, actors are at the right level of abstraction where to pay the toll of Grit persistence.
 
 ### Future Runtime
 What is the future trajectory of the runtime? As stated previously, agents will have different parts running in different places. Some actors will have high compute needs, others should run on the cloud edge for fast response times, others will be chugging away on the user's devices.
 
-The runtime, then, needs to be a system that guarantees the integrity of the agent as a whole by ensuring that the Grit namespace is available to all actors, no matter where they run. It also needs to coordinate the resource and sandbox requirements for individual wit executions. For that, cores will likely contain more metadata about security and resource requirements in the future, and the runtime will need to ship the function to the right place to be executed, considering the constraints of those requirements.
+The runtime, then, needs to be a system that guarantees the integrity of the agent as a whole by ensuring that the Grit namespace is available to all actors, no matter where they run. It also needs to coordinate the resource and sandbox requirements for individual Wit executions. For that, cores will likely contain more metadata about security and resource requirements in the future, and the runtime will need to ship the function to the right place to be executed, considering the constraints of those requirements.
 
-So, conceivably, the runtime, in future iterations of the Agent OS, will function more like a distributed orchestration layer that lives somewhere in the cloud, providing the functionalities we just outlined. Much of the Agent OS is designed with this future purpose in mind. Most significantly, wit functions are designed to be executed in a cloud function environment. Moreover, the object store is a just a very simple key-value database and can plug into distributed KV stores such as Foundation DB or other managed offerings. Larger objects will likely be stored in blob storage systems like S3.
+So, conceivably, the runtime, in future iterations of the Agent OS, will function more like a distributed orchestration layer that lives somewhere in the cloud, providing the functionalities we just outlined. Much of the Agent OS is designed with this future purpose in mind. Most significantly, Wit functions are designed to be executed in a cloud function environment. Moreover, the object store is a just a very simple key-value database and can plug into distributed KV stores such as Foundation DB or other managed offerings. Larger objects will likely be stored in blob storage systems like S3.
 
-You might also wonder about sandboxing specifically, especially when we talk about generating code and executing it. The Agent OS is designed to work in conjunction with current sandboxing systems, such as containerization and other Linux namespacing techniques. For example, a core could be required to carry a manifest of the type of I/O and external resources it wants to access, and the runtime will then make sure that the wit is executed in a suitable environment. Further, the system is designed with WebAssembly in mind. It is very much conceivable that most wit functions will be written in a WASM compatible language and that the runtime will utilize WASM for sandboxing.
+You might also wonder about sandboxing specifically, especially when we talk about generating code and executing it. The Agent OS is designed to work in conjunction with current sandboxing systems, such as containerization and other Linux namespacing techniques. For example, a core could be required to carry a manifest of the type of I/O and external resources it wants to access, and the runtime will then make sure that the Wit is executed in a suitable environment. Further, the system is designed with WebAssembly in mind. It is very much conceivable that most Wit functions will be written in a WASM compatible language and that the runtime will utilize WASM for sandboxing.
 
 ### Security and Privacy
 For data security and privacy, the runtime will provide all kinds of low-level primitives that make sure the data is secure from prying eyes. 
@@ -581,7 +584,7 @@ Some of those services will be implemented as special actors, others will live o
 There is a special actor that represents the runtime. It's primary function, right now, is to be the entry point for external messages that are injected into the agent by a developer or by the webserver.
 
 ### Web Server
-The Agent OS comes with a [built-in web server](/src/web/web_server.py). The basic intuition is that it is trivial to render any blob or tree in Grit as either JSON or a full-blown website. Combined with wit queries that can transform core data on demand, the web server can supply most frontend affordances.
+The Agent OS comes with a [built-in web server](/src/web/web_server.py). The basic intuition is that it is trivial to render any blob or tree in Grit as either JSON or a full-blown website. Combined with Wit queries that can transform core data on demand, the web server can supply most frontend affordances.
 
 The Agent OS does not come with any UI (yet). The idea is that the UI is shipped as part of an individual agent implementation. For example, if you look at the [code of the "first" agent](/examples/first/frontend/), you see that a simple chat interface, implemented using HTML, some JS, and HTMX is quite straightforward.
 
@@ -603,7 +606,7 @@ It's very conceivable that agents want to form a communication network. If that'
 ## Conclusion
 The Agent OS is a relatively simple system. It proposes two basic primitives: the Grit object model and the Wit state transition function. Based on these two things, we believe, it should be able to construct powerful autonomous agents.
 
-In the end, data are just blobs of bytes. It used to be the case that it was necessary to build extremely intricate programs to transform data from one shape and purpose to another. But with the advent of LLMs, the semantic structure of data is much more readily accessible and can yield its own programs by being understood by language models. Actors will make extensive use of the flat data structure of Grit and pass much of the contents along to external models to make sense of what these blobs contain—be it text or images, or other formats. The models, in turn, will respond with code, not just explaining what the data means, but what to do with it. The actors can then reify that code as wit functions and instantiate them as new actors that participate in the ecosystem of the agent.
+In the end, data are just blobs of bytes. It used to be the case that it was necessary to build extremely intricate programs to transform data from one shape and purpose to another. But with the advent of LLMs, the semantic structure of data is much more readily accessible and can yield its own programs by being understood by language models. Actors will make extensive use of the flat data structure of Grit and pass much of the contents along to external models to make sense of what these blobs contain—be it text or images, or other formats. The models, in turn, will respond with code, not just explaining what the data means, but what to do with it. The actors can then reify that code as Wit functions and instantiate them as new actors that participate in the ecosystem of the agent.
 
 Most of the goals put forth on the outset are directly solved by different aspects of the architecture:
 
