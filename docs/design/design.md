@@ -34,7 +34,8 @@ In the Agent OS, there are the following sub-systems or components:
  - **Runtime**: the orchestrator that makes sure the Wit function of an actor executes properly and that messages are routed between actors. It also controls access to Grit
 
 <p><img src="agent-runtime-grit-actors.png" alt="Architecture Overview" width="600" />
-Figure 1: An agent consists of the Runtime, Grit, and several actors. Each actor consists of its state transition function (Wit) and its state, both of which are stored in Grit itself. The runtime, here, is executing "Actor B" by passing new input messages to its function "Wit b". As part of the execution, the Wit also produces new output messages, which are then routed to other actors. Also, during execution the actor might change its internal state.
+<br />
+Figure 1: An agent consists of the Runtime, Grit, and several actors. Each actor consists of its state transition function (Wit) and its state, both of which are stored in Grit itself. The runtime, here, is executing "Actor B" by passing new input messages to its function "Wit b". As part of the execution, the Wit also produces new output messages, which are then routed to other actors. Also, during execution the actor might change its internal state. All of this will be explained in detail below.
 </p>
 
 One of the explicit design goals is that the execution and persistence models are simple enough that different programming languages can be trivially supported. It should take only 1000-2000 lines of code to implement an executor that can host actors written in a particular programming language. (The runtime is a bit more complicated, but the runtime does not have to be re-implemented for each programming language). Since we want to be able to run parts of an agent on different platforms—e.g., local machine, mobile, cloud, browser—this will come in handy.
