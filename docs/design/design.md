@@ -287,14 +287,14 @@ The object model is structured in such a way that it allows the implementation o
 
 
 ## Wit: State Transition Function
-An agent consists of several actors, and each actor is defined by its state transition function. A state transition function is a procedure that takes in `current state + new data` and computes `new state`. We call this function the "Wit" of an actor. The inputs and outputs of this function are exactly defined in terms of Grit objects. 
+An agent consists of several actors, and each actor is defined by its state transition function. A state transition function is a procedure that takes in `last state + new data` and computes `new state`. We call this function the "Wit" of an actor. The inputs and outputs of this function are exactly defined in terms of Grit objects. 
 
 *Note: our "Wit" functions have nothing to do with [wit.ai](https://wit.ai), the NLP platform by Meta for chatbots. The naming clash is just an unfortunate coincidence. In the worst case, it will force us to rename our concept of strongly persistent actors with a fixed state transition function to something different.*
  
 ### Creating Steps
 Here is the definition of the Wit function:
 ```
-current step + new messages -> new step
+last step + new messages -> new step
 ```
 Or using the Grit object model definitions from above:
 ```Python
@@ -310,7 +310,7 @@ Figure 4: The code of the Wit function itself is loaded by the runtime from the 
 ### Context & Accessing the Object Store
 You might have noticed that there is a problem: how to get from last step *id* to new *id*? Clearly, more is required than what is provided in the function inputs to generate a new step id. Some sort of access to the grit object store is needed! This is especially the case if you expected the transition function to be deterministic and side-effect free. However, in the Agent OS, *Wit functions can have side effects*! So, technically speaking, the function definition as it stands is correct, because the function implementer can call other APIs or libraries to generate the new step. Now, in practice, since the data store and other services are managed by the runtime, these dependencies are injected into the Wit function, giving us the following function:
 ```
-current step + new messages + object store + other dependencies -> new step
+last step + new messages + object store + other dependencies -> new step
 ```
 Or, again, in Python:
 ```Python
