@@ -21,8 +21,8 @@ Before we can describe how the Agent OS works, we need to describe the propertie
 These properties constrain our design boundaries considerably, but we believe that the architecture described here can realize these goals.
 
 
-## High Level Design
-Agents do not have to run all in one place or on one machine. Parts could run in the cloud, and other parts on your personal machine or mobile phone. Agents should be able to marshal whatever compute resources they need to achieve their goals. The important thing is that agents are a unified *conceptually*: a user needs to be able to delineate what constitutes *their* agent and what doesn't. As long as that's guaranteed, the agent can be an extremely dynamic system. Consequently, the Agent OS can be thought of as the orchestration layer, or runtime, that makes this possible.
+## Design Overview
+Agents do not have to run all in one place or on one machine. Parts could run in the cloud, and other parts on your personal machine or mobile phone. On the one hand, agents should be able to marshal whatever compute resources they need to achieve their goals. On the other hand, it should always be possible to run parts of an agent "local-first". The important thing is that agents are a unified *conceptually*: a user needs to be able to delineate what constitutes *their* agent and what doesn't. As long as that's guaranteed, the agent can be an extremely dynamic system. Consequently, the Agent OS can be thought of as the orchestration layer, or runtime, that makes this possible.
 
 The architecture set forth here combines a strongly consistent data layer with a relatively simple [actor model](https://en.wikipedia.org/wiki/Actor_model). Think of actors as "sub-components" or "objects" that encapsulate a certain functionality. The persistence layer acts as a file system of sorts. Actors pass messages to each other utilizing the data layer. While individual actors are single threaded, other actors can run concurrently. Because we want actors to write their own code, most actors execute their code not from a traditional file system but right out of the data layer. Accordingly, the persistence layer contains both the data and the code of each actor. There is also a runtime that coordinates the execution of the actors and ensures the integrity of the data layer.
 
@@ -33,7 +33,7 @@ In the Agent OS, there are the following sub-systems or components:
  - **Wit**: the state transition function of an actor, which takes as its input its current state and new messages, and then produces a new state and output messages
  - **Runtime**: the orchestrator that makes sure the Wit function of an actor executes properly and that messages are routed between actors. It also controls access to Grit
 
-<p><img src="agent-runtime-grit-actors.png" alt="Architecture Overview" width="600" />
+<p><img src="design-fig-1-runtime-grit.png" alt="Architecture Overview" width="600" />
 <br />
 Figure 1: An agent consists of the Runtime, Grit, and several actors. Each actor consists of its state transition function (Wit) and its state, both of which are stored in Grit itself. The runtime, here, is executing "Actor B" by passing new input messages to its function "Wit b". As part of the execution, the Wit also produces new output messages, which are then routed to other actors. Also, during execution the actor might change its internal state. All of this will be explained in detail below.
 </p>
@@ -86,6 +86,12 @@ Generally, when talking about actor models, the key insight is that actors run i
 
 An actor does not need to do any data locking internally. This is because actors communicate by message passing: if an actor wants information from another actor, it has to be done via message. They never share mutable memory or state. For example, actor A sends a "request for X" message to actor B. Actor B then sends a "response with X" message to actor A. That's all there is to the actor model. Implementing this model is mostly about creating a runtime that executes the actors in parallel and ensure that messages are delivered to the correct actor.
 
+<p><img src="design-fig-2-actors.png" alt="Actors" width="600" />
+<br />
+Figure 2: Actors communicate with each other using messages. All kinds of messaging patterns can be constructed with actors. Here, we see request-response (between A and B), fanout (B to C,D,E,F), and aggregate (C,D,E,F to G), and so on.
+</p>
+
+### Actors as Functions
 At the heart of our actor model there is the "Wit." The Wit is the state transition function that accepts a message and applies it to a state variable in order to create a new state. The exact definition of a Wit function is given below after going into the details of Grit, because that's a prerequisite. But for now, what you need to know is that an actor consists of its internal state and a Wit function. It accepts input messages from other actors, modifies its internal state, and produces output messages which address other actors. Finally, a Wit is not an actor, because the same Wit can be used in different actors; an actor is Wit+state.
 
 What is unique about our actor model is that it is built right into our persistence layer, Grit. Many other actor implementations are persistence agnostic. In the Agent OS, messages are just persisted `message` objects, and an agent's state is the latest saved `step` object. More on that shortly.
@@ -162,7 +168,12 @@ If it's still not clear, here is a good [explanation of how Git works](https://c
 ### Grit Data Structure
 The way Grit works is largely inspired by Git. However, instead of having `commits` we have `steps`. And there are two new objects: `message` and `mailbox`
 
-Besides the new object types, the biggest difference to Git is that each Grit "repository" can have many parallel steps with independent sub-trees. A Git repository manages only a single directory tree. Or another way to look at it: Git has only one `commit` HEAD; Grit has many `step` HEADS. Think of a Grit namespace as consisting of many different repositories that contain unrelated data but may reference each other.
+<p><img src="design-fig-3-grit-model.png" alt="Grit object model" width="400" />
+<br />
+Figure 3: All the objects in the Grit model. The relationships are described in this section, but notice that it is largely a hierarchical structure with the Step forming the root.
+</p>
+
+Besides the new object types, the biggest difference to Git is that each Grit "repository", or rather "namespace", can have many parallel steps with independent sub-trees. A Git repository manages only a single directory tree. Or another way to look at it: Git has only one `commit` head; Grit has many `step` heads. So, you can think of a Grit namespace as consisting of many different "repositories" that contain unrelated data but may reference each other.
 
 Here is the [actual Python code](/src/grit/object_model.py) that defines the entire Grit data model:
 ```Python
@@ -248,8 +259,8 @@ So, to recap, any given step object contains the entire state and history of an 
 ### References
 In Grit, there is also a "reference store." It [consists](/src/grit/references.py) of two simple functions: 
 ```Python
-get_ref(ref:str) -> ObjectId
-set_ref(ref:str, object_id:ObjectId) -> None
+def get(ref:str) -> ObjectId
+def set(ref:str, object_id:ObjectId) -> None
 ```
 References are utilized by the runtime to know the state of affairs of the entire Grit namespace. Specifically, there are a few conventions that need to be observed to keep the system as a whole consistent.
 
@@ -291,7 +302,13 @@ def wit(last_step_id:StepId, new_messages:Mailbox) -> StepId
 ```
 A Wit takes in the last step id, and then "applies" the new messages to its internal state and in doing so produces a new step id. The process usually consists in modifying its core, but minimally it updates the inbox of the step to mark the new messages as read.
 
-You might have noticed that there is a problem: how to get from last step *id* to new *id*? Clearly, more is required than what is provided in the function inputs to generate a new step id. This is especially the case if you expected the transition function to be deterministic and side-effect free. However, in the Agent OS, *Wit functions can have side effects*! So, technically speaking, the function definition as it stands is correct, because the function implementer can call other APIs or libraries to generate the new step. Now, in practice, since the data store and other services are managed by the runtime, these dependencies are injected into the Wit function, giving us the following function:
+<p><img src="design-fig-4-wit-function.png" alt="Wit function" width="900" />
+<br />
+Figure 4: The code of the Wit function itself is loaded by the runtime from the core of the previous step (green arrow). The Wit adopts the "new messages" that are part of the input by making the message ids part of the new "read inbox" of the "new step" (first purple arrow). The runtime compares the outboxes between the previous and new step to figure out which messages need to be routed and then sends them to the appropriate next actor (second purple arrow and "Wit b Input"). 
+</p>
+
+### Context & Accessing the Object Store
+You might have noticed that there is a problem: how to get from last step *id* to new *id*? Clearly, more is required than what is provided in the function inputs to generate a new step id. Some sort of access to the grit object store is needed! This is especially the case if you expected the transition function to be deterministic and side-effect free. However, in the Agent OS, *Wit functions can have side effects*! So, technically speaking, the function definition as it stands is correct, because the function implementer can call other APIs or libraries to generate the new step. Now, in practice, since the data store and other services are managed by the runtime, these dependencies are injected into the Wit function, giving us the following function:
 ```
 current step + new messages + object store + other dependencies -> new step
 ```
@@ -477,6 +494,11 @@ Once Wit code has been pushed to Grit, and the runtime is started, the proper li
 #### 1) Genesis Message
 It's not possible to just create an actor, one has to send a "genesis message" to a not-yet-existing actor, which then brings it into existence by executing the first step transition function. How does this work?
 
+<p><img src="design-fig-5-wit-function-genesis.png" alt="Genesis Message in a Wit Function" width="900" />
+<br />
+Figure 5: "Wit a" sends a genesis message to "Wit b". The Wit to run the first step is loaded directly from the core inside the message.
+</p>
+
 A genesis message is just a normal message as defined in the Grit object model. But the message contains the entire initial core of an actor, including the Wit code and any other initializing data. Concretely, this means that the content id of the genesis message points to a tree id which is structured like a core. Now, if you remember, the actor id *is* the object id of the *initial* core of an actor. So, we know who the recipient of the genesis message needs to be: the recipient id is same as the object id of the core. 
 
 This is something that the runtime enforces. And when the runtime routes a message and realizes an actor doesn't exist yet, it creates it. In the case of a genesis message, the runtime locates the Wit to execute not in the last step, but in the core of the genesis message itself.
@@ -569,14 +591,16 @@ The runtime, then, needs to be a system that guarantees the integrity of the age
 
 So, conceivably, the runtime, in future iterations of the Agent OS, will function more like a distributed orchestration layer that lives somewhere in the cloud, providing the functionalities we just outlined. Much of the Agent OS is designed with this future purpose in mind. Most significantly, Wit functions are designed to be executed in a cloud function environment. Moreover, the object store is a just a very simple key-value database and can plug into distributed KV stores such as Foundation DB or other managed offerings. Larger objects will likely be stored in blob storage systems like S3.
 
+But at the same time, to provide strong privacy and persistence guarantees, it should always be possible to run parts or an entire agent on your local devices. A local runtime will coordinate with a cloud runtime in the same way that your local Git repository connects to the remote repository that is hosted by, say, GitHub. The local runtime will synchronize all relevant Grit objects to your machine and then execute Wit functions there (and sync the results back to the cloud). This will unlock an extreme level of privacy for certain parts of your agent because the data can be end-to-end encrypted and only decrypted on your device, while the keys never leave your trusted device, allowing the data to be synced to the cloud without worry of leaking any private information.
+
 You might also wonder about sandboxing specifically, especially when we talk about generating code and executing it. The Agent OS is designed to work in conjunction with current sandboxing systems, such as containerization and other Linux namespacing techniques. For example, a core could be required to carry a manifest of the type of I/O and external resources it wants to access, and the runtime will then make sure that the Wit is executed in a suitable environment. Further, the system is designed with WebAssembly in mind. It is very much conceivable that most Wit functions will be written in a WASM compatible language and that the runtime will utilize WASM for sandboxing.
 
 ### Security and Privacy
 For data security and privacy, the runtime will provide all kinds of low-level primitives that make sure the data is secure from prying eyes. 
 
-On the other hand, the idea that actors will run in different places is a key aspect to building agents that you can trust with your most private data. Your personal agent might be acting on all kinds of data and events in the cloud, but when it comes to, say, personal medical records you should have the option that such data can only be read and operated on by an actor that runs on a trusted device, such as your personal computer.
+As just mentioned (in the "Future Runtime" section), the idea that actors will run in different places is a key aspect to building agents that you can trust with your most private data. Your personal agent might be acting on all kinds of data and events in the cloud, but when it comes to, say, personal medical records you should have the option that such data can only be read and operated on by an actor that runs on a trusted device, such as your personal computer. In other words, a commitment to ["local-first computing"](https://www.inkandswitch.com/local-first/) gives us most of the things we want here.
 
-So, for true privacy, the [end-to-end principle](https://en.wikipedia.org/wiki/End-to-end_principle) applies. That is, the actor implementor will have to ensure that certain data is encrypted as blobs inside the object store, that such data is only sent to trusted language models, and so on. And the runtime can provide facilities that encryption keys are only available to permissioned actors.
+Moreover, for true privacy, the [end-to-end principle](https://en.wikipedia.org/wiki/End-to-end_principle) applies. That is, the actor implementor will have to ensure that certain data is encrypted as blobs inside the object store, that such data is only sent to trusted language models, and so on. And the runtime can provide facilities that encryption keys are only available to permissioned actors.
 
 As for code security, the runtime will largely be tasked with the responsibility to make sure that only permissioned changes are made to the cores of an actor. For example, there might be actors that have a "frozen" codebase that cannot update itself. When the runtime detects a step in such an actor that modifies its own code, it can just reject the step and not make it part of the head reference, thus avoiding ever executing the modified code. The orderly step execution regime is suitable to add all kinds of security and privacy enforcement subsystems. 
 
