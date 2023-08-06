@@ -91,4 +91,4 @@ If we realize the goals outlined here, it should be able to build agents that re
 
 I think these are important considerations to make because we are rapidly entering the "age of agents". Powerful AI agents will certainly exist, but who will they answer to? The agent OS should be a system that makes it possible to build powerful, long-lasting, autonomous agents that you can work with and evolve over time.
 
-If you want to learn more, please check out the ["agent-os" project on GitHub](https://github.com/lukebuehler/agent-os).
+If you want to learn how we might make this happen, please check out the [design docs of the "agent-os"](/docs/design/design.md).
