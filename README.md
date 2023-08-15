@@ -33,10 +33,10 @@ OPENAI_API_KEY=sk-myspecialkey
 ```
 Then run the following CLI commands:
 ```
-poetry run aos -d examples/first push
-poetry run aos -d examples/first run
+poetry run aos -d examples/chatbot push
+poetry run aos -d examples/chatbot run
 ```
-This 'first' agent comes with a web interface, and the Agent OS hosts a web server. To chat with your agent, browse to `http://127.0.0.1:5000/ag/first/wit/actors/frontend/query/web`.
+This 'chatbot' agent comes with a web interface, and the Agent OS hosts a web server. To chat with your agent, browse to `http://127.0.0.1:5000/ag/chatbot/wit/actors/frontend/query/web`.
 
 ## Project Structure
 

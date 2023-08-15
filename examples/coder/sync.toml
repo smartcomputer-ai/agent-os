@@ -1,17 +1,17 @@
 [agent]
-name = "first"
+name = "chatbot"
 
 [all]
-push="./examples/first/common:/common"
+push="./examples/chatbot/common:/common"
 
 [[actors]]
 name="frontend"
-push="./examples/first/frontend:/"
+push="./examples/chatbot/frontend:/"
 wit="/:frontend_wit:app"
 wit_query="/:frontend_queries:app"
 
 [[actors]]
 name="head"
-push="./examples/first/head:/"
+push="./examples/chatbot/head:/"
 wit="/:head_wit:app"
 notify="frontend"
