@@ -3,10 +3,11 @@ import openai
 from grit import *
 from openai.openai_object import OpenAIObject
 from dotenv import load_dotenv
-from .messages import ChatMessage
-load_dotenv()
+from ..common.messages_chat import ChatMessage
 
+load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
 #chat completion docs
 #https://platform.openai.com/docs/api-reference/chat/create
 
