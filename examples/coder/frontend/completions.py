@@ -1,9 +1,9 @@
 import os
 import openai
-from grit import *
-from openai.openai_object import OpenAIObject
 from dotenv import load_dotenv
-from ..common.messages_chat import ChatMessage
+from openai.openai_object import OpenAIObject
+from grit import *
+from messages import ChatMessage
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
