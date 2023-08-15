@@ -1,7 +1,7 @@
 
 from grit import *
 from wit import *
-from messages import *
+from common import ChatMessage
 from completions import chat_completion
 
 app = Wit()

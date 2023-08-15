@@ -3,7 +3,7 @@ import openai
 from dotenv import load_dotenv
 from openai.openai_object import OpenAIObject
 from grit import *
-from messages import ChatMessage
+from common import ChatMessage
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")

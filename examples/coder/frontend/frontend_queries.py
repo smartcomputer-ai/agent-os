@@ -2,7 +2,7 @@
 from jinja2 import Environment, TemplateNotFound, select_autoescape
 from grit import *
 from wit import *
-from messages import *
+from common import ChatMessage
 
 app = Wit()
 
