@@ -2,63 +2,63 @@ from dataclasses import dataclass
 import types
 from grit import *
 from wit import *
-from examples.coder.generator import SpecifyCode, normalize_prompt, strip_code
-from ..common import *
+# from .completions import SpecifyCode, normalize_prompt, strip_code
+# from ..common import *
 
-upscale_spec = SpecifyCode(
-    task_description=normalize_prompt("""
-    Can you write me a module that loads an image and upscales it to 2000x2000 pixels while maintaining the 
-    aspect ratio? Then saves the image again.
-    The name of the image is passed as an id.
-    The upscale function should return the new id.
-    """),
-#     arguments_spec="""
-# class Input:
-#     id:str
-#     """,
-#     return_spec="""
-# class Output:
-#     id:str
-#     """,
-    )
+# upscale_spec = SpecifyCode(
+#     task_description=normalize_prompt("""
+#     Can you write me a module that loads an image and upscales it to 2000x2000 pixels while maintaining the 
+#     aspect ratio? Then saves the image again.
+#     The name of the image is passed as an id.
+#     The upscale function should return the new id.
+#     """),
+# #     arguments_spec="""
+# # class Input:
+# #     id:str
+# #     """,
+# #     return_spec="""
+# # class Output:
+# #     id:str
+# #     """,
+#     )
 
-download_and_upscale_spec = SpecifyCode(
-    task_description=normalize_prompt("""
-    Can you download an image and upscales it to 2000x2000 pixels while maintaining the 
-    aspect ratio? Then saves the image again.
-    """),
-#     arguments_spec="""
-# class Input:
-#     img_url:str
-#     """,
-#     return_spec="""
-# class Output:
-#     id:str
-#     """,
-    )
+# download_and_upscale_spec = SpecifyCode(
+#     task_description=normalize_prompt("""
+#     Can you download an image and upscales it to 2000x2000 pixels while maintaining the 
+#     aspect ratio? Then saves the image again.
+#     """),
+# #     arguments_spec="""
+# # class Input:
+# #     img_url:str
+# #     """,
+# #     return_spec="""
+# # class Output:
+# #     id:str
+# #     """,
+#     )
 
-find_and_save = SpecifyCode(
-    task_description=normalize_prompt("""
-    Find an image of a cat online and save it.
-    """),
-    arguments_spec=None,
-#     return_spec="""
-# class Output:
-#     id:str
-#     """,
-    )
+# find_and_save = SpecifyCode(
+#     task_description=normalize_prompt("""
+#     Find an image of a cat online and save it.
+#     """),
+#     arguments_spec=None,
+# #     return_spec="""
+# # class Output:
+# #     id:str
+# #     """,
+#     )
 
-top_stocks = SpecifyCode(
-    task_description=normalize_prompt("""
-    Find me a list of the top 10 stocks to buy when inflation is high and interest rates are high.
-    Save the list as a text file.
-    """),
-    arguments_spec=None,
-#     return_spec="""
-# class Output:
-#     id:str
-#     """,
-    )
+# top_stocks = SpecifyCode(
+#     task_description=normalize_prompt("""
+#     Find me a list of the top 10 stocks to buy when inflation is high and interest rates are high.
+#     Save the list as a text file.
+#     """),
+#     arguments_spec=None,
+# #     return_spec="""
+# # class Output:
+# #     id:str
+# #     """,
+#     )
 
 def create_module(code:str):
     # Create a new module
@@ -178,6 +178,13 @@ The error "cannot identify image file <_io.BytesIO object at 0x7f9ba15025c0>" oc
 class Input(BaseModel):
     img_url:str
 
+class SpecifyCode(BaseModel):
+    task_description: str
+    arguments_spec: dict|None = None
+    return_spec: dict|None = None
+    max_code_tries:int|None = None
+    test_descriptions: list[str]|None = None
+
 async def amain():
     # code = await code_completion(top_stocks)
     # code = strip_code(code)
@@ -196,8 +203,8 @@ async def amain():
     #     f.write(data)
     # print("done")
 
-    print("stripping code...")
-    print(strip_code(test_code_3))
+    print("printing SpecifyCode schema")
+    print(SpecifyCode.model_json_schema())
 
     # input_schema = Input(img_url="test").model_json_schema()
     # print("input schema:", json.dumps(input_schema))

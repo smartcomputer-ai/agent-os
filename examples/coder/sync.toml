@@ -7,11 +7,11 @@ push="./examples/coder/common:/code/common"
 [[actors]]
 name="frontend"
 push="./examples/coder/frontend:/code"
-wit="/code:frontend_wit:app"
-wit_query="/code:frontend_queries:app"
+wit="external:frontend_wit:app"
+wit_query="external:frontend_queries:app"
 
 [[actors]]
-name="generator"
+name="coder"
 push="./examples/coder/generator:/code"
-wit="/code:gen_wit:app"
+wit="external:gen_wit:app"
 notify="frontend"

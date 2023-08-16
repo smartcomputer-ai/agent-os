@@ -20,7 +20,8 @@ class ChatMessage(BaseModel):
     
     @classmethod
     def from_actor(cls, content:str, actor_id:ActorId|None = None):
-        return cls(id=uuid1(), content=content, from_name='assistant', from_id=actor_id.hex() if actor_id else None, timestamp=datetime.now())
+        return cls(
+            id=uuid1(), content=content, from_name='assistant', from_id=actor_id.hex() if actor_id else None, timestamp=datetime.now())
 
     @classmethod
     async def load_from_tree(cls, tree:TreeObject, message_filter:list[str]=None) -> list['ChatMessage']:

@@ -3,10 +3,10 @@ from grit import *
 from transitions import Machine
 from wit import *
 from runtime import CoreResolver
-from .completions import *
-from ..common import *
+from gen_completions import *
+from common import *
 
-class CodeGen(WitState):
+class CodeGenState(WitState):
     states = [
         'new', 
         'failed', 
@@ -29,9 +29,13 @@ class CodeGen(WitState):
     def __init__(self):
         super().__init__()
 
+    @property
+    def is_job(self):
+        return False
+
     def _after_load(self):
         if(self.machine is None):
-            self.machine = Machine(model=self, states=CodeGen.states, initial='new')
+            self.machine = Machine(model=self, states=CodeGenState.states, initial='new')
             self.machine.add_transition(trigger='plan', source='specified', dest='planning')
             self.machine.add_transition(trigger='code', source=['planning', 'testing'], dest='coding')
             self.machine.add_transition(trigger='test', source='coding', dest='testing')
@@ -43,14 +47,10 @@ class CodeGen(WitState):
         else:
             self.machine.add_model(self, initial=self.state)
     
-    @property
-    def is_job(self):
-        return False
-    
     def _include_attribute(self, attr_key:str):
         return attr_key.startswith('code_') or attr_key in ['state', 'states', 'machine', 'notify']
 
-def notify_all(state:CodeGen, outbox:Outbox, msg:any, mt:str|None=None):
+def notify_all(state:CodeGenState, outbox:Outbox, msg:any, mt:str|None=None):
     for actor_id in state.notify:
         outbox.add_new_msg(actor_id, msg, mt=mt)
 
@@ -58,12 +58,12 @@ def notify_all(state:CodeGen, outbox:Outbox, msg:any, mt:str|None=None):
 app = Wit()
 
 @app.genesis_message
-async def on_genesis_message(msg:InboxMessage, state:CodeGen):
+async def on_genesis_message(msg:InboxMessage, state:CodeGenState):
     print("on_genesis_message")
     print("state:", state.state)
 
 @app.message("spec")
-async def on_spec_message(spec:SpecifyCode, msg:InboxMessage, state:CodeGen, outbox:Outbox, actor_id:ActorId):
+async def on_spec_message(spec:SpecifyCode, msg:InboxMessage, state:CodeGenState, outbox:Outbox, actor_id:ActorId):
     print("on_spec_message")
     state.spec()
     state.code_spec = spec
@@ -71,10 +71,11 @@ async def on_spec_message(spec:SpecifyCode, msg:InboxMessage, state:CodeGen, out
         state.code_spec.max_code_tries = 3
     state.code_tries = 0
     state.code_errors = None
+    state.notify.append(msg.sender_id)
     outbox.add_new_msg(actor_id, "plan", mt="plan")
 
 @app.message("plan")
-async def on_plan_message(msg:InboxMessage, state:CodeGen, outbox:Outbox, actor_id:ActorId):
+async def on_plan_message(msg:InboxMessage, state:CodeGenState, outbox:Outbox, actor_id:ActorId):
     print("on_plan_message")
     state.plan()
     #todo: convert the spec into a plan using a model completion
@@ -83,15 +84,15 @@ async def on_plan_message(msg:InboxMessage, state:CodeGen, outbox:Outbox, actor_
     notify_all(state, outbox, CodePlanned(task_description=state.code_spec.task_description, code_plan=state.code_plan), mt="code_planned")
 
 @app.message("code")
-async def on_code_message(msg:InboxMessage, state:CodeGen, core:Core, outbox:Outbox, actor_id:ActorId):
+async def on_code_message(msg:InboxMessage, state:CodeGenState, core:Core, outbox:Outbox, actor_id:ActorId):
     print("on_code_message")
     state.code()
     state.code_tries += 1
     # copy the code node, if it exists, into the code_test node so that all modules are available
     code_node = await core.get("code")
-    if code_node is not None:
+    if code_node is not None and 'code_test' not in core:
         # setting a new tree node with an existing tree node id is all that is required to copy
-        await core.add("code_test", code_node.get_as_object_id())
+        core.add("code_test", code_node.get_as_object_id())
     test_node = await core.gett("code_test") # will create it if it does not exist
     #get the previously generated code (if there is some)
     previous_code = None
@@ -119,7 +120,7 @@ async def on_code_message(msg:InboxMessage, state:CodeGen, core:Core, outbox:Out
     outbox.add_new_msg(actor_id, "test", mt="test")
 
 @app.message("test")
-async def on_test_message(msg:InboxMessage, state:CodeGen, core:Core, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
+async def on_test_message(msg:InboxMessage, state:CodeGenState, core:Core, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
     print("on_test_message")
     state.test()
 
@@ -174,7 +175,7 @@ async def on_test_message(msg:InboxMessage, state:CodeGen, core:Core, outbox:Out
     outbox.add_new_msg(actor_id, "deploy", mt="deploy")
 
 @app.message("deploy")
-async def on_deploy_message(msg:InboxMessage, state:CodeGen, core:Core, outbox:Outbox, actor_id:ActorId):
+async def on_deploy_message(msg:InboxMessage, state:CodeGenState, core:Core, outbox:Outbox, actor_id:ActorId):
     print("on_deploy_message")
     state.deploy()
     #copy the tested code into the main code node, making it deployed
@@ -183,11 +184,11 @@ async def on_deploy_message(msg:InboxMessage, state:CodeGen, core:Core, outbox:O
     code_node.makeb("generated.py").set_from_blob(code)
     #add an entry point for the resolver
     core.makeb("wit_code").set_as_str("/code:generated:entry")
-    notify_all(state, outbox, CodeDeployed(code=code.get_as_str), mt="code_deployed")
+    notify_all(state, outbox, CodeDeployed(code=code.get_as_str()), mt="code_deployed")
 
 
 @app.message("execute")
-async def on_execute_message(msg:InboxMessage, state:CodeGen, core:Core, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
+async def on_execute_message(msg:InboxMessage, state:CodeGenState, core:Core, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
     print("on_execute_message")
     state.execute()
     #use the resolver to load the code and any modules it might be referencing

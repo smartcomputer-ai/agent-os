@@ -122,6 +122,7 @@ class BlobObject:
             raise TypeError("pydantic_type must be a subclass of pydantic.BaseModel")
         if(self.__data == None):
             return None
+        print("getting model", pydantic_type, self.get_as_json())
         return pydantic_type(**self.get_as_json())
 
     def get_as_object_id(self) -> BlobId:

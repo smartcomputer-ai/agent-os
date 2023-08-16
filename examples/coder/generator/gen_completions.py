@@ -4,7 +4,7 @@ import re
 from dotenv import load_dotenv
 from grit import *
 from wit import *
-from ..common import *
+from common import *
 
 #========================================================================
 # Utils
