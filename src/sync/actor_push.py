@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
-import magic
+import filetype
+import mimetypes  
 from collections import OrderedDict
 from typing import Iterable
 from grit.object_serialization import blob_to_bytes
@@ -232,19 +233,34 @@ def _blob_from_value(value:any) -> BlobObject:
     
 def _blob_from_file(file_path:str) -> BlobObject:
     #todo: check .grit/headers if there are any headers for this file from a previous sync
-    mime = magic.Magic(mime=True)
-    mime_type = mime.from_file(file_path)
+
+    # try filetype to guess
+    kind = filetype.guess(file_path)
+    if kind is not None:
+        mime_type = kind.mime
+    else:
+        mime_type = None
+        mimetypes.init()
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if mime_type is None:
+            print('Cannot guess file mime type: '+file_path)
+
+    headers = {}
+    if mime_type is not None:
+        if mime_type == 'application/octet-stream':
+            headers['ct'] = 'b'
+        elif mime_type == 'application/json':
+            headers['ct'] = 'j'
+        elif mime_type == 'text/plain':
+            headers['ct'] = 's'
+        elif mime_type == 'text/x-python':
+            headers['ct'] = 's'
+            headers['Content-Type'] = mime_type
+        else:
+            headers['Content-Type'] = mime_type
+    
     with open(file_path, 'rb') as f:
         bytes = f.read()
-    headers = {}
-    if(mime_type == 'application/octet-stream'):
-        headers['ct'] = 'b'
-    elif(mime_type == 'application/json'):
-        headers['ct'] = 'j'
-    elif(mime_type == 'text/plain'):
-        headers['ct'] = 's'
-    else:
-        headers['Content-Type'] = mime_type
     blob = Blob(headers, bytes)
     return BlobObject(blob)
 
