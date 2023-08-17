@@ -65,5 +65,5 @@ and modules.
 ## Running the Tests
 If you want to hack on the code, it is helpful to run the tests. The project uses `pytest` and has almost 100 unit tests.
 ```
-poetry run pytest
+poetry run pytest tests/
 ```
