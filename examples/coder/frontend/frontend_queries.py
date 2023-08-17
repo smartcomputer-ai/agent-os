@@ -12,7 +12,7 @@ async def on_query_web(core:Core, actor_id:ActorId):
         'actor_id': actor_id.hex(),
         'actor_inbox_url': "../inbox",
         #todo: add a recipient filter back for the *agent*_id (not this actor)
-        'messages_sse_url': f"../../../messages-sse?content=true&mt=receipt"
+        'messages_sse_url': "../../../messages-sse?content=true&mt=receipt"
         }
     return await render_template(core, "/code/chat.html", **template_kwargs)
 

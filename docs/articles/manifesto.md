@@ -81,7 +81,7 @@ One idea is to combine the storage of code and data into one layer and ensure th
 
 ### Parallel Compute
 
-Finally, an agent should be able to have many "though processes" in parallel. Perhaps, similar to humans, an agent will have parts that run concurrently and certain parts that are synched up in a "consciousness layer". That is, there might be a part that needs to ensure that everything fits together by making one decision at a time. But there are centrally many types of actions that an agent can take in parallel. For example, an agent should be able to deal with multiple emails at the same time.
+Finally, an agent should be able to have many "thought processes" in parallel. Perhaps, similar to humans, an agent will have parts that run concurrently and certain parts that are synched up in a "consciousness layer". That is, there might be a part that needs to ensure that everything fits together by making one decision at a time. But there are centrally many types of actions that an agent can take in parallel. For example, an agent should be able to deal with multiple emails at the same time.
 
 In fact, if your AI assistant is doing a lot of work for you, it might have many more processes than fit on a single machine running in the cloud, which are all laboring on different aspects of your digital life that . The OS should make this possible, while also allowing consensus to be formed and things to converge again.
 

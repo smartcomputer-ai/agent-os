@@ -113,7 +113,7 @@ def _sync_from_push_dir_path(dir_path:str, core_path:str, ignore:list[str]=None)
     core_path = os.path.normpath(core_path)
     # now, walk the directory and get all files
     items = []
-    for root, _, filenames in os.walk(dir_path):
+    for root, dirs, filenames in os.walk(dir_path):
         for filename in sorted(filenames):
             if not _should_ignore(root, filename, ignore):
                 sync_dir_path = root
@@ -121,7 +121,7 @@ def _sync_from_push_dir_path(dir_path:str, core_path:str, ignore:list[str]=None)
                 sync_core_path = os.path.relpath(root, dir_path)
                 sync_core_path = os.path.normpath(os.path.join(core_path, sync_core_path))
                 items.append(SyncItem(sync_dir_path, filename, sync_core_path, filename))
-    dirs = sorted(dirs)
+        dirs = sorted(dirs)
     for dir in dirs:
         #if a directory is ignored, then don't even descend into it
         # see os.walk documentation on how that works (using topdown=True)

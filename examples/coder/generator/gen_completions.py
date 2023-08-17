@@ -32,7 +32,8 @@ def strip_code(code:str) -> str:
 #========================================================================
 # Prompts
 #========================================================================
-store_spec = """All data is stored in a simple key-value store that is accessed with simple string IDs. When persisting data, the store generates the ids. The inteface of the store is:
+store_spec = """All data is stored in a simple key-value store that is accessed with simple string IDs. 
+When persisting data, the store generates the ids. The inteface of the store is:
 ```
 class StoreWrapper:
     async def load_bytes(self, id:str) -> bytes | None:
@@ -52,7 +53,8 @@ class StoreWrapper:
 An instance of the store can be passed to your the function you write. For example: `async def entry(..., store:StoreWrapper)`. 
 The StoreWrapper type can be imported with `from .common import *`, but do not import it and do not type annotate it.
 Many times the input spec, if there is one, will contain ids to define the content that needs to be loaded. Use the store to load those ids.
-Many times the output spec, if there is one, will contain fields to return changed data. Use the store to store those fields and populate the ids in the return values.
+Many times the output spec, if there is one, will contain fields to return changed data. Use the store to store those fields and populate the 
+ids in the return values.
 """)
 
 module_spec = normalize_prompt("""
@@ -122,13 +124,13 @@ async def code_completion(
 
     input_output_spec = "Let's describe the desired input and output of the entry function."
     if arguments_spec:
-        input_output_spec += f"The entry function needs to take an argument called `input` and it is of the following structure, treat it as a dict:\n"
+        input_output_spec += "The entry function needs to take an argument called `input` and it is of the following structure, treat it as a dict:\n"
         input_output_spec += f"```\n{json.dumps(arguments_spec)}\n```"
     else:
         input_output_spec += "The entry function does not take any arguments besides the store."
 
     if return_spec:
-        input_output_spec += f"The entry function needs return an object of the following structure, return it as a dict:\n"
+        input_output_spec += "The entry function needs return an object of the following structure, return it as a dict:\n"
         input_output_spec += f"```\n{json.dumps(return_spec)}\n```"
     else:
         input_output_spec += "The entry function should not return a value, try to accomplish the task entirely with side-effects."
@@ -197,7 +199,7 @@ async def function_completion(
         function_call={ "name": function_name},
         )
     
-    content = response['choices'][0]['message']['content']
+    #content = response['choices'][0]['message']['content']
     function_call = response['choices'][0]['message']['function_call']
     if function_call is None or function_call['name'] != function_name:
         raise Exception("Could not generate function call")

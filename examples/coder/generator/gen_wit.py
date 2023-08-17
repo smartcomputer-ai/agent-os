@@ -1,4 +1,3 @@
-import types
 from grit import *
 from transitions import Machine
 from wit import *

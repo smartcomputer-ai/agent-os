@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 import types
 from grit import *
 from wit import *
