@@ -89,7 +89,6 @@ async def code_spec_completion(
     code_spec = None
     if 'function_call' in response['choices'][0]['message']:
         function_call = response['choices'][0]['message']['function_call']
-        function = function_call['name']
         function_args_str = function_call['arguments']
         function_args = json.loads(function_args_str)
         
@@ -111,7 +110,7 @@ async def code_spec_completion(
             test_descriptions=test_descriptions)
             
     content = response['choices'][0]['message'].get('content')
-    if content is None and function is not None:
+    if content is None and code_spec is not None:
         content = "I generated the following spec for the function."
     chat_message = ChatMessage.from_actor(content, actor_id)
 
@@ -160,10 +159,10 @@ async def code_exec_completion(
         ],
     )
 
+    print("code_exec_completion", response['choices'][0])
     exec_code = None
     if 'function_call' in response['choices'][0]['message']:
         function_call = response['choices'][0]['message']['function_call']
-        function = function_call['name']
         function_args_str = function_call['arguments']
         function_args = json.loads(function_args_str)
         
@@ -171,7 +170,7 @@ async def code_exec_completion(
         exec_code = ExecuteCode(input_arguments=function_args)
             
     content = response['choices'][0]['message'].get('content')
-    if content is None and function is not None:
+    if content is None and exec_code is not None:
         content = "I generated the following execution instructions."
     chat_message = ChatMessage.from_actor(content, actor_id)
 

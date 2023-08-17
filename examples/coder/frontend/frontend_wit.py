@@ -84,7 +84,7 @@ async def on_message_specify(msg:InboxMessage, ctx:MessageContext, state:Fronten
     if code_spec is not None:
         print("FrontendWit: code_spec was generated")
         #render the code spec as a frontend message
-        code_spec_content = f"{code_spec.task_description}\nInputs:\n```{code_spec.arguments_spec}```\nOutputs:\n```{code_spec.return_spec}```\nTests:\n```{code_spec.test_descriptions}```"
+        code_spec_content = f"{code_spec.task_description}\n\nInputs:\n```\n{code_spec.arguments_spec}\n```\nOutputs:\n```\n{code_spec.return_spec}\n```\nTests:\n```\n{code_spec.test_descriptions}\n```\n"
         code_spec_message = ChatMessage.from_actor(code_spec_content, ctx.actor_id)
         print("FrontendWit: code_spec:", code_spec_content)
         messages_tree.makeb(str(code_spec_message.id), True).set_as_json(code_spec_message)
@@ -139,7 +139,7 @@ async def on_message_coding(msg:InboxMessage, ctx:MessageContext, state:Frontend
     if exec_code is not None:
         print("FrontendWit: exec_code was generated")
         #render the code spec as a frontend message
-        exec_content = f"Inputs:\n```{exec_code.input_arguments}```"
+        exec_content = f"Inputs:\n```\n{exec_code.input_arguments}\n```"
         exec_message = ChatMessage.from_actor(exec_content, ctx.actor_id)
         print("FrontendWit: exec_content:", exec_content)
         messages_tree.makeb(str(exec_message.id), True).set_as_json(exec_message)
@@ -155,6 +155,7 @@ async def on_message_coding(msg:InboxMessage, ctx:MessageContext, state:Frontend
             print("FrontendWit: coder peer not found")
     else:
         print("FrontendWit: no function call")
+
 #========================================================================================
 # Coder Callbacks
 #========================================================================================
@@ -164,7 +165,7 @@ async def on_message_code_deployed(code:CodeDeployed, ctx:MessageContext, state:
     state.deployed()
     
     # render the code and notify frontend
-    code_message = ChatMessage.from_actor(f"Here is the code I generated:\n```{code.code}```", ctx.actor_id)
+    code_message = ChatMessage.from_actor(f"Here is the code I generated:\n```\n{code.code}\n```\n", ctx.actor_id)
     messages_tree = await ctx.core.gett("messages")
     messages_tree.makeb(str(code_message.id), True).set_as_json(code_message)
     ctx.outbox.add_new_msg(ctx.agent_id, str(code_message.id), mt="receipt")
@@ -175,7 +176,7 @@ async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:
     state.execute()
     
     # render the code and notify frontend
-    code_message = ChatMessage.from_actor(f"Here is the result from the execution:\n```{exec.output}```", ctx.actor_id)
+    code_message = ChatMessage.from_actor(f"Here is the result from the execution:\n```\n{exec.output}\n```", ctx.actor_id)
     messages_tree = await ctx.core.gett("messages")
     messages_tree.makeb(str(code_message.id), True).set_as_json(code_message)
     ctx.outbox.add_new_msg(ctx.agent_id, str(code_message.id), mt="receipt")

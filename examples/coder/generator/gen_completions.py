@@ -71,6 +71,7 @@ third_party_modules = [
 "scipy",
 "numpy",
 "sklearn",
+"bs4",
 ]
 module_spec += ", ".join(third_party_modules)
 

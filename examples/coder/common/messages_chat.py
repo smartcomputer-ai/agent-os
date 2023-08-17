@@ -1,4 +1,5 @@
 
+import mistune
 from uuid import UUID, uuid1
 from pydantic import BaseModel
 from datetime import datetime
@@ -13,6 +14,10 @@ class ChatMessage(BaseModel):
     timestamp: datetime
     from_name: str
     from_id: str|None = None
+
+    @property
+    def html(self):
+        return mistune.html(self.content)
 
     @classmethod
     def from_user(cls, content:str):

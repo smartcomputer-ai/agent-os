@@ -10,16 +10,10 @@
             </svg>
         {% endif %}
     </div>
-    <div class="content w-full lg:w-7/10 bg-white p-4 rounded-lg shadow-sm prose">
-        <p class="text-gray-800">
-            {{message.content}}
-        </p>
-        {% if message.function %}
-        <p>
-            Function args:<br/>
-            {{message.function_args}}
-        </p>
-        {% endif %}
+    <div class="content w-full lg:w-7/10 bg-white p-4 rounded-lg shadow-sm">
+        <article class="prose">
+{{message.html|raw}}
+        </article>
     </div>
 </div>
 {% endfor %} 
