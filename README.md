@@ -26,17 +26,26 @@ The project comes with a CLI that can be used to initiate and run agents. To see
 poetry run aos --help
 ```
 
-## Your First Agent 🤖 
+## Your First Agents 🤖 
 To run your first agent, put an `.env` file in the project root that contains an OpenAI API key. (It also works without an `.env` file or key if you just want to give the project a quick spin.)
 ```
 OPENAI_API_KEY=sk-myspecialkey
 ```
+### Chatbot
 Then run the following CLI commands:
 ```
 poetry run aos -d examples/chatbot push
 poetry run aos -d examples/chatbot run
 ```
-This 'chatbot' agent comes with a web interface, and the Agent OS hosts a web server. To chat with your agent, browse to `http://127.0.0.1:5000/ag/chatbot/wit/actors/frontend/query/web`.
+This 'chatbot' agent comes with a web interface, and the Agent OS hosts a web server. To chat with your agent, browse to `http://127.0.0.1:5000/ag/chatbot/wit/actors/frontend/query/web`
+
+### Coder
+Alternatively, if you wish to experiment with a more sophisticated agent that can [generate and execute code](/examples/coder/README.md), you can run the following commands:
+```
+poetry run aos -d examples/coder push
+poetry run aos -d examples/coder run
+```
+The frontend is available under `http://127.0.0.1:5000/ag/coder/wit/actors/frontend/query/web`
 
 ## Project Structure
 
