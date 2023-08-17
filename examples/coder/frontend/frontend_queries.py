@@ -20,6 +20,7 @@ async def on_query_web(core:Core, actor_id:ActorId):
 async def on_query_messages(core:Core, messagekey:str=None):
     message_filter = messagekey
     messages = await ChatMessage.load_from_tree(await core.gett("messages"), message_filter)
+    print(f"messages: {len(messages)}, key: {message_filter}")
     return await render_template(core, "/code/chat_messages.html", messages=messages)
 
 env = Environment(autoescape=select_autoescape())

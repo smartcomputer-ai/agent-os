@@ -3,7 +3,7 @@ from grit import *
 from transitions import Machine
 from wit import *
 from common import *
-from frontend_completions import code_spec_completion
+from frontend_completions import code_spec_completion, code_exec_completion
 
 class FrontendState(WitState):
     peers:dict[str, ActorId] = {}
@@ -30,6 +30,9 @@ class FrontendState(WitState):
 
 app = Wit()
 
+#========================================================================================
+# Frontend Main
+#========================================================================================
 @app.message("notify_genesis")
 async def on_message_notify(content:dict, state:FrontendState, agent_id:ActorId) -> None:
     print("FrontendWit: received notify_genesis")
@@ -45,12 +48,17 @@ async def on_message_web(content:str, ctx:MessageContext, state:FrontendState) -
     msgt.makeb(str(chat_msg.id), True).set_as_json(chat_msg)
     # notify the web frontend that the message was received (will be delivered via SSE)
     ctx.outbox.add_reply_msg(ctx.message, str(chat_msg.id), mt="receipt")
+    # notify itself to generate a response
     if state.state == 'specifying':
-        # send new to itself to create a completion
         ctx.outbox.add_new_msg(ctx.actor_id, "specify", mt="specify")
-    #elif state.state == 'waiting_for_code':
+    elif state.state == 'waiting_for_code':
+        ctx.outbox.add_new_msg(ctx.actor_id, "coding", mt="coding")
+    elif state.state == 'executing':
+        ctx.outbox.add_new_msg(ctx.actor_id, "execute", mt="execute")
 
-
+#========================================================================================
+# Frontend States
+#========================================================================================
 @app.message("specify")
 async def on_message_specify(msg:InboxMessage, ctx:MessageContext, state:FrontendState) -> None:
     print("FrontendWit: will specify code")
@@ -92,4 +100,82 @@ async def on_message_specify(msg:InboxMessage, ctx:MessageContext, state:Fronten
         else:
             print("FrontendWit: coder peer not found")
 
+@app.message("coding")
+async def on_message_coding(msg:InboxMessage, ctx:MessageContext, state:FrontendState) -> None:
+    print("FrontendWit: Already coding")
+    # load message history
+    messages_tree = await ctx.core.gett("messages")
+    messages = await ChatMessage.load_from_tree(messages_tree)
+    if len(messages) == 0 :
+        return
+    # ensure that the last message was from the user
+    last_message = messages[-1]
+    if last_message.from_name != 'user':
+        return
+    
+    new_chat_message = ChatMessage.from_actor("I am already coding... please wait until I'm done.", ctx.actor_id)
+    messages_tree.makeb(str(new_chat_message.id), True).set_as_json(new_chat_message)
+    print("FrontendWit: send receipt to web frontend")
+    ctx.outbox.add_new_msg(ctx.agent_id, str(new_chat_message.id), mt="receipt")
 
+@app.message("execute")
+async def on_message_coding(msg:InboxMessage, ctx:MessageContext, state:FrontendState) -> None:
+    print("FrontendWit: Execute")
+    # load message history
+    messages_tree = await ctx.core.gett("messages")
+    messages = await ChatMessage.load_from_tree(messages_tree)
+    if len(messages) == 0 :
+        return
+    # ensure that the last message was from the user
+    last_message = messages[-1]
+    if last_message.from_name != 'user':
+        return
+    
+    new_chat_message, exec_code = await code_exec_completion(messages, state.code_spec, actor_id=ctx.actor_id)
+    messages_tree.makeb(str(new_chat_message.id), True).set_as_json(new_chat_message)
+    print("FrontendWit: send receipt to web frontend")
+    ctx.outbox.add_new_msg(ctx.agent_id, str(new_chat_message.id), mt="receipt")
+
+    if exec_code is not None:
+        print("FrontendWit: exec_code was generated")
+        #render the code spec as a frontend message
+        exec_content = f"Inputs:\n```{exec_code.input_arguments}```"
+        exec_message = ChatMessage.from_actor(exec_content, ctx.actor_id)
+        print("FrontendWit: exec_content:", exec_content)
+        messages_tree.makeb(str(exec_message.id), True).set_as_json(exec_message)
+        ctx.outbox.add_new_msg(ctx.agent_id, str(exec_message.id), mt="receipt")
+
+        #move the state machine forward (which will remain on exec)
+        state.execute()
+
+        #message the coder actor to execute the code
+        if 'coder' in state.peers:
+            ctx.outbox.add_new_msg(state.peers['coder'], exec_code, mt="execute")
+        else:
+            print("FrontendWit: coder peer not found")
+    else:
+        print("FrontendWit: no function call")
+#========================================================================================
+# Coder Callbacks
+#========================================================================================
+@app.message("code_deployed")
+async def on_message_code_deployed(code:CodeDeployed, ctx:MessageContext, state:FrontendState) -> None:
+    print("FrontendWit: received code_deployed")
+    state.deployed()
+    
+    # render the code and notify frontend
+    code_message = ChatMessage.from_actor(f"Here is the code I generated:\n```{code.code}```", ctx.actor_id)
+    messages_tree = await ctx.core.gett("messages")
+    messages_tree.makeb(str(code_message.id), True).set_as_json(code_message)
+    ctx.outbox.add_new_msg(ctx.agent_id, str(code_message.id), mt="receipt")
+
+@app.message("code_executed")
+async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:FrontendState) -> None:
+    print("FrontendWit: received code_executed")
+    state.execute()
+    
+    # render the code and notify frontend
+    code_message = ChatMessage.from_actor(f"Here is the result from the execution:\n```{exec.output}```", ctx.actor_id)
+    messages_tree = await ctx.core.gett("messages")
+    messages_tree.makeb(str(code_message.id), True).set_as_json(code_message)
+    ctx.outbox.add_new_msg(ctx.agent_id, str(code_message.id), mt="receipt")

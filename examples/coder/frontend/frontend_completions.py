@@ -4,7 +4,7 @@ import openai
 from dotenv import load_dotenv
 from openai.openai_object import OpenAIObject
 from grit import *
-from common import ChatMessage, SpecifyCode
+from common import ChatMessage, SpecifyCode, ExecuteCode
 
 #========================================================================
 # Utils
@@ -24,12 +24,10 @@ async def code_spec_completion(
         actor_id:ActorId|None=None,
         ) -> tuple[ChatMessage, SpecifyCode | None]:
     
-    # make it work even if the api_key is not set,
-    # since this example is used to try the OS for the first time.
     if(openai.api_key is None):
         return ChatMessage.from_actor(
             "I am a helpful assistant, and I want to reply to your question, but the OpenAI API key is not set", 
-            actor_id)
+            actor_id), None
 
     system_message = normalize_prompt("""
         You are a helpful assistant. 
@@ -119,3 +117,62 @@ async def code_spec_completion(
 
     return chat_message, code_spec
 
+
+async def code_exec_completion(
+        messages:list[ChatMessage],
+        code_spec:SpecifyCode,
+        actor_id:ActorId|None=None,
+        ) -> tuple[ChatMessage, ExecuteCode | None]:
+    
+    system_message = normalize_prompt("""
+        You are a helpful assistant. 
+        Our goal is to execute a code function that we just generated. See the message history to see the type of task that we generated a function for.
+        Now, we want to call that function. 
+                                        
+        Also, this system uses a simple key-value store that is accessed with simple string IDs. Which, if they contain, media, can be rendered in the UI.
+        So, if the function is changing data, retrieving data, or generating content, you can expect it to return not the actual data but just an id to the result.
+                                        
+        Taking into consideration the conversation history, ask the user for information that can be used as input to the function. 
+        Once you are certain that you have sufficient information, generate the function call
+        """)
+    messages_completion = []
+    messages_completion.append({
+        'role': 'system',
+        'content': system_message
+    })
+    for msg in messages:
+        messages_completion.append({
+            'role': msg.from_name,
+            'content': msg.content
+        })
+    response:OpenAIObject = await openai.ChatCompletion.acreate(
+        model="gpt-4-0613",
+        messages=messages_completion,
+        temperature=0.7,
+        functions=[
+            {
+                "name": "entry",
+                "description": normalize_prompt(f"""
+                    This function accomplishes the following tasks: {code_spec.task_description}
+                    """),
+                "parameters": code_spec.arguments_spec, 
+            }
+        ],
+    )
+
+    exec_code = None
+    if 'function_call' in response['choices'][0]['message']:
+        function_call = response['choices'][0]['message']['function_call']
+        function = function_call['name']
+        function_args_str = function_call['arguments']
+        function_args = json.loads(function_args_str)
+        
+        print('function_args', function_args)
+        exec_code = ExecuteCode(input_arguments=function_args)
+            
+    content = response['choices'][0]['message'].get('content')
+    if content is None and function is not None:
+        content = "I generated the following execution instructions."
+    chat_message = ChatMessage.from_actor(content, actor_id)
+
+    return chat_message, exec_code

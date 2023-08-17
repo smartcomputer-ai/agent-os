@@ -188,14 +188,24 @@ async def on_deploy_message(msg:InboxMessage, state:CodeGenState, core:Core, out
 
 
 @app.message("execute")
-async def on_execute_message(msg:InboxMessage, state:CodeGenState, core:Core, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
+async def on_execute_message(exec:ExecuteCode, state:CodeGenState, core:Core, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
     print("on_execute_message")
     state.execute()
     #use the resolver to load the code and any modules it might be referencing
     resolver = CoreResolver(store)
     try:
         entry_func = await resolver.resolve(core.get_as_object_id(), "wit_code", is_required=True)
-        #TODO call function
     except Exception as e:
         print("error trying to resolve the deployed function:", e)
+    
+    store_wrapper = StoreWrapper(store)
+    function_kwargs = {}
+    function_kwargs['input'] = exec.input_arguments
+    function_kwargs['store'] = store_wrapper
+    try:
+        output = await entry_func(**function_kwargs)
+        print("test output:", output)
+        notify_all(state, outbox, CodeExecuted(input_arguments=exec.input_arguments, output=output), mt="code_executed")
+    except Exception as e:
+        print("error trying to execute the generated function:", e)
 
