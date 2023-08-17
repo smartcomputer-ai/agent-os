@@ -168,7 +168,8 @@ def _validate_doc(doc:tomlkit.TOMLDocument) -> None:
                     raise ValueError(f"Actor to notify must be a string or list of strings, but was {type(notify)}.")
                 for actor_to_notify in notify:
                     if(actor_to_notify not in actor_names):
-                        raise ValueError(f"Actor to notify '{actor_to_notify}' has not been defined before this one '{actor['name']}'. Define the actor '{actor_to_notify}' above this one.")
+                        raise ValueError(f"Actor to notify '{actor_to_notify}' has not been defined before this one '{actor['name']}'. "+
+                                         f"Define the actor '{actor_to_notify}' above this one.")
 
     if('agent' in doc):
         validate_agent(doc['agent'])

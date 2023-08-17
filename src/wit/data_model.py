@@ -28,7 +28,13 @@ class BlobObject:
     __breadcrumb:str
     __dirty:bool
 
-    def __init__(self, blob:Blob|None, blob_id:BlobId|None=None, parent:TreeObject|None=None, breadcrumb:str=None):
+    def __init__(
+            self, 
+            blob:Blob|None, 
+            blob_id:BlobId|None=None, 
+            parent:TreeObject|None=None, 
+            breadcrumb:str=None,
+            ):
         if(blob is not None and not is_blob(blob)):
             raise TypeError("blob must be a Blob")
         if(blob_id is not None and not is_object_id(blob_id)):
@@ -93,26 +99,26 @@ class BlobObject:
     def mark_dirty(self):
         self.__dirty = True
         self.from_blob_id = None
-        if(self.__parent != None):
+        if(self.__parent is not None):
             self.__parent.mark_dirty()
 
     def get_as_bytes(self) -> bytes:
-        if(self.__data == None):
+        if(self.__data is None):
             return None
         return self.__data
     
     def get_as_str(self) -> str:
-        if(self.__data == None):
+        if(self.__data is None):
             return None
         return self.__data.decode(self.STR_ENCODING)
     
     def get_as_json(self) -> dict:
-        if(self.__data == None):
+        if(self.__data is None):
             return None
         return json.loads(self.__data.decode(self.STR_ENCODING))
     
     def get_as_blob(self) -> Blob:
-        if(self.__data == None):
+        if(self.__data is None):
             return None
         return Blob(self.__headers.copy() if len(self.__headers) > 0 else None, self.__data)
 
@@ -120,7 +126,7 @@ class BlobObject:
     def get_as_model(self, pydantic_type:Type[BaseModel]) -> BaseModel:
         if(not issubclass(pydantic_type, BaseModel)):
             raise TypeError("pydantic_type must be a subclass of pydantic.BaseModel")
-        if(self.__data == None):
+        if(self.__data is None):
             return None
         print("getting model", pydantic_type, self.get_as_json())
         return pydantic_type(**self.get_as_json())
@@ -133,7 +139,7 @@ class BlobObject:
         return self.__blob_id
 
     def set_as_bytes(self, data:bytes) -> BlobObject:
-        if(data == None):
+        if(data is None):
             raise Exception("Cannot set blob to None")
         if(not isinstance(data, bytes)):
             raise Exception("blob must be bytes")
@@ -143,7 +149,7 @@ class BlobObject:
         return self
 
     def set_as_str(self, s:str) -> BlobObject:
-        if(s == None):
+        if(s is None):
             raise Exception("Cannot set s to None")
         if(not isinstance(s, str)):
             raise Exception("s must be str")
@@ -153,7 +159,7 @@ class BlobObject:
         return self
 
     def set_as_json(self, obj:dict|BaseModel) -> BlobObject:
-        if(obj == None):
+        if(obj is None):
             raise Exception("Cannot set obj to None")
         if(isinstance(obj, dict)):
             self.__data = json.dumps(obj).encode(self.STR_ENCODING)
@@ -206,10 +212,10 @@ class BlobObject:
         self.__breadcrumb = breadcrumb
 
     def is_empty(self) -> bool:
-        return self.__data == None
+        return self.__data is None
     
     async def persist(self, store:ObjectStore) -> ObjectId:
-        if(not self.__dirty and self.__blob_id != None):
+        if(not self.__dirty and self.__blob_id is not None):
             return self.__blob_id
         if(self.is_empty()):
             raise Exception("Cannot persist empty object")
@@ -242,7 +248,14 @@ class TreeObject:
     __breadcrumb:str
     __dirty:bool
 
-    def __init__(self, loader:ObjectLoader|None, tree:Tree, tree_id:TreeId|None=None, tree_parent:TreeObject|None=None, breadcrumb:str=None):
+    def __init__(
+            self, 
+            loader:ObjectLoader|None, 
+            tree:Tree, 
+            tree_id:TreeId|None=None, 
+            tree_parent:TreeObject|None=None, 
+            breadcrumb:str=None,
+            ):
         self.__loader = loader
         if(tree is None):
             tree = {}
@@ -270,7 +283,7 @@ class TreeObject:
     def mark_dirty(self):
         self.__dirty = True
         self.__tree_id = None
-        if(self.__parent != None):
+        if(self.__parent is not None):
             self.__parent.mark_dirty()
 
     #==========================================
@@ -399,7 +412,8 @@ class TreeObject:
             if(next is None):
                 return None
             elif(isinstance(next, BlobObject)):
-                raise ValueError(f"Cannot descend into blob '{parts[0]}' in path '{path}'. Path fragments, except the last one, must be tree objects.")
+                raise ValueError(f"Cannot descend into blob '{parts[0]}' in path '{path}'. "+
+                                 "Path fragments, except the last one, must be tree objects.")
             else:
                 return await next.get_path("/".join(parts[1:]))
             
@@ -412,7 +426,8 @@ class TreeObject:
             if(next is None):
                 return None
             elif(isinstance(next, BlobObject)):
-                raise ValueError(f"Cannot descend into blob '{parts[0]}' in path '{path}'. Path fragments, except the last one, must be tree objects.")
+                raise ValueError(f"Cannot descend into blob '{parts[0]}' in path '{path}'. "+
+                                 "Path fragments, except the last one, must be tree objects.")
             else:
                 return next.get_path_sync("/".join(parts[1:]))
 
@@ -492,7 +507,7 @@ class TreeObject:
             return True
         #recursively check if the tree is empty
         # for a tree not to be empty, it must have at least one non-empty blob child or indirect child (e.g., of another sub-tree)
-        for(key, value) in self.__tree.items():
+        for(_key, value) in self.__tree.items():
             if(isinstance(value, ObjectId)):
                 return False #not empty because there is an object with and id, meaning it was successfully persisted
             elif(isinstance(value, TreeObject)):
@@ -504,7 +519,7 @@ class TreeObject:
         return True
     
     async def persist(self, store:ObjectStore=None):
-        if(not self.__dirty and self.__tree_id != None):
+        if(not self.__dirty and self.__tree_id is not None):
             return self.__tree_id
         if(self.is_empty()):
             raise Exception("Cannot persist empty tree, at least one non-empty sub-object must be present")
@@ -516,7 +531,8 @@ class TreeObject:
             if(self.__loader is not None and isinstance(self.__loader, ObjectStore)):
                 store = self.__loader
             else:
-                raise Exception("Cannot persist tree, no ObjectStore instance provided, tried to see if the loader is an ObjectStore instance, but it is not.")
+                raise Exception("Cannot persist tree, no ObjectStore instance provided, "+
+                                "tried to see if the loader is an ObjectStore instance, but it is not.")
         tree_to_store = {}
         for(key, value) in self.__tree.items():
             if(isinstance(value, ObjectId)):
@@ -635,7 +651,7 @@ class Core(TreeObject):
     async def merge(self, new_core:Core):
         '''Merges the new_core into the current core. The current core will be modified.'''
         # walk the new_core and see if the current core is different
-        async for path, trees, blobs in new_core.walk():
+        async for _path, _trees, blobs in new_core.walk():
             for blob in blobs:
                 new_blob_path = blob.path()
                 try:
@@ -712,7 +728,7 @@ class InboxMessageIterator:
         return self
     
     async def __anext__(self):
-        if(self.current_id == None):
+        if(self.current_id is None):
             raise StopAsyncIteration
         message_id = self.current_id
         msg = await InboxMessage.from_message_id(self.__loader, self.sender_id, message_id)
@@ -726,7 +742,7 @@ class Inbox:
 
     def __init__(self, loader:ObjectLoader, previous_inbox:Mailbox, new_inbox:Mailbox):
         self.__loader = loader
-        if(new_inbox == None):
+        if(new_inbox is None):
             new_inbox = Mailbox()
         self.__new_inbox = new_inbox.copy()
         #todo: move these checks to a helper method
@@ -734,8 +750,8 @@ class Inbox:
             #make sure the dictionary is of the shape {bytes: bytes}
             first_key = next(iter(self.__new_inbox))
             if(not isinstance(first_key, bytes) or not isinstance(self.__new_inbox[first_key], bytes)):
-                raise TypeError(f"Actor id and message id must be bytes'")
-        if(previous_inbox == None):
+                raise TypeError("Actor id and message id must be bytes'")
+        if(previous_inbox is None):
             previous_inbox = Mailbox()
         self.__read_inbox = previous_inbox.copy() #no messages read yet: read_inbox = previous_inbox 
 
@@ -815,7 +831,8 @@ class Inbox:
             if(isinstance(self.__loader, ObjectStore)):
                 store = self.__loader
             else:
-                raise Exception("Cannot persist inbox, no ObjectStore instance provided, tried to see if the loader is an ObjectStore instance, but it is not.")
+                raise Exception("Cannot persist inbox, no ObjectStore instance provided, "+
+                                "tried to see if the loader is an ObjectStore instance, but it is not.")
         return await store.store(self.__read_inbox)
 
 ValidMessageContent = BlobId | TreeId | BlobObject | TreeObject | str | bytes | dict | BaseModel
@@ -864,7 +881,7 @@ class OutboxMessage:
         self.headers["mt"] = value
 
     def is_empty(self) -> bool:
-        return self.content == None
+        return self.content is None
 
     async def persist(self, store:ObjectStore) -> MessageId:
         if(self.is_empty()):
@@ -939,7 +956,7 @@ class Outbox:
     __outbox_buffer:dict[ActorId, OutboxMessage | list[OutboxMessage]] #if it's a signal, it's not a list; if it's queued, it's a list
 
     def __init__(self, outbox:Mailbox):
-        if(outbox == None):
+        if(outbox is None):
             outbox = Mailbox()
         #build the new outbox from the previous outbox
         self.__new_outbox = outbox.copy()
@@ -961,13 +978,15 @@ class Outbox:
             raise Exception("Cannot add empty message to outbox, content must be set")
         if(message.is_signal):
             if(message.recipient_id in self.__outbox_buffer and isinstance(self.__outbox_buffer[message.recipient_id], list)):
-                raise Exception("Cannot add signal message to queue outbox (a message was probably added with is_signal=False before), please clear the outbox for that recipient first")
+                raise Exception("Cannot add signal message to queue outbox (a message was probably added with is_signal=False before), "+
+                                "please clear the outbox for that recipient first")
             self.__outbox_buffer[message.recipient_id] = message
         else:
             if(message.recipient_id not in self.__outbox_buffer):
                 self.__outbox_buffer[message.recipient_id] = []
             elif(not isinstance(self.__outbox_buffer[message.recipient_id], list)):
-                raise Exception("Cannot add queued message to signal outbox (a message was probably added with is_signal=True before), please clear the outbox for that recipient first")
+                raise Exception("Cannot add queued message to signal outbox (a message was probably added with is_signal=True before), "+
+                                "please clear the outbox for that recipient first")
             self.__outbox_buffer[message.recipient_id].append(message)
 
 
@@ -1032,11 +1051,13 @@ class Outbox:
             del self.__outbox_buffer[recipient_id]
             return message_id
         else:
-            #if it's a queue, the message chain/queue should not be managed manually, by the user, and so all the previous_ids should be None (they will be set below)
+            #if it's a queue, the message chain/queue should not be managed manually, by the user, 
+            # and so all the previous_ids should be None (they will be set below)
             # (it does work, however, if the queue has only a single message in it).
             messages:list[OutboxMessage] = self.__outbox_buffer[recipient_id]
             if(len(messages) > 1 and any(message.previous_id is not None for message in messages)):
-                raise Exception("For some queued messags the previous message id was set, the Inbox class does not support manually managed message chains for more than one message.")
+                raise Exception("For some queued messags the previous message id was set, "+
+                                "the Inbox class does not support manually managed message chains for more than one message.")
             #now, save the queue for that recipient step by step, so that each message id can be linked to the previous one
             last_message_id = None
             #get the last known sent message id for that recipient actor

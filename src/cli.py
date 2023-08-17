@@ -10,7 +10,6 @@ from grit.stores.memory import MemoryObjectStore, MemoryReferences
 from runtime.runtime_executor import create_or_load_runtime_actor
 from runtime.runtime import Runtime
 from sync.actor_push import ActorPush
-from sync.sync_item import SyncItem
 from web.web_server import WebServer
 import sync.sync_file as sf
 
@@ -30,13 +29,15 @@ class WitContext:
         if(self.store_type == "lmdb"):
             #check if .grit has been initialized with 'file' store
             if os.path.exists(os.path.join(self.grit_dir, "obj")) or os.path.exists(os.path.join(self.grit_dir, "refs")):
-                raise click.ClickException(f"grit directory '{self.grit_dir}' has already been initialized with a 'file' store. Cannot use 'lmdb' store.")
+                raise click.ClickException(
+                    f"grit directory '{self.grit_dir}' has already been initialized with a 'file' store. Cannot use 'lmdb' store.")
             lmdb_env = SharedEnvironment(self.grit_dir, writemap=True)
             return LmdbObjectStore(lmdb_env), LmdbReferences(lmdb_env)
         elif(self.store_type == "file"):
             #check if .grit has been initialized with 'lmdb' store
             if os.path.exists(os.path.join(self.grit_dir, "data.mdb")) or os.path.exists(os.path.join(self.grit_dir, "lock.mdb")):
-                raise click.ClickException(f"grit directory '{self.grit_dir}' has already been initialized with a 'lmdb' store. Cannot use 'file' store.")
+                raise click.ClickException(
+                    f"grit directory '{self.grit_dir}' has already been initialized with a 'lmdb' store. Cannot use 'file' store.")
             return FileObjectStore(self.grit_dir), FileReferences(self.grit_dir)
         elif(self.store_type == "memory"):
             return MemoryObjectStore(), MemoryReferences()
@@ -53,9 +54,13 @@ class WitContext:
 
 @click.group()
 @click.pass_context
-@click.option("--work-dir", "-d", help="Work directory. By default, uses the current directory. All other files and paths will be relative to this.")
-@click.option("--sync-file", "-s", show_default=True, default="sync.toml", help="What sync file to use, if not the default one.")
-@click.option("--store-type", default="lmdb", show_default=True, type=click.Choice(['lmdb', 'file', 'memory'], case_sensitive=False), help="What type of object store to use.")
+@click.option("--work-dir", "-d", 
+    help="Work directory. By default, uses the current directory. All other files and paths will be relative to this.")
+@click.option("--sync-file", "-s", show_default=True, default="sync.toml",
+    help="What sync file to use, if not the default one.")
+@click.option("--store-type", default="lmdb", show_default=True, 
+    type=click.Choice(['lmdb', 'file', 'memory'], case_sensitive=False), 
+    help="What type of object store to use.")
 @click.option("--verbose", "-v", is_flag=True, help="Will print verbose messages.")
 def cli(ctx:click.Context, verbose:bool, work_dir:str|None, sync_file:str, store_type:str):
     if(work_dir is None):
@@ -81,7 +86,8 @@ def cli(ctx:click.Context, verbose:bool, work_dir:str|None, sync_file:str, store
 #===========================================================
 @cli.command()
 @click.pass_context
-@click.option("--agent-name", "-n", required=True, help="Agent reference name. Used to identify the agent in the runtime and generate the agent id.")
+@click.option("--agent-name", "-n", required=True, 
+    help="Agent reference name. Used to identify the agent in the runtime and generate the agent id.")
 def init(ctx:click.Context, agent_name:str):
     print("-> Initializing Agent")
     wit_ctx:WitContext = ctx.obj
@@ -194,7 +200,7 @@ def run(ctx:click.Context):
         actors = runtime.get_actors()
         print(f"Actors: {len(actors)}")
         if(len(actors) == 0):
-            print(f"WARNING: no actors available in the runtime!")
+            print("WARNING: no actors available in the runtime!")
 
         web_sever = WebServer(runtime)
         web_task = asyncio.create_task(web_sever.run())
@@ -260,7 +266,7 @@ def _try_add_to_path(actor_push:ActorPush):
 def print_grit_file_stats(grit_dir):
     files = os.listdir(grit_dir)
     file_bytes = 0
-    for root, dirs, files in os.walk(grit_dir):
+    for root, _, files in os.walk(grit_dir):
         for file in files:
             file_bytes += os.path.getsize(os.path.join(root,file))
     file_bytes = file_bytes / 1024 / 1024

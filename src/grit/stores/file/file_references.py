@@ -1,7 +1,5 @@
 import asyncio
-import json
 import os
-from functools import lru_cache
 import threading
 from grit.object_model import *
 from grit.references import References
@@ -24,7 +22,7 @@ class FileReferences(References):
         self.references_path = os.path.join(store_path, 'refs')
         os.makedirs(os.path.join(store_path, 'refs'), exist_ok=True)
         #walk the refs directory and load all the references
-        for root, dirs, files in os.walk(self.references_path):
+        for root, _dirs, files in os.walk(self.references_path):
             for file in files:
                 ref = os.path.relpath(os.path.join(root, file), self.references_path)
                 with open(os.path.join(root, file), "r") as f:

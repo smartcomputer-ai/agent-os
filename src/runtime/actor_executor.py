@@ -1,7 +1,7 @@
 from __future__ import annotations
 import asyncio
 import inspect
-from typing import Awaitable, Callable, Coroutine
+from typing import Awaitable, Callable
 from grit import *
 from wit import *
 from .resolvers import Resolver
@@ -122,7 +122,7 @@ class ActorExecutor:
         # For example, if agent X sends A -> B -> C, they will always arrive in that order, not C -> A -> B, etc.
         # However, if a sender sends multiple messages, an update event might be skipped, but it will still be ordered, it might be A -> C
         async with self._step_lock:
-            for sender_id, recipient_id, message_id in new_messages:
+            for sender_id, _recipient_id, message_id in new_messages:
                 self._current_inbox[sender_id] = message_id
         self._step_sleep_event.set()
 
@@ -148,7 +148,7 @@ class ActorExecutor:
                 #retrieve the wit transition function and start a task to run it
                 try:
                     wit_execution = await self._create_wit_execution(new_inbox)
-                except GenesisMessageNotReadyError as e:
+                except GenesisMessageNotReadyError:
                     continue
                 #starts the wit task but does not return it, has to be awaited separately
                 await wit_execution.run(self.ctx)

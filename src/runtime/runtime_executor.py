@@ -43,7 +43,7 @@ class RuntimeExecutor(ActorExecutor):
 
     async def update_current_outbox(self, new_messages:list[MailboxUpdate]):
         async with self._step_lock:
-            for sender_id, recipient_id, message_id in new_messages:
+            for _sender_id, recipient_id, message_id in new_messages:
                 self._current_outbox[recipient_id] = message_id
         self._step_sleep_event.set()
         
@@ -64,7 +64,7 @@ class RuntimeExecutor(ActorExecutor):
         (inbox, outbox, core) = await load_step(self.ctx.store, self.actor_id, last_step_id, new_inbox)
         if(len(inbox.get_current()) > 0):
             #todo: this fails if the inbox is empty
-            messages = await inbox.read_new()
+            await inbox.read_new()
             #do stuff with system messages here
             # e.g notify the runtime about changes with agents and so on
 
@@ -118,7 +118,13 @@ async def create_or_load_runtime_actor(object_store:ObjectStore, references:Refe
             raise Exception(f"Agent {agent_name} has no reference: '{ref_step_head(agent_id)}'.")
         return agent_id, last_step_id
     
-async def add_offline_message_to_runtime_outbox(object_store:ObjectStore, references:References, agent_name:str, msg:OutboxMessage, set_previous:bool=False) -> StepId:
+async def add_offline_message_to_runtime_outbox(
+        object_store:ObjectStore, 
+        references:References, 
+        agent_name:str, 
+        msg:OutboxMessage, 
+        set_previous:bool=False,
+        ) -> StepId:
     '''Dangerous! Do not use if the runtime is running!'''
     agent_id, last_step_id = await create_or_load_runtime_actor(object_store, references, agent_name)
     last_step = await object_store.load(last_step_id)
@@ -140,7 +146,12 @@ async def add_offline_message_to_runtime_outbox(object_store:ObjectStore, refere
     await references.set(ref_step_head(agent_id), new_step_id)
     return new_step_id
 
-async def remove_offline_message_from_runtime_outbox(object_store:ObjectStore, references:References, agent_name:str, recipient_id:ActorId) -> StepId:
+async def remove_offline_message_from_runtime_outbox(
+        object_store:ObjectStore, 
+        references:References, 
+        agent_name:str, 
+        recipient_id:ActorId,
+        ) -> StepId:
     '''Dangerous! Do not use if the runtime is running!'''
     #todo: dedupe the code with add_offline_message_to_agent_outbox
     agent_id, last_step_id = await create_or_load_runtime_actor(object_store, references, agent_name)

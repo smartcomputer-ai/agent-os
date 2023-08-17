@@ -1,12 +1,12 @@
 from __future__ import annotations
-from abc import ABC, ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 import os
 import sys
 import importlib
 import importlib.abc
 import importlib.machinery
 import types
-from typing import Awaitable, Callable
+from typing import Callable
 from grit import *
 from grit.tree_helpers import _load_path
 from wit.errors import InvalidCoreException
@@ -211,7 +211,6 @@ class CodeResolver(Resolver):
         super().__init__(object_store)
 
     async def _resolve(self, core_id:TreeId, core:Tree, node_id:BlobId, node_content:str) -> Callable:
-        code = node_content
         #TODO execute the code and look for a function 
         # this should execute the code as a module using the CoreLoader, this allows the code to import other modules
         raise NotImplementedError()

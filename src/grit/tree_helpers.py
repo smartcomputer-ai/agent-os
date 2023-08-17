@@ -19,7 +19,7 @@ from . object_serialization import *
 #============================================================
 def _tree_path_parts(path:str, allow_absolute:bool=False) -> list[str]:
     """Returns a list of path parts, with empty parts removed"""
-    if(path == "" or path == None):
+    if(path == "" or path is None):
         return []
     path = path.replace("//", "/")
     if(path[0] == "/"):
@@ -79,7 +79,8 @@ async def _load_path(
             if final_fragment in tree:
                 break
     if final_fragment not in tree:
-        raise ValueError(f"root tree '{root_id.hex()}' path '{path_parts}' could not find '{path_parts[-1]}' (nor the same ending in '{possible_file_endings}').")
+        raise ValueError(f"root tree '{root_id.hex()}' path '{path_parts}' could not find '{path_parts[-1]}' "+
+                         f"(nor the same ending in '{possible_file_endings}').")
     obj_id = tree[final_fragment]
     obj = await loader.load(obj_id)
     return tree_id, obj_id, obj
@@ -115,7 +116,8 @@ def _load_path_sync(
                 break
     if final_fragment not in tree:
         print("final fragemnt", final_fragment, tree)
-        raise ValueError(f"root tree '{root_id.hex()}' path '{path_parts}' could not find '{path_parts[-1]}' (nor the same ending in '{possible_file_endings}').")
+        raise ValueError(f"root tree '{root_id.hex()}' path '{path_parts}' could not find '{path_parts[-1]}' "+
+                         f"(nor the same ending in '{possible_file_endings}').")
     obj_id = tree[final_fragment]
     obj = loader.load_sync(obj_id)
     return tree_id, obj_id, obj
@@ -184,7 +186,7 @@ async def walk_ids(loader:ObjectLoader, root_id:TreeId) -> AsyncIterator[tuple[T
         else:
             blobs[key] = object_id
     yield (root_id, trees, blobs)
-    for key, tree_id in trees.items():
+    for _, tree_id in trees.items():
         async for sub_tree in walk_ids(loader, tree_id):
             yield sub_tree
 
@@ -207,6 +209,6 @@ def walk_ids_sync(loader:ObjectLoader, root_id:TreeId) -> Iterable[tuple[TreeId,
         else:
             blobs[key] = object_id
     yield (root_id, trees, blobs)
-    for key, tree_id in trees.items():
+    for _, tree_id in trees.items():
         for sub_tree in walk_ids_sync(loader, tree_id):
             yield sub_tree

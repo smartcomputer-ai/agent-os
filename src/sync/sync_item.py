@@ -1,5 +1,4 @@
 from __future__ import annotations
-from collections import OrderedDict
 import os
 from attr import dataclass
 from grit import *
@@ -102,7 +101,7 @@ def _sync_from_push_dir_path(dir_path:str, core_path:str, ignore:list[str]=None)
         ignore = DEFAULT_IGNORE
     # there must be a directory path (TODO: handle '/.', windows, etc)
     if dir_path == "" or dir_path == "/" or dir_path is None:
-        raise ValueError(f'dir_root must contain a directory.')
+        raise ValueError('dir_root must contain a directory.')
     # dir_path should end with a '/' for the replacement logic to work
     dir_path = os.path.normpath(dir_path)
     # core_path can be empty, then just assume root
@@ -114,7 +113,7 @@ def _sync_from_push_dir_path(dir_path:str, core_path:str, ignore:list[str]=None)
     core_path = os.path.normpath(core_path)
     # now, walk the directory and get all files
     items = []
-    for root, dirs, filenames in os.walk(dir_path):
+    for root, _, filenames in os.walk(dir_path):
         for filename in sorted(filenames):
             if not _should_ignore(root, filename, ignore):
                 sync_dir_path = root

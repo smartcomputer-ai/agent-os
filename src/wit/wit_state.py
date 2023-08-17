@@ -1,7 +1,4 @@
-import inspect
 import pickle
-from abc import ABC
-from typing import TypeVar
 from grit import *
 from .data_model import *
 from .data_model_utils import *
@@ -9,7 +6,7 @@ from .data_model_utils import *
 # Load and persist state data to a core
 #TODO: make this much smarter to track what actually changed, and what did not
 
-class WitState(ABC):
+class WitState:
     """Loads and persists any class and instance properties that a subclass adds to itself.
     
     Use this utility class to manage more complicated wit state.
@@ -20,25 +17,25 @@ class WitState(ABC):
 
     def _include_attribute(self, attr_key:str):
         """Returns true if the attribute should be included in the state"""
-        attr = getattr(self, attr_key)
+        getattr(self, attr_key)
         return (
             not attr_key.startswith('_') 
             and not attr_key.startswith('__') 
         )
     
-    def _before_load(self):
+    def _before_load(self):  # noqa: B027
         """Called before loading state from core"""
         pass
 
-    def _after_load(self):
+    def _after_load(self):  # noqa: B027
         """Called after loading state from core"""
         pass
 
-    def _before_persist(self):
+    def _before_persist(self):  # noqa: B027
         """Called before persisting state to core"""
         pass
 
-    def _after_persist(self):
+    def _after_persist(self):  # noqa: B027
         """Called after persisting state to core"""
         pass
 

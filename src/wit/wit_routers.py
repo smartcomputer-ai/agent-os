@@ -1,7 +1,6 @@
 
 from __future__ import annotations
 import inspect
-import typing
 from typing import Any, Callable, TypeVar
 from dataclasses import dataclass
 from itertools import islice
@@ -152,7 +151,8 @@ class _WitWrapper(_Wrapper):
         self.context_param = None
         for param in self.sig.parameters.values():
             # if param.annotation is not inspect.Parameter.empty:
-            #     print("_WitWrapper: param:", self.func.__name__, param.name, param.annotation, type(param.annotation), inspect.isclass(param.annotation))
+            #     print("_WitWrapper: param:", self.func.__name__, param.name, param.annotation,
+            #            type(param.annotation), inspect.isclass(param.annotation))
             if param.annotation is not inspect.Parameter.empty and inspect.isclass(param.annotation) and issubclass(param.annotation, MessageContext):
                 self.context_param = param
 
@@ -173,7 +173,10 @@ class _WitMessageWrapper(_WitWrapper):
         if(len(params) > 0):
             param = list(params.values())[0]
             allowed_target_types = (BaseModel, TreeObject, BlobObject, str, dict,)
-            if param.annotation is not inspect.Parameter.empty and inspect.isclass(param.annotation) and issubclass(param.annotation, allowed_target_types):
+            if (param.annotation is not inspect.Parameter.empty 
+                and inspect.isclass(param.annotation) 
+                and issubclass(param.annotation, allowed_target_types)
+                ):
                 self.input_param = param
                 #print("detected converted input param:", param)
     
@@ -218,7 +221,8 @@ class _WitMessageWrapper(_WitWrapper):
                 return converted.get_as_str()
             elif issubclass(target_type, dict):
                 return converted.get_as_json()
-        raise InvalidMessageException(f"Could not convert to desired input parameter '{self.input_param.name}' value, from message '{message.message_id.hex()}' to parameter type '{target_type.__name__}'.")
+        raise InvalidMessageException(f"Could not convert to desired input parameter '{self.input_param.name}' value, "+
+                                      f"from message '{message.message_id.hex()}' to parameter type '{target_type.__name__}'.")
 
 
 class _WitMessageRouter:
@@ -231,15 +235,18 @@ class _WitMessageRouter:
         if self._wit_run is not None:
             raise InvalidWitException("Cannot register more than one run handler.")
         if len(self._wit_message_handlers) > 0:
-            raise InvalidWitException(f"Cannot register run handler after registering individual message handlers: {self._wit_message_handlers.keys()}.")
+            raise InvalidWitException(
+                f"Cannot register run handler after registering individual message handlers: {self._wit_message_handlers.keys()}.")
         self._wit_run = _WitWrapper(func)
         return self._wit_run
 
     def register_message_handler(self, message_type:str, func:Callable) -> _WitMessageWrapper:
         if self._wit_run is not None:
-            raise InvalidWitException(f"Cannot register individual message handler for message type '{message_type}' after registering run handler.")
+            raise InvalidWitException(
+                f"Cannot register individual message handler for message type '{message_type}' after registering run handler.")
         if message_type in self._wit_message_handlers:
-            raise InvalidWitException(f"Cannot register more than one handler for message type '{message_type}'.")
+            raise InvalidWitException(
+                f"Cannot register more than one handler for message type '{message_type}'.")
         self._wit_message_handlers[message_type] = _WitMessageWrapper(func)
         return self._wit_message_handlers[message_type]
 
@@ -262,7 +269,16 @@ class _WitMessageRouter:
                     # see if there is a message handler for that message type (mt)
                     handler = self._wit_message_handlers.get(message.mt)
                     if handler is not None:
-                        new_kwargs = self._build_new_kwargs(kwargs, handler, last_step_id, inbox, outbox, core, object_store, messages, message)
+                        new_kwargs = self._build_new_kwargs(
+                            kwargs, 
+                            handler, 
+                            last_step_id, 
+                            inbox, 
+                            outbox, 
+                            core, 
+                            object_store, 
+                            messages, 
+                            message)
                         await handler(*(message,), **new_kwargs)
                         continue
                 if self.fail_on_unhandled:
@@ -299,7 +315,9 @@ class _WitMessageRouter:
             raise Exception("The 'object_store' or 'store' argument must be provided and must be an ObjectStore.")
         return (actor_id, agent_id, object_store)
     
-    def _build_new_kwargs(self, kwargs:dict, wrapper:_WitWrapper, step_id:StepId, inbox, outbox, core, store:ObjectStore, messages=None, message=None):
+    def _build_new_kwargs(self, kwargs:dict, wrapper:_WitWrapper, 
+                          step_id:StepId, inbox, outbox, core, store:ObjectStore, 
+                          messages=None, message=None):
         kwargs = kwargs.copy()
         kwargs.setdefault('inbox', inbox)
         kwargs.setdefault('outbox', outbox)
@@ -364,7 +382,9 @@ class _NamedQueryWrapper(_QueryWrapper):
         if(len(params) > 0):
             param = list(params.values())[0]
             allowed_target_types = (BaseModel, BlobObject,)
-            if param.annotation is not inspect.Parameter.empty and inspect.isclass(param.annotation) and issubclass(param.annotation, allowed_target_types):
+            if (param.annotation is not inspect.Parameter.empty 
+                and inspect.isclass(param.annotation) 
+                and issubclass(param.annotation, allowed_target_types)):
                 self.input_param = param
                 #print("detected converted input param:", param)
     
@@ -394,7 +414,8 @@ class _NamedQueryWrapper(_QueryWrapper):
             return converted
         elif issubclass(target_type, BaseModel):
             return converted.get_as_model(target_type)
-        raise QueryError(f"Could not convert to desired input parameter '{self.input_param.name}' value, from query_args blob to parameter type '{target_type.__name__}'.")
+        raise QueryError(f"Could not convert to desired input parameter '{self.input_param.name}' value, "+
+                         f"from query_args blob to parameter type '{target_type.__name__}'.")
 
 class _WitQueryRouter:
     def __init__(self, fail_on_unhandled=False) -> None:
@@ -406,7 +427,8 @@ class _WitQueryRouter:
         if self._query_run is not None:
             raise InvalidWitException("Cannot register more than one run handler.")
         if len(self._query_handlers) > 0:
-            raise InvalidWitException(f"Cannot register run handler after registering individual query handlers: {self._query_handlers.keys()}.")
+            raise InvalidWitException(
+                f"Cannot register run handler after registering individual query handlers: {self._query_handlers.keys()}.")
         self._query_run = _QueryWrapper(func)
         return self._query_run
 
@@ -476,7 +498,10 @@ class _WitQueryRouter:
             raise Exception("The loader must be ObjectLoader.")
         return (actor_id, agent_id, loader)
 
-    def _build_new_kwargs(self, kwargs:dict, wrapper:_QueryWrapper, step_id:StepId, query_name:str, query_args:Blob|None, inbox, outbox, core, loader:ObjectLoader):
+    def _build_new_kwargs(self, kwargs:dict, wrapper:_QueryWrapper, 
+                          step_id:StepId, query_name:str, query_args:Blob|None, 
+                          inbox, outbox, core,
+                          loader:ObjectLoader):
         kwargs = kwargs.copy()
         kwargs.setdefault('inbox', inbox)
         kwargs.setdefault('outbox', outbox)
@@ -488,11 +513,13 @@ class _WitQueryRouter:
         #parse the arguments into json if the content type is json
         query_args_json = None
         if(query_args is not None and query_args.headers is not None):
-            if ('ct' in query_args.headers and query_args.headers['ct'] == 'j') or ('Content-Type' in query_args.headers and query_args.headers['Content-Type'] == 'application/json'):
+            if (('ct' in query_args.headers and query_args.headers['ct'] == 'j') 
+                or ('Content-Type' in query_args.headers and query_args.headers['Content-Type'] == 'application/json')
+                ):
                 try:
                     query_args_json = json.loads(query_args.data)
                 except Exception as e:
-                    raise QueryError(f"The query_args content type is JSON, but was not able to parse it: {e}")
+                    raise QueryError(f"The query_args content type is JSON, but was not able to parse it: {e}") from e
 
         # create a context object, if the target function has a context parameter  
         if wrapper.context_param is not None:

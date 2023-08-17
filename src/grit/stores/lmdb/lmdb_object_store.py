@@ -1,5 +1,3 @@
-import asyncio
-import threading
 from functools import lru_cache
 from async_lru import alru_cache
 from grit.object_model import *
@@ -23,17 +21,17 @@ class LmdbObjectStore(ObjectStore):
     
     def store_sync(self, object:Object) -> ObjectId:
         if(object is None):
-            raise ValueError(f"object must not be None.")
+            raise ValueError("object must not be None.")
         bytes = object_to_bytes(object)
         object_id = get_object_id(bytes)
         with self._shared_env.begin_object_txn() as txn:
             txn.put(object_id, bytes, overwrite=False)
         return object_id
     
-    @lru_cache(maxsize=1024)
+    @lru_cache(maxsize=1024)  # noqa: B019
     def load_sync(self, object_id:ObjectId) -> Object | None:
         if(object_id is None):
-            raise ValueError(f"object_id must not be None.")
+            raise ValueError("object_id must not be None.")
         if(not is_object_id(object_id)):
             raise TypeError(f"object_id must be of type ObjectId, not '{type(object_id)}'.")
         with self._shared_env.begin_object_txn(write=False) as txn:

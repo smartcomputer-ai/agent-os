@@ -6,8 +6,7 @@ from starlette.exceptions import HTTPException
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import Response, PlainTextResponse, JSONResponse, RedirectResponse
-from starlette.routing import Route, Mount
-from starlette.staticfiles import StaticFiles
+from starlette.routing import Route
 from sse_starlette.sse import EventSourceResponse
 from grit import *
 from wit import *
@@ -60,7 +59,8 @@ class WebServer:
             Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/inbox", self.wit_post_inbox, methods=['POST']),
             Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/outbox", self.wit_get_outbox),
             Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}", self.wit_query),
-            Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}/{{{self.__QUERY_PATH_PARAM}:path}}", self.wit_query),
+            Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}/{{{self.__QUERY_PATH_PARAM}:path}}", 
+                  self.wit_query),
             Route(f"{wit_url_prefix}/messages-sse", self.wit_get_messages_sse),
             #web routes
             Route(f"{web_url_prefix}", self.web_get_ref),
@@ -166,7 +166,6 @@ class WebServer:
     async def wit_get_actors(self, request:Request):
         assert request.method == "GET"
         self.__validate_agent_id(request)
-        self.runtime
         actor_ids = self.runtime.get_actors()
         return JSONResponse([actor_id.hex() for actor_id in actor_ids])
 
@@ -220,7 +219,7 @@ class WebServer:
 
     async def wit_query(self, request:Request):
         assert request.method == "GET"
-        agent_id = self.__validate_agent_id(request)
+        self.__validate_agent_id(request)
         actor_id = await self.__validate_actor_id(request)
         query_name = request.path_params.get(self.__QUERY_NAME_PARAM)
         query_path = request.path_params.get(self.__QUERY_PATH_PARAM)
@@ -274,7 +273,8 @@ class WebServer:
             else:
                 return self.__other_object_to_response(last_object.get_as_tree())
         else:
-            raise HTTPException(status_code=500, detail=f"Query result ({query_name}) is not a blob or tree object, the query endpoint only supports serving blob and tree objects")
+            raise HTTPException(status_code=500, 
+                detail=f"Query result ({query_name}) is not a blob or tree object, the query endpoint only supports serving blob and tree objects")
 
     async def wit_get_messages_sse(self, request:Request):
         agent_id = self.__validate_agent_id(request)
@@ -294,7 +294,7 @@ class WebServer:
 
         include_content = request.query_params.get('content', 'false').lower() == 'true'
         message_type_filter = request.query_params.get('mt')
-        last_message_id_str = request.headers.get('Last-Event-ID')
+        request.headers.get('Last-Event-ID')
         # if(last_message_id_str is not None):
         #     print(f"last message id: {last_message_id_str}")
 
@@ -332,7 +332,7 @@ class WebServer:
                             elif is_tree(message_content):
                                 sse_data["content"] = json.dumps(message_content)
                             else:
-                                raise HTTPException(status_code=500, detail=f"Message content is not a blob or tree object.")
+                                raise HTTPException(status_code=500, detail="Message content is not a blob or tree object.")
                         yield { 
                             #the data field is required by the SSE spec
                             # and it needs to be a valid JSON string inside data
@@ -353,7 +353,7 @@ class WebServer:
 
     async def web_get_ref(self, request:Request):
         assert request.method == "GET"
-        agent_id = self.__validate_agent_id(request)
+        self.__validate_agent_id(request)
         ref = request.path_params.get(self.__WEB_REF_PARAM)
         path = request.path_params.get(self.__WEB_PATH_PARAM)
         #todo: consider just setting it to "root" and serve without redirect
@@ -393,10 +393,12 @@ class WebServer:
             if(blob_obj is None):
                 raise HTTPException(status_code=404, detail=f"Path part ({path_parts[0]} in {path}) not found")
             if(type(blob_obj).__name__ != "BlobObject"):
-                raise HTTPException(status_code=400, detail=f"Path part ({path_parts[0]} in {path}) is not a blob, expected a blob at the end of the path")
+                raise HTTPException(status_code=400,
+                    detail=f"Path part ({path_parts[0]} in {path}) is not a blob, expected a blob at the end of the path")
             return self.__blob_object_to_response(blob_obj.get_as_blob())
         else:
-            raise HTTPException(status_code=400, detail=f"Object ({object_id.hex()}) is not a blob or tree object, the web endpoint only supports serving blob and tree objects")
+            raise HTTPException(status_code=400, 
+                detail=f"Object ({object_id.hex()}) is not a blob or tree object, the web endpoint only supports serving blob and tree objects")
 
     def __validate_agent_id(self, request:Request) -> bytes:
         if(self.__AGENT_ID_PARAM not in request.path_params):

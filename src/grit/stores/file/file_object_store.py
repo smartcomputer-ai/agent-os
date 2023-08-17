@@ -73,7 +73,7 @@ class FileObjectStore(ObjectStore):
                     bytes = f.read()
         return bytes_to_object(bytes)
     
-    @lru_cache(maxsize=1024)
+    @lru_cache(maxsize=1024)  # noqa: B019
     def load_sync(self, object_id:ObjectId) -> Object | None:
         object_path = self._to_path(object_id)
         with self._thread_lock:

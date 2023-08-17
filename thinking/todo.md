@@ -27,42 +27,45 @@
 - [X] file store is slow and not efficient, consider using sqlite or lmdb (lmdb is probably the best option, HOWEVER, sqlite is more ergonomic and known by devs)
 - [X] cleanup and finalize the @wit helper funcions
 - [ ] write a real agent that can do the following:
-   - [ ] chat
-   - [ ] write code and execute it (as a new actor)
+   - [X] chat
+   - [X] write code and execute it (as a new actor)
    - [ ] ingest data and analyize it (embeddings, etc.)
    - [ ] generate some images
    - [ ] do it in a modular fashion (with funcation usage) that shows the power of the actor system and wits in general
 - [X] Rename 'agent executor' to something else, it's just too confusing, maybe just call it 'runtime executor'
 - [X] Add documentation to all relevant classes and functions
 - [X] write some basic documentation on the architecture and how to use it
-- [ ] Write a getting started guide
 - [X] pick a name for the project: agent-os
 - [X] move to different repo & apply MIT license
 
 
-### Release v0.1
+### Release v0.1.0
 
-- [ ] install and use a linter (see: https://google.github.io/styleguide/pyguide.html)
+- [ ] cli: reset commant to reset grit
+- [X] install and use a linter (see: https://google.github.io/styleguide/pyguide.html)
 - [ ] Add basic logging and instrumentation (instead of just prints)
 - [ ] Review wit error handling
    - [ ] How should the first version work?
    - [ ] What is the end-goal of wit error semantics?
    - [ ] Document it.
-- [ ] implement pruning / garbage collection v0.1 (can just be offline from the CLI)
-- [ ] rename 'wit', because of wit.ai
-- [ ] lockfile for the runtime and cli
-- [ ] resolver cache clearing/invalidation, especially for CoreResolvers
 - [ ] support sync wits (the objective is to support libraries like LangChain):
    - [X] sync alternative in object store
    - [X] sync version of data_model
    - [ ] allow sync wits, execute them in a thread
+- [ ] automatic LMDB resizing
+- [ ] Write a getting started guide
+
+### Release v0.1.1
+
+- [ ] implement pruning / garbage collection v0.1 (can just be offline from the CLI)
+- [X] (WONTFIX) rename 'wit', because of wit.ai
+- [ ] lockfile for the runtime and cli
+- [ ] resolver cache clearing/invalidation, especially for CoreResolvers
 - [ ] consider renaming 'inbox' and 'outbox' to 'inputs' and 'outputs', makes it sound more neural-netty (I remember being somewhat put off by F#'s "MailboxProcessor".when I first saw it, which was really a simple actor model.) 'Mailbox' can become 'Channels'
 - [ ] finalize url naming scheme for the web api. 
    - [ ] consider splitting up the webserver into wit and grit (get rid of the /ag/ root, it's ugly, probbaly go back to /wit and /grit root paths)
    - [ ] remove the 'web' paths from the web server (should be served by queries instead) (consider supporting tree descent in /grit/objects)
    - [ ] add support for a default foward path for an agent (e.g., go to /ag/test/web and then be fowarded to ag/test/wit/agents/frontent/web)
-- [ ] what are the requirements for the first version documentation?
-- [ ] automatic LMDB resizing
 - [ ] automatic pruning of object store
    - [ ] define "sleep" semantics for step chains and message chains (inbox and outbox), so that actors can prepare for pruning
 - [ ] implement cancelation of wit execution if all messages are signals (50% done already)

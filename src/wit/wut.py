@@ -2,7 +2,7 @@ from __future__ import annotations
 from grit import *
 from .data_model import *
 from .data_model_utils import *
-from .wit_routers import _WitMessageRouter, _WitQueryRouter, _Wrapper, _WitMessageWrapper, _NamedQueryWrapper
+from .wit_routers import _WitMessageRouter, _WitQueryRouter, _WitMessageWrapper, _NamedQueryWrapper
 
 # The 'wut' query is just a convention to implement a query name that reurns information about the wit.
 # It is not required, but it is a good idea to implement it.

@@ -1,5 +1,3 @@
-import asyncio
-import threading
 from grit.object_model import *
 from grit.object_serialization import *
 from grit.object_store import ObjectStore

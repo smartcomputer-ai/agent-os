@@ -34,7 +34,8 @@ def is_tree(object:Object) -> bool:
     return isinstance(object, dict) and len(object) > 0 and isinstance(next(iter(object)), str) and isinstance(object[next(iter(object))], ObjectId)
 
 def is_mailbox(object:Object) -> bool:
-    return isinstance(object, dict) and len(object) > 0 and (isinstance(next(iter(object)), bytes) or isinstance(next(iter(object)), bytearray)) and (isinstance(object[next(iter(object))], bytes) or isinstance(object[next(iter(object))], bytearray))
+    return (isinstance(object, dict) and len(object) > 0 and (isinstance(next(iter(object)), bytes) or isinstance(next(iter(object)), bytearray)) 
+        and (isinstance(object[next(iter(object))], bytes) or isinstance(object[next(iter(object))], bytearray)))
 
 def object_to_bytes(object:Object) -> bytes:
     if is_blob(object):

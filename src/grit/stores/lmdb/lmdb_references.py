@@ -1,5 +1,3 @@
-import asyncio
-import threading
 from grit.object_model import *
 from grit.object_serialization import *
 from grit.references import References
@@ -23,7 +21,7 @@ class LmdbReferences(References):
 
     def set_sync(self, ref:str, object_id:ObjectId) -> None:
         if(ref is None):
-            raise ValueError(f"ref must not be None.")
+            raise ValueError("ref must not be None.")
         ref_bytes = ref.encode('utf-8')
         with self._shared_env.begin_refs_txn() as txn:
             if not txn.put(ref_bytes, object_id, overwrite=True):

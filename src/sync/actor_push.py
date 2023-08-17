@@ -8,7 +8,6 @@ from grit.object_serialization import blob_to_bytes
 from grit import *
 from wit import *
 from runtime.runtime_executor import add_offline_message_to_runtime_outbox, remove_offline_message_from_runtime_outbox
-from runtime import Runtime
 from . sync_item import SyncItem, sync_from_push_path, sync_from_push_value
 
 # Utility class to push external data to a specific actor
@@ -46,7 +45,9 @@ class ActorPush():
         # check if the actor already exists
         actor_id = await references.get(ref_actor_name(actor_name))
         if(actor_id is not None):
-            # the actor ref is a just helper reference, to make sure the actor actually exists (i.e. the genesis step has run) also check if there is a step head for this actor
+            # the actor ref is a just helper reference, to make sure the actor 
+            # actually exists (i.e. the genesis step has run) also check if there 
+            # is a step head for this actor
             step_id = await references.get(ref_step_head(actor_id))
         else:
             step_id = None
@@ -114,13 +115,14 @@ class ActorPush():
         if(self.runtime):
             core.makeb("runtime").set_as_str(self.runtime)
         # add sync items, grouping by the core_path they will be added to
-        groups = {}; 
+        groups = {} 
         for v in self._sync_items.values(): 
             groups.setdefault(v.core_path, []).append(v)
         for k,v in groups.items():
             core_path = k
             sync_items = v
-            node:TreeObject = core.maket_path(core_path, exist_ok=True) #the paths should already be checked to not overwrite each other
+            # the paths should already be checked to not overwrite each other
+            node:TreeObject = core.maket_path(core_path, exist_ok=True) 
             sync_item:SyncItem
             for sync_item in sync_items:
                 if(sync_item.has_item_value):
@@ -133,7 +135,7 @@ class ActorPush():
     async def diff_core_with_actor(self, store:ObjectStore, references:References) -> AsyncIterator[tuple[str, str]]:
         if(self._is_genesis):
             push_core = self.to_core()
-            async for path, trees, blobs in push_core.walk():
+            async for path, _trees, blobs in push_core.walk():
                 for blob in blobs:
                     push_blob_path = os.path.join(path, blob.breadcrumb)
                     yield push_blob_path, "genesis"
@@ -146,7 +148,7 @@ class ActorPush():
             step_core:Core = await Core.from_core_id(store, step.core)
             push_core = self.to_core()
             # walk the push_core and see if the step_core is different
-            async for path, trees, blobs in push_core.walk():
+            async for path, _trees, blobs in push_core.walk():
                 for blob in blobs:
                     push_blob_path = os.path.join(path, blob.breadcrumb)
                     try:
@@ -164,7 +166,8 @@ class ActorPush():
 
     async def create_and_inject_messages(self, store:ObjectStore, references:References, agent_name:str) -> StepId:
         # While pushing the first genesis core to actors, the initial wit can fail (not be found, code error, etc). 
-        # If this is the case the developer will iterate on the push files and values and as a consequnce change the actor id of the target actor each time.
+        # If this is the case the developer will iterate on the push files and values and as a consequnce change the 
+        # actor id of the target actor each time.
         # So, if this is a genesis push, look if there is already an agent ref for this actor, and if so, remove it.
         if(self._is_genesis):
             previous_genesis_actor_id = await references.get(ref_actor_name(self.actor_name))
@@ -172,12 +175,14 @@ class ActorPush():
                 await remove_offline_message_from_runtime_outbox(store, references, agent_name, previous_genesis_actor_id)
         # Now, create the message
         msg = await self.create_actor_message(store)
-        # Don't set previous, so that this message can be pushed multiple times, resulting in an override of the current message in the outbox.
+        # Don't set previous, so that this message can be pushed multiple times, 
+        # resulting in an override of the current message in the outbox.
         # With set_previous=False, the message is treated like a signal, and only the last message will apply.
         step_id = await add_offline_message_to_runtime_outbox(store, references, agent_name, msg, set_previous=False)
         # If this the gnesis step, also create an agen ref
         if(self._is_genesis and self.actor_name is not None):
-            # This may override the actor ref, if the genesis step changes over multiple initial pushes, but once the runtime runs, the actor ref needs to be fix
+            # This may override the actor ref, if the genesis step changes over multiple initial pushes, 
+            # but once the runtime runs, the actor ref needs to be fix
             await references.set(ref_actor_name(self.actor_name), msg.recipient_id)
         #notify other actors about the creation of this one
         notify_msgs = await self.create_notification_messages(references, msg.recipient_id)
@@ -214,7 +219,9 @@ class ActorPush():
         for actor_to_notify in self.notify:
             actor_to_notify_id = await references.get(ref_actor_name(actor_to_notify))
             if(actor_to_notify_id is None):
-                raise Exception(f"Cannot notify actor {actor_to_notify} because no actor id was found in references '{ref_actor_name(actor_to_notify)}'.")
+                raise Exception(
+                    f"Cannot notify actor {actor_to_notify} because no actor id was found in references '{ref_actor_name(actor_to_notify)}'."
+                    )
             notify_msg = OutboxMessage.from_new(actor_to_notify_id, {'actor_name': self.actor_name, 'actor_id': actor_id.hex()})
             notify_msg.mt = "notify_genesis"
             notify_msgs.append(notify_msg)

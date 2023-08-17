@@ -1,5 +1,4 @@
 from __future__ import annotations
-import os
 import asyncio
 from grit import *
 from wit import *
@@ -129,7 +128,8 @@ class Runtime:
             #TODO: support loading the agent even if no name was provided, from the refs and core
             self.__runtime_executor = await RuntimeExecutor.from_agent_name(self.ctx, self.agent_name)
             if(self.agent_id != self.__runtime_executor.agent_id):
-                raise Exception(f"Agent name {self.agent_name} with id '{self.agent_id.hex()}' does not match the agent executor id '{self.__runtime_executor.agent_id.hex()}'. Did you use the right name?")
+                raise Exception(f"Agent name {self.agent_name} with id '{self.agent_id.hex()}' does not match the agent executor id "+
+                                f"'{self.__runtime_executor.agent_id.hex()}'. Did you use the right name?")
     
     def wait_until_running(self) -> asyncio.Future:
         return self.__running_event.wait()
@@ -140,7 +140,9 @@ class Runtime:
     async def start(self):
         await self.__init_runtime_executor()
         refs = await self.references.get_all()
-        actor_heads:dict[ActorId, StepId] = {bytes.fromhex(ref.removeprefix('heads/')):step_id for ref,step_id in refs.items() if ref.startswith('heads/')}
+        actor_heads:dict[ActorId, StepId] = (
+            {bytes.fromhex(ref.removeprefix('heads/')):step_id for ref,step_id in refs.items() if ref.startswith('heads/')}
+            )
 
         async with self.__executor_lock:
             self.__executors:dict[ActorId, ActorExecutor] = {}
@@ -149,7 +151,8 @@ class Runtime:
                     self.__executors[actor_id] = await ActorExecutor.from_last_step(self.ctx, actor_id, step_id)
             gather_executors = self.__executors.copy()
         
-        #there might me messages that have not been processed in the last runtime exection, gather them now and add them to the top of the queue
+        # there might me messages that have not been processed in the last runtime exection, 
+        # gather them now and add them to the top of the queue
         gather_executors[self.__runtime_executor.agent_id] = self.__runtime_executor
         await _gather_pending_messages_for_recipients(self.__outbox_queue, gather_executors)
         del gather_executors

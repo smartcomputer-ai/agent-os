@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from grit.object_model import ObjectId, ActorId, StepId
+from grit.object_model import ObjectId, ActorId
 
 class References(ABC):
     """Interface for saving and quering references in the Grit object store."""
@@ -37,4 +37,4 @@ def ref_actor_name(actor_name_ref:str) -> str:
     return f"actors/{actor_name_ref}"
 
 def ref_runtime_agent() -> str:
-    return f"runtime/agent"
+    return "runtime/agent"

@@ -41,6 +41,7 @@ transitions = "^0.9.0"
 beautifulsoup4 = "^4.12.2"
 mistune = "^3.0.1"
 filetype = "^1.2.0"
+ruff = "^0.0.285"
 
 [build-system]
 requires = ["poetry-core"]
@@ -54,3 +55,11 @@ aos = "src.cli:cli"
 cli = "src.cli:cli"
 perf = "tests.perf.perf:main"
 gen = "examples.coder.generator.gen_workbench:main"
+
+[tool.ruff]
+select = ["E", "F", "B"]
+ignore = ["F403", "F405"]
+line-length = 150
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401", "E402"]

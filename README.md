@@ -50,7 +50,8 @@ The frontend is available under `http://127.0.0.1:5000/ag/coder/wit/actors/front
 ## Project Structure
 
 * `examples/`: examples of agent implementations.
-  * `first/`: a simple GTP chatbot. See "Your First Agent" above.
+  * `chatbot/`: a simple GTP chatbot. See "Your First Agent" above.
+  * `coder/`: an agent that can write, test, and execute code.
 * `src/`: contains all relevant modules that are part of the Agent OS.
   * `grit/`: object store, inspired by Git.
   * `wit/`: libraries to help write "wit" state transition functions
