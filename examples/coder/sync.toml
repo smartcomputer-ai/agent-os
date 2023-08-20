@@ -1,0 +1,17 @@
+[agent]
+name = "coder"
+
+[all]
+push="./examples/coder/common:/code/common"
+
+[[actors]]
+name="frontend"
+push="./examples/coder/frontend:/code"
+wit="external:frontend_wit:app"
+wit_query="external:frontend_queries:app"
+
+[[actors]]
+name="coder"
+push="./examples/coder/generator:/code"
+wit="external:gen_wit:app"
+notify="frontend"

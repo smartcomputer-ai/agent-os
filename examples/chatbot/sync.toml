@@ -1,0 +1,8 @@
+[agent]
+name = "chatbot"
+
+[[actors]]
+name="frontend"
+push="./examples/chatbot/frontend:/code"
+wit="/code:frontend_wit:app"
+wit_query="/code:frontend_queries:app"

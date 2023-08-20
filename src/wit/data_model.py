@@ -122,6 +122,7 @@ class BlobObject:
             raise TypeError("pydantic_type must be a subclass of pydantic.BaseModel")
         if(self.__data == None):
             return None
+        print("getting model", pydantic_type, self.get_as_json())
         return pydantic_type(**self.get_as_json())
 
     def get_as_object_id(self) -> BlobId:
@@ -817,7 +818,7 @@ class Inbox:
                 raise Exception("Cannot persist inbox, no ObjectStore instance provided, tried to see if the loader is an ObjectStore instance, but it is not.")
         return await store.store(self.__read_inbox)
 
-ValidMessageContent = BlobId | TreeId | BlobObject | TreeObject | str | bytes | dict
+ValidMessageContent = BlobId | TreeId | BlobObject | TreeObject | str | bytes | dict | BaseModel
 
 class OutboxMessage:
     __previous_id:MessageId|None
@@ -928,6 +929,8 @@ def _ensure_content(content:ValidMessageContent):
         return BlobObject.from_json(content)
     elif(isinstance(content, BlobObject) or isinstance(content, TreeObject)):
         return content
+    elif(isinstance(content, BaseModel)):
+        return BlobObject.from_json(content)
     else:
         raise Exception("Invalid content type")
 
@@ -966,6 +969,18 @@ class Outbox:
             elif(not isinstance(self.__outbox_buffer[message.recipient_id], list)):
                 raise Exception("Cannot add queued message to signal outbox (a message was probably added with is_signal=True before), please clear the outbox for that recipient first")
             self.__outbox_buffer[message.recipient_id].append(message)
+
+
+    def add_new_msg(self, recipient_id:ActorId, content:ValidMessageContent, is_signal:bool=False, mt:str|None=None) -> OutboxMessage:
+        msg = OutboxMessage.from_new(recipient_id, content, is_signal, mt)
+        self.add(msg)
+        return msg
+    
+    def add_reply_msg(self, reply_to:InboxMessage, content:ValidMessageContent, is_signal:bool=False, mt:str|None=None) -> OutboxMessage:
+        msg = OutboxMessage.from_reply(reply_to, content, is_signal, mt)
+        self.add(msg)
+        return msg
+    
 
     def get_buffer(self, recipient_id:ActorId) -> list[OutboxMessage]:
         if(recipient_id in self.__outbox_buffer):
