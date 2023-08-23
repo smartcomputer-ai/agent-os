@@ -41,23 +41,26 @@
 
 ### Release v0.1.0
 
-- [ ] cli: reset commant to reset grit
-- [X] install and use a linter (see: https://google.github.io/styleguide/pyguide.html)
-- [ ] Add basic logging and instrumentation (instead of just prints)
 - [ ] Review wit error handling
    - [ ] How should the first version work?
    - [ ] What is the end-goal of wit error semantics?
    - [ ] Document it.
+- [ ] automatic LMDB resizing
+- [ ] cli: reset commant to reset grit
+- [ ] fix push bug (doesn't detect same files, always pushes something)
+- [X] install and use a linter (see: https://google.github.io/styleguide/pyguide.html)
 - [ ] support sync wits (the objective is to support libraries like LangChain):
    - [X] sync alternative in object store
    - [X] sync version of data_model
    - [ ] allow sync wits, execute them in a thread
-- [ ] automatic LMDB resizing
-- [ ] Write a getting started guide
+- [ ] Add basic logging and instrumentation (instead of just prints)
+- [ ] Write a getting started guide 
 
 ### Release v0.1.1
 
+- [ ] support inter-wit queries (query client that gets injected into the with function context)
 - [ ] implement pruning / garbage collection v0.1 (can just be offline from the CLI)
+- [ ] add timers
 - [X] (WONTFIX) rename 'wit', because of wit.ai
 - [ ] lockfile for the runtime and cli
 - [ ] resolver cache clearing/invalidation, especially for CoreResolvers
