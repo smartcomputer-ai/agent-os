@@ -41,13 +41,13 @@
 
 ### Release v0.1.0
 
-- [ ] Review wit error handling
-   - [ ] How should the first version work?
-   - [ ] What is the end-goal of wit error semantics?
-   - [ ] Document it.
-- [ ] automatic LMDB resizing
+- [X] Review wit error handling
+   - [X] How should the first version work?
+   - [X] What is the end-goal of wit error semantics?
+   - [X] Document it.
 - [ ] cli: reset commant to reset grit
 - [ ] fix push bug (doesn't detect same files, always pushes something)
+- [ ] automatic LMDB resizing
 - [X] install and use a linter (see: https://google.github.io/styleguide/pyguide.html)
 - [ ] support sync wits (the objective is to support libraries like LangChain):
    - [X] sync alternative in object store

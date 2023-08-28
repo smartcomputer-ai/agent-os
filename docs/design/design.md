@@ -569,15 +569,22 @@ The executor runs whenever there is a new message for its actor. Here is how it 
   6) The executor then waits until it is signaled by the runtime that there are new messages for its actor.
 
 ### Error Handling
-So far, we have touched very little on error handling. This is primarily because error handling is not fully thought through yet.
+So far, we have touched very little on error handling.
 
-However, for queries this is easy, errors just bubble up to the caller, be it a different actor or an external system.
+For Wit functions, error handling is tricky. Everything happens asynchronously and so it is difficult to bubble up errors. 
 
-For Wit functions, errors are trickier, because everything happens through asynchronous messaging. Here we enter the treacherous territory of dead letter queues, poison messages, delivery of error receipts, and so on. But the current approach is that an actor should try to handle all messages, if possible, by catching errors, and marking even faulty messages as read. This is also known as the “dumb pipes, smart endpoints” principle. However, if an actor repeatedly fails on message delivery, the runtime will exponentially back off, until it finally marks an actor as irrecoverable.
+The default behavior is that if a Wit function fails, it will not be retried as long as the runtime is running. So, it is up to the function implementer to handle errors, or just let a Wit fail.
 
-We will still have to decide if there should be error receipts that go to the message sender, indicating that the recipient is not available (basically bubbling exceptions). 
+For any Wit implementer, there are really three key problems that need solving:
+1) What to do with the actor when a wit function call fails? Stop it, retry with backoff, sound the alarm, etc.?
+2) What to do with the message that caused the error? Retry it, discard it, etc.?
+3) How to communicate the error back to the sender of the message?
 
-If an actor becomes irrecoverable, the only option is to send it an update that fixes the error. The nice thing is that we could have "healing" actors that read error messages originating from a different actor and use LLMs to generate code fixes.
+For the first point, there needs to be some runtime support; to do things like retry with backoff, and to do proper logging when an error occurs. We will add this support in the next version. But for the other two cases, it is up to the Wit implementer to decide what to do. For example, the developer can catch an error and then reply with a custom "error message" to the sender of the message that caused the error. This is also known as the “dumb pipes, smart endpoints” principle. There is no "dead letter queue" or other facilities to handle errors, it is assumed that the Wit function does it.
+
+In the case of queries error handling is easy, errors just bubble up to the caller because the query is executed synchronously.
+
+If an actor becomes irrecoverable because it has a bug, the only option is to send it an update that fixes the error.
 
 ### Performance
 The current performance is acceptable; the runtime can process about 5 Wit transitions per millisecond, or about 300,000 executions per minute. Since actor executions are expected to be quite granular, i.e., doing quite a bit of work per execution, this is sufficient for now to build highly concurrent and versatile agents that consist of possibly thousands of actors.
