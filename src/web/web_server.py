@@ -69,8 +69,10 @@ class WebServer:
         ]
         return Starlette(routes=routes, debug=True)
 
-    async def run(self, watch_dir:str=None):
-        config = uvicorn.Config(app=self.app(), loop="asyncio", port=5000, log_level="info")
+    async def run(self, port:int=5000, watch_dir:str=None):
+        if port is None:
+            port = 5000
+        config = uvicorn.Config(app=self.app(), loop="asyncio", port=port, log_level="info")
         if(watch_dir is not None):
             config.reload = True
             config.reload_dirs = [watch_dir]

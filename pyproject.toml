@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "agent-os-py"
-version = "0.0.1"
+version = "0.0.4"
 description = "A library and runtime to build autonomous AI agents."
 authors = []
 license = "MIT"
@@ -11,6 +11,7 @@ packages = [
     {include = "sync", from = "src"}, 
     {include = "web", from = "src"}, 
     {include = "runtime", from = "src"},
+    {include = "cli", from = "src"},
 ]
 repository = "https://github.com/lukebuehler/agent-os"
 
@@ -51,8 +52,7 @@ build-backend = "poetry.core.masonry.api"
 asyncio_mode = "auto"
 
 [tool.poetry.scripts]
-aos = "src.cli:cli"
-cli = "src.cli:cli"
+aos = "cli.aos:cli"
 perf = "tests.perf.perf:main"
 gen = "examples.coder.generator.gen_workbench:main"
 

@@ -172,8 +172,11 @@ def push(ctx:click.Context):
 # 'run' command
 #===========================================================
 @cli.command()
+#add an integer option  for the port
+@click.option("--port", "-p", required=False, type=int,
+    help="The port to run the webserver on.")
 @click.pass_context
-def run(ctx:click.Context):
+def run(ctx:click.Context, port:int|None):
     print("-> Running Agent")
     wit_ctx:WitContext = ctx.obj
     wit_ctx.enforce_paths_exist()
@@ -202,8 +205,10 @@ def run(ctx:click.Context):
         if(len(actors) == 0):
             print("WARNING: no actors available in the runtime!")
 
+
         web_sever = WebServer(runtime)
-        web_task = asyncio.create_task(web_sever.run())
+        print("Web server starting...", port)
+        web_task = asyncio.create_task(web_sever.run(port=port))
         print("Web server started")
 
         await asyncio.wait([runtime_task, web_task], return_when=asyncio.FIRST_COMPLETED)

@@ -56,6 +56,7 @@
 - [ ] Add basic logging and instrumentation (instead of just prints)
 - [ ] Write a getting started guide 
 
+
 ### Release v0.1.1
 
 - [ ] support inter-wit queries (query client that gets injected into the with function context)
