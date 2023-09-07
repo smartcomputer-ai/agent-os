@@ -50,7 +50,8 @@ async def on_message_web(content:str, ctx:MessageContext, state:FrontendState) -
     #if the last message was from a user, then kick off the models
     if chat_msg.from_name == 'user':
         ctx.outbox.add_new_msg(ctx.actor_id, "complete", mt="complete")
-
+    else:
+        print(f"Frontend: last web message was not from 'user', but was from '{chat_msg.from_name}', will skip.")
 
 #========================================================================================
 # Frontend States
@@ -74,11 +75,15 @@ async def on_complete_message(msg:InboxMessage, ctx:MessageContext, state:Fronte
     result = await chat_completion(messages, state.code_spec)
     
     if isinstance(result, str):
+        print("Frontend: completion is normal chat message.")
         chat_message = ChatMessage.from_actor(result, ctx.actor_id)
+
     elif isinstance(result, CodeRequest):
+        print("Frontend: completion is a CodeRequest.")
         # message the retriever actor to generate the code
         if state.retriever is not None:
             ctx.outbox.add_new_msg(state.retriever, result, mt="request")
+            print(f"Frontend: sent CodeRequest mesage to retriever: {state.retriever.hex()}")
         else:
             print("Frontend: retriever peer not found")
             return
@@ -96,12 +101,14 @@ async def on_complete_message(msg:InboxMessage, ctx:MessageContext, state:Fronte
         chat_message = ChatMessage.from_actor(msg, ctx.actor_id) 
     
     elif isinstance(result, CodeExecution):
+        print("Frontend: completion is a CodeExecution.")
         if state.code_spec is None:
             print("Frontend: code_spec is None, will skip.")
             return
         # message the coder actor to execute the code
         if state.coder is not None:
             ctx.outbox.add_new_msg(state.coder, result, mt="execute")
+            print(f"Frontend: sent CodeExecution mesage to coder: {state.coder.hex()}")
         else:
             print("Frontend: coder peer not found")
             return

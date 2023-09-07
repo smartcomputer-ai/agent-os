@@ -25,8 +25,11 @@ class StoreWrapper:
         blob_obj = BlobObject(blob)
         return blob_obj.get_as_json()
     
-    async def store_bytes(self, data:bytes) -> str:
-        obj_id = await BlobObject.from_bytes(data).persist(self.store)
+    async def store_bytes(self, data:bytes, content_type:str|None=None) -> str:
+        obj =  BlobObject.from_bytes(data)
+        if content_type is not None:
+            obj.set_header["Content-Type"] = content_type
+        obj_id = await obj.persist(self.store)
         return obj_id.hex()
     
     async def store_str(self, data:str) -> str:

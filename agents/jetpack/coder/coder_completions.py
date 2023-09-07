@@ -106,7 +106,7 @@ async def code_completion(
                 pass
             async def load_json(self, id:str) -> dict | None:
                 pass
-            async def store_bytes(self, data:bytes) -> str | None:
+            async def store_bytes(self, data:bytes, content_type:str|None=None) -> str:
                 pass
             async def store_str(self, data:str) -> str | None:
                 pass
@@ -117,8 +117,7 @@ async def code_completion(
         """An instance of the store can be passed to your the function you write. For example: `async def entry(..., store:StoreWrapper)`. 
         The StoreWrapper type can be imported with `from tools import StoreWrapper`, but do not import it and do not type annotate it.
         Many times the input spec, if there is one, will contain ids to define the content that needs to be loaded. Use the store to load those ids.
-        Many times the output spec, if there is one, will contain fields to return changed data. Use the store to store those fields and populate the 
-        ids in the return values.
+        Many times the output spec, if there is one, will contain fields to return changed data. Use the store to store those fields and populate the ids in the return values.
         """)
     
     prompt.append_msg(
@@ -286,9 +285,8 @@ async def plan_completion(
     prompt.append_to_prev(
         """An instance of the store can be passed to your the function you write. For example: `async def entry(..., store:StoreWrapper)`. 
         Many times the input spec--if there is one--will contain ids to define the content that needs to be loaded. Use the store to load those ids.
-        Many times the output spec--if there is one--will contain fields to return changed data. Use the store to store those fields and populate the 
-        ids in the return values.
-        """)
+        Many times the output spec--if there is one--will contain fields to return changed data. Use the store to store those fields and populate the ids in the return values.
+        If you know the content type (or mime type) of binary data, then you can pass it to the store as well.""")
     
     prompt.append_msg(
         """If there is data that needs parsing into a fixed and structured format, use the following parsing library:""")
