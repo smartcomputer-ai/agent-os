@@ -50,8 +50,11 @@ class WitState:
                 property_data = await state.get(attr_key)
                 if property_data is not None:
                     if(not isinstance(property_data, BlobObject)): #we expect this to be a blob object
-                        raise Exception(f'Expected property {attr_key} to be a BlobObject, but got {type(property_data)}')     
-                    self.__setattr__(attr_key, pickle.loads(property_data.get_as_bytes()))
+                        raise Exception(f'Expected property {attr_key} to be a BlobObject, but got {type(property_data)}')
+                    try:
+                        self.__setattr__(attr_key, pickle.loads(property_data.get_as_bytes()))
+                    except Exception as e:
+                        print(f'Error loading {attr_key}: {e}')
         self._after_load()
 
     async def _persist_to_core(self, core:Core):
