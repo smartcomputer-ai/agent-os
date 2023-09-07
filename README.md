@@ -26,32 +26,23 @@ The project comes with a CLI that can be used to initiate and run agents. To see
 poetry run aos --help
 ```
 
-## Your First Agents 🤖 
+## Test Drive an Agent 🤖 
 To run your first agent, put an `.env` file in the project root that contains an OpenAI API key. (It also works without an `.env` file or key if you just want to give the project a quick spin.)
 ```
 OPENAI_API_KEY=sk-myspecialkey
 ```
-### Chatbot
-Then run the following CLI commands:
+### Jetpack Agent
+The "Jetpack" agent demonstrates what the Agent OS can do and is geared towards end-to-end code generation and execution. It's a conversational agent that can accomplish various tasks for you. To run it, execute the following commands:
 ```
-poetry run aos -d examples/chatbot push
-poetry run aos -d examples/chatbot run
+poetry run aos -d agents/jetpack/ push
+poetry run aos -d agents/jetpack/ run
 ```
-This 'chatbot' agent comes with a web interface, and the Agent OS hosts a web server. To chat with your agent, browse to `http://127.0.0.1:5000/ag/chatbot/wit/actors/frontend/query/web`
-
-### Coder
-Alternatively, if you wish to experiment with a more sophisticated agent that can [generate and execute code](/examples/coder/README.md), you can run the following commands:
-```
-poetry run aos -d examples/coder push
-poetry run aos -d examples/coder run
-```
-The frontend is available under `http://127.0.0.1:5000/ag/coder/wit/actors/frontend/query/web`
+Jetpack comes with a web interface, and the Agent OS hosts a web server. To access the interface, browse to `http://127.0.0.1:5000/ag/jetpack/wit/actors/frontend/query/web`
 
 ## Project Structure
 
-* `examples/`: examples of agent implementations.
-  * `chatbot/`: a simple GTP chatbot. See "Your First Agent" above.
-  * `coder/`: an agent that can write, test, and execute code.
+* `agents/`: examples of agent implementations. See folder for more details
+  * `jetpack/`: the flagship agent demo, geared towards conversational task completion through code generation.
 * `src/`: contains all relevant modules that are part of the Agent OS.
   * `grit/`: object store, inspired by Git.
   * `wit/`: libraries to help write "wit" state transition functions

@@ -12,6 +12,11 @@ packages = [
     {include = "web", from = "src"}, 
     {include = "runtime", from = "src"},
     {include = "cli", from = "src"},
+
+    {include = "completions", from = "agents/lib"},
+    {include = "tools", from = "agents/lib"},
+
+    {include = "jetpack", from = "agents"},
 ]
 repository = "https://github.com/lukebuehler/agent-os"
 

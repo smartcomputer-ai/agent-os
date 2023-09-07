@@ -1,0 +1,11 @@
+[agent]
+name = "jetpack"
+
+[all]
+push="./agents/jetpack/coder:/code/coder"
+
+[[actors]]
+name="frontend"
+push="./agents/jetpack/frontend:/code"
+wit="external:frontend_wit:app"
+wit_query="external:frontend_queries:app"
