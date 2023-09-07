@@ -1,3 +1,4 @@
+import filetype
 from grit import *
 from wit import *
 
@@ -27,8 +28,10 @@ class StoreWrapper:
     
     async def store_bytes(self, data:bytes, content_type:str|None=None) -> str:
         obj =  BlobObject.from_bytes(data)
+        if content_type is None:
+            content_type = filetype.guess_mime(data)
         if content_type is not None:
-            obj.set_header["Content-Type"] = content_type
+            obj.set_header("Content-Type", content_type)
         obj_id = await obj.persist(self.store)
         return obj_id.hex()
     

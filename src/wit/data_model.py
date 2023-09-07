@@ -192,7 +192,7 @@ class BlobObject:
         self.mark_dirty()
         return self
     
-    def get_header(self, key:str) -> str:
+    def get_header(self, key:str) -> str | None:
         return self.__headers.get(key, None)
     
     def get_headers(self) -> dict[str, str]:

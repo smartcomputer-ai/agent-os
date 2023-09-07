@@ -1,4 +1,4 @@
-
+import filetype
 from grit import *
 from wit import *
 from jetpack.messages import *
@@ -137,18 +137,62 @@ async def on_message_code_deployed(code:CodeDeployed, ctx:MessageContext, state:
     
     state.code_spec = code.spec
     # render the code and notify frontend
-    code_message = ChatMessage.from_actor(f"Here is the function and code I generated:\n```\n{code.code}\n```\n", ctx.actor_id)
+    chat_message = ChatMessage.from_actor(f"Here is the function and code I generated:\n```\n{code.code}\n```\n", ctx.actor_id)
     messages_tree = await ctx.core.gett("messages")
-    messages_tree.makeb(str(code_message.id), True).set_as_json(code_message)
-    ctx.outbox.add_new_msg(ctx.agent_id, str(code_message.id), mt="receipt")
+    messages_tree.makeb(str(chat_message.id), True).set_as_json(chat_message)
+    ctx.outbox.add_new_msg(ctx.agent_id, str(chat_message.id), mt="receipt")
 
 @app.message("code_executed")
 async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:FrontendState) -> None:
     print("Frontend: received callback: code_executed")
+    state.current_execution = None 
+    content = ""
+    links = []
+    for key in list(exec.output):
+        if isinstance(exec.output[key], str) and is_object_id_str(exec.output[key]):
+            obj_id_str = exec.output[key]
+            obj_id = to_object_id(obj_id_str)
+            #figure out what's in the object
+            obj = await ctx.store.load(obj_id)
+            if not is_blob(obj):
+                continue
+            blob = BlobObject(obj, obj_id)
 
-    state.current_execution = None    
-    # render the code and notify frontend
-    code_message = ChatMessage.from_actor(f"Here is the result from the execution:\n```\n{exec.output}\n```", ctx.actor_id)
+            #see if the content type is set
+            content_type = blob.get_header("Content-Type")
+            if content_type is None and blob.get_header("ct") == "s":
+                content_type = "text/plain"
+            if content_type is None and blob.get_header("ct") == "j":
+                content_type = "application/json"
+            
+            if content_type is None:
+                continue
+
+            #if the content type is an image, then display it as an image
+            if content_type.startswith("image/"):
+                image_url = f"../../../../grit/objects/{obj_id_str}"
+                content += f"Here is the image I generated:\n![]({image_url})\n"
+            #if the content type is text, then display it as text
+            elif content_type.startswith("text/"):
+                content += f"Here is what I generated:\n\n{blob.get_as_str()}\n"
+            #if the content type is json, then display it as json
+            elif content_type.startswith("application/json"):
+                content += f"Here is the JSON I generated:\n```\n{json.dumps(blob.get_as_json(), indent=2)}\n```\n"
+            
+            links.append(f"[{key}: {obj_id_str}](../../../../grit/objects/{obj_id_str})")
+
+            #pop from the dictionary
+            exec.output.pop(key)
+
+    if len(links) > 0:
+        content += "Here are the links to the generated objects:\n"
+        for link in links:
+            content += f"- {link}\n"
+            
+    if len(exec.output) > 0:
+        content += f"Here is the result from the execution:\n```\n{exec.output}\n```"
+
+    chat_message = ChatMessage.from_actor(content, ctx.actor_id)
     messages_tree = await ctx.core.gett("messages")
-    messages_tree.makeb(str(code_message.id), True).set_as_json(code_message)
-    ctx.outbox.add_new_msg(ctx.agent_id, str(code_message.id), mt="receipt")
+    messages_tree.makeb(str(chat_message.id), True).set_as_json(chat_message)
+    ctx.outbox.add_new_msg(ctx.agent_id, str(chat_message.id), mt="receipt")
