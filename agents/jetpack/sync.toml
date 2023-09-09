@@ -2,10 +2,10 @@
 name = "jetpack"
 
 [all]
-push="./agents/jetpack/coder:/code/coder"
+push=["./agents/jetpack/coder:/code/coder", "./agents/jetpack/chat:/code/chat"]
 
 [[actors]]
 name="frontend"
-push="./agents/jetpack/frontend:/code"
+push=["./agents/jetpack/frontend:/code", "./agents/jetpack/templates:/templates"]
 wit="external:frontend_wit:app"
 wit_query="external:frontend_queries:app"

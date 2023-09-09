@@ -3,6 +3,6 @@ name = "demodata"
 
 [[actors]]
 name="frontend_data"
-push="./demodata/frontend_data:/code"
+push="./agents/demodata/frontend_data:/code"
 wit="external:frontend_data_queries:app"
 wit_query="external:frontend_data_queries:app"

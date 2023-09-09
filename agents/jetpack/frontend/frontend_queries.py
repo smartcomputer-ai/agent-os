@@ -2,26 +2,27 @@
 from jinja2 import Environment, TemplateNotFound, select_autoescape
 from grit import *
 from wit import *
-from jetpack.messages import ChatMessage
+from jetpack.frontend.frontend_wit import FrontendState
 
 app = Wit()
 
 @app.query("web")
-async def on_query_web(core:Core, actor_id:ActorId):
+async def on_query_web(ctx:QueryContext, state:FrontendState):
+    if 'chat' in ctx.query_args_json:
+        current_chat = ctx.query_args_json['chat']
+        if isinstance(current_chat, list):
+            current_chat = current_chat[0]
+    else:
+        current_chat = 'main'
     template_kwargs = {
-        'actor_id': actor_id.hex(),
-        'actor_inbox_url': "../inbox",
-        #todo: add a recipient filter back for the *agent*_id (not this actor)
-        'messages_sse_url': "../../../messages-sse?content=true&mt=receipt"
+        'agent_id': ctx.agent_id.hex(),
+        'frontend_id': ctx.actor_id.hex(),
+        'chat_actors': {k:v.hex() for k,v in state.chat_actors.items()},
+        'chat_titles': state.chat_titles,
+        'current_chat': current_chat,
+        'current_chat_id': state.chat_actors[current_chat].hex(),
         }
-    return await render_template(core, "/code/chat.html", **template_kwargs)
-
-@app.query("messages")
-async def on_query_messages(core:Core, messagekey:str=None):
-    message_filter = messagekey
-    messages = await ChatMessage.load_from_tree(await core.gett("messages"), message_filter)
-    print(f"Frontend Query: messages: {len(messages)}, filter: {message_filter}")
-    return await render_template(core, "/code/chat_messages.html", messages=messages)
+    return await render_template(ctx.core, "/templates/index.html", **template_kwargs)
 
 env = Environment(autoescape=select_autoescape())
 async def render_template(core:Core, template_path, **kwargs) -> BlobObject:

@@ -1,0 +1,323 @@
+<html lang="en"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>a|os Jetpack</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography,aspect-ratio"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inconsolata">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora&amp;display=swap">
+    <script src="https://unpkg.com/htmx.org@1.9.2" integrity="sha384-L6OqL9pRWyyFU3+/bjdSri+iIphTN/bvYyM37tICVyOJkWZLpP2vGn6VUEXgzg6h" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/sse.js"></script>
+    <style>
+        .input-wrapper {
+            transition: all 0.5s ease-in-out;
+            min-height: 50px;
+            max-height: 200px;
+            overflow: auto;
+        }
+        body {
+            font-family: 'Inconsolata', serif;
+        }
+    </style>
+
+<body id="body" class="bg-slate-100">
+    <div class="fixed left-0 top-0 p-4 flex invisible lg:visible">
+        <span class="self-center text-2xl font-semibold whitespace-nowrap text-gray-400 dark:text-white">a|os</span>
+     </div>
+
+     <div class="fixed right-0 top-0 p-4 flex flex-col invisible lg:visible">
+        <button type="button" class="py-1 px-2 mb-2 text-left whitespace-nowrap rounded-md border border-solid border-gray-400 bg-gray-200 hover:bg-gray-300 text-gray-600 dark:text-white">
+            Main
+        </button>
+        <a href="#" class="py-1 px-2 mb-2 text-left whitespace-nowrap no-underline rounded-md border border-solid bg-gray-200 hover:bg-gray-300  text-gray-600 dark:text-white">
+            Meeting prep
+        </a>
+        <button type="button" class="py-1 px-2 mb-2 text-left whitespace-nowrap rounded-md border border-solid bg-gray-200 hover:bg-gray-300 text-gray-600 dark:text-white">
+            Image Downloader
+        </button>
+        <button id="new-scope" type="button" class="py-1 px-2 mb-2 mt-5 inline-flex text-center items-center rounded-md border border-solid bg-gray-200 hover:bg-gray-300  text-gray-600 dark:text-white">
+            <svg class="w-3 h-3 mr-2  text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 18 18">
+                <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 1v16M1 9h16"/>
+              </svg>
+            New
+        </button>
+     </div>
+
+    <div id="messages-container" hx-ext="sse" >
+        <div hx-get="messages" hx-vals="js:{messagekey: getQueryVals(event)}" hx-swap="beforeend" @htmx:sse-message.camel="$el.scrollIntoView(false)" class="chat-container px-4 py-6 max-w-4xl mx-auto mb-20">
+<div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+
+        <svg class="w-full h-full object-cover text-gray-200 fill-gray-400  dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs></defs><title>user</title><path d="M16,4a5,5,0,1,1-5,5,5,5,0,0,1,5-5m0-2a7,7,0,1,0,7,7A7,7,0,0,0,16,2Z"></path><path d="M26,30H24V25a5,5,0,0,0-5-5H13a5,5,0,0,0-5,5v5H6V25a7,7,0,0,1,7-7h6a7,7,0,0,1,7,7Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
+
+
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>Look into this file and save all the available company info into a CSV file: http://127.0.0.1:5001/ag/demodata/wit/actors/frontend_data/query/companies</p>
+
+        </article>
+    </div>
+</div>
+
+<div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+
+        <svg class="w-full h-full object-cover  fill-gray-400 dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs><style>.cls-1{fill:none;}</style></defs><title>chat-bot</title><path d="M16,19a6.9908,6.9908,0,0,1-5.833-3.1287l1.666-1.1074a5.0007,5.0007,0,0,0,8.334,0l1.666,1.1074A6.9908,6.9908,0,0,1,16,19Z"></path><path d="M20,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,20,8Z"></path><path d="M12,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,12,8Z"></path><path d="M17.7358,30,16,29l4-7h6a1.9966,1.9966,0,0,0,2-2V6a1.9966,1.9966,0,0,0-2-2H6A1.9966,1.9966,0,0,0,4,6V20a1.9966,1.9966,0,0,0,2,2h9v2H6a3.9993,3.9993,0,0,1-4-4V6A3.9988,3.9988,0,0,1,6,2H26a3.9988,3.9988,0,0,1,4,4V20a3.9993,3.9993,0,0,1-4,4H21.1646Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
+
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>Sure, I can help with that. However, I need some more information to proceed:</p>
+<ol>
+<li>What specific information about the companies do you want to save in the CSV file? (e.g., company name, address, etc.)</li>
+<li>Do you have a preferred name for the CSV file?</li>
+<li>Where should the CSV file be saved? (e.g., local directory, cloud storage, etc.)</li>
+<li>What is the format of the data in the file? Is it JSON, XML, or something else?</li>
+</ol>
+
+        </article>
+    </div>
+</div>
+
+<div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 18" stroke="currentColor" class="w-full h-full object-cover text-gray-200  dark:text-white" aria-hidden="true">
+            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-2 3h4a4 4 0 0 1 4 4v2H1v-2a4 4 0 0 1 4-4Z"></path>
+        </svg>
+
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>look in the URL what data is available. The file name doesnt matter, use the internal data store.</p>
+
+        </article>
+    </div>
+</div>
+
+<div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20" stroke="currentColor" class="w-full h-full object-cover text-yellow-500 text-opacity-50 dark:text-white" aria-hidden="true">
+            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 3V1m0 18v-2M5.05 5.05 3.636 3.636m12.728 12.728L14.95 14.95M3 10H1m18 0h-2M5.05 14.95l-1.414 1.414M16.364 3.636 14.95 5.05M14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z"></path>
+        </svg>
+
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>I will generate the requested functionality:</p>
+<pre><code>Write a Python function to fetch data from the provided URL, parse the data, and save all the available company information into a CSV file. The CSV file should then be stored in the internal data store.
+</code></pre>
+<p>Here are some examples for the function input:</p>
+<pre><code>['http://127.0.0.1:5001/ag/demodata/wit/actors/frontend_data/query/companies']
+</code></pre>
+
+        </article>
+    </div>
+</div>
+
+<div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20" stroke="currentColor" class="w-full h-full object-cover text-yellow-500 text-opacity-50 dark:text-white" aria-hidden="true">
+            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 3V1m0 18v-2M5.05 5.05 3.636 3.636m12.728 12.728L14.95 14.95M3 10H1m18 0h-2M5.05 14.95l-1.414 1.414M16.364 3.636 14.95 5.05M14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z"></path>
+        </svg>
+
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>Here is the function and code I generated:</p>
+<pre><code>import requests
+import pandas as pd
+from tools import DataParser
+
+async def fetch_and_parse_data(url):
+    response = requests.get(url)
+    parser = DataParser()
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "Company": {"type": "string"},
+            "Contact": {"type": "string"},
+            "Country": {"type": "string"}
+        }
+    }
+    query = "extract table data"
+    parsed_data = await parser.parse(response.text, output_schema, query)
+    return parsed_data
+
+async def save_to_csv(data):
+    df = pd.DataFrame(data)
+    csv_data = df.to_csv(index=False)
+    return csv_data
+
+async def entry(input, store):
+    url = input['url']
+    data = await fetch_and_parse_data(url)
+    csv_data = await save_to_csv(data)
+    id = await store.store_str(csv_data)
+    return {"id": id}
+
+</code></pre>
+
+        </article>
+    </div>
+</div>
+
+<div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 18" stroke="currentColor" class="w-full h-full object-cover text-gray-200  dark:text-white" aria-hidden="true">
+            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm-2 3h4a4 4 0 0 1 4 4v2H1v-2a4 4 0 0 1 4-4Z"></path>
+        </svg>
+
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>can you run it?</p>
+
+        </article>
+    </div>
+</div>
+
+<div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20" stroke="currentColor" class="w-full h-full object-cover text-yellow-500 text-opacity-50 dark:text-white" aria-hidden="true">
+            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 3V1m0 18v-2M5.05 5.05 3.636 3.636m12.728 12.728L14.95 14.95M3 10H1m18 0h-2M5.05 14.95l-1.414 1.414M16.364 3.636 14.95 5.05M14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z"></path>
+        </svg>
+
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>I will call the function with the following arguments:</p>
+<pre><code>{'url': 'http://127.0.0.1:5001/ag/demodata/wit/actors/frontend_data/query/companies'}
+</code></pre>
+
+        </article>
+    </div>
+</div>
+
+<div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20" stroke="currentColor" class="w-full h-full object-cover text-yellow-500 text-opacity-50 dark:text-white" aria-hidden="true">
+            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 3V1m0 18v-2M5.05 5.05 3.636 3.636m12.728 12.728L14.95 14.95M3 10H1m18 0h-2M5.05 14.95l-1.414 1.414M16.364 3.636 14.95 5.05M14 10a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z"></path>
+        </svg>
+
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>Here is what I generated:</p>
+<p>Company,Contact,Country
+Alfreds Futterkiste,Maria Anders,Germany
+Centro comercial Moctezuma,Francisco Chang,Mexico
+Ernst Handel,Roland Mendel,Austria
+Island Trading,Helen Bennett,UK
+Laughing Bacchus Winecellars,Yoshi Tannamuri,Canada
+Magazzini Alimentari Riuniti,Giovanni Rovelli,Italy</p>
+<p>Here are the links to the generated objects:</p>
+<ul>
+<li><a href="../../../../grit/objects/f90c23042c4e53fc103fb2e522cd07f87a07a5b5d49d498f3a8c9f550fa54a08">id: f90c23042c4e53fc103fb2e522cd07f87a07a5b5d49d498f3a8c9f550fa54a08</a></li>
+</ul>
+
+        </article>
+    </div>
+</div>
+ </div>
+    </div>
+
+    <div class="chat-input-container fixed bottom-0 left-0 right-0 p-2 bg-gray-100 border-t border-gray-200">
+        <div class="relative flex items-center max-w-4xl mx-auto pl-14">
+            <div id="chat-input-wrapper" class="input-wrapper flex-1 bg-white border border-gray-300 rounded">
+                <textarea id="chat-input" class="w-full p-2 pr-8 outline-none resize-none" placeholder="Type a message..."></textarea>
+            </div>
+            <button id="send-button" class="absolute right-4 bottom-1/2 transform translate-y-1/2">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="h-6 w-6 text-blue-600">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        agent_inbox_url = "../inbox"
+        actor_id = "0056a796062b3420f680359fddbcd04a2aca4bb17db10b4dbd212427834a6fa8"
+
+        function getQueryVals(e){
+            console.log('Event:', e);
+            if(e && e.type == 'receipt'){
+                data = JSON.parse(e.data);
+                if(data.sender_id == actor_id && data.content != null){
+                    return data.content;
+                }
+            }
+            return null;
+        }
+
+        const chatInput = document.getElementById('chat-input');
+        const sendButton = document.getElementById('send-button');
+        const newScopeButton = document.getElementById('new-scope');
+
+
+        // Expands the textarea to fit its content
+        chatInput.addEventListener('input', function() {
+            this.style.height = (this.scrollHeight) + 'px';
+        });
+
+        // Sends the message when Enter is pressed, and adds a new line when Ctrl+Enter is pressed
+        chatInput.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                if (!event.shiftKey) {
+                    // Prevent the default "Enter" behaviour (adding a new line)
+                    event.preventDefault();
+                    // Send the message (you'll need to implement this function yourself)
+                    sendMessage();
+                }
+            }
+        });
+
+        // Sends the message when the button is clicked
+        sendButton.addEventListener('click', sendMessage);
+        function sendMessage() {
+            const message = chatInput.value.trim();
+            if (message) {
+                console.log('Sending message:', message);
+                // Send the message (you'll need to implement this function yourself)
+                fetch(agent_inbox_url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain'
+                    },
+                    body: message
+                });
+                // Clear the input
+                chatInput.value = '';
+                chatInput.style.height = 'auto';
+            }
+        }
+
+        htmx.on('htmx:afterSwap', function(evt) {
+            window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
+        });
+
+        newScopeButton.addEventListener('click', newScope)
+        function newScope(){
+            //ask for name, then post
+            const scopeName = prompt("Please enter a name for the new scope", "New Scope");
+            if (scopeName != null) {
+                console.log('Creating new scope:', scopeName);
+                // Send the message (you'll need to implement this function yourself)
+                fetch(agent_inbox_url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain'
+                    },
+                    body: 'new scope: ' + scopeName
+                });
+            }
+        }
+    </script>
+
+</body></html>

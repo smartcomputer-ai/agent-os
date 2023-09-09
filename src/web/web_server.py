@@ -205,13 +205,19 @@ class WebServer:
             else:
                 #otherwise, just use the full content type
                 blob_headers['Content-Type'] = ct
+        message_headers = {}
+        if('AOS-Message-Type' in request.headers):
+            message_headers['mt'] = request.headers['AOS-Message-Type']
+        else:
+            message_headers['mt'] = 'web'
+        print(f"message headers: {message_headers}")
         #conceptually, this is adding a new message to the inbox of the actor,
         # but internally the runtime treats an injected message as if its an outbox message,
         # i.e., a message being sent by an actor (which used the outbox)
         msg = OutboxMessage.from_new(
             actor_id, 
             BlobObject(Blob(blob_headers, request_body_bytes)))
-        msg.headers['mt'] = 'web'
+        msg.headers = message_headers
         message_id = await self.runtime.inject_message(msg)
         return Response(
             content=message_id.hex(), 
@@ -295,7 +301,10 @@ class WebServer:
             actor_filter = set([bytes.fromhex(actor_id) for actor_id in actor_filter])
 
         include_content = request.query_params.get('content', 'false').lower() == 'true'
-        message_type_filter = request.query_params.get('mt')
+        message_type_filters = request.query_params.getlist('mt')
+        if(len(message_type_filters) == 0):
+            message_type_filters = None
+        print(f"message type filters: {message_type_filters}")
         request.headers.get('Last-Event-ID')
         # if(last_message_id_str is not None):
         #     print(f"last message id: {last_message_id_str}")
@@ -319,8 +328,8 @@ class WebServer:
                         else:
                             message_type = "message"
                         #if the subscriber defined a message type filter, skip messages that don't match
-                        if(message_type_filter is not None and message_type != message_type_filter):
-                            #print("skipping msg:", message_type)
+                        if(message_type_filters is not None and message_type not in message_type_filters):
+                            print("skipping msg:", message_type)
                             continue                            
                         sse_data = { 
                             "sender_id": mailbox_update[0].hex(),

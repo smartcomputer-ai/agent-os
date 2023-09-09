@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>a|os Jetpack</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=typography,aspect-ratio"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inconsolata">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora&display=swap" >
+    <script src="https://unpkg.com/htmx.org@1.9.2" integrity="sha384-L6OqL9pRWyyFU3+/bjdSri+iIphTN/bvYyM37tICVyOJkWZLpP2vGn6VUEXgzg6h" crossorigin="anonymous"></script>
+    <style>
+        .input-wrapper {
+            transition: all 0.5s ease-in-out;
+            min-height: 50px;
+            max-height: 200px;
+            overflow: auto;
+        }
+        body {
+            font-family: 'Inconsolata', serif;
+        }    
+    </style> 
+</head>
+<body id="body" class="bg-gray-100">
+
+    <div class="fixed left-0 top-0 p-4 flex invisible lg:visible">
+        <span class="self-center text-2xl font-semibold whitespace-nowrap text-gray-500 dark:text-white">a|os</span>
+     </div>
+
+     <div class="fixed right-0 top-0 p-4 flex flex-col invisible lg:visible">
+        {% for name, title in chat_titles.items() %}
+        <a href="?chat={{name}}" 
+           class="py-1 px-2 mb-2 text-left whitespace-nowrap no-underline rounded-md border border-solid {% if name == current_chat %}border-gray-500{% endif %} bg-gray-200 hover:bg-gray-300 text-gray-600 dark:text-white">
+            {{title}}
+        </a>
+        {% endfor %} 
+
+        <button id="new-chat" type="button" class="py-1 px-2 mb-2 mt-5 inline-flex text-center items-center rounded-md border border-solid bg-gray-200 hover:bg-gray-300  text-gray-600 dark:text-white">
+            <svg class="w-3 h-3 mr-2  text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 18 18">
+                <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 1v16M1 9h16"/>
+              </svg>
+            New
+        </button>
+     </div>
+     
+    <div id="messages-container"class="px-4 py-6 max-w-4xl mx-auto mb-20"
+        hx-get="../../{{current_chat_id}}/query/messages"
+        hx-trigger="load, receipt" 
+        hx-vals="js:{messagekey: getMessageFilter(event)}" 
+        hx-swap="beforeend">
+        
+    </div>
+
+    <div class="chat-input-container fixed bottom-0 left-0 right-0 p-2 bg-gray-100 border-t border-gray-200">
+        <div class="relative flex items-center max-w-4xl mx-auto pl-14">
+            <div id="chat-input-wrapper" class="input-wrapper flex-1 bg-white border border-gray-300 rounded">
+                <textarea id="chat-input" class="w-full p-2 pr-8 outline-none resize-none" placeholder="Type a message..."></textarea>
+            </div>
+            <button id="send-button" class="absolute right-4 bottom-1/2 transform translate-y-1/2">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="h-6 w-6 text-blue-600">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const agent_id = "{{agent_id}}"
+        const frontend_id = "{{frontend_id}}"
+        const chat_actors = JSON.parse('{{chat_actors|tojson}}')
+        const chat_titles = JSON.parse('{{chat_titles|tojson}}')
+        const current_chat = "{{current_chat}}"
+        const current_chat_id = "{{current_chat_id}}"
+
+        const chatInput = document.getElementById('chat-input');
+        const sendButton = document.getElementById('send-button');
+        const newChatButton = document.getElementById('new-chat');
+
+        // Expands the textarea to fit its content
+        chatInput.addEventListener('input', function() {
+            this.style.height = (this.scrollHeight) + 'px';
+        });
+
+        // Sends the message when Enter is pressed, and adds a new line when Ctrl+Enter is pressed
+        chatInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                if (!e.shiftKey) {
+                    // Prevent the default "Enter" behaviour (adding a new line)
+                    e.preventDefault();
+                    // Send the message (you'll need to implement this function yourself)
+                    sendMessage();
+                }
+            }
+        });
+
+        // Sends the message when the button is clicked
+        sendButton.addEventListener('click', sendMessage);
+        function sendMessage() {
+            chat_inbox_url = "../../{{current_chat_id}}/inbox"
+            const message = chatInput.value.trim();
+            if (message) {
+                console.log('Sending message:', message);
+                // Send the message (you'll need to implement this function yourself)
+                fetch(chat_inbox_url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'text/plain'
+                    },
+                    body: message
+                });
+                // Clear the input
+                chatInput.value = '';
+                chatInput.style.height = 'auto';
+            }
+        }
+
+        newChatButton.addEventListener('click', newChat)
+        function newChat(){
+            frontend_inbox_url = "../../{{frontend_id}}/inbox"
+            //ask for name, then post
+            const chatName = prompt("Please enter a name for the new chat", "New Chat");
+            if (chatName != null) {
+                console.log('Creating new chat:', chatName);
+                // Send the message (you'll need to implement this function yourself)
+                fetch(frontend_inbox_url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'AOS-Message-Type': 'create-chat'
+                    },
+                    body: JSON.stringify({'name': chatName})
+                });
+            }
+        }
+
+        const evtSource = new EventSource("../../../messages-sse?content=true&mt=receipt&mt=new-chat");
+        evtSource.onmessage = (e) => {
+            console.log('SSE Event, message:', e);
+        };
+        evtSource.addEventListener('receipt', (e) => {
+            data = JSON.parse(e.data);
+            //console.log('SSE Event, receipt:', data);
+            if(data.sender_id == current_chat_id && data.content != null){
+                htmx.trigger("#messages-container", "receipt", {messagekey: data.content});
+            }
+            else{
+                //todo indicate that there are new messages in this other chat
+                console.log('SSE Event: Not for current chat, ignoring');
+            }
+        });
+        evtSource.addEventListener('new-chat', (e) => {
+            data = JSON.parse(e.data);
+            console.log('SSE Event, new-chat', data);
+            //redirect to new chat
+            window.location.href = "?chat=" + data.content;
+        });
+
+        function getMessageFilter(e){
+            //if the event contain messagekey, return it
+            //console.log('Getting message filter for event:', e);
+            if(e.detail != null && e.detail.messagekey != null){
+                return e.detail.messagekey;
+            }
+            return null;
+        }
+
+        htmx.on('htmx:afterSwap', function(evt) {
+            window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
+        });
+
+    </script>
+</body>
+</html>
