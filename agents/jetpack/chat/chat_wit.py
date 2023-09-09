@@ -87,6 +87,7 @@ async def on_message_web(content:str, ctx:MessageContext, state:ChatState) -> No
     #if the last message was from a user, then kick off the models
     if chat_msg.from_name == 'user':
         ctx.outbox.add_new_msg(ctx.actor_id, "complete", mt="complete")
+        ctx.outbox.add_reply_msg(ctx.message, "Thinking", mt="thinking")
     else:
         print(f"Chat '{state.name}': last web message was not from 'user', but was from '{chat_msg.from_name}', will skip.")
 
@@ -136,6 +137,8 @@ async def on_complete_message(msg:InboxMessage, ctx:MessageContext, state:ChatSt
         state.code_request = result
         # create a chat message for the frontend
         chat_message = ChatMessage.from_actor(msg, ctx.actor_id) 
+        ctx.outbox.add_new_msg(ctx.agent_id, "Start Coding", mt="thinking")
+
     
     elif isinstance(result, CodeExecution):
         print(f"Chat '{state.name}': completion is a CodeExecution.")
@@ -157,6 +160,7 @@ async def on_complete_message(msg:InboxMessage, ctx:MessageContext, state:ChatSt
         state.current_execution = result
         # create a chat message for the frontend
         chat_message = ChatMessage.from_actor(msg, ctx.actor_id)
+        ctx.outbox.add_new_msg(ctx.agent_id, "Executing", mt="thinking")
 
     # save message in history
     messages_tree.makeb(str(chat_message.id), True).set_as_json(chat_message)

@@ -88,7 +88,7 @@ async def on_spec_message(spec:CodeSpec, msg:InboxMessage, state:CoderState, out
 
 
 @app.message("plan")
-async def on_plan_message(msg:InboxMessage, state:CoderState, outbox:Outbox, actor_id:ActorId):
+async def on_plan_message(msg:InboxMessage, state:CoderState, ctx:MessageContext):
     print("Coder: on_plan_message")
     if state.code_spec.input_spec is None or state.code_spec.output_spec is None:
         print("Coder: generating input and/or output specs")
@@ -107,8 +107,9 @@ async def on_plan_message(msg:InboxMessage, state:CoderState, outbox:Outbox, act
 
     #todo: convert the spec into a plan using a model completion
     state.code_plan = state.code_spec.task_description
-    outbox.add_new_msg(actor_id, "code", mt="code")
-    notify_all(state, outbox, CodePlanned(task_description=state.code_spec.task_description, code_plan=state.code_plan), mt="code_planned")
+    ctx.outbox.add_new_msg(ctx.actor_id, "code", mt="code")
+    notify_all(state, ctx.outbox, CodePlanned(task_description=state.code_spec.task_description, code_plan=state.code_plan), mt="code_planned")
+    ctx.outbox.add_new_msg(ctx.agent_id, f"Coding: {state.name}", mt="thinking")
 
 
 @app.message("code")

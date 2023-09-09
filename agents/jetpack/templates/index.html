@@ -25,12 +25,12 @@
 
     <div class="fixed left-0 top-0 p-4 flex invisible lg:visible">
         <span class="self-center text-2xl font-semibold whitespace-nowrap text-gray-500 dark:text-white">a|os</span>
-     </div>
+        </div>
 
-     <div class="fixed right-0 top-0 p-4 flex flex-col invisible lg:visible">
+        <div class="fixed right-0 top-0 p-4 flex flex-col invisible lg:visible">
         {% for name, title in chat_titles.items() %}
         <a href="?chat={{name}}" 
-           class="py-1 px-2 mb-2 text-left whitespace-nowrap no-underline rounded-md border border-solid {% if name == current_chat %}border-gray-500{% endif %} bg-gray-200 hover:bg-gray-300 text-gray-600 dark:text-white">
+            class="py-1 px-2 mb-2 text-left whitespace-nowrap no-underline rounded-md border border-solid {% if name == current_chat %}border-gray-500{% endif %} bg-gray-200 hover:bg-gray-300 text-gray-600 dark:text-white">
             {{title}}
         </a>
         {% endfor %} 
@@ -38,17 +38,38 @@
         <button id="new-chat" type="button" class="py-1 px-2 mb-2 mt-5 inline-flex text-center items-center rounded-md border border-solid bg-gray-200 hover:bg-gray-300  text-gray-600 dark:text-white">
             <svg class="w-3 h-3 mr-2  text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 18 18">
                 <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 1v16M1 9h16"/>
-              </svg>
+                </svg>
             New
         </button>
-     </div>
-     
-    <div id="messages-container"class="px-4 py-6 max-w-4xl mx-auto mb-20"
-        hx-get="../../{{current_chat_id}}/query/messages"
-        hx-trigger="load, receipt" 
-        hx-vals="js:{messagekey: getMessageFilter(event)}" 
-        hx-swap="beforeend">
-        
+    </div>
+    
+    <div class="mb-20">
+        <div id="messages-container"class="px-4 pt-6 pb-4 max-w-4xl mx-auto"
+            hx-get="../../{{current_chat_id}}/query/messages"
+            hx-trigger="load, receipt" 
+            hx-vals="js:{messagekey: getMessageFilter(event)}" 
+            hx-swap="beforeend">
+        </div>
+
+        <div id="loader" class="pb-5 w-full" style="display: none;">
+            <div class="w-12 h-12 mx-auto">
+                <svg class="w-full h-full stroke-gray-600 dark:stroke-white" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
+                    <g fill="none" fill-rule="evenodd" stroke-width="3">
+                        <circle cx="22" cy="22" r="1">
+                            <animate attributeName="r" begin="0s" dur="1.8s" values="1; 20" calcMode="spline" keyTimes="0; 1" keySplines="0.165, 0.84, 0.44, 1" repeatCount="indefinite"></animate>
+                            <animate attributeName="stroke-opacity" begin="0s" dur="1.8s" values="1; 0" calcMode="spline" keyTimes="0; 1" keySplines="0.3, 0.61, 0.355, 1" repeatCount="indefinite"></animate>
+                        </circle>
+                        <circle cx="22" cy="22" r="1">
+                            <animate attributeName="r" begin="-0.9s" dur="1.8s" values="1; 20" calcMode="spline" keyTimes="0; 1" keySplines="0.165, 0.84, 0.44, 1" repeatCount="indefinite"></animate>
+                            <animate attributeName="stroke-opacity" begin="-0.9s" dur="1.8s" values="1; 0" calcMode="spline" keyTimes="0; 1" keySplines="0.3, 0.61, 0.355, 1" repeatCount="indefinite"></animate>
+                        </circle>
+                    </g>
+                </svg>
+            </div>
+            <div class="mt-2 mx-auto text-center">
+                <span id="loader-text">Loading</span>
+            </div>
+        </div>
     </div>
 
     <div class="chat-input-container fixed bottom-0 left-0 right-0 p-2 bg-gray-100 border-t border-gray-200">
@@ -133,7 +154,7 @@
             }
         }
 
-        const evtSource = new EventSource("../../../messages-sse?content=true&mt=receipt&mt=new-chat");
+        const evtSource = new EventSource("../../../messages-sse?content=true&mt=receipt&mt=new-chat&mt=thinking");
         evtSource.onmessage = (e) => {
             console.log('SSE Event, message:', e);
         };
@@ -142,6 +163,9 @@
             //console.log('SSE Event, receipt:', data);
             if(data.sender_id == current_chat_id && data.content != null){
                 htmx.trigger("#messages-container", "receipt", {messagekey: data.content});
+                //hider loader & reset text
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('loader-text').innerHTML = 'Loading';
             }
             else{
                 //todo indicate that there are new messages in this other chat
@@ -153,6 +177,14 @@
             console.log('SSE Event, new-chat', data);
             //redirect to new chat
             window.location.href = "?chat=" + data.content;
+        });
+        evtSource.addEventListener('thinking', (e) => {
+            data = JSON.parse(e.data);
+            console.log('SSE Event, thinking', data);
+            //show loader & set text
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('loader-text').innerHTML = data.content;
+            window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
         });
 
         function getMessageFilter(e){

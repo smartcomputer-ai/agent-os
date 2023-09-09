@@ -72,7 +72,7 @@ async def on_request_message(request:CodeRequest, msg:InboxMessage, state:Retrie
     outbox.add_new_msg(actor_id, "plan", mt="plan")
 
 @app.message("plan")
-async def on_plan_message(msg:InboxMessage, state:RetrieverState, outbox:Outbox, actor_id:ActorId):
+async def on_plan_message(msg:InboxMessage, state:RetrieverState, ctx:MessageContext):
     print("Retriever: on_plan_message")
 
     # see if any data needs to be retrieved that needs to feature in the code generation later
@@ -83,13 +83,14 @@ async def on_plan_message(msg:InboxMessage, state:RetrieverState, outbox:Outbox,
     if retrievals is not None:
         print("Retriever: retrievals:", retrievals)
         state.locations = retrievals
-        outbox.add_new_msg(actor_id, "retrieve", mt="retrieve")
+        ctx.outbox.add_new_msg(ctx.actor_id, "retrieve", mt="retrieve")
+        ctx.outbox.add_new_msg(ctx.agent_id, "Retrieving Data", mt="thinking")
         return
     else:
         print("Retriever: no retrievals needed")
         state.locations = None
         state.retrieved_data = None
-        outbox.add_new_msg(actor_id, "complete", mt="complete")
+        ctx.outbox.add_new_msg(ctx.actor_id, "complete", mt="complete")
 
 @app.message("retrieve")
 async def on_retrieve_message(msg:InboxMessage, state:RetrieverState, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
