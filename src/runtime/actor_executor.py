@@ -7,7 +7,7 @@ from wit import *
 from .resolvers import Resolver
 from .query_executor import QueryExecutor
 
-MailboxUpdate = tuple[ActorId, ActorId, MessageId]
+MailboxUpdate = tuple[ActorId, ActorId, MessageId] # sender_id, recipient_id, message_id
 MailboxUpdateCallback = Callable[[set[MailboxUpdate]], Awaitable[None]]
 
 class GenesisMessageNotReadyError(Exception):
@@ -58,12 +58,13 @@ class ActorExecutor:
     _last_step_outbox:Mailbox
     _current_inbox:Mailbox
 
-    def __init__(self,
-        ctx:ExecutionContext,
-        actor_id:ActorId, 
-        last_step_id:StepId|None, 
-        last_step_inbox:Mailbox, 
-        last_step_outbox:Mailbox):
+    def __init__(
+            self,
+            ctx:ExecutionContext,
+            actor_id:ActorId, 
+            last_step_id:StepId|None, 
+            last_step_inbox:Mailbox, 
+            last_step_outbox:Mailbox):
         if not isinstance(ctx, ExecutionContext):
             raise TypeError(f"ctx must be an ExecutionContext, got {type(ctx)}")
         self.ctx = ctx
@@ -184,6 +185,7 @@ class ActorExecutor:
                     await outbox_callback(new_outbox_messages)
             #clear the event so it can wait again later
             self._step_sleep_event.clear()
+
     async def _should_run_step(self)->bool:
         '''Allows for a sub-class to override the logic of when to run the step function.'''
         return False    
@@ -216,6 +218,7 @@ class ActorExecutor:
                 return {}
             return await self.ctx.store.load(step.outbox)
     
+
 class _WitExecution:
     #set in from_new_inbox
     actor_id:ActorId

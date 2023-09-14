@@ -21,9 +21,6 @@ class Runtime:
     # (the deadlock would actually be here in the callback, but technically it would be in the executor)
     __outbox_queue:asyncio.Queue
 
-    #pub/sub variables
-    _external_message_subscriptions:set[ExternalMessageSubscription]
-
     def __init__(self, 
             store:ObjectStore, 
             references:References, 
@@ -57,7 +54,6 @@ class Runtime:
         self.__runtime_executor = None
         self.__outbox_queue = asyncio.Queue()
         self.__executor_lock = asyncio.Lock()
-        self._external_message_subscriptions = set()
 
     @property
     def agent_name(self) -> str|None:
@@ -201,12 +197,7 @@ class Runtime:
                             self.__executors[recipient_id] = ActorExecutor.from_genesis(self.ctx, recipient_id)
                         executor_tasks.append(asyncio.create_task(self.__executors[recipient_id].start(self.__outbox_callback)))
                         await self.__executors[recipient_id].update_current_inbox(new_messages)
-                #publish the new messages to the external subscribers (external systems listening to the real-time updates)
-                # (this should happen after the actor executor has been created and/or accepted the new messages)
-                self.__publish_to_external_subscribers(recipient_id, new_messages)
 
-        #signal stop to all external subscribers
-        self.__publish_stop_to_external_subscribers()
         #cancel all executors
         for _, executor in self.__executors.items():
             executor.stop()
@@ -218,36 +209,8 @@ class Runtime:
                 print("exception in executor task")
                 raise ex
     
-    #todo: document this, esp. the recursive nature of the pub/sub setup
-    def subscribe_to_messages(self, recipient_filters:set[ActorId]=None) -> ExternalMessageSubscription:
-        return Runtime.ExternalMessageSubscription(self, recipient_filters)
-
-    def __publish_to_external_subscribers(self, recipient_id:ActorId, new_messages:list[MailboxUpdate]):
-        #print("publishing to external subscribers", recipient_id.hex(), len(new_messages))
-        if(self._external_message_subscriptions is None or len(self._external_message_subscriptions) == 0):
-            return
-        for sub in self._external_message_subscriptions:
-            if(sub.recipients is None or recipient_id in sub.recipients):
-                for mailbox_update in new_messages:
-                    sub.queue.put_nowait(mailbox_update)
-
-    def __publish_stop_to_external_subscribers(self):
-        if(self._external_message_subscriptions is None or len(self._external_message_subscriptions) == 0):
-            return
-        for sub in self._external_message_subscriptions:
-            sub.queue.put_nowait(None)
-
-    class ExternalMessageSubscription:
-        def __init__(self, runtime:Runtime, recipients:set[ActorId]=None):
-            self.runtime = runtime
-            self.recipients = recipients
-            self.queue = asyncio.Queue()
-        def __enter__(self):
-            self.runtime._external_message_subscriptions.add(self)
-            return self.queue
-        def __exit__(self, type, value, traceback):
-            self.runtime._external_message_subscriptions.remove(self)
-
+    def subscribe_to_messages(self) -> RuntimeExecutor.ExternalMessageSubscription:
+        return self.__runtime_executor.subscribe_to_messages()
 
 def _sort_new_messages_for_recipients(outbox_updates:list[set[MailboxUpdate]]) -> dict[ActorId, list[MailboxUpdate]]:
     #gather all new messages from the outbox updates

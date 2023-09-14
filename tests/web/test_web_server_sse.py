@@ -38,7 +38,7 @@ async def test_sse():
     sse_events = []
     async def listen_to_messages():
         async with httpx.AsyncClient(app=WebServer(runtime).app(), base_url="http://localhost:5000") as client:
-            async with aconnect_sse(client, method="GET", url=f"{url_prefix}/messages-sse?actor-id=all") as event_source:
+            async with aconnect_sse(client, method="GET", url=f"{url_prefix}/messages-sse?content=true") as event_source:
                 async for sse in event_source.aiter_sse():
                     print(f"SSE event (id: {sse.id}, event: {sse.event}): {sse.data}")
                     sse_events.append(sse.json())
@@ -62,10 +62,9 @@ async def test_sse():
     await runtime_task
     await listen_task
 
-    #there should be three events, two for the sent message (genesis and post), and one for the reply from the wit
-    assert len(sse_events) == 3
-    assert sse_events[0]['message_id'] == wit_a_gen_message_id.hex()
-    assert sse_events[1]['message_id'] == new_message_id_str
+    #there should be one event, for the reply from the wit
+    assert len(sse_events) == 1
+    assert sse_events[0]['content'] == "hi back"
 
     
 

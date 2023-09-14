@@ -10,8 +10,11 @@ class RuntimeExecutor(ActorExecutor):
     Whenever a new message gets injected from the outside world, it still has to come from somewhere.
     And so external messages are injected into the runtime agent's outbox, and are then routed to the
     appropriate normal agent.
+
+    It also supports to subscribe to messages sent by other actors to this runtime actor.
     """
     _current_outbox:Mailbox
+    _external_message_subscriptions:set[ExternalMessageSubscription]
 
     def __init__(self, 
         ctx:ExecutionContext,
@@ -23,7 +26,8 @@ class RuntimeExecutor(ActorExecutor):
             ctx, agent_id, 
             last_step_id, last_step_inbox, last_step_outbox)
         self._current_outbox = last_step_outbox.copy()
-    
+        self._external_message_subscriptions = set()
+
     @classmethod
     async def from_agent_name(cls, ctx:ExecutionContext, agent_name:str) -> 'RuntimeExecutor':
         agent_id, last_step_id = await create_or_load_runtime_actor(ctx.store, ctx.references, agent_name)
@@ -63,10 +67,10 @@ class RuntimeExecutor(ActorExecutor):
     async def runtime_wit(self, last_step_id:StepId, new_inbox:Mailbox, **kwargs) -> StepId:
         (inbox, outbox, core) = await load_step(self.ctx.store, self.actor_id, last_step_id, new_inbox)
         if(len(inbox.get_current()) > 0):
-            #todo: this fails if the inbox is empty
-            await inbox.read_new()
-            #do stuff with system messages here
-            # e.g notify the runtime about changes with agents and so on
+            #forward new messages to subscribers
+            new_messages = await inbox.read_new()
+            mailbox_updates:list[MailboxUpdate] = [(msg.sender_id, self.actor_id, msg.message_id,) for msg in new_messages]
+            self._publish_to_external_subscribers(mailbox_updates)
 
         #persist the read inbox
         new_inbox_id = await inbox.persist(self.ctx.store)
@@ -83,7 +87,38 @@ class RuntimeExecutor(ActorExecutor):
         new_step = Step(last_step_id, self.actor_id, new_inbox_id, new_outbox_id, core.get_as_object_id()) #core has not changed
         new_step_id = await self.ctx.store.store(new_step)
         return new_step_id
-    
+
+    def stop(self):
+        self._publish_stop_to_external_subscribers()
+        super().stop()
+
+    def subscribe_to_messages(self) -> ExternalMessageSubscription:
+        return RuntimeExecutor.ExternalMessageSubscription(self)
+
+    def _publish_to_external_subscribers(self, new_messages:list[MailboxUpdate]):
+        print("publishing to external subscribers", len(new_messages))
+        if(self._external_message_subscriptions is None or len(self._external_message_subscriptions) == 0):
+            return
+        for sub in self._external_message_subscriptions:
+            for mailbox_update in new_messages:
+                sub.queue.put_nowait(mailbox_update)
+
+    def _publish_stop_to_external_subscribers(self):
+        if(self._external_message_subscriptions is None or len(self._external_message_subscriptions) == 0):
+            return
+        for sub in self._external_message_subscriptions:
+            sub.queue.put_nowait(None)
+
+    class ExternalMessageSubscription:
+        def __init__(self, executor:RuntimeExecutor):
+            self.executor = executor
+            self.queue = asyncio.Queue()
+        def __enter__(self):
+            self.executor._external_message_subscriptions.add(self)
+            return self.queue
+        def __exit__(self, type, value, traceback):
+            self.executor._external_message_subscriptions.remove(self)
+
 
 async def create_or_load_runtime_actor(object_store:ObjectStore, references:References, agent_name:str) -> tuple[ActorId, StepId]:
     #check if the 'runtime/agent' reference exists

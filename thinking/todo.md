@@ -45,6 +45,9 @@
    - [X] How should the first version work?
    - [X] What is the end-goal of wit error semantics?
    - [X] Document it.
+- [ ] first version of runtime actors
+   - [ ] Agent
+   - [ ] Web Server
 - [ ] cli: reset commant to reset grit
 - [ ] fix push bug (doesn't detect same files, always pushes something)
 - [ ] automatic LMDB resizing

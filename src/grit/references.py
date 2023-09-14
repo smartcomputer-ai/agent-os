@@ -36,5 +36,8 @@ def ref_step_head(actor_id:ActorId|str) -> str:
 def ref_actor_name(actor_name_ref:str) -> str:
     return f"actors/{actor_name_ref}"
 
+def ref_runtime_actor_name(actor_name_ref:str) -> str:
+    return f"runtime/{actor_name_ref}"
+
 def ref_runtime_agent() -> str:
     return "runtime/agent"

@@ -285,20 +285,7 @@ class WebServer:
                 detail=f"Query result ({query_name}) is not a blob or tree object, the query endpoint only supports serving blob and tree objects")
 
     async def wit_get_messages_sse(self, request:Request):
-        agent_id = self.__validate_agent_id(request)
-
-        #actor ids can be selected via query string "?actor-id=hex-id1&actor-id=hex-id2" or "?actor-id=all" to get all messages
-        # by default, only messages for the agent id are returned, meaning messages sent to the runtime and not an individual actor
-        actor_filter = None
-        if(self.__ACTOR_ID_QUERY_PARAM in request.query_params):
-            actor_filter = request.query_params.getlist(self.__ACTOR_ID_QUERY_PARAM)
-            if(actor_filter[0] == 'all'):
-                actor_filter = None
-        else:
-            actor_filter = [agent_id.hex()]
-        #convert to byte ids and set
-        if(actor_filter is not None):
-            actor_filter = set([bytes.fromhex(actor_id) for actor_id in actor_filter])
+        self.__validate_agent_id(request)
 
         include_content = request.query_params.get('content', 'false').lower() == 'true'
         message_type_filters = request.query_params.getlist('mt')
@@ -309,10 +296,10 @@ class WebServer:
         # if(last_message_id_str is not None):
         #     print(f"last message id: {last_message_id_str}")
 
-        async def subscribe_to_messages(recipient_filter:set[ActorId]=None):
+        async def subscribe_to_messages():
             mailbox_updates_queue:asyncio.Queue[tuple[ActorId, ActorId, MessageId]]
             try:
-                with self.runtime.subscribe_to_messages(recipient_filter) as mailbox_updates_queue:
+                with self.runtime.subscribe_to_messages() as mailbox_updates_queue:
                     while True:
                         #todo: add time out to handle cancel, etc
                         mailbox_update = await mailbox_updates_queue.get()
@@ -358,7 +345,7 @@ class WebServer:
                 raise e
         
         return EventSourceResponse(
-            subscribe_to_messages(actor_filter),
+            subscribe_to_messages(),
             headers={'Cache-Control': "public, max-age=3200"},
             )
 
