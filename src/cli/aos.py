@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import dataclass
 import os
+import shutil
 import sys
 import click
 from grit import *
@@ -118,6 +119,31 @@ name = "{agent_name}"
     asyncio.run(ainit())
 
 #===========================================================
+# 'reset' command
+#===========================================================
+@cli.command()
+@click.pass_context
+@click.option("--no-push", is_flag=True, help="Only delete grit, do not push.")
+def reset(ctx:click.Context, no_push:bool):
+    print("-> Resetting Agent")
+    wit_ctx:WitContext = ctx.obj
+    
+    if(not os.path.exists(wit_ctx.sync_file_path)):
+        raise click.ClickException(f"Sync file '{wit_ctx.sync_file_path}' does not exist, assuming this is not an existing agent.")
+
+    if(os.path.exists(wit_ctx.grit_dir)):
+        print("Deleting grit directory: " + wit_ctx.grit_dir)
+        shutil.rmtree(wit_ctx.grit_dir)
+        os.makedirs(wit_ctx.grit_dir, exist_ok=True)
+        print("Created fresh grit directory: " + wit_ctx.grit_dir)
+
+    #sanity check that all needed paths exist
+    wit_ctx.enforce_paths_exist()
+
+    if(not no_push):
+        ctx.invoke(push)
+
+#===========================================================
 # 'push' command
 #===========================================================
 @cli.command()
@@ -172,11 +198,15 @@ def push(ctx:click.Context):
 # 'run' command
 #===========================================================
 @cli.command()
+@click.pass_context
 #add an integer option  for the port
 @click.option("--port", "-p", required=False, type=int,
     help="The port to run the webserver on.")
-@click.pass_context
-def run(ctx:click.Context, port:int|None):
+@click.option("--do-reset", "-r", is_flag=True, help="Reset grit before running.")
+def run(ctx:click.Context, port:int|None, do_reset:bool):
+    if do_reset:
+        ctx.invoke(reset)
+
     print("-> Running Agent")
     wit_ctx:WitContext = ctx.obj
     wit_ctx.enforce_paths_exist()
@@ -189,11 +219,10 @@ def run(ctx:click.Context, port:int|None):
         print("Grit dir: "+wit_ctx.grit_dir)
         store, refs = wit_ctx.init_stores()
 
-        #load the agents and register the external paths
-        pushes = await sf.load_pushes(wit_ctx.sync_file_path, refs)
-        for push in pushes:
-            _try_add_to_path(push)
+        # add external paths
+        _add_to_path(wit_ctx.sync_file_path)
 
+        # start the runtime
         runtime = Runtime(store, refs, agent_name)
         print("Agent id: "+runtime.agent_id.hex())
         runtime_task = asyncio.create_task(runtime.start())
@@ -205,7 +234,7 @@ def run(ctx:click.Context, port:int|None):
         if(len(actors) == 0):
             print("WARNING: no actors available in the runtime!")
 
-
+        # start web server
         web_sever = WebServer(runtime)
         print("Web server starting...", port)
         web_task = asyncio.create_task(web_sever.run(port=port))
@@ -222,48 +251,12 @@ def run(ctx:click.Context, port:int|None):
 
     asyncio.run(arun())
 
-def _try_add_to_path(actor_push:ActorPush):
-    add_paths = False
-    modules = []
-    if(actor_push.wit is not None and actor_push.wit.startswith("external:")):
-        wit_ref = actor_push.wit[9:]
-        ref_parts = wit_ref.split(":")
-        if(len(ref_parts) > 2):
-            raise Exception(f"Invalid external 'wit' reference: {wit_ref}")
-        elif(len(ref_parts) == 2):
-            modules.append(ref_parts[0])
-            add_paths = True
-    if(actor_push.wit_query is not None and actor_push.wit_query.startswith("external:")):
-        query_ref = actor_push.wit_query[9:]
-        ref_parts = query_ref.split(":")
-        if(len(ref_parts) > 2):
-            raise Exception(f"Invalid external 'wit_query' reference: {query_ref}")
-        elif(len(ref_parts) == 2):
-            modules.append(ref_parts[0])
-            add_paths = True
-
-    if(add_paths):
-        search_paths = set()
-        for si in actor_push.sync_items:
-            if(si.file_name is not None and si.file_name.endswith(".py")):
-                search_paths.add(si.dir_path)
-                #also add the parent directory, so that packages can be imported too
-                search_paths.add(os.path.normpath(os.path.join(si.dir_path, "..")))
-        for search_path in search_paths:
-            if(not os.path.exists(search_path)):
-                raise Exception(f"Search path does not exist: {search_path}")
-            #if the path contains an __init__.py file, then it is a package and we should not add the path
-            if(os.path.exists(os.path.join(search_path, "__init__.py"))):
-                print(f"Skipping search path because it is a package: {search_path}")
-                continue
-            if(search_path not in sys.path):
-                print(f"Adding search path: {search_path}")
-                sys.path.append(search_path)
-            #also see if the module has been loaded previously and reload it now (for watch mode)
-            # for module in modules:
-            #     if(module in sys.modules):
-            #         importlib.reload(sys.modules[module])
-
+def _add_to_path(sync_file:str):
+    external_paths = sf.load_paths(sync_file)
+    for external_path in external_paths:
+        if external_path not in sys.path:
+            print(f"Adding search path: {external_path}")
+            sys.path.append(external_path)
 
 #===========================================================
 # Utils

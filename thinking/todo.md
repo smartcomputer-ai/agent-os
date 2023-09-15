@@ -26,11 +26,11 @@
    - [X] Introduce a 'patterns' folder from which wits can be constructed
 - [X] file store is slow and not efficient, consider using sqlite or lmdb (lmdb is probably the best option, HOWEVER, sqlite is more ergonomic and known by devs)
 - [X] cleanup and finalize the @wit helper funcions
-- [ ] write a real agent that can do the following:
+- [X] write a real agent that can do the following:
    - [X] chat
    - [X] write code and execute it (as a new actor)
-   - [ ] ingest data and analyize it (embeddings, etc.)
-   - [ ] generate some images
+   - [X] ingest data and analyize it (embeddings, etc.)
+   - [X] generate some images
    - [ ] do it in a modular fashion (with funcation usage) that shows the power of the actor system and wits in general
 - [X] Rename 'agent executor' to something else, it's just too confusing, maybe just call it 'runtime executor'
 - [X] Add documentation to all relevant classes and functions
@@ -45,12 +45,10 @@
    - [X] How should the first version work?
    - [X] What is the end-goal of wit error semantics?
    - [X] Document it.
-- [ ] first version of runtime actors
-   - [ ] Agent
-   - [ ] Web Server
-- [ ] cli: reset commant to reset grit
-- [ ] fix push bug (doesn't detect same files, always pushes something)
-- [ ] automatic LMDB resizing
+- [X] cli: reset command to delete grit
+- [X] cli: add paths option to sync file so that external wits can be easily added, don't use automatic path detection
+- [X] fix push bug (doesn't detect same files, always pushes something)
+- [X] automatic LMDB resizing
 - [X] install and use a linter (see: https://google.github.io/styleguide/pyguide.html)
 - [ ] support sync wits (the objective is to support libraries like LangChain):
    - [X] sync alternative in object store
@@ -58,6 +56,7 @@
    - [ ] allow sync wits, execute them in a thread
 - [ ] Add basic logging and instrumentation (instead of just prints)
 - [ ] Write a getting started guide 
+- [ ] Add inspiration section to design doc
 
 
 ### Release v0.1.1

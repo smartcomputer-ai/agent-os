@@ -3,8 +3,6 @@ import sys
 import time
 import asyncio
 import tempfile
-from grit.stores.memory import MemoryObjectStore, MemoryReferences
-from grit.stores.file import FileObjectStore, FileReferences
 from grit.stores.lmdb import SharedEnvironment, LmdbReferences, LmdbObjectStore
 from . perf_grid import perf_grid_run
 
@@ -12,6 +10,7 @@ async def amain():
     # store = MemoryObjectStore()
     # refs = MemoryReferences()
     with tempfile.TemporaryDirectory() as temp_dir:
+        print(f"Temp dir is {temp_dir}")
         # store = FileObjectStore(temp_dir)
         # refs = FileReferences(temp_dir)
         shared_env = SharedEnvironment(temp_dir, writemap=True)

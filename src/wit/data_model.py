@@ -1083,7 +1083,7 @@ class Outbox:
             raise Exception("Cannot persist empty outbox, at least one message must be present")
         #save each queue concurrently
         queue_futures = []
-        for recipient in self.__outbox_buffer:
+        for recipient in list(self.__outbox_buffer):
             queue_futures.append(self.__persist_recipient_buffer(store, recipient))
         await asyncio.gather(*queue_futures)
         #the latest message id in the new_outbox was already set in __persist_recipient_buffer

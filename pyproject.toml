@@ -48,6 +48,7 @@ beautifulsoup4 = "^4.12.2"
 mistune = "^3.0.1"
 filetype = "^1.2.0"
 ruff = "^0.0.285"
+readerwriterlock = "^1.0.9"
 
 [build-system]
 requires = ["poetry-core"]

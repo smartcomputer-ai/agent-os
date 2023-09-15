@@ -1,6 +1,7 @@
 from grit.object_model import *
 from grit.object_serialization import *
 from grit.references import References
+import lmdb
 from .shared_env import SharedEnvironment
 
 class LmdbReferences(References):
@@ -23,9 +24,19 @@ class LmdbReferences(References):
         if(ref is None):
             raise ValueError("ref must not be None.")
         ref_bytes = ref.encode('utf-8')
-        with self._shared_env.begin_refs_txn() as txn:
-            if not txn.put(ref_bytes, object_id, overwrite=True):
-                raise Exception(f"Not able to set '{ref}' in lmdb 'refs' database.")
+
+        try:
+            with self._shared_env.begin_refs_txn() as txn:
+                if not txn.put(ref_bytes, object_id, overwrite=True):
+                    raise Exception(f"Not able to set '{ref}' in lmdb 'refs' database.")
+        except lmdb.MapFullError as lmdb_error:
+            print(f"===> Resizing LMDB map... in refs store, (ref: {ref}, obj id: {object_id.hex()}) <===")
+            self._shared_env._resize()
+            #try again
+            with self._shared_env.begin_refs_txn() as txn:
+                if not txn.put(ref_bytes, object_id, overwrite=True):
+                    raise Exception(f"Not able to set '{ref}' in lmdb 'refs' database.") from lmdb_error
+
 
     def get_sync(self, ref:str) -> ObjectId | None:
         with self._shared_env.begin_refs_txn(write=False) as txn:

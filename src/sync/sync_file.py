@@ -22,6 +22,7 @@ from .actor_push import ActorPush
 # push_on_genesis = "path/to/common_code:/"
 # pull = "path/to/common_code:/"
 # sync = "path/to/common_code:/" supports both push and pull
+# external_paths = ["path/to/common_code", "path/to/other_code"] #optional
 
 # [[actors]]
 # name = "actor_one" #optional
@@ -49,6 +50,36 @@ def loads_agent(toml:str|TOMLDocument) -> dict[str,str]:
     _validate_doc(doc)
     agent = doc["agent"]
     return dict(agent)
+
+def load_paths(toml_file_path:str) -> dict[str,str]:
+    doc = _read_toml_file(toml_file_path)
+    return loads_paths(doc)
+
+def loads_paths(toml:str|TOMLDocument) -> list[str]:
+    if(isinstance(toml, str)):
+        doc = _read_toml_string(toml)
+    else:
+        doc = toml
+    _validate_doc(doc)
+    paths = []
+    all = doc.get("all", None)
+    if(all is not None and 'external_paths' in all):
+        all_paths = all['external_paths']
+        if(isinstance(all_paths, str)):
+            paths.append(all_paths)
+        elif(isinstance(all_paths, list)):
+            paths.extend(all_paths)
+    
+    actors = doc.get("actors", None)
+    if(actors is not None):
+        for actor_table in actors:
+            if 'external_paths' in actor_table:
+                actor_paths = actor_table['external_paths']
+                if(isinstance(actor_paths, str)):
+                    paths.append(actor_paths)
+                elif(isinstance(actor_paths, list)):
+                    paths.extend(actor_paths)
+    return paths
 
 async def load_pushes(toml_file_path:str, references:References) -> list[ActorPush]:
     doc = _read_toml_file(toml_file_path)
@@ -173,7 +204,7 @@ def _validate_doc(doc:tomlkit.TOMLDocument) -> None:
 
     if('agent' in doc):
         validate_agent(doc['agent'])
-    valid_all_keys = ['push', 'pull', 'sync', 'push_value', 'push_on_genesis', 'push_value_on_genesis', 'runtime']
+    valid_all_keys = ['push', 'pull', 'sync', 'push_value', 'push_on_genesis', 'push_value_on_genesis', 'runtime', 'external_paths']
     if('all' in doc):
         validate_all(doc['all'], valid_all_keys)
     valid_actor_keys = ['name', 'wit', 'wit_query', 'notify'] + valid_all_keys

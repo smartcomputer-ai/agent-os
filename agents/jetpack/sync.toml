@@ -2,7 +2,7 @@
 name = "jetpack"
 
 [all]
-push=["./agents/jetpack/coder:/code/coder", "./agents/jetpack/chat:/code/chat"]
+external_paths=["./agents/jetpack/frontend", "./agents/jetpack/coder", "./agents/jetpack/chat"]
 
 [[actors]]
 name="frontend"

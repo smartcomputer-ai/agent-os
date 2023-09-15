@@ -1,8 +1,7 @@
-import pickle
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
+import faulthandler
 from src.wit import *
 from src.runtime import *
-
+faulthandler.enable()
 # Create a grid of wits, like this:
 #        TopWit     <--------|
 #       /    \   \           |
@@ -23,62 +22,91 @@ N_TEST_MESSAGES = 50
 count_init_messages = 0
 count_grid_messages = 0
 
-class TopWit(Wit):
+
+#=================================================================================
+# Top Wit
+#=================================================================================
+async def create_top_actor(
+        store:ObjectStore,
+        ) -> OutboxMessage:
+    core = Core.from_external_wit_ref(store, wit_ref="top_wit")
+    genesis_msg = await OutboxMessage.from_genesis(store, core)
+    return genesis_msg
+
+class TopState(WitState):
     core_first_row_wits:list[ActorId] = None
 
-    async def on_genesis_message(self, message:InboxMessage) -> None:
-        #print(f"TopWit, on_genesis_message: I am {self.actor_id.hex()}")
-        self.core_first_row_wits = []
-        for i in range(N_COLUMNS):
-            first_row_gen = GridWit.create_genesis_core(self.store)
-            await set_args(first_row_gen, {"rows_remaining": N_ROWS, "column": i, "top_wit": self.actor_id.hex()})
-            first_row_gen_msg = await self.send_genesis_message(first_row_gen)
-            self.core_first_row_wits.append(first_row_gen_msg.recipient_id)
+top_wit = Wit()
 
-    async def on_message(self, message:InboxMessage) -> None:
-        #print(f"TopWit, on_message: I am {self.actor_id.hex()}")
-        content = (await message.get_content()).get_as_str()
-        #init messages start with "init", responses start with "grid"
-        if(content.startswith("init")):
-            #print("init message")
-            global count_init_messages
-            count_init_messages += 1
-            for grid_wit_id in self.core_first_row_wits:
-                self.send_message(grid_wit_id, "grid")
-        elif(content.startswith("grid")):
-            global count_grid_messages
-            count_grid_messages += 1
-        else:
-            print("Unknown message: "+content)
+@top_wit.genesis_message
+async def on_genesis_message(message:InboxMessage, ctx:MessageContext, state: TopState) -> None:
+    print(f"TopWit, on_genesis_message: I am {ctx.actor_id.hex()}")
+    state.core_first_row_wits = []
+    for i in range(N_COLUMNS):
+        args = {"rows_remaining": N_ROWS, "column": i, "top_wit": ctx.actor_id.hex()}
+        first_row_gen_msg = await create_grid_actor(ctx.store, args)
+        state.core_first_row_wits.append(first_row_gen_msg.recipient_id)
+        ctx.outbox.add(first_row_gen_msg)
+
+@top_wit.message("init")
+async def on_init_message(message:InboxMessage, ctx:MessageContext, state: TopState) -> None:
+    print(f"TopWit, on_init_message: I am {ctx.actor_id.hex()}")
+    global count_init_messages
+    count_init_messages += 1
+    for grid_wit_id in state.core_first_row_wits:
+        ctx.outbox.add_new_msg(grid_wit_id, "grid", mt="grid")
+
+@top_wit.message("grid")
+async def on_grid_callback_message(message:InboxMessage, ctx:MessageContext) -> None:
+    print(f"TopWit, on_grid_callback_message: I am {ctx.actor_id.hex()}")
+    global count_grid_messages
+    count_grid_messages += 1
+
+#=================================================================================
+# Grid Wit
+#=================================================================================
+async def create_grid_actor(
+        store:ObjectStore,
+        args:dict, 
+        ) -> OutboxMessage:
+    core = Core.from_external_wit_ref(store, wit_ref="grid_wit")
+
+    await set_args(core, args)
+    genesis_msg = await OutboxMessage.from_genesis(store, core)
+    return genesis_msg
 
 
-class GridWit(Wit):
+class GridState(WitState):
     core_forward_messages_to:ActorId = None
 
-    async def on_genesis_message(self, message:InboxMessage) -> None:
-        #print(f"GridWit, on_genesis_message: I am {self.actor_id.hex()}")
-        args = await get_args(self.core)
-        rows_remaining = args["rows_remaining"]
-        column = args["column"]
-        top_wit_id = bytes.fromhex(args["top_wit"])
-        if(rows_remaining > 0):
-            next_row_gen = GridWit.create_genesis_core(self.store)
-            await set_args(next_row_gen, {"rows_remaining": rows_remaining - 1, "column": column, "top_wit": args["top_wit"]})
-            next_row_gen_msg = await self.send_genesis_message(next_row_gen)
-            #since there are still more rows, when non-gen message arrives, forward to next grid wit
-            self.core_forward_messages_to = next_row_gen_msg.recipient_id
-        else:
-            #forward message back to top wit
-            self.core_forward_messages_to = top_wit_id
+grid_wit = Wit()
 
-    async def on_message(self, message:InboxMessage) -> None:
-        #print(f"GridWit, on_message: I am {self.actor_id.hex()}")
-        args = await get_args(self.core)
-        rows_remaining = args["rows_remaining"]
-        column = args["column"]
-        content = (await message.get_content()).get_as_str()
-        content = content + f"\n-> {rows_remaining} x {column}: {self.actor_id.hex()}"
-        self.send_message(self.core_forward_messages_to, content)
+@grid_wit.genesis_message
+async def on_grid_genesis_message(message:InboxMessage, ctx:MessageContext, state:GridState) -> None:
+    #print(f"GridWit, on_genesis_message: I am {ctx.actor_id.hex()}")
+    args = await get_args(ctx.core)
+    rows_remaining = args["rows_remaining"]
+    column = args["column"]
+    top_wit_id = bytes.fromhex(args["top_wit"])
+    if(rows_remaining > 0):
+        new_args = {"rows_remaining": rows_remaining - 1, "column": column, "top_wit": args["top_wit"]}
+        next_row_gen_msg = await create_grid_actor(ctx.store, new_args)
+        ctx.outbox.add(next_row_gen_msg)
+        #since there are still more rows, when non-gen message arrives, forward to next grid wit
+        state.core_forward_messages_to = next_row_gen_msg.recipient_id
+    else:
+        #forward message back to top wit
+        state.core_forward_messages_to = top_wit_id
+
+@grid_wit.message("grid")
+async def on_grid_message(message:InboxMessage, ctx:MessageContext, state:GridState) -> None:
+    #print(f"GridWit, on_grid_message: I am {ctx.actor_id.hex()}")
+    args = await get_args(ctx.core)
+    rows_remaining = args["rows_remaining"]
+    column = args["column"]
+    content = (await message.get_content()).get_as_str()
+    content = content + f"\n-> {rows_remaining} x {column}: {ctx.actor_id.hex()}"
+    ctx.outbox.add_new_msg(state.core_forward_messages_to, content, mt="grid")
 
 
 async def get_args(core:Core) -> dict:
@@ -91,8 +119,8 @@ async def perf_grid_run(store:ObjectStore, refs:References) -> None:
     print(f"Will run perf_grid with {N_COLUMNS} columns and {N_ROWS} rows, and {N_TEST_MESSAGES} test messages.") 
 
     resolver = ExternalResolver(store)
-    TopWit.register_wit(resolver)
-    GridWit.register_wit(resolver)
+    resolver.register("top_wit", top_wit)
+    resolver.register("grid_wit", grid_wit)
 
     runtime = Runtime(store, refs, "test", resolver)
 
@@ -100,13 +128,13 @@ async def perf_grid_run(store:ObjectStore, refs:References) -> None:
     print("Runtime started")
     #genesis
     print("Injecting genesis message...")
-    gen_message = await TopWit.create_genesis_message(store)
+    gen_message = await create_top_actor(store)
     await runtime.inject_message(gen_message)
     await runtime.wait_until_running()
     
     print(f"Injecting other {N_TEST_MESSAGES} messages...")
     for i in range(N_TEST_MESSAGES):
-        await runtime.inject_message(OutboxMessage.from_new(gen_message.recipient_id, f"init {i}"))
+        await runtime.inject_message(OutboxMessage.from_new(gen_message.recipient_id, f"init {i}", mt="init"))
         await asyncio.sleep(0.001)
 
     last_print = 0
