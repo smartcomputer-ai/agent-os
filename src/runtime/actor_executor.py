@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import asyncio
 import inspect
 from typing import Awaitable, Callable
@@ -58,6 +59,8 @@ class ActorExecutor:
     _last_step_outbox:Mailbox
     _current_inbox:Mailbox
 
+    _logger:logging.Logger
+
     def __init__(
             self,
             ctx:ExecutionContext,
@@ -65,6 +68,7 @@ class ActorExecutor:
             last_step_id:StepId|None, 
             last_step_inbox:Mailbox, 
             last_step_outbox:Mailbox):
+        self._logger = logging.getLogger(f"{type(self).__name__}({actor_id.hex()})")
         if not isinstance(ctx, ExecutionContext):
             raise TypeError(f"ctx must be an ExecutionContext, got {type(ctx)}")
         self.ctx = ctx
@@ -82,6 +86,7 @@ class ActorExecutor:
         self._step_lock = asyncio.Lock()
         self._step_sleep_event = asyncio.Event()
         self._step_cancel_event = asyncio.Event()
+
         
     @classmethod
     def from_genesis(cls, ctx:ExecutionContext, actor_id:ActorId) -> ActorExecutor:
@@ -162,7 +167,7 @@ class ActorExecutor:
                     if not isinstance(new_step_id, StepId):
                         raise TypeError(f"Expected a StepId, got {type(new_step_id)}")
                 except Exception as e:
-                    print(f"Exception in actor '{self.actor_id_str}' when executing wit function: {e}")
+                    self._logger.exception(f"Exception in actor '{self.actor_id_str}' when executing wit function: {e}")
                     raise e
                 #set the new step id as the HEAD for this actor
                 await self.ctx.references.set(ref_step_head(self.actor_id), new_step_id)
@@ -181,7 +186,7 @@ class ActorExecutor:
                     if recipient_id not in exec_last_outbox or exec_last_outbox[recipient_id] != message_id:
                         new_outbox_messages.add((self.actor_id, recipient_id, message_id))
                 if len(new_outbox_messages) > 0:
-                    #print(f"{type(self)}: callback")
+                    #self._logger.debug(f"{type(self)}: callback")
                     await outbox_callback(new_outbox_messages)
             #clear the event so it can wait again later
             self._step_sleep_event.clear()
@@ -197,7 +202,7 @@ class ActorExecutor:
         except GenesisMessageNotReadyError as e:
             raise e
         except Exception as e:
-            print(f"{type(self).__name__} exception creating wit execution: {e}")
+            self._logger.exception("error creating wit execution.")
             raise e
         
     async def _load_step_inbox(self, step_id:StepId|None) -> Mailbox:
@@ -387,7 +392,7 @@ async def default_update_wit(inbox:Inbox, outbox:Outbox, core:Core):
     if(not isinstance(new_core, TreeObject)):
         raise InvalidUpdateException("The update message did not contain a tree object.")
     #now, merge the new core into the current core
-    print(f"Updating core {core.get_as_object_id().hex()} with new core {update_msg.content_id.hex()} by merging them.")
+    #print(f"Updating core {core.get_as_object_id().hex()} with new core {update_msg.content_id.hex()} by merging them.")
     await core.merge(new_core)    
 
 

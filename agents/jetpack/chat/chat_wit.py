@@ -1,9 +1,12 @@
+import logging
 from grit import *
 from wit import *
 from jetpack.messages import *
 from jetpack.coder.coder_wit import create_coder_actor
 from jetpack.coder.retriever_wit import create_retriever_actor
 from jetpack.chat.chat_completions import chat_completion
+
+logger = logging.getLogger(__name__)
 
 # A "chat" limits a conversation to a single topic and goal. Each chat corresponds to a single chat window in Jetpack.
 
@@ -50,14 +53,14 @@ app = Wit()
 
 @app.genesis_message
 async def on_genesis(msg:InboxMessage, ctx:MessageContext, state:ChatState) -> None:
-    print("Chat: received genesis")
+    logger.info("received genesis")
     
     args:TreeObject = await ctx.core.get('args')
     if args is not None:
-        print("Chat: loading args")
+        logger.info("loading args")
         if 'name' in args:
             state.name = (await args.getb('name')).get_as_str()
-            print(f"Chat: new chat: '{state.name}'")
+            logger.info(f"'{state.name}': new chat actor created")
 
     if state.name is None:
         state.name = "Main"
@@ -66,17 +69,17 @@ async def on_genesis(msg:InboxMessage, ctx:MessageContext, state:ChatState) -> N
     coder_msg = await create_coder_actor(ctx.store, name=f"{state.name} Coder")
     state.coder = coder_msg.recipient_id
     ctx.outbox.add(coder_msg)
-    print (f"Chat '{state.name}': created coder actor", coder_msg.recipient_id.hex())
+    logger.info(f"'{state.name}': created coder actor %s", coder_msg.recipient_id.hex())
 
     retriever_msg = await create_retriever_actor(ctx.store, forward_to=state.coder)
     state.retriever = retriever_msg.recipient_id
     ctx.outbox.add(retriever_msg)
-    print (f"Chat '{state.name}': created retriever actor", retriever_msg.recipient_id.hex())
+    logger.info(f"'{state.name}': created retriever actor %s", retriever_msg.recipient_id.hex())
 
 
 @app.message("web")
 async def on_message_web(content:str, ctx:MessageContext, state:ChatState) -> None:
-    print(f"Chat '{state.name}': received message from user")
+    logger.info(f"'{state.name}': received message from user")
     # save in the core
     msgt = await ctx.core.gett("messages")
     chat_msg = ChatMessage.from_user(content)
@@ -89,41 +92,40 @@ async def on_message_web(content:str, ctx:MessageContext, state:ChatState) -> No
         ctx.outbox.add_new_msg(ctx.actor_id, "complete", mt="complete")
         ctx.outbox.add_reply_msg(ctx.message, "Thinking", mt="thinking")
     else:
-        print(f"Chat '{state.name}': last web message was not from 'user', but was from '{chat_msg.from_name}', will skip.")
+        logger.info(f"'{state.name}': last web message was not from 'user', but was from '{chat_msg.from_name}', will skip.")
 
 #========================================================================================
 # Frontend States
 #========================================================================================
 @app.message("complete")
 async def on_complete_message(msg:InboxMessage, ctx:MessageContext, state:ChatState) -> None:
-    print(f"Chat '{state.name}': completion")
+    logger.info(f"'{state.name}': completion")
     # load message history
     messages_tree = await ctx.core.gett("messages")
     messages = await ChatMessage.load_from_tree(messages_tree)
-    #print(f"FrontendWit: history has {len(messages)} messages.")
     if len(messages) == 0 :
         return
     # ensure that the last message was from the user
     last_message = messages[-1]
     if last_message.from_name != 'user':
-        print(f"Chat '{state.name}': last message was not from 'user', but was from '{last_message.from_name}', will skip.")
+        logger.info(f"'{state.name}': last message was not from 'user', but was from '{last_message.from_name}', will skip.")
         return
     
     # chat completion, and process result
     result = await chat_completion(messages, state.code_spec)
     
     if isinstance(result, str):
-        print(f"Chat '{state.name}': completion is normal chat message.")
+        logger.info(f"'{state.name}': completion is normal chat message.")
         chat_message = ChatMessage.from_actor(result, ctx.actor_id)
 
     elif isinstance(result, CodeRequest):
-        print(f"Chat '{state.name}': completion is a CodeRequest.")
+        logger.info(f"'{state.name}': completion is a CodeRequest.")
         # message the retriever actor to generate the code
         if state.retriever is not None:
             ctx.outbox.add_new_msg(state.retriever, result, mt="request")
-            print(f"Chat '{state.name}': sent CodeRequest mesage to retriever: {state.retriever.hex()}")
+            logger.info(f"'{state.name}': sent CodeRequest mesage to retriever: {state.retriever.hex()}")
         else:
-            print(f"Chat '{state.name}': retriever peer not found")
+            logger.info(f"'{state.name}': retriever peer not found")
             return
         
         if state.code_request is None:
@@ -141,16 +143,16 @@ async def on_complete_message(msg:InboxMessage, ctx:MessageContext, state:ChatSt
 
     
     elif isinstance(result, CodeExecution):
-        print(f"Chat '{state.name}': completion is a CodeExecution.")
+        logger.info(f"'{state.name}': completion is a CodeExecution.")
         if state.code_spec is None:
-            print(f"Chat '{state.name}': code_spec is None, will skip.")
+            logger.info(f"'{state.name}': code_spec is None, will skip.")
             return
         # message the coder actor to execute the code
         if state.coder is not None:
             ctx.outbox.add_new_msg(state.coder, result, mt="execute")
-            print(f"Chat '{state.name}': sent CodeExecution mesage to coder: {state.coder.hex()}")
+            logger.info(f"'{state.name}': sent CodeExecution mesage to coder: {state.coder.hex()}")
         else:
-            print(f"Chat '{state.name}': coder peer not found")
+            logger.info(f"'{state.name}': coder peer not found")
             return
         
         msg = "I will call the function with the following arguments:"
@@ -165,7 +167,7 @@ async def on_complete_message(msg:InboxMessage, ctx:MessageContext, state:ChatSt
     # save message in history
     messages_tree.makeb(str(chat_message.id), True).set_as_json(chat_message)
     # notify the web frontend that the message was generated (will be delivered via SSE)
-    print(f"Chat '{state.name}': send receipt to web frontend")
+    logger.info(f"'{state.name}': send receipt to web frontend")
     ctx.outbox.add_new_msg(ctx.agent_id, str(chat_message.id), mt="receipt")
 
 
@@ -174,7 +176,7 @@ async def on_complete_message(msg:InboxMessage, ctx:MessageContext, state:ChatSt
 #========================================================================================
 @app.message("code_deployed")
 async def on_message_code_deployed(code:CodeDeployed, ctx:MessageContext, state:ChatState) -> None:
-    print(f"Chat '{state.name}': received callback: code_deployed")
+    logger.info(f"'{state.name}': received callback: code_deployed")
     
     state.code_spec = code.spec
     # render the code and notify frontend
@@ -185,7 +187,7 @@ async def on_message_code_deployed(code:CodeDeployed, ctx:MessageContext, state:
 
 @app.message("code_executed")
 async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:ChatState) -> None:
-    print(f"Chat '{state.name}': received callback: code_executed")
+    logger.info(f"'{state.name}': received callback: code_executed")
     state.current_execution = None 
     content = ""
     links = []

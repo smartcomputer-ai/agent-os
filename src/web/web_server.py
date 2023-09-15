@@ -23,7 +23,6 @@ from runtime import Runtime
 #
 # See the 'app' method in the beginning for the routes that are supported.
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class WebServer:
@@ -97,8 +96,8 @@ class WebServer:
         #in this setup, the API will only ever return a single agent id
         agent_id = self.runtime.agent_id
         agent_name = self.runtime.agent_name
-        print(f"Agent name: {agent_name}")
-        print(f"Agent id: {agent_id}")
+        logger.info(f"Agent name: {agent_name}")
+        logger.info(f"Agent id: {agent_id}")
         return JSONResponse({ agent_name: agent_id.hex()})
 
     async def grit_get_refs(self, request:Request):
@@ -210,7 +209,7 @@ class WebServer:
             message_headers['mt'] = request.headers['AOS-Message-Type']
         else:
             message_headers['mt'] = 'web'
-        print(f"message headers: {message_headers}")
+        logger.debug(f"message headers: {message_headers}")
         #conceptually, this is adding a new message to the inbox of the actor,
         # but internally the runtime treats an injected message as if its an outbox message,
         # i.e., a message being sent by an actor (which used the outbox)
@@ -291,10 +290,8 @@ class WebServer:
         message_type_filters = request.query_params.getlist('mt')
         if(len(message_type_filters) == 0):
             message_type_filters = None
-        print(f"message type filters: {message_type_filters}")
+        logger.info(f"message type filters: {message_type_filters}")
         request.headers.get('Last-Event-ID')
-        # if(last_message_id_str is not None):
-        #     print(f"last message id: {last_message_id_str}")
 
         async def subscribe_to_messages():
             mailbox_updates_queue:asyncio.Queue[tuple[ActorId, ActorId, MessageId]]
@@ -303,7 +300,7 @@ class WebServer:
                     while True:
                         #todo: add time out to handle cancel, etc
                         mailbox_update = await mailbox_updates_queue.get()
-                        #print(f"got mailbox update: {mailbox_update}")
+                        logger.debug(f"got mailbox update: {mailbox_update}")
                         #take an empty message as a signal that the runtime is stoping
                         if(mailbox_update is None):
                             break
@@ -316,7 +313,7 @@ class WebServer:
                             message_type = "message"
                         #if the subscriber defined a message type filter, skip messages that don't match
                         if(message_type_filters is not None and message_type not in message_type_filters):
-                            print("skipping msg:", message_type)
+                            logger.debug("skipping msg:", message_type)
                             continue                            
                         sse_data = { 
                             "sender_id": mailbox_update[0].hex(),

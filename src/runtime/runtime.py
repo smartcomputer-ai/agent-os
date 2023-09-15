@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import asyncio
 from grit import *
 from wit import *
@@ -6,6 +7,8 @@ from .resolvers import *
 from .query_executor import QueryExecutor
 from .actor_executor import ExecutionContext, ActorExecutor, MailboxUpdate
 from .runtime_executor import RuntimeExecutor, agent_id_from_name
+
+logger = logging.getLogger(__name__)
 
 class Runtime:
     """The main runtime API to run an agent."""
@@ -206,7 +209,7 @@ class Runtime:
         for executor_task in executor_tasks:
             ex = executor_task.exception()
             if(ex is not None):
-                print("exception in executor task")
+                logger.error("exception in executor task")
                 raise ex
     
     def subscribe_to_messages(self) -> RuntimeExecutor.ExternalMessageSubscription:

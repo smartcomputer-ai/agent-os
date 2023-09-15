@@ -131,7 +131,6 @@ def _add_table_to_actor_push(actor_push:ActorPush, table:Container):
         elif key == "push_on_genesis" and actor_push.is_genesis:
             try_add_path(key)
         elif key == "push_value":
-            print("push_value")
             try_add_values(key)
         elif key == "push_value_on_genesis" and actor_push.is_genesis:
             try_add_values(key)

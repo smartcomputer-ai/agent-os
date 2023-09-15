@@ -96,7 +96,6 @@ class RuntimeExecutor(ActorExecutor):
         return RuntimeExecutor.ExternalMessageSubscription(self)
 
     def _publish_to_external_subscribers(self, new_messages:list[MailboxUpdate]):
-        #print("publishing to external subscribers", len(new_messages))
         if(self._external_message_subscriptions is None or len(self._external_message_subscriptions) == 0):
             return
         for sub in self._external_message_subscriptions:

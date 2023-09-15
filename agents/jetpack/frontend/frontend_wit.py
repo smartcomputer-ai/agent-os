@@ -1,8 +1,11 @@
+import logging
 import re
 from grit import *
 from wit import *
 from jetpack.messages import *
 from jetpack.chat.chat_wit import create_chat_actor
+
+logger = logging.getLogger(__name__)
 
 class FrontendState(WitState):
     chat_actors:dict[str, ActorId] = {}
@@ -12,13 +15,13 @@ app = Wit()
 
 @app.genesis_message
 async def on_genesis(msg:InboxMessage, ctx:MessageContext, state:FrontendState) -> None:
-    print("Frontend: received genesis")
+    logger.info("received genesis")
     #create the fist chat
     await create_chat("Main", ctx, state)
 
 @app.message('create-chat')
 async def on_create_chat(chat:dict, ctx:MessageContext, state:FrontendState) -> None:
-    print("Frontend: received create chat")
+    logger.info("received create chat")
     title = chat['name']
     slug = await create_chat(title, ctx, state)
     ctx.outbox.add_reply_msg(ctx.message, slug, mt="new-chat")

@@ -70,7 +70,6 @@ async def inputoutput_completion(
     fn, args = parse_function_completion(response)
     if fn != "code_gen":
         raise Exception(f"Expected function name code_gen, but got {fn}")
-    #print("inputoutput args", args)
     return args.get('input_spec'), args.get('output_spec')
 
 async def code_completion(

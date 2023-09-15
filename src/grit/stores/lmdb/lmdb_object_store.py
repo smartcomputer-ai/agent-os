@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 from async_lru import alru_cache
 from grit.object_model import *
@@ -5,6 +6,8 @@ from grit.object_serialization import *
 from grit.object_store import ObjectStore
 import lmdb
 from . shared_env import SharedEnvironment
+
+logger = logging.getLogger(__name__)
 
 class LmdbObjectStore(ObjectStore):
     def __init__(self, shared_env:SharedEnvironment):
@@ -29,7 +32,7 @@ class LmdbObjectStore(ObjectStore):
                 txn.put(object_id, bytes, overwrite=False)
             return object_id
         except lmdb.MapFullError:
-            print(f"===> Resizing LMDB map... in obj store, (obj id: {object_id.hex()}) <===")
+            logger.warn(f"===> Resizing LMDB map... in obj store, (obj id: {object_id.hex()}) <===")
             self._shared_env._resize()
             #try again
             with self._shared_env.begin_object_txn() as txn:

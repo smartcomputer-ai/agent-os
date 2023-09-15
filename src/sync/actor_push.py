@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import os
 import filetype
 import mimetypes  
@@ -9,6 +10,8 @@ from grit import *
 from wit import *
 from runtime.runtime_executor import add_offline_message_to_runtime_outbox, remove_offline_message_from_runtime_outbox
 from . sync_item import SyncItem, sync_from_push_path, sync_from_push_value
+
+logger = logging.Logger(__name__)
 
 # Utility class to push external data to a specific actor
 
@@ -88,7 +91,6 @@ class ActorPush():
         if(item.core_item_path in self._sync_items and not allow_file_override):
             existing_item = self._sync_items[item.core_item_path]
             raise ValueError(f"Cannot add item '{item}' because it was already added as a file earlier: '{existing_item}'.")
-        #print("item.core_item_path", item.core_item_path)
         self._sync_items[item.core_item_path] = item
         self.__seen_core_paths.add(item.core_path)
         self.__seen_core_item_paths.add(item.core_item_path)
@@ -250,7 +252,7 @@ def _blob_from_file(file_path:str) -> BlobObject:
         mimetypes.init()
         mime_type, _ = mimetypes.guess_type(file_path)
         if mime_type is None:
-            print('Cannot guess file mime type: '+file_path)
+            logger.warn('Cannot guess file mime type: '+file_path)
 
     headers = {}
     if mime_type is not None:

@@ -1,6 +1,9 @@
+import logging
 import openai
 from pydantic import BaseModel
 from completions import *
+
+logger = logging.getLogger(__name__)
 
 async def retrieve_completion(
         task_description:str, 
@@ -60,7 +63,7 @@ async def retrieve_completion(
     completion = parse_completion(response)
 
     if isinstance(completion, str):
-        print("No data retrieval needed. The models answered with:", completion)
+        logger.debug("No data retrieval needed. The models answered with:", completion)
         return None
     else:
         fn, args = completion

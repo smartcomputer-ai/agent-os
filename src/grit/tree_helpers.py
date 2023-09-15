@@ -115,7 +115,7 @@ def _load_path_sync(
             if final_fragment in tree:
                 break
     if final_fragment not in tree:
-        print("final fragemnt", final_fragment, tree)
+        #print("final fragemnt", final_fragment, tree)
         raise ValueError(f"root tree '{root_id.hex()}' path '{path_parts}' could not find '{path_parts[-1]}' "+
                          f"(nor the same ending in '{possible_file_endings}').")
     obj_id = tree[final_fragment]

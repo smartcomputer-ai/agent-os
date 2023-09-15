@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 import os.path as path
 import asyncio
 import json
@@ -6,6 +7,8 @@ from typing import AsyncIterator, Callable, Iterable, Type
 from pydantic import BaseModel
 from grit import *
 from grit.tree_helpers import _tree_path_parts, _blob_path_parts
+
+logger = logging.getLogger(__name__)
 
 # Contains the most important high-level abstractions for working with Grit objects.
 # Most Grit objects from '../grit/object_model.py' have equivalent classes here.
@@ -128,7 +131,6 @@ class BlobObject:
             raise TypeError("pydantic_type must be a subclass of pydantic.BaseModel")
         if(self.__data is None):
             return None
-        #print("getting model", pydantic_type, self.get_as_json())
         return pydantic_type(**self.get_as_json())
 
     def get_as_object_id(self) -> BlobId:
@@ -658,7 +660,7 @@ class Core(TreeObject):
                     target_blob:BlobObject = await self.get_path(new_blob_path)
                 except Exception as ex:
                     #this usually happens if one is a path and the other is a blob or vice versa
-                    print(f"Merge conflic while getting {new_blob_path}: {ex}")
+                    logger.warn(f"Merge conflic while getting {new_blob_path}: {ex}")
                     continue
                 if(target_blob is None):
                     self.makeb_path(new_blob_path).set_from_blob(blob)

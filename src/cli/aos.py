@@ -1,3 +1,4 @@
+import logging
 import asyncio
 from dataclasses import dataclass
 import os
@@ -13,6 +14,9 @@ from runtime.runtime import Runtime
 from sync.actor_push import ActorPush
 from web.web_server import WebServer
 import sync.sync_file as sf
+
+#print logs to console
+logging.basicConfig(level=logging.INFO)
 
 # Main CLI to work with agent projects.
 # It utilizes the 'click' library.

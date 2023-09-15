@@ -82,7 +82,6 @@ def sync_from_push_path(push_path:str, ignore:list[str]=None) -> list[SyncItem]:
         file_path = dir_path
         sync_dir_path = os.path.dirname(file_path)
         file_name = os.path.basename(file_path)
-        print("core_path", core_path)
         # if the core path ends with a slash, then assume the core path is a grit "directory"
         if core_path.endswith("/"):
             item_name = file_name

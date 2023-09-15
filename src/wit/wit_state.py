@@ -1,7 +1,10 @@
+import logging
 import pickle
 from grit import *
 from .data_model import *
 from .data_model_utils import *
+
+logger = logging.getLogger(__name__)
 
 # Load and persist state data to a core
 #TODO: make this much smarter to track what actually changed, and what did not
@@ -54,7 +57,7 @@ class WitState:
                     try:
                         self.__setattr__(attr_key, pickle.loads(property_data.get_as_bytes()))
                     except Exception as e:
-                        print(f'Error loading {attr_key}: {e}')
+                        logger.exception(f'Error loading {attr_key}')
         self._after_load()
 
     async def _persist_to_core(self, core:Core):

@@ -1,8 +1,11 @@
+import logging
 from grit.object_model import *
 from grit.object_serialization import *
 from grit.references import References
 import lmdb
 from .shared_env import SharedEnvironment
+
+logger = logging.getLogger(__name__)
 
 class LmdbReferences(References):
     def __init__(self, shared_env:SharedEnvironment):
@@ -30,7 +33,7 @@ class LmdbReferences(References):
                 if not txn.put(ref_bytes, object_id, overwrite=True):
                     raise Exception(f"Not able to set '{ref}' in lmdb 'refs' database.")
         except lmdb.MapFullError as lmdb_error:
-            print(f"===> Resizing LMDB map... in refs store, (ref: {ref}, obj id: {object_id.hex()}) <===")
+            logger.warn(f"===> Resizing LMDB map... in refs store, (ref: {ref}, obj id: {object_id.hex()}) <===")
             self._shared_env._resize()
             #try again
             with self._shared_env.begin_refs_txn() as txn:

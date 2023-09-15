@@ -28,15 +28,12 @@ class DataParser:
             "Based on the context so far and the input string, the structured function takes this data as input.", 
             output_schema)
         
-        print("parse prompt", "sending")
         response = await openai.ChatCompletion.acreate(
             model="gpt-4-0613",
             temperature=0,
             **build_chat_kwargs(prompt, funcs, function_call="structured"),
             )
         
-        #print("parse response", response)
-
         fn, arguments = parse_function_completion(response)
         if fn != "structured":
             raise Exception(f"Expected function name structured, but got {fn}")

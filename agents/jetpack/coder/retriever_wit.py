@@ -1,8 +1,11 @@
+import logging
 from grit import *
 from wit import *
 from jetpack.messages import *
 from jetpack.coder.retriever_completions import *
 from jetpack.coder.coder_wit import create_coder_actor
+
+logger = logging.getLogger(__name__)
 
 class RetrieverState(WitState):
     code_request:CodeRequest|None = None
@@ -45,16 +48,16 @@ app = Wit()
 
 @app.genesis_message
 async def on_genesis_message(msg:InboxMessage, core:Core, state:RetrieverState, outbox:Outbox, actor_id:ActorId):
-    print("Retriever: on_genesis_message")
+    logger.info("on_genesis_message")
     #copy args into state
     args:TreeObject = await core.get('args')
     if args is not None:
-        print("Retriever: loading args")
+        logger.info("loading args")
         if 'code_request' in args:
             state.code_request = (await args.getb('code_request')).get_as_model(CodeRequest)
         if 'forward_to' in args:
             forward_to = (await args.getb('forward_to')).get_as_bytes()
-            print("Retriever: forward_to:", forward_to.hex())
+            logger.info("forward_to: %s", forward_to.hex())
             state.forward_to = forward_to
         # add the sender to the notify list
         # only if args are provided, because we can assume the sender is another actor
@@ -66,14 +69,14 @@ async def on_genesis_message(msg:InboxMessage, core:Core, state:RetrieverState, 
 
 @app.message("request")
 async def on_request_message(request:CodeRequest, msg:InboxMessage, state:RetrieverState, outbox:Outbox, actor_id:ActorId):
-    print("Retriever: on_request_message")
+    logger.info("on_request_message")
     state.code_request = request
     state.notify.add(msg.sender_id)
     outbox.add_new_msg(actor_id, "plan", mt="plan")
 
 @app.message("plan")
 async def on_plan_message(msg:InboxMessage, state:RetrieverState, ctx:MessageContext):
-    print("Retriever: on_plan_message")
+    logger.info("on_plan_message")
 
     # see if any data needs to be retrieved that needs to feature in the code generation later
     retrievals = await retrieve_completion(
@@ -81,27 +84,27 @@ async def on_plan_message(msg:InboxMessage, state:RetrieverState, ctx:MessageCon
         state.code_request.input_examples,
         )
     if retrievals is not None:
-        print("Retriever: retrievals:", retrievals)
+        logger.info("retrievals:", retrievals)
         state.locations = retrievals
         ctx.outbox.add_new_msg(ctx.actor_id, "retrieve", mt="retrieve")
         ctx.outbox.add_new_msg(ctx.agent_id, "Retrieving Data", mt="thinking")
         return
     else:
-        print("Retriever: no retrievals needed")
+        logger.info("no retrievals needed")
         state.locations = None
         state.retrieved_data = None
         ctx.outbox.add_new_msg(ctx.actor_id, "complete", mt="complete")
 
 @app.message("retrieve")
 async def on_retrieve_message(msg:InboxMessage, state:RetrieverState, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
-    print("Retriever: on_retrieve_message")
+    logger.info("on_retrieve_message")
     state.retrieval_coders = {}
     if state.retrieved_data is None:
         state.retrieved_data = {}
     for location in state.locations:
         #check if the data was already retrieved
         if location in state.retrieved_data:
-            print("Retriever: data already retrieved for location:", location)
+            logger.info("data already retrieved for location:", location)
             continue
         #create a code actor to retrieve the data
         task_description = f"""For context, we are writing code for the following task:
@@ -141,7 +144,7 @@ async def on_retrieve_message(msg:InboxMessage, state:RetrieverState, outbox:Out
 
 @app.message("complete")
 async def on_complete_message(msg:InboxMessage, state:RetrieverState, outbox:Outbox, actor_id:ActorId):
-    print("Retriever: on_complete_message")
+    logger.info("on_complete_message")
     if state.forward_to is not None:
         spec = CodeSpec(
             task_description=state.code_request.task_description,
@@ -158,7 +161,7 @@ async def on_complete_message(msg:InboxMessage, state:RetrieverState, outbox:Out
 #========================================================================================
 @app.message("code_executed")
 async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:RetrieverState) -> None:
-    print("Retriever: received callback: code_executed")
+    logger.info("received callback: code_executed")
     
     #see if there is coder associated with this message
     if state.retrieval_coders is None:
@@ -166,7 +169,7 @@ async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:
     if ctx.message.sender_id in state.retrieval_coders:
         location = state.retrieval_coders[ctx.message.sender_id]
         state.retrieved_data[location] = exec.output['contents']
-        print("Retriever: retrieved data for location:", location, state.retrieved_data[location])
+        logger.info("retrieved data for location:", location, state.retrieved_data[location])
         state.retrieval_coders.pop(ctx.message.sender_id)
         if len(state.retrieval_coders) == 0:
             ctx.outbox.add_new_msg(ctx.actor_id, "complete", mt="complete")

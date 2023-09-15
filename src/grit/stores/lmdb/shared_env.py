@@ -1,5 +1,8 @@
+import logging
 import os
 import lmdb
+
+logger = logging.getLogger(__name__)
 
 class SharedEnvironment:
     def __init__(self, store_path:str, writemap:bool=False):
@@ -48,7 +51,7 @@ class SharedEnvironment:
             multiplier = 3.0
         # must be rounded to next int! otherwise lmdb will segfault later (spent several hours on this)
         new_size = round(current_size * multiplier) 
-        print(f"Resizing LMDB map from {current_size/1024/1024} MB to {new_size/1024/1024} MB")
+        logger.info(f"Resizing LMDB map from {current_size/1024/1024} MB to {new_size/1024/1024} MB")
         self.env.set_mapsize(new_size)
         self._resizing = False
         return new_size
