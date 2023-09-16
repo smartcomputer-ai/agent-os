@@ -1,10 +1,11 @@
 import logging
 import asyncio
-from dataclasses import dataclass
 import os
 import shutil
 import sys
 import click
+import sync.sync_file as sf
+from dataclasses import dataclass
 from grit import *
 from grit.stores.file import FileObjectStore, FileReferences
 from grit.stores.lmdb import SharedEnvironment, LmdbObjectStore, LmdbReferences
@@ -13,7 +14,6 @@ from runtime.runtime_executor import create_or_load_runtime_actor
 from runtime.runtime import Runtime
 from sync.actor_push import ActorPush
 from web.web_server import WebServer
-import sync.sync_file as sf
 
 #print logs to console
 logging.basicConfig(level=logging.INFO)

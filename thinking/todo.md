@@ -31,7 +31,7 @@
    - [X] write code and execute it (as a new actor)
    - [X] ingest data and analyize it (embeddings, etc.)
    - [X] generate some images
-   - [ ] do it in a modular fashion (with funcation usage) that shows the power of the actor system and wits in general
+   - [X] do it in a modular fashion (with funcation usage) that shows the power of the actor system and wits in general
 - [X] Rename 'agent executor' to something else, it's just too confusing, maybe just call it 'runtime executor'
 - [X] Add documentation to all relevant classes and functions
 - [X] write some basic documentation on the architecture and how to use it
@@ -54,10 +54,12 @@
    - [X] sync alternative in object store
    - [X] sync version of data_model
    - [ ] allow sync wits, execute them in a thread
-- [ ] Add basic logging and instrumentation (instead of just prints)
+- [X] Add basic logging and instrumentation (instead of just prints)
+- [ ] Work on Windows
 - [ ] Write a getting started guide 
+- [ ] Jetpack readme 
 - [ ] Add inspiration section to design doc
-
+- [ ] Add image to readme
 
 ### Release v0.1.1
 
