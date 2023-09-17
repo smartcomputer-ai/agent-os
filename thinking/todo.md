@@ -50,10 +50,10 @@
 - [X] fix push bug (doesn't detect same files, always pushes something)
 - [X] automatic LMDB resizing
 - [X] install and use a linter (see: https://google.github.io/styleguide/pyguide.html)
-- [ ] support sync wits (the objective is to support libraries like LangChain):
+- [X] support sync wits (the objective is to support libraries like LangChain):
    - [X] sync alternative in object store
    - [X] sync version of data_model
-   - [ ] allow sync wits, execute them in a thread
+   - [X] allow sync wits, execute them in a thread
 - [X] Add basic logging and instrumentation (instead of just prints)
 - [ ] Work on Windows
 - [ ] Write a getting started guide 

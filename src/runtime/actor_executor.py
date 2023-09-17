@@ -355,7 +355,6 @@ class _WitExecution:
             else:
                 self.run_task = asyncio.create_task(self.func(*args, **kwargs), name=task_name)
         else:
-            raise NotImplementedError("Wit function is not async, sync wits are not implemented yet.", self.func)
             #if there is a semaphore that limits how many sync wits can execute in parallel, use it
             if ctx.sync_semaphore is not None:
                 async with ctx.sync_semaphore:

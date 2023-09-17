@@ -35,6 +35,14 @@ async def test_run_wit():
         signal.set()
     await setup_call_and_test(wit)
 
+async def test_run_wit_sync():
+    wit = Wit()
+    @wit.run_wit
+    def my_run_wit_sync(inbox:Mailbox, outbox:Mailbox, core:Core, signal:asyncio.Event):
+        print("my_run_wit called")
+        signal.set()
+    await setup_call_and_test(wit)
+
 async def test_genesis_message():
     wit = Wit()
     @wit.genesis_message

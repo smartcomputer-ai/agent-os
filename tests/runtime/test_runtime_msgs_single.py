@@ -33,7 +33,6 @@ async def test_msgs__single_wit():
     await asyncio.sleep(0.1)
     #say hi
     hi_message = OutboxMessage.from_new(gen_message[1], "hi from outside", mt="hi")
-    hi_message
     await runtime.inject_mailbox_update(await hi_message.persist_to_mailbox_update(store, runtime.agent_id))
     await asyncio.sleep(0.1)
     #stop

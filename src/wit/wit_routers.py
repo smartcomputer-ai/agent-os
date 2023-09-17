@@ -80,7 +80,7 @@ class _Wrapper():
             return await self.func(*new_args, **new_kwargs)
         else:
             #todo: run in thread pool if configured to do so
-            return self.func(*new_args, **new_kwargs)
+            return await asyncio.to_thread(self.func, *new_args, **new_kwargs)
 
     def _match_func_signature(self, *args, **kwargs):
         params = self.sig.parameters
