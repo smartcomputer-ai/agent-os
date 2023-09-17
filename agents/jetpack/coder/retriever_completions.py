@@ -48,6 +48,7 @@ async def retrieve_completion(
 
     class DataRetrieval(BaseModel):
         locations: list[str]
+        
     funcs = FunctionBuilder()
     funcs.register_function(
         "retrieve", 

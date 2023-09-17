@@ -18,20 +18,20 @@ class CodeSpec(BaseModel):
     def empty_inputoutput_spec() -> dict:
         return {"properties": {}, "type": "object" }
 
+class CodePlanned(BaseModel):
+    plan: str
+
+class CodeDeployed(BaseModel):
+    code: str
+
 class CodeExecution(BaseModel):
     #provide one or the other, if both are provider, the arguments will be used
     input_arguments: dict|None = None
     input_description: str|None = None
 
-class CodePlanned(BaseModel):
-    task_description: str
-    code_plan: str
-
-class CodeDeployed(BaseModel):
-    code: str
-    spec: CodeSpec
-
 class CodeExecuted(BaseModel):
     input_arguments: dict
     output: dict
 
+class CodeFailed(BaseModel):
+    errors: str

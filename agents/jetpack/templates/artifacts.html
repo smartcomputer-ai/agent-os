@@ -1,0 +1,8 @@
+<span class="font-semibold whitespace-nowrap text-gray-500 dark:text-white">Artifacts</span>
+{% if artifacts|length == 0 %}
+<span class="whitespace-nowrap text-gray-500 dark:text-white">No artifacts yet</span>
+{% else %}
+    {% for artifact in artifacts %}
+    <span class="whitespace-nowrap">{{artifact.emoji|safe}} <a href="{{artifact.url|safe}}" target="_blank" class="underline">{{artifact.title}}</a></span>
+    {% endfor %} 
+{% endif %}

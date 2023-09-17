@@ -26,12 +26,8 @@
 
         <div class="fixed right-0 top-0 p-4 flex flex-col invisible lg:visible">
         
-        <a href="?chat=main" class="py-1 px-2 mb-2 text-left whitespace-nowrap no-underline rounded-md border border-solid  bg-gray-200 hover:bg-gray-300 text-gray-600 dark:text-white">
+        <a href="?chat=main" class="py-1 px-2 mb-2 text-left whitespace-nowrap no-underline rounded-md border border-solid border-gray-500 bg-gray-200 hover:bg-gray-300 text-gray-600 dark:text-white">
             Main
-        </a>
-        
-        <a href="?chat=new-chat" class="py-1 px-2 mb-2 text-left whitespace-nowrap no-underline rounded-md border border-solid border-gray-500 bg-gray-200 hover:bg-gray-300 text-gray-600 dark:text-white">
-            New Chat
         </a>
          
 
@@ -42,107 +38,71 @@
             New
         </button>
     </div>
-    
+
+    <div class="fixed right-0 bottom-0 p-4 mb-20 flex flex-col invisible lg:visible">
+        <span class="font-semibold whitespace-nowrap text-gray-500 dark:text-white">Artifacts</span>
+        <span class="whitespace-nowrap text-gray-500 dark:text-white">No artifacts yet</span>
+        <span class="whitespace-nowrap">&#128195; <a href="#a" class="underline">The plan and more information</a></span>
+        <span class="whitespace-nowrap">&#128220; <a href="#a" class="underline">Some code</a></span>
+    </div>
+
     <div class="mb-20">
-        <div id="messages-container" class="px-4 pt-6 pb-4 max-w-4xl mx-auto" hx-get="../../29840eda0eaa66458ae2f1ac8ab033c57c1b3d7c17b18451071d7573630176ce/query/messages" hx-trigger="load, receipt" hx-vals="js:{messagekey: getMessageFilter(event)}" hx-swap="beforeend">
+        <div id="messages-container" class="px-4 pt-6 pb-4 max-w-4xl mx-auto" hx-get="../../f9b0c27ef631996c3dc9a21685cd542cd05f78e4423fef8afd77c81316e4cbee/query/messages" hx-trigger="load, receipt" hx-vals="js:{messagekey: getMessageFilter(event)}" hx-swap="beforeend">
+        <div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
         
+        <svg class="w-full h-full object-cover fill-gray-300  dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs></defs><title>user</title><path d="M16,4a5,5,0,1,1-5,5,5,5,0,0,1,5-5m0-2a7,7,0,1,0,7,7A7,7,0,0,0,16,2Z"></path><path d="M26,30H24V25a5,5,0,0,0-5-5H13a5,5,0,0,0-5,5v5H6V25a7,7,0,0,1,7-7h6a7,7,0,0,1,7,7Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
+        
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>let's go</p>
 
-            <div class="message flex items-start mb-4 w-full">
-                <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-                    
-                    <svg class="w-full h-full object-cover fill-gray-300  dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs></defs><title>user</title><path d="M16,4a5,5,0,1,1-5,5,5,5,0,0,1,5-5m0-2a7,7,0,1,0,7,7A7,7,0,0,0,16,2Z"></path><path d="M26,30H24V25a5,5,0,0,0-5-5H13a5,5,0,0,0-5,5v5H6V25a7,7,0,0,1,7-7h6a7,7,0,0,1,7,7Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-                    
-                </div>
-                <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-                    <article class="prose" style="max-width: 95ch;">
-            <p>WHAT IS THE GOAL HERE?</p>
+        </article>
+    </div>
+</div>
+ <div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+        
+        <svg class="w-full h-full object-cover fill-gray-300 dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs><style>.cls-1{fill:none;}</style></defs><title>chat-bot</title><path d="M16,19a6.9908,6.9908,0,0,1-5.833-3.1287l1.666-1.1074a5.0007,5.0007,0,0,0,8.334,0l1.666,1.1074A6.9908,6.9908,0,0,1,16,19Z"></path><path d="M20,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,20,8Z"></path><path d="M12,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,12,8Z"></path><path d="M17.7358,30,16,29l4-7h6a1.9966,1.9966,0,0,0,2-2V6a1.9966,1.9966,0,0,0-2-2H6A1.9966,1.9966,0,0,0,4,6V20a1.9966,1.9966,0,0,0,2,2h9v2H6a3.9993,3.9993,0,0,1-4-4V6A3.9988,3.9988,0,0,1,6,2H26a3.9988,3.9988,0,0,1,4,4V20a3.9993,3.9993,0,0,1-4,4H21.1646Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
+        
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>Sure, could you please provide me with the details of the Python code that you want to generate?</p>
 
-                    </article>
-                </div>
-            </div>
+        </article>
+    </div>
+</div>
+ <div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+        
+        <svg class="w-full h-full object-cover fill-gray-300  dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs></defs><title>user</title><path d="M16,4a5,5,0,1,1-5,5,5,5,0,0,1,5-5m0-2a7,7,0,1,0,7,7A7,7,0,0,0,16,2Z"></path><path d="M26,30H24V25a5,5,0,0,0-5-5H13a5,5,0,0,0-5,5v5H6V25a7,7,0,0,1,7-7h6a7,7,0,0,1,7,7Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
+        
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>this is pretty cool!</p>
 
-            <div class="message flex items-start mb-4 w-full">
-                <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-                    
-                    <svg class="w-full h-full object-cover fill-gray-300 dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs><style>.cls-1{fill:none;}</style></defs><title>chat-bot</title><path d="M16,19a6.9908,6.9908,0,0,1-5.833-3.1287l1.666-1.1074a5.0007,5.0007,0,0,0,8.334,0l1.666,1.1074A6.9908,6.9908,0,0,1,16,19Z"></path><path d="M20,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,20,8Z"></path><path d="M12,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,12,8Z"></path><path d="M17.7358,30,16,29l4-7h6a1.9966,1.9966,0,0,0,2-2V6a1.9966,1.9966,0,0,0-2-2H6A1.9966,1.9966,0,0,0,4,6V20a1.9966,1.9966,0,0,0,2,2h9v2H6a3.9993,3.9993,0,0,1-4-4V6A3.9988,3.9988,0,0,1,6,2H26a3.9988,3.9988,0,0,1,4,4V20a3.9993,3.9993,0,0,1-4,4H21.1646Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-                    
-                </div>
-                <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-                    <article class="prose" style="max-width: 95ch;">
-            <p>The goal here is to assist you in writing Python code based on the specifications you provide. You can describe the functionality you want, and I can help generate the Python code for it. Additionally, if you need to modify or execute a function, I can assist with that as well. Please provide the details of the functionality you want in your Python code.</p>
+        </article>
+    </div>
+</div>
+ <div class="message flex items-start mb-4 w-full">
+    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
+        
+        <svg class="w-full h-full object-cover fill-gray-300 dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs><style>.cls-1{fill:none;}</style></defs><title>chat-bot</title><path d="M16,19a6.9908,6.9908,0,0,1-5.833-3.1287l1.666-1.1074a5.0007,5.0007,0,0,0,8.334,0l1.666,1.1074A6.9908,6.9908,0,0,1,16,19Z"></path><path d="M20,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,20,8Z"></path><path d="M12,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,12,8Z"></path><path d="M17.7358,30,16,29l4-7h6a1.9966,1.9966,0,0,0,2-2V6a1.9966,1.9966,0,0,0-2-2H6A1.9966,1.9966,0,0,0,4,6V20a1.9966,1.9966,0,0,0,2,2h9v2H6a3.9993,3.9993,0,0,1-4-4V6A3.9988,3.9988,0,0,1,6,2H26a3.9988,3.9988,0,0,1,4,4V20a3.9993,3.9993,0,0,1-4,4H21.1646Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
+        
+    </div>
+    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
+        <article class="prose" style="max-width: 95ch;">
+<p>I'm glad you're enjoying this! How can I assist you further? Do you need help with a specific Python code or any other task?</p>
 
-                    </article>
-                </div>
-            </div>
-
-            <div class="message flex items-start mb-4 w-full">
-                <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-                    
-                    <svg class="w-full h-full object-cover fill-gray-300  dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs></defs><title>user</title><path d="M16,4a5,5,0,1,1-5,5,5,5,0,0,1,5-5m0-2a7,7,0,1,0,7,7A7,7,0,0,0,16,2Z"></path><path d="M26,30H24V25a5,5,0,0,0-5-5H13a5,5,0,0,0-5,5v5H6V25a7,7,0,0,1,7-7h6a7,7,0,0,1,7,7Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-                    
-                </div>
-                <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-                    <article class="prose" style="max-width: 95ch;">
-            <p>write me a todo app that uses the local store for todos, where i can send a new todo or request the current list</p>
-
-                    </article>
-                </div>
-            </div>
-
-            <div class="message flex items-start mb-4 w-full">
-                <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-                    
-                    <svg class="w-full h-full object-cover fill-gray-300 dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs><style>.cls-1{fill:none;}</style></defs><title>chat-bot</title><path d="M16,19a6.9908,6.9908,0,0,1-5.833-3.1287l1.666-1.1074a5.0007,5.0007,0,0,0,8.334,0l1.666,1.1074A6.9908,6.9908,0,0,1,16,19Z"></path><path d="M20,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,20,8Z"></path><path d="M12,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,12,8Z"></path><path d="M17.7358,30,16,29l4-7h6a1.9966,1.9966,0,0,0,2-2V6a1.9966,1.9966,0,0,0-2-2H6A1.9966,1.9966,0,0,0,4,6V20a1.9966,1.9966,0,0,0,2,2h9v2H6a3.9993,3.9993,0,0,1-4-4V6A3.9988,3.9988,0,0,1,6,2H26a3.9988,3.9988,0,0,1,4,4V20a3.9993,3.9993,0,0,1-4,4H21.1646Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-                    
-                </div>
-                <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-                    <article class="prose" style="max-width: 95ch;">
-            <p>I will generate the requested functionality:</p>
-            <pre><code>Write a Python application to manage a To-Do list. The application should use a local store for To-Do items. It should have functionality to add a new To-Do item and to request the current list of To-Do items.
-            </code></pre>
-            <p>Here are some examples for the function input:</p>
-            <pre><code>['Add To-Do: Buy milk', 'Get To-Do list']
-            </code></pre>
-
-                    </article>
-                </div>
-            </div>
-
-            <div class="message flex items-start mb-4 w-full">
-                <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-                    
-                    <svg class="w-full h-full object-cover fill-gray-300  dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs></defs><title>user</title><path d="M16,4a5,5,0,1,1-5,5,5,5,0,0,1,5-5m0-2a7,7,0,1,0,7,7A7,7,0,0,0,16,2Z"></path><path d="M26,30H24V25a5,5,0,0,0-5-5H13a5,5,0,0,0-5,5v5H6V25a7,7,0,0,1,7-7h6a7,7,0,0,1,7,7Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-                    
-                </div>
-                <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-                    <article class="prose" style="max-width: 95ch;">
-            <p>let's try again</p>
-
-                    </article>
-                </div>
-            </div>
-
-            <div class="message flex items-start mb-4 w-full">
-                <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-                    
-                    <svg class="w-full h-full object-cover fill-gray-300 dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs><style>.cls-1{fill:none;}</style></defs><title>chat-bot</title><path d="M16,19a6.9908,6.9908,0,0,1-5.833-3.1287l1.666-1.1074a5.0007,5.0007,0,0,0,8.334,0l1.666,1.1074A6.9908,6.9908,0,0,1,16,19Z"></path><path d="M20,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,20,8Z"></path><path d="M12,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,12,8Z"></path><path d="M17.7358,30,16,29l4-7h6a1.9966,1.9966,0,0,0,2-2V6a1.9966,1.9966,0,0,0-2-2H6A1.9966,1.9966,0,0,0,4,6V20a1.9966,1.9966,0,0,0,2,2h9v2H6a3.9993,3.9993,0,0,1-4-4V6A3.9988,3.9988,0,0,1,6,2H26a3.9988,3.9988,0,0,1,4,4V20a3.9993,3.9993,0,0,1-4,4H21.1646Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-                    
-                </div>
-                <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-                    <article class="prose" style="max-width: 95ch;">
-            <p>I will generate the requested changes:</p>
-            <pre><code>Write a Python application to manage a To-Do list. The application should use a local store for To-Do items. It should have functionality to add a new To-Do item and to request the current list of To-Do items.
-            </code></pre>
-            <p>Here are some examples for the function input:</p>
-            <pre><code>['Add To-Do: Buy milk', 'Get To-Do list']
-            </code></pre>
-
-                    </article>
-                </div>
-            </div>
+        </article>
+    </div>
+</div>
  </div>
 
-        <div id="loader" class="pb-4 w-full">
+        <div id="loader" class="pb-5 w-full" style="display: none;">
             <div class="w-12 h-12 mx-auto">
                 <svg class="w-full h-full stroke-gray-600 dark:stroke-white" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
                     <g fill="none" fill-rule="evenodd" stroke-width="3">
@@ -157,16 +117,16 @@
                     </g>
                 </svg>
             </div>
-            <div class="mt-2 mx-auto text-center text-gray-500">
-                <span id="loader-text">Loading...</span>
+            <div class="mt-2 mx-auto text-center">
+                <span id="loader-text">Loading</span>
             </div>
         </div>
     </div>
 
     <div class="chat-input-container fixed bottom-0 left-0 right-0 p-2 bg-gray-100 border-t border-gray-200">
         <div class="relative flex items-center max-w-4xl mx-auto pl-14">
-            <div id="chat-input-wrapper" class="input-wrapper flex-1 bg-white border border-gray-300 rounded">
-                <textarea id="chat-input" class="w-full p-2 pr-8 outline-none resize-none" placeholder="Type a message..."></textarea>
+            <div id="chat-input-wrapper" class="input-wrapper flex-1 bg-white border border-gray-300 rounded-lg">
+                <textarea id="chat-input" class="w-full p-2 pr-8 outline-none resize-none" placeholder="Type a message..." style="height: auto;"></textarea>
             </div>
             <button id="send-button" class="absolute right-4 bottom-1/2 transform translate-y-1/2">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="h-6 w-6 text-blue-600">
@@ -178,11 +138,11 @@
 
     <script>
         const agent_id = "0184431e335847e3a27f07b505ad6639b3774e24eac909c7c4c04cd30b9bc229"
-        const frontend_id = "83b9172f99c794e2022484821dd793662398cfd6ea635811efde33e2df781bc3"
-        const chat_actors = JSON.parse('{"main": "549266a3e1c766cd9250b6c78467ea594a8ba0cd71fbd40e5fac08aa9afc12c8", "new-chat": "29840eda0eaa66458ae2f1ac8ab033c57c1b3d7c17b18451071d7573630176ce"}')
-        const chat_titles = JSON.parse('{"main": "Main", "new-chat": "New Chat"}')
-        const current_chat = "new-chat"
-        const current_chat_id = "29840eda0eaa66458ae2f1ac8ab033c57c1b3d7c17b18451071d7573630176ce"
+        const frontend_id = "2759b449a4bacd245753aefc79e2f5392246821245088ee28d6c57a5da3d0a90"
+        const chat_actors = JSON.parse('{"main": "f9b0c27ef631996c3dc9a21685cd542cd05f78e4423fef8afd77c81316e4cbee"}')
+        const chat_titles = JSON.parse('{"main": "Main"}')
+        const current_chat = "main"
+        const current_chat_id = "f9b0c27ef631996c3dc9a21685cd542cd05f78e4423fef8afd77c81316e4cbee"
 
         const chatInput = document.getElementById('chat-input');
         const sendButton = document.getElementById('send-button');
@@ -208,7 +168,7 @@
         // Sends the message when the button is clicked
         sendButton.addEventListener('click', sendMessage);
         function sendMessage() {
-            chat_inbox_url = "../../29840eda0eaa66458ae2f1ac8ab033c57c1b3d7c17b18451071d7573630176ce/inbox"
+            chat_inbox_url = "../../f9b0c27ef631996c3dc9a21685cd542cd05f78e4423fef8afd77c81316e4cbee/inbox"
             const message = chatInput.value.trim();
             if (message) {
                 console.log('Sending message:', message);
@@ -228,7 +188,7 @@
 
         newChatButton.addEventListener('click', newChat)
         function newChat(){
-            frontend_inbox_url = "../../83b9172f99c794e2022484821dd793662398cfd6ea635811efde33e2df781bc3/inbox"
+            frontend_inbox_url = "../../2759b449a4bacd245753aefc79e2f5392246821245088ee28d6c57a5da3d0a90/inbox"
             //ask for name, then post
             const chatName = prompt("Please enter a name for the new chat", "New Chat");
             if (chatName != null) {
@@ -245,7 +205,7 @@
             }
         }
 
-        const evtSource = new EventSource("../../../messages-sse?content=true&mt=receipt&mt=new-chat");
+        const evtSource = new EventSource("../../../messages-sse?content=true&mt=receipt&mt=new-chat&mt=thinking");
         evtSource.onmessage = (e) => {
             console.log('SSE Event, message:', e);
         };
@@ -254,6 +214,9 @@
             //console.log('SSE Event, receipt:', data);
             if(data.sender_id == current_chat_id && data.content != null){
                 htmx.trigger("#messages-container", "receipt", {messagekey: data.content});
+                //hider loader & reset text
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('loader-text').innerHTML = 'Loading';
             }
             else{
                 //todo indicate that there are new messages in this other chat
@@ -265,6 +228,14 @@
             console.log('SSE Event, new-chat', data);
             //redirect to new chat
             window.location.href = "?chat=" + data.content;
+        });
+        evtSource.addEventListener('thinking', (e) => {
+            data = JSON.parse(e.data);
+            console.log('SSE Event, thinking', data);
+            //show loader & set text
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('loader-text').innerHTML = data.content;
+            window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
         });
 
         function getMessageFilter(e){

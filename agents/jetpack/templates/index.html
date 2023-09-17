@@ -43,8 +43,10 @@
         </button>
     </div>
     
-    <div class="mb-20">
-        <div id="messages-container"class="px-4 pt-6 pb-4 max-w-4xl mx-auto"
+
+
+    <div id="messages-container" class="mb-20">
+        <div id="messages"class="px-4 pt-6 pb-4 max-w-4xl mx-auto"
             hx-get="../../{{current_chat_id}}/query/messages"
             hx-trigger="load, receipt" 
             hx-vals="js:{messagekey: getMessageFilter(event)}" 
@@ -72,9 +74,15 @@
         </div>
     </div>
 
+    <div id="artifacts" class="fixed right-0 bottom-0 mb-20 p-4 flex flex-col invisible lg:visible"
+        hx-get="../../{{current_chat_id}}/query/artifacts"
+        hx-trigger="load, artifact" 
+        hx-swap="innerHTML">
+    </div>
+
     <div class="chat-input-container fixed bottom-0 left-0 right-0 p-2 bg-gray-100 border-t border-gray-200">
         <div class="relative flex items-center max-w-4xl mx-auto pl-14">
-            <div id="chat-input-wrapper" class="input-wrapper flex-1 bg-white border border-gray-300 rounded">
+            <div id="chat-input-wrapper" class="input-wrapper flex-1 bg-white border border-gray-300 rounded-lg">
                 <textarea id="chat-input" class="w-full p-2 pr-8 outline-none resize-none" placeholder="Type a message..."></textarea>
             </div>
             <button id="send-button" class="absolute right-4 bottom-1/2 transform translate-y-1/2">
@@ -154,15 +162,16 @@
             }
         }
 
-        const evtSource = new EventSource("../../../messages-sse?content=true&mt=receipt&mt=new-chat&mt=thinking");
+        const evtSource = new EventSource("../../../messages-sse?content=true&mt=receipt&mt=new-chat&mt=thinking&mt=artifact");
         evtSource.onmessage = (e) => {
             console.log('SSE Event, message:', e);
         };
+
         evtSource.addEventListener('receipt', (e) => {
             data = JSON.parse(e.data);
             //console.log('SSE Event, receipt:', data);
             if(data.sender_id == current_chat_id && data.content != null){
-                htmx.trigger("#messages-container", "receipt", {messagekey: data.content});
+                htmx.trigger("#messages", "receipt", {messagekey: data.content});
                 //hider loader & reset text
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('loader-text').innerHTML = 'Loading';
@@ -172,12 +181,7 @@
                 console.log('SSE Event: Not for current chat, ignoring');
             }
         });
-        evtSource.addEventListener('new-chat', (e) => {
-            data = JSON.parse(e.data);
-            console.log('SSE Event, new-chat', data);
-            //redirect to new chat
-            window.location.href = "?chat=" + data.content;
-        });
+
         evtSource.addEventListener('thinking', (e) => {
             data = JSON.parse(e.data);
             console.log('SSE Event, thinking', data);
@@ -186,6 +190,26 @@
             document.getElementById('loader-text').innerHTML = data.content;
             window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
         });
+
+        evtSource.addEventListener('artifact', (e) => {
+            data = JSON.parse(e.data);
+            console.log('SSE Event, artifact:', data);
+            if(data.sender_id == current_chat_id && data.content != null){
+                htmx.trigger("#artifacts", "artifact", {});
+            }
+            else{
+                //todo indicate that there are new artifacts in another chat
+                console.log('SSE Event: Not for current chat, ignoring');
+            }
+        });
+        
+        evtSource.addEventListener('new-chat', (e) => {
+            data = JSON.parse(e.data);
+            console.log('SSE Event, new-chat', data);
+            //redirect to new chat
+            window.location.href = "?chat=" + data.content;
+        });
+       
 
         function getMessageFilter(e){
             //if the event contain messagekey, return it

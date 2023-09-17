@@ -17,8 +17,12 @@ class ChatState(WitState):
     coder:ActorId|None = None
 
     code_request:CodeRequest|None = None
+    code_plan:CodePlanned|None = None
     code_spec:CodeSpec|None = None
+    code_deploy:CodeDeployed|None = None
+    code_fail:CodeFailed|None = None
     current_execution:CodeExecution|None = None
+    last_result:CodeExecuted|None = None
 
 async def create_chat_actor(
         store:ObjectStore, 
@@ -174,21 +178,38 @@ async def on_complete_message(msg:InboxMessage, ctx:MessageContext, state:ChatSt
 #========================================================================================
 # Coder Callbacks
 #========================================================================================
+
+@app.message("code_speced")
+async def on_message_code_speced(spec:CodeSpec, ctx:MessageContext, state:ChatState) -> None:
+    logger.info(f"'{state.name}': received callback: code_speced")
+    state.code_spec = spec
+    ctx.outbox.add_new_msg(ctx.agent_id, "artifact", mt="artifact")
+
+@app.message("code_planned")
+async def on_message_code_planned(plan:CodePlanned, ctx:MessageContext, state:ChatState) -> None:
+    logger.info(f"'{state.name}': received callback: code_planned")
+    state.code_plan = plan
+    if state.code_plan.plan is not None:
+        #todo: also output as chat message
+        ctx.outbox.add_new_msg(ctx.agent_id, "artifact", mt="artifact")
+
 @app.message("code_deployed")
 async def on_message_code_deployed(code:CodeDeployed, ctx:MessageContext, state:ChatState) -> None:
     logger.info(f"'{state.name}': received callback: code_deployed")
-    
-    state.code_spec = code.spec
-    # render the code and notify frontend
-    chat_message = ChatMessage.from_actor(f"Here is the function and code I generated:\n```\n{code.code}\n```\n", ctx.actor_id)
-    messages_tree = await ctx.core.gett("messages")
-    messages_tree.makeb(str(chat_message.id), True).set_as_json(chat_message)
-    ctx.outbox.add_new_msg(ctx.agent_id, str(chat_message.id), mt="receipt")
+    state.code_deploy = code
+    if state.code_deploy.code is not None:
+        # render the code and notify frontend
+        chat_message = ChatMessage.from_actor(f"Here is the function and code I generated:\n```\n{code.code}\n```\n", ctx.actor_id)
+        messages_tree = await ctx.core.gett("messages")
+        messages_tree.makeb(str(chat_message.id), True).set_as_json(chat_message)
+        ctx.outbox.add_new_msg(ctx.agent_id, str(chat_message.id), mt="receipt")
+        ctx.outbox.add_new_msg(ctx.agent_id, "artifact", mt="artifact")
 
 @app.message("code_executed")
 async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:ChatState) -> None:
     logger.info(f"'{state.name}': received callback: code_executed")
-    state.current_execution = None 
+    state.current_execution = None
+    state.last_result = exec
     content = ""
     links = []
     for key in list(exec.output):
@@ -239,3 +260,12 @@ async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:
     messages_tree = await ctx.core.gett("messages")
     messages_tree.makeb(str(chat_message.id), True).set_as_json(chat_message)
     ctx.outbox.add_new_msg(ctx.agent_id, str(chat_message.id), mt="receipt")
+    ctx.outbox.add_new_msg(ctx.agent_id, "artifact", mt="artifact")
+
+@app.message("code_failed")
+async def on_message_code_failed(fail:CodeFailed, ctx:MessageContext, state:ChatState) -> None:
+    logger.warn(f"'{state.name}': received callback: code_failed")
+    state.code_fail = fail
+    if state.code_fail.errors is not None:
+        #todo: also output as chat message
+        ctx.outbox.add_new_msg(ctx.agent_id, "artifact", mt="artifact")

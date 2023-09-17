@@ -88,6 +88,7 @@ async def on_spec_message(spec:CodeSpec, msg:InboxMessage, state:CoderState, out
     reset_code(state)
     state.notify.add(msg.sender_id)
     outbox.add_new_msg(actor_id, "plan", mt="plan")
+    notify_all(state, outbox, spec, mt="code_speced")
 
 
 @app.message("plan")
@@ -102,29 +103,30 @@ async def on_plan_message(msg:InboxMessage, state:CoderState, ctx:MessageContext
             state.code_spec.output_spec,
             )
         if input_spec is not None:
-            logger.info("generated input_spec:", input_spec)
+            logger.info("generated input_spec: %s", input_spec)
             state.code_spec.input_spec = input_spec
         if output_spec is not None:
-            logger.info("generated output_spec:", output_spec)
+            logger.info("generated output_spec: %s", output_spec)
             state.code_spec.output_spec = output_spec
 
     #todo: convert the spec into a plan using a model completion
     state.code_plan = state.code_spec.task_description
     ctx.outbox.add_new_msg(ctx.actor_id, "code", mt="code")
-    notify_all(state, ctx.outbox, CodePlanned(task_description=state.code_spec.task_description, code_plan=state.code_plan), mt="code_planned")
     ctx.outbox.add_new_msg(ctx.agent_id, f"Coding: {state.name}", mt="thinking")
+    notify_all(state, ctx.outbox, state.code_spec, mt="code_speced")
+    notify_all(state, ctx.outbox, CodePlanned(plan=state.code_plan), mt="code_planned")
 
 
 @app.message("code")
-async def on_code_message(msg:InboxMessage, state:CoderState, core:Core, outbox:Outbox, actor_id:ActorId):
+async def on_code_message(msg:InboxMessage, state:CoderState, ctx:MessageContext):
     logger.info("on_code_message")
     state.code_tries += 1
     # copy the code node, if it exists, into the code_test node so that all modules are available
-    code_node = await core.get("code")
-    if code_node is not None and 'code_test' not in core:
+    code_node = await ctx.core.get("code")
+    if code_node is not None and 'code_test' not in ctx.core:
         # setting a new tree node with an existing tree node id is all that is required to copy
-        core.add("code_test", code_node.get_as_object_id())
-    test_node = await core.gett("code_test") # will create it if it does not exist
+        ctx.core.add("code_test", code_node.get_as_object_id())
+    test_node = await ctx.core.gett("code_test") # will create it if it does not exist
     #get the previously generated code (if there is some)
     previous_code = None
     previous_code_blob = await test_node.get("generated.py")
@@ -147,26 +149,27 @@ async def on_code_message(msg:InboxMessage, state:CoderState, core:Core, outbox:
     #save the code
     test_node.makeb("generated.py").set_as_str(code)
     #add an entry point for the resolver
-    core.makeb("wit_code_test").set_as_str("/code_test:generated:entry")
+    ctx.core.makeb("wit_code_test").set_as_str("/code_test:generated:entry")
     #move state machine forward
-    outbox.add_new_msg(actor_id, "test", mt="test")
+    ctx.outbox.add_new_msg(ctx.actor_id, "test", mt="test")
+    ctx.outbox.add_new_msg(ctx.agent_id, f"Testing: {state.name}", mt="thinking")
 
 @app.message("test")
-async def on_test_message(msg:InboxMessage, state:CoderState, core:Core, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
+async def on_test_message(msg:InboxMessage, state:CoderState, ctx:MessageContext):
     logger.info("on_test_message")
     #load the code
     try:
         #use the resolver to load the code and any modules it might be referencing
-        resolver = CoreResolver(store)
-        entry_func = await resolver.resolve(core.get_as_object_id(), "wit_code_test", is_required=True)
-        logger.info("resolved entry func", entry_func)
+        resolver = CoreResolver(ctx.store)
+        entry_func = await resolver.resolve(ctx.core.get_as_object_id(), "wit_code_test", is_required=True)
+        logger.info(f"resolved entry func: {entry_func}")
     except Exception as e:
-        logger.info("syntax error, trying to resolve the function:", str(e))
+        logger.info(f"syntax error, trying to resolve the function: {e}", exc_info=True)
         if state.code_tries >= state.code_tries_max:
-            outbox.add_new_msg(actor_id, "fail", mt="fail")
+            ctx.outbox.add_new_msg(ctx.actor_id, "fail", mt="fail")
         else:
             state.code_errors = str(e)
-            outbox.add_new_msg(actor_id, "code", mt="code")
+            ctx.outbox.add_new_msg(ctx.actor_id, "code", mt="code")
         return
     
     if state.code_spec.input_examples is not None and state.code_spec.input_examples != []:
@@ -174,39 +177,40 @@ async def on_test_message(msg:InboxMessage, state:CoderState, core:Core, outbox:
         test_errors = []
         for test_description in state.code_spec.input_examples:
             #generate the test data
-            logger.info("test description:", test_description)
+            logger.info("test description: %s", test_description)
             test_input = await function_call_completion(
                 "entry", 
                 state.code_spec.task_description, 
                 state.code_spec.input_spec, 
                 test_description)
-            logger.info("test input:", test_input)
-            store_wrapper = StoreWrapper(store)
+            logger.info("test input: %s", test_input)
+            store_wrapper = StoreWrapper(ctx.store)
             function_kwargs = {}
             function_kwargs['input'] = test_input
             function_kwargs['store'] = store_wrapper
             try:
-                logger.info("test kwargs:", function_kwargs)
+                logger.info("test kwargs: %s", function_kwargs)
                 func_wrapper = _Wrapper(entry_func)
                 output = await func_wrapper(**function_kwargs)
-                logger.info("test output:", output)
+                logger.info("test output: %s", output)
             except Exception as e:
-                logger.info("error trying to execute the generated function:", e)
+                logger.info(f"error trying to execute the generated function: {e}", exc_info=True)
                 if str(e) not in test_errors:
                     test_errors.append(str(e))
         if len(test_errors) > 0:
-            logger.info("test errors:", test_errors)
+            logger.info("test errors: %s", test_errors)
             if state.code_tries >= state.code_tries_max:
-                logger.info("too many tries, will fail; tries, max:", state.code_tries, state.code_tries_max)
-                outbox.add_new_msg(actor_id, "fail", mt="fail")
+                logger.info("too many tries, will fail; tries: %s, max: %s", state.code_tries, state.code_tries_max)
+                ctx.outbox.add_new_msg(ctx.actor_id, "fail", mt="fail")
             else:
                 state.code_errors = "\n".join(test_errors)
                 logger.info("will try again")
-                outbox.add_new_msg(actor_id, "code", mt="code")
+                ctx.outbox.add_new_msg(ctx.actor_id, "code", mt="code")
             return
         
     #the testing succeeded, move forward
-    outbox.add_new_msg(actor_id, "deploy", mt="deploy")
+    ctx.outbox.add_new_msg(ctx.actor_id, "deploy", mt="deploy")
+    ctx.outbox.add_new_msg(ctx.agent_id, f"Deploying: {state.name}", mt="thinking")
 
 @app.message("deploy")
 async def on_deploy_message(msg:InboxMessage, state:CoderState, core:Core, outbox:Outbox, actor_id:ActorId):
@@ -218,11 +222,11 @@ async def on_deploy_message(msg:InboxMessage, state:CoderState, core:Core, outbo
     code_node.makeb("generated.py").set_from_blob(code)
     #add an entry point for the resolver
     core.makeb("wit_code").set_as_str("/code:generated:entry")
-    notify_all(state, outbox, CodeDeployed(code=code.get_as_str(), spec=state.code_spec), mt="code_deployed")
     #if this is a job, move on to the execute state
     if state.job_execution is not None:
         logger.info("this is a job, moving to execute state")
         outbox.add_new_msg(actor_id, state.job_execution, mt="execute")
+    notify_all(state, outbox, CodeDeployed(code=code.get_as_str()), mt="code_deployed")
 
 @app.message("execute")
 async def on_execute_message(exec:CodeExecution, state:CoderState, core:Core, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
@@ -237,13 +241,13 @@ async def on_execute_message(exec:CodeExecution, state:CoderState, core:Core, ou
     
     #if the input arguments were just described, convert them to a function call
     if exec.input_arguments is None and exec.input_description is not None:
-        logger.info("generating input arguments from input description:", exec.input_description)
+        logger.info("generating input arguments from input description: %s", exec.input_description)
         exec.input_arguments = await function_call_completion(
                 "entry", 
                 state.code_spec.task_description, 
                 state.code_spec.input_spec, 
                 exec.input_description)
-        logger.info("generated input arguments:", exec.input_arguments)
+        logger.info("generated input arguments: %s", exec.input_arguments)
 
     if exec.input_arguments is None:
         logger.info("no input arguments or description provided, cannot execute")
@@ -259,6 +263,11 @@ async def on_execute_message(exec:CodeExecution, state:CoderState, core:Core, ou
         logger.info("execute output:", output)
         notify_all(state, outbox, CodeExecuted(input_arguments=exec.input_arguments, output=output), mt="code_executed")
     except Exception as e:
-        logger.info("error trying to execute the deployed function:", e)
+        logger.info("error trying to execute the deployed function: %s", e)
         return
+
+@app.message("fail")
+async def on_fail_message(msg:InboxMessage, state:CoderState, ctx:MessageContext):
+    logger.info("on_fail_message")
+    notify_all(state, ctx.outbox, CodeFailed(errors=state.code_errors), mt="code_failed")
 
