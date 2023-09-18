@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-import os.path as path
+import posixpath as path
 import asyncio
 import json
 from typing import AsyncIterator, Callable, Iterable, Type

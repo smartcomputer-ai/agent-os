@@ -1,4 +1,6 @@
+import os
 import pytest
+from pathlib import PureWindowsPath, PurePosixPath
 from src.grit.stores.memory import MemoryReferences, MemoryObjectStore
 from src.grit import *
 from src.wit import *
@@ -23,36 +25,42 @@ def create_files(root_path):
     helpers.create_file(f"{root_path}/data_a_sync", "sync_file.txt", "hi")
     helpers.create_file(f"{root_path}/data_b", "file.json", {"name": "Luke", "age": 21, "city": "Buffalo"})
 
+    if os.name == "nt" and "\\" in root_path:
+        posix_root_path = PureWindowsPath(root_path).as_posix()
+    else:
+        posix_root_path = root_path
+
     toml_string=f'''
-    [agent]
-    name = "test"
+[agent]
+name = "test"
 
-    [all] 
-    push = ["{root_path}/code/common:/code/common", "{root_path}/data/common:/data/common"]
+[all] 
+push = ["{posix_root_path}/code/common:/code/common", "{posix_root_path}/data/common:/data/common"]
 
-    [[actors]]
-    name = "a"
-    push = ["{root_path}/code/wit_a:/code/", "{root_path}/data_a:/data"]
-    push_value."/data/args" = "hello world"
-    push_value."/data/more_args" = {{"hello" = "world"}}
-    push_on_genesis = "{root_path}/data_a_gen:/data"
-    pull = "path/to/common_code:/"
-    sync = "{root_path}/data_a_sync/sync_file.txt:/data/sync_file.txt" #supports both push and pull
-    wit = "/code:wit:wit_a" 
-    wit_query = "/code:query:wit_query_a" 
-    #wit_update = "/code:module:function_name" 
+[[actors]]
+name = "a"
+push = ["{posix_root_path}/code/wit_a:/code/", "{posix_root_path}/data_a:/data"]
+push_value."/data/args" = "hello world"
+push_value."/data/more_args" = {{"hello" = "world"}}
+push_on_genesis = "{posix_root_path}/data_a_gen:/data"
+pull = "path/to/common_code:/"
+sync = "{posix_root_path}/data_a_sync/sync_file.txt:/data/sync_file.txt" #supports both push and pull
+wit = "/code:wit:wit_a" 
+wit_query = "/code:query:wit_query_a" 
+#wit_update = "/code:module:function_name" 
 
-    [[actors]]
-    name = "b"
-    push = ["{root_path}/code/wit_b:/code/", "{root_path}/data_b:/data"]
-    wit = "external:wit_b:wit_b" 
-    wit_query = "external:wit_b:qit_b_query" 
-    runtime = "python" #which runtime to use, default is python
-    notify = "a"
-    '''
+[[actors]]
+name = "b"
+push = ["{posix_root_path}/code/wit_b:/code/", "{posix_root_path}/data_b:/data"]
+wit = "external:wit_b:wit_b" 
+wit_query = "external:wit_b:qit_b_query" 
+runtime = "python" #which runtime to use, default is python
+notify = "a"
+'''
     helpers.create_file(f"{root_path}", "sync.toml", toml_string)
 
 async def test_sync_file_from_toml_file(tmp_path):
+    tmp_path = os.path.relpath(tmp_path)
     create_files(tmp_path)
     refs = MemoryReferences()
     pushes = await sync_file.load_pushes(f"{tmp_path}/sync.toml", refs)
@@ -68,6 +76,7 @@ async def test_sync_file_from_toml_file(tmp_path):
     assert len(pushes[1].notify) == 1 #notify actor a
 
 async def test_sync_file_push(tmp_path):
+    tmp_path = os.path.relpath(tmp_path)
     create_files(tmp_path)
     store = MemoryObjectStore()
     refs = MemoryReferences()
@@ -84,6 +93,7 @@ async def test_sync_file_push(tmp_path):
     assert len(all_refs) == 4 # actor, step head, and 2 agent refs
 
 async def test_sync_file_push_twice(tmp_path):
+    tmp_path = os.path.relpath(tmp_path)
     create_files(tmp_path)
     store = MemoryObjectStore()
     refs = MemoryReferences()

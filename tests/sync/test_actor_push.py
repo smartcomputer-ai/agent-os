@@ -1,3 +1,4 @@
+import os
 import pytest
 from src.grit import *
 from src.wit import *
@@ -13,6 +14,7 @@ def create_files(root_path):
     helpers.create_file(f"{root_path}/code", "wit2.py", "python contents")
 
 async def test_actor_push__add_path(tmp_path):
+    tmp_path = os.path.relpath(tmp_path)
     create_files(tmp_path)
 
     pushpath = f"{tmp_path}:/"
@@ -21,6 +23,7 @@ async def test_actor_push__add_path(tmp_path):
     assert len(push.sync_items) == 5
 
 async def test_actor_push__add_path_twice(tmp_path):
+    tmp_path = os.path.relpath(tmp_path)
     create_files(f"{tmp_path}/a")
     create_files(f"{tmp_path}/b")
     
@@ -31,6 +34,7 @@ async def test_actor_push__add_path_twice(tmp_path):
     assert len(push.sync_items) == 5
 
 async def test_actor_push__to_core(tmp_path):
+    tmp_path = os.path.relpath(tmp_path)
     create_files(tmp_path)
 
     pushpath = f"{tmp_path}:/"

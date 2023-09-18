@@ -1,4 +1,3 @@
-import os
 from runtime.actor_executor import MailboxUpdate
 from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
 from src.wit import *

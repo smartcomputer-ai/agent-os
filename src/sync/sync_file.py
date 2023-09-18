@@ -1,3 +1,4 @@
+import os
 import tomlkit
 from tomlkit import TOMLDocument
 from tomlkit.container import Container
@@ -150,6 +151,7 @@ def _add_table_to_actor_push(actor_push:ActorPush, table:Container):
             actor_push.notify.add(actor_to_notify)
 
 def _read_toml_file(file_path) -> TOMLDocument:
+    file_path = _convert_posix_to_win(file_path)
     with open(file_path, 'r') as f:
         return _read_toml_string(f.read())
 
@@ -211,3 +213,7 @@ def _validate_doc(doc:tomlkit.TOMLDocument) -> None:
         #raise ValueError('No actors table array (aka heading) is defined. Use [[actors]] to define one or more actors.')
         validate_actors(doc['actors'], valid_actor_keys)
 
+def _convert_posix_to_win(path:str) -> str:
+    if os.name == "nt" and "/" in path:
+        return path.replace("/", os.sep)
+    return path

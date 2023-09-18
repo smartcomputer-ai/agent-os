@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import PureWindowsPath
 import threading
 from grit.object_model import *
 from grit.references import References
@@ -25,6 +26,8 @@ class FileReferences(References):
         for root, _dirs, files in os.walk(self.references_path):
             for file in files:
                 ref = os.path.relpath(os.path.join(root, file), self.references_path)
+                if os.name == "nt": #convert the path to forward slash posix path
+                    ref = PureWindowsPath(ref).as_posix()
                 with open(os.path.join(root, file), "r") as f:
                     object_id = bytes.fromhex(f.read())
                     self._ref[ref] = object_id
@@ -49,7 +52,7 @@ class FileReferences(References):
 
     def set_sync(self, ref:str, object_id:ObjectId) -> None:
         with self._thread_lock:
-                self._set_and_persist(ref, object_id)
+            self._set_and_persist(ref, object_id)
 
     def _set_and_persist(self, ref:str, object_id:ObjectId) -> None:
         self._ref[ref] = object_id

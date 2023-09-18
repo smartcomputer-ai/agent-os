@@ -33,7 +33,7 @@ async def test_sse():
 
     runtime_task = asyncio.create_task(runtime.start())
     client = TestClient(WebServer(runtime).app())
-    await asyncio.sleep(0.02) #give the runtime time to create the actor
+    await asyncio.sleep(0.05) #give the runtime time to create the actor
 
     sse_events = []
     async def listen_to_messages():
@@ -49,14 +49,14 @@ async def test_sse():
     #create and actor for wit_a
     wit_a_actor_id, wit_a_gen_message_id = await helpers.create_and_send_genesis_message(runtime, 'wit_a')
     wit_a_actor_id_str = to_object_id_str(wit_a_actor_id)
-    await asyncio.sleep(0.02) #give the runtime time to create the actor
+    await asyncio.sleep(0.05) #give the runtime time to create the actor
 
     #send a message via POST api to the actor
     response = client.post(url_prefix+"/actors/"+wit_a_actor_id_str+"/inbox", json={"content":"hi"})
     assert response.status_code == 201
     assert response.headers['content-type'] == 'text/plain; charset=utf-8'
     new_message_id_str = response.text
-    await asyncio.sleep(0.02) #give the runtime time to create the actor
+    await asyncio.sleep(0.05) #give the runtime time to create the actor
     
     runtime.stop()
     await runtime_task
