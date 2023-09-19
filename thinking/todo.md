@@ -55,11 +55,9 @@
    - [X] sync version of data_model
    - [X] allow sync wits, execute them in a thread
 - [X] Add basic logging and instrumentation (instead of just prints)
-- [ ] Work on Windows
-- [ ] Write a getting started guide 
-- [ ] Jetpack readme 
-- [ ] Add inspiration section to design doc
-- [ ] Add image to readme
+- [X] Work on Windows
+- [X] Jetpack readme
+- [X] Add image to readme
 
 ### Release v0.1.1
 
@@ -78,3 +76,5 @@
    - [ ] define "sleep" semantics for step chains and message chains (inbox and outbox), so that actors can prepare for pruning
 - [ ] implement cancelation of wit execution if all messages are signals (50% done already)
 
+- [ ] Write a getting started guide 
+- [ ] Flesh out inspiration doc

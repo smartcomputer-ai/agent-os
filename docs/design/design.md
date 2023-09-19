@@ -33,7 +33,7 @@ In the Agent OS, there are the following sub-systems or components:
  - **Wit**: the state transition function of an actor, which takes as its input its current state and new messages, and then produces a new state and output messages
  - **Runtime**: the orchestrator that makes sure the Wit function of an actor executes properly and that messages are routed between actors. It also controls access to Grit
 
-<p><img src="design-fig-1-runtime-grit.png" alt="Architecture Overview" width="600" />
+<p><img src="../images/design-fig-1-runtime-grit.png" alt="Architecture Overview" width="600" />
 <br />
 Figure 1: An agent consists of the Runtime, Grit, and several actors. Each actor consists of its state transition function (Wit) and its state, both of which are stored in Grit itself. The runtime, here, is executing "Actor B" by passing new input messages to its function "Wit b". As part of the execution, the Wit also produces new output messages, which are then routed to other actors. Also, during execution the actor might change its internal state. All of this will be explained in detail below.
 </p>
@@ -86,7 +86,7 @@ Generally, when talking about actor models, the key insight is that actors run i
 
 An actor does not need to do any data locking internally. This is because actors communicate by message passing: if an actor wants information from another actor, it has to be done via message. They never share mutable memory or state. For example, actor A sends a "request for X" message to actor B. Actor B then sends a "response with X" message to actor A. That's all there is to the actor model. Implementing this model is mostly about creating a runtime that executes the actors in parallel and ensure that messages are delivered to the correct actor.
 
-<p><img src="design-fig-2-actors.png" alt="Actors" width="600" />
+<p><img src="../images/design-fig-2-actors.png" alt="Actors" width="600" />
 <br />
 Figure 2: Actors communicate with each other using messages. All kinds of messaging patterns can be constructed with actors. Here, we see request-response (between A and B), fanout (B to C,D,E,F), and aggregate (C,D,E,F to G), and so on.
 </p>
@@ -168,7 +168,7 @@ If it's still not clear, here is a good [explanation of how Git works](https://c
 ### Grit Data Structure
 The way Grit works is largely inspired by Git. However, instead of having `commits` we have `steps`. And there are two new objects: `message` and `mailbox`
 
-<p><img src="design-fig-3-grit-model.png" alt="Grit object model" width="400" />
+<p><img src="../images/design-fig-3-grit-model.png" alt="Grit object model" width="400" />
 <br />
 Figure 3: All the objects in the Grit model. The relationships are described in this section, but notice that it is largely a hierarchical structure with the Step forming the root.
 </p>
@@ -302,7 +302,7 @@ def wit(last_step_id:StepId, new_messages:Mailbox) -> StepId
 ```
 A Wit takes in the last step id, and then "applies" the new messages to its internal state and in doing so produces a new step id. The process usually consists in modifying its core, but minimally it updates the inbox of the step to mark the new messages as read.
 
-<p><img src="design-fig-4-wit-function.png" alt="Wit function" width="900" />
+<p><img src="../images/design-fig-4-wit-function.png" alt="Wit function" width="900" />
 <br />
 Figure 4: The code of the Wit function itself is loaded by the runtime from the core of the previous step (green arrow). The Wit adopts the "new messages" that are part of the input by making the message ids part of the new "read inbox" of the "new step" (first purple arrow). The runtime compares the outboxes between the previous and new step to figure out which messages need to be routed and then sends them to the appropriate next actor (second purple arrow and "Wit b Input"). 
 </p>
@@ -494,7 +494,7 @@ Once Wit code has been pushed to Grit, and the runtime is started, the proper li
 #### 1) Genesis Message
 It's not possible to just create an actor, one has to send a "genesis message" to a not-yet-existing actor, which then brings it into existence by executing the first step transition function. How does this work?
 
-<p><img src="design-fig-5-wit-function-genesis.png" alt="Genesis Message in a Wit Function" width="900" />
+<p><img src="../images/design-fig-5-wit-function-genesis.png" alt="Genesis Message in a Wit Function" width="900" />
 <br />
 Figure 5: "Wit a" sends a genesis message to "Wit b". The Wit to run the first step is loaded directly from the core inside the message.
 </p>

@@ -1,5 +1,6 @@
 # Documentation
 
-The documentation is very WIP.
+The documentation is very much work in progress.
 
-To understand the design and architecture of the Agent OS, start reading the [design document](design/design.md).
+❓If you want to understand the motivation behind the project, read the [manifesto](articles/manifesto.md).  
+❓To learn how everything works, start reading the [design docs](design/design.md).
