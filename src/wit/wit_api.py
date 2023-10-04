@@ -63,4 +63,3 @@ class Wit:
     
     def wut_query(self, func, /) -> Callable[[], DecoratedCallable]:
         return self._wit_query_router.register_query_handler("wut", func)
-    

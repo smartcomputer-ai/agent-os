@@ -198,8 +198,8 @@ async def on_message_code_deployed(code:CodeDeployed, ctx:MessageContext, state:
     logger.info(f"'{state.name}': received callback: code_deployed")
     state.code_deploy = code
     if state.code_deploy.code is not None:
-        # render the code and notify frontend
-        chat_message = ChatMessage.from_actor(f"Here is the function and code I generated:\n```\n{code.code}\n```\n", ctx.actor_id)
+        # notify frontend
+        chat_message = ChatMessage.from_actor("**Igenerated the function and deployed it.**  \nYou can view it in the artifacts on the right.", ctx.actor_id)
         messages_tree = await ctx.core.gett("messages")
         messages_tree.makeb(str(chat_message.id), True).set_as_json(chat_message)
         ctx.outbox.add_new_msg(ctx.agent_id, str(chat_message.id), mt="receipt")

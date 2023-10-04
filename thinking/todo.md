@@ -61,6 +61,8 @@
 
 ### Release v0.1.1
 
+- [ ] wit "constructor" helpers (actually should be "create agent")
+- [ ] better model to implement complicated wits (class or something)
 - [ ] support inter-wit queries (query client that gets injected into the with function context)
 - [ ] implement pruning / garbage collection v0.1 (can just be offline from the CLI)
 - [ ] add timers
