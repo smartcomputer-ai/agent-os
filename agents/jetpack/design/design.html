@@ -1,256 +1,199 @@
-<html lang="en"><head>
+<html lang="en">
+<head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>a|os Jetpack</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.tailwindcss.com?plugins=typography,aspect-ratio"></script>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inconsolata">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lora&amp;display=swap">
+    <title>a|os - UI Kit</title>
+    <link rel="stylesheet" href="design.css">
     <script src="https://unpkg.com/htmx.org@1.9.2" integrity="sha384-L6OqL9pRWyyFU3+/bjdSri+iIphTN/bvYyM37tICVyOJkWZLpP2vGn6VUEXgzg6h" crossorigin="anonymous"></script>
-    <style>
-        .input-wrapper {
-            transition: all 0.5s ease-in-out;
-            min-height: 50px;
-            max-height: 200px;
-            overflow: auto;
-        }
-        body {
-            font-family: 'Inconsolata', serif;
-        }    
-    </style> 
-<body id="body" class="bg-gray-100x">
-
-    <div class="fixed left-0 top-0 p-4 flex invisible lg:visible">
-        <span class="self-center text-2xl font-semibold whitespace-nowrap text-gray-500 dark:text-white">a|os</span>
-        </div>
-
-        <div class="fixed right-0 top-0 p-4 flex flex-col invisible lg:visible">
-        
-        <a href="?chat=main" class="py-1 px-2 mb-2 text-left whitespace-nowrap no-underline rounded-md border border-solid border-gray-500 bg-gray-200 hover:bg-gray-300 text-gray-600 dark:text-white">
-            Main
-        </a>
-         
-
-        <button id="new-chat" type="button" class="py-1 px-2 mb-2 mt-5 inline-flex text-center items-center rounded-md border border-solid bg-gray-200 hover:bg-gray-300  text-gray-600 dark:text-white">
-            <svg class="w-3 h-3 mr-2  text-gray-800 dark:text-white" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 18 18">
-                <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 1v16M1 9h16"></path>
-                </svg>
-            New
-        </button>
-    </div>
-
-    <div class="fixed right-0 bottom-0 p-4 mb-20 flex flex-col invisible lg:visible">
-        <span class="font-semibold whitespace-nowrap text-gray-500 dark:text-white">Artifacts</span>
-        <span class="whitespace-nowrap text-gray-500 dark:text-white">No artifacts yet</span>
-        <span class="whitespace-nowrap">&#128195; <a href="#a" class="underline">The plan and more information</a></span>
-        <span class="whitespace-nowrap">&#128220; <a href="#a" class="underline">Some code</a></span>
-    </div>
-
-    <div class="mb-20">
-        <div id="messages-container" class="px-4 pt-6 pb-4 max-w-4xl mx-auto" hx-get="../../f9b0c27ef631996c3dc9a21685cd542cd05f78e4423fef8afd77c81316e4cbee/query/messages" hx-trigger="load, receipt" hx-vals="js:{messagekey: getMessageFilter(event)}" hx-swap="beforeend">
-        <div class="message flex items-start mb-4 w-full">
-    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-        
-        <svg class="w-full h-full object-cover fill-gray-300  dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs></defs><title>user</title><path d="M16,4a5,5,0,1,1-5,5,5,5,0,0,1,5-5m0-2a7,7,0,1,0,7,7A7,7,0,0,0,16,2Z"></path><path d="M26,30H24V25a5,5,0,0,0-5-5H13a5,5,0,0,0-5,5v5H6V25a7,7,0,0,1,7-7h6a7,7,0,0,1,7,7Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-        
-    </div>
-    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-        <article class="prose" style="max-width: 95ch;">
-<p>let's go</p>
-
-        </article>
-    </div>
-</div>
- <div class="message flex items-start mb-4 w-full">
-    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-        
-        <svg class="w-full h-full object-cover fill-gray-300 dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs><style>.cls-1{fill:none;}</style></defs><title>chat-bot</title><path d="M16,19a6.9908,6.9908,0,0,1-5.833-3.1287l1.666-1.1074a5.0007,5.0007,0,0,0,8.334,0l1.666,1.1074A6.9908,6.9908,0,0,1,16,19Z"></path><path d="M20,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,20,8Z"></path><path d="M12,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,12,8Z"></path><path d="M17.7358,30,16,29l4-7h6a1.9966,1.9966,0,0,0,2-2V6a1.9966,1.9966,0,0,0-2-2H6A1.9966,1.9966,0,0,0,4,6V20a1.9966,1.9966,0,0,0,2,2h9v2H6a3.9993,3.9993,0,0,1-4-4V6A3.9988,3.9988,0,0,1,6,2H26a3.9988,3.9988,0,0,1,4,4V20a3.9993,3.9993,0,0,1-4,4H21.1646Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-        
-    </div>
-    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-        <article class="prose" style="max-width: 95ch;">
-<p>Sure, could you please provide me with the details of the Python code that you want to generate?</p>
-
-        </article>
-    </div>
-</div>
- <div class="message flex items-start mb-4 w-full">
-    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-        
-        <svg class="w-full h-full object-cover fill-gray-300  dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs></defs><title>user</title><path d="M16,4a5,5,0,1,1-5,5,5,5,0,0,1,5-5m0-2a7,7,0,1,0,7,7A7,7,0,0,0,16,2Z"></path><path d="M26,30H24V25a5,5,0,0,0-5-5H13a5,5,0,0,0-5,5v5H6V25a7,7,0,0,1,7-7h6a7,7,0,0,1,7,7Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-        
-    </div>
-    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-        <article class="prose" style="max-width: 95ch;">
-<p>this is pretty cool!</p>
-
-        </article>
-    </div>
-</div>
- <div class="message flex items-start mb-4 w-full">
-    <div class="avatar w-10 h-10 mr-4 mt-2 overflow-hidden">
-        
-        <svg class="w-full h-full object-cover fill-gray-300 dark:text-white" viewBox="0 0 32 32" id="icon" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><defs><style>.cls-1{fill:none;}</style></defs><title>chat-bot</title><path d="M16,19a6.9908,6.9908,0,0,1-5.833-3.1287l1.666-1.1074a5.0007,5.0007,0,0,0,8.334,0l1.666,1.1074A6.9908,6.9908,0,0,1,16,19Z"></path><path d="M20,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,20,8Z"></path><path d="M12,8a2,2,0,1,0,2,2A1.9806,1.9806,0,0,0,12,8Z"></path><path d="M17.7358,30,16,29l4-7h6a1.9966,1.9966,0,0,0,2-2V6a1.9966,1.9966,0,0,0-2-2H6A1.9966,1.9966,0,0,0,4,6V20a1.9966,1.9966,0,0,0,2,2h9v2H6a3.9993,3.9993,0,0,1-4-4V6A3.9988,3.9988,0,0,1,6,2H26a3.9988,3.9988,0,0,1,4,4V20a3.9993,3.9993,0,0,1-4,4H21.1646Z"></path><rect id="_Transparent_Rectangle_" data-name="<Transparent Rectangle>" class="cls-1" width="32" height="32"></rect></g></svg>
-        
-    </div>
-    <div class="content w-full bg-white p-4 rounded-lg shadow-md">
-        <article class="prose" style="max-width: 95ch;">
-<p>I'm glad you're enjoying this! How can I assist you further? Do you need help with a specific Python code or any other task?</p>
-
-        </article>
-    </div>
-</div>
- </div>
-
-        <div id="loader" class="pb-5 w-full" style="display: none;">
-            <div class="w-12 h-12 mx-auto">
-                <svg class="w-full h-full stroke-gray-600 dark:stroke-white" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
-                    <g fill="none" fill-rule="evenodd" stroke-width="3">
-                        <circle cx="22" cy="22" r="1">
-                            <animate attributeName="r" begin="0s" dur="1.8s" values="1; 20" calcMode="spline" keyTimes="0; 1" keySplines="0.165, 0.84, 0.44, 1" repeatCount="indefinite"></animate>
-                            <animate attributeName="stroke-opacity" begin="0s" dur="1.8s" values="1; 0" calcMode="spline" keyTimes="0; 1" keySplines="0.3, 0.61, 0.355, 1" repeatCount="indefinite"></animate>
-                        </circle>
-                        <circle cx="22" cy="22" r="1">
-                            <animate attributeName="r" begin="-0.9s" dur="1.8s" values="1; 20" calcMode="spline" keyTimes="0; 1" keySplines="0.165, 0.84, 0.44, 1" repeatCount="indefinite"></animate>
-                            <animate attributeName="stroke-opacity" begin="-0.9s" dur="1.8s" values="1; 0" calcMode="spline" keyTimes="0; 1" keySplines="0.3, 0.61, 0.355, 1" repeatCount="indefinite"></animate>
-                        </circle>
-                    </g>
-                </svg>
+</head>
+<body id="body">
+    <div id="app" class="aos-app show-artifacts-view show-scope-view">
+        <div id="header" class="aos-header aos-panel panel-border-bottom">
+            <div class="header-logo">
+                <div class="aos-logo"></div>
             </div>
-            <div class="mt-2 mx-auto text-center">
-                <span id="loader-text">Loading</span>
+            <div class="header-nav aos-nav">
+                <a href="?chat=main" class="nav-item"><div class="item-icon aos-icon icon-agent"></div><div class="item-text">Agent</div></a>
+                <a class="nav-item"><div class="item-icon aos-icon icon-ability"></div><div class="item-text">Search the web about a topic</div></a>
+                <a class="nav-item"><div class="item-icon aos-icon icon-ability"></div><div class="item-text">Compile a report</div></a>
+            </div>
+            <div class="header-tools aos-toolbar">
+                <a class="toolbar-item action-toggle-scope-view"><div class="item-icon aos-icon icon-ability"></div></a>
+                <a class="toolbar-item action-toggle-artifacts-view"><div class="item-icon aos-icon icon-artifact"></div></a>
+                <a class="toolbar-item"><div class="item-icon aos-icon icon-settings"></div></a>
             </div>
         </div>
-    </div>
+        <div id="content" class="aos-app-layout">
+            <div id="main-view" class="aos-ability-chat aos-panel">
+                <div id="chat-messages" class="ability-chat-messages aos-panel">
+                    <div class="panel-header">
+                        <div class="panel-tools aos-toolbar"></div>
+                        <div class="panel-nav aos-nav">
+                            <div class="nav-item"><div class="item-text">Ability: Compile a report</div></div>
+                        </div>
+                        <div class="panel-tools aos-toolbar">
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-graph"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-tree"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-share"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-code"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-download"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-settings"></div></a>
+                        </div>
+                    </div>
+                    <div id="messages-scrollview" class="panel-scrollview">
+                        <div class="panel-content">
+                            <div class="aos-conversation">
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">get a wikipedia article on a given topic, then summarize it. here is an example: https://en.wikipedia.org/wiki/Operating_system</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">Sure, I can help with that. To clarify your request, you want a new Ability that takes a Wikipedia URL as input and returns a summary of the article at that URL, correct?</div>
+                                </div>
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">yes</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">I will generate the requested functionality:</div>
+                                    <div class="message-attachment">
+                                        <div class="aos-card">
+                                            Create a new ability which gets the Wikipedia article for a given topic, then summarizes it.
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">
+                                        <p>I will generate the requested functionality:</p>
+                                            <pre><code>Write a Python function that takes a Wikipedia article URL as input, fetches the article, and then summarizes it. The function should return the summarized text.
+                                            </code></pre>
+                                            <p>Here are some examples for the function input:</p>
+                                            <pre><code>['https://en.wikipedia.org/wiki/Operating_system']
+                                            </code></pre>
+                                    </div>
+                                </div>
 
-    <div class="chat-input-container fixed bottom-0 left-0 right-0 p-2 bg-gray-100 border-t border-gray-200">
-        <div class="relative flex items-center max-w-4xl mx-auto pl-14">
-            <div id="chat-input-wrapper" class="input-wrapper flex-1 bg-white border border-gray-300 rounded-lg">
-                <textarea id="chat-input" class="w-full p-2 pr-8 outline-none resize-none" placeholder="Type a message..." style="height: auto;"></textarea>
+
+
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">get a wikipedia article on a given topic, then summarize it. here is an example: https://en.wikipedia.org/wiki/Operating_system</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">Sure, I can help with that. To clarify your request, you want a new Ability that takes a Wikipedia URL as input and returns a summary of the article at that URL, correct?</div>
+                                </div>
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">yes</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">I will generate the requested functionality:</div>
+                                    <div class="message-attachment">
+                                        <div class="aos-card">
+                                            Create a new ability which gets the Wikipedia article for a given topic, then summarizes it.
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">get a wikipedia article on a given topic, then summarize it. here is an example: https://en.wikipedia.org/wiki/Operating_system</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">Sure, I can help with that. To clarify your request, you want a new Ability that takes a Wikipedia URL as input and returns a summary of the article at that URL, correct?</div>
+                                </div>
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">yes</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">I will generate the requested functionality:</div>
+                                    <div class="message-attachment">
+                                        <div class="aos-card">
+                                            Create a new ability which gets the Wikipedia article for a given topic, then summarizes it.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-content">
+                            <div id="loader" class="aos-loader">
+                                <div class="layer layer-1 aos-icon icon-loader-a"></div>
+                                <div class="layer layer-2 aos-icon icon-loader-b"></div>
+                                <div class="layer layer-3 aos-icon icon-loader-c"></div>
+                            </div>
+                            <div style="height:2em"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="chat-input" class="ability-chat-input aos-panel panel-border-top">
+                    <div class="panel-content">
+                        <div class="aos-message-input">
+                            <input class="aos-input"/>
+                            <button class="aos-button action-send-message">Send</button>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <button id="send-button" class="absolute right-4 bottom-1/2 transform translate-y-1/2">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" class="h-6 w-6 text-blue-600">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
-                </svg>
-            </button>
+            <div id="sidebar" class="aos-sidebar aos-panel panel-border-left">
+                <div id="scope-view" class="aos-panel">
+                    <div class="panel-header">
+                        <div class="panel-nav aos-nav">
+                            <div class="nav-item"><div class="item-text">Scope</div></div>
+                        </div>
+                        <div class="panel-tools aos-toolbar">
+                            <a id="new-chat" class="toolbar-item"><div class="item-icon aos-icon icon-add"></div></a>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <div class="aos-list">
+                            <a href="?chat=main" class="list-item"><div class="item-icon aos-icon icon-ability"></div><div class="item-text">Compile a report</div></a>
+                            <a href="?chat=2" class="list-item selected"><div class="item-icon aos-icon icon-ability"></div><div class="item-text">Save as PDF</div></a>
+                        </div>
+                    </div>
+                </div>
+                <div id="artifacts-view" class="aos-panel panel-border-top">
+                    <div class="panel-header">
+                        <div class="panel-nav aos-nav">
+                            <div class="nav-item"><div class="item-text">Artifacts</div></div>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <div class="aos-list">
+                            <a href="?chat=main" class="list-item"><div class="item-icon aos-icon icon-artifact"></div><div class="item-text">Specification</div></a>
+                            <a href="?chat=2" class="list-item"><div class="item-icon aos-icon icon-artifact"></div><div class="item-text">Plan</div></a>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
-
     <script>
-        const agent_id = "0184431e335847e3a27f07b505ad6639b3774e24eac909c7c4c04cd30b9bc229"
-        const frontend_id = "2759b449a4bacd245753aefc79e2f5392246821245088ee28d6c57a5da3d0a90"
-        const chat_actors = JSON.parse('{"main": "f9b0c27ef631996c3dc9a21685cd542cd05f78e4423fef8afd77c81316e4cbee"}')
-        const chat_titles = JSON.parse('{"main": "Main"}')
-        const current_chat = "main"
-        const current_chat_id = "f9b0c27ef631996c3dc9a21685cd542cd05f78e4423fef8afd77c81316e4cbee"
 
-        const chatInput = document.getElementById('chat-input');
-        const sendButton = document.getElementById('send-button');
-        const newChatButton = document.getElementById('new-chat');
+        const appElem = document.getElementById('app');
 
-        // Expands the textarea to fit its content
-        chatInput.addEventListener('input', function() {
-            this.style.height = (this.scrollHeight) + 'px';
+        Array.from(document.getElementsByClassName('action-toggle-scope-view')).forEach(function (elem) {
+            elem.addEventListener("click", function () {
+                appElem.classList.toggle("show-scope-view");
+            });
         });
-
-        // Sends the message when Enter is pressed, and adds a new line when Ctrl+Enter is pressed
-        chatInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                if (!e.shiftKey) {
-                    // Prevent the default "Enter" behaviour (adding a new line)
-                    e.preventDefault();
-                    // Send the message (you'll need to implement this function yourself)
-                    sendMessage();
-                }
-            }
+        Array.from(document.getElementsByClassName('action-toggle-artifacts-view')).forEach(function (elem) {
+            elem.addEventListener("click", function () {
+                appElem.classList.toggle("show-artifacts-view");
+            });
         });
-
-        // Sends the message when the button is clicked
-        sendButton.addEventListener('click', sendMessage);
-        function sendMessage() {
-            chat_inbox_url = "../../f9b0c27ef631996c3dc9a21685cd542cd05f78e4423fef8afd77c81316e4cbee/inbox"
-            const message = chatInput.value.trim();
-            if (message) {
-                console.log('Sending message:', message);
-                // Send the message (you'll need to implement this function yourself)
-                fetch(chat_inbox_url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'text/plain'
-                    },
-                    body: message
-                });
-                // Clear the input
-                chatInput.value = '';
-                chatInput.style.height = 'auto';
-            }
-        }
-
-        newChatButton.addEventListener('click', newChat)
-        function newChat(){
-            frontend_inbox_url = "../../2759b449a4bacd245753aefc79e2f5392246821245088ee28d6c57a5da3d0a90/inbox"
-            //ask for name, then post
-            const chatName = prompt("Please enter a name for the new chat", "New Chat");
-            if (chatName != null) {
-                console.log('Creating new chat:', chatName);
-                // Send the message (you'll need to implement this function yourself)
-                fetch(frontend_inbox_url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'AOS-Message-Type': 'create-chat'
-                    },
-                    body: JSON.stringify({'name': chatName})
-                });
-            }
-        }
-
-        const evtSource = new EventSource("../../../messages-sse?content=true&mt=receipt&mt=new-chat&mt=thinking");
-        evtSource.onmessage = (e) => {
-            console.log('SSE Event, message:', e);
-        };
-        evtSource.addEventListener('receipt', (e) => {
-            data = JSON.parse(e.data);
-            //console.log('SSE Event, receipt:', data);
-            if(data.sender_id == current_chat_id && data.content != null){
-                htmx.trigger("#messages-container", "receipt", {messagekey: data.content});
-                //hider loader & reset text
-                document.getElementById('loader').style.display = 'none';
-                document.getElementById('loader-text').innerHTML = 'Loading';
-            }
-            else{
-                //todo indicate that there are new messages in this other chat
-                console.log('SSE Event: Not for current chat, ignoring');
-            }
-        });
-        evtSource.addEventListener('new-chat', (e) => {
-            data = JSON.parse(e.data);
-            console.log('SSE Event, new-chat', data);
-            //redirect to new chat
-            window.location.href = "?chat=" + data.content;
-        });
-        evtSource.addEventListener('thinking', (e) => {
-            data = JSON.parse(e.data);
-            console.log('SSE Event, thinking', data);
-            //show loader & set text
-            document.getElementById('loader').style.display = 'block';
-            document.getElementById('loader-text').innerHTML = data.content;
-            window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
-        });
-
-        function getMessageFilter(e){
-            //if the event contain messagekey, return it
-            //console.log('Getting message filter for event:', e);
-            if(e.detail != null && e.detail.messagekey != null){
-                return e.detail.messagekey;
-            }
-            return null;
-        }
-
-        htmx.on('htmx:afterSwap', function(evt) {
-            window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'});
+        Array.from(document.getElementsByClassName('action-send-message')).forEach(function (elem) {
+            elem.addEventListener("click", function () {
+                const messagesScrollViewElem = document.getElementById('messages-scrollview');
+                messagesScrollViewElem.scrollTo({ top: messagesScrollViewElem.scrollHeight, behavior: 'smooth' });
+            });
         });
 
     </script>
-
 </body></html>
