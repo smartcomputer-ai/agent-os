@@ -21,6 +21,7 @@ async def on_query_web(ctx:QueryContext, state:FrontendState):
         'chat_titles': state.chat_titles,
         'current_chat': current_chat,
         'current_chat_id': state.chat_actors[current_chat].hex(),
+        'current_chat_title': state.chat_titles[current_chat],
         }
     return await render_template(ctx.core, "/templates/index.html", **template_kwargs)
 
