@@ -6,6 +6,7 @@
     <style>
 /*IMPORTANT: The styles are copied from design/design.css - do not edit here */      
 
+
 /**************************************************
 * Fonts 
 **************************************************/
@@ -596,10 +597,12 @@ a, a * {
 .aos-message .message-text {
     display: block;
     line-height: 1.2em;
+    word-break: break-word;
 }
-.aos-message .message-text p + p,
-.aos-message .message-text pre + p,
-.aos-message .message-text p + pre {
+.aos-message .message-text p:not(:first-child),
+.aos-message .message-text pre:not(:first-child),
+.aos-message .message-text ul:not(:first-child),
+.aos-message .message-text img:not(:first-child) {
     margin-top: 1em;
 }
 .aos-message .message-text pre {
