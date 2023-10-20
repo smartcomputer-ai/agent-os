@@ -160,6 +160,8 @@ async def code_completion(
         "scipy",
         "numpy",
         "sklearn",
+        "yfinance",
+        "matplotlib",
         ]
     prompt.append_to_prev(", ".join(third_party_modules))
 
@@ -328,6 +330,7 @@ async def plan_completion(
         "scipy",
         "numpy",
         "sklearn",
+        "openpyxl",
         ]
     prompt.append_to_prev(", ".join(third_party_modules))
     #end copied

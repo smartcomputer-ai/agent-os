@@ -1,6 +1,9 @@
 [agent]
 name = "demodata"
 
+[all]
+external_paths=["./agents/demodata/frontend_data"]
+
 [[actors]]
 name="frontend_data"
 push="./agents/demodata/frontend_data:/code"
