@@ -1,0 +1,199 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>a|os - UI Kit</title>
+    <link rel="stylesheet" href="design.css">
+    <script src="https://unpkg.com/htmx.org@1.9.2" integrity="sha384-L6OqL9pRWyyFU3+/bjdSri+iIphTN/bvYyM37tICVyOJkWZLpP2vGn6VUEXgzg6h" crossorigin="anonymous"></script>
+</head>
+<body id="body">
+    <div id="app" class="aos-app show-artifacts-view show-scope-view">
+        <div id="header" class="aos-header aos-panel panel-border-bottom">
+            <div class="header-logo">
+                <div class="aos-logo"></div>
+            </div>
+            <div class="header-nav aos-nav">
+                <a href="?chat=main" class="nav-item"><div class="item-icon aos-icon icon-agent"></div><div class="item-text">Agent</div></a>
+                <a class="nav-item"><div class="item-icon aos-icon icon-ability"></div><div class="item-text">Search the web about a topic</div></a>
+                <a class="nav-item"><div class="item-icon aos-icon icon-ability"></div><div class="item-text">Compile a report</div></a>
+            </div>
+            <div class="header-tools aos-toolbar">
+                <a class="toolbar-item action-toggle-scope-view"><div class="item-icon aos-icon icon-ability"></div></a>
+                <a class="toolbar-item action-toggle-artifacts-view"><div class="item-icon aos-icon icon-artifact"></div></a>
+                <a class="toolbar-item"><div class="item-icon aos-icon icon-settings"></div></a>
+            </div>
+        </div>
+        <div id="content" class="aos-app-layout">
+            <div id="main-view" class="aos-ability-chat aos-panel">
+                <div id="chat-messages" class="ability-chat-messages aos-panel">
+                    <div class="panel-header">
+                        <div class="panel-tools aos-toolbar"></div>
+                        <div class="panel-nav aos-nav">
+                            <div class="nav-item"><div class="item-text">Ability: Compile a report</div></div>
+                        </div>
+                        <div class="panel-tools aos-toolbar">
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-graph"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-tree"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-share"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-code"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-download"></div></a>
+                            <a class="toolbar-item"><div class="item-icon aos-icon icon-settings"></div></a>
+                        </div>
+                    </div>
+                    <div id="messages-scrollview" class="panel-scrollview">
+                        <div class="panel-content">
+                            <div class="aos-conversation">
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">get a wikipedia article on a given topic, then summarize it. here is an example: https://en.wikipedia.org/wiki/Operating_system</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">Sure, I can help with that. To clarify your request, you want a new Ability that takes a Wikipedia URL as input and returns a summary of the article at that URL, correct?</div>
+                                </div>
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">yes</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">I will generate the requested functionality:</div>
+                                    <div class="message-attachment">
+                                        <div class="aos-card">
+                                            Create a new ability which gets the Wikipedia article for a given topic, then summarizes it.
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">
+                                        <p>I will generate the requested functionality:</p>
+                                            <pre><code>Write a Python function that takes a Wikipedia article URL as input, fetches the article, and then summarizes it. The function should return the summarized text.
+                                            </code></pre>
+                                            <p>Here are some examples for the function input:</p>
+                                            <pre><code>['https://en.wikipedia.org/wiki/Operating_system']
+                                            </code></pre>
+                                    </div>
+                                </div>
+
+
+
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">get a wikipedia article on a given topic, then summarize it. here is an example: https://en.wikipedia.org/wiki/Operating_system</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">Sure, I can help with that. To clarify your request, you want a new Ability that takes a Wikipedia URL as input and returns a summary of the article at that URL, correct?</div>
+                                </div>
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">yes</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">I will generate the requested functionality:</div>
+                                    <div class="message-attachment">
+                                        <div class="aos-card">
+                                            Create a new ability which gets the Wikipedia article for a given topic, then summarizes it.
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">get a wikipedia article on a given topic, then summarize it. here is an example: https://en.wikipedia.org/wiki/Operating_system</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">Sure, I can help with that. To clarify your request, you want a new Ability that takes a Wikipedia URL as input and returns a summary of the article at that URL, correct?</div>
+                                </div>
+                                <div class="aos-card aos-message">
+                                    <div class="message-author">Dan</div>
+                                    <div class="message-text">yes</div>
+                                </div>
+                                <div class="aos-card aos-message message-reply">
+                                    <div class="message-author">Agent</div>
+                                    <div class="message-text">I will generate the requested functionality:</div>
+                                    <div class="message-attachment">
+                                        <div class="aos-card">
+                                            Create a new ability which gets the Wikipedia article for a given topic, then summarizes it.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="panel-content">
+                            <div id="loader" class="aos-loader">
+                                <div class="layer layer-1 aos-icon icon-loader-a"></div>
+                                <div class="layer layer-2 aos-icon icon-loader-b"></div>
+                                <div class="layer layer-3 aos-icon icon-loader-c"></div>
+                            </div>
+                            <div style="height:2em"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="chat-input" class="ability-chat-input aos-panel panel-border-top">
+                    <div class="panel-content">
+                        <div class="aos-message-input">
+                            <input class="aos-input"/>
+                            <button class="aos-button action-send-message">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="sidebar" class="aos-sidebar aos-panel panel-border-left">
+                <div id="scope-view" class="aos-panel">
+                    <div class="panel-header">
+                        <div class="panel-nav aos-nav">
+                            <div class="nav-item"><div class="item-text">Scope</div></div>
+                        </div>
+                        <div class="panel-tools aos-toolbar">
+                            <a id="new-chat" class="toolbar-item"><div class="item-icon aos-icon icon-add"></div></a>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <div class="aos-list">
+                            <a href="?chat=main" class="list-item"><div class="item-icon aos-icon icon-ability"></div><div class="item-text">Compile a report</div></a>
+                            <a href="?chat=2" class="list-item selected"><div class="item-icon aos-icon icon-ability"></div><div class="item-text">Save as PDF</div></a>
+                        </div>
+                    </div>
+                </div>
+                <div id="artifacts-view" class="aos-panel panel-border-top">
+                    <div class="panel-header">
+                        <div class="panel-nav aos-nav">
+                            <div class="nav-item"><div class="item-text">Artifacts</div></div>
+                        </div>
+                    </div>
+                    <div class="panel-content">
+                        <div class="aos-list">
+                            <a href="?chat=main" class="list-item"><div class="item-icon aos-icon icon-artifact"></div><div class="item-text">Specification</div></a>
+                            <a href="?chat=2" class="list-item"><div class="item-icon aos-icon icon-artifact"></div><div class="item-text">Plan</div></a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+
+        const appElem = document.getElementById('app');
+
+        Array.from(document.getElementsByClassName('action-toggle-scope-view')).forEach(function (elem) {
+            elem.addEventListener("click", function () {
+                appElem.classList.toggle("show-scope-view");
+            });
+        });
+        Array.from(document.getElementsByClassName('action-toggle-artifacts-view')).forEach(function (elem) {
+            elem.addEventListener("click", function () {
+                appElem.classList.toggle("show-artifacts-view");
+            });
+        });
+        Array.from(document.getElementsByClassName('action-send-message')).forEach(function (elem) {
+            elem.addEventListener("click", function () {
+                const messagesScrollViewElem = document.getElementById('messages-scrollview');
+                messagesScrollViewElem.scrollTo({ top: messagesScrollViewElem.scrollHeight, behavior: 'smooth' });
+            });
+        });
+
+    </script>
+</body></html>
