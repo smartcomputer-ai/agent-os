@@ -162,6 +162,7 @@ async def code_completion(
         "sklearn",
         "yfinance",
         "matplotlib",
+        "openpyxl",
         ]
     prompt.append_to_prev(", ".join(third_party_modules))
 

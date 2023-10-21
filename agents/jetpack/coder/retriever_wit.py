@@ -117,6 +117,7 @@ async def on_retrieve_message(msg:InboxMessage, state:RetrieverState, outbox:Out
         ```
         Whatever the format of the data at that location, we need to retrieve it and return it as a string (`contents`).
         Do not take any inputs to the function, just use the location as a variable inside the code.
+        To retrieve the schema, do not use the openpyxl library, just use requests.
         """
 
         retrieve_spec = CodeSpec(

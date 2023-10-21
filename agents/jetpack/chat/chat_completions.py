@@ -26,6 +26,8 @@ async def chat_completion(
 
         You can access the web, internal URLs, the file system, and so on, because you can write and execute code.
 
+        When the request is to retreive some data, do not ask for the structure of the data, assume it will be determiend later by the coder system.
+        
         Once the code is written, either request changes (code_request) to the code because the user mentioned changes, or call the code because the user asked for a code execution (code_exec).
 
         Whenever the user asks you modify or call a function make the actual function call--do not just copy previous output.
