@@ -9,6 +9,7 @@ from grit.object_serialization import blob_to_bytes
 from grit import *
 from wit import *
 from runtime.runtime_executor import add_offline_message_to_runtime_outbox, remove_offline_message_from_runtime_outbox
+from wit.prototype import wrap_in_prototype
 from . sync_item import SyncItem, sync_from_push_path, sync_from_push_value
 
 logger = logging.Logger(__name__)
@@ -24,6 +25,7 @@ class ActorPush():
     _is_genesis:bool
     _sync_items:OrderedDict[str, SyncItem]
     actor_name:str
+    is_prototype:bool
     wit:str
     wit_query:str
     wit_update:str
@@ -37,6 +39,7 @@ class ActorPush():
             raise ValueError("Cannot create a non-genesis actor push without an actor id.")
         self._sync_items = OrderedDict()
         self.actor_name = None
+        self.is_prototype = False
         self.wit = None
         self.wit_query = None
         self.wit_update = None
@@ -132,6 +135,9 @@ class ActorPush():
                 else:
                     blob_obj = _blob_from_file(os.path.join(sync_item.dir_path, sync_item.file_name))
                 node.add(sync_item.item_name, blob_obj)
+        #check if the core needs to be wrapped as a prototype
+        if(self.is_prototype):
+            core = wrap_in_prototype(core)
         return core
     
     async def diff_core_with_actor(self, store:ObjectStore, references:References) -> AsyncIterator[tuple[str, str]]:

@@ -537,18 +537,18 @@ class TreeObject:
                                 "tried to see if the loader is an ObjectStore instance, but it is not.")
         tree_to_store = {}
         for(key, value) in self.__tree.items():
-            if(isinstance(value, ObjectId)):
+            if isinstance(value, ObjectId):
                 tree_to_store[key] = value
-            elif(isinstance(value, TreeObject)):
+            elif isinstance(value, TreeObject) or isinstance(value, Core) or type(value).__name__ == 'TreeObject' or type(value).__name__ == 'Core':
                 #only persist non-empty trees
                 if(not value.is_empty()):
                     tree_to_store[key] = await value.persist(store)
-            elif(isinstance(value, BlobObject)):
+            elif isinstance(value, BlobObject):
                 #only persist non-empty blobs
                 if(not value.is_empty()):
                     tree_to_store[key] = await value.persist(store)
             else:
-                raise TypeError(f"Cannot persist tree, invalid type for key '{key}'")
+                raise TypeError(f"Cannot persist tree, invalid type for key '{key}', is '{type(value)}'.")
         self.__tree_id = await store.store(tree_to_store)
         self.__dirty = False
         return self.__tree_id
@@ -912,7 +912,7 @@ class OutboxMessage:
         return msg
     
     @classmethod
-    def from_update(cls, recipient_id:ActorId, core:TreeObject) -> OutboxMessage:
+    def from_update(cls, recipient_id:ActorId, core:TreeObject|TreeId) -> OutboxMessage:
         msg = cls(recipient_id, is_signal=False)
         msg.content = _ensure_content(core)
         msg.headers["mt"] = "update"
@@ -946,7 +946,7 @@ def _ensure_content(content:ValidMessageContent):
         return BlobObject.from_bytes(content)
     elif(isinstance(content, dict)):
         return BlobObject.from_json(content)
-    elif(isinstance(content, BlobObject) or isinstance(content, TreeObject)):
+    elif(isinstance(content, BlobObject) or isinstance(content, TreeObject)) or type(content).__name__ == 'BlobObject' or type(content).__name__ == 'TreeObject' or type(content).__name__ == 'Core':
         return content
     elif(isinstance(content, BaseModel)):
         return BlobObject.from_json(content)

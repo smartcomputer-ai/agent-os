@@ -143,6 +143,8 @@ def _add_table_to_actor_push(actor_push:ActorPush, table:Container):
         actor_push.wit_update = table["wit_update"]
     if "name" in table:
         actor_push.actor_name = table["name"]
+    if "is_prototype" in table:
+        actor_push.is_prototype = table["is_prototype"]
     if "notify" in table:
         notify = table['notify']
         if(isinstance(notify, str)):
@@ -191,8 +193,18 @@ def _validate_doc(doc:tomlkit.TOMLDocument) -> None:
                 raise ValueError("Actor name is required. Use 'name' to define an actor reference name.")
             else:
                 actor_names.append(actor['name'])
+            
+            is_prototype = False
+            if 'is_prototype' in actor:
+                if(not isinstance(actor['is_prototype'], bool)):
+                    raise ValueError(f"Actor is_prototype must be a boolean, but was {type(actor['is_prototype'])}.")
+                is_prototype = actor['is_prototype']
+
             #check that the actors that need to be notified about this actor have been defined *before* this actor
             if 'notify' in actor:
+                #cannot notify about a prototype
+                if is_prototype:
+                    raise ValueError(f"Actor '{actor['name']}' is a prototype and therefore cannot notify other actors. Remove the 'notify' key.")
                 notify = actor['notify']
                 if(isinstance(notify, str)):
                     notify = [notify]

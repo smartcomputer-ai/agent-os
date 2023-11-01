@@ -37,6 +37,16 @@ async def setup_wit_with_dependencies(store:ObjectStore, wit_ref:str) -> tuple[d
     mailbox = {sender_id: gen_message_id}
     return (kwargs, None, mailbox) #none becuase it is the genesis step
 
+async def setup_wit_prototype_with_dependencies(store:ObjectStore, wit_ref:str) -> tuple[dict, StepId|None, Mailbox]:
+    (sender_id, recipient_id, gen_message_id) = await create_genesis_message(store, get_random_actor_id(), wit_ref)
+    kwargs = {
+        'agent_id': get_random_actor_id(),
+        'actor_id': recipient_id,
+        'object_store': store,
+    }
+    mailbox = {sender_id: gen_message_id}
+    return (kwargs, None, mailbox) #none becuase it is the genesis step
+
 async def setup_query_with_dependencies(store:ObjectStore, wit_function, wit_ref:str, query_ref:str) -> tuple[dict, StepId]:
     (sender_id, recipient_id, gen_message_id) = await create_genesis_message(store, get_random_actor_id(), wit_ref, query_ref)
     kwargs = {
