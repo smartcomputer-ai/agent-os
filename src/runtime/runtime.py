@@ -51,6 +51,7 @@ class Runtime:
 
         self.ctx.query_executor = QueryExecutor(self.ctx.store, self.ctx.references, self.ctx.resolver, self.ctx.agent_id)
 
+
         self.__cancel_event = asyncio.Event()
         self.__running_event = asyncio.Event()
         self.__executors = {}
@@ -139,9 +140,10 @@ class Runtime:
     async def start(self):
         await self.__init_runtime_executor()
         refs = await self.references.get_all()
-        actor_heads:dict[ActorId, StepId] = (
-            {bytes.fromhex(ref.removeprefix('heads/')):step_id for ref,step_id in refs.items() if ref.startswith('heads/')}
-            )
+        actor_heads:dict[ActorId, StepId] = {bytes.fromhex(ref.removeprefix('heads/')):step_id for ref,step_id in refs.items() if ref.startswith('heads/')}
+
+        self.ctx.named_actors = {ref.removeprefix('actors/'):actor_id for ref,actor_id in refs.items() if ref.startswith('actors/')}
+        self.ctx.prototype_actors = {ref.removeprefix('prototypes/'):actor_id for ref,actor_id in refs.items() if ref.startswith('prototypes/')}
 
         async with self.__executor_lock:
             self.__executors:dict[ActorId, ActorExecutor] = {}

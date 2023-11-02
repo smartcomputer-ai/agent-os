@@ -30,6 +30,8 @@ class MessageContext():
     actor_id:ActorId
     agent_id:ActorId
     store:ObjectStore
+    named_actors:dict[str,ActorId]
+    prototype_actors:dict[str,ActorId]
 
 @dataclass(frozen=True)
 class QueryContext():
@@ -533,7 +535,10 @@ class _WitQueryRouter:
                 core=core,
                 loader=loader,
                 actor_id=kwargs['actor_id'],
-                agent_id=kwargs['agent_id'])
+                agent_id=kwargs['agent_id'],
+                named_actors=kwargs.get('named_actors', {}),
+                prototype_actors=kwargs.get('prototype_actors', {}),
+                )
         
         #finally, add the json args to the kwargs, so they can be accessed direcly by name
         if(isinstance(query_args_json, dict)):

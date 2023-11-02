@@ -36,8 +36,32 @@ def wrap_in_prototype(core:Core) -> Core:
 #===================================================================================================
 # Create an actor from a prototype
 #===================================================================================================
-async def create_actor_from_prototype() -> Core:
-    pass
+def create_actor_from_prototype(prototype_id:ActorId, args:ValidMessageContent|None) -> OutboxMessage:
+    if args is None:
+        args = {}
+    return OutboxMessage.from_new(prototype_id, args, mt="create")
+
+async def get_prototype_args(core:Core) -> TreeObject|BlobObject|None:
+    create = await core.get("create")
+    if create is None:
+        return None
+    return await create.get("args")
+
+async def get_prototype_args_as_json(core:Core) -> dict:
+    args = await get_prototype_args(core)
+    if args is None:
+        return {}
+    if not isinstance(args, BlobObject):
+        raise Exception(f"Prototype args must be a blob, but got '{type(args)}'.")
+    return args.get_as_json()
+
+async def get_prototype_args_as_model(core:Core, pydantic_type:Type[BaseModel]) -> BaseModel:
+    args = await get_prototype_args(core)
+    if args is None:
+        return {}
+    if not isinstance(args, BlobObject):
+        raise Exception(f"Prototype args must be a blob, but got '{type(args)}'.")
+    return args.get_as_model(pydantic_type)
 
 #===================================================================================================
 # Prototype wit function implementaion
@@ -117,12 +141,10 @@ async def _ensure_prototype(core:Core, check_wit:bool=True):
     p:TreeObject = await core.get("prototype")
     if p is None:
         raise Exception("No 'prototype' specified in the core")
-    
     if check_wit:
         p_wit:BlobObject = await p.get("wit")
         if p_wit is None:
             raise Exception("No 'wit' specified in the prototype")
-    
     return p
 
 async def _ensure_schema(prototype:TreeObject, msg:InboxMessage):

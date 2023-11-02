@@ -10,6 +10,10 @@ logger = logging.getLogger(__name__)
 
 # A "chat" limits a conversation to a single topic and goal. Each chat corresponds to a single chat window in Jetpack.
 
+async def create_chat_actor(prototypes:dict, name:str="Main") -> OutboxMessage:
+    return create_actor_from_prototype(prototypes['chat'], {'name':name})
+
+
 class ChatState(WitState):
     name:str="Main"
 
@@ -24,50 +28,14 @@ class ChatState(WitState):
     current_execution:CodeExecution|None = None
     last_result:CodeExecuted|None = None
 
-async def create_chat_actor(
-        store:ObjectStore, 
-        name:str="Main", #allows the differentiation of multiple scopes
-        templates:TreeId=None,
-        wit_ref:str|None=None,
-        wit_query_ref:str|None=None,
-        ) -> OutboxMessage:
-    #TODO: how to know if this should be external or loaded from a core?
-    if wit_ref is not None:
-        core = Core.from_external_wit_ref(store, wit_ref=wit_ref)
-    else:
-        core = Core.from_external_wit_ref(store, "chat_wit:app")
-    if wit_query_ref is not None:
-        core.makeb("wit_query").set_as_str("external:"+wit_query_ref)
-    else:
-        core.makeb("wit_query").set_as_str("external:chat_queries:app")
-
-    args = core.maket('args')
-    if name is not None:
-        args.makeb('name').set_as_str(name)
-    #add the templates to the core
-    if templates is not None:
-        core.add("templates", templates)
-
-    genesis_msg = await OutboxMessage.from_genesis(store, core)
-    return genesis_msg
-
-
 app = Wit()
-
 
 @app.genesis_message
 async def on_genesis(msg:InboxMessage, ctx:MessageContext, state:ChatState) -> None:
     logger.info("received genesis")
     
-    args:TreeObject = await ctx.core.get('args')
-    if args is not None:
-        logger.info("loading args")
-        if 'name' in args:
-            state.name = (await args.getb('name')).get_as_str()
-            logger.info(f"'{state.name}': new chat actor created")
-
-    if state.name is None:
-        state.name = "Main"
+    args = await get_prototype_args_as_json(ctx.core)
+    state.name = args.get('name', 'Main')
 
     #create the downstream actors
     coder_msg = await create_coder_actor(ctx.store, name=f"{state.name} Coder")

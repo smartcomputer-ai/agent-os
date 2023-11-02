@@ -55,7 +55,6 @@ push = ["{posix_root_path}/code/wit_b:/code/", "{posix_root_path}/data_b:/data"]
 wit = "external:wit_b:wit_b" 
 wit_query = "external:wit_b:qit_b_query" 
 runtime = "python" #which runtime to use, default is python
-notify = "a"
 '''
     helpers.create_file(f"{root_path}", "sync.toml", toml_string)
 
@@ -73,7 +72,6 @@ async def test_sync_file_from_toml_file(tmp_path):
 
     assert pushes[1].actor_name == "b"
     assert len(pushes[1].sync_items) == 7 # 7 files
-    assert len(pushes[1].notify) == 1 #notify actor a
 
 async def test_sync_file_push(tmp_path):
     tmp_path = os.path.relpath(tmp_path)
