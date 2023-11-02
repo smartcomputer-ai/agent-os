@@ -1,0 +1,9 @@
+{% if artifacts|length == 0 %}
+    No artifacts yet
+{% else %}
+    <div class="aos-list">
+    {% for artifact in artifacts %}
+        <a href="{{artifact.url|safe}}" target="_blank" class="list-item"><div class="item-icon aos-icon icon-artifact"></div><div class="item-text">{{artifact.title}}</div></a>
+    {% endfor %}
+    </div>
+{% endif %}
