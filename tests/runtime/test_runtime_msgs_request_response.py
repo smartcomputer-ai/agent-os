@@ -13,7 +13,7 @@ async def test_msgs__single_wit():
     async def on_a_message(actor_b:str, ctx:MessageContext) -> None:
         print("on_a_message: start")
         actor_b_id = to_object_id(actor_b)
-        response = await ctx.request_response.run(OutboxMessage.from_new(actor_b_id, "hi", is_signal=True, mt="hi"), ctx.actor_id, ['response'], 0.1)
+        response = await ctx.request_response.run(OutboxMessage.from_new(actor_b_id, "hi", is_signal=True, mt="hi"), ['response'], 0.1)
         response_str = (await response.get_content()).get_as_str()
         arrived_messages.append(response_str)
 

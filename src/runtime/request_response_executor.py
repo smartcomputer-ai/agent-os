@@ -21,7 +21,6 @@ class RequestResponseExecutor(RequestResponse):
     async def run(
         self, 
         msg:OutboxMessage, 
-        sender_id:ActorId, 
         response_types:list[str], 
         timeout:float|None = None,
         ) -> InboxMessage:
@@ -32,7 +31,7 @@ class RequestResponseExecutor(RequestResponse):
         if not msg.is_signal:
             raise Exception("The request 'msg' must be a signal. Set is_signal to True.")
 
-        mailbox_update = await msg.persist_to_mailbox_update(self.store, sender_id)
+        mailbox_update = await msg.persist_to_mailbox_update(self.store, self.runtime_executor.actor_id)
         with self.runtime_executor.subscribe_to_messages() as queue:
             # send to executor
             await self.runtime_executor.update_current_outbox([mailbox_update])
@@ -47,6 +46,7 @@ class RequestResponseExecutor(RequestResponse):
                 if mailbox_update is None:
                     raise Exception("Runtime terminated runtime actor.")
                 
+                sender_id = mailbox_update[0]
                 message_id = mailbox_update[2]
                 message = await InboxMessage.from_message_id(self.store, sender_id, message_id)
                 

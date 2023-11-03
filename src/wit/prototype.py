@@ -36,10 +36,16 @@ def wrap_in_prototype(core:Core) -> Core:
 #===================================================================================================
 # Create an actor from a prototype
 #===================================================================================================
-def create_actor_from_prototype(prototype_id:ActorId, args:ValidMessageContent|None) -> OutboxMessage:
+def create_actor_from_prototype_msg(prototype_id:ActorId, args:ValidMessageContent|None) -> OutboxMessage:
     if args is None:
         args = {}
     return OutboxMessage.from_new(prototype_id, args, mt="create")
+
+async def create_actor_from_prototype(prototype_id:ActorId, args:ValidMessageContent|None, request_response:RequestResponse) -> ActorId:
+    create_msg = create_actor_from_prototype_msg(prototype_id, args)
+    response = await request_response.run(create_msg, ["created"], 1.0)
+    created_actor_id_str = (await response.get_content()).get_as_str()
+    return to_object_id(created_actor_id_str)
 
 async def get_prototype_args(core:Core) -> TreeObject|BlobObject|None:
     create = await core.get("create")

@@ -8,7 +8,6 @@ class RequestResponse(ABC):
     async def run(
         self, 
         msg:OutboxMessage, 
-        sender_id:ActorId, 
         response_types:list[str], 
         timeout:float|None = None,
         ) -> InboxMessage:
