@@ -48,10 +48,10 @@ async def create_actor_from_prototype(prototype_id:ActorId, args:ValidMessageCon
     return to_object_id(created_actor_id_str)
 
 async def get_prototype_args(core:Core) -> TreeObject|BlobObject|None:
-    create = await core.get("create")
-    if create is None:
+    state = await core.get("state")
+    if state is None:
         return None
-    return await create.get("args")
+    return await state.get("args")
 
 async def get_prototype_args_as_json(core:Core) -> dict:
     args = await get_prototype_args(core)
@@ -83,34 +83,32 @@ async def on_genesis(msg:InboxMessage, ctx:MessageContext):
 @wit.message("create")
 async def on_create(msg:InboxMessage, ctx:MessageContext):
     p = await _ensure_prototype(ctx.core)
-    await _ensure_schema(p, msg)
-
     new_core = await Core.from_core_id(ctx.store, p.get_as_object_id())
 
-    new_core_create = await new_core.gett("create")
-    # if args exist remove them
-    if "args" in new_core_create:
-        del new_core_create["args"]
-    # set the args to the content_id of the create message which should contain only the args
-    new_args_id = msg.content_id
-    new_core_create.add("args", new_args_id)
+    # either the create message is a tree, in which case we assume is a WitState compatible tree,
+    # or it is a blob, in which case we just put it in state under args
+    msg_contents = await msg.get_content()
+    if isinstance(msg_contents, TreeObject):
+        new_core.add("state", msg.content_id)
+    else:
+        new_core.maket("state").add("args", msg.content_id)
 
-    # check in 'created' to see if this actor has already been created with those args
+    # check in 'created' to see if this actor has already been created with those args/state
     # we cannot check for the actor id itself because the prototype core might have been updated in the meantime
     # which would change the actor id
-    # if the arguments have also been changed as part of the update then a new actor will be created
-    new_args_id_str = new_args_id.hex()
+    # if the state has also been changed as part of the update then a new actor will be created
+    state_id_str = msg.content_id.hex()
     created = await ctx.core.gett("created")
-    if new_args_id_str not in created:
+    if state_id_str not in created:
         # send the genesis message
         gen_msg = await OutboxMessage.from_genesis(ctx.store, new_core)
         ctx.outbox.add(gen_msg)
         # register the new actor in 'created'
         actor_id = gen_msg.recipient_id
         actor_id_str = actor_id.hex()
-        created.makeb(new_args_id_str).set_as_str(actor_id_str)
+        created.makeb(state_id_str).set_as_str(actor_id_str)
     else:
-        actor_id_str = (await created.getb(new_args_id_str)).get_as_str()
+        actor_id_str = (await created.getb(state_id_str)).get_as_str()
     
     # reply with the new or existing actor_id
     ctx.outbox.add(OutboxMessage.from_reply(msg, actor_id_str, mt="created"))
@@ -152,32 +150,3 @@ async def _ensure_prototype(core:Core, check_wit:bool=True):
         if p_wit is None:
             raise Exception("No 'wit' specified in the prototype")
     return p
-
-async def _ensure_schema(prototype:TreeObject, msg:InboxMessage):
-    p_create = await prototype.get("create")
-    if p_create is not None:
-        #if the prototype has a constructor schema, ensure the create message matches it
-        schema = await p_create.get("schema")
-        if schema is not None:
-            schema_dict = schema.get_as_json()
-            create_args:BlobObject = await msg.get_content()
-            if not isinstance(create_args, BlobObject):
-                raise Exception("Create message must be a blob since a schema is specified: "+schema.get_as_str())
-            create_args_dict = create_args.get_as_json()
-            try:
-                jsonschema.validate(instance=create_args_dict, schema=schema_dict)
-            except jsonschema.ValidationError as err:
-                raise Exception("Create message does not match schema: "+str(err)) from err
-
-def _is_empty_object_schema(schema):
-    if not isinstance(schema, dict):
-        return False
-    if schema.get("type") != "object":
-        return False
-    if schema.get("properties", {}) != {}:
-        return False
-    if schema.get("required", []) != []:
-        return False
-    if schema.get("additionalProperties", False):
-        return False
-    return True

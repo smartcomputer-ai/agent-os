@@ -74,3 +74,8 @@ class WitState:
                 else:
                     property_data.set_empty()
         self._after_persist()
+
+    async def _persist_to_tree_id(self, store:ObjectStore):
+        tmp_core = Core(store, {}, None)
+        await self._persist_to_core(tmp_core)
+        return await tmp_core.persist()

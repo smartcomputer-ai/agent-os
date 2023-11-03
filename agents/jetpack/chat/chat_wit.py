@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 # A "chat" limits a conversation to a single topic and goal. Each chat corresponds to a single chat window in Jetpack.
 
-async def create_chat_actor(prototypes:dict, name:str="Main") -> OutboxMessage:
-    return create_actor_from_prototype(prototypes['chat'], {'name':name})
+async def create_chat_actor(req_resp:RequestResponse, prototypes:dict, name:str="Main") -> OutboxMessage:
+    return await create_actor_from_prototype(prototypes['chat'], {'name':name}, request_response=req_resp)
 
 
 class ChatState(WitState):

@@ -9,6 +9,24 @@ from jetpack.coder.coder_completions import *
 
 logger = logging.getLogger(__name__)
 
+async def create_coder_actor(
+        store:ObjectStore,
+        req_resp:RequestResponse, 
+        prototypes:dict, 
+        name:str="coder",
+        spec:CodeSpec|None=None,
+        job_execution:CodeExecution|None=None,
+        notify:ActorId|None=None,
+        ) -> ActorId:
+    state = CoderState()
+    state.name = name
+    state.code_spec = spec
+    state.job_execution = job_execution
+    if notify is not None:
+        state.notify.add(notify)
+    tree_id = await state._persist_to_tree_id(store)
+    return await create_actor_from_prototype(prototypes["coder"], tree_id, req_resp)
+
 class CoderState(WitState):
     name:str = "coder"
     notify:set[ActorId] = set()
@@ -26,69 +44,31 @@ def reset_code(state:CoderState):
     state.code_tries_max = 3
     state.code_errors = None
 
-
 def notify_all(state:CoderState, outbox:Outbox, msg:any, mt:str|None=None):
     for actor_id in state.notify:
         outbox.add_new_msg(actor_id, msg, mt=mt)
 
-async def create_coder_actor(
-        store:ObjectStore, 
-        name:str="coder", #allows the differentiation of multiple coders
-        spec:CodeSpec|None=None,
-        job_execution:CodeExecution|None=None,
-        wit_ref:str|None=None,
-        ) -> OutboxMessage:
-    #TODO: how to know if this should be external or loaded from a core?
-    if wit_ref is not None:
-        core = Core.from_external_wit_ref(store, wit_ref=wit_ref)
-    else:
-        core = Core.from_external_wit_ref(store, "coder_wit:app")
-
-    args = core.maket('args')
-    if name is not None:
-        args.makeb('name').set_as_str(name)
-    if spec is not None:
-        args.makeb('code_spec').set_as_json(spec)
-    if job_execution is not None:
-        args.makeb('job_execution').set_as_json(job_execution)
-    
-    genesis_msg = await OutboxMessage.from_genesis(store, core)
-    return genesis_msg
-
-
 app = Wit()
 
 @app.genesis_message
-async def on_genesis_message(msg:InboxMessage, core:Core, state:CoderState, outbox:Outbox, actor_id:ActorId):
+async def on_genesis_message(msg:InboxMessage, state:CoderState, ctx:MessageContext,):
     logger.info("on_genesis_message")
-    #copy args into state
-    args:TreeObject = await core.get('args')
-    if args is not None:
-        logger.info("loading args")
-        if 'name' in args:
-            state.name = (await args.getb('name')).get_as_str()
-        if 'code_spec' in args:
-            state.code_spec = (await args.getb('code_spec')).get_as_model(CodeSpec)
-        if 'job_execution' in args:
-            state.job_execution = (await args.getb('job_execution')).get_as_model(CodeExecution)
-        # add the sender to the notify list
-        # only if args are provided, because we can assume the sender is another actor
-        state.notify.add(msg.sender_id)
     logger.info("is job: %s", state.job_execution is not None)
     # if code specs were provided, move right to the spec state
     # and send message to move on to the plan state 
     if state.code_spec is not None:
         reset_code(state)
-        outbox.add_new_msg(actor_id, "plan", mt="plan")
+        ctx.outbox.add_new_msg(ctx.actor_id, "plan", mt="plan")
+
 
 @app.message("spec")
-async def on_spec_message(spec:CodeSpec, msg:InboxMessage, state:CoderState, outbox:Outbox, actor_id:ActorId):
+async def on_spec_message(spec:CodeSpec, state:CoderState, ctx:MessageContext):
     logger.info("on_spec_message")
     state.code_spec = spec
     reset_code(state)
-    state.notify.add(msg.sender_id)
-    outbox.add_new_msg(actor_id, "plan", mt="plan")
-    notify_all(state, outbox, spec, mt="code_speced")
+    state.notify.add(ctx.message.sender_id)
+    ctx.outbox.add_new_msg(ctx.actor_id, "plan", mt="plan")
+    notify_all(state, ctx.outbox, spec, mt="code_speced")
 
 
 @app.message("plan")
