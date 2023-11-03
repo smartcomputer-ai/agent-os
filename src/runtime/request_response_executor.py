@@ -29,6 +29,9 @@ class RequestResponseExecutor(RequestResponse):
         if response_types is None or len(response_types) == 0:
             raise Exception("Need at least one response message type to wait for.")
         
+        if not msg.is_signal:
+            raise Exception("The request 'msg' must be a signal. Set is_signal to True.")
+
         mailbox_update = await msg.persist_to_mailbox_update(self.store, sender_id)
         with self.runtime_executor.subscribe_to_messages() as queue:
             # send to executor
