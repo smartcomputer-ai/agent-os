@@ -111,7 +111,6 @@ async def test_prototype_with_update():
     prototype_id = await send_prototype_genesis_message(runtime, "wit", wit_a_async)
     await send_create_message(runtime, prototype_id, "init")
     await send_prototype_update_message(runtime, prototype_id, wit_a_async_updated)
-    
     # there should be two actors now, one for the prototype and one for the created actor
     assert len(runtime.get_actors()) == 2
     actor_id = runtime.get_actors()[1]

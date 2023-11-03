@@ -10,6 +10,7 @@ from .data_model import *
 from .data_model_utils import *
 from .errors import InvalidWitException, InvalidMessageException, QueryError
 from .wit_state import WitState
+from .request_response import RequestResponse
 
 # The classes are mostly used internally to wrap user defined functions and route wit messages to the
 # correct message handler.
@@ -32,6 +33,7 @@ class MessageContext():
     store:ObjectStore
     named_actors:dict[str,ActorId]
     prototype_actors:dict[str,ActorId]
+    request_response:RequestResponse
 
 @dataclass(frozen=True)
 class QueryContext():
@@ -337,6 +339,9 @@ class _WitMessageRouter:
                 store=store,
                 actor_id=kwargs.get('actor_id'),
                 agent_id=kwargs.get('agent_id'),
+                named_actors=kwargs.get('named_actors', {}),
+                prototype_actors=kwargs.get('prototype_actors', {}),
+                request_response=kwargs.get('request_response', None),
             )
             kwargs[wrapper.context_param.name] = ctx
         return kwargs
@@ -536,8 +541,6 @@ class _WitQueryRouter:
                 loader=loader,
                 actor_id=kwargs['actor_id'],
                 agent_id=kwargs['agent_id'],
-                named_actors=kwargs.get('named_actors', {}),
-                prototype_actors=kwargs.get('prototype_actors', {}),
                 )
         
         #finally, add the json args to the kwargs, so they can be accessed direcly by name

@@ -57,7 +57,7 @@ class WitState:
                     try:
                         self.__setattr__(attr_key, pickle.loads(property_data.get_as_bytes()))
                     except Exception as e:
-                        logger.exception(f'Error loading {attr_key}')
+                        logger.exception(f'Error loading {attr_key}: {e}')
         self._after_load()
 
     async def _persist_to_core(self, core:Core):

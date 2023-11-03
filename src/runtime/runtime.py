@@ -7,6 +7,7 @@ from .resolvers import *
 from .query_executor import QueryExecutor
 from .actor_executor import ExecutionContext, ActorExecutor, MailboxUpdate
 from .runtime_executor import RuntimeExecutor, agent_id_from_name
+from .request_response_executor import RequestResponseExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,6 @@ class Runtime:
             self.ctx.agent_id = agent_id_from_name(agent_name)
 
         self.ctx.query_executor = QueryExecutor(self.ctx.store, self.ctx.references, self.ctx.resolver, self.ctx.agent_id)
-
 
         self.__cancel_event = asyncio.Event()
         self.__running_event = asyncio.Event()
@@ -130,7 +130,10 @@ class Runtime:
             if(self.agent_id != self.__runtime_executor.agent_id):
                 raise Exception(f"Agent name {self.agent_name} with id '{self.agent_id.hex()}' does not match the agent executor id "+
                                 f"'{self.__runtime_executor.agent_id.hex()}'. Did you use the right name?")
-    
+            # the request-response executor can only be created now that the runtime executor exists
+            # but we might want to consider to move the construction of such "user-space" dependencies somewhere else
+            self.ctx.request_response = RequestResponseExecutor(self.ctx.store, self.__runtime_executor)
+
     def wait_until_running(self) -> asyncio.Future:
         return self.__running_event.wait()
 
