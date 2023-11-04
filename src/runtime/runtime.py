@@ -7,6 +7,7 @@ from .resolvers import *
 from .query_executor import QueryExecutor
 from .actor_executor import ExecutionContext, ActorExecutor, MailboxUpdate
 from .runtime_executor import RuntimeExecutor, agent_id_from_name
+from .request_response_executor import RequestResponseExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,10 @@ class Runtime:
             if(self.agent_id != self.__runtime_executor.agent_id):
                 raise Exception(f"Agent name {self.agent_name} with id '{self.agent_id.hex()}' does not match the agent executor id "+
                                 f"'{self.__runtime_executor.agent_id.hex()}'. Did you use the right name?")
-    
+            # the request-response executor can only be created now that the runtime executor exists
+            # but we might want to consider to move the construction of such "user-space" dependencies somewhere else
+            self.ctx.request_response = RequestResponseExecutor(self.ctx.store, self.__runtime_executor)
+
     def wait_until_running(self) -> asyncio.Future:
         return self.__running_event.wait()
 
@@ -139,9 +143,10 @@ class Runtime:
     async def start(self):
         await self.__init_runtime_executor()
         refs = await self.references.get_all()
-        actor_heads:dict[ActorId, StepId] = (
-            {bytes.fromhex(ref.removeprefix('heads/')):step_id for ref,step_id in refs.items() if ref.startswith('heads/')}
-            )
+        actor_heads:dict[ActorId, StepId] = {bytes.fromhex(ref.removeprefix('heads/')):step_id for ref,step_id in refs.items() if ref.startswith('heads/')}
+
+        self.ctx.named_actors = {ref.removeprefix('actors/'):actor_id for ref,actor_id in refs.items() if ref.startswith('actors/')}
+        self.ctx.prototype_actors = {ref.removeprefix('prototypes/'):actor_id for ref,actor_id in refs.items() if ref.startswith('prototypes/')}
 
         async with self.__executor_lock:
             self.__executors:dict[ActorId, ActorExecutor] = {}

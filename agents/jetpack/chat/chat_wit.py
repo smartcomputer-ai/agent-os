@@ -6,9 +6,27 @@ from jetpack.coder.coder_wit import create_coder_actor
 from jetpack.coder.retriever_wit import create_retriever_actor
 from jetpack.chat.chat_completions import chat_completion
 
+
+#========================================================================================
+# Setup & State
+#
+# A "chat" limits a conversation to a single topic and goal. 
+# Each chat corresponds to a single chat window in Jetpack.
+#========================================================================================
 logger = logging.getLogger(__name__)
 
-# A "chat" limits a conversation to a single topic and goal. Each chat corresponds to a single chat window in Jetpack.
+async def create_chat_actor(
+        ctx:MessageContext,
+        name:str="Main"
+        ) -> ActorId:
+    state = ChatState()
+    state.name = name
+    return await create_actor_from_prototype_with_state(
+        ctx.prototype_actors["chat"], 
+        state, 
+        ctx.request_response, 
+        ctx.store)
+
 
 class ChatState(WitState):
     name:str="Main"
@@ -24,61 +42,23 @@ class ChatState(WitState):
     current_execution:CodeExecution|None = None
     last_result:CodeExecuted|None = None
 
-async def create_chat_actor(
-        store:ObjectStore, 
-        name:str="Main", #allows the differentiation of multiple scopes
-        templates:TreeId=None,
-        wit_ref:str|None=None,
-        wit_query_ref:str|None=None,
-        ) -> OutboxMessage:
-    #TODO: how to know if this should be external or loaded from a core?
-    if wit_ref is not None:
-        core = Core.from_external_wit_ref(store, wit_ref=wit_ref)
-    else:
-        core = Core.from_external_wit_ref(store, "chat_wit:app")
-    if wit_query_ref is not None:
-        core.makeb("wit_query").set_as_str("external:"+wit_query_ref)
-    else:
-        core.makeb("wit_query").set_as_str("external:chat_queries:app")
-
-    args = core.maket('args')
-    if name is not None:
-        args.makeb('name').set_as_str(name)
-    #add the templates to the core
-    if templates is not None:
-        core.add("templates", templates)
-
-    genesis_msg = await OutboxMessage.from_genesis(store, core)
-    return genesis_msg
-
-
+#========================================================================================
+# Wit
+#========================================================================================
 app = Wit()
-
 
 @app.genesis_message
 async def on_genesis(msg:InboxMessage, ctx:MessageContext, state:ChatState) -> None:
     logger.info("received genesis")
     
-    args:TreeObject = await ctx.core.get('args')
-    if args is not None:
-        logger.info("loading args")
-        if 'name' in args:
-            state.name = (await args.getb('name')).get_as_str()
-            logger.info(f"'{state.name}': new chat actor created")
-
-    if state.name is None:
-        state.name = "Main"
-
     #create the downstream actors
-    coder_msg = await create_coder_actor(ctx.store, name=f"{state.name} Coder")
-    state.coder = coder_msg.recipient_id
-    ctx.outbox.add(coder_msg)
-    logger.info(f"'{state.name}': created coder actor %s", coder_msg.recipient_id.hex())
+    coder_id = await create_coder_actor(ctx, name=f"{state.name} Coder")
+    state.coder = coder_id
+    logger.info(f"'{state.name}': created coder actor {coder_id.hex()}")
 
-    retriever_msg = await create_retriever_actor(ctx.store, forward_to=state.coder)
-    state.retriever = retriever_msg.recipient_id
-    ctx.outbox.add(retriever_msg)
-    logger.info(f"'{state.name}': created retriever actor %s", retriever_msg.recipient_id.hex())
+    retriever_id = await create_retriever_actor(ctx, forward_to=state.coder)
+    state.retriever = retriever_id
+    logger.info(f"'{state.name}': created retriever actor {retriever_id.hex()}")
 
 
 @app.message("web")

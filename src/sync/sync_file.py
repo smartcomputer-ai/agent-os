@@ -104,7 +104,8 @@ async def loads_pushes(toml:str|TOMLDocument, references:References) -> list[Act
 
 async def _actor_push_from_toml_table(references:References, actor_table:Container, all:Container|None=None) -> ActorPush:        
     actor_name = actor_table['name']
-    actor_push = await ActorPush.from_actor_name(references, actor_name)
+    is_prototype = actor_table.get('is_prototype', False)
+    actor_push = await ActorPush.from_actor_name(references, actor_name, is_prototype)
     if all is not None:
         _add_table_to_actor_push(actor_push, all)
     _add_table_to_actor_push(actor_push, actor_table)
@@ -141,14 +142,6 @@ def _add_table_to_actor_push(actor_push:ActorPush, table:Container):
         actor_push.wit_query = table["wit_query"]
     if "wit_update" in table and not actor_push.is_genesis:
         actor_push.wit_update = table["wit_update"]
-    if "name" in table:
-        actor_push.actor_name = table["name"]
-    if "notify" in table:
-        notify = table['notify']
-        if(isinstance(notify, str)):
-            notify = [notify]
-        for actor_to_notify in notify:
-            actor_push.notify.add(actor_to_notify)
 
 def _read_toml_file(file_path) -> TOMLDocument:
     file_path = _convert_posix_to_win(file_path)
@@ -191,24 +184,17 @@ def _validate_doc(doc:tomlkit.TOMLDocument) -> None:
                 raise ValueError("Actor name is required. Use 'name' to define an actor reference name.")
             else:
                 actor_names.append(actor['name'])
-            #check that the actors that need to be notified about this actor have been defined *before* this actor
-            if 'notify' in actor:
-                notify = actor['notify']
-                if(isinstance(notify, str)):
-                    notify = [notify]
-                if(not isinstance(notify, list)):
-                    raise ValueError(f"Actor to notify must be a string or list of strings, but was {type(notify)}.")
-                for actor_to_notify in notify:
-                    if(actor_to_notify not in actor_names):
-                        raise ValueError(f"Actor to notify '{actor_to_notify}' has not been defined before this one '{actor['name']}'. "+
-                                         f"Define the actor '{actor_to_notify}' above this one.")
+            
+            if 'is_prototype' in actor:
+                if(not isinstance(actor['is_prototype'], bool)):
+                    raise ValueError(f"Actor is_prototype must be a boolean, but was {type(actor['is_prototype'])}.")
 
     if('agent' in doc):
         validate_agent(doc['agent'])
     valid_all_keys = ['push', 'pull', 'sync', 'push_value', 'push_on_genesis', 'push_value_on_genesis', 'runtime', 'external_paths']
     if('all' in doc):
         validate_all(doc['all'], valid_all_keys)
-    valid_actor_keys = ['name', 'wit', 'wit_query', 'notify'] + valid_all_keys
+    valid_actor_keys = ['name', 'wit', 'wit_query', 'is_prototype'] + valid_all_keys
     if 'actors' in doc:
         #raise ValueError('No actors table array (aka heading) is defined. Use [[actors]] to define one or more actors.')
         validate_actors(doc['actors'], valid_actor_keys)

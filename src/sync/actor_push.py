@@ -9,6 +9,7 @@ from grit.object_serialization import blob_to_bytes
 from grit import *
 from wit import *
 from runtime.runtime_executor import add_offline_message_to_runtime_outbox, remove_offline_message_from_runtime_outbox
+from wit.prototype import wrap_in_prototype
 from . sync_item import SyncItem, sync_from_push_path, sync_from_push_value
 
 logger = logging.Logger(__name__)
@@ -24,11 +25,11 @@ class ActorPush():
     _is_genesis:bool
     _sync_items:OrderedDict[str, SyncItem]
     actor_name:str
+    is_prototype:bool
     wit:str
     wit_query:str
     wit_update:str
     runtime:str
-    notify:set[str]
 
     def __init__(self, is_genesis:bool, actor_id:ActorId|None=None):
         self._is_genesis = is_genesis
@@ -37,17 +38,22 @@ class ActorPush():
             raise ValueError("Cannot create a non-genesis actor push without an actor id.")
         self._sync_items = OrderedDict()
         self.actor_name = None
+        self.is_prototype = False
         self.wit = None
         self.wit_query = None
         self.wit_update = None
         self.runtime = None
-        self.notify = set()
 
     @classmethod
-    async def from_actor_name(cls, references:References, actor_name:str) -> ActorPush:
+    async def from_actor_name(cls, references:References, actor_name:str, is_prototype:bool=False) -> ActorPush:
         # check if the actor already exists
-        actor_id = await references.get(ref_actor_name(actor_name))
-        if(actor_id is not None):
+        if is_prototype:
+            actor_ref = ref_prototype_name(actor_name)
+        else:
+            actor_ref = ref_actor_name(actor_name)
+
+        actor_id = await references.get(actor_ref)
+        if actor_id is not None:
             # the actor ref is a just helper reference, to make sure the actor 
             # actually exists (i.e. the genesis step has run) also check if there 
             # is a step head for this actor
@@ -55,11 +61,12 @@ class ActorPush():
         else:
             step_id = None
         #now, either create a genesis push, or an update push
-        if(step_id is None):
+        if step_id is None:
             obj = cls(is_genesis=True, actor_id=None)
         else:
             obj = cls(is_genesis=False, actor_id=actor_id)
         obj.actor_name = actor_name
+        obj.is_prototype = is_prototype
         return obj
 
     @property
@@ -132,6 +139,9 @@ class ActorPush():
                 else:
                     blob_obj = _blob_from_file(os.path.join(sync_item.dir_path, sync_item.file_name))
                 node.add(sync_item.item_name, blob_obj)
+        #check if the core needs to be wrapped as a prototype
+        if(self.is_prototype):
+            core = wrap_in_prototype(core)
         return core
     
     async def diff_core_with_actor(self, store:ObjectStore, references:References) -> AsyncIterator[tuple[str, str]]:
@@ -170,9 +180,14 @@ class ActorPush():
         # While pushing the first genesis core to actors, the initial wit can fail (not be found, code error, etc). 
         # If this is the case the developer will iterate on the push files and values and as a consequnce change the 
         # actor id of the target actor each time.
-        # So, if this is a genesis push, look if there is already an agent ref for this actor, and if so, remove it.
+        # So, if this is a genesis push, look if there is already an actor ref for this actor, and if so, remove it.
+        if self.is_prototype:
+            actor_ref = ref_prototype_name(self.actor_name)
+        else:
+            actor_ref = ref_actor_name(self.actor_name)
+
         if(self._is_genesis):
-            previous_genesis_actor_id = await references.get(ref_actor_name(self.actor_name))
+            previous_genesis_actor_id = await references.get(actor_ref)
             if(previous_genesis_actor_id is not None):
                 await remove_offline_message_from_runtime_outbox(store, references, agent_name, previous_genesis_actor_id)
         # Now, create the message
@@ -181,15 +196,11 @@ class ActorPush():
         # resulting in an override of the current message in the outbox.
         # With set_previous=False, the message is treated like a signal, and only the last message will apply.
         step_id = await add_offline_message_to_runtime_outbox(store, references, agent_name, msg, set_previous=False)
-        # If this the gnesis step, also create an agen ref
+        # If this the genesis step, also create an actor ref
         if(self._is_genesis and self.actor_name is not None):
             # This may override the actor ref, if the genesis step changes over multiple initial pushes, 
             # but once the runtime runs, the actor ref needs to be fix
-            await references.set(ref_actor_name(self.actor_name), msg.recipient_id)
-        #notify other actors about the creation of this one
-        notify_msgs = await self.create_notification_messages(references, msg.recipient_id)
-        for notify_msg in notify_msgs:
-            await add_offline_message_to_runtime_outbox(store, references, agent_name, notify_msg, set_previous=True)
+            await references.set(actor_ref, msg.recipient_id)
         return step_id
         
     async def create_actor_message(self, store:ObjectStore) -> OutboxMessage:
@@ -211,23 +222,6 @@ class ActorPush():
             raise Exception("Cannot create update message without actor_id.")
         update_msg = OutboxMessage.from_update(self.actor_id, core)
         return update_msg
-    
-    async def create_notification_messages(self, references:References, actor_id:ActorId) -> list[OutboxMessage]:
-        if(not self._is_genesis):
-            return []
-        if(len(self.notify) == 0):
-            return []
-        notify_msgs = []
-        for actor_to_notify in self.notify:
-            actor_to_notify_id = await references.get(ref_actor_name(actor_to_notify))
-            if(actor_to_notify_id is None):
-                raise Exception(
-                    f"Cannot notify actor {actor_to_notify} because no actor id was found in references '{ref_actor_name(actor_to_notify)}'."
-                    )
-            notify_msg = OutboxMessage.from_new(actor_to_notify_id, {'actor_name': self.actor_name, 'actor_id': actor_id.hex()})
-            notify_msg.mt = "notify_genesis"
-            notify_msgs.append(notify_msg)
-        return notify_msgs
     
 
 def _blob_from_value(value:any) -> BlobObject:

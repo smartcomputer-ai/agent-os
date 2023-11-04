@@ -23,6 +23,9 @@ class ExecutionContext:
     agent_id:ActorId
     async_semaphore:asyncio.Semaphore|None
     sync_semaphore:asyncio.Semaphore|None
+    named_actors:dict[str,ActorId]
+    prototype_actors:dict[str,ActorId]
+    request_response:RequestResponse
 
     def __init__(self):
         self.store = None
@@ -33,6 +36,9 @@ class ExecutionContext:
         self.agent_id = None
         self.async_semaphore = None
         self.sync_semaphore = None
+        self.named_actors = {}
+        self.prototype_actors = {}
+        self.request_response = None
 
     @classmethod
     def from_store(cls, store:ObjectStore, references:References, resolver:Resolver, agent_id:ActorId) -> ExecutionContext:
@@ -41,8 +47,6 @@ class ExecutionContext:
         ctx.references = references
         ctx.resolver = resolver
         ctx.agent_id = agent_id
-        ctx.query_executor = None
-        ctx.agent_name = None
         return ctx
     
 class ActorExecutor:
@@ -345,6 +349,9 @@ class _WitExecution:
             'object_store': ctx.store,
             'store': ctx.store,
             'cancel_event': self.cancel_event,
+            'named_actors': ctx.named_actors,
+            'prototype_actors': ctx.prototype_actors,
+            'request_response': ctx.request_response,
         }
         task_name = f'wit_function_{self.actor_id}'
         if(self.is_async):

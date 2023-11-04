@@ -55,9 +55,14 @@ class WitState:
                     if(not isinstance(property_data, BlobObject)): #we expect this to be a blob object
                         raise Exception(f'Expected property {attr_key} to be a BlobObject, but got {type(property_data)}')
                     try:
-                        self.__setattr__(attr_key, pickle.loads(property_data.get_as_bytes()))
+                        attr_bytes = property_data.get_as_bytes()
+                        if attr_bytes is not None:
+                            attr_value = pickle.loads(attr_bytes)
+                            self.__setattr__(attr_key, attr_value)
+                        else:
+                            self.__setattr__(attr_key, None)
                     except Exception as e:
-                        logger.exception(f'Error loading {attr_key}')
+                        logger.exception(f'Error loading {attr_key}: {e}')
         self._after_load()
 
     async def _persist_to_core(self, core:Core):
@@ -74,3 +79,8 @@ class WitState:
                 else:
                     property_data.set_empty()
         self._after_persist()
+
+    async def _persist_to_tree_id(self, store:ObjectStore):
+        tmp_core = Core(store, {}, None)
+        await self._persist_to_core(tmp_core)
+        return await tmp_core.persist()

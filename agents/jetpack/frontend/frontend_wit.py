@@ -26,23 +26,14 @@ async def on_create_chat(chat:dict, ctx:MessageContext, state:FrontendState) -> 
     slug = await create_chat(title, ctx, state)
     ctx.outbox.add_reply_msg(ctx.message, slug, mt="new-chat")
 
-
 async def create_chat(title:str, ctx:MessageContext, state:FrontendState):
-    #find the templates to pass to the new chat
-    templ = await ctx.core.get("templates")
-    if templ is None:
-        raise Exception("templates not found")
-    templ_id = templ.get_as_object_id()
-
     #create the chat
     slug = slugify(title)
-    genesis_msg = await create_chat_actor(ctx.store, name=slug, templates=templ_id)
-    ctx.outbox.add(genesis_msg)
-    state.chat_actors[slug] = genesis_msg.recipient_id
+    chat_id = await create_chat_actor(ctx, name=slug)
+    state.chat_actors[slug] = chat_id
     state.chat_titles[slug] = title
     return slug
 
-
-def slugify(text):
+def slugify(text:str):
     text = text.lower()
     return re.sub(r'[\W_]+', '-', text)

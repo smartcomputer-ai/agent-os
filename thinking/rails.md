@@ -26,7 +26,7 @@ One way to solve this, especially if multiple actors need to be coordinated is t
 ## Introducing "Rails" 
 Let's call our IO monad "rails" (or "trains", not sure yet). A rail defines a linear path of several chained Wit function calls. Specificaly, it enables request-response patterns with wit functions, but also other things like timeouts, and so on.
 
-In the agent OS, rails can only be properly started from the runtime itself (or the actor executor), a wit can use a rail helper, which is passed via context, to start a rail. Under the hood, a rail is just a wit too that proxies events for the caller.
+In the agent OS, rails can only be properly started from the runtime itself (or the actor executor), a wit can use a rail helper, which is passed via context, to start a rail. Under the hood, a rail is just a wit too that proxies events for the caller./
 
 ## Deadlocks
 As long as the rails-subsystem does not allow reentracy into the actor that "owns" or initiated the rail, dead-locks can be avoided. Also, as long as a rail is active, no other actor should be allowed to create a different rail that messages an actor with that active rail. Again, this could cause deadlocks.

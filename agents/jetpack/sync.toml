@@ -2,10 +2,27 @@
 name = "jetpack"
 
 [all]
-external_paths=["./agents/jetpack/frontend", "./agents/jetpack/coder", "./agents/jetpack/chat"]
+external_paths=["./agents/jetpack/frontend", "./agents/jetpack/chat", "./agents/jetpack/coder"]
 
 [[actors]]
 name="frontend"
-push=["./agents/jetpack/frontend:/code", "./agents/jetpack/templates:/templates"]
+push=["./agents/jetpack/frontend/index.html:/templates/index.html"]
 wit="external:frontend_wit:app"
 wit_query="external:frontend_queries:app"
+
+[[actors]]
+name="chat"
+is_prototype=true
+push=["./agents/jetpack/chat/chat_messages.html:/templates/chat_messages.html", "./agents/jetpack/chat/artifacts.html:/templates/artifacts.html"]
+wit="external:chat_wit:app"
+wit_query="external:chat_queries:app"
+
+[[actors]]
+name="coder"
+is_prototype=true
+wit="external:coder_wit:app"
+
+[[actors]]
+name="retriever"
+is_prototype=true
+wit="external:retriever_wit:app"
