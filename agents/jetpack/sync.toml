@@ -13,7 +13,7 @@ wit_query="external:frontend_queries:app"
 [[actors]]
 name="chat"
 is_prototype=true
-push=["./agents/jetpack/frontend/chat_messages.html:/templates/chat_messages.html", "./agents/jetpack/frontend/artifacts.html:/templates/artifacts.html"]
+push=["./agents/jetpack/chat/chat_messages.html:/templates/chat_messages.html", "./agents/jetpack/chat/artifacts.html:/templates/artifacts.html"]
 wit="external:chat_wit:app"
 wit_query="external:chat_queries:app"
 

@@ -5,7 +5,25 @@ from jetpack.messages import *
 from jetpack.coder.retriever_completions import *
 from jetpack.coder.coder_wit import create_coder_actor
 
+#========================================================================================
+# Setup & State
+#========================================================================================
 logger = logging.getLogger(__name__)
+
+async def create_retriever_actor(
+        ctx:MessageContext,
+        request:CodeRequest|None=None,
+        forward_to:ActorId|None=None,
+        ) -> ActorId:
+    state = RetrieverState()
+    state.code_request = request
+    state.forward_to = forward_to
+    state.notify.add(ctx.actor_id)
+    return await create_actor_from_prototype_with_state(
+        ctx.prototype_actors["retriever"], 
+        state, 
+        ctx.request_response, 
+        ctx.store)
 
 class RetrieverState(WitState):
     code_request:CodeRequest|None = None
@@ -15,53 +33,14 @@ class RetrieverState(WitState):
     notify:set[ActorId] = set()
     forward_to:ActorId|None = None
 
-    def __init__(self):
-        super().__init__()
-
-def notify_all(state:RetrieverState, outbox:Outbox, msg:any, mt:str|None=None):
-    for actor_id in state.notify:
-        outbox.add_new_msg(actor_id, msg, mt=mt)
-
-async def create_retriever_actor(
-        store:ObjectStore, 
-        request:CodeRequest|None=None,
-        forward_to:ActorId|None=None,
-        wit_ref:str|None=None,
-        ) -> OutboxMessage:
-    #TODO: how to know if this should be external or loaded from a core?
-    if wit_ref is not None:
-        core = Core.from_external_wit_ref(store, wit_ref=wit_ref)
-    else:
-        core = Core.from_external_wit_ref(store, "retriever_wit:app")
-
-    args = core.maket('args')
-    if request is not None:
-        args.makeb('code_request').set_as_json(request)
-    if forward_to is not None:
-        args.makeb('forward_to').set_as_bytes(forward_to)
-    
-    genesis_msg = await OutboxMessage.from_genesis(store, core)
-    return genesis_msg
-
-
+#========================================================================================
+# Wit
+#========================================================================================
 app = Wit()
 
 @app.genesis_message
 async def on_genesis_message(msg:InboxMessage, core:Core, state:RetrieverState, outbox:Outbox, actor_id:ActorId):
     logger.info("on_genesis_message")
-    #copy args into state
-    args:TreeObject = await core.get('args')
-    if args is not None:
-        logger.info("loading args")
-        if 'code_request' in args:
-            state.code_request = (await args.getb('code_request')).get_as_model(CodeRequest)
-        if 'forward_to' in args:
-            forward_to = (await args.getb('forward_to')).get_as_bytes()
-            logger.info("forward_to: %s", forward_to.hex())
-            state.forward_to = forward_to
-        # add the sender to the notify list
-        # only if args are provided, because we can assume the sender is another actor
-        state.notify.add(msg.sender_id)
     # if code specs were provided, move right to the plan
     # and send message to move on to the plan state 
     if state.code_request is not None:
@@ -96,7 +75,7 @@ async def on_plan_message(msg:InboxMessage, state:RetrieverState, ctx:MessageCon
         ctx.outbox.add_new_msg(ctx.actor_id, "complete", mt="complete")
 
 @app.message("retrieve")
-async def on_retrieve_message(msg:InboxMessage, state:RetrieverState, outbox:Outbox, actor_id:ActorId, store:ObjectStore):
+async def on_retrieve_message(msg:InboxMessage, state:RetrieverState, ctx:MessageContext):
     logger.info("on_retrieve_message")
     state.retrieval_coders = {}
     if state.retrieved_data is None:
@@ -130,18 +109,17 @@ async def on_retrieve_message(msg:InboxMessage, state:RetrieverState, outbox:Out
             input_arguments=json.loads('{"type": "object", "properties": {}}'),
             input_description=None,
         )
-        retrieve_msg = await create_coder_actor(
-            store, 
+        coder_id = await create_coder_actor(
+            ctx, 
             f"retrieve: {location}",
             retrieve_spec,
             retrieve_job)
-        outbox.add(retrieve_msg)
-        state.retrieval_coders[retrieve_msg.recipient_id] = location
+        state.retrieval_coders[coder_id] = location
         state.retrieved_data[location] = None
     
     #if no retrievals coders were needed, move on to the completed state
     if len(state.retrieval_coders) == 0:
-        outbox.add_new_msg(actor_id, "complete", mt="complete")
+        ctx.outbox.add_new_msg(ctx.actor_id, "complete", mt="complete")
 
 @app.message("complete")
 async def on_complete_message(msg:InboxMessage, state:RetrieverState, outbox:Outbox, actor_id:ActorId):
@@ -175,3 +153,8 @@ async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:
         if len(state.retrieval_coders) == 0:
             ctx.outbox.add_new_msg(ctx.actor_id, "complete", mt="complete")
 
+
+
+def notify_all(state:RetrieverState, outbox:Outbox, msg:any, mt:str|None=None):
+    for actor_id in state.notify:
+        outbox.add_new_msg(actor_id, msg, mt=mt)

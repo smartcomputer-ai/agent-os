@@ -6,12 +6,26 @@ from jetpack.coder.coder_wit import create_coder_actor
 from jetpack.coder.retriever_wit import create_retriever_actor
 from jetpack.chat.chat_completions import chat_completion
 
+
+#========================================================================================
+# Setup & State
+#
+# A "chat" limits a conversation to a single topic and goal. 
+# Each chat corresponds to a single chat window in Jetpack.
+#========================================================================================
 logger = logging.getLogger(__name__)
 
-# A "chat" limits a conversation to a single topic and goal. Each chat corresponds to a single chat window in Jetpack.
-
-async def create_chat_actor(req_resp:RequestResponse, prototypes:dict, name:str="Main") -> OutboxMessage:
-    return await create_actor_from_prototype(prototypes['chat'], {'name':name}, request_response=req_resp)
+async def create_chat_actor(
+        ctx:MessageContext,
+        name:str="Main"
+        ) -> ActorId:
+    state = ChatState()
+    state.name = name
+    return await create_actor_from_prototype_with_state(
+        ctx.prototype_actors["chat"], 
+        state, 
+        ctx.request_response, 
+        ctx.store)
 
 
 class ChatState(WitState):
@@ -28,25 +42,23 @@ class ChatState(WitState):
     current_execution:CodeExecution|None = None
     last_result:CodeExecuted|None = None
 
+#========================================================================================
+# Wit
+#========================================================================================
 app = Wit()
 
 @app.genesis_message
 async def on_genesis(msg:InboxMessage, ctx:MessageContext, state:ChatState) -> None:
     logger.info("received genesis")
     
-    args = await get_prototype_args_as_json(ctx.core)
-    state.name = args.get('name', 'Main')
-
     #create the downstream actors
-    coder_msg = await create_coder_actor(ctx.store, name=f"{state.name} Coder")
-    state.coder = coder_msg.recipient_id
-    ctx.outbox.add(coder_msg)
-    logger.info(f"'{state.name}': created coder actor %s", coder_msg.recipient_id.hex())
+    coder_id = await create_coder_actor(ctx, name=f"{state.name} Coder")
+    state.coder = coder_id
+    logger.info(f"'{state.name}': created coder actor {coder_id.hex()}")
 
-    retriever_msg = await create_retriever_actor(ctx.store, forward_to=state.coder)
-    state.retriever = retriever_msg.recipient_id
-    ctx.outbox.add(retriever_msg)
-    logger.info(f"'{state.name}': created retriever actor %s", retriever_msg.recipient_id.hex())
+    retriever_id = await create_retriever_actor(ctx, forward_to=state.coder)
+    state.retriever = retriever_id
+    logger.info(f"'{state.name}': created retriever actor {retriever_id.hex()}")
 
 
 @app.message("web")

@@ -650,7 +650,7 @@ class Core(TreeObject):
             path = path[1:]
         return await super().get_path(path)
     
-    async def merge(self, new_core:Core):
+    async def merge(self, new_core:Core|TreeObject):
         '''Merges the new_core into the current core. The current core will be modified.'''
         # walk the new_core and see if the current core is different
         async for _path, _trees, blobs in new_core.walk():

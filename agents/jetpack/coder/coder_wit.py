@@ -7,25 +7,28 @@ from tools import StoreWrapper
 from jetpack.messages import *
 from jetpack.coder.coder_completions import *
 
+#========================================================================================
+# Setup & State
+#========================================================================================
 logger = logging.getLogger(__name__)
 
 async def create_coder_actor(
-        store:ObjectStore,
-        req_resp:RequestResponse, 
-        prototypes:dict, 
+        ctx:MessageContext,
         name:str="coder",
         spec:CodeSpec|None=None,
         job_execution:CodeExecution|None=None,
-        notify:ActorId|None=None,
         ) -> ActorId:
     state = CoderState()
     state.name = name
     state.code_spec = spec
     state.job_execution = job_execution
-    if notify is not None:
-        state.notify.add(notify)
-    tree_id = await state._persist_to_tree_id(store)
-    return await create_actor_from_prototype(prototypes["coder"], tree_id, req_resp)
+    state.notify.add(ctx.actor_id)
+    return await create_actor_from_prototype_with_state(
+        ctx.prototype_actors["coder"], 
+        state, 
+        ctx.request_response, 
+        ctx.store)
+
 
 class CoderState(WitState):
     name:str = "coder"
@@ -38,16 +41,9 @@ class CoderState(WitState):
     code_errors:str|None = None
     job_execution:CodeExecution|None = None
 
-def reset_code(state:CoderState):
-    state.code_plan = None
-    state.code_tries = 0
-    state.code_tries_max = 3
-    state.code_errors = None
-
-def notify_all(state:CoderState, outbox:Outbox, msg:any, mt:str|None=None):
-    for actor_id in state.notify:
-        outbox.add_new_msg(actor_id, msg, mt=mt)
-
+#========================================================================================
+# Wit
+#========================================================================================
 app = Wit()
 
 @app.genesis_message
@@ -251,3 +247,14 @@ async def on_fail_message(msg:InboxMessage, state:CoderState, ctx:MessageContext
     logger.info("on_fail_message")
     notify_all(state, ctx.outbox, CodeFailed(errors=state.code_errors), mt="code_failed")
 
+
+
+def reset_code(state:CoderState):
+    state.code_plan = None
+    state.code_tries = 0
+    state.code_tries_max = 3
+    state.code_errors = None
+
+def notify_all(state:CoderState, outbox:Outbox, msg:any, mt:str|None=None):
+    for actor_id in state.notify:
+        outbox.add_new_msg(actor_id, msg, mt=mt)

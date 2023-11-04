@@ -26,17 +26,14 @@ async def on_create_chat(chat:dict, ctx:MessageContext, state:FrontendState) -> 
     slug = await create_chat(title, ctx, state)
     ctx.outbox.add_reply_msg(ctx.message, slug, mt="new-chat")
 
-
 async def create_chat(title:str, ctx:MessageContext, state:FrontendState):
     #create the chat
     slug = slugify(title)
-    genesis_msg = await create_chat_actor(ctx.prototype_actors, name=slug)
-    ctx.outbox.add(genesis_msg)
-    state.chat_actors[slug] = genesis_msg.recipient_id
+    chat_id = await create_chat_actor(ctx, name=slug)
+    state.chat_actors[slug] = chat_id
     state.chat_titles[slug] = title
     return slug
 
-
-def slugify(text):
+def slugify(text:str):
     text = text.lower()
     return re.sub(r'[\W_]+', '-', text)

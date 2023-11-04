@@ -39,13 +39,17 @@ def wrap_in_prototype(core:Core) -> Core:
 def create_actor_from_prototype_msg(prototype_id:ActorId, args:ValidMessageContent|None) -> OutboxMessage:
     if args is None:
         args = {}
-    return OutboxMessage.from_new(prototype_id, args, mt="create")
+    return OutboxMessage.from_new(prototype_id, args, is_signal=True, mt="create")
 
 async def create_actor_from_prototype(prototype_id:ActorId, args:ValidMessageContent|None, request_response:RequestResponse) -> ActorId:
     create_msg = create_actor_from_prototype_msg(prototype_id, args)
     response = await request_response.run(create_msg, ["created"], 1.0)
     created_actor_id_str = (await response.get_content()).get_as_str()
     return to_object_id(created_actor_id_str)
+
+async def create_actor_from_prototype_with_state(prototype_id:ActorId, state:WitState, request_response:RequestResponse, store:ObjectStore) -> ActorId:
+    tree_id = await state._persist_to_tree_id(store)
+    return await create_actor_from_prototype(prototype_id, tree_id, request_response)
 
 async def get_prototype_args(core:Core) -> TreeObject|BlobObject|None:
     state = await core.get("state")
@@ -89,9 +93,11 @@ async def on_create(msg:InboxMessage, ctx:MessageContext):
     # or it is a blob, in which case we just put it in state under args
     msg_contents = await msg.get_content()
     if isinstance(msg_contents, TreeObject):
-        new_core.add("state", msg.content_id)
+        await new_core.merge(msg_contents)
     else:
-        new_core.maket("state").add("args", msg.content_id)
+        if "args" in new_core:
+            del new_core["args"]
+        new_core.add("args", msg.content_id)
 
     # check in 'created' to see if this actor has already been created with those args/state
     # we cannot check for the actor id itself because the prototype core might have been updated in the meantime
