@@ -50,7 +50,7 @@ class Runtime:
             self.ctx.agent_name = agent_name
             self.ctx.agent_id = agent_id_from_name(agent_name)
 
-        self.ctx.query_executor = QueryExecutor(self.ctx.store, self.ctx.references, self.ctx.resolver, self.ctx.agent_id)
+        self.ctx.query = QueryExecutor(self.ctx.store, self.ctx.references, self.ctx.resolver, self.ctx.agent_id)
 
         self.__cancel_event = asyncio.Event()
         self.__running_event = asyncio.Event()
@@ -78,7 +78,7 @@ class Runtime:
         return self.ctx.resolver
     @property
     def query_executor(self) -> QueryExecutor:
-        return self.ctx.query_executor
+        return self.ctx.query
 
     #todo: add lock around __executors
     def get_actors(self) -> list[ActorId]:

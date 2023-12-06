@@ -6,7 +6,6 @@ from typing import Awaitable, Callable
 from grit import *
 from wit import *
 from .resolvers import Resolver
-from .query_executor import QueryExecutor
 
 MailboxUpdate = tuple[ActorId, ActorId, MessageId] # sender_id, recipient_id, message_id
 MailboxUpdateCallback = Callable[[set[MailboxUpdate]], Awaitable[None]]
@@ -18,26 +17,26 @@ class ExecutionContext:
     store:ObjectStore
     references:References
     resolver:Resolver
-    query_executor:QueryExecutor
     agent_name:str
     agent_id:ActorId
     async_semaphore:asyncio.Semaphore|None
     sync_semaphore:asyncio.Semaphore|None
     named_actors:dict[str,ActorId]
     prototype_actors:dict[str,ActorId]
+    query:Query
     request_response:RequestResponse
 
     def __init__(self):
         self.store = None
         self.references = None
         self.resolver = None
-        self.query_executor = None
         self.agent_name = None
         self.agent_id = None
         self.async_semaphore = None
         self.sync_semaphore = None
         self.named_actors = {}
         self.prototype_actors = {}
+        self.query = None
         self.request_response = None
 
     @classmethod
@@ -351,6 +350,7 @@ class _WitExecution:
             'cancel_event': self.cancel_event,
             'named_actors': ctx.named_actors,
             'prototype_actors': ctx.prototype_actors,
+            'query': ctx.query,
             'request_response': ctx.request_response,
         }
         task_name = f'wit_function_{self.actor_id}'
