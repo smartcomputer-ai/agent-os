@@ -19,7 +19,7 @@ In short:
   - To demonstrate the power of the Agent OS, this project comes with a demo agent called ["Jetpack"](agents/README.md#jetpack) that can chat with you and write self-executing programs.
 
 
-<p><a href="https://www.youtube.com/embed/V8QpNic7b24" target="_blank"><img src="docs/images/agents-fig-1-jetpack-demo.png" alt="Jetpack Demo Video" width="700" /></a>
+<p><a href="https://www.youtube.com/watch?v=7HJXUMCDFks" target="_blank"><img src="docs/images/screenshot.png" alt="Jetpack Demo Video" width="700" /></a>
 <br>
 <small>Click the the image to watch a short demo on YouTube.</small>
 </p>
