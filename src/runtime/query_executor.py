@@ -1,9 +1,10 @@
 from __future__ import annotations
 from grit import *
 from wit.errors import QueryError
+from wit.query import Query
 from .resolvers import Resolver
 
-class QueryExecutor:
+class QueryExecutor(Query):
     """Executes wit queries against an actor's head step."""
     loader:ObjectLoader
     references:References
@@ -48,6 +49,7 @@ class QueryExecutor:
             'object_loader': self.loader,
             'actor_id': actor_id,
             'agent_id': self.agent_id,
+            'query': self
         } 
         try:
             result = await query_func(*args, **kwargs)
