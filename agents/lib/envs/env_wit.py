@@ -3,7 +3,7 @@ from grit import *
 from wit import *
 
 # The idea of an environment, here, is closely related to the env from Lisp or Subjects in Urbit.
-# It's basically a recursive structure that is storngly typed. But in the case of Agent OS, it can
+# It's basically a recursive structure that is strongly typed. But in the case of Agent OS, it can
 # be accessed by different programming languages.
 # Other "processes" / wits, update the env they are "attached to".
 #

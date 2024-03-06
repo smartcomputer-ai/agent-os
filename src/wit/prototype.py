@@ -2,9 +2,7 @@ import jsonschema
 from .wit_api import *
 from .wit_routers import *
 
-# A prototype is an actor that acts as a factory for a certain type of actors
-#
-# Technically, it can different types of actors, but the prototype notion implies that it's just one type
+# A prototype is an actor that acts as a factory for a certain type of actor
 #
 # The prototype is in charge of sending the genesis message to the to-be-created actor
 # and also updating all the actors it has created when the the prototype itself is updated
