@@ -45,6 +45,12 @@ To run your first agent, put an `.env` file in the project root that contains an
 ```
 OPENAI_API_KEY=sk-myspecialkey
 ```
+### Agent Dependencies
+Some of the dependencies for the demo agents are optional and not part of the core Agent OS source. To install them, run:
+```
+poetry install --with agents
+```
+
 ### Jetpack Agent
 The ["Jetpack" agent](agents/README.md) demonstrates what the Agent OS can do and is geared towards end-to-end code generation and execution. It's a conversational agent that can accomplish various tasks for you. To run it, execute the following commands:
 ```

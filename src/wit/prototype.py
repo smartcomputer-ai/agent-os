@@ -1,4 +1,3 @@
-import jsonschema
 from .wit_api import *
 from .wit_routers import *
 

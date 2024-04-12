@@ -37,7 +37,7 @@ async def test_sse():
 
     sse_events = []
     async def listen_to_messages():
-        async with httpx.AsyncClient(app=WebServer(runtime).app(), base_url="http://localhost:5000") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=WebServer(runtime).app()), base_url="http://localhost:5000") as client:
             async with aconnect_sse(client, method="GET", url=f"{url_prefix}/messages-sse?content=true") as event_source:
                 async for sse in event_source.aiter_sse():
                     print(f"SSE event (id: {sse.id}, event: {sse.event}): {sse.data}")

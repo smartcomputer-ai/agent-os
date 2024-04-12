@@ -1,8 +1,9 @@
 from __future__ import annotations
+from dataclasses import dataclass
 import os
 import posixpath
 from pathlib import PureWindowsPath, PurePosixPath
-from attr import dataclass
+
 from grit import *
 
 @dataclass
