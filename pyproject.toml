@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "agent-os-py"
-version = "0.1.0"
+version = "0.1.1"
 description = "A library and runtime to build autonomous AI agents."
 authors = []
 license = "MIT"
