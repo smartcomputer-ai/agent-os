@@ -24,6 +24,8 @@ In short:
 <small>Click the the image to watch a short demo on YouTube.</small>
 </p>
 
+NOTE: WE ARE CURRENTLY WORKING ON A DISTRIBUTED RUNTIME.
+Everything below this is out of date.
 
 ## Getting Started
 As long as the project is still in alpha, the best way to get started is to clone this repository.

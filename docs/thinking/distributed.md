@@ -57,7 +57,7 @@ All of it will be in python.
   - grit (grit server)
   - apex (orchestrator)
   - worker (runs actors)
-  - inproc (in process runtime) (or "play", "reference", "inproc")
+  - inproc (in process runtime)
   - web (webserver)
   - cli (connects to apex and grit, or simple runtime)
 

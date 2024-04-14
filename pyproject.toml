@@ -35,6 +35,7 @@ sse-starlette = "^1.6.1"
 uvicorn = "^0.22.0"
 click = "^8.1.5"
 filetype = "^1.2.0"
+grpcio = "^1.62.1"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.1.1"
@@ -44,10 +45,11 @@ httpx-sse = "^0.4.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.3.7"
+grpcio-tools = "^1.62.1"
 
 
-# to install run poetry install --with agents
 [tool.poetry.group.agents]
+# to install run poetry install --with agents
 optional = true
 
 [tool.poetry.group.agents.dependencies]
