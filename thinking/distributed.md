@@ -38,3 +38,26 @@
  - snapshot all heads for an agent (before updates), refert to certain snapshots
  - initiate updates
  - host web server (could be different service) and route queries and messages to workers
+
+
+## Structure
+
+We'll implement the first version as a monolith that can be started with different settings.
+
+All of it will be in python.
+
+- protos
+- src
+  - shared
+    - protos
+    - grit (interfaces, object model, serialization)
+    - wit (intefaces, inner wit runner)
+    - runtime (?, interfaces)
+    - web
+  - grit (grit server)
+  - apex (orchestrator)
+  - worker (runs actors)
+  - inproc (in process runtime) (or "play", "reference", "inproc")
+  - web (webserver)
+  - cli (connects to apex and grit, or simple runtime)
+
