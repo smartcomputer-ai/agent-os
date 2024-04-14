@@ -21,12 +21,20 @@ ActorId = ObjectId # hash of core of message that created the actor, i.e, object
 MessageId = ObjectId
 Message = NamedTuple("Message", 
     [('previous', MessageId | None), #if none, it's a signal, otherwise, a queue
+     ('prune', MessageId | None), 
+        #NEW: /if set, previous is not allowed to be set, instead, the previous message has to be set here, 
+        #     which migh be pruned by grit (ie not available anymore)
      ('headers', Headers | None),
-     #('type', str), #NEW aka, "message_type"/"mt" -- is this a good idea, or should it remain part of the headers? 
-                     # the pro is that the message types could be made more explicit in the object model here since the runtime inspects the message types substiantly (e.g., "genesis", "update", and, in the future "gc/garbage/disconnect")
+     ('type', str),
+        #NEW aka, "message_type"/"mt" -- is this a good idea, or should it remain part of the headers? 
+        #    the pro is that the message types could be made more explicit in the object model here since the runtime inspects the message types substiantly (e.g., "genesis", "update", and, in the future "gc/garbage/disconnect")
      ('content', BlobId | TreeId | ListId | None)]) #NEW with None option, because many messages are just a singal or a ping, and have no content
 MailboxId = ObjectId
-Mailbox = dict[ActorId, MessageId]
+
+Mailbox = dict[tuple(ActorId, str|None), MessageId] 
+        #NEW: Channel name (str), to allow to send on multiple channels to an actor
+        #     if channel name is None then it is the "default channel"
+        # ActorId can be either sender or receiver
 
 StepId = ObjectId
 Step = NamedTuple("Step",
@@ -39,4 +47,4 @@ Step = NamedTuple("Step",
 Object = Blob | Tree | List | Message | Mailbox | Step
 
 
-
+# TODO: in serialization, add grit/object model version header

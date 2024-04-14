@@ -17,7 +17,7 @@ faulthandler.enable()
 VERBOSE = False
 N_COLUMNS = 50
 N_ROWS = 50
-N_TEST_MESSAGES = 50
+N_TEST_MESSAGES = 200
 
 count_init_messages = 0
 count_grid_messages = 0
@@ -150,6 +150,7 @@ async def perf_grid_run(store:ObjectStore, refs:References) -> None:
 
     print(f"count_init_messages: {count_init_messages}")
     print(f"count_grid_messages: {count_grid_messages}")
-    print(f"total processed in the grid: {N_COLUMNS * N_ROWS * N_TEST_MESSAGES}")
+    total_grid_messages = N_COLUMNS * N_ROWS * N_TEST_MESSAGES
+    print(f"total processed in the grid: {total_grid_messages}")
     assert count_init_messages == N_TEST_MESSAGES
     assert count_grid_messages == N_COLUMNS * N_TEST_MESSAGES
