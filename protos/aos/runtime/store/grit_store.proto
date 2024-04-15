@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+service GritStore {
+  rpc Store(StoreRequest) returns (StoreResponse) {}
+  rpc Load(LoadRequest) returns (LoadResponse) {}
+
+  //todo: add streaming versions
+}
+
+enum ObjectType {
+  BLOB = 0;
+  TREE = 1;
+  MESSAGE = 4;
+  MAILBOX = 5;
+  STEP = 10;
+}
+
+message StoreRequest {
+  bytes agent_id = 1;
+  optional bytes object_id = 3;
+  bytes data = 10;
+}
+
+message StoreResponse {
+  bytes agent_id = 1;
+  bytes object_id = 3;
+}
+
+message LoadRequest {
+  bytes agent_id = 1;
+  bytes object_id = 3;
+}
+
+message LoadResponse {
+  bytes agent_id = 1;
+  bytes object_id = 3;
+  optional bytes data = 10;
+}
+
+//storerequest
+// object bytes
+// object type
+// object id (should it be re-computed?)
+// agent id
+
+// response
+// agent id
+// object id
+

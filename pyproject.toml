@@ -6,17 +6,7 @@ authors = []
 license = "MIT"
 readme = "README.md"
 packages = [
-    {include = "grit", from = "src"}, 
-    {include = "wit", from = "src"}, 
-    {include = "sync", from = "src"}, 
-    {include = "web", from = "src"}, 
-    {include = "runtime", from = "src"},
-    {include = "cli", from = "src"},
-
-    {include = "completions", from = "agents/lib"},
-    {include = "tools", from = "agents/lib"},
-
-    {include = "jetpack", from = "agents"},
+    {include = "aos"}, 
 ]
 repository = "https://github.com/lukebuehler/agent-os"
 
@@ -76,6 +66,7 @@ asyncio_mode = "auto"
 
 [tool.poetry.scripts]
 aos = "cli.aos:cli"
+gritserv = "aos.cluster.grit.grit_server:serve"
 perf = "tests.perf.perf:main"
 gen = "examples.coder.generator.gen_workbench:main"
 
