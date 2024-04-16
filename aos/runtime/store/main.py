@@ -6,12 +6,22 @@ import time
 
 from aos.grit import *
 from aos.wit import *
+from aos.runtime.store import grit_store_pb2
 from . agent_object_store import AgentObjectStore
 from .store_client import StoreClient
 
 async def arun() -> None:
     client = StoreClient()
-    object_store = AgentObjectStore(client, get_random_object_id())
+
+    response:grit_store_pb2.CreateAgentResponse = await client.get_grit_store_stub_async().CreateAgent(
+        grit_store_pb2.CreateAgentRequest())
+    
+    logging.info(f"Created agent with id {response.agent_id.hex()}")
+    logging.info(f"Created agent with DID {response.agent_did}")
+    agent_id = response.agent_id
+
+    object_store = AgentObjectStore(client, agent_id)
+
 
     t1 = time.perf_counter()
     for i in range(100000):

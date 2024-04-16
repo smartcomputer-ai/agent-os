@@ -271,7 +271,8 @@ class LmdbBackend:
         if(request is None):
             raise ValueError("request must not be None.")
         
-        if(request.agent_did is not None):
+
+        if(request.agent_did):
             if not request.agent_did.startswith('did:key'):
                 #TODO: support other DID methods
                 #TODO: more rigorous DID validation
@@ -283,23 +284,25 @@ class LmdbBackend:
             agent_did_private_key_bytes = bytes.fromhex(agent_did_private_key)
             #TODO: check that the private key matches the public key of the DID
         else:
+            logger.info("Generating new agent DID.")
             agent_did, _, agent_did_private_key_bytes = generate_did()
             agent_did_private_key = agent_did_private_key_bytes.hex()
+            logger.info(f"Generated agent DID: {agent_did}")
 
         #create the agent in the db
+        agents_db = self.get_agents_db()
+        object_db = self.get_object_db()
+        refs_db = self.get_refs_db()
         with self.env.begin(write=True) as txn:
-            agents_db = self.get_agents_db()
-            object_db = self.get_object_db()
-            refs_db = self.get_refs_db()
-
             #check if the agent already exists
             existing_agent_id = txn.get(agent_did.encode('utf-8'), db=agents_db)
             if existing_agent_id is not None:
-                logger.warn(f"Agent with DID '{agent_did}' already exists, will return existing agent.")
+                logger.warn(f"Agent for DID '{agent_did}' already exists, will return existing agent.")
                 return grit_store_pb2.CreateAgentResponse(
                     agent_id=existing_agent_id,
                     agent_did=agent_did)
             
+            logger.info(f"Creating agent for DID '{agent_did}'")
             #since the agent doesn't exist we need to create the root actor for that agent,
             # which determines the agent_id: the agent_id is the actor_id of the root actor
             # the "root actor" is a priviledged actor that represents the runtime and the agent itself
@@ -309,7 +312,7 @@ class LmdbBackend:
             # however, the trick is to construct all relevant grit objects in memory, derrive the actor id from there
             # and then write all the objects to the db in a single transaction
 
-            import grit.object_serialization as ser
+            import aos.grit.object_serialization as ser
             #TODO: change this to normal "content-type"
             did_blob = Blob({'ct': 's'}, agent_did.encode('utf-8'))
             did_blob_id = ser.get_object_id(ser.blob_to_bytes(did_blob))
@@ -363,6 +366,8 @@ class LmdbBackend:
             txn.put(agent_did.encode('utf-8'), agent_id, db=agents_db)
 
             #not thread safe, but should be fine for now (since this is lunning only in one process)
+            if self._agents is None:
+                self._agents = set()
             self._agents.add(agent_id)
 
             return grit_store_pb2.CreateAgentResponse(
@@ -373,12 +378,13 @@ class LmdbBackend:
     def delete_agent(self, request:grit_store_pb2.DeleteAgentRequest) -> None:
         if(request is None):
             raise ValueError("request must not be None.")
-        with self.env.begin(write=True) as txn:
-            agents_db = self.get_agents_db()
-            object_db = self.get_object_db()
-            refs_db = self.get_refs_db()
-            secrets_db = self.get_secrets_db()
+        
+        agents_db = self.get_agents_db()
+        object_db = self.get_object_db()
+        refs_db = self.get_refs_db()
+        secrets_db = self.get_secrets_db()
 
+        with self.env.begin(write=True) as txn:
             #get the agent id
             agent_id = txn.get(request.agent_did.encode('utf-8'), db=agents_db)
             if agent_id is None:

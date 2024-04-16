@@ -32,16 +32,16 @@ class GritStore(grit_store_pb2_grpc.GritStoreServicer):
         return self._backend.get_refs(request)
     
     def GetAgent(self, request, context):
-        return self._backend.get_agent(request, context)
+        return self._backend.get_agent(request)
     
     def GetAgents(self, request, context):
-        return self._backend.get_agents(request, context)
+        return self._backend.get_agents(request)
     
     def CreateAgent(self, request, context):
-        return self._backend.create_agent(request, context)
+        return self._backend.create_agent(request)
     
     def DeleteAgent(self, request, context):
-        return self._backend.delete_agent(request, context)
+        return self._backend.delete_agent(request)
     
 
 class SecretStore(secret_store_pb2_grpc.SecretStoreServicer):
