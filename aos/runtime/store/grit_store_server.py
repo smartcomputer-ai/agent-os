@@ -4,34 +4,34 @@ import logging
 import grpc
 from grpc import Server
 from aos.runtime.store import grit_store_pb2, grit_store_pb2_grpc
-from .lmdb_store import LmdbStore
+from .lmdb_backend import LmdbBackend
 
 class GritStore(grit_store_pb2_grpc.GritStoreServicer):
 
-    def __init__(self, lmdb_store:LmdbStore) -> None:
+    def __init__(self, backend:LmdbBackend) -> None:
         super().__init__()
-        self._lmdb_store = lmdb_store
+        self._backend = backend
 
     def Store(
             self, 
             request: grit_store_pb2.StoreRequest, 
             context: grpc.aio.ServicerContext,
             ) -> grit_store_pb2.StoreResponse:
-        return self._lmdb_store.store(request)
+        return self._backend.store(request)
 
     def Load(
             self, 
             request: grit_store_pb2.LoadRequest, 
             context: grpc.aio.ServicerContext,
             ) -> grit_store_pb2.LoadResponse:
-        return self._lmdb_store.load(request)
+        return self._backend.load(request)
 
 
 async def start_server(grit_dir:str, port:str="50051") -> Server:
-    lmdb_store = LmdbStore(grit_dir, writemap=True)
+    lmdb_backend = LmdbBackend(grit_dir, writemap=True)
     #kind of a hack to switch from asyc to sync lmdb handling (which is mostly sync)
     server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
-    grit_store_pb2_grpc.aos_dot_runtime_dot_store_dot_grit__store__pb2(GritStore(lmdb_store), server)
+    grit_store_pb2_grpc.add_GritStoreServicer_to_server(GritStore(lmdb_backend), server)
     server.add_insecure_port("[::]:" + port)
     await server.start()
     print("Server started, listening on " + port)

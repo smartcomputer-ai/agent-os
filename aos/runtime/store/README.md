@@ -1,8 +1,13 @@
 # Grit Server
 
 ```
+poetry run python -m aos.runtime.store.grit_store_server
+
+poetry run python -m aos.runtime.store.main
+
+
 poetry run python -m aos.cluster.grit.grit_server
-poetry run python -m aos.cluster.grit.grit_client
+
 ```
 
 

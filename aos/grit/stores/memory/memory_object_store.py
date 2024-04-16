@@ -1,6 +1,6 @@
-from ..object_model import *
-from ..object_serialization import *
-from ..object_store import ObjectStore
+from ...object_model import *
+from ...object_serialization import *
+from ...object_store import ObjectStore
 
 class MemoryObjectStore(ObjectStore):
     #no lockign needed here, because all the dict operations used here are atomic

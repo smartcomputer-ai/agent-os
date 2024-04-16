@@ -2,8 +2,8 @@ import asyncio
 import os
 from pathlib import PureWindowsPath
 import threading
-from ..object_model import *
-from ..references import References
+from ...object_model import *
+from ...references import References
 
 class FileReferences(References):
     # to share the dictionary between sync and async code, a retrant lock is needed

@@ -1,5 +1,5 @@
-from ..object_model import *
-from ..references import References
+from ...object_model import *
+from ...references import References
 
 class MemoryReferences(References):
     #no lockign needed here, because all the dict operations used here are atomic

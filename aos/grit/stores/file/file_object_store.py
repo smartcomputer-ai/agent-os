@@ -4,9 +4,9 @@ import threading
 import aiofiles
 from functools import lru_cache
 from async_lru import alru_cache
-from ..object_model import *
-from ..object_serialization import *
-from ..object_store import ObjectStore
+from ...object_model import *
+from ...object_serialization import *
+from ...object_store import ObjectStore
 
 class FileObjectStore(ObjectStore):
 

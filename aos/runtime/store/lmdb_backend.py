@@ -8,7 +8,7 @@ _GRIT_ID_LEN = 32
 
 logger = logging.getLogger(__name__)
 
-class LmdbStore:
+class LmdbBackend:
     def __init__(self, store_path:str, writemap:bool=False):
         self.store_path = store_path
         self._resizing = False
@@ -80,13 +80,13 @@ class LmdbStore:
         object_key = _make_object_key(request.agent_id, object_id)
         try:
             with self.begin_object_txn() as txn:
-                txn.put(object_key, bytes, overwrite=False)
+                txn.put(object_key, request.data, overwrite=False)
         except lmdb.MapFullError:
             logger.warn(f"===> Resizing LMDB map... in obj store, (obj id: {object_id.hex()}) <===")
             self._resize()
             #try again
             with self.begin_object_txn() as txn:
-                txn.put(object_key, bytes, overwrite=False)
+                txn.put(object_key, request.data, overwrite=False)
 
         return grit_store_pb2.StoreResponse(
             agent_id=request.agent_id,

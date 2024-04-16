@@ -5,13 +5,12 @@ import logging
 import time
 
 from aos.grit import *
+from aos.grit.stores.lmdb import SharedEnvironment, LmdbReferences, LmdbObjectStore
 from aos.wit import *
-from . agent_object_store import AgentObjectStore
-from . grit_store_client import GritStoreClient
 
 async def arun() -> None:
-    client = GritStoreClient()
-    object_store = AgentObjectStore(client, get_random_object_id())
+    shared_env = SharedEnvironment("/tmp/grit_store_two", writemap=True)
+    object_store = LmdbObjectStore(shared_env)
 
     t1 = time.perf_counter()
     for i in range(100000):
@@ -34,7 +33,6 @@ async def arun() -> None:
     t2 = time.perf_counter()
     logging.info(f"Elapsed time: {t2-t1:0.2f} seconds")
 
-    await client.close()
     logging.info("Done")
 
 if __name__ == "__main__":

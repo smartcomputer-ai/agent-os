@@ -1,5 +1,6 @@
 import hashlib
 import string
+from os import urandom
 from .object_model import *
 
 _STR_ENCODING = 'ascii'
@@ -8,6 +9,10 @@ _ID_STR_LEN = 64
 
 def get_object_id(bytes:bytes | bytearray) -> ObjectId:
     return hashlib.sha256(bytes).digest()
+
+def get_random_object_id() -> ObjectId:
+    """Used for testing. But is used so often we add it here to be universally available."""
+    return get_object_id(urandom(20))
 
 def is_object_id_match(object_id_a:ObjectId, object_id_b:ObjectId):
     if object_id_a is None or object_id_b is None:

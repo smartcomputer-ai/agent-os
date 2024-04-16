@@ -1,4 +1,4 @@
-from grit import *
+from aos.grit import *
 from . data_model import *
 
 # Functions to load and persist steps, utilizing on the data model classes Inbox, Outbox, and Core

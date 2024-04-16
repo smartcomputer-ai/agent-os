@@ -1,8 +1,8 @@
 import logging
 import lmdb
-from ..object_model import *
-from ..object_serialization import *
-from ..references import References
+from ...object_model import *
+from ...object_serialization import *
+from ...references import References
 from .shared_env import SharedEnvironment
 
 logger = logging.getLogger(__name__)
