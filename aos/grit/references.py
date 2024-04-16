@@ -7,6 +7,7 @@ class References(ABC):
     async def get(self, ref:str) -> ObjectId | None:
         pass
 
+    #todo: refactor this to "get_refs", with ref prefix
     @abstractmethod
     async def get_all(self) -> dict[str, ObjectId]:
         pass

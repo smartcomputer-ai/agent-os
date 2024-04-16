@@ -48,6 +48,7 @@ class LmdbBackend:
     def begin_refs_txn(self, write=True, buffers=False) -> lmdb.Transaction:
         return self.env.begin(db=self.get_refs_db(), write=write, buffers=buffers)
     
+
     def _resize(self) -> int:
         #TODO: is this safe? Do we need to lock in some way or other?
         # probably not, because it is only run in a single process
@@ -66,10 +67,11 @@ class LmdbBackend:
         self._resizing = False
         return new_size
     
+
     #=========================================================
     # Grit Object Store API
     #=========================================================
-    def store(self, request:grit_store_pb2.StoreRequest) -> grit_store_pb2.StoreResponse:
+    def store(self, request:grit_store_pb2.StoreRequest) -> None:
         if(request is None):
             raise ValueError("request must not be None.")
         
@@ -88,9 +90,7 @@ class LmdbBackend:
             with self.begin_object_txn() as txn:
                 txn.put(object_key, request.data, overwrite=False)
 
-        return grit_store_pb2.StoreResponse(
-            agent_id=request.agent_id,
-            object_id=object_id)
+        return None
     
 
     def load(self, request:grit_store_pb2.LoadRequest) -> grit_store_pb2.LoadResponse:
@@ -108,10 +108,66 @@ class LmdbBackend:
             data=bytes)
     
 
+    #=========================================================
+    # References Store API
+    #=========================================================
+    def set_ref(self, request:grit_store_pb2.SetRefRequest) -> None:
+        if(request is None):
+            raise ValueError("request must not be None.")
+        ref_key = _make_refs_key(request.agent_id, request.ref)
+        with self.begin_refs_txn() as txn:
+            txn.put(ref_key, request.object_id)
+
+        return None
+
+
+    def get_ref(self, request:grit_store_pb2.GetRefRequest)  -> grit_store_pb2.GetRefResponse:
+        if(request is None):
+            raise ValueError("request must not be None.")
+        ref_key = _make_refs_key(request.agent_id, request.ref)
+        with self.begin_refs_txn(write=False) as txn:
+            object_id = txn.get(ref_key, default=None)
+        
+        return grit_store_pb2.GetRefResponse(
+            agent_id=request.agent_id,
+            ref=request.ref,
+            object_id=object_id)
+    
+
+    def get_refs(self, request:grit_store_pb2.GetRefsRequest) -> grit_store_pb2.GetRefsResponse:
+        if(request is None):
+            raise ValueError("request must not be None.")
+        search_key = request.agent_id
+        if request.ref_prefix is not None:
+            search_key = _make_refs_key(request.agent_id, request.ref_prefix)
+        refs = {}
+        with self.begin_refs_txn(write=False) as txn:
+            cursor = txn.cursor()
+            cursor.set_range(search_key)
+            while _bytes_startswith(cursor.key(), search_key):
+                _, ref = _parse_refs_key(cursor.key())
+                refs[ref] = cursor.value()
+                cursor.next()
+
+        return grit_store_pb2.GetRefsResponse(
+            agent_id=request.agent_id,
+            refs=refs)
 
         
+#=========================================================
+# Utils
+#=========================================================
 def _make_object_key(agent_id:ActorId, object_id:ObjectId) -> bytes:
     return agent_id + object_id
 
 def _parse_object_key(key:bytes) -> tuple[ActorId, ObjectId]:
     return key[:_GRIT_ID_LEN], key[_GRIT_ID_LEN:]
+
+def _make_refs_key(agent_id:ActorId, ref:str) -> bytes:
+    return agent_id + ref.encode('utf-8')
+
+def _parse_refs_key(key:bytes) -> tuple[ActorId, str]:
+    return key[:_GRIT_ID_LEN], key[_GRIT_ID_LEN:].decode('utf-8')
+
+def _bytes_startswith(haystack:bytes, needle:bytes) -> bool:
+    return haystack[:len(needle)] == needle

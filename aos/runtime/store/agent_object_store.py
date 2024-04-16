@@ -4,6 +4,10 @@ from aos.grit.object_store import ObjectStore
 from aos.runtime.store import grit_store_pb2, grit_store_pb2_grpc
 from .grit_store_client import GritStoreClient
 
+#todo: this should probably move to the worker? depending who needs it
+
+#todo: add a cache to the store, track the total bytes stored (using the object size), set limits there
+
 class AgentObjectStore(ObjectStore):
     """An object store for a single agent. It connects to the Grit store server to perist data."""
     def __init__(self, store_client:GritStoreClient, agent_id:ActorId):
@@ -28,8 +32,8 @@ class AgentObjectStore(ObjectStore):
 
     async def store(self, object:Object) -> ObjectId:
         request = self._to_store_request(object)
-        response:grit_store_pb2.StoreResponse = await self._store_stub_async.Store(request)
-        return response.object_id
+        await self._store_stub_async.Store(request)
+        return request.object_id
     
     async def load(self, object_id:ObjectId) -> Object | None:
         response:grit_store_pb2.LoadResponse = await self._store_stub_async.Load(

@@ -37,6 +37,10 @@ Mailbox = dict[tuple(ActorId, str|None), MessageId]
         # ActorId can be either sender or receiver
 
 StepId = ObjectId
+
+# TODO: check this out to see if we can use something from the at protocol repo structure
+# https://atproto.com/specs/repository
+
 Step = NamedTuple("Step",
     [('previous', StepId | None),
      ('actor', ActorId),

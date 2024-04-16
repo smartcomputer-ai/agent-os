@@ -1,10 +1,16 @@
 syntax = "proto3";
+import "google/protobuf/empty.proto";
 
 service GritStore {
-  rpc Store(StoreRequest) returns (StoreResponse) {}
+
+  //object store calls
+  rpc Store(StoreRequest) returns (google.protobuf.Empty) {}
   rpc Load(LoadRequest) returns (LoadResponse) {}
 
-  //todo: add streaming versions
+  //ref store calls
+  rpc SetRef(SetRefRequest) returns (google.protobuf.Empty) {}
+  rpc GetRef(GetRefRequest) returns (GetRefResponse) {}
+  rpc GetRefs(GetRefsRequest) returns (GetRefsResponse) {}
 }
 
 enum ObjectType {
@@ -20,11 +26,7 @@ message StoreRequest {
   optional bytes object_id = 3;
   bytes data = 10;
 }
-
-message StoreResponse {
-  bytes agent_id = 1;
-  bytes object_id = 3;
-}
+//store response is empty (see above)
 
 message LoadRequest {
   bytes agent_id = 1;
@@ -37,13 +39,34 @@ message LoadResponse {
   optional bytes data = 10;
 }
 
-//storerequest
-// object bytes
-// object type
-// object id (should it be re-computed?)
-// agent id
+message SetRefRequest {
+  bytes agent_id = 1;
+  string ref = 2;
+  bytes object_id = 3;
+}
+//set ref response is empty (see above)
+//maybe in the future, if there are race conditions on setting a ref, 
+// we could return the final object id that was set
 
-// response
-// agent id
-// object id
+message GetRefRequest {
+  bytes agent_id = 1;
+  string ref = 2;
+}
+
+message GetRefResponse{
+  bytes agent_id = 1;
+  string ref = 2;
+  optional bytes object_id = 3;
+}
+
+message GetRefsRequest {
+  bytes agent_id = 1;
+  optional string ref_prefix = 2;
+}
+
+message GetRefsResponse{
+  bytes agent_id = 1;
+  map<string, bytes> refs = 2;
+}
+
 

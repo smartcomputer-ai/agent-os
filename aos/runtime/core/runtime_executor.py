@@ -4,6 +4,7 @@ from grit import Mailbox
 from wit import *
 from .actor_executor import ExecutionContext, ActorExecutor, _WitExecution, MailboxUpdate
 
+#rename to "RootExecutor"
 class RuntimeExecutor(ActorExecutor):
     """A special executor for the runtime agent, which communicates in the name of the runtime.
     

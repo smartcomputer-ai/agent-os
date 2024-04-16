@@ -26,6 +26,10 @@ uvicorn = "^0.22.0"
 click = "^8.1.5"
 filetype = "^1.2.0"
 grpcio = "^1.62.1"
+py-multibase = "^1.0.3"
+py-multicodec = "^0.2.1"
+base58 = "^2.1.1"
+cryptography = "^42.0.5"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.1.1"

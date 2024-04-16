@@ -12,3 +12,5 @@ Crypto/IPFS: Merkle DAG
 Temporal.io: persistence of workflows (although wits dont do that), or better, "persistent actor model"
 
 FastApi: for the wit api
+
+AtProtocol: connecting repos with DIDs (https://atproto.com/specs/repository)

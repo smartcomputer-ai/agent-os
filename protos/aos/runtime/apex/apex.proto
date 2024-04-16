@@ -1,0 +1,114 @@
+syntax = "proto3";
+//import "google/protobuf/empty.proto";
+
+service Apex {
+  rpc RegisterWorker(WorkerRegistrationRequest) returns (WorkerRegistrationResponse) {}
+  rpc WorkerStream(stream WorkerToApex) returns (stream ApexToWorker) {}
+
+  //TODO: 
+  // get agent(s)             *needed
+  // create agent             *needed
+  // delete agent
+  // get actors (why?)
+  // get workers
+  // inject message           *needed
+  // send query
+  // subscribe to root actor (two way stream)
+  // getApexStatus (node_id, workers, etc) (should probably be a stream)
+}
+
+
+message WorkerRegistrationRequest {
+  string node_id = 1;
+  WorkerManifest manifest = 2;
+}
+
+message WorkerRegistrationResponse {
+  string ticket = 1; //used to connect to the stream
+}
+
+message WorkerManifest{
+  string node_id = 1;
+  map<string, string> capabilities = 2; //key, value
+  repeated Agent current_agents = 3;
+  repeated Actor current_actors = 4;
+}
+
+
+message Agent{
+  bytes agent_id = 1; //32 bytes, of actor_id type
+  string agent_name = 2;
+
+  string grit_address = 3; //how to connect to grit of this agent
+}
+
+message Actor{
+  bytes agent_id = 1; //32 bytes, of actor_id type
+  bytes actor_id = 2; //32 bytes, actor_id
+}
+
+message ActorMessage{
+  bytes agent_id = 1; //32 bytes, of actor_id type
+  bytes sender_id = 2; //32 bytes, actor_id
+  bytes recipient_id = 3; //32 bytes, actor_id
+  bytes message_id = 4; //32 bytes, object_id
+}
+
+message ActorQuery{
+  bytes agent_id = 1; //32 bytes, of actor_id type
+  bytes actor_id = 2; //32 bytes, actor_id
+  string query_id = 3; //correlation_id for this query
+  string query_name = 4;
+  optional bytes context = 5; //
+}
+
+message ActorQueryResult{
+  bytes agent_id = 1; //32 bytes, of actor_id type
+  bytes actor_id = 2; //32 bytes, actor_id
+  string query_id = 3; //correlation_id for this query, must match the ActorQuery
+  bytes result = 5; //can be a tree_id, or the actual blob data
+}
+
+
+message ApexToWorker {
+  enum ApexToWorkerType {
+    POKE = 0;
+    GIVE_ACTORS = 12; // give to worker
+    YANK_ACTORS = 13; // take from worker
+    ACTOR_MESSAGES = 10;
+    ACTOR_QUERIES = 11;
+  }
+
+  //always required
+  ApexToWorkerType type = 1;
+
+  //ACTOR_MESSAGES
+  repeated ActorMessage messages = 10;
+
+  //ACTOR_QUERIES
+  repeated ActorQuery queries = 11;
+
+  //GIVE_ACTORS, YANK_ACTORS
+  repeated Actor actors = 12;
+  //GIVE_ACTORS
+  repeated Agent agents = 13; //for each agent_id in the actors, there must be a corresponding agent
+}
+
+message WorkerToApex {
+  enum WorkerToApexType {
+    READY = 0;
+    ACTOR_MESSAGES = 10;
+    ACTOR_QUERIES = 11;
+  }
+
+  //always required
+  WorkerToApexType type = 1;
+  string worker_id = 2;
+  string ticket = 3;
+
+  //ACTOR_MESSAGES
+  repeated ActorMessage messages = 10;
+
+  //ACTOR_QUERIES
+  repeated ActorQueryResult queries = 11;
+}

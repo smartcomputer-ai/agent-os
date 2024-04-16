@@ -22,9 +22,10 @@ async def arun() -> None:
         if should_log:
             logging.info(f"Persisted object with id {object_id.hex()}")
 
-        blob2 = await BlobObject.from_blob_id(object_store, object_id)
-        if should_log:
-            logging.info(f"Loaded object with id {blob2.get_as_str()}")
+        # this is not good for perf testing, because most of the reads will be cached
+        # blob2 = await BlobObject.from_blob_id(object_store, object_id)
+        # if should_log:
+        #     logging.info(f"Loaded object with id {blob2.get_as_str()}")
 
         if should_log:
             # time elapsed since beginning

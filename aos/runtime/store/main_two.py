@@ -8,6 +8,7 @@ from aos.grit import *
 from aos.grit.stores.lmdb import SharedEnvironment, LmdbReferences, LmdbObjectStore
 from aos.wit import *
 
+#Quick test to compare the benchmark to in-proc lmdb
 async def arun() -> None:
     shared_env = SharedEnvironment("/tmp/grit_store_two", writemap=True)
     object_store = LmdbObjectStore(shared_env)

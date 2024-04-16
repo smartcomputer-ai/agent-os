@@ -61,3 +61,12 @@ All of it will be in python.
   - web (webserver)
   - cli (connects to apex and grit, or simple runtime)
 
+NOTE: I have since changed the folder structure quite a bit.
+
+## More thinking
+
+Distributing the runtime (with separate Grit server and all), in a naive implementation, is about 100x slower! (100k object stores take about ~1s with in-proc lmdb, and 60s with the gRPC server running in separate processes)
+
+Some of the optimizations: make the storing async, meaning the store call comes back immediately. But that gives us a consistency problem... because the worker can go down before the objects are persisted. However, the soluton is to buffer the writes, but only allow a head ref update once all the objects behind that step commit have been written. Also writes to the grit server could be batched (or gRCP streamed) to make less individual calls. I think all this could give us a 10 x speedup, resulting in 10msg per milliecond, which is likely good enough for now.
+
+Also, one thing I thought of is to simply host an agent only in a single worker with a local store. But then the local store needs to be replicated... This could give much better performance, but then actors could not run on different workers unless we implement a more complicated replication structure.

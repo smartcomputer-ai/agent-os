@@ -3,6 +3,7 @@
 import grpc
 
 from aos.runtime.store import grit_store_pb2 as aos_dot_runtime_dot_store_dot_grit__store__pb2
+from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
 
 class GritStoreStub(object):
@@ -17,12 +18,27 @@ class GritStoreStub(object):
         self.Store = channel.unary_unary(
                 '/GritStore/Store',
                 request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.StoreRequest.SerializeToString,
-                response_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.StoreResponse.FromString,
+                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
                 )
         self.Load = channel.unary_unary(
                 '/GritStore/Load',
                 request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.LoadRequest.SerializeToString,
                 response_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.LoadResponse.FromString,
+                )
+        self.SetRef = channel.unary_unary(
+                '/GritStore/SetRef',
+                request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.SetRefRequest.SerializeToString,
+                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                )
+        self.GetRef = channel.unary_unary(
+                '/GritStore/GetRef',
+                request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefResponse.FromString,
+                )
+        self.GetRefs = channel.unary_unary(
+                '/GritStore/GetRefs',
+                request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsResponse.FromString,
                 )
 
 
@@ -30,12 +46,32 @@ class GritStoreServicer(object):
     """Missing associated documentation comment in .proto file."""
 
     def Store(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """object store calls
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def Load(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SetRef(self, request, context):
+        """ref store calls
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRef(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRefs(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -47,12 +83,27 @@ def add_GritStoreServicer_to_server(servicer, server):
             'Store': grpc.unary_unary_rpc_method_handler(
                     servicer.Store,
                     request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.StoreRequest.FromString,
-                    response_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.StoreResponse.SerializeToString,
+                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
             ),
             'Load': grpc.unary_unary_rpc_method_handler(
                     servicer.Load,
                     request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.LoadRequest.FromString,
                     response_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.LoadResponse.SerializeToString,
+            ),
+            'SetRef': grpc.unary_unary_rpc_method_handler(
+                    servicer.SetRef,
+                    request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.SetRefRequest.FromString,
+                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            ),
+            'GetRef': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRef,
+                    request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefResponse.SerializeToString,
+            ),
+            'GetRefs': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRefs,
+                    request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -77,7 +128,7 @@ class GritStore(object):
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/GritStore/Store',
             aos_dot_runtime_dot_store_dot_grit__store__pb2.StoreRequest.SerializeToString,
-            aos_dot_runtime_dot_store_dot_grit__store__pb2.StoreResponse.FromString,
+            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -95,5 +146,56 @@ class GritStore(object):
         return grpc.experimental.unary_unary(request, target, '/GritStore/Load',
             aos_dot_runtime_dot_store_dot_grit__store__pb2.LoadRequest.SerializeToString,
             aos_dot_runtime_dot_store_dot_grit__store__pb2.LoadResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def SetRef(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/GritStore/SetRef',
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.SetRefRequest.SerializeToString,
+            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetRef(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/GritStore/GetRef',
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefRequest.SerializeToString,
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetRefs(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/GritStore/GetRefs',
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsRequest.SerializeToString,
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
