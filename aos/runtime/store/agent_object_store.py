@@ -2,7 +2,7 @@ from aos.grit.object_model import *
 from aos.grit.object_serialization import *
 from aos.grit.object_store import ObjectStore
 from aos.runtime.store import grit_store_pb2, grit_store_pb2_grpc
-from .grit_store_client import GritStoreClient
+from .store_client import StoreClient
 
 #todo: this should probably move to the worker? depending who needs it
 
@@ -10,12 +10,12 @@ from .grit_store_client import GritStoreClient
 
 class AgentObjectStore(ObjectStore):
     """An object store for a single agent. It connects to the Grit store server to perist data."""
-    def __init__(self, store_client:GritStoreClient, agent_id:ActorId):
+    def __init__(self, store_client:StoreClient, agent_id:ActorId):
         super().__init__()
         self._agent_id = agent_id
         self._store_client = store_client
-        self._store_stub_sync = store_client.get_store_stub_sync()
-        self._store_stub_async = store_client.get_store_stub_async()
+        self._store_stub_sync = store_client.get_grit_store_stub_sync()
+        self._store_stub_async = store_client.get_grit_store_stub_async()
 
     def _to_store_request(self, object:Object):
         data = object_to_bytes(object)

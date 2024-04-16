@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 # the idea is that only one of these clients exists and then the object store and refs classes create one off stubs
 
-class GritStoreClient:
+class StoreClient:
     def __init__(self, server_address="localhost:50051"):
         self.server_address = server_address
         # the async and sync api cannot be shared
@@ -25,10 +25,10 @@ class GritStoreClient:
     def get_channel_async(self):
         return self.channel_async
     
-    def get_store_stub_sync(self):
+    def get_grit_store_stub_sync(self):
         return grit_store_pb2_grpc.GritStoreStub(self.channel_sync)
     
-    def get_store_stub_async(self):
+    def get_grit_store_stub_async(self):
         return grit_store_pb2_grpc.GritStoreStub(self.channel_async)
 
     async def close(self, grace_period=1.0):

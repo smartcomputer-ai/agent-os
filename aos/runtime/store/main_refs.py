@@ -7,10 +7,10 @@ import time
 from aos.grit import *
 from aos.wit import *
 from . agent_references import AgentReferences
-from . grit_store_client import GritStoreClient
+from .store_client import StoreClient
 
 async def arun() -> None:
-    client = GritStoreClient()
+    client = StoreClient()
     refs1 = AgentReferences(client, get_random_object_id())
     refs2 = AgentReferences(client, get_random_object_id())
 

@@ -40,8 +40,6 @@ def ref_actor_name(actor_name_ref:str) -> str:
 def ref_prototype_name(prototype_name_ref:str) -> str:
     return f"prototypes/{prototype_name_ref}"
 
-def ref_runtime_actor_name(actor_name_ref:str) -> str:
-    return f"runtime/{actor_name_ref}"
-
-def ref_runtime_agent() -> str:
+#todo: rename to "root_actor"
+def ref_root_actor() -> str:
     return "runtime/agent"

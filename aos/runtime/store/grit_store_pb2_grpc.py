@@ -40,6 +40,26 @@ class GritStoreStub(object):
                 request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsRequest.SerializeToString,
                 response_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsResponse.FromString,
                 )
+        self.CreateAgent = channel.unary_unary(
+                '/GritStore/CreateAgent',
+                request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.CreateAgentRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.CreateAgentResponse.FromString,
+                )
+        self.DeleteAgent = channel.unary_unary(
+                '/GritStore/DeleteAgent',
+                request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.DeleteAgentRequest.SerializeToString,
+                response_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                )
+        self.GetAgent = channel.unary_unary(
+                '/GritStore/GetAgent',
+                request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentResponse.FromString,
+                )
+        self.GetAgents = channel.unary_unary(
+                '/GritStore/GetAgents',
+                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentsResponse.FromString,
+                )
 
 
 class GritStoreServicer(object):
@@ -77,6 +97,31 @@ class GritStoreServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def CreateAgent(self, request, context):
+        """manage agents
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DeleteAgent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAgent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetAgents(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_GritStoreServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -104,6 +149,26 @@ def add_GritStoreServicer_to_server(servicer, server):
                     servicer.GetRefs,
                     request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsRequest.FromString,
                     response_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsResponse.SerializeToString,
+            ),
+            'CreateAgent': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateAgent,
+                    request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.CreateAgentRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.CreateAgentResponse.SerializeToString,
+            ),
+            'DeleteAgent': grpc.unary_unary_rpc_method_handler(
+                    servicer.DeleteAgent,
+                    request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.DeleteAgentRequest.FromString,
+                    response_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            ),
+            'GetAgent': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAgent,
+                    request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentResponse.SerializeToString,
+            ),
+            'GetAgents': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetAgents,
+                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    response_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentsResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -197,5 +262,73 @@ class GritStore(object):
         return grpc.experimental.unary_unary(request, target, '/GritStore/GetRefs',
             aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsRequest.SerializeToString,
             aos_dot_runtime_dot_store_dot_grit__store__pb2.GetRefsResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def CreateAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/GritStore/CreateAgent',
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.CreateAgentRequest.SerializeToString,
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.CreateAgentResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def DeleteAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/GritStore/DeleteAgent',
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.DeleteAgentRequest.SerializeToString,
+            google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/GritStore/GetAgent',
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentRequest.SerializeToString,
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetAgents(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/GritStore/GetAgents',
+            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentsResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

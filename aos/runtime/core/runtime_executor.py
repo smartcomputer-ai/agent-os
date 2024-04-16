@@ -122,7 +122,7 @@ class RuntimeExecutor(ActorExecutor):
 
 async def create_or_load_runtime_actor(object_store:ObjectStore, references:References, agent_name:str) -> tuple[ActorId, StepId]:
     #check if the 'runtime/agent' reference exists
-    agent_id = await references.get(ref_runtime_agent())
+    agent_id = await references.get(ref_root_actor())
     if(agent_id is None):
         #if it doesn't exist, create it, and the first step for that agent (without actually running a wit)
         #the original agent core is simple, it just contains the name of the agent
@@ -139,7 +139,7 @@ async def create_or_load_runtime_actor(object_store:ObjectStore, references:Refe
         gen_step_id = await object_store.store(gen_step)
         #set initial references
         await references.set(ref_step_head(agent_id), gen_step_id)
-        await references.set(ref_runtime_agent(), agent_id)
+        await references.set(ref_root_actor(), agent_id)
         return agent_id, gen_step_id
     else:
         agent_genesis_core = await Core.from_core_id(object_store, agent_id)

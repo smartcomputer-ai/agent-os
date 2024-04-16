@@ -10,8 +10,11 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat,
 #code taken from here: https://grotto-networking.com/blog/posts/DID_Key.html
 
 
-def create_did():
-    "This creates a simple DID, using the did:key method, with an Ed25519 keypair."
+def generate_did():
+    """This creates a simple DID, using the did:key method, with an Ed25519 keypair.
+    
+    Returns a tuple with the DID, the public key bytes, and the private key bytes.
+    """
     private_key = Ed25519PrivateKey.generate()
     public_key = private_key.public_key()
 
@@ -80,7 +83,7 @@ def create_did_doc(did_key:str):
     return doc
 
 if __name__ == "__main__":
-    did, public_key_bytes, private_key_bytes = create_did()
+    did, public_key_bytes, private_key_bytes = generate_did()
     print('Public Key:')
     print(public_key_bytes.hex())
     # Danger: in real life you don't flaunt your private key like this!

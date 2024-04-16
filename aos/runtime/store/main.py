@@ -7,10 +7,10 @@ import time
 from aos.grit import *
 from aos.wit import *
 from . agent_object_store import AgentObjectStore
-from . grit_store_client import GritStoreClient
+from .store_client import StoreClient
 
 async def arun() -> None:
-    client = GritStoreClient()
+    client = StoreClient()
     object_store = AgentObjectStore(client, get_random_object_id())
 
     t1 = time.perf_counter()

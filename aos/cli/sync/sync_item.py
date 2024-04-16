@@ -8,7 +8,7 @@ from aos.grit import *
 
 @dataclass
 class SyncItem:
-    """An item to sync between the the external world, usually the file system, and Grit."""
+    """An item to sync between the external world, usually the file system, and Grit."""
     dir_path:str
     file_name:str
     core_path:str

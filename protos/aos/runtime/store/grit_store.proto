@@ -11,6 +11,12 @@ service GritStore {
   rpc SetRef(SetRefRequest) returns (google.protobuf.Empty) {}
   rpc GetRef(GetRefRequest) returns (GetRefResponse) {}
   rpc GetRefs(GetRefsRequest) returns (GetRefsResponse) {}
+
+  //manage agents
+  rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse) {}
+  rpc DeleteAgent(DeleteAgentRequest) returns (google.protobuf.Empty) {}
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse) {}
+  rpc GetAgents(google.protobuf.Empty) returns (GetAgentsResponse) {}
 }
 
 enum ObjectType {
@@ -53,7 +59,7 @@ message GetRefRequest {
   string ref = 2;
 }
 
-message GetRefResponse{
+message GetRefResponse {
   bytes agent_id = 1;
   string ref = 2;
   optional bytes object_id = 3;
@@ -64,9 +70,38 @@ message GetRefsRequest {
   optional string ref_prefix = 2;
 }
 
-message GetRefsResponse{
+message GetRefsResponse {
   bytes agent_id = 1;
   map<string, bytes> refs = 2;
+}
+
+
+message CreateAgentRequest {
+  optional string agent_did = 2; //if not provided, will be generated internally
+  optional string agent_did_private_key = 3;
+}
+
+message CreateAgentResponse {
+  bytes agent_id = 1;
+  string agent_did = 2;
+}
+
+message DeleteAgentRequest {
+  string agent_did = 2;
+}
+
+message GetAgentRequest {
+  string agent_did = 2;
+}
+
+message GetAgentResponse {
+  optional bytes agent_id = 1;
+  string agent_did = 2;
+}
+
+
+message GetAgentsResponse {
+  map<string, bytes> agents = 1;
 }
 
 
