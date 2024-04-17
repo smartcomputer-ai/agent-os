@@ -4,13 +4,15 @@ syntax = "proto3";
 
 // Internal service for worker nodes to communicate with the Apex node
 service ApexWorkers {
+  // Registers a worker to get ready for a streaming connection.
   rpc RegisterWorker(WorkerRegistrationRequest) returns (WorkerRegistrationResponse) {}
-  rpc WorkerStream(stream WorkerToApex) returns (stream ApexToWorker) {}
+  // Connects a long running worker to the apex node via two-way streaming. Worker needs to register first.
+  rpc ConnectWorker(stream WorkerToApexMessage) returns (stream ApexToWorkerMessage) {}
 }
 
 
 message WorkerRegistrationRequest {
-  string node_id = 1;
+  string worker_id = 1;
   WorkerManifest manifest = 2;
 }
 
@@ -19,23 +21,22 @@ message WorkerRegistrationResponse {
 }
 
 message WorkerManifest{
-  string node_id = 1;
+  string worker_id = 1;
   map<string, string> capabilities = 2; //key, value
-  repeated Agent current_agents = 3;
   repeated Actor current_actors = 4;
 }
 
+// message Agent{
+//   bytes agent_id = 1; //32 bytes, of actor_id type
+//   string agent_did = 2;
 
-message Agent{
-  bytes agent_id = 1; //32 bytes, of actor_id type
-  string agent_did = 2;
-
-  string grit_address = 3; //how to connect to grit of this agent
-}
+//   string grit_address = 3; //how to connect to grit of this agent
+// }
 
 message Actor{
   bytes agent_id = 1; //32 bytes, of actor_id type
   bytes actor_id = 2; //32 bytes, actor_id
+  string grit_address = 3; //how to connect to the assigned grit of the agent of this actor
 }
 
 message ActorMessage{
@@ -57,49 +58,49 @@ message ActorQueryResult{
   bytes agent_id = 1; //32 bytes, of actor_id type
   bytes actor_id = 2; //32 bytes, actor_id
   string query_id = 3; //correlation_id for this query, must match the ActorQuery
-  bytes result = 5; //can be a tree_id, or the actual blob data
+  oneof result { //can be a tree_id, or the actual blob data
+    //blob_id or tree_id (see Grit Message)
+    bytes tree_id = 10;
+    //valid Grit blob object  
+    bytes blob = 11; 
+  }
 }
 
 
-message ApexToWorker {
-  enum ApexToWorkerType {
-    POKE = 0;
-    GIVE_ACTORS = 12; // give to worker
-    YANK_ACTORS = 13; // take from worker
-    ACTOR_MESSAGES = 10;
-    ACTOR_QUERIES = 11;
+message ApexToWorkerMessage {
+  enum MessageType {
+    PING = 0;
+    GIVE_ACTOR = 12; // give to worker
+    YANK_ACTOR = 13; // take from worker
+    ACTOR_MESSAGE = 10; //the recipient is on the worker
+    ACTOR_QUERIE = 11;  //the recipient is on the worker
   }
 
   //always required
-  ApexToWorkerType type = 1;
+  MessageType type = 1;
 
-  //ACTOR_MESSAGES
-  repeated ActorMessage messages = 10;
-
-  //ACTOR_QUERIES
-  repeated ActorQuery queries = 11;
-
-  //GIVE_ACTORS, YANK_ACTORS
-  repeated Actor actors = 12;
-  //GIVE_ACTORS
-  repeated Agent agents = 13; //for each agent_id in the actors, there must be a corresponding agent
+  oneof payload {
+    ActorMessage message = 10;
+    ActorQuery query = 11;
+    Actor actor = 12;
+  }
 }
 
-message WorkerToApex {
-  enum WorkerToApexType {
-    READY = 0;
-    ACTOR_MESSAGES = 10;
-    ACTOR_QUERIES = 11;
+message WorkerToApexMessage {
+  enum MessageType {
+    PING = 0;
+    READY = 1; // start receiving messages from apex
+    ACTOR_MESSAGE = 10; //the recipient is not on the worker and the message needs to be routed by apex
+    ACTOR_QUERIE = 11;  //the recipient is not on the worker and the query needs to be routed by apex
   }
 
   //always required
-  WorkerToApexType type = 1;
+  MessageType type = 1;
   string worker_id = 2;
   string ticket = 3;
 
-  //ACTOR_MESSAGES
-  repeated ActorMessage messages = 10;
-
-  //ACTOR_QUERIES
-  repeated ActorQueryResult queries = 11;
+  oneof payload {
+    ActorMessage message = 10;
+    ActorQuery query = 11;
+  }
 }

@@ -3,7 +3,8 @@ import os
 import lmdb
 from aos.grit import *
 from aos.runtime.store import grit_store_pb2
-from aos.runtime.store import secret_store_pb2
+from aos.runtime.store import agent_store_pb2
+from aos.runtime.store import agent_store_pb2
 from aos.runtime.crypto.did_key import generate_did
 
 _GRIT_ID_LEN = 32
@@ -51,8 +52,8 @@ class LmdbBackend:
     def get_refs_db(self) -> lmdb._Database:
         return self.env.open_db('refs'.encode('utf-8'))
     
-    def get_secrets_db(self) -> lmdb._Database:
-        return self.env.open_db('secrets'.encode('utf-8'))
+    def get_vars_db(self) -> lmdb._Database:
+        return self.env.open_db('vars'.encode('utf-8'))
     
     def begin_agents_txn(self, write=True, buffers=False) -> lmdb.Transaction:
         return self.env.begin(db=self.get_agents_db(), write=write, buffers=buffers)
@@ -63,8 +64,8 @@ class LmdbBackend:
     def begin_refs_txn(self, write=True, buffers=False) -> lmdb.Transaction:
         return self.env.begin(db=self.get_refs_db(), write=write, buffers=buffers)
     
-    def begin_secrets_txn(self, write=True, buffers=False) -> lmdb.Transaction:
-        return self.env.begin(db=self.get_secrets_db(), write=write, buffers=buffers)
+    def begin_vars_txn(self, write=True, buffers=False) -> lmdb.Transaction:
+        return self.env.begin(db=self.get_vars_db(), write=write, buffers=buffers)
     
 
     def _resize(self) -> int:
@@ -186,66 +187,11 @@ class LmdbBackend:
         return grit_store_pb2.GetRefsResponse(
             agent_id=request.agent_id,
             refs=refs)
-    
+     
     #=========================================================
-    # Secret Store API
-    #=========================================================
-    def set_secret(self, request:secret_store_pb2.SetSecretRequest) -> None:
-        if(request is None):
-            raise ValueError("request must not be None.")
-        self._ensure_agent(request.agent_id)
-        secret_key = _make_secret_key(request.agent_id, request.key)
-        with self.begin_secrets_txn() as txn:
-            txn.put(secret_key, request.value.encode('utf-8'))
-        return None
-
-
-    def get_secret(self, request:secret_store_pb2.GetSecretRequest)  -> secret_store_pb2.GetSecretResponse:
-        if(request is None):
-            raise ValueError("request must not be None.")
-        self._ensure_agent(request.agent_id)
-        secret_key = _make_secret_key(request.agent_id, request.key)
-        with self.begin_secrets_txn(write=False) as txn:
-            value:bytes = txn.get(secret_key, default=None)
-        
-        return secret_store_pb2.GetSecretResponse(
-            agent_id=request.agent_id,
-            key=request.key,
-            value=value.decode('utf-8'))
-
-    def get_secrets(self, request:secret_store_pb2.GetSecretsRequest) -> secret_store_pb2.GetSecretsResponse:
-        if(request is None):
-            raise ValueError("request must not be None.")
-        self._ensure_agent(request.agent_id)
-        search_key = request.agent_id
-        if request.key_prefix is not None:
-            search_key = _make_secret_key(request.agent_id, request.key_prefix)
-        secrets = {}
-        with self.begin_secrets_txn(write=False) as txn:
-            cursor = txn.cursor()
-            cursor.set_range(search_key)
-            while _bytes_startswith(cursor.key(), search_key):
-                _, key = _parse_secret_key(cursor.key())
-                secrets[key] = cursor.value().decode('utf-8')
-                cursor.next()
-
-        return secret_store_pb2.GetSecretsResponse(
-            agent_id=request.agent_id,
-            secrets=secrets)
-    
-    def delete_secret(self, request:secret_store_pb2.DeleteSecretRequest) -> None:
-        if(request is None):
-            raise ValueError("request must not be None.")
-        self._ensure_agent(request.agent_id)
-        secret_key = _make_secret_key(request.agent_id, request.key)
-        with self.begin_secrets_txn() as txn:
-            txn.delete(secret_key)
-        return None
-    
-    #=========================================================
-    # Agent Management API
+    # Agent CRUD/Management API
     #=========================================================  
-    def get_agent(self, request:grit_store_pb2.GetAgentRequest) -> grit_store_pb2.GetAgentResponse:
+    def get_agent(self, request:agent_store_pb2.GetAgentRequest) -> agent_store_pb2.GetAgentResponse:
         if(request is None):
             raise ValueError("request must not be None.")
         if (request.agent_did is None and request.agent_id is None):
@@ -254,17 +200,22 @@ class LmdbBackend:
         with self.begin_agents_txn(write=False) as txn:
             if request.agent_id:
                 agent_did = txn.get(request.agent_id)
-                return grit_store_pb2.GetAgentResponse(
-                    agent_id=request.agent_id,
-                    agent_did=agent_did.decode('utf-8'))
+                if agent_did is not None:
+                    return agent_store_pb2.GetAgentResponse(
+                        exists=True,
+                        agent_id=request.agent_id,
+                        agent_did=agent_did.decode('utf-8'))
             else:
                 agent_id = txn.get(request.agent_did.encode('utf-8'))
-                return grit_store_pb2.GetAgentResponse(
-                    agent_id=agent_id,
-                    agent_did=request.agent_did)
+                if agent_id is not None:
+                    return agent_store_pb2.GetAgentResponse(
+                        exists=True,
+                        agent_id=agent_id,
+                        agent_did=request.agent_did)
+        return agent_store_pb2.GetAgentResponse(exists=False)
 
 
-    def get_agents(self) -> grit_store_pb2.GetAgentsResponse:
+    def get_agents(self) -> agent_store_pb2.GetAgentsResponse:
         agents = {}
         with self.begin_agents_txn(write=False) as txn:
             cursor = txn.cursor()
@@ -280,10 +231,10 @@ class LmdbBackend:
                 
                 agent_id = cursor.value()
                 agents[agent_did] = agent_id
-        return grit_store_pb2.GetAgentsResponse(agents=agents)
+        return agent_store_pb2.GetAgentsResponse(agents=agents)
     
 
-    def create_agent(self, request:grit_store_pb2.CreateAgentRequest) -> grit_store_pb2.CreateAgentResponse:
+    def create_agent(self, request:agent_store_pb2.CreateAgentRequest) -> agent_store_pb2.CreateAgentResponse:
         if(request is None):
             raise ValueError("request must not be None.")
         
@@ -308,13 +259,13 @@ class LmdbBackend:
         agents_db = self.get_agents_db()
         object_db = self.get_object_db()
         refs_db = self.get_refs_db()
-        secrets_db = self.get_secrets_db()
+        vars_db = self.get_vars_db()
         with self.env.begin(write=True) as txn:
             #check if the agent already exists
             existing_agent_id = txn.get(agent_did.encode('utf-8'), db=agents_db)
             if existing_agent_id is not None:
                 logger.warn(f"Agent for DID '{agent_did}' already exists, will return existing agent.")
-                return grit_store_pb2.CreateAgentResponse(
+                return agent_store_pb2.CreateAgentResponse(
                     agent_id=existing_agent_id,
                     agent_did=agent_did)
             
@@ -382,9 +333,9 @@ class LmdbBackend:
             txn.put(agent_did.encode('utf-8'), agent_id, db=agents_db)
             txn.put(agent_id, agent_did.encode('utf-8'), db=agents_db)
 
-            #store the private key
-            #note the key is stored not in the raw binary format, but as a binary encoded hex string (because the API's assumption is that all secrets are strings)
-            txn.put(_make_secret_key(agent_id, 'did_private_key'), agent_did_private_key.encode('utf-8'), db=secrets_db)
+            #store the private key in vars
+            #note the key is stored not in the raw binary format, but as a binary encoded hex string (because the API's assumption is that all vars are strings)
+            txn.put(_make_var_key(agent_id, 'secrets.did_private_key'), agent_did_private_key.encode('utf-8'), db=vars_db)
 
             #store the agent in the in-memory cache
             #not thread safe, but should be fine for now (since this is lunning only in one process)
@@ -392,12 +343,12 @@ class LmdbBackend:
                 self._agents = set()
             self._agents.add(agent_id)
 
-            return grit_store_pb2.CreateAgentResponse(
+            return agent_store_pb2.CreateAgentResponse(
                 agent_id=agent_id,
                 agent_did=agent_did)
         
 
-    def delete_agent(self, request:grit_store_pb2.DeleteAgentRequest) -> None:
+    def delete_agent(self, request:agent_store_pb2.DeleteAgentRequest) -> agent_store_pb2.DeleteAgentResponse:
         if(request is None):
             raise ValueError("request must not be None.")
         if (request.agent_did is None and request.agent_id is None):
@@ -406,7 +357,7 @@ class LmdbBackend:
         agents_db = self.get_agents_db()
         object_db = self.get_object_db()
         refs_db = self.get_refs_db()
-        secrets_db = self.get_secrets_db()
+        vars_db = self.get_vars_db()
 
         with self.env.begin(write=True) as txn:
             #get the agent id
@@ -437,8 +388,8 @@ class LmdbBackend:
                 txn.delete(cursor.key())
                 cursor.next()
 
-            #delete all secrets
-            cursor = txn.cursor(db=secrets_db)
+            #delete all vars
+            cursor = txn.cursor(db=vars_db)
             cursor.set_range(agent_id)
             while _bytes_startswith(cursor.key(), agent_id):
                 txn.delete(cursor.key())
@@ -450,6 +401,60 @@ class LmdbBackend:
         
         return None
     
+    #=========================================================
+    # Agent Var(iables) Store API
+    #=========================================================
+    def set_var(self, request:agent_store_pb2.SetVarRequest) -> None:
+        if(request is None):
+            raise ValueError("request must not be None.")
+        self._ensure_agent(request.agent_id)
+        var_key = _make_var_key(request.agent_id, request.key)
+        with self.begin_vars_txn() as txn:
+            txn.put(var_key, request.value.encode('utf-8'))
+        return None
+
+
+    def get_var(self, request:agent_store_pb2.GetVarRequest)  -> agent_store_pb2.GetVarResponse:
+        if(request is None):
+            raise ValueError("request must not be None.")
+        self._ensure_agent(request.agent_id)
+        var_key = _make_var_key(request.agent_id, request.key)
+        with self.begin_vars_txn(write=False) as txn:
+            value:bytes = txn.get(var_key, default=None)
+        
+        return agent_store_pb2.GetVarResponse(
+            agent_id=request.agent_id,
+            key=request.key,
+            value=value.decode('utf-8'))
+
+    def get_vars(self, request:agent_store_pb2.GetVarsRequest) -> agent_store_pb2.GetVarsResponse:
+        if(request is None):
+            raise ValueError("request must not be None.")
+        self._ensure_agent(request.agent_id)
+        search_key = request.agent_id
+        if request.key_prefix is not None:
+            search_key = _make_var_key(request.agent_id, request.key_prefix)
+        vars = {}
+        with self.begin_vars_txn(write=False) as txn:
+            cursor = txn.cursor()
+            cursor.set_range(search_key)
+            while _bytes_startswith(cursor.key(), search_key):
+                _, key = _parse_var_key(cursor.key())
+                vars[key] = cursor.value().decode('utf-8')
+                cursor.next()
+
+        return agent_store_pb2.GetVarsResponse(
+            agent_id=request.agent_id,
+            values=vars)
+    
+    def delete_var(self, request:agent_store_pb2.DeleteVarRequest) -> None:
+        if(request is None):
+            raise ValueError("request must not be None.")
+        self._ensure_agent(request.agent_id)
+        var_key = _make_var_key(request.agent_id, request.key)
+        with self.begin_vars_txn() as txn:
+            txn.delete(var_key)
+        return None
 
 #=========================================================
 # Utils
@@ -466,10 +471,10 @@ def _make_refs_key(agent_id:ActorId, ref:str) -> bytes:
 def _parse_refs_key(key:bytes) -> tuple[ActorId, str]:
     return key[:_GRIT_ID_LEN], key[_GRIT_ID_LEN:].decode('utf-8')
 
-def _make_secret_key(agent_id:ActorId, secret_key:str) -> bytes:
-    return agent_id + secret_key.encode('utf-8')
+def _make_var_key(agent_id:ActorId, key:str) -> bytes:
+    return agent_id + key.encode('utf-8')
 
-def _parse_secret_key(key:bytes) -> tuple[ActorId, str]:
+def _parse_var_key(key:bytes) -> tuple[ActorId, str]:
     return key[:_GRIT_ID_LEN], key[_GRIT_ID_LEN:].decode('utf-8')
 
 def _bytes_startswith(haystack:bytes, needle:bytes) -> bool:

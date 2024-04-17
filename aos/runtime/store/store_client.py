@@ -2,7 +2,7 @@ from __future__ import print_function
 import asyncio
 import grpc
 from concurrent import futures
-from aos.runtime.store import grit_store_pb2, grit_store_pb2_grpc
+from aos.runtime.store import grit_store_pb2_grpc, agent_store_pb2_grpc
 
 import logging
 logger = logging.getLogger(__name__)
@@ -19,6 +19,9 @@ class StoreClient:
         self.channel_sync = grpc.insecure_channel(self.server_address)
         self.channel_async = grpc.aio.insecure_channel(self.server_address)
 
+    async def wait_for_async_channel_ready(self):
+        await self.channel_async.channel_ready()
+
     def get_channel_sync(self):
         return self.channel_sync
     
@@ -30,6 +33,12 @@ class StoreClient:
     
     def get_grit_store_stub_async(self):
         return grit_store_pb2_grpc.GritStoreStub(self.channel_async)
+    
+    def get_agent_store_stub_sync(self):
+        return agent_store_pb2_grpc.AgentStoreStub(self.channel_sync)
+    
+    def get_agent_store_stub_async(self):
+        return agent_store_pb2_grpc.AgentStoreStub(self.channel_async)
 
     async def close(self, grace_period=1.0):
         await self.channel_async.close(grace_period)

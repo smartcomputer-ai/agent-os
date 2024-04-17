@@ -6,31 +6,31 @@ import time
 
 from aos.grit import *
 from aos.wit import *
-from aos.runtime.store import grit_store_pb2
+from aos.runtime.store import grit_store_pb2, agent_store_pb2
 from . agent_object_store import AgentObjectStore
 from .store_client import StoreClient
 
 async def arun() -> None:
     client = StoreClient()
 
-    response:grit_store_pb2.CreateAgentResponse = await client.get_grit_store_stub_async().CreateAgent(grit_store_pb2.CreateAgentRequest())
+    response:agent_store_pb2.CreateAgentResponse = await client.get_agent_store_stub_async().CreateAgent(agent_store_pb2.CreateAgentRequest())
     
     logging.info(f"Created agent with id {response.agent_id.hex()}")
     logging.info(f"Created agent with DID {response.agent_did}")
     agent_id = response.agent_id
 
     # create a few more agents (just to make sure it all works)
-    response2:grit_store_pb2.CreateAgentResponse = await client.get_grit_store_stub_async().CreateAgent(grit_store_pb2.CreateAgentRequest())
-    response3:grit_store_pb2.CreateAgentResponse = await client.get_grit_store_stub_async().CreateAgent(grit_store_pb2.CreateAgentRequest())
+    response2:agent_store_pb2.CreateAgentResponse = await client.get_agent_store_stub_async().CreateAgent(agent_store_pb2.CreateAgentRequest())
+    response3:agent_store_pb2.CreateAgentResponse = await client.get_agent_store_stub_async().CreateAgent(agent_store_pb2.CreateAgentRequest())
 
     #get agents, just to test
     print("=====================================")
     print("Getting agents")
-    agent_by_id = await client.get_grit_store_stub_async().GetAgent(grit_store_pb2.GetAgentRequest(agent_id=response.agent_id))
+    agent_by_id = await client.get_agent_store_stub_async().GetAgent(agent_store_pb2.GetAgentRequest(agent_id=response.agent_id))
     print(agent_by_id)
-    agent_by_did = await client.get_grit_store_stub_async().GetAgent(grit_store_pb2.GetAgentRequest(agent_did=response.agent_did))
+    agent_by_did = await client.get_agent_store_stub_async().GetAgent(agent_store_pb2.GetAgentRequest(agent_did=response.agent_did))
     print(agent_by_did)
-    all_agents = await client.get_grit_store_stub_async().GetAgents(grit_store_pb2.GetAgentsRequest())
+    all_agents = await client.get_agent_store_stub_async().GetAgents(agent_store_pb2.GetAgentsRequest())
     print(all_agents)
     print("=====================================")
 

@@ -2,6 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
+from aos.runtime.apex import apex_api_pb2 as aos_dot_runtime_dot_apex_dot_apex__api__pb2
 
 
 class ApexApiStub(object):
@@ -14,15 +15,96 @@ class ApexApiStub(object):
         Args:
             channel: A grpc.Channel.
         """
+        self.GetApexStatus = channel.unary_unary(
+                '/ApexApi/GetApexStatus',
+                request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetApexStatusRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetApexStatusResponse.FromString,
+                )
+        self.GetRunningAgents = channel.unary_unary(
+                '/ApexApi/GetRunningAgents',
+                request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsResponse.FromString,
+                )
+        self.StartAgent = channel.unary_unary(
+                '/ApexApi/StartAgent',
+                request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StartAgentRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StartAgentResponse.FromString,
+                )
+        self.StopAgent = channel.unary_unary(
+                '/ApexApi/StopAgent',
+                request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentResponse.FromString,
+                )
+        self.InjectMessage = channel.unary_unary(
+                '/ApexApi/InjectMessage',
+                request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageResponse.FromString,
+                )
 
 
 class ApexApiServicer(object):
     """APIs for CLI and Web
     """
 
+    def GetApexStatus(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRunningAgents(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StartAgent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StopAgent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def InjectMessage(self, request, context):
+        """Sends a message to the recipient actor, the sender is the root actor, which represents the agent.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ApexApiServicer_to_server(servicer, server):
     rpc_method_handlers = {
+            'GetApexStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetApexStatus,
+                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetApexStatusRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetApexStatusResponse.SerializeToString,
+            ),
+            'GetRunningAgents': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRunningAgents,
+                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsResponse.SerializeToString,
+            ),
+            'StartAgent': grpc.unary_unary_rpc_method_handler(
+                    servicer.StartAgent,
+                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StartAgentRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StartAgentResponse.SerializeToString,
+            ),
+            'StopAgent': grpc.unary_unary_rpc_method_handler(
+                    servicer.StopAgent,
+                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentResponse.SerializeToString,
+            ),
+            'InjectMessage': grpc.unary_unary_rpc_method_handler(
+                    servicer.InjectMessage,
+                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
             'ApexApi', rpc_method_handlers)
@@ -33,3 +115,88 @@ def add_ApexApiServicer_to_server(servicer, server):
 class ApexApi(object):
     """APIs for CLI and Web
     """
+
+    @staticmethod
+    def GetApexStatus(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/ApexApi/GetApexStatus',
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetApexStatusRequest.SerializeToString,
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetApexStatusResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetRunningAgents(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/ApexApi/GetRunningAgents',
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsRequest.SerializeToString,
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def StartAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/ApexApi/StartAgent',
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.StartAgentRequest.SerializeToString,
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.StartAgentResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def StopAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/ApexApi/StopAgent',
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentRequest.SerializeToString,
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def InjectMessage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/ApexApi/InjectMessage',
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageRequest.SerializeToString,
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

@@ -1,22 +1,16 @@
 syntax = "proto3";
 import "google/protobuf/empty.proto";
 
+// Service methods for Grit object and reference store
 service GritStore {
 
-  //object store calls
   rpc Store(StoreRequest) returns (google.protobuf.Empty) {}
   rpc Load(LoadRequest) returns (LoadResponse) {}
 
-  //ref store calls
   rpc SetRef(SetRefRequest) returns (google.protobuf.Empty) {}
   rpc GetRef(GetRefRequest) returns (GetRefResponse) {}
   rpc GetRefs(GetRefsRequest) returns (GetRefsResponse) {}
 
-  //manage agents
-  rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse) {}
-  rpc DeleteAgent(DeleteAgentRequest) returns (google.protobuf.Empty) {}
-  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse) {}
-  rpc GetAgents(GetAgentsRequest) returns (GetAgentsResponse) {}
 }
 
 enum ObjectType {
@@ -73,42 +67,6 @@ message GetRefsRequest {
 message GetRefsResponse {
   bytes agent_id = 1;
   map<string, bytes> refs = 2;
-}
-
-
-message CreateAgentRequest {
-  optional string agent_did = 2; //if not provided, will be generated internally
-  optional string agent_did_private_key = 3;
-}
-
-message CreateAgentResponse {
-  bytes agent_id = 1;
-  string agent_did = 2;
-}
-
-message DeleteAgentRequest {
-  oneof delete_by {
-    bytes agent_id = 1;
-    string agent_did = 2;
-  }
-}
-
-message GetAgentRequest {
-  oneof get_by {
-    bytes agent_id = 1;
-    string agent_did = 2;
-  }
-}
-
-message GetAgentResponse {
-  optional bytes agent_id = 1;
-  optional string agent_did = 2;
-}
-
-message GetAgentsRequest {}
-
-message GetAgentsResponse {
-  map<string, bytes> agents = 1;
 }
 
 

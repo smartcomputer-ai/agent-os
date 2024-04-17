@@ -1,18 +1,109 @@
 syntax = "proto3";
-//import "google/protobuf/empty.proto";
 
 // APIs for CLI and Web
 service ApexApi {
 
+  rpc GetApexStatus(GetApexStatusRequest) returns (GetApexStatusResponse) {}
+  
+  rpc GetRunningAgents(GetRunningAgentsRequest) returns (GetRunningAgentsResponse) {}
+  rpc StartAgent(StartAgentRequest) returns (StartAgentResponse) {}
+  rpc StopAgent(StopAgentRequest) returns (StopAgentResponse) {}
+
+  // Sends a message to the recipient actor, the sender is the root actor, which represents the agent.
+  rpc InjectMessage(InjectMessageRequest) returns (InjectMessageResponse) {}
+
   //TODO: 
-  // get agent(s)             *needed
-  // create agent             *needed
-  // delete agent
-  // get actors (why?)
-  // get workers
-  // inject message           *needed
   // send query
   // subscribe to root actor (two way stream)
-  // getApexStatus (node_id, workers, etc) (should probably be a stream)
+  // GetApexStatusStream (one way stream)
 }
 
+//=========================================================
+// Agent Management
+//=========================================================
+message StartAgentRequest {
+  bytes agent_id = 1;
+}
+
+message StartAgentResponse {
+}
+
+message StopAgentRequest {
+  bytes agent_id = 1;
+}
+
+message StopAgentResponse {
+}
+
+message GetRunningAgentsRequest {}
+
+message GetRunningAgentsResponse {
+  repeated AgentInfo agents = 10;
+}
+
+message AgentInfo{
+  bytes agent_id = 1;
+  string agent_did = 2;
+}
+
+
+message GetApexStatusRequest {}
+
+message GetApexStatusResponse {
+  enum ApexStatus {
+    UNKNOWN = 0;
+    STARTING = 1; 
+    RUNNING = 2; 
+    STOPPING = 3;
+    ERROR = 10;
+  }
+
+  string grit_address = 3;
+  repeated WorkerInfo workers = 10;
+}
+
+message WorkerInfo{
+  string worker_id = 1;
+  map<string, string> capabilities = 2;
+}
+
+//=========================================================
+// Grit Actor Ineraction Messages
+//=========================================================
+message InjectMessageRequest {
+  bytes agent_id = 1;
+  bytes recipient_id = 2;
+  map <string, string> headers = 3;
+  bool is_signal = 4;
+
+  oneof content {
+    //blob_id or tree_id (see Grit Message)
+    bytes content_id = 5;
+    //valid Grit blob object  
+    bytes content_blob = 6; 
+  }
+}
+
+message InjectMessageResponse {
+  bytes agent_id = 1;
+  bytes message_id = 2;
+}
+
+message RunQueryRequest {
+  bytes agent_id = 1;
+  bytes actor_id = 2;
+  string query_name = 4;
+  optional bytes context = 5;
+}
+
+
+message RunQueryResponse{
+  bytes agent_id = 1; //32 bytes, of actor_id type
+  bytes actor_id = 2; //32 bytes, actor_id
+  oneof result { //can be a tree_id, or the actual blob data
+    //blob_id or tree_id (see Grit Message)
+    bytes tree_id = 10;
+    //valid Grit blob object  
+    bytes blob = 11; 
+  }
+}

@@ -5,7 +5,7 @@ import logging
 import grpc
 from grpc import Server
 from aos.runtime.store import grit_store_pb2, grit_store_pb2_grpc
-from aos.runtime.store import secret_store_pb2, secret_store_pb2_grpc
+from aos.runtime.store import agent_store_pb2, agent_store_pb2_grpc
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 from .lmdb_backend import LmdbBackend
 
@@ -31,6 +31,12 @@ class GritStore(grit_store_pb2_grpc.GritStoreServicer):
     def GetRefs(self, request: grit_store_pb2.GetRefsRequest, context):
         return self._backend.get_refs(request)
     
+
+class AgentStore(agent_store_pb2_grpc.AgentStoreServicer):
+    def __init__(self, backend:LmdbBackend) -> None:
+        super().__init__()
+        self._backend = backend
+
     def GetAgent(self, request, context):
         return self._backend.get_agent(request)
     
@@ -43,24 +49,19 @@ class GritStore(grit_store_pb2_grpc.GritStoreServicer):
     def DeleteAgent(self, request, context):
         return self._backend.delete_agent(request)
     
-
-class SecretStore(secret_store_pb2_grpc.SecretStoreServicer):
-    def __init__(self, backend:LmdbBackend) -> None:
-        super().__init__()
-        self._backend = backend
-
-    def SetSecret(self, request: secret_store_pb2.SetSecretRequest, context):
-        self._backend.set_secret(request)
+    
+    def SetVar(self, request: agent_store_pb2.SetVarRequest, context):
+        self._backend.set_var(request)
         return google_dot_protobuf_dot_empty__pb2.Empty()
 
-    def GetSecret(self, request: secret_store_pb2.GetSecretRequest, context):
-        return self._backend.get_secret(request)
+    def GetVar(self, request: agent_store_pb2.GetVarRequest, context):
+        return self._backend.get_var(request)
     
-    def GetSecrets(self, request: secret_store_pb2.GetSecretsRequest, context):
-        return self._backend.get_secrets(request)
+    def GetVars(self, request: agent_store_pb2.GetVarsRequest, context):
+        return self._backend.get_vars(request)
     
-    def DeleteSecret(self, request: secret_store_pb2.DeleteSecretRequest, context):
-        self._backend.delete_secret(request)
+    def DeleteVar(self, request: agent_store_pb2.DeleteVarRequest, context):
+        self._backend.delete_var(request)
         return google_dot_protobuf_dot_empty__pb2.Empty()
     
 
@@ -69,7 +70,7 @@ async def start_server(grit_dir:str, port:str="50051") -> Server:
     #kind of a hack to switch from asyc to sync lmdb handling (which is mostly sync)
     server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
     grit_store_pb2_grpc.add_GritStoreServicer_to_server(GritStore(lmdb_backend), server)
-    secret_store_pb2_grpc.add_SecretStoreServicer_to_server(SecretStore(lmdb_backend), server)
+    agent_store_pb2_grpc.add_AgentStoreServicer_to_server(AgentStore(lmdb_backend), server)
     server.add_insecure_port("[::]:" + port)
     await server.start()
     print("Server started, listening on " + port)
@@ -80,7 +81,7 @@ def start_server_sync(grit_dir:str, port:str="50051") -> Server:
     #kind of a hack to switch from asyc to sync lmdb handling (which is mostly sync)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     grit_store_pb2_grpc.add_GritStoreServicer_to_server(GritStore(lmdb_backend), server)
-    secret_store_pb2_grpc.add_SecretStoreServicer_to_server(SecretStore(lmdb_backend), server)
+    agent_store_pb2_grpc.add_AgentStoreServicer_to_server(AgentStore(lmdb_backend), server)
     server.add_insecure_port("[::]:" + port)
     server.start()
     print("Server started, listening on " + port)

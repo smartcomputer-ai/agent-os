@@ -20,10 +20,10 @@ class ApexWorkersStub(object):
                 request_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationRequest.SerializeToString,
                 response_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationResponse.FromString,
                 )
-        self.WorkerStream = channel.stream_stream(
-                '/ApexWorkers/WorkerStream',
-                request_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerToApex.SerializeToString,
-                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.ApexToWorker.FromString,
+        self.ConnectWorker = channel.stream_stream(
+                '/ApexWorkers/ConnectWorker',
+                request_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerToApexMessage.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.ApexToWorkerMessage.FromString,
                 )
 
 
@@ -32,13 +32,15 @@ class ApexWorkersServicer(object):
     """
 
     def RegisterWorker(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Registers a worker to get ready for a streaming connection.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def WorkerStream(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+    def ConnectWorker(self, request_iterator, context):
+        """Connects a long running worker to the apex node via two-way streaming. Worker needs to register first.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -51,10 +53,10 @@ def add_ApexWorkersServicer_to_server(servicer, server):
                     request_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationRequest.FromString,
                     response_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationResponse.SerializeToString,
             ),
-            'WorkerStream': grpc.stream_stream_rpc_method_handler(
-                    servicer.WorkerStream,
-                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerToApex.FromString,
-                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.ApexToWorker.SerializeToString,
+            'ConnectWorker': grpc.stream_stream_rpc_method_handler(
+                    servicer.ConnectWorker,
+                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerToApexMessage.FromString,
+                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.ApexToWorkerMessage.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -85,7 +87,7 @@ class ApexWorkers(object):
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
     @staticmethod
-    def WorkerStream(request_iterator,
+    def ConnectWorker(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -95,8 +97,8 @@ class ApexWorkers(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/ApexWorkers/WorkerStream',
-            aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerToApex.SerializeToString,
-            aos_dot_runtime_dot_apex_dot_apex__workers__pb2.ApexToWorker.FromString,
+        return grpc.experimental.stream_stream(request_iterator, target, '/ApexWorkers/ConnectWorker',
+            aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerToApexMessage.SerializeToString,
+            aos_dot_runtime_dot_apex_dot_apex__workers__pb2.ApexToWorkerMessage.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

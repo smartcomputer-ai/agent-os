@@ -15,7 +15,7 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"aos/runtime/store/grit_store.proto\x1a\x1bgoogle/protobuf/empty.proto\"T\n\x0cStoreRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x16\n\tobject_id\x18\x03 \x01(\x0cH\x00\x88\x01\x01\x12\x0c\n\x04\x64\x61ta\x18\n \x01(\x0c\x42\x0c\n\n_object_id\"2\n\x0bLoadRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x11\n\tobject_id\x18\x03 \x01(\x0c\"O\n\x0cLoadResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x11\n\tobject_id\x18\x03 \x01(\x0c\x12\x11\n\x04\x64\x61ta\x18\n \x01(\x0cH\x00\x88\x01\x01\x42\x07\n\x05_data\"A\n\rSetRefRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03ref\x18\x02 \x01(\t\x12\x11\n\tobject_id\x18\x03 \x01(\x0c\".\n\rGetRefRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03ref\x18\x02 \x01(\t\"U\n\x0eGetRefResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03ref\x18\x02 \x01(\t\x12\x16\n\tobject_id\x18\x03 \x01(\x0cH\x00\x88\x01\x01\x42\x0c\n\n_object_id\"J\n\x0eGetRefsRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x17\n\nref_prefix\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\r\n\x0b_ref_prefix\"z\n\x0fGetRefsResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12(\n\x04refs\x18\x02 \x03(\x0b\x32\x1a.GetRefsResponse.RefsEntry\x1a+\n\tRefsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\"x\n\x12\x43reateAgentRequest\x12\x16\n\tagent_did\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\"\n\x15\x61gent_did_private_key\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x0c\n\n_agent_didB\x18\n\x16_agent_did_private_key\":\n\x13\x43reateAgentResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x11\n\tagent_did\x18\x02 \x01(\t\"J\n\x12\x44\x65leteAgentRequest\x12\x12\n\x08\x61gent_id\x18\x01 \x01(\x0cH\x00\x12\x13\n\tagent_did\x18\x02 \x01(\tH\x00\x42\x0b\n\tdelete_by\"D\n\x0fGetAgentRequest\x12\x12\n\x08\x61gent_id\x18\x01 \x01(\x0cH\x00\x12\x13\n\tagent_did\x18\x02 \x01(\tH\x00\x42\x08\n\x06get_by\"\\\n\x10GetAgentResponse\x12\x15\n\x08\x61gent_id\x18\x01 \x01(\x0cH\x00\x88\x01\x01\x12\x16\n\tagent_did\x18\x02 \x01(\tH\x01\x88\x01\x01\x42\x0b\n\t_agent_idB\x0c\n\n_agent_did\"\x12\n\x10GetAgentsRequest\"r\n\x11GetAgentsResponse\x12.\n\x06\x61gents\x18\x01 \x03(\x0b\x32\x1e.GetAgentsResponse.AgentsEntry\x1a-\n\x0b\x41gentsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01*D\n\nObjectType\x12\x08\n\x04\x42LOB\x10\x00\x12\x08\n\x04TREE\x10\x01\x12\x0b\n\x07MESSAGE\x10\x04\x12\x0b\n\x07MAILBOX\x10\x05\x12\x08\n\x04STEP\x10\n2\xd8\x03\n\tGritStore\x12\x30\n\x05Store\x12\r.StoreRequest\x1a\x16.google.protobuf.Empty\"\x00\x12%\n\x04Load\x12\x0c.LoadRequest\x1a\r.LoadResponse\"\x00\x12\x32\n\x06SetRef\x12\x0e.SetRefRequest\x1a\x16.google.protobuf.Empty\"\x00\x12+\n\x06GetRef\x12\x0e.GetRefRequest\x1a\x0f.GetRefResponse\"\x00\x12.\n\x07GetRefs\x12\x0f.GetRefsRequest\x1a\x10.GetRefsResponse\"\x00\x12:\n\x0b\x43reateAgent\x12\x13.CreateAgentRequest\x1a\x14.CreateAgentResponse\"\x00\x12<\n\x0b\x44\x65leteAgent\x12\x13.DeleteAgentRequest\x1a\x16.google.protobuf.Empty\"\x00\x12\x31\n\x08GetAgent\x12\x10.GetAgentRequest\x1a\x11.GetAgentResponse\"\x00\x12\x34\n\tGetAgents\x12\x11.GetAgentsRequest\x1a\x12.GetAgentsResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\"aos/runtime/store/grit_store.proto\x1a\x1bgoogle/protobuf/empty.proto\"T\n\x0cStoreRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x16\n\tobject_id\x18\x03 \x01(\x0cH\x00\x88\x01\x01\x12\x0c\n\x04\x64\x61ta\x18\n \x01(\x0c\x42\x0c\n\n_object_id\"2\n\x0bLoadRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x11\n\tobject_id\x18\x03 \x01(\x0c\"O\n\x0cLoadResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x11\n\tobject_id\x18\x03 \x01(\x0c\x12\x11\n\x04\x64\x61ta\x18\n \x01(\x0cH\x00\x88\x01\x01\x42\x07\n\x05_data\"A\n\rSetRefRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03ref\x18\x02 \x01(\t\x12\x11\n\tobject_id\x18\x03 \x01(\x0c\".\n\rGetRefRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03ref\x18\x02 \x01(\t\"U\n\x0eGetRefResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03ref\x18\x02 \x01(\t\x12\x16\n\tobject_id\x18\x03 \x01(\x0cH\x00\x88\x01\x01\x42\x0c\n\n_object_id\"J\n\x0eGetRefsRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x17\n\nref_prefix\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\r\n\x0b_ref_prefix\"z\n\x0fGetRefsResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12(\n\x04refs\x18\x02 \x03(\x0b\x32\x1a.GetRefsResponse.RefsEntry\x1a+\n\tRefsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01*D\n\nObjectType\x12\x08\n\x04\x42LOB\x10\x00\x12\x08\n\x04TREE\x10\x01\x12\x0b\n\x07MESSAGE\x10\x04\x12\x0b\n\x07MAILBOX\x10\x05\x12\x08\n\x04STEP\x10\n2\xf5\x01\n\tGritStore\x12\x30\n\x05Store\x12\r.StoreRequest\x1a\x16.google.protobuf.Empty\"\x00\x12%\n\x04Load\x12\x0c.LoadRequest\x1a\r.LoadResponse\"\x00\x12\x32\n\x06SetRef\x12\x0e.SetRefRequest\x1a\x16.google.protobuf.Empty\"\x00\x12+\n\x06GetRef\x12\x0e.GetRefRequest\x1a\x0f.GetRefResponse\"\x00\x12.\n\x07GetRefs\x12\x0f.GetRefsRequest\x1a\x10.GetRefsResponse\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -24,10 +24,8 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   DESCRIPTOR._options = None
   _globals['_GETREFSRESPONSE_REFSENTRY']._options = None
   _globals['_GETREFSRESPONSE_REFSENTRY']._serialized_options = b'8\001'
-  _globals['_GETAGENTSRESPONSE_AGENTSENTRY']._options = None
-  _globals['_GETAGENTSRESPONSE_AGENTSENTRY']._serialized_options = b'8\001'
-  _globals['_OBJECTTYPE']._serialized_start=1246
-  _globals['_OBJECTTYPE']._serialized_end=1314
+  _globals['_OBJECTTYPE']._serialized_start=688
+  _globals['_OBJECTTYPE']._serialized_end=756
   _globals['_STOREREQUEST']._serialized_start=67
   _globals['_STOREREQUEST']._serialized_end=151
   _globals['_LOADREQUEST']._serialized_start=153
@@ -46,22 +44,6 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_GETREFSRESPONSE']._serialized_end=686
   _globals['_GETREFSRESPONSE_REFSENTRY']._serialized_start=643
   _globals['_GETREFSRESPONSE_REFSENTRY']._serialized_end=686
-  _globals['_CREATEAGENTREQUEST']._serialized_start=688
-  _globals['_CREATEAGENTREQUEST']._serialized_end=808
-  _globals['_CREATEAGENTRESPONSE']._serialized_start=810
-  _globals['_CREATEAGENTRESPONSE']._serialized_end=868
-  _globals['_DELETEAGENTREQUEST']._serialized_start=870
-  _globals['_DELETEAGENTREQUEST']._serialized_end=944
-  _globals['_GETAGENTREQUEST']._serialized_start=946
-  _globals['_GETAGENTREQUEST']._serialized_end=1014
-  _globals['_GETAGENTRESPONSE']._serialized_start=1016
-  _globals['_GETAGENTRESPONSE']._serialized_end=1108
-  _globals['_GETAGENTSREQUEST']._serialized_start=1110
-  _globals['_GETAGENTSREQUEST']._serialized_end=1128
-  _globals['_GETAGENTSRESPONSE']._serialized_start=1130
-  _globals['_GETAGENTSRESPONSE']._serialized_end=1244
-  _globals['_GETAGENTSRESPONSE_AGENTSENTRY']._serialized_start=1199
-  _globals['_GETAGENTSRESPONSE_AGENTSENTRY']._serialized_end=1244
-  _globals['_GRITSTORE']._serialized_start=1317
-  _globals['_GRITSTORE']._serialized_end=1789
+  _globals['_GRITSTORE']._serialized_start=759
+  _globals['_GRITSTORE']._serialized_end=1004
 # @@protoc_insertion_point(module_scope)
