@@ -1,0 +1,18 @@
+syntax = "proto3";
+//import "google/protobuf/empty.proto";
+
+// APIs for CLI and Web
+service ApexApi {
+
+  //TODO: 
+  // get agent(s)             *needed
+  // create agent             *needed
+  // delete agent
+  // get actors (why?)
+  // get workers
+  // inject message           *needed
+  // send query
+  // subscribe to root actor (two way stream)
+  // getApexStatus (node_id, workers, etc) (should probably be a stream)
+}
+

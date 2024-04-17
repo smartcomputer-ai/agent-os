@@ -248,20 +248,36 @@ class LmdbBackend:
     def get_agent(self, request:grit_store_pb2.GetAgentRequest) -> grit_store_pb2.GetAgentResponse:
         if(request is None):
             raise ValueError("request must not be None.")
+        if (request.agent_did is None and request.agent_id is None):
+            raise ValueError("either agent_did or agent_id must be provided.")
+        
         with self.begin_agents_txn(write=False) as txn:
-            agent_id = txn.get(request.agent_did.encode('utf-8'))
-            return grit_store_pb2.GetAgentResponse(
-                agent_id=agent_id,
-                agent_did=request.agent_did)
-        
-        
+            if request.agent_id:
+                agent_did = txn.get(request.agent_id)
+                return grit_store_pb2.GetAgentResponse(
+                    agent_id=request.agent_id,
+                    agent_did=agent_did.decode('utf-8'))
+            else:
+                agent_id = txn.get(request.agent_did.encode('utf-8'))
+                return grit_store_pb2.GetAgentResponse(
+                    agent_id=agent_id,
+                    agent_did=request.agent_did)
+
+
     def get_agents(self) -> grit_store_pb2.GetAgentsResponse:
         agents = {}
         with self.begin_agents_txn(write=False) as txn:
             cursor = txn.cursor()
             cursor.first()
             while cursor.next():
-                agent_did = cursor.key().decode('utf-8')
+                #since agents are stored both by did and agent_id, check that this is a did entry
+                try:
+                    agent_did = cursor.key().decode('utf-8')
+                    if not agent_did.startswith('did:key'):
+                        continue
+                except UnicodeDecodeError:
+                    continue
+                
                 agent_id = cursor.value()
                 agents[agent_did] = agent_id
         return grit_store_pb2.GetAgentsResponse(agents=agents)
@@ -271,7 +287,6 @@ class LmdbBackend:
         if(request is None):
             raise ValueError("request must not be None.")
         
-
         if(request.agent_did):
             if not request.agent_did.startswith('did:key'):
                 #TODO: support other DID methods
@@ -293,6 +308,7 @@ class LmdbBackend:
         agents_db = self.get_agents_db()
         object_db = self.get_object_db()
         refs_db = self.get_refs_db()
+        secrets_db = self.get_secrets_db()
         with self.env.begin(write=True) as txn:
             #check if the agent already exists
             existing_agent_id = txn.get(agent_did.encode('utf-8'), db=agents_db)
@@ -362,9 +378,15 @@ class LmdbBackend:
                 agent_id,
                 db=refs_db)
 
-            #create the agent
+            #create the agent (both ways, so they can be found by DID or agent_id)
             txn.put(agent_did.encode('utf-8'), agent_id, db=agents_db)
+            txn.put(agent_id, agent_did.encode('utf-8'), db=agents_db)
 
+            #store the private key
+            #note the key is stored not in the raw binary format, but as a binary encoded hex string (because the API's assumption is that all secrets are strings)
+            txn.put(_make_secret_key(agent_id, 'did_private_key'), agent_did_private_key.encode('utf-8'), db=secrets_db)
+
+            #store the agent in the in-memory cache
             #not thread safe, but should be fine for now (since this is lunning only in one process)
             if self._agents is None:
                 self._agents = set()
@@ -378,6 +400,8 @@ class LmdbBackend:
     def delete_agent(self, request:grit_store_pb2.DeleteAgentRequest) -> None:
         if(request is None):
             raise ValueError("request must not be None.")
+        if (request.agent_did is None and request.agent_id is None):
+            raise ValueError("either agent_did or agent_id must be provided.")
         
         agents_db = self.get_agents_db()
         object_db = self.get_object_db()
@@ -386,9 +410,18 @@ class LmdbBackend:
 
         with self.env.begin(write=True) as txn:
             #get the agent id
-            agent_id = txn.get(request.agent_did.encode('utf-8'), db=agents_db)
+            agent_id = request.agent_id
+            agent_did = request.agent_did
             if agent_id is None:
-                return None
+                agent_id = txn.get(request.agent_did.encode('utf-8'), db=agents_db)
+                #if the agent id is still None, then the agent does not exist
+                if agent_id is None:
+                    return None
+            else:
+                #check that the agent did actually exists
+                agent_did = txn.get(agent_id, db=agents_db)
+                if agent_did is None:
+                    return None
             
             #delete all objects
             cursor = txn.cursor(db=object_db)
@@ -412,7 +445,8 @@ class LmdbBackend:
                 cursor.next()
 
             #delete the agent
-            txn.delete(request.agent_did.encode('utf-8'), db=agents_db)
+            txn.delete(agent_did.encode('utf-8'), db=agents_db)
+            txn.delete(agent_id, db=agents_db)
         
         return None
     

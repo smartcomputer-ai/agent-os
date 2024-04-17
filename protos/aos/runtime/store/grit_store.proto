@@ -16,7 +16,7 @@ service GritStore {
   rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse) {}
   rpc DeleteAgent(DeleteAgentRequest) returns (google.protobuf.Empty) {}
   rpc GetAgent(GetAgentRequest) returns (GetAgentResponse) {}
-  rpc GetAgents(google.protobuf.Empty) returns (GetAgentsResponse) {}
+  rpc GetAgents(GetAgentsRequest) returns (GetAgentsResponse) {}
 }
 
 enum ObjectType {
@@ -87,18 +87,25 @@ message CreateAgentResponse {
 }
 
 message DeleteAgentRequest {
-  string agent_did = 2;
+  oneof delete_by {
+    bytes agent_id = 1;
+    string agent_did = 2;
+  }
 }
 
 message GetAgentRequest {
-  string agent_did = 2;
+  oneof get_by {
+    bytes agent_id = 1;
+    string agent_did = 2;
+  }
 }
 
 message GetAgentResponse {
   optional bytes agent_id = 1;
-  string agent_did = 2;
+  optional string agent_did = 2;
 }
 
+message GetAgentsRequest {}
 
 message GetAgentsResponse {
   map<string, bytes> agents = 1;

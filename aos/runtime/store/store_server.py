@@ -35,7 +35,7 @@ class GritStore(grit_store_pb2_grpc.GritStoreServicer):
         return self._backend.get_agent(request)
     
     def GetAgents(self, request, context):
-        return self._backend.get_agents(request)
+        return self._backend.get_agents()
     
     def CreateAgent(self, request, context):
         return self._backend.create_agent(request)

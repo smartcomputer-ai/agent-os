@@ -57,7 +57,7 @@ class GritStoreStub(object):
                 )
         self.GetAgents = channel.unary_unary(
                 '/GritStore/GetAgents',
-                request_serializer=google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+                request_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentsRequest.SerializeToString,
                 response_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentsResponse.FromString,
                 )
 
@@ -167,7 +167,7 @@ def add_GritStoreServicer_to_server(servicer, server):
             ),
             'GetAgents': grpc.unary_unary_rpc_method_handler(
                     servicer.GetAgents,
-                    request_deserializer=google_dot_protobuf_dot_empty__pb2.Empty.FromString,
+                    request_deserializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentsRequest.FromString,
                     response_serializer=aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentsResponse.SerializeToString,
             ),
     }
@@ -328,7 +328,7 @@ class GritStore(object):
             timeout=None,
             metadata=None):
         return grpc.experimental.unary_unary(request, target, '/GritStore/GetAgents',
-            google_dot_protobuf_dot_empty__pb2.Empty.SerializeToString,
+            aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentsRequest.SerializeToString,
             aos_dot_runtime_dot_store_dot_grit__store__pb2.GetAgentsResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

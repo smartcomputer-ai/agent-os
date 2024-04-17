@@ -2,11 +2,12 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from aos.runtime.apex import apex_pb2 as aos_dot_runtime_dot_apex_dot_apex__pb2
+from aos.runtime.apex import apex_workers_pb2 as aos_dot_runtime_dot_apex_dot_apex__workers__pb2
 
 
-class ApexStub(object):
-    """Missing associated documentation comment in .proto file."""
+class ApexWorkersStub(object):
+    """Internal service for worker nodes to communicate with the Apex node
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -15,19 +16,20 @@ class ApexStub(object):
             channel: A grpc.Channel.
         """
         self.RegisterWorker = channel.unary_unary(
-                '/Apex/RegisterWorker',
-                request_serializer=aos_dot_runtime_dot_apex_dot_apex__pb2.WorkerRegistrationRequest.SerializeToString,
-                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__pb2.WorkerRegistrationResponse.FromString,
+                '/ApexWorkers/RegisterWorker',
+                request_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationResponse.FromString,
                 )
         self.WorkerStream = channel.stream_stream(
-                '/Apex/WorkerStream',
-                request_serializer=aos_dot_runtime_dot_apex_dot_apex__pb2.WorkerToApex.SerializeToString,
-                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__pb2.ApexToWorker.FromString,
+                '/ApexWorkers/WorkerStream',
+                request_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerToApex.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.ApexToWorker.FromString,
                 )
 
 
-class ApexServicer(object):
-    """Missing associated documentation comment in .proto file."""
+class ApexWorkersServicer(object):
+    """Internal service for worker nodes to communicate with the Apex node
+    """
 
     def RegisterWorker(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -42,27 +44,28 @@ class ApexServicer(object):
         raise NotImplementedError('Method not implemented!')
 
 
-def add_ApexServicer_to_server(servicer, server):
+def add_ApexWorkersServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'RegisterWorker': grpc.unary_unary_rpc_method_handler(
                     servicer.RegisterWorker,
-                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__pb2.WorkerRegistrationRequest.FromString,
-                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__pb2.WorkerRegistrationResponse.SerializeToString,
+                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationResponse.SerializeToString,
             ),
             'WorkerStream': grpc.stream_stream_rpc_method_handler(
                     servicer.WorkerStream,
-                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__pb2.WorkerToApex.FromString,
-                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__pb2.ApexToWorker.SerializeToString,
+                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerToApex.FromString,
+                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__workers__pb2.ApexToWorker.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'Apex', rpc_method_handlers)
+            'ApexWorkers', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
 
 
  # This class is part of an EXPERIMENTAL API.
-class Apex(object):
-    """Missing associated documentation comment in .proto file."""
+class ApexWorkers(object):
+    """Internal service for worker nodes to communicate with the Apex node
+    """
 
     @staticmethod
     def RegisterWorker(request,
@@ -75,9 +78,9 @@ class Apex(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/Apex/RegisterWorker',
-            aos_dot_runtime_dot_apex_dot_apex__pb2.WorkerRegistrationRequest.SerializeToString,
-            aos_dot_runtime_dot_apex_dot_apex__pb2.WorkerRegistrationResponse.FromString,
+        return grpc.experimental.unary_unary(request, target, '/ApexWorkers/RegisterWorker',
+            aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationRequest.SerializeToString,
+            aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerRegistrationResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -92,8 +95,8 @@ class Apex(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.stream_stream(request_iterator, target, '/Apex/WorkerStream',
-            aos_dot_runtime_dot_apex_dot_apex__pb2.WorkerToApex.SerializeToString,
-            aos_dot_runtime_dot_apex_dot_apex__pb2.ApexToWorker.FromString,
+        return grpc.experimental.stream_stream(request_iterator, target, '/ApexWorkers/WorkerStream',
+            aos_dot_runtime_dot_apex_dot_apex__workers__pb2.WorkerToApex.SerializeToString,
+            aos_dot_runtime_dot_apex_dot_apex__workers__pb2.ApexToWorker.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

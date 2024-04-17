@@ -40,14 +40,14 @@ class WorkerManifest(_message.Message):
     def __init__(self, node_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ..., current_agents: _Optional[_Iterable[_Union[Agent, _Mapping]]] = ..., current_actors: _Optional[_Iterable[_Union[Actor, _Mapping]]] = ...) -> None: ...
 
 class Agent(_message.Message):
-    __slots__ = ("agent_id", "agent_name", "grit_address")
+    __slots__ = ("agent_id", "agent_did", "grit_address")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_NAME_FIELD_NUMBER: _ClassVar[int]
+    AGENT_DID_FIELD_NUMBER: _ClassVar[int]
     GRIT_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    agent_name: str
+    agent_did: str
     grit_address: str
-    def __init__(self, agent_id: _Optional[bytes] = ..., agent_name: _Optional[str] = ..., grit_address: _Optional[str] = ...) -> None: ...
+    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ..., grit_address: _Optional[str] = ...) -> None: ...
 
 class Actor(_message.Message):
     __slots__ = ("agent_id", "actor_id")

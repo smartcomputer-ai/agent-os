@@ -116,16 +116,20 @@ class CreateAgentResponse(_message.Message):
     def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ...) -> None: ...
 
 class DeleteAgentRequest(_message.Message):
-    __slots__ = ("agent_did",)
+    __slots__ = ("agent_id", "agent_did")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    agent_id: bytes
     agent_did: str
-    def __init__(self, agent_did: _Optional[str] = ...) -> None: ...
+    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ...) -> None: ...
 
 class GetAgentRequest(_message.Message):
-    __slots__ = ("agent_did",)
+    __slots__ = ("agent_id", "agent_did")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    agent_id: bytes
     agent_did: str
-    def __init__(self, agent_did: _Optional[str] = ...) -> None: ...
+    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ...) -> None: ...
 
 class GetAgentResponse(_message.Message):
     __slots__ = ("agent_id", "agent_did")
@@ -134,6 +138,10 @@ class GetAgentResponse(_message.Message):
     agent_id: bytes
     agent_did: str
     def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ...) -> None: ...
+
+class GetAgentsRequest(_message.Message):
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class GetAgentsResponse(_message.Message):
     __slots__ = ("agents",)
