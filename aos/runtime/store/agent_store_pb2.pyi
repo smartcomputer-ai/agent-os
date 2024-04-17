@@ -53,8 +53,17 @@ class GetAgentResponse(_message.Message):
     def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ..., exists: bool = ...) -> None: ...
 
 class GetAgentsRequest(_message.Message):
-    __slots__ = ()
-    def __init__(self) -> None: ...
+    __slots__ = ("var_filters",)
+    class VarFiltersEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    VAR_FILTERS_FIELD_NUMBER: _ClassVar[int]
+    var_filters: _containers.ScalarMap[str, str]
+    def __init__(self, var_filters: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class GetAgentsResponse(_message.Message):
     __slots__ = ("agents",)

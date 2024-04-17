@@ -32,6 +32,11 @@ async def arun() -> None:
     print(agent_by_did)
     all_agents = await client.get_agent_store_stub_async().GetAgents(agent_store_pb2.GetAgentsRequest())
     print(all_agents)
+
+    #set a var and filter by it
+    await client.get_agent_store_stub_async().SetVar(agent_store_pb2.SetVarRequest(agent_id=response.agent_id, key="test", value="test"))
+    agent_by_var = await client.get_agent_store_stub_async().GetAgents(agent_store_pb2.GetAgentsRequest(var_filters={"test":"test"}))
+    print("agent by var", agent_by_var)
     print("=====================================")
 
     object_store = AgentObjectStore(client, agent_id)

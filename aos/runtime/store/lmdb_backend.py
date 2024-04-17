@@ -215,22 +215,40 @@ class LmdbBackend:
         return agent_store_pb2.GetAgentResponse(exists=False)
 
 
-    def get_agents(self) -> agent_store_pb2.GetAgentsResponse:
+    def get_agents(self, request:agent_store_pb2.GetAgentsRequest) -> agent_store_pb2.GetAgentsResponse:
         agents = {}
-        with self.begin_agents_txn(write=False) as txn:
-            cursor = txn.cursor()
-            cursor.first()
-            while cursor.next():
+
+        agents_db = self.get_agents_db()
+        vars_db = self.get_vars_db()
+        with self.env.begin(write=True) as txn:
+            agents_cursor = txn.cursor(db=agents_db)
+            agents_cursor.first()
+            while agents_cursor.next():
                 #since agents are stored both by did and agent_id, check that this is a did entry
                 try:
-                    agent_did = cursor.key().decode('utf-8')
+                    agent_did = agents_cursor.key().decode('utf-8')
                     if not agent_did.startswith('did:key'):
                         continue
                 except UnicodeDecodeError:
                     continue
                 
-                agent_id = cursor.value()
-                agents[agent_did] = agent_id
+                agent_id = agents_cursor.value()
+
+                #if filters are set, check if the agent matches the filter
+                if request.var_filters is not None and len(request.var_filters) > 0:
+                    for var_filter_key, var_filter_value in request.var_filters.items():
+                        var_value = txn.get(_make_var_key(agent_id, var_filter_key), db=vars_db)
+                        if var_value is None and var_filter_value is not None:
+                            break
+                        if var_filter_value != var_value.decode('utf-8'):
+                            break
+                    else:
+                        #all filters matched
+                        agents[agent_did] = agent_id
+                else:
+                    #no filters
+                    agents[agent_did] = agent_id
+
         return agent_store_pb2.GetAgentsResponse(agents=agents)
     
 

@@ -49,7 +49,10 @@ message GetAgentResponse {
   bool exists = 3;
 }
 
-message GetAgentsRequest {}
+message GetAgentsRequest {
+  //if set, filters the agents to the ones that have the specified key-value pairs
+  map<string, string> var_filters = 1;
+}
 
 message GetAgentsResponse {
   map<string, bytes> agents = 1;

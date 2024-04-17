@@ -37,16 +37,16 @@ class AgentStore(agent_store_pb2_grpc.AgentStoreServicer):
         super().__init__()
         self._backend = backend
 
-    def GetAgent(self, request, context):
+    def GetAgent(self, request: agent_store_pb2.GetAgentRequest, context):
         return self._backend.get_agent(request)
     
-    def GetAgents(self, request, context):
-        return self._backend.get_agents()
+    def GetAgents(self, request: agent_store_pb2.GetAgentsRequest, context):
+        return self._backend.get_agents(request)
     
-    def CreateAgent(self, request, context):
+    def CreateAgent(self, request: agent_store_pb2.CreateAgentRequest, context):
         return self._backend.create_agent(request)
     
-    def DeleteAgent(self, request, context):
+    def DeleteAgent(self, request: agent_store_pb2.DeleteAgentRequest, context):
         return self._backend.delete_agent(request)
     
     
