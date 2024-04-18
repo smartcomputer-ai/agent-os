@@ -1,7 +1,7 @@
 from __future__ import annotations
-from grit import *
-from grit import Mailbox
-from wit import *
+from aos.grit import *
+from aos.grit import Mailbox
+from aos.wit import *
 from .actor_executor import ExecutionContext, ActorExecutor, _WitExecution, MailboxUpdate
 
 #rename to "RootExecutor"

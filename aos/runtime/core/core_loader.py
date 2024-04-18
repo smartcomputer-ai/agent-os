@@ -4,8 +4,8 @@ import sys
 import types
 import importlib.abc
 import importlib.machinery
-from grit import *
-from grit.tree_helpers import _load_path_sync
+from aos.grit import *
+from aos.grit.tree_helpers import _load_path_sync
 
 _BLOB_FILE_ENDINGS = [".py"]
 

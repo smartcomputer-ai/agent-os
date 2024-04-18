@@ -3,8 +3,8 @@ import logging
 import asyncio
 import inspect
 from typing import Awaitable, Callable
-from grit import *
-from wit import *
+from aos.grit import *
+from aos.wit import *
 from .resolvers import Resolver
 
 MailboxUpdate = tuple[ActorId, ActorId, MessageId] # sender_id, recipient_id, message_id

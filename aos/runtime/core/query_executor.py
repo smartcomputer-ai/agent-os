@@ -1,7 +1,7 @@
 from __future__ import annotations
-from grit import *
-from wit.errors import QueryError
-from wit.query import Query
+from aos.grit import *
+from aos.wit.errors import QueryError
+from aos.wit.query import Query
 from .resolvers import Resolver
 
 class QueryExecutor(Query):

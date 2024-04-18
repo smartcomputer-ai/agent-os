@@ -20,15 +20,18 @@ from aos.runtime.store.agent_references import AgentReferences
 import logging
 logger = logging.getLogger(__name__)
 
-# Steps:
-# 0) get this node id
-# 1) get all agents and their actors from grit
-# 2) gather unprocessed messages (between actors)
-# 3) wait for workers
-# 4) assign actors to workers (compare actor's wit manifest to worker's capabilities)
-# 5) send messages to workers 
+#==============================================================
+# Documentation
+#==============================================================
 
-# if new actor: make sure if it is a genesis or update message that the worker can handle the message)
+# Main Steps:
+# 1) get all agents from grit
+# 2) wait for workers
+# 3) assign agents to workers (compare agent's requested capabilities to worker's capabilities)
+
+# The worker is in charge of running the agent. Apex does not route messages unless they are root_actor messages.
+# Right now, an agent can only run on a single worker. Later, workers can coordinate to split agent workloads 
+# (with wits with different capabilities) and apex will facilitate
 
 
 #==============================================================
@@ -108,6 +111,7 @@ class ApexCoreState:
     #      a bit sticky to avoid too much dirft when workers come in and out, but this is an optimization
     unassigned_agents:dict[AgentId, TimeSinceUnassigned] = field(default_factory=dict)  #are not assigned to a worker
     assigned_agents:dict[AgentId, WorkerId] = field(default_factory=dict)  #are assigned to a worker
+    last_rebalance_time:float = 0
 
     def start_loop(self):
         self.is_dirty = False
@@ -314,6 +318,7 @@ class ApexCoreLoop:
         self._node_id = node_id
         self._store_address = store_address
         self._assign_time_delay_secods = assign_time_delay_secods
+        self._rebalance_interval_seconds = 5
         self._cancel_event = asyncio.Event()
         self._running_event = asyncio.Event()
         self._event_queue = asyncio.Queue()
@@ -356,6 +361,8 @@ class ApexCoreLoop:
             try:
                 event = await asyncio.wait_for(self._event_queue.get(), 0.05)
             except asyncio.TimeoutError:
+                if time.perf_counter() - loop_state.last_rebalance_time > self._rebalance_interval_seconds:
+                    await self._event_queue.put(self._RebalanceAgentsEvent())
                 continue #test for cancel (in the while condition) and try again
             
             if isinstance(event, self._RegisterWorkerEvent):
@@ -471,6 +478,9 @@ class ApexCoreLoop:
         # this is not optimal, but it's a start
         workers = loop_state.workers.values()
         agents_to_assign = loop_state.unassigned_agents.keys()
+
+        #logger.warning(f"RebalanceAgentsEvent: Rebalancing {len(agents_to_assign)} agents to {len(workers)} workers.")
+
         for agent_id in agents_to_assign:
             #if the time since unassigned is too short, skip
             if time.perf_counter() - loop_state.unassigned_agents[agent_id] < self._assign_time_delay_secods:
@@ -484,7 +494,7 @@ class ApexCoreLoop:
             selected_worker_id = min(matching_workers, key=lambda w: len(w.current_agents)).worker_id
             loop_state.assign_agent_to_worker(agent_id, selected_worker_id)
             logger.info(f"RebalanceAgentsEvent: Agent {agent_id.hex()} assigned to worker {selected_worker_id}.")
-
+        loop_state.last_rebalance_time = time.perf_counter()
 
     async def _handle_start_agent(self, event:_StartAgentEvent, loop_state:ApexCoreState, store_client:StoreClient):
         #check if already running

@@ -7,9 +7,9 @@ import importlib.abc
 import importlib.machinery
 import types
 from typing import Callable
-from grit import *
-from grit.tree_helpers import _load_path
-from wit.errors import InvalidCoreException
+from aos.grit import *
+from aos.grit.tree_helpers import _load_path
+from aos.wit.errors import InvalidCoreException
 from .core_loader import *
 
 class Resolver(ABC):

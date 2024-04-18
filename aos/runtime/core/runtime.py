@@ -1,8 +1,8 @@
 from __future__ import annotations
 import logging
 import asyncio
-from grit import *
-from wit import *
+from aos.grit import *
+from aos.wit import *
 from .resolvers import *
 from .query_executor import QueryExecutor
 from .actor_executor import ExecutionContext, ActorExecutor, MailboxUpdate

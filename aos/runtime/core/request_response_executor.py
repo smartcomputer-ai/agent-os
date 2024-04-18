@@ -1,6 +1,6 @@
 from __future__ import annotations
-from grit import *
-from wit import *
+from aos.grit import *
+from aos.wit import *
 from .runtime_executor import RuntimeExecutor
 
 #==========================================================================================
