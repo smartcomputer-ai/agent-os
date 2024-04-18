@@ -252,7 +252,7 @@ class ApexCoreLoop:
                     logger.error(f"Max tries reached, giving up")
                     raise e
                 else:
-                    logger.warn(f"Was not able to connect to store server {self._store_address}, will try again: {e}")
+                    logger.warning(f"Was not able to connect to store server {self._store_address}, will try again: {e}")
                     await asyncio.sleep(5)
 
     
@@ -261,7 +261,7 @@ class ApexCoreLoop:
         if event.worker_id in loop_state.workers:
             worker_state = loop_state.workers[event.worker_id]
             if worker_state.is_connected:
-                logger.warn(f"RegisterWorkerEvent: Worker {event.worker_id} is already connected, disconnecting it.")
+                logger.warning(f"RegisterWorkerEvent: Worker {event.worker_id} is already connected, disconnecting it.")
                 worker_state.to_worker_queue.put_nowait(None)
         #add worker with new ticket
         loop_state.workers[event.worker_id] = self._WorkerState(
@@ -272,7 +272,7 @@ class ApexCoreLoop:
 
     async def _handle_worker_connected(self, event:_WorkerConnectedEvent, loop_state:_CoreLoopState):
         if event.worker_id not in loop_state.workers:
-            logger.warn(f"WorkerConnectedEvent: Worker {event.worker_id} trying to connect, but it is not registered, NO-OP.")
+            logger.warning(f"WorkerConnectedEvent: Worker {event.worker_id} trying to connect, but it is not registered, NO-OP.")
             event.to_worker_queue.put_nowait(None)
         else:
             loop_state.workers[event.worker_id].to_worker_queue = event.to_worker_queue
@@ -283,7 +283,7 @@ class ApexCoreLoop:
 
     async def _handle_worker_disconnected(self, event:_WorkerDisconnectedEvent, loop_state:_CoreLoopState):
         if event.worker_id not in loop_state.workers:
-            logger.warn(f"WorkerDisconnectedEvent: Worker {event.worker_id} trying to disconnect, but it is not registered, NO-OP.")
+            logger.warning(f"WorkerDisconnectedEvent: Worker {event.worker_id} trying to disconnect, but it is not registered, NO-OP.")
         else:
             worker_state = loop_state.workers[event.worker_id]
             if worker_state.is_connected:
@@ -332,7 +332,7 @@ class ApexCoreLoop:
     async def _handle_start_agent(self, event:_StartAgentEvent, loop_state:_CoreLoopState, store_client:StoreClient):
         #check if already running
         if event.agent_id in loop_state.running_agents:
-            logger.warn(f"StartAgentEvent: Agent {event.agent_id.hex()} is already running, NO-OP.")
+            logger.warning(f"StartAgentEvent: Agent {event.agent_id.hex()} is already running, NO-OP.")
         else:
             agent_id = event.agent_id
             logger.info(f"StartAgentEvent: Starting agent {agent_id.hex()}.")
@@ -352,7 +352,7 @@ class ApexCoreLoop:
     async def _handle_stop_agent(self, event:_StopAgentEvent, loop_state:_CoreLoopState, store_client:StoreClient):
         #check if already stopped
         if event.agent_id not in loop_state.running_agents:
-            logger.warn(f"StopAgentEvent: Agent {event.agent_id.hex()} is not running, NO-OP.")
+            logger.warning(f"StopAgentEvent: Agent {event.agent_id.hex()} is not running, NO-OP.")
         else:
             agent_id = event.agent_id
             logger.info(f"StopAgentEvent: Stopping agent {agent_id.hex()}.")

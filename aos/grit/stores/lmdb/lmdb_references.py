@@ -33,7 +33,7 @@ class LmdbReferences(References):
                 if not txn.put(ref_bytes, object_id, overwrite=True):
                     raise Exception(f"Not able to set '{ref}' in lmdb 'refs' database.")
         except lmdb.MapFullError as lmdb_error:
-            logger.warn(f"===> Resizing LMDB map... in refs store, (ref: {ref}, obj id: {object_id.hex()}) <===")
+            logger.warning(f"===> Resizing LMDB map... in refs store, (ref: {ref}, obj id: {object_id.hex()}) <===")
             self._shared_env._resize()
             #try again
             with self._shared_env.begin_refs_txn() as txn:

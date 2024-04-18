@@ -11,6 +11,7 @@ from .apex_core_loop import ApexCoreLoop
 import logging
 logger = logging.getLogger(__name__)
 
+
 class ApexApi(apex_api_pb2_grpc.ApexApiServicer):
     def __init__(self, core_loop:ApexCoreLoop):
         self.core_loop = core_loop
@@ -40,7 +41,6 @@ class ApexApi(apex_api_pb2_grpc.ApexApiServicer):
         raise NotImplementedError()
 
 
-
 class ApexWorkers(apex_workers_pb2_grpc.ApexWorkersServicer):
     def __init__(self, core_loop:ApexCoreLoop):
         self.core_loop = core_loop
@@ -64,25 +64,28 @@ class ApexWorkers(apex_workers_pb2_grpc.ApexWorkersServicer):
             connected = False
             worker_id = None
             async for message in request_iterator:
+                if message.type == apex_workers_pb2.WorkerToApexMessage.PING:
+                    logger.info(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent PING.")
                 #only accept READY messags once
-                if message.type == apex_workers_pb2.WorkerToApexMessage.READY and not connected:
+                elif message.type == apex_workers_pb2.WorkerToApexMessage.READY and not connected:
                     logger.info(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent READY with ticket {message.ticket}.")
                     connected = True
                     worker_id = message.worker_id
                     await self.core_loop.worker_connected(message.worker_id, message.ticket, message.manifest, to_worker_queue)
                 elif not connected:
-                    logger.warn(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent message ({message.type}) before READY.")
+                    logger.warning(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent message ({message.type}) before READY.")
                     return
                 elif message.type == apex_workers_pb2.WorkerToApexMessage.RETURN_AGENT:
                     #todo: implement
-                    logger.warn(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent RETURN_AGENT with ticket {message.ticket}. NOT IMPLEMENTED YET.")
+                    logger.warning(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent RETURN_AGENT with ticket {message.ticket}. NOT IMPLEMENTED YET.")
             #when the loop ends, the worker has disconnected
             if connected and worker_id:
                 logger.info(f"ApexWorkers.ConnectWorker: Worker {worker_id} disconnected.")
                 #only forward the disconnect to the core loop if the worker was connected (had sent READY)
                 await self.core_loop.worker_disconnected(worker_id)
             else:
-                logger.warn("ApexWorkers.ConnectWorker: Worker disconnected without ever sending READY.")
+                logger.warning("ApexWorkers.ConnectWorker: Worker disconnected without ever sending READY.")
+                #in the other case, the core loop closes the worker_queue
                 to_worker_queue.put_nowait(None)
 
         #start the incoming message processing task
@@ -115,7 +118,7 @@ async def start_server(
     
     #start core loop
     core_loop = ApexCoreLoop(store_address, node_id, assign_time_delay_secods)
-    await core_loop.start()
+    running_task = asyncio.create_task(core_loop.start())
     await core_loop.wait_until_running()
 
     #start server
@@ -126,6 +129,7 @@ async def start_server(
     await server.start()
     print("Server started, listening on " + port)
     return server
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

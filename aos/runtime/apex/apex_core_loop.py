@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 from abc import ABC
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 import random
 import asyncio
@@ -53,8 +53,8 @@ STORE_CAPABILITIES_VAR_PREFIX = "capabilities" #what capabilities the agent requ
 class WorkerState:
     worker_id:str
     ticket:str
-    capabilities:dict[str, str] = {}
-    current_agents:set[AgentId] = set()
+    capabilities:dict[str, str] = field(default_factory=dict) 
+    current_agents:set[AgentId] = field(default_factory=set) 
 
     to_worker_queue:asyncio.Queue[apex_workers_pb2.ApexToWorkerMessage]|None = None
 
@@ -102,12 +102,12 @@ class AgentInfo:
 class ApexCoreState:
 
     is_dirty:bool = False
-    workers:dict[WorkerId, WorkerState] = {}
-    agents:dict[AgentId, AgentInfo] = {}
+    workers:dict[WorkerId, WorkerState] = field(default_factory=dict) 
+    agents:dict[AgentId, AgentInfo] = field(default_factory=dict) 
     #TODO: keep some sort of info on what the last worker was and how long ago to make agent asssignments 
     #      a bit sticky to avoid too much dirft when workers come in and out, but this is an optimization
-    unassigned_agents:dict[AgentId, TimeSinceUnassigned] = {} #are not assigned to a worker
-    assigned_agents:dict[AgentId, WorkerId] = {} #are assigned to a worker
+    unassigned_agents:dict[AgentId, TimeSinceUnassigned] = field(default_factory=dict)  #are not assigned to a worker
+    assigned_agents:dict[AgentId, WorkerId] = field(default_factory=dict)  #are assigned to a worker
 
     def start_loop(self):
         self.is_dirty = False
@@ -394,7 +394,7 @@ class ApexCoreLoop:
                     logger.error(f"Max tries reached, giving up")
                     raise e
                 else:
-                    logger.warn(f"Was not able to connect to store server {self._store_address}, will try again: {e}")
+                    logger.warning(f"Was not able to connect to store server {self._store_address}, will try again: {e}")
                     await asyncio.sleep(5)
 
     
@@ -406,7 +406,7 @@ class ApexCoreLoop:
         if event.worker_id in loop_state.workers:
             worker_state = loop_state.workers[event.worker_id]
             if worker_state.is_connected:
-                logger.warn(f"RegisterWorkerEvent: Worker {event.worker_id} is already connected, disconnecting it.")
+                logger.warning(f"RegisterWorkerEvent: Worker {event.worker_id} is already connected, disconnecting it.")
                 worker_state.to_worker_queue.put_nowait(None)
         #add worker with new ticket
         loop_state.add_worker(event.worker_id, event.ticket)
@@ -415,9 +415,9 @@ class ApexCoreLoop:
 
     async def _handle_worker_connected(self, event:_WorkerConnectedEvent, loop_state:ApexCoreState):
         if event.worker_id not in loop_state.workers:
-            logger.warn(f"WorkerConnectedEvent: Worker {event.worker_id} trying to connect, but it is not registered.")
+            logger.warning(f"WorkerConnectedEvent: Worker {event.worker_id} trying to connect, but it is not registered.")
         elif loop_state.workers[event.worker_id].ticket != event.ticket:
-            logger.warn(f"WorkerConnectedEvent: Worker {event.worker_id} trying to connect with wrong ticket, closing connection.")
+            logger.warning(f"WorkerConnectedEvent: Worker {event.worker_id} trying to connect with wrong ticket, closing connection.")
             event.to_worker_queue.put_nowait(None)
         else:
             loop_state.set_worker_connect(event.worker_id, event.manifest.capabilities, event.to_worker_queue)
@@ -428,11 +428,11 @@ class ApexCoreLoop:
                 for agent in event.manifest.current_agents:
                     agents_to_yank = []
                     if agent.agent_id not in loop_state.agents:
-                        logger.warn(f"WorkerConnectedEvent: Worker {event.worker_id} has agent {agent.agent_id.hex()} in its current list, but apex does not have it in the started agent list.")
+                        logger.warning(f"WorkerConnectedEvent: Worker {event.worker_id} has agent {agent.agent_id.hex()} in its current list, but apex does not have it in the started agent list.")
                         agents_to_yank.append(agent)
 
                     if agent.agent_id in loop_state.assigned_agents and loop_state.assigned_agents[agent.agent_id] != event.worker_id:
-                        logger.warn(f"WorkerConnectedEvent: Worker {event.worker_id} has agent {agent.agent_id.hex()} in its current list, but apex has it assigned to worker {loop_state.assigned_agents[agent.agent_id]}.")
+                        logger.warning(f"WorkerConnectedEvent: Worker {event.worker_id} has agent {agent.agent_id.hex()} in its current list, but apex has it assigned to worker {loop_state.assigned_agents[agent.agent_id]}.")
                         agents_to_yank.append(agent)
 
                     for agent in agents_to_yank:
@@ -454,7 +454,7 @@ class ApexCoreLoop:
 
     async def _handle_worker_disconnected(self, event:_WorkerDisconnectedEvent, loop_state:ApexCoreState):
         if event.worker_id not in loop_state.workers:
-            logger.warn(f"WorkerDisconnectedEvent: Worker {event.worker_id} trying to disconnect, but it is not registered, NO-OP.")
+            logger.warning(f"WorkerDisconnectedEvent: Worker {event.worker_id} trying to disconnect, but it is not registered, NO-OP.")
         else:
             worker_state = loop_state.workers[event.worker_id]
             if worker_state.is_connected:
@@ -478,7 +478,7 @@ class ApexCoreLoop:
             #TODO: find the workers that match the capabilities of the agent
             matching_workers = workers
             if len(matching_workers) == 0:
-                logger.warn(f"RebalanceAgentsEvent: No workers available to assign agent {agent_id.hex()}.")
+                logger.warning(f"RebalanceAgentsEvent: No workers available to assign agent {agent_id.hex()}.")
                 continue
             #find the worker with the least agents
             selected_worker_id = min(matching_workers, key=lambda w: len(w.current_agents)).worker_id
@@ -489,7 +489,7 @@ class ApexCoreLoop:
     async def _handle_start_agent(self, event:_StartAgentEvent, loop_state:ApexCoreState, store_client:StoreClient):
         #check if already running
         if event.agent_id in loop_state.agents:
-            logger.warn(f"StartAgentEvent: Agent {event.agent_id.hex()} is already running, NO-OP.")
+            logger.warning(f"StartAgentEvent: Agent {event.agent_id.hex()} is already running, NO-OP.")
         else:
             agent_id = event.agent_id
             logger.info(f"StartAgentEvent: Starting agent {agent_id.hex()}.")
@@ -522,7 +522,7 @@ class ApexCoreLoop:
     async def _handle_stop_agent(self, event:_StopAgentEvent, loop_state:ApexCoreState, store_client:StoreClient):
         #check if already stopped
         if event.agent_id not in loop_state.agents:
-            logger.warn(f"StopAgentEvent: Agent {event.agent_id.hex()} is not running, NO-OP.")
+            logger.warning(f"StopAgentEvent: Agent {event.agent_id.hex()} is not running, NO-OP.")
         else:
             agent_id = event.agent_id
             logger.info(f"StopAgentEvent: Stopping agent {agent_id.hex()}.")
@@ -607,7 +607,7 @@ class ApexCoreLoop:
         agents_response:agent_store_pb2.GetAgentsResponse = await (
             store_client
             .get_agent_store_stub_async()
-            .GetAgents(agent_store_pb2.GetAgentsRequest(var_filters={STORE_APEX_STATUS_VAR_NAME, STORE_APEX_STATUS_STARTED})) 
+            .GetAgents(agent_store_pb2.GetAgentsRequest(var_filters={STORE_APEX_STATUS_VAR_NAME: STORE_APEX_STATUS_STARTED})) 
         )
         agent_id_to_did = {agent_id:did for did, agent_id in agents_response.agents.items()}
         tasks = [self._gather_agent_capabilities(agent_id, store_client) for agent_id in agent_id_to_did.keys()]
@@ -615,7 +615,7 @@ class ApexCoreLoop:
         agent_capabilities_lookup = {agent_id:capabilities for agent_id, capabilities in agent_capabilities}
 
         for agent_id, did in agent_id_to_did.items():
-            agent_info = self.AgentInfo(
+            agent_info = AgentInfo(
                 agent_id=agent_id,
                 agent_did=did,
                 store_address=self._store_address,

@@ -244,7 +244,7 @@ async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:
 
 @app.message("code_failed")
 async def on_message_code_failed(fail:CodeFailed, ctx:MessageContext, state:ChatState) -> None:
-    logger.warn(f"'{state.name}': received callback: code_failed")
+    logger.warning(f"'{state.name}': received callback: code_failed")
     state.code_fail = fail
     if state.code_fail.errors is not None:
         #todo: also output as chat message

@@ -115,7 +115,7 @@ class LmdbBackend:
             with self.begin_object_txn() as txn:
                 txn.put(object_key, request.data, overwrite=False)
         except lmdb.MapFullError:
-            logger.warn(f"===> Resizing LMDB map... in obj store, (obj id: {object_id.hex()}) <===")
+            logger.warning(f"===> Resizing LMDB map... in obj store, (obj id: {object_id.hex()}) <===")
             self._resize()
             #try again
             with self.begin_object_txn() as txn:
@@ -282,7 +282,7 @@ class LmdbBackend:
             #check if the agent already exists
             existing_agent_id = txn.get(agent_did.encode('utf-8'), db=agents_db)
             if existing_agent_id is not None:
-                logger.warn(f"Agent for DID '{agent_did}' already exists, will return existing agent.")
+                logger.warning(f"Agent for DID '{agent_did}' already exists, will return existing agent.")
                 return agent_store_pb2.CreateAgentResponse(
                     agent_id=existing_agent_id,
                     agent_did=agent_did)

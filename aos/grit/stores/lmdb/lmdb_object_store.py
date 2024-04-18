@@ -32,7 +32,7 @@ class LmdbObjectStore(ObjectStore):
                 txn.put(object_id, bytes, overwrite=False)
             return object_id
         except lmdb.MapFullError:
-            logger.warn(f"===> Resizing LMDB map... in obj store, (obj id: {object_id.hex()}) <===")
+            logger.warning(f"===> Resizing LMDB map... in obj store, (obj id: {object_id.hex()}) <===")
             self._shared_env._resize()
             #try again
             with self._shared_env.begin_object_txn() as txn:

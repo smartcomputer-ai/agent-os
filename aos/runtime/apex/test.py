@@ -16,13 +16,27 @@ async def arun() -> None:
 
     worker_stub = client.get_apex_workers_stub_async()
 
+    #register first
+    response = await worker_stub.RegisterWorker(apex_workers_pb2.WorkerRegistrationRequest(worker_id="worker1"))
+    ticket = response.ticket
+    print("registered worker1 with ticket", ticket)
+
     async def generate_messages() -> AsyncIterable[apex_workers_pb2.WorkerToApexMessage]:
+        yield apex_workers_pb2.WorkerToApexMessage(
+            worker_id="worker1", 
+            type=apex_workers_pb2.WorkerToApexMessage.PING)
+        print("sent ping")
+        await asyncio.sleep(1)
+        yield apex_workers_pb2.WorkerToApexMessage(
+            worker_id="worker1",
+            ticket=ticket,
+            type=apex_workers_pb2.WorkerToApexMessage.READY)
         while True:
             yield apex_workers_pb2.WorkerToApexMessage(
-                worker_id="worker1", 
+                worker_id="worker1",
                 type=apex_workers_pb2.WorkerToApexMessage.PING)
             print("sent ping")
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)
 
     apex_stream:AsyncIterable[apex_workers_pb2.ApexToWorkerMessage] = worker_stub.ConnectWorker(generate_messages())
 

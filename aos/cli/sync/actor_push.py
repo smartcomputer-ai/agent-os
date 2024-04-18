@@ -246,7 +246,7 @@ def _blob_from_file(file_path:str) -> BlobObject:
         mimetypes.init()
         mime_type, _ = mimetypes.guess_type(file_path)
         if mime_type is None:
-            logger.warn('Cannot guess file mime type: '+file_path)
+            logger.warning('Cannot guess file mime type: '+file_path)
 
     headers = {}
     if mime_type is not None:

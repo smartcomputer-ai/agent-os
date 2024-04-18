@@ -660,7 +660,7 @@ class Core(TreeObject):
                     target_blob:BlobObject = await self.get_path(new_blob_path)
                 except Exception as ex:
                     #this usually happens if one is a path and the other is a blob or vice versa
-                    logger.warn(f"Merge conflic while getting {new_blob_path}: {ex}")
+                    logger.warning(f"Merge conflic while getting {new_blob_path}: {ex}")
                     continue
                 if(target_blob is None):
                     self.makeb_path(new_blob_path).set_from_blob(blob)
