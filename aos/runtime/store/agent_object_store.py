@@ -44,8 +44,8 @@ class AgentObjectStore(ObjectStore):
     
     def store_sync(self, object:Object) -> ObjectId:
         request = self._to_store_request(object)
-        response:grit_store_pb2.StoreResponse = self._store_stub_sync.Store(request)
-        return response.object_id
+        self._store_stub_sync.Store(request)
+        return request.object_id
     
     def load_sync(self, object_id:ObjectId) -> Object | None:
         response:grit_store_pb2.LoadResponse = self._store_stub_sync.Load(

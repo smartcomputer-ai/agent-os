@@ -2,6 +2,7 @@ import os
 import asyncio
 from concurrent import futures
 import logging
+from typing import AsyncIterable
 import grpc
 from grpc import Server
 from aos.runtime.apex import apex_api_pb2, apex_api_pb2_grpc
@@ -30,8 +31,25 @@ class ApexWorkers(apex_workers_pb2_grpc.ApexWorkersServicer):
     async def RegisterWorker(self, request: apex_workers_pb2.WorkerRegistrationRequest, context):
         pass
 
-    async def WorkerStream(self, request: apex_workers_pb2.WorkerToApexMessage, context):
-        pass
+    async def ConnectWorker(
+            self, 
+            request_iterator: AsyncIterable[apex_workers_pb2.WorkerToApexMessage], 
+            context,
+            ) -> AsyncIterable[apex_workers_pb2.ApexToWorkerMessage]:
+
+        async def process_incoming_messages():
+            async for message in request_iterator:
+                print("received message from worker", message.worker_id, message.type)
+            print("process incoming stream done")
+
+        #note: when the incoming tasks completes, the server seems to stop the entire request and the rest of the function is not called
+        process_incoming_task = asyncio.create_task(process_incoming_messages())
+        await asyncio.sleep(10)
+        print("canceling worker stream")
+        process_incoming_task.cancel()
+        
+        print("worker stream done")
+
 
 #example: https://github.com/grpc/grpc/blob/master/examples/python/route_guide/asyncio_route_guide_server.py
     # async def RouteChat(
@@ -57,3 +75,10 @@ async def start_server(port:str="50052") -> Server:
     await server.start()
     print("Server started, listening on " + port)
     return server
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    async def arun():
+        server = await start_server()
+        await server.wait_for_termination()
+    asyncio.run(arun())
