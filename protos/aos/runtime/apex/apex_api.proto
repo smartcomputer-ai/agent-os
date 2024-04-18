@@ -44,6 +44,8 @@ message GetRunningAgentsResponse {
 message AgentInfo{
   bytes agent_id = 1;
   string agent_did = 2;
+  string store_address = 3;
+  map <string, string> capabilities = 4;
 }
 
 
@@ -57,14 +59,16 @@ message GetApexStatusResponse {
     STOPPING = 3;
     ERROR = 10;
   }
-
-  string grit_address = 3;
+  ApexStatus status = 1;
+  string node_id = 2;
+  string store_address = 3;
   repeated WorkerInfo workers = 10;
 }
 
 message WorkerInfo{
   string worker_id = 1;
   map<string, string> capabilities = 2;
+  repeated bytes current_agents = 3;
 }
 
 //=========================================================

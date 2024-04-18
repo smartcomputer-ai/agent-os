@@ -13,7 +13,6 @@ service ApexWorkers {
 
 message WorkerRegistrationRequest {
   string worker_id = 1;
-  WorkerManifest manifest = 2;
 }
 
 message WorkerRegistrationResponse {
@@ -22,67 +21,67 @@ message WorkerRegistrationResponse {
 
 message WorkerManifest{
   string worker_id = 1;
-  map<string, string> capabilities = 2; //key, value
-  repeated Actor current_actors = 4;
+  map<string, string> capabilities = 10; //what capabilities can it satisfy
+  repeated Agent current_agents = 20;
+  //capacity, load, etc so that apex can decide where to send agents
 }
 
-// message Agent{
-//   bytes agent_id = 1; //32 bytes, of actor_id type
-//   string agent_did = 2;
+message Agent{
+  bytes agent_id = 1; //32 bytes, of actor_id type
+  string agent_did = 2;
+  string store_address = 3; //how to connect to the data store of this agent
+  map<string, string> capabilities = 10; //what capabilities are requested by the agent
+  //map<string, string> workers = 20; //worker_id, worker_address - > for later, what workers are assigned to this agent, so that workers can coordinate
+}
 
-//   string grit_address = 3; //how to connect to grit of this agent
+message AgentAssignment{
+  bytes agent_id = 1;  //required
+  optional Agent agent = 2; //only needed when giving to worker
+  //todo: reason for assignment, maybe also what actors
+}
+
+// message ActorMessage{
+//   bytes agent_id = 1; //32 bytes, of actor_id type
+//   bytes sender_id = 2; //32 bytes, actor_id
+//   bytes recipient_id = 3; //32 bytes, actor_id
+//   bytes message_id = 4; //32 bytes, object_id
 // }
 
-message Actor{
-  bytes agent_id = 1; //32 bytes, of actor_id type
-  bytes actor_id = 2; //32 bytes, actor_id
-  string grit_address = 3; //how to connect to the assigned grit of the agent of this actor
-}
+// message ActorQuery{
+//   bytes agent_id = 1; //32 bytes, of actor_id type
+//   bytes actor_id = 2; //32 bytes, actor_id
+//   string query_id = 3; //correlation_id for this query
+//   string query_name = 4;
+//   optional bytes context = 5; //
+// }
 
-message ActorMessage{
-  bytes agent_id = 1; //32 bytes, of actor_id type
-  bytes sender_id = 2; //32 bytes, actor_id
-  bytes recipient_id = 3; //32 bytes, actor_id
-  bytes message_id = 4; //32 bytes, object_id
-}
-
-message ActorQuery{
-  bytes agent_id = 1; //32 bytes, of actor_id type
-  bytes actor_id = 2; //32 bytes, actor_id
-  string query_id = 3; //correlation_id for this query
-  string query_name = 4;
-  optional bytes context = 5; //
-}
-
-message ActorQueryResult{
-  bytes agent_id = 1; //32 bytes, of actor_id type
-  bytes actor_id = 2; //32 bytes, actor_id
-  string query_id = 3; //correlation_id for this query, must match the ActorQuery
-  oneof result { //can be a tree_id, or the actual blob data
-    //blob_id or tree_id (see Grit Message)
-    bytes tree_id = 10;
-    //valid Grit blob object  
-    bytes blob = 11; 
-  }
-}
+// message ActorQueryResult{
+//   bytes agent_id = 1; //32 bytes, of actor_id type
+//   bytes actor_id = 2; //32 bytes, actor_id
+//   string query_id = 3; //correlation_id for this query, must match the ActorQuery
+//   oneof result { //can be a tree_id, or the actual blob data
+//     //blob_id or tree_id (see Grit Message)
+//     bytes tree_id = 10;
+//     //valid Grit blob object  
+//     bytes blob = 11; 
+//   }
+// }
 
 
 message ApexToWorkerMessage {
   enum MessageType {
     PING = 0;
-    GIVE_ACTOR = 12; // give to worker
-    YANK_ACTOR = 13; // take from worker
-    ACTOR_MESSAGE = 10; //the recipient is on the worker
-    ACTOR_QUERIE = 11;  //the recipient is on the worker
+    GIVE_AGENT = 10; // give to worker
+    YANK_AGENT = 11; // take from worker
+    //ACTOR_MESSAGE = 10; //the recipient is on the worker
+    //ACTOR_QUERY = 11;  //the recipient is on the worker
   }
 
   //always required
   MessageType type = 1;
 
   oneof payload {
-    ActorMessage message = 10;
-    ActorQuery query = 11;
-    Actor actor = 12;
+    AgentAssignment assignment = 11;
   }
 }
 
@@ -90,8 +89,10 @@ message WorkerToApexMessage {
   enum MessageType {
     PING = 0;
     READY = 1; // start receiving messages from apex
-    ACTOR_MESSAGE = 10; //the recipient is not on the worker and the message needs to be routed by apex
-    ACTOR_QUERIE = 11;  //the recipient is not on the worker and the query needs to be routed by apex
+    //MANIFEST_UPDATE = 2; // send a manifest update to apex (esp, when capacity changes)
+    RETURN_AGENT = 11; // return agent to apex
+    // ACTOR_MESSAGE = 10; //the recipient is not on the worker and the message needs to be routed by apex
+    // ACTOR_QUERY = 11;  //the recipient is not on the worker and the query needs to be routed by apex
   }
 
   //always required
@@ -100,7 +101,7 @@ message WorkerToApexMessage {
   string ticket = 3;
 
   oneof payload {
-    ActorMessage message = 10;
-    ActorQuery query = 11;
+    WorkerManifest manifest = 10; //READY event
+    AgentAssignment assignment = 11; //RETURN_AGENT
   }
 }

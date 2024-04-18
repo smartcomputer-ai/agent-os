@@ -463,7 +463,7 @@ class LmdbBackend:
 
         return agent_store_pb2.GetVarsResponse(
             agent_id=request.agent_id,
-            values=vars)
+            vars=vars)
     
     def delete_var(self, request:agent_store_pb2.DeleteVarRequest) -> None:
         if(request is None):

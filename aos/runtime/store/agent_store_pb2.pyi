@@ -115,8 +115,8 @@ class GetVarsRequest(_message.Message):
     def __init__(self, agent_id: _Optional[bytes] = ..., key_prefix: _Optional[str] = ...) -> None: ...
 
 class GetVarsResponse(_message.Message):
-    __slots__ = ("agent_id", "values")
-    class ValuesEntry(_message.Message):
+    __slots__ = ("agent_id", "vars")
+    class VarsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
@@ -124,10 +124,10 @@ class GetVarsResponse(_message.Message):
         value: bytes
         def __init__(self, key: _Optional[str] = ..., value: _Optional[bytes] = ...) -> None: ...
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    VALUES_FIELD_NUMBER: _ClassVar[int]
+    VARS_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    values: _containers.ScalarMap[str, bytes]
-    def __init__(self, agent_id: _Optional[bytes] = ..., values: _Optional[_Mapping[str, bytes]] = ...) -> None: ...
+    vars: _containers.ScalarMap[str, bytes]
+    def __init__(self, agent_id: _Optional[bytes] = ..., vars: _Optional[_Mapping[str, bytes]] = ...) -> None: ...
 
 class DeleteVarRequest(_message.Message):
     __slots__ = ("agent_id", "key")

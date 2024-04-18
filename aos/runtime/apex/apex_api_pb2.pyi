@@ -37,19 +37,30 @@ class GetRunningAgentsResponse(_message.Message):
     def __init__(self, agents: _Optional[_Iterable[_Union[AgentInfo, _Mapping]]] = ...) -> None: ...
 
 class AgentInfo(_message.Message):
-    __slots__ = ("agent_id", "agent_did")
+    __slots__ = ("agent_id", "agent_did", "store_address", "capabilities")
+    class CapabilitiesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    STORE_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
     agent_did: str
-    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ...) -> None: ...
+    store_address: str
+    capabilities: _containers.ScalarMap[str, str]
+    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ..., store_address: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class GetApexStatusRequest(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
 class GetApexStatusResponse(_message.Message):
-    __slots__ = ("grit_address", "workers")
+    __slots__ = ("status", "node_id", "store_address", "workers")
     class ApexStatus(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
         __slots__ = ()
         UNKNOWN: _ClassVar[GetApexStatusResponse.ApexStatus]
@@ -62,14 +73,18 @@ class GetApexStatusResponse(_message.Message):
     RUNNING: GetApexStatusResponse.ApexStatus
     STOPPING: GetApexStatusResponse.ApexStatus
     ERROR: GetApexStatusResponse.ApexStatus
-    GRIT_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    STATUS_FIELD_NUMBER: _ClassVar[int]
+    NODE_ID_FIELD_NUMBER: _ClassVar[int]
+    STORE_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     WORKERS_FIELD_NUMBER: _ClassVar[int]
-    grit_address: str
+    status: GetApexStatusResponse.ApexStatus
+    node_id: str
+    store_address: str
     workers: _containers.RepeatedCompositeFieldContainer[WorkerInfo]
-    def __init__(self, grit_address: _Optional[str] = ..., workers: _Optional[_Iterable[_Union[WorkerInfo, _Mapping]]] = ...) -> None: ...
+    def __init__(self, status: _Optional[_Union[GetApexStatusResponse.ApexStatus, str]] = ..., node_id: _Optional[str] = ..., store_address: _Optional[str] = ..., workers: _Optional[_Iterable[_Union[WorkerInfo, _Mapping]]] = ...) -> None: ...
 
 class WorkerInfo(_message.Message):
-    __slots__ = ("worker_id", "capabilities")
+    __slots__ = ("worker_id", "capabilities", "current_agents")
     class CapabilitiesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -79,9 +94,11 @@ class WorkerInfo(_message.Message):
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_AGENTS_FIELD_NUMBER: _ClassVar[int]
     worker_id: str
     capabilities: _containers.ScalarMap[str, str]
-    def __init__(self, worker_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    current_agents: _containers.RepeatedScalarFieldContainer[bytes]
+    def __init__(self, worker_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ..., current_agents: _Optional[_Iterable[bytes]] = ...) -> None: ...
 
 class InjectMessageRequest(_message.Message):
     __slots__ = ("agent_id", "recipient_id", "headers", "is_signal", "content_id", "content_blob")

@@ -7,12 +7,10 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class WorkerRegistrationRequest(_message.Message):
-    __slots__ = ("worker_id", "manifest")
+    __slots__ = ("worker_id",)
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
-    MANIFEST_FIELD_NUMBER: _ClassVar[int]
     worker_id: str
-    manifest: WorkerManifest
-    def __init__(self, worker_id: _Optional[str] = ..., manifest: _Optional[_Union[WorkerManifest, _Mapping]] = ...) -> None: ...
+    def __init__(self, worker_id: _Optional[str] = ...) -> None: ...
 
 class WorkerRegistrationResponse(_message.Message):
     __slots__ = ("ticket",)
@@ -21,7 +19,7 @@ class WorkerRegistrationResponse(_message.Message):
     def __init__(self, ticket: _Optional[str] = ...) -> None: ...
 
 class WorkerManifest(_message.Message):
-    __slots__ = ("worker_id", "capabilities", "current_actors")
+    __slots__ = ("worker_id", "capabilities", "current_agents")
     class CapabilitiesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -31,106 +29,73 @@ class WorkerManifest(_message.Message):
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
-    CURRENT_ACTORS_FIELD_NUMBER: _ClassVar[int]
+    CURRENT_AGENTS_FIELD_NUMBER: _ClassVar[int]
     worker_id: str
     capabilities: _containers.ScalarMap[str, str]
-    current_actors: _containers.RepeatedCompositeFieldContainer[Actor]
-    def __init__(self, worker_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ..., current_actors: _Optional[_Iterable[_Union[Actor, _Mapping]]] = ...) -> None: ...
+    current_agents: _containers.RepeatedCompositeFieldContainer[Agent]
+    def __init__(self, worker_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ..., current_agents: _Optional[_Iterable[_Union[Agent, _Mapping]]] = ...) -> None: ...
 
-class Actor(_message.Message):
-    __slots__ = ("agent_id", "actor_id", "grit_address")
+class Agent(_message.Message):
+    __slots__ = ("agent_id", "agent_did", "store_address", "capabilities")
+    class CapabilitiesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    ACTOR_ID_FIELD_NUMBER: _ClassVar[int]
-    GRIT_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    STORE_ADDRESS_FIELD_NUMBER: _ClassVar[int]
+    CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    actor_id: bytes
-    grit_address: str
-    def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., grit_address: _Optional[str] = ...) -> None: ...
+    agent_did: str
+    store_address: str
+    capabilities: _containers.ScalarMap[str, str]
+    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ..., store_address: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
-class ActorMessage(_message.Message):
-    __slots__ = ("agent_id", "sender_id", "recipient_id", "message_id")
+class AgentAssignment(_message.Message):
+    __slots__ = ("agent_id", "agent")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    SENDER_ID_FIELD_NUMBER: _ClassVar[int]
-    RECIPIENT_ID_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    AGENT_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    sender_id: bytes
-    recipient_id: bytes
-    message_id: bytes
-    def __init__(self, agent_id: _Optional[bytes] = ..., sender_id: _Optional[bytes] = ..., recipient_id: _Optional[bytes] = ..., message_id: _Optional[bytes] = ...) -> None: ...
-
-class ActorQuery(_message.Message):
-    __slots__ = ("agent_id", "actor_id", "query_id", "query_name", "context")
-    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    ACTOR_ID_FIELD_NUMBER: _ClassVar[int]
-    QUERY_ID_FIELD_NUMBER: _ClassVar[int]
-    QUERY_NAME_FIELD_NUMBER: _ClassVar[int]
-    CONTEXT_FIELD_NUMBER: _ClassVar[int]
-    agent_id: bytes
-    actor_id: bytes
-    query_id: str
-    query_name: str
-    context: bytes
-    def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., query_id: _Optional[str] = ..., query_name: _Optional[str] = ..., context: _Optional[bytes] = ...) -> None: ...
-
-class ActorQueryResult(_message.Message):
-    __slots__ = ("agent_id", "actor_id", "query_id", "tree_id", "blob")
-    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    ACTOR_ID_FIELD_NUMBER: _ClassVar[int]
-    QUERY_ID_FIELD_NUMBER: _ClassVar[int]
-    TREE_ID_FIELD_NUMBER: _ClassVar[int]
-    BLOB_FIELD_NUMBER: _ClassVar[int]
-    agent_id: bytes
-    actor_id: bytes
-    query_id: str
-    tree_id: bytes
-    blob: bytes
-    def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., query_id: _Optional[str] = ..., tree_id: _Optional[bytes] = ..., blob: _Optional[bytes] = ...) -> None: ...
+    agent: Agent
+    def __init__(self, agent_id: _Optional[bytes] = ..., agent: _Optional[_Union[Agent, _Mapping]] = ...) -> None: ...
 
 class ApexToWorkerMessage(_message.Message):
-    __slots__ = ("type", "message", "query", "actor")
+    __slots__ = ("type", "assignment")
     class MessageType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
         __slots__ = ()
         PING: _ClassVar[ApexToWorkerMessage.MessageType]
-        GIVE_ACTOR: _ClassVar[ApexToWorkerMessage.MessageType]
-        YANK_ACTOR: _ClassVar[ApexToWorkerMessage.MessageType]
-        ACTOR_MESSAGE: _ClassVar[ApexToWorkerMessage.MessageType]
-        ACTOR_QUERIE: _ClassVar[ApexToWorkerMessage.MessageType]
+        GIVE_AGENT: _ClassVar[ApexToWorkerMessage.MessageType]
+        YANK_AGENT: _ClassVar[ApexToWorkerMessage.MessageType]
     PING: ApexToWorkerMessage.MessageType
-    GIVE_ACTOR: ApexToWorkerMessage.MessageType
-    YANK_ACTOR: ApexToWorkerMessage.MessageType
-    ACTOR_MESSAGE: ApexToWorkerMessage.MessageType
-    ACTOR_QUERIE: ApexToWorkerMessage.MessageType
+    GIVE_AGENT: ApexToWorkerMessage.MessageType
+    YANK_AGENT: ApexToWorkerMessage.MessageType
     TYPE_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    QUERY_FIELD_NUMBER: _ClassVar[int]
-    ACTOR_FIELD_NUMBER: _ClassVar[int]
+    ASSIGNMENT_FIELD_NUMBER: _ClassVar[int]
     type: ApexToWorkerMessage.MessageType
-    message: ActorMessage
-    query: ActorQuery
-    actor: Actor
-    def __init__(self, type: _Optional[_Union[ApexToWorkerMessage.MessageType, str]] = ..., message: _Optional[_Union[ActorMessage, _Mapping]] = ..., query: _Optional[_Union[ActorQuery, _Mapping]] = ..., actor: _Optional[_Union[Actor, _Mapping]] = ...) -> None: ...
+    assignment: AgentAssignment
+    def __init__(self, type: _Optional[_Union[ApexToWorkerMessage.MessageType, str]] = ..., assignment: _Optional[_Union[AgentAssignment, _Mapping]] = ...) -> None: ...
 
 class WorkerToApexMessage(_message.Message):
-    __slots__ = ("type", "worker_id", "ticket", "message", "query")
+    __slots__ = ("type", "worker_id", "ticket", "manifest", "assignment")
     class MessageType(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
         __slots__ = ()
         PING: _ClassVar[WorkerToApexMessage.MessageType]
         READY: _ClassVar[WorkerToApexMessage.MessageType]
-        ACTOR_MESSAGE: _ClassVar[WorkerToApexMessage.MessageType]
-        ACTOR_QUERIE: _ClassVar[WorkerToApexMessage.MessageType]
+        RETURN_AGENT: _ClassVar[WorkerToApexMessage.MessageType]
     PING: WorkerToApexMessage.MessageType
     READY: WorkerToApexMessage.MessageType
-    ACTOR_MESSAGE: WorkerToApexMessage.MessageType
-    ACTOR_QUERIE: WorkerToApexMessage.MessageType
+    RETURN_AGENT: WorkerToApexMessage.MessageType
     TYPE_FIELD_NUMBER: _ClassVar[int]
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     TICKET_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_FIELD_NUMBER: _ClassVar[int]
-    QUERY_FIELD_NUMBER: _ClassVar[int]
+    MANIFEST_FIELD_NUMBER: _ClassVar[int]
+    ASSIGNMENT_FIELD_NUMBER: _ClassVar[int]
     type: WorkerToApexMessage.MessageType
     worker_id: str
     ticket: str
-    message: ActorMessage
-    query: ActorQuery
-    def __init__(self, type: _Optional[_Union[WorkerToApexMessage.MessageType, str]] = ..., worker_id: _Optional[str] = ..., ticket: _Optional[str] = ..., message: _Optional[_Union[ActorMessage, _Mapping]] = ..., query: _Optional[_Union[ActorQuery, _Mapping]] = ...) -> None: ...
+    manifest: WorkerManifest
+    assignment: AgentAssignment
+    def __init__(self, type: _Optional[_Union[WorkerToApexMessage.MessageType, str]] = ..., worker_id: _Optional[str] = ..., ticket: _Optional[str] = ..., manifest: _Optional[_Union[WorkerManifest, _Mapping]] = ..., assignment: _Optional[_Union[AgentAssignment, _Mapping]] = ...) -> None: ...
