@@ -22,7 +22,8 @@ message WorkerRegistrationResponse {
 message WorkerManifest{
   string worker_id = 1;
   map<string, string> capabilities = 10; //what capabilities can it satisfy
-  repeated Agent current_agents = 20;
+  repeated Agent current_agents = 20; //not allowed to have any workers in it on READY (aka connect)
+  repeated bytes desired_agents = 21; //the agents that the worker wants to have (maybe because it had them previosuly, local caches, etc)
   //capacity, load, etc so that apex can decide where to send agents
 }
 

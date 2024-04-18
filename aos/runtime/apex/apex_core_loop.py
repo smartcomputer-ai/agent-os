@@ -100,6 +100,14 @@ class AgentInfo:
             agent_did=self.agent_did,
             store_address=self.store_address,
             capabilities={k:v for k,v in self.capabilities.items()})
+    
+    def to_apex_worker_agent(self):
+        return apex_workers_pb2.Agent(
+            agent_id=self.agent_id,
+            agent_did=self.agent_did,
+            store_address=self.store_address,
+            capabilities={k:v for k,v in self.capabilities.items()})
+    
 
 @dataclass(slots=True)
 class ApexCoreState:
@@ -237,6 +245,7 @@ class ApexCoreLoop:
     class _RebalanceAgentsEvent:
         new_workers:list[WorkerId]|None = None
         removed_workers:list[WorkerId]|None = None
+        desired_agents:dict[AgentId, WorkerId]|None = None
 
     # @dataclass(frozen=True, slots=True)
     # class _RouteMessageEvent:
@@ -426,36 +435,22 @@ class ApexCoreLoop:
         elif loop_state.workers[event.worker_id].ticket != event.ticket:
             logger.warning(f"WorkerConnectedEvent: Worker {event.worker_id} trying to connect with wrong ticket, closing connection.")
             event.to_worker_queue.put_nowait(None)
+        elif event.manifest.current_agents is not None:
+            logger.error(f"WorkerConnectedEvent: Worker {event.worker_id} sent current agents, but this is not allowed on connect, must be empty, see proto file.")
+            event.to_worker_queue.put_nowait(None)
+            loop_state.remove_worker(event.worker_id)
         else:
             loop_state.set_worker_connect(event.worker_id, event.manifest.capabilities, event.to_worker_queue)
 
-            if event.manifest.current_agents is not None:
-                current_agent_ids = set([agent.agent_id for agent in event.manifest.current_agents])
-                #check if any agents are assigned to this worker, but are not in our started agent list
-                for agent in event.manifest.current_agents:
-                    agents_to_yank = []
-                    if agent.agent_id not in loop_state.agents:
-                        logger.warning(f"WorkerConnectedEvent: Worker {event.worker_id} has agent {agent.agent_id.hex()} in its current list, but apex does not have it in the started agent list.")
-                        agents_to_yank.append(agent)
-
-                    if agent.agent_id in loop_state.assigned_agents and loop_state.assigned_agents[agent.agent_id] != event.worker_id:
-                        logger.warning(f"WorkerConnectedEvent: Worker {event.worker_id} has agent {agent.agent_id.hex()} in its current list, but apex has it assigned to worker {loop_state.assigned_agents[agent.agent_id]}.")
-                        agents_to_yank.append(agent)
-
-                    for agent in agents_to_yank:
-                        #send a yank message to the worker
-                        await event.to_worker_queue.put(apex_workers_pb2.ApexToWorkerMessage(
-                            type=apex_workers_pb2.ApexToWorkerMessage.YANK_AGENT,
-                            assignment=apex_workers_pb2.AgentAssignment(agent_id=agent.agent_id, agent=agent)))
-                        current_agent_ids.remove(agent.agent_id)
-
-                #for the remaining, mark that these agents run on this worker
-                for agent_id in list(current_agent_ids):
-                    logger.info(f"WorkerConnectedEvent: Worker {event.worker_id} has agent {agent_id.hex()} in its current list, maintaining assignment to the worker.")
-                    loop_state.assign_agent_to_worker(agent_id, event.worker_id)
+            #see if the worker requested any agents to run
+            desired_agent_ids = None
+            if event.manifest.desired_agents is not None:
+                desired_agent_ids = {agent.agent_id:event.worker_id for agent in event.manifest.desired_agents}
 
             #add rebalance event since there is now a new worker
-            await self._event_queue.put(self._RebalanceAgentsEvent(new_workers=[event.worker_id]))
+            await self._event_queue.put(self._RebalanceAgentsEvent(
+                new_workers=[event.worker_id], 
+                desired_agents=desired_agent_ids))
             logger.info(f"WorkerConnectedEvent: Worker {event.worker_id} connected.")
 
 
@@ -476,25 +471,43 @@ class ApexCoreLoop:
     async def _handle_rebalance_agents(self, event:_RebalanceAgentsEvent, loop_state:ApexCoreState):
         # in this first version, we'll just assign the agents to the workers that have the least agents
         # this is not optimal, but it's a start
-        workers = loop_state.workers.values()
+        workers = [w for w in loop_state.workers.values() if w.is_connected()]
         agents_to_assign = loop_state.unassigned_agents.keys()
 
         #logger.warning(f"RebalanceAgentsEvent: Rebalancing {len(agents_to_assign)} agents to {len(workers)} workers.")
 
+        async def give_agent(agent_id, worker_id):
+            loop_state.assign_agent_to_worker(agent_id, worker_id)
+            await loop_state.workers[worker_id].to_worker_queue.put(apex_workers_pb2.ApexToWorkerMessage(
+                type=apex_workers_pb2.ApexToWorkerMessage.GIVE_AGENT,
+                assignment=apex_workers_pb2.AgentAssignment(
+                    agent_id=agent_id, 
+                    agent=loop_state.agents[agent_id].to_apex_worker_agent())))
+            logger.info(f"RebalanceAgentsEvent: Agent {agent_id.hex()} assigned to worker {selected_worker_id}.")
+        
         for agent_id in agents_to_assign:
+            #if the worker requested the agent, assign it right away (greedy)
+            if event.desired_agents is not None and agent_id in event.desired_agents:
+                selected_worker_id = event.desired_agents[agent_id]
+                await give_agent(agent_id, selected_worker_id)                
+                continue
+
             #if the time since unassigned is too short, skip
             if time.perf_counter() - loop_state.unassigned_agents[agent_id] < self._assign_time_delay_secods:
                 continue
+
             #TODO: find the workers that match the capabilities of the agent
             matching_workers = workers
             if len(matching_workers) == 0:
                 logger.warning(f"RebalanceAgentsEvent: No workers available to assign agent {agent_id.hex()}.")
                 continue
+
             #find the worker with the least agents
             selected_worker_id = min(matching_workers, key=lambda w: len(w.current_agents)).worker_id
-            loop_state.assign_agent_to_worker(agent_id, selected_worker_id)
-            logger.info(f"RebalanceAgentsEvent: Agent {agent_id.hex()} assigned to worker {selected_worker_id}.")
+            await give_agent(agent_id, selected_worker_id)                
+
         loop_state.last_rebalance_time = time.perf_counter()
+
 
     async def _handle_start_agent(self, event:_StartAgentEvent, loop_state:ApexCoreState, store_client:StoreClient):
         #check if already running

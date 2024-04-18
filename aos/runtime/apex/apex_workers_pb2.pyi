@@ -19,7 +19,7 @@ class WorkerRegistrationResponse(_message.Message):
     def __init__(self, ticket: _Optional[str] = ...) -> None: ...
 
 class WorkerManifest(_message.Message):
-    __slots__ = ("worker_id", "capabilities", "current_agents")
+    __slots__ = ("worker_id", "capabilities", "current_agents", "desired_agents")
     class CapabilitiesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -30,10 +30,12 @@ class WorkerManifest(_message.Message):
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     CURRENT_AGENTS_FIELD_NUMBER: _ClassVar[int]
+    DESIRED_AGENTS_FIELD_NUMBER: _ClassVar[int]
     worker_id: str
     capabilities: _containers.ScalarMap[str, str]
     current_agents: _containers.RepeatedCompositeFieldContainer[Agent]
-    def __init__(self, worker_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ..., current_agents: _Optional[_Iterable[_Union[Agent, _Mapping]]] = ...) -> None: ...
+    desired_agents: _containers.RepeatedScalarFieldContainer[bytes]
+    def __init__(self, worker_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ..., current_agents: _Optional[_Iterable[_Union[Agent, _Mapping]]] = ..., desired_agents: _Optional[_Iterable[bytes]] = ...) -> None: ...
 
 class Agent(_message.Message):
     __slots__ = ("agent_id", "agent_did", "store_address", "capabilities")

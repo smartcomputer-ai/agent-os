@@ -17,21 +17,77 @@ logger = logging.getLogger(__name__)
 
 AgentId = ActorId #the agent is defined by the id of the root actor, so technically, it's an actor id too
 
+
 @dataclass(slots=True, frozen=True)
 class WorkerState:
-
     capabilities: dict[str, str] = field(default_factory=dict)
     store_clients: dict[str, StoreClient] = field(default_factory=dict)
     assigned_agents: dict[AgentId, apex_workers_pb2.Agent] = field(default_factory=dict)
     runtimes: dict[AgentId, Runtime] = field(default_factory=dict)
+    runtime_tasks: dict[AgentId, asyncio.Task] = field(default_factory=dict)
+
+    
+async def run_worker(worker_id:str=None, apex_address:str="localhost:50052"):
+    if worker_id is None:
+        worker_id = os.getenv("WORKER_ID", None)
+        if worker_id is None:
+            #create a random worker id
+            worker_id = f"worker-{os.urandom(8).hex()}"
+
+    logger.info(f"Starting worker: {worker_id}")
+
+    previously_assigned_agents:list[AgentId]|None = None
+    #outer loop of worker is trying to maintain a connection to the apex server
+    #TODO
+    while True:
+        #todo: but connect into loop
+        client = ApexClient(apex_address)
+        await client.wait_for_async_channel_ready()
+
+        worker_stub = client.get_apex_workers_stub_async()
+
+        #register worker
+        register_response = await worker_stub.RegisterWorker(apex_workers_pb2.WorkerRegistrationRequest(worker_id=worker_id))
+        #the ticket is needed to connect to the apex-worker duplex stream
+        ticket = register_response.ticket
+        to_apex_queue:asyncio.Queue[apex_workers_pb2.WorkerToApexMessage] = asyncio.Queue()
+
+        #convert the queue to an iterator (which is what the gRPC api expects)
+        # cancel the queue/iterator by adding a None item
+        async def to_apex_iterator(queue:asyncio.Queue) -> AsyncIterator:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+
+        #connect to the duplex stream
+        logger.info(f"Worker: Connecting to apex...")
+        to_worker_iterator:AsyncIterator[apex_workers_pb2.ApexToWorkerMessage] = worker_stub.ConnectWorker(to_apex_iterator(to_apex_queue))
+        logger.info(f"Worker: Connected to apex, starting worker loop.")
+        previously_assigned_agents = await _worker_loop(
+            worker_id,
+            ticket,
+            to_apex_queue,
+            to_worker_iterator,
+            previously_assigned_agents)
+        
+        #this will close the iterator to the apex server
+        await to_apex_queue.put(None)
+        logger.info(f"Worker: Apex connection was closed, will try to reconnect.")
+
+    
 
 async def _worker_loop(
         worker_id:str,
         ticket:str,
-        worker_state:WorkerState,
         to_apex_queue:asyncio.Queue[apex_workers_pb2.WorkerToApexMessage],
-        to_worker_iterator:AsyncIterator[apex_workers_pb2.WorkerToApexMessage]):
+        to_worker_iterator:AsyncIterator[apex_workers_pb2.ApexToWorkerMessage],
+        previously_assigned_agents:list[AgentId]|None = None,
+        ):
     
+    worker_state = WorkerState()
+
     #connect with apex by sending a READY message
     await to_apex_queue.put(apex_workers_pb2.WorkerToApexMessage(
         type=apex_workers_pb2.WorkerToApexMessage.READY,
@@ -40,18 +96,28 @@ async def _worker_loop(
         manifest=apex_workers_pb2.WorkerManifest(
             worker_id=worker_id,
             capabilities=worker_state.capabilities,
-            current_agents=list(worker_state.assigned_agents.values()))))
+            desired_agents=previously_assigned_agents)))
 
+    #this iterator will end when the connection to the apex server is closed
     async for message in to_worker_iterator:
         if message.type == apex_workers_pb2.ApexToWorkerMessage.PING:
-            logger.info(f"Received ping from apex")
+            logger.info(f"Worker: Received ping from apex")
         elif message.type == apex_workers_pb2.ApexToWorkerMessage.GIVE_AGENT:
             await _handle_give_agent(worker_state, message.assignment.agent)
+        elif message.type == apex_workers_pb2.ApexToWorkerMessage.YANK_AGENT:
+            await _handle_yank_agent(worker_state, message.assignment.agent_id)
+
+    assigned_agent_ids = list(worker_state.assigned_agents.keys())
+    #TODO cleanup worker state
+    # close all runtimes, etc
+
+    #so the worker can request them in the next connect loop again
+    return assigned_agent_ids
 
 
 async def _handle_give_agent(worker_state:WorkerState, agent:apex_workers_pb2.Agent):
     agent_id:AgentId = agent.agent_id
-    logger.info(f"Received agent {agent_id.hex()} ({agent.agent_did})")
+    logger.info(f"Worker: Received agent {agent_id.hex()} ({agent.agent_did}), will run it...")
     worker_state.assigned_agents[agent_id] = agent
     #create a store client for the agent
     store_address = agent.store_address
@@ -71,39 +137,30 @@ async def _handle_give_agent(worker_state:WorkerState, agent:apex_workers_pb2.Ag
     runtime = Runtime(object_store, references, agent.agent_did)
     worker_state.runtimes[agent_id] = runtime
 
-    #TODO: use a runtime wrapper (contains task, stores, etc)
-    #start the runtime
-    #AS TASK
-    await runtime.start()
+    runtime_task = asyncio.create_task(runtime.start())
+    worker_state.runtime_tasks[agent_id] = runtime_task
+    logger.info(f"Worker: Started runtime for {agent_id.hex()} ({agent.agent_did}).")
 
 
-async def run_worker(worker_id:str=None, apex_address:str="localhost:50052"):
-    if worker_id is None:
-        worker_id = os.getenv("WORKER_ID", None)
-        if worker_id is None:
-            #create a random worker id
-            worker_id = f"worker-{os.urandom(8).hex()}"
-
-    logger.info(f"Starting worker: {worker_id}")
-
-    #outer loop of worker is trying to maintain a connection to the apex server
-    #TODO
-    client = ApexClient(apex_address)
-    await client.wait_for_async_channel_ready()
-    worker_stub = client.get_apex_workers_stub_async()
-
-    #register worker
-    register_response = await worker_stub.RegisterWorker(apex_workers_pb2.WorkerRegistrationRequest(worker_id=worker_id))
-    #the ticket is needed to connect to the apex-worker duplex stream
-    ticket = register_response.ticket
-    to_apex_queue:asyncio.Queue[apex_workers_pb2.WorkerToApexMessage] = asyncio.Queue()
-    worker_state = WorkerState()
-
+async def _handle_yank_agent(worker_state:WorkerState, agent_id:AgentId):
+    if agent_id not in worker_state.assigned_agents:
+        logger.error(f"Worker: Tried to yank agent {agent_id.hex()}, but it is currently not running on this worker.")
+        return
     
+    logger.info(f"Worker: Yanking agent {agent_id.hex()}, will stop it...")
 
-    #connect to the duplex stream
-    stream = worker_stub.ConnectWorker()
+    runtime = worker_state.runtimes[agent_id]
+    runtime_task = worker_state.runtime_tasks[agent_id]
+    runtime.stop()
+    try:
+        await asyncio.wait_for(runtime_task, 2.0)
+    except asyncio.TimeoutError as e:
+        raise Exception(f"Worker: timeout while stopping runtime for agent {agent_id.hex()}.") from e
 
+    del worker_state.runtime_tasks[agent_id]
+    del worker_state.runtimes[agent_id]
+    del worker_state.assigned_agents[agent_id]
+    logger.info(f"Worker: Stopped runtime for {agent_id.hex()}.")
 
 
 
