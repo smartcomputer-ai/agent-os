@@ -65,7 +65,7 @@ class AgentStore(agent_store_pb2_grpc.AgentStoreServicer):
         return google_dot_protobuf_dot_empty__pb2.Empty()
     
 
-async def start_server(grit_dir:str, port:str="50051") -> Server:
+async def start_server(grit_dir:str, port:str="50051"):
     lmdb_backend = LmdbBackend(grit_dir, writemap=True)
     #kind of a hack to switch from asyc to sync lmdb handling (which is mostly sync)
     server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=10))
@@ -73,10 +73,10 @@ async def start_server(grit_dir:str, port:str="50051") -> Server:
     agent_store_pb2_grpc.add_AgentStoreServicer_to_server(AgentStore(lmdb_backend), server)
     server.add_insecure_port("[::]:" + port)
     await server.start()
+    await server.wait_for_termination()
     print("Server started, listening on " + port)
-    return server
 
-def start_server_sync(grit_dir:str, port:str="50051") -> Server:
+def start_server_sync(grit_dir:str, port:str="50051"):
     lmdb_backend = LmdbBackend(grit_dir, writemap=True)
     #kind of a hack to switch from asyc to sync lmdb handling (which is mostly sync)
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
@@ -84,8 +84,8 @@ def start_server_sync(grit_dir:str, port:str="50051") -> Server:
     agent_store_pb2_grpc.add_AgentStoreServicer_to_server(AgentStore(lmdb_backend), server)
     server.add_insecure_port("[::]:" + port)
     server.start()
+    server.wait_for_termination()
     print("Server started, listening on " + port)
-    return server
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
@@ -101,4 +101,3 @@ if __name__ == "__main__":
         print("deleting /tmp/aos_store")
         os.system("rm -rf /tmp/aos_store")
     server = start_server_sync("/tmp/aos_store")
-    server.wait_for_termination()

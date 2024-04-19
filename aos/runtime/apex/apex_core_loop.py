@@ -357,7 +357,7 @@ class ApexCoreLoop:
         loop_state = ApexCoreState()
         #try to connect to the store server
         store_client = StoreClient(self._store_address)
-        store_client.wait_for_async_channel_ready(timeout_seconds=30*60) #30 minutes
+        await store_client.wait_for_async_channel_ready(timeout_seconds=30*60) #30 minutes
         # gather started agents, their actors, and unprocessed messages
         await self._gather_started_agents(loop_state, store_client)
         #first copy of the state
@@ -386,6 +386,15 @@ class ApexCoreLoop:
 
             elif isinstance(event, self._RebalanceAgentsEvent):
                 await self._handle_rebalance_agents(event, loop_state)
+
+            elif isinstance(event, self._StartAgentEvent):
+                await self._handle_start_agent(event, loop_state, store_client)
+
+            elif isinstance(event, self._StopAgentEvent):
+                await self._handle_stop_agent(event, loop_state, store_client)
+
+            else:
+                logger.warning(f"Apex core loop: Unknown event type {type(event)}.")
 
             if loop_state.is_dirty:
                 await self._make_state_copy(loop_state)
@@ -563,7 +572,8 @@ class ApexCoreLoop:
         self._ensure_running()
         event = self._StartAgentEvent(agent_id)
         await self._event_queue.put(event)
-        await event.wait_for_completion()
+        print("started agent")
+        #await event.wait_for_completion()
 
 
     async def stop_agent(self, agent_id:AgentId):

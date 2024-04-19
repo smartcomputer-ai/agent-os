@@ -32,10 +32,13 @@ class ApexApi(apex_api_pb2_grpc.ApexApiServicer):
         )
 
     async def StartAgent(self, request: apex_api_pb2.StartAgentRequest, context):
+        print("StartAgent in apex server")
         await self.core_loop.start_agent(request.agent_id)
+        return apex_api_pb2.StartAgentResponse()
 
     async def StopAgent(self, request: apex_api_pb2.StopAgentRequest, context):
         await self.core_loop.stop_agent(request.agent_id)
+        return apex_api_pb2.StopAgentResponse()
 
     async def InjectMessage(self, request: apex_api_pb2.InjectMessageRequest, context):
         raise NotImplementedError()
