@@ -1,8 +1,9 @@
 import os
 
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit import *
-from src.runtime import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.grit import *
+from aos.wit import *
+from aos.runtime.core import *
 import helpers_runtime as helpers
 
 async def test_run_empty():
@@ -15,7 +16,7 @@ async def test_run_empty():
     await running_task
 
     #there should be the agent actor (representing the runtime)
-    agent_id = await refs.get(ref_runtime_agent())
+    agent_id = await refs.get(ref_root_actor())
     assert agent_id is not None
     agent_core = await store.load(agent_id)
     assert agent_core is not None

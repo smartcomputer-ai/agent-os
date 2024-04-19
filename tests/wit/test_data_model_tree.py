@@ -1,9 +1,9 @@
 import os
 
 import pytest
-from src.grit import *
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit.data_model import *
+from aos.grit import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit.data_model import *
 
 async def test_tree__get_set_persist():
     store = MemoryObjectStore()

@@ -1,6 +1,6 @@
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit import *
-from src.runtime import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit import *
+from aos.runtime.core import *
 import helpers_runtime as helpers
 
 # A broader end-to-end test that makes sure the runtime applies pending messages:

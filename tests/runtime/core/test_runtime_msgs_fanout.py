@@ -1,8 +1,8 @@
 import time
-from src.wit import *
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit.data_model import *
-from src.runtime import *
+from aos.wit import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit.data_model import *
+from aos.runtime.core import *
 import helpers_runtime as helpers
 
 # A broader end-to-end test with fanout pattern:

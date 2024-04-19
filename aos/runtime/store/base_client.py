@@ -2,6 +2,7 @@ from __future__ import print_function
 import asyncio
 import grpc
 import logging
+import time
 from concurrent import futures
 
 class BaseClient:
@@ -11,14 +12,21 @@ class BaseClient:
         # however, opening two channels is okay, because, appratenly, there is something called a "sun channel"
         # wich is a shared resource between the two client channels (if their configuration is the same)
         # see: https://stackoverflow.com/a/62761510 (last comment)
-        self.channel_async = grpc.aio.insecure_channel(self.server_address)
+        self.channel_async = grpc.aio.insecure_channel(
+            self.server_address,
+            # options=[
+            #     #("grpc.enable_retries", 0),
+            #     ("grpc.min_reconnect_backoff_ms", 5000),
+            #     ("grpc.max_reconnect_backoff_ms", 10000),
+            # ])
+        )
         self.channel_sync = grpc.insecure_channel(self.server_address)
 
-    async def wait_for_async_channel_ready(self):
-        await self.channel_async.channel_ready()
-        state = self.channel_async.get_state(try_to_connect=True)
-        print(f"Channel state: {state}")
-
+    async def wait_for_async_channel_ready(self, timeout_seconds:float=3000):
+        try:
+            await asyncio.wait_for(self.channel_async.channel_ready(), timeout_seconds)
+        except asyncio.TimeoutError as e:
+            raise asyncio.TimeoutError(f"{type(self).__name__}: Timeout waiting for {timeout_seconds} seconds for channel to be ready.") from e
 
     def get_channel_sync(self):
         return self.channel_sync
@@ -29,34 +37,3 @@ class BaseClient:
     async def close(self, grace_period=1.0):
         await self.channel_async.close(grace_period)
         self.channel_sync.close()
-
-    @classmethod
-    async def get_connected_client_with_retry(cls, 
-            server_address,
-            max_retries=5, 
-            retry_interval_seconds=5.0,
-            logger:logging.Logger=None):
-        client_name = cls.__name__        
-        if logger:
-            logger.info(f"{client_name}: Connecting to server '{server_address}'...")
-        tries = 0
-        while True:
-            tries += 1
-            try:
-                print("connect 1")
-                client = cls(server_address)
-                print("connect 2")
-                await client.wait_for_async_channel_ready()
-                print("connect 3")
-                if logger:
-                    logger.info(f"{client_name}: Connected server '{server_address}' after {tries} try(ies).")
-                return client
-            except grpc.aio.AioRpcError as e:
-                if tries >= max_retries:
-                    if logger:
-                        logger.error(f"{client_name}: Max retries reached trying to connect to server, giving up.")
-                    raise e
-                else:
-                    if logger:
-                        logger.warning(f"{client_name}: Was not able to connect to server '{server_address}', will try again in {retry_interval_seconds} seconds, {(max_retries-tries)} tries left. gRPC code: {str(e.code())}")
-                    await asyncio.sleep(retry_interval_seconds)

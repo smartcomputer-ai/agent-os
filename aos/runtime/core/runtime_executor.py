@@ -210,7 +210,7 @@ async def remove_offline_message_from_runtime_outbox(
     return new_step_id
 
 def agent_id_from_name(agent_name:str) -> ActorId:
-    import grit.object_serialization as ser
+    import aos.grit.object_serialization as ser
     name_blob = Blob({'ct': 's'}, agent_name.encode('utf-8'))
     name_blob_id = ser.get_object_id(ser.blob_to_bytes(name_blob))
     core = {'name': name_blob_id}

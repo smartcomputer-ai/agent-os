@@ -127,7 +127,7 @@ async def start_server(
     
     #start core loop
     core_loop = ApexCoreLoop(store_address, node_id, assign_time_delay_secods)
-    running_task = asyncio.create_task(core_loop.start())
+    core_loop_task = asyncio.create_task(core_loop.start())
     await core_loop.wait_until_running()
 
     #start server
@@ -136,13 +136,20 @@ async def start_server(
     apex_workers_pb2_grpc.add_ApexWorkersServicer_to_server(ApexWorkers(core_loop), server)
     server.add_insecure_port("[::]:" + port)
     await server.start()
+    server_task = asyncio.create_task(server.wait_for_termination())
     print("Server started, listening on " + port)
-    return server
+    await asyncio.wait([core_loop_task, server_task], return_when=asyncio.FIRST_COMPLETED)
+    core_loop.stop()
+    await asyncio.wait_for(core_loop_task, 0.5)
+    await server.stop(0.5)
+    await server_task
+    print("Server stopped.")
 
+
+# how to do graceful shutdown 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     async def arun():
-        server = await start_server()
-        await server.wait_for_termination()
+        await start_server()
     asyncio.run(arun())

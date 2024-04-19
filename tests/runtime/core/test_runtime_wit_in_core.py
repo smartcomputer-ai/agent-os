@@ -1,15 +1,15 @@
 import os
 import time
-from src.wit import *
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.grit.tree_helpers import *
-from src.wit.data_model import *
-from src.runtime import *
+from aos.wit import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.grit.tree_helpers import *
+from aos.wit.data_model import *
+from aos.runtime.core import *
 
 # A broader end-to-end test where the wits are executed from inside the core
 wit_a_async = """
-from grit import *
-from wit import *
+from aos.grit import *
+from aos.wit import *
 
 wit = Wit()
 @wit.run_wit
@@ -20,8 +20,8 @@ async def wit_a_async(inbox:Inbox, outbox:Outbox, core:Core) -> None:
 """
 
 wit_a_async_updated = """
-from grit import *
-from wit import *
+from aos.grit import *
+from aos.wit import *
 
 wit = Wit()
 @wit.run_wit

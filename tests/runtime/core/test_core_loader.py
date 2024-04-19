@@ -3,12 +3,12 @@ import time
 import importlib
 
 import pytest
-from src.wit import *
-from src.grit import *
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit.data_model import *
-from src.runtime import *
-from runtime.core_loader import *
+from aos.wit import *
+from aos.grit import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit.data_model import *
+from aos.runtime import *
+from aos.runtime.core.core_loader import *
 import helpers_runtime as helpers
 
 helper_py = """

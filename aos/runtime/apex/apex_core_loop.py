@@ -356,7 +356,8 @@ class ApexCoreLoop:
         logger.info("Starting apex core loop")
         loop_state = ApexCoreState()
         #try to connect to the store server
-        store_client = await StoreClient.get_connected_client_with_retry(self._store_address, logger=logger)
+        store_client = StoreClient(self._store_address)
+        store_client.wait_for_async_channel_ready(timeout_seconds=30*60) #30 minutes
         # gather started agents, their actors, and unprocessed messages
         await self._gather_started_agents(loop_state, store_client)
         #first copy of the state

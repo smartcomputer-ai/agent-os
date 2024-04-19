@@ -1,10 +1,10 @@
 import os
 
-from src.grit import *
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit import *
-from runtime import *
-from runtime.actor_executor import ActorExecutor
+from aos.grit import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit import *
+from aos.runtime.core.runtime import *
+from aos.runtime.core.actor_executor import ActorExecutor
 import helpers_runtime as helpers
     
 

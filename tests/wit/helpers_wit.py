@@ -1,8 +1,7 @@
 import os
 
-from src.runtime.actor_executor import MailboxUpdate
-from src.grit import *
-from src.wit import *
+from aos.grit import *
+from aos.wit import *
 
 def get_random_actor_id() -> ActorId:
     return get_object_id(os.urandom(20))

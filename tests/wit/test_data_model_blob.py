@@ -1,7 +1,7 @@
 import os
-from src.grit import *
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit.data_model import *
+from aos.grit import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit.data_model import *
 
 async def test_blob__get_set_persist__bytes():
     store = MemoryObjectStore()

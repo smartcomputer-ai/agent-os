@@ -1,6 +1,6 @@
 import pytest
-from src.grit.stores.memory import MemoryObjectStore
-from src.wit import *
+from aos.grit.stores.memory import MemoryObjectStore
+from aos.wit import *
 import helpers_wit as helpers
 
 async def setup_call_and_test(wit:Wit, content:str|BlobObject|TreeObject=None, mt:str=None):

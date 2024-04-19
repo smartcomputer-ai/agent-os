@@ -1,10 +1,10 @@
 import os
 import time
-from src.wit import *
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.grit.tree_helpers import *
-from src.wit.data_model import *
-from src.runtime import *
+from aos.wit import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.grit.tree_helpers import *
+from aos.wit.data_model import *
+from aos.runtime.core import *
 
 def wit_sync(last_step_id:StepId, new_inbox:Mailbox, **kwargs) -> StepId:
     print("wit_sync, called")

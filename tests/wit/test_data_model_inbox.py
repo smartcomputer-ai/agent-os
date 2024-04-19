@@ -1,7 +1,7 @@
 import os
-from src.grit import *
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit.data_model import *
+from aos.grit import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit.data_model import *
 
 def get_random_actor_id() -> ActorId:
     return get_object_id(os.urandom(20))

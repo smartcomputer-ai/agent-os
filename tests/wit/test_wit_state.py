@@ -1,6 +1,6 @@
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit import *
-from src.runtime import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit import *
+from aos.runtime import *
 import helpers_wit as helpers
 
 class MoreData:

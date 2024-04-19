@@ -32,5 +32,8 @@ Step = NamedTuple("Step",
 
 Object = Blob | Tree | Message | Mailbox | Step
 
+# Few more type helpers that are used throughout
+MailboxUpdate = tuple[ActorId, ActorId, MessageId] # sender_id, recipient_id, message_id
+AgentId = ActorId # the agent is defined by the id of the root actor
 
 
