@@ -2,6 +2,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 import asyncio
+import time
+import grpc
 from aos.grit import *
 from aos.wit import *
 from aos.runtime.core import *
@@ -27,7 +29,20 @@ class WorkerState:
     runtime_tasks: dict[AgentId, asyncio.Task] = field(default_factory=dict)
 
     
-async def run_worker(worker_id:str=None, apex_address:str="localhost:50052"):
+async def run_worker(
+        worker_id:str=None, 
+        apex_address:str="localhost:50052",
+        cancel_token:asyncio.Event=None
+        ):
+    """Run's a worker that connects to the apex server and runs agents.
+    
+    How is the worker cancelled/closed?
+    When the cancellation token is set, to_apex_iterator terminates, which results in the worker->apex stream to be closed.
+    On the apex server side, this is also detected and the worker is unregistered and cleaned up, which results in the apex->worker stream to be closed,
+    which terminates the async iterator in the _worker_loop function.
+    """
+    
+    # see if a worker id needs to be generated
     if worker_id is None:
         worker_id = os.getenv("WORKER_ID", None)
         if worker_id is None:
@@ -36,47 +51,49 @@ async def run_worker(worker_id:str=None, apex_address:str="localhost:50052"):
 
     logger.info(f"Starting worker: {worker_id}")
 
+    # if not cancel token is provided, create one
+    if cancel_token is None:
+        cancel_token = asyncio.Event()
+
     previously_assigned_agents:list[AgentId]|None = None
     #outer loop of worker is trying to maintain a connection to the apex server
-    #TODO
-    while True:
+    
+    while not cancel_token.is_set():
         #todo: but connect into loop
-        client = ApexClient(apex_address)
-        await client.wait_for_async_channel_ready()
-
+        client = await ApexClient.get_connected_client_with_retry(apex_address, logger=logger)
         worker_stub = client.get_apex_workers_stub_async()
 
-        #register worker
-        register_response = await worker_stub.RegisterWorker(apex_workers_pb2.WorkerRegistrationRequest(worker_id=worker_id))
-        #the ticket is needed to connect to the apex-worker duplex stream
-        ticket = register_response.ticket
-        to_apex_queue:asyncio.Queue[apex_workers_pb2.WorkerToApexMessage] = asyncio.Queue()
+        try:
+            #register worker
+            register_response = await worker_stub.RegisterWorker(apex_workers_pb2.WorkerRegistrationRequest(worker_id=worker_id))
+            #the ticket is needed to connect to the apex-worker duplex stream
+            ticket = register_response.ticket
+            to_apex_queue:asyncio.Queue[apex_workers_pb2.WorkerToApexMessage] = asyncio.Queue()
 
-        #convert the queue to an iterator (which is what the gRPC api expects)
-        # cancel the queue/iterator by adding a None item
-        async def to_apex_iterator(queue:asyncio.Queue) -> AsyncIterator:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield item
 
-        #connect to the duplex stream
-        logger.info(f"Worker: Connecting to apex...")
-        to_worker_iterator:AsyncIterator[apex_workers_pb2.ApexToWorkerMessage] = worker_stub.ConnectWorker(to_apex_iterator(to_apex_queue))
-        logger.info(f"Worker: Connected to apex, starting worker loop.")
-        previously_assigned_agents = await _worker_loop(
-            worker_id,
-            ticket,
-            to_apex_queue,
-            to_worker_iterator,
-            previously_assigned_agents)
+            #connect to the duplex stream
+            logger.info(f"Worker: Connecting to apex...")
+            to_worker_iterator:AsyncIterator[apex_workers_pb2.ApexToWorkerMessage] = worker_stub.ConnectWorker(
+                queue_to_cancellable_async_iterator(to_apex_queue, cancel_token))
+            logger.info(f"Worker: Connected to apex, starting worker loop.")
+            previously_assigned_agents = await _worker_loop(
+                worker_id,
+                ticket,
+                to_apex_queue,
+                to_worker_iterator,
+                previously_assigned_agents)
+        except grpc.aio.AioRpcError as e:
+            logger.warning(f"Worker: Connection to apex failed: {e.code()}: {e.details()}")
+        except Exception as e:
+            logger.error(f"Worker: Error in worker loop: {e}")
+            raise
         
         #this will close the iterator to the apex server
         await to_apex_queue.put(None)
-        logger.info(f"Worker: Apex connection was closed, will try to reconnect.")
+        await client.close()
+        await asyncio.sleep(0.5)
+        logger.info(f"Worker: Apex connection was closed.")
 
-    
 
 async def _worker_loop(
         worker_id:str,
@@ -99,20 +116,27 @@ async def _worker_loop(
             desired_agents=previously_assigned_agents)))
 
     #this iterator will end when the connection to the apex server is closed
-    async for message in to_worker_iterator:
-        if message.type == apex_workers_pb2.ApexToWorkerMessage.PING:
-            logger.info(f"Worker: Received ping from apex")
-        elif message.type == apex_workers_pb2.ApexToWorkerMessage.GIVE_AGENT:
-            await _handle_give_agent(worker_state, message.assignment.agent)
-        elif message.type == apex_workers_pb2.ApexToWorkerMessage.YANK_AGENT:
-            await _handle_yank_agent(worker_state, message.assignment.agent_id)
+    try:
+        async for message in to_worker_iterator:
+            if message.type == apex_workers_pb2.ApexToWorkerMessage.PING:
+                logger.info(f"Worker: Received ping from apex")
+            elif message.type == apex_workers_pb2.ApexToWorkerMessage.GIVE_AGENT:
+                await _handle_give_agent(worker_state, message.assignment.agent)
+            elif message.type == apex_workers_pb2.ApexToWorkerMessage.YANK_AGENT:
+                await _handle_yank_agent(worker_state, message.assignment.agent_id)
+    except grpc.aio.AioRpcError as e:
+        logger.warning(f"Worker: Connection to apex was closed: {e.code()}: {e.details()}")
+    except Exception as e:
+        logger.error(f"Worker: Error in worker loop: {e}")
+        raise
+    finally:
+        logger.info(f"Worker: Cleaning up worker state...")
+        assigned_agent_ids = list(worker_state.assigned_agents.keys())
+        #TODO cleanup worker state
+        # close all runtimes, etc
 
-    assigned_agent_ids = list(worker_state.assigned_agents.keys())
-    #TODO cleanup worker state
-    # close all runtimes, etc
-
-    #so the worker can request them in the next connect loop again
-    return assigned_agent_ids
+        #so the worker can request them in the next connect loop again
+        return assigned_agent_ids
 
 
 async def _handle_give_agent(worker_state:WorkerState, agent:apex_workers_pb2.Agent):
@@ -162,8 +186,33 @@ async def _handle_yank_agent(worker_state:WorkerState, agent_id:AgentId):
     del worker_state.assigned_agents[agent_id]
     logger.info(f"Worker: Stopped runtime for {agent_id.hex()}.")
 
+#convert the queue to an iterator (which is what the gRPC api expects)
+# cancel the queue/iterator by adding a None item or by setting the cancel event
+async def queue_to_cancellable_async_iterator(queue:asyncio.Queue, cancel:asyncio.Event) -> AsyncIterator:
+    while not cancel.is_set():
+        event = None
+        try:
+            event = await asyncio.wait_for(queue.get(), 0.05)
+            if event is None:
+                break
+            yield event
+        except asyncio.TimeoutError:
+            continue #test for cancel (in the while condition) and try again
 
 
 if __name__ == "__main__":
+    import signal
+    import sys
+
+    cancel_token = asyncio.Event()
+    def sig_cancel(sig, frame):
+        logger.info(f"Received signal ({sig}), will cancel worker.")
+        cancel_token.set()
+        time.sleep(0.2)
+        sys.exit(sig)
+        #give it a short while
+        
+    signal.signal(signal.SIGINT, sig_cancel)
+    signal.signal(signal.SIGTERM, sig_cancel)
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_worker())
+    asyncio.run(run_worker(cancel_token=cancel_token))

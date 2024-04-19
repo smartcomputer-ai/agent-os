@@ -63,30 +63,35 @@ class ApexWorkers(apex_workers_pb2_grpc.ApexWorkersServicer):
         async def process_incoming_messages():
             connected = False
             worker_id = None
-            async for message in request_iterator:
-                if message.type == apex_workers_pb2.WorkerToApexMessage.PING:
-                    logger.info(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent PING.")
-                #only accept READY messags once
-                elif message.type == apex_workers_pb2.WorkerToApexMessage.READY and not connected:
-                    logger.info(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent READY with ticket {message.ticket}.")
-                    connected = True
-                    worker_id = message.worker_id
-                    await self.core_loop.worker_connected(message.worker_id, message.ticket, message.manifest, to_worker_queue)
-                elif not connected:
-                    logger.warning(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent message ({message.type}) before READY.")
-                    return
-                elif message.type == apex_workers_pb2.WorkerToApexMessage.RETURN_AGENT:
-                    #todo: implement
-                    logger.warning(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent RETURN_AGENT with ticket {message.ticket}. NOT IMPLEMENTED YET.")
-            #when the loop ends, the worker has disconnected
-            if connected and worker_id:
-                logger.info(f"ApexWorkers.ConnectWorker: Worker {worker_id} disconnected.")
-                #only forward the disconnect to the core loop if the worker was connected (had sent READY)
-                await self.core_loop.worker_disconnected(worker_id)
-            else:
-                logger.warning("ApexWorkers.ConnectWorker: Worker disconnected without ever sending READY.")
-                #in the other case, the core loop closes the worker_queue
-                to_worker_queue.put_nowait(None)
+
+            try:
+                async for message in request_iterator:
+                    if message.type == apex_workers_pb2.WorkerToApexMessage.PING:
+                        logger.info(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent PING.")
+                    #only accept READY messags once
+                    elif message.type == apex_workers_pb2.WorkerToApexMessage.READY and not connected:
+                        logger.info(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent READY with ticket {message.ticket}.")
+                        connected = True
+                        worker_id = message.worker_id
+                        await self.core_loop.worker_connected(message.worker_id, message.ticket, message.manifest, to_worker_queue)
+                    elif not connected:
+                        logger.warning(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent message ({message.type}) before READY.")
+                        return
+                    elif message.type == apex_workers_pb2.WorkerToApexMessage.RETURN_AGENT:
+                        #todo: implement
+                        logger.warning(f"ApexWorkers.ConnectWorker: Worker {message.worker_id} sent RETURN_AGENT with ticket {message.ticket}. NOT IMPLEMENTED YET.")
+            except Exception as e:
+                logger.error(f"ApexWorkers.ConnectWorker: Error in incoming message processing: {e}")
+            finally:
+                #when the loop ends, the worker has disconnected
+                if connected and worker_id:
+                    logger.info(f"ApexWorkers.ConnectWorker: Worker {worker_id} disconnected.")
+                    #only forward the disconnect to the core loop if the worker was connected (had sent READY)
+                    await self.core_loop.worker_disconnected(worker_id)
+                else:
+                    logger.warning("ApexWorkers.ConnectWorker: Worker disconnected without ever sending READY.")
+                    #in the other case, the core loop closes the worker_queue
+                    to_worker_queue.put_nowait(None)
 
         #start the incoming message processing task
         process_incoming_task = asyncio.create_task(process_incoming_messages())
@@ -94,19 +99,23 @@ class ApexWorkers(apex_workers_pb2_grpc.ApexWorkersServicer):
         #start the response to worker loop
         #note: when the incoming tasks completes, the server seems to stop the entire ConnectWorker request function call and the rest of the function is not called
         #      but we are sending the disconnect from within the task, that should work
-        while True:
-            message:apex_workers_pb2.ApexToWorkerMessage|None = await to_worker_queue.get()
-            if message is None:
-                #the loop has terminated the connection
-                logger.info("ApexWorkers.ConnectWorker: to_worker_queue terminated.")
-                break
-            else:
-                logger.info(f"ApexWorkers.ConnectWorker: sending message to worker: {message.type}")
-                yield message
-        
-        logger.info("ApexWorkers.ConnectWorker: cancelling incoming message process.")
-        process_incoming_task.cancel()
-        logger.info("ApexWorkers.ConnectWorker: two-way stream terminated.")
+        try:
+            while True:
+                message:apex_workers_pb2.ApexToWorkerMessage|None = await to_worker_queue.get()
+                if message is None:
+                    #the loop has terminated the connection
+                    logger.info("ApexWorkers.ConnectWorker: Outgoing queue terminated.")
+                    break
+                else:
+                    logger.info(f"ApexWorkers.ConnectWorker: Sending message to worker: {message.type}")
+                    yield message
+        except Exception as e:
+            logger.error(f"ApexWorkers.ConnectWorker: Error in outgoing message processing: {e}")
+        finally:
+            #cancel the incoming message processing task
+            logger.info("ApexWorkers.ConnectWorker: Cancelling incoming message process.")
+            process_incoming_task.cancel()
+            logger.info("ApexWorkers.ConnectWorker: Two-way stream terminated.")
 
 
 async def start_server(

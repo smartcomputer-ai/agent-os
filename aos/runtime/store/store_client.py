@@ -3,31 +3,17 @@ import asyncio
 import grpc
 from concurrent import futures
 from aos.runtime.store import grit_store_pb2_grpc, agent_store_pb2_grpc
+from .base_client import BaseClient
 
 import logging
 logger = logging.getLogger(__name__)
 
 # the idea is that only one of these clients exists and then the object store and refs classes create one off stubs
 
-class StoreClient:
+class StoreClient(BaseClient):
     def __init__(self, server_address="localhost:50051"):
-        self.server_address = server_address
-        # the async and sync api cannot be shared
-        # however, opening two channels is okay, because, appratenly, there is something called a "sun channel"
-        # wich is a shared resource between the two client channels (if their configuration is the same)
-        # see: https://stackoverflow.com/a/62761510 (last comment)
-        self.channel_sync = grpc.insecure_channel(self.server_address)
-        self.channel_async = grpc.aio.insecure_channel(self.server_address)
+        super().__init__(server_address)
 
-    async def wait_for_async_channel_ready(self):
-        await self.channel_async.channel_ready()
-
-    def get_channel_sync(self):
-        return self.channel_sync
-    
-    def get_channel_async(self):
-        return self.channel_async
-    
     def get_grit_store_stub_sync(self):
         return grit_store_pb2_grpc.GritStoreStub(self.channel_sync)
     
@@ -39,7 +25,3 @@ class StoreClient:
     
     def get_agent_store_stub_async(self):
         return agent_store_pb2_grpc.AgentStoreStub(self.channel_async)
-
-    async def close(self, grace_period=1.0):
-        await self.channel_async.close(grace_period)
-        self.channel_sync.close()

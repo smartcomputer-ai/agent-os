@@ -356,7 +356,7 @@ class ApexCoreLoop:
         logger.info("Starting apex core loop")
         loop_state = ApexCoreState()
         #try to connect to the store server
-        store_client = await self._connect_to_store_loop()
+        store_client = await StoreClient.get_connected_client_with_retry(self._store_address, logger=logger)
         # gather started agents, their actors, and unprocessed messages
         await self._gather_started_agents(loop_state, store_client)
         #first copy of the state
@@ -394,26 +394,6 @@ class ApexCoreLoop:
         await store_client.close()
 
 
-    async def _connect_to_store_loop(self):
-        logger.info("Connecting to store server...")
-        tries = 0
-        max_tries = 100
-        while True:
-            tries += 1
-            try:
-                store_client = StoreClient(self._store_address)
-                await store_client.wait_for_async_channel_ready()
-                logger.info("Connected to store server")
-                return store_client
-            except Exception as e:
-                if tries >= max_tries:
-                    logger.error(f"Max tries reached, giving up")
-                    raise e
-                else:
-                    logger.warning(f"Was not able to connect to store server {self._store_address}, will try again: {e}")
-                    await asyncio.sleep(5)
-
-    
     #==============================================================
     # Event Handlers
     #==============================================================
@@ -435,8 +415,8 @@ class ApexCoreLoop:
         elif loop_state.workers[event.worker_id].ticket != event.ticket:
             logger.warning(f"WorkerConnectedEvent: Worker {event.worker_id} trying to connect with wrong ticket, closing connection.")
             event.to_worker_queue.put_nowait(None)
-        elif event.manifest.current_agents is not None:
-            logger.error(f"WorkerConnectedEvent: Worker {event.worker_id} sent current agents, but this is not allowed on connect, must be empty, see proto file.")
+        elif event.manifest.current_agents is not None and len(event.manifest.current_agents) > 0:
+            logger.error(f"WorkerConnectedEvent: Worker {event.worker_id} sent current agents ({event.manifest.current_agents}), but this is not allowed on connect, must be empty, see proto file.")
             event.to_worker_queue.put_nowait(None)
             loop_state.remove_worker(event.worker_id)
         else:
@@ -471,7 +451,7 @@ class ApexCoreLoop:
     async def _handle_rebalance_agents(self, event:_RebalanceAgentsEvent, loop_state:ApexCoreState):
         # in this first version, we'll just assign the agents to the workers that have the least agents
         # this is not optimal, but it's a start
-        workers = [w for w in loop_state.workers.values() if w.is_connected()]
+        workers = [w for w in loop_state.workers.values() if w.is_connected]
         agents_to_assign = loop_state.unassigned_agents.keys()
 
         #logger.warning(f"RebalanceAgentsEvent: Rebalancing {len(agents_to_assign)} agents to {len(workers)} workers.")
