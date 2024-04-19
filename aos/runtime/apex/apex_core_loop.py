@@ -462,9 +462,10 @@ class ApexCoreLoop:
         # in this first version, we'll just assign the agents to the workers that have the least agents
         # this is not optimal, but it's a start
         workers = [w for w in loop_state.workers.values() if w.is_connected]
-        agents_to_assign = loop_state.unassigned_agents.keys()
+        agents_to_assign = list(loop_state.unassigned_agents.keys())
 
-        #logger.warning(f"RebalanceAgentsEvent: Rebalancing {len(agents_to_assign)} agents to {len(workers)} workers.")
+        if len(agents_to_assign) > 0:
+            logger.info(f"RebalanceAgentsEvent: Rebalancing {len(agents_to_assign)} agents to {len(workers)} workers.")
 
         async def give_agent(agent_id, worker_id):
             loop_state.assign_agent_to_worker(agent_id, worker_id)
@@ -517,18 +518,20 @@ class ApexCoreLoop:
                 await store_client.get_agent_store_stub_async().SetVar(
                     agent_store_pb2.SetVarRequest(
                         agent_id=agent_id,
-                        var_name=STORE_APEX_STATUS_VAR_NAME,
-                        var_value=STORE_APEX_STATUS_STARTED))
+                        key=STORE_APEX_STATUS_VAR_NAME,
+                        value=STORE_APEX_STATUS_STARTED))
                 #gather actors and unpocessed messages
+
                 _, agent_capabilities = await self._gather_agent_capabilities(agent_id, store_client)
-                agent_info = self.AgentInfo(
+                agent_info = AgentInfo(
                     agent_id=agent_id,
                     agent_did=agent_response.agent_did,
                     store_address=self._store_address,
                     capabilities=agent_capabilities)
                 loop_state.add_agent(agent_info)
                 logger.info(f"StartAgentEvent: Agent {agent_id.hex()} ({agent_info.agent_did}) started.")
-            
+            #rebalance
+            await self._event_queue.put(self._RebalanceAgentsEvent())
         event.set_completion()
 
 
@@ -552,8 +555,8 @@ class ApexCoreLoop:
             await store_client.get_agent_store_stub_async().SetVar(
                 agent_store_pb2.SetVarRequest(
                     agent_id=agent_id,
-                    var_name=STORE_APEX_STATUS_VAR_NAME,
-                    var_value=STORE_APEX_STATUS_STOPPED))
+                    key=STORE_APEX_STATUS_VAR_NAME,
+                    value=STORE_APEX_STATUS_STOPPED))
             loop_state.remove_agent(agent_id)
             
         event.set_completion()
@@ -572,15 +575,14 @@ class ApexCoreLoop:
         self._ensure_running()
         event = self._StartAgentEvent(agent_id)
         await self._event_queue.put(event)
-        print("started agent")
-        #await event.wait_for_completion()
+        await event.wait_for_completion(timeout_seconds=10)
 
 
     async def stop_agent(self, agent_id:AgentId):
         self._ensure_running()
         event = self._StopAgentEvent(agent_id)
         await self._event_queue.put(event)
-        await event.wait_for_completion()
+        await event.wait_for_completion(timeout_seconds=10)
 
 
     async def register_worker(self, worker_id:str) -> str:

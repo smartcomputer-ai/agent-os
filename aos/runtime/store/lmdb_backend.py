@@ -301,7 +301,7 @@ class LmdbBackend:
             #TODO: change this to normal "content-type"
             did_blob = Blob({'ct': 's'}, agent_did.encode('utf-8'))
             did_blob_id = ser.get_object_id(ser.blob_to_bytes(did_blob))
-            core = {'did': did_blob_id}
+            core = {'name': did_blob_id}
             core_id = ser.get_object_id(ser.tree_to_bytes(core))
             agent_id = core_id #the agent id is the core id
 

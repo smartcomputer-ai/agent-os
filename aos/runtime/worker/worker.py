@@ -166,7 +166,15 @@ async def _handle_give_agent(worker_state:WorkerState, agent:apex_workers_pb2.Ag
     runtime = Runtime(object_store, references, agent.agent_did)
     worker_state.runtimes[agent_id] = runtime
 
-    runtime_task = asyncio.create_task(runtime.start())
+    async def runtime_runner(agent_id:AgentId, runtime:Runtime):
+        try:
+            await runtime.start()
+        except Exception as e:
+            logger.error(f"Worker: Error in runtime for {agent_id.hex()}.", exc_info=e)
+            #TODO: retry and/or return to apex
+            raise
+
+    runtime_task = asyncio.create_task(runtime_runner(agent_id, runtime))
     worker_state.runtime_tasks[agent_id] = runtime_task
     logger.info(f"Worker: Started runtime for {agent_id.hex()} ({agent.agent_did}).")
 

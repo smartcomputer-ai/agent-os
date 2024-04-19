@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 async def test_worker(tmp_path):
     store_server_task = asyncio.create_task(start_store_server(str(tmp_path)))
     apex_server_task = asyncio.create_task(start_apex_server())
-    #worker_task = asyncio.create_task(run_worker())
+    worker_task = asyncio.create_task(run_worker())
 
     store_client = StoreClient()
     await store_client.wait_for_async_channel_ready()
@@ -37,16 +37,13 @@ async def test_worker(tmp_path):
     #start agent
     apex_api_stub = apex_client.get_apex_api_stub_async()
     await apex_api_stub.StartAgent(apex_api_pb2.StartAgentRequest(agent_id=agent_id))
-    print("test: agent started")
 
+    await asyncio.sleep(0.1)
 
-    # #save object
-    # object_store = AgentObjectStore(store_client, agent_id)
+    #stop agent
+    await apex_api_stub.StopAgent(apex_api_pb2.StopAgentRequest(agent_id=agent_id))
 
-    # blob = Blob({'hi': 'there', 'foo': 'bar'}, os.urandom(1024))
+    #TODO: push a wit to the agent
+    #      using the inject message api (doesnt exits yet)
 
-    # blob_id = await object_store.store(blob)
-
-    # blob2 = await object_store.load(blob_id)
-    # assert blob.data == blob2.data
-    # assert blob.headers == blob2.headers
+    await asyncio.sleep(0.2)

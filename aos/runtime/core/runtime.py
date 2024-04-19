@@ -173,6 +173,12 @@ class Runtime:
         while not self.__cancel_event.is_set():
             #print('waiting for outbox updates')
             outbox_updates:list[set[MailboxUpdate]] = []
+            # check the executors if they have any errors
+            # TODO: recently added, might need to be delayed to be checked less frequently
+            for executor_task in executor_tasks:
+                if(executor_task.done() and executor_task.exception() is not None):
+                    logger.error("exception in executor task", exc_info=(executor_task.exception()))
+                    raise executor_task.exception()
             # await the outbox_updates queue with a timeout
             # this makes it possible to cancel the loop
             try:
