@@ -9,7 +9,7 @@ from aos.grit.object_serialization import blob_to_bytes
 from aos.grit import *
 from aos.wit import *
 from aos.wit.prototype import wrap_in_prototype
-from runtime.runtime_executor import add_offline_message_to_runtime_outbox, remove_offline_message_from_runtime_outbox
+from .root_actor_offline import add_offline_message_to_root_outbox, remove_offline_message_from_root_outbox
 from . sync_item import SyncItem, sync_from_push_path, sync_from_push_value
 
 logger = logging.Logger(__name__)
@@ -189,13 +189,13 @@ class ActorPush():
         if(self._is_genesis):
             previous_genesis_actor_id = await references.get(actor_ref)
             if(previous_genesis_actor_id is not None):
-                await remove_offline_message_from_runtime_outbox(store, references, agent_name, previous_genesis_actor_id)
+                await remove_offline_message_from_root_outbox(store, references, agent_name, previous_genesis_actor_id)
         # Now, create the message
         msg = await self.create_actor_message(store)
         # Don't set previous, so that this message can be pushed multiple times, 
         # resulting in an override of the current message in the outbox.
         # With set_previous=False, the message is treated like a signal, and only the last message will apply.
-        step_id = await add_offline_message_to_runtime_outbox(store, references, agent_name, msg, set_previous=False)
+        step_id = await add_offline_message_to_root_outbox(store, references, agent_name, msg, set_previous=False)
         # If this the genesis step, also create an actor ref
         if(self._is_genesis and self.actor_name is not None):
             # This may override the actor ref, if the genesis step changes over multiple initial pushes, 

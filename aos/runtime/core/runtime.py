@@ -6,7 +6,7 @@ from aos.wit import *
 from .resolvers import *
 from .query_executor import QueryExecutor
 from .actor_executor import ExecutionContext, ActorExecutor, MailboxUpdate
-from .runtime_executor import RuntimeExecutor, agent_id_from_name
+from .root_executor import RootActorExecutor, agent_id_from_root_actor_name
 from .request_response_executor import RequestResponseExecutor
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class Runtime:
 
     __cancel_event:asyncio.Event
     __running_event:asyncio.Event
-    __runtime_executor:RuntimeExecutor
+    __root_executor:RootActorExecutor
     __executors:dict[ActorId, ActorExecutor]
     __executor_lock:asyncio.Lock
     # I *think* this cannot have a limit, otherwise it could cause deadlocks inside the run function of the executors
@@ -28,7 +28,7 @@ class Runtime:
     def __init__(self, 
             store:ObjectStore, 
             references:References, 
-            agent_name:str|None, 
+            agent_name:str, 
             resolver:Resolver=None):
         if not isinstance(store, ObjectStore):
             raise TypeError('store must be an ObjectStore')
@@ -46,16 +46,18 @@ class Runtime:
             self.ctx.resolver = MetaResover.with_all(store)
 
         #if no agent_name was provided, it will be loaded later, in __init_agent_executor 
-        if agent_name is not None:
-            self.ctx.agent_name = agent_name
-            self.ctx.agent_id = agent_id_from_name(agent_name)
+        if agent_name is None:
+            raise ValueError('agent_name must be provided')
+        
+        self.ctx.agent_name = agent_name
+        self.ctx.agent_id = agent_id_from_root_actor_name(agent_name)
 
         self.ctx.query = QueryExecutor(self.ctx.store, self.ctx.references, self.ctx.resolver, self.ctx.agent_id)
 
         self.__cancel_event = asyncio.Event()
         self.__running_event = asyncio.Event()
         self.__executors = {}
-        self.__runtime_executor = None
+        self.__root_executor = None
         self.__outbox_queue = asyncio.Queue()
         self.__executor_lock = asyncio.Lock()
 
@@ -97,16 +99,16 @@ class Runtime:
         await self.__outbox_queue.put(outbox_updates)
 
     async def inject_mailbox_update(self, new_update:MailboxUpdate) -> MessageId:
-        await self.__init_runtime_executor()
+        await self.__init_root_executor()
         '''Injects a "raw" mailbox update into the queue.
         Careful when rapidly sending more than one message to a specific actor:
         If no previous_id is set in the message, each message will be treated as a signals and only the last one might be processed.'''
         #print(f"inject   1 new messages to {new_update[1].hex()} AGENT OUTBOX  ({new_update[2].hex()})")
-        await self.__runtime_executor.update_current_outbox([new_update])
+        await self.__root_executor.update_current_outbox([new_update])
         return new_update[2]
 
     async def inject_message(self, new_message:OutboxMessage) -> MessageId:
-        await self.__init_runtime_executor()
+        await self.__init_root_executor()
         '''Injects a message into the queue. It will set the sender as the agent_id of this runtime.
         By default (unless the message is configured as a signal) this method will set the previous_id to the id that
         was sent to the recipient in the last inject_message call.'''
@@ -114,25 +116,24 @@ class Runtime:
         #see if the previous_id should be set
         #otherwise, messages can get overriden because they are treated like a signal (signal = no previous_id)
         if(not new_message.is_signal):
-            current_outbox = await self.__runtime_executor.get_current_outbox()
+            current_outbox = await self.__root_executor.get_current_outbox()
             if(new_message.recipient_id in current_outbox):
                 new_message.previous_id = current_outbox[new_message.recipient_id]
         #use the agent_id as the sender_id
-        new_update = await new_message.persist_to_mailbox_update(self.store, self.__runtime_executor.agent_id)
+        new_update = await new_message.persist_to_mailbox_update(self.store, self.__root_executor.agent_id)
         return await self.inject_mailbox_update(new_update)
     
-    async def __init_runtime_executor(self):
+    async def __init_root_executor(self):
         async with self.__executor_lock:
-            if(self.__runtime_executor is not None):
+            if(self.__root_executor is not None):
                 return
-            #TODO: support loading the agent even if no name was provided, from the refs and core
-            self.__runtime_executor = await RuntimeExecutor.from_agent_name(self.ctx, self.agent_name)
-            if(self.agent_id != self.__runtime_executor.agent_id):
+            self.__root_executor = await RootActorExecutor.from_agent_name(self.ctx, self.agent_name)
+            if(self.agent_id != self.__root_executor.agent_id):
                 raise Exception(f"Agent name {self.agent_name} with id '{self.agent_id.hex()}' does not match the agent executor id "+
-                                f"'{self.__runtime_executor.agent_id.hex()}'. Did you use the right name?")
+                                f"'{self.__root_executor.agent_id.hex()}'. Did you use the right name?")
             # the request-response executor can only be created now that the runtime executor exists
             # but we might want to consider to move the construction of such "user-space" dependencies somewhere else
-            self.ctx.request_response = RequestResponseExecutor(self.ctx.store, self.__runtime_executor)
+            self.ctx.request_response = RequestResponseExecutor(self.ctx.store, self.__root_executor)
 
     def wait_until_running(self) -> asyncio.Future:
         return self.__running_event.wait()
@@ -141,7 +142,7 @@ class Runtime:
         self.__cancel_event.set()
 
     async def start(self):
-        await self.__init_runtime_executor()
+        await self.__init_root_executor()
         refs = await self.references.get_all()
         actor_heads:dict[ActorId, StepId] = {bytes.fromhex(ref.removeprefix('heads/')):step_id for ref,step_id in refs.items() if ref.startswith('heads/')}
 
@@ -151,13 +152,13 @@ class Runtime:
         async with self.__executor_lock:
             self.__executors:dict[ActorId, ActorExecutor] = {}
             for actor_id, step_id in actor_heads.items():
-                if(actor_id != self.__runtime_executor.agent_id): # exclude the agent actor, which is managed separately
+                if(actor_id != self.__root_executor.actor_id): # exclude the root actor, which is managed separately
                     self.__executors[actor_id] = await ActorExecutor.from_last_step(self.ctx, actor_id, step_id)
             gather_executors = self.__executors.copy()
         
         # there might me messages that have not been processed in the last runtime exection, 
         # gather them now and add them to the top of the queue
-        gather_executors[self.__runtime_executor.agent_id] = self.__runtime_executor
+        gather_executors[self.__root_executor.agent_id] = self.__root_executor
         await _gather_pending_messages_for_recipients(self.__outbox_queue, gather_executors)
         del gather_executors
 
@@ -165,7 +166,7 @@ class Runtime:
         executor_tasks:list[asyncio.Task] = []
         for executor in self.__executors.values():
             executor_tasks.append(asyncio.create_task(executor.start(self.__outbox_callback)))
-        executor_tasks.append(asyncio.create_task(self.__runtime_executor.start(self.__outbox_callback)))
+        executor_tasks.append(asyncio.create_task(self.__root_executor.start(self.__outbox_callback)))
 
         #start processing the outbox queue for all the actors
         await asyncio.sleep(0) #yield to allow other tasks to run
@@ -196,9 +197,9 @@ class Runtime:
             for recipient_id, new_messages in actor_new_messages.items():
                 #If the recipient "actor" is the runtime agent itself then send it to that executor.
                 # Otherwise see if an actor executor exists, or create it.
-                if(recipient_id == self.__runtime_executor.agent_id):
+                if(recipient_id == self.__root_executor.agent_id):
                     #print(f"sending  {len(new_messages)} new messages to {recipient_id.hex()} AGENT       ({new_messages[0][2].hex()})")
-                    await self.__runtime_executor.update_current_inbox(new_messages)
+                    await self.__root_executor.update_current_inbox(new_messages)
                 else:
                     if recipient_id in self.__executors:
                         #print(f"sending  {len(new_messages)} new messages to {recipient_id.hex()}         ({new_messages[0][2].hex()})")
@@ -215,7 +216,7 @@ class Runtime:
         #cancel all executors
         for _, executor in self.__executors.items():
             executor.stop()
-        self.__runtime_executor.stop()
+        self.__root_executor.stop()
         await asyncio.gather(*executor_tasks, return_exceptions=True)
         for executor_task in executor_tasks:
             ex = executor_task.exception()
@@ -223,8 +224,8 @@ class Runtime:
                 logger.error("exception in executor task")
                 raise ex
     
-    def subscribe_to_messages(self) -> RuntimeExecutor.ExternalMessageSubscription:
-        return self.__runtime_executor.subscribe_to_messages()
+    def subscribe_to_messages(self) -> RootActorExecutor.ExternalMessageSubscription:
+        return self.__root_executor.subscribe_to_messages()
 
 def _sort_new_messages_for_recipients(outbox_updates:list[set[MailboxUpdate]]) -> dict[ActorId, list[MailboxUpdate]]:
     #gather all new messages from the outbox updates

@@ -2,6 +2,7 @@ import logging
 import os
 import lmdb
 from aos.grit import *
+from aos.runtime.core.root_executor import bootstrap_root_actor, agent_id_from_root_actor_name
 from aos.runtime.store import grit_store_pb2
 from aos.runtime.store import agent_store_pb2
 from aos.runtime.store import agent_store_pb2
@@ -296,51 +297,25 @@ class LmdbBackend:
             # but the the id is not known until all the objects and initial core exists for that root actor
             # however, the trick is to construct all relevant grit objects in memory, derrive the actor id from there
             # and then write all the objects to the db in a single transaction
+            # there are helper methods for this!
 
-            import aos.grit.object_serialization as ser
-            #TODO: change this to normal "content-type"
-            did_blob = Blob({'ct': 's'}, agent_did.encode('utf-8'))
-            did_blob_id = ser.get_object_id(ser.blob_to_bytes(did_blob))
-            core = {'name': did_blob_id}
-            core_id = ser.get_object_id(ser.tree_to_bytes(core))
-            agent_id = core_id #the agent id is the core id
+            agent_id = agent_id_from_root_actor_name(agent_did)
 
-            # there is more work to boostrap the agent... we need to create a step
-            # implemented as an iterator to make it a bit more readable
-            def bootstrap():
-                yield did_blob_id, ser.blob_to_bytes(did_blob)
-                yield core_id, ser.tree_to_bytes(core)
-                #genesis message
-                msg = Message(previous=None, headers={"mt": "genesis"}, content=core_id)
-                msg_bytes = ser.message_to_bytes(msg)
-                msg_id = ser.get_object_id(msg_bytes)
-                yield msg_id, msg_bytes
-                #genesis step inbox (from agent id to itself, nice old bootstrap!)
-                inbox = {agent_id: msg_id}
-                inbox_bytes = ser.mailbox_to_bytes(inbox)
-                inbox_id = ser.get_object_id(inbox_bytes)
-                yield inbox_id, inbox_bytes
-                #genesis step
-                step = Step(previous=None, actor=agent_id, inbox=inbox_id, outbox=None, core=core_id)
-                step_bytes = ser.step_to_bytes(step)
-                step_id = ser.get_object_id(step_bytes)
-                yield step_id, step_bytes
-
-            #now save the core grit objects
             last_obj_id = None
-            for obj_id, obj_bytes in bootstrap():
+            for obj_id, obj_bytes in bootstrap_root_actor(agent_did):            
                 txn.put(
                     _make_object_key(agent_id, obj_id), 
                     obj_bytes, 
                     db=object_db)
                 last_obj_id = obj_id
-            #the last id from the iterator was the step id
-            step_id = last_obj_id
+
+            #the last id from the iterator was the genesis step id
+            gen_step_id = last_obj_id
             
             #set the initial references (step HEAD)
             txn.put(
                 _make_refs_key(agent_id, ref_step_head(agent_id)), 
-                step_id, 
+                gen_step_id, 
                 db=refs_db)
             txn.put(
                 _make_refs_key(agent_id, ref_root_actor()),

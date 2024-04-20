@@ -1,7 +1,7 @@
 from __future__ import annotations
 from aos.grit import *
 from aos.wit import *
-from .runtime_executor import RuntimeExecutor
+from .root_executor import RootActorExecutor
 
 #==========================================================================================
 # Rails are request-response calls to an actor.
@@ -14,7 +14,7 @@ from .runtime_executor import RuntimeExecutor
 # In the future, we will want to make the rails executor its own runtime actor.
 
 class RequestResponseExecutor(RequestResponse):
-    def __init__(self, store:ObjectStore, runtime_executor:RuntimeExecutor) -> None:
+    def __init__(self, store:ObjectStore, runtime_executor:RootActorExecutor) -> None:
         self.store = store
         self.runtime_executor = runtime_executor
 

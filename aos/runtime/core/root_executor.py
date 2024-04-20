@@ -4,15 +4,14 @@ from aos.grit import Mailbox
 from aos.wit import *
 from .actor_executor import ExecutionContext, ActorExecutor, _WitExecution, MailboxUpdate
 
-#rename to "RootExecutor"
-class RuntimeExecutor(ActorExecutor):
-    """A special executor for the runtime agent, which communicates in the name of the runtime.
+class RootActorExecutor(ActorExecutor):
+    """A special executor for 'root actor', which communicates in the name of the runtime.
     
     Whenever a new message gets injected from the outside world, it still has to come from somewhere.
-    And so external messages are injected into the runtime agent's outbox, and are then routed to the
-    appropriate normal agent.
+    And so external messages are injected into the root actor's outbox, and are then routed to the
+    appropriate normal actor.
 
-    It also supports to subscribe to messages sent by other actors to this runtime actor.
+    It also supports to subscribe to messages sent by other actors to this root actor.
     """
     _current_outbox:Mailbox
     _external_message_subscriptions:set[ExternalMessageSubscription]
@@ -30,8 +29,8 @@ class RuntimeExecutor(ActorExecutor):
         self._external_message_subscriptions = set()
 
     @classmethod
-    async def from_agent_name(cls, ctx:ExecutionContext, agent_name:str) -> 'RuntimeExecutor':
-        agent_id, last_step_id = await create_or_load_runtime_actor(ctx.store, ctx.references, agent_name)
+    async def from_agent_name(cls, ctx:ExecutionContext, agent_name:str) -> 'RootActorExecutor':
+        agent_id, last_step_id = await create_or_load_root_actor(ctx.store, ctx.references, agent_name)
         return await cls.from_last_step(ctx, agent_id, last_step_id)
     
     @property
@@ -94,7 +93,7 @@ class RuntimeExecutor(ActorExecutor):
         super().stop()
 
     def subscribe_to_messages(self) -> ExternalMessageSubscription:
-        return RuntimeExecutor.ExternalMessageSubscription(self)
+        return RootActorExecutor.ExternalMessageSubscription(self)
 
     def _publish_to_external_subscribers(self, new_messages:list[MailboxUpdate]):
         if(self._external_message_subscriptions is None or len(self._external_message_subscriptions) == 0):
@@ -110,7 +109,7 @@ class RuntimeExecutor(ActorExecutor):
             sub.queue.put_nowait(None)
 
     class ExternalMessageSubscription:
-        def __init__(self, executor:RuntimeExecutor):
+        def __init__(self, executor:RootActorExecutor):
             self.executor = executor
             self.queue = asyncio.Queue()
         def __enter__(self):
@@ -120,23 +119,22 @@ class RuntimeExecutor(ActorExecutor):
             self.executor._external_message_subscriptions.remove(self)
 
 
-async def create_or_load_runtime_actor(object_store:ObjectStore, references:References, agent_name:str) -> tuple[ActorId, StepId]:
+async def create_or_load_root_actor(object_store:ObjectStore, references:References, agent_name:str) -> tuple[ActorId, StepId]:
+    #TODO: see code in lmdb_store, it also creates a root actor. this code should be moved here, and lmdb_store should use it from here
+    #      the change here needs to be that raw Grit objets are used to create the core, but that code already exists in lmdb_store
+    
     #check if the 'runtime/agent' reference exists
     agent_id = await references.get(ref_root_actor())
     if(agent_id is None):
         #if it doesn't exist, create it, and the first step for that agent (without actually running a wit)
         #the original agent core is simple, it just contains the name of the agent
-        agent_genesis_core = Core(object_store, {}, None)
-        agent_genesis_core.makeb("name").set_as_str(agent_name)
-        #create a message from itself to itself: a good old bootstrap
-        msg = await OutboxMessage.from_genesis(object_store, agent_genesis_core)
-        msg_id = await msg.persist(object_store)
-        agent_id = msg.recipient_id
-        gen_inbox = {agent_id: msg_id} #the sender is the recipient here
-        gen_inbox_id = await object_store.store(gen_inbox)
-        #create the first step
-        gen_step = Step(None, agent_id, gen_inbox_id, None, agent_id) #agent_id == genesis_core_id
-        gen_step_id = await object_store.store(gen_step)
+        last_id = None
+        for obj_id, obj_bytes in bootstrap_root_actor(agent_name):
+            actual_id = await object_store.store(obj_bytes)
+            if obj_id != actual_id:
+                raise ValueError(f"Object id mismatch: expected {obj_id.hex()}, but got {actual_id.hex()}. This should never happen!")
+            last_id = obj_id
+        gen_step_id = last_id # the last bootrap pair is the step, which is the genesis step
         #set initial references
         await references.set(ref_step_head(agent_id), gen_step_id)
         await references.set(ref_root_actor(), agent_id)
@@ -152,67 +150,41 @@ async def create_or_load_runtime_actor(object_store:ObjectStore, references:Refe
         if(last_step_id is None):
             raise Exception(f"Agent {agent_name} has no reference: '{ref_step_head(agent_id)}'.")
         return agent_id, last_step_id
-    
-async def add_offline_message_to_runtime_outbox(
-        object_store:ObjectStore, 
-        references:References, 
-        agent_name:str, 
-        msg:OutboxMessage, 
-        set_previous:bool=False,
-        ) -> StepId:
-    '''Dangerous! Do not use if the runtime is running!'''
-    agent_id, last_step_id = await create_or_load_runtime_actor(object_store, references, agent_name)
-    last_step = await object_store.load(last_step_id)
-    if(last_step.outbox is None):
-        last_step_outbox = {}
-    else:
-        last_step_outbox = await object_store.load(last_step.outbox)
-    #set previous id if needed
-    if(msg.recipient_id in last_step_outbox and set_previous and not msg.is_signal):
-        msg.previous_id = last_step_outbox[msg.recipient_id]
-    #new outbox
-    new_outbox = last_step_outbox.copy()
-    msg_id = await msg.persist(object_store)
-    new_outbox[msg.recipient_id] = msg_id
-    new_outbox_id = await object_store.store(new_outbox)
-    #new step
-    new_step = Step(last_step_id, agent_id, last_step.inbox, new_outbox_id, last_step.core)
-    new_step_id = await object_store.store(new_step)
-    await references.set(ref_step_head(agent_id), new_step_id)
-    return new_step_id
 
-async def remove_offline_message_from_runtime_outbox(
-        object_store:ObjectStore, 
-        references:References, 
-        agent_name:str, 
-        recipient_id:ActorId,
-        ) -> StepId:
-    '''Dangerous! Do not use if the runtime is running!'''
-    #todo: dedupe the code with add_offline_message_to_agent_outbox
-    agent_id, last_step_id = await create_or_load_runtime_actor(object_store, references, agent_name)
-    last_step = await object_store.load(last_step_id)
-    if(last_step.outbox is None):
-        last_step_outbox = {}
-    else:
-        last_step_outbox = await object_store.load(last_step.outbox)
-    #new outbox
-    new_outbox = last_step_outbox.copy()
-    if(recipient_id in new_outbox):
-        del new_outbox[recipient_id]
-    if(len(new_outbox) > 0):
-        new_outbox_id = await object_store.store(new_outbox)
-    else:
-        new_outbox_id = None
-    #new step
-    new_step = Step(last_step_id, agent_id, last_step.inbox, new_outbox_id, last_step.core)
-    new_step_id = await object_store.store(new_step)
-    await references.set(ref_step_head(agent_id), new_step_id)
-    return new_step_id
 
-def agent_id_from_name(agent_name:str) -> ActorId:
+def bootstrap_root_actor(agent_name:str, agent_id_only:bool=False):
     import aos.grit.object_serialization as ser
+
+    #initial core (which defines the agent id)
     name_blob = Blob({'ct': 's'}, agent_name.encode('utf-8'))
-    name_blob_id = ser.get_object_id(ser.blob_to_bytes(name_blob))
+    name_blob_bytes = ser.blob_to_bytes(name_blob)
+    name_blob_id = ser.get_object_id(name_blob_bytes)
+    yield name_blob_id, name_blob_bytes
     core = {'name': name_blob_id}
-    core_id = ser.get_object_id(ser.tree_to_bytes(core))
-    return core_id #the agent id is the core id
+    core_bytes = ser.tree_to_bytes(core)
+    core_id = ser.get_object_id(core_bytes)
+    yield core_id, core_bytes
+    agent_id = core_id #the agent id is the core id
+    if(agent_id_only):
+        return
+
+    #genesis message
+    msg = Message(previous=None, headers={"mt": "genesis"}, content=core_id)
+    msg_bytes = ser.message_to_bytes(msg)
+    msg_id = ser.get_object_id(msg_bytes)
+    yield msg_id, msg_bytes
+    #genesis step inbox (from agent id to itself, nice old bootstrap!)
+    inbox = {agent_id: msg_id}
+    inbox_bytes = ser.mailbox_to_bytes(inbox)
+    inbox_id = ser.get_object_id(inbox_bytes)
+    yield inbox_id, inbox_bytes
+    #genesis step
+    step = Step(previous=None, actor=agent_id, inbox=inbox_id, outbox=None, core=core_id)
+    step_bytes = ser.step_to_bytes(step)
+    step_id = ser.get_object_id(step_bytes)
+    yield step_id, step_bytes
+
+
+def agent_id_from_root_actor_name(agent_name:str) -> AgentId:
+    agent_id, _ = list(bootstrap_root_actor(agent_name, agent_id_only=True))[-1]
+    return agent_id

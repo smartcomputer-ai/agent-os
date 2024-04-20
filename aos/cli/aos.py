@@ -4,16 +4,16 @@ import os
 import shutil
 import sys
 import click
-import sync.sync_file as sf
+import sync_file as sf
 from dataclasses import dataclass
 from grit import *
-from aos.grit.file import FileObjectStore, FileReferences
-from aos.grit.lmdb import SharedEnvironment, LmdbObjectStore, LmdbReferences
-from aos.grit.memory import MemoryObjectStore, MemoryReferences
-from runtime.runtime_executor import create_or_load_runtime_actor
-from runtime.runtime import Runtime
-from sync.actor_push import ActorPush
+from aos.grit.stores.file import FileObjectStore, FileReferences
+from aos.grit.stores.lmdb import SharedEnvironment, LmdbObjectStore, LmdbReferences
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.runtime.core.root_executor import create_or_load_root_actor
+from aos.runtime.core.runtime import Runtime
 from aos.runtime.web.web_server import WebServer
+from .actor_push import ActorPush
 
 #print logs to console
 logging.basicConfig(level=logging.INFO)
@@ -117,7 +117,7 @@ name = "{agent_name}"
 
     async def ainit():
         store, refs = wit_ctx.init_stores()
-        agent_id, step_id = await create_or_load_runtime_actor(store, refs, agent_name)
+        agent_id, step_id = await create_or_load_root_actor(store, refs, agent_name)
         print("Agent id: " + agent_id.hex())
         print("Last step id: " + step_id.hex())
     asyncio.run(ainit())

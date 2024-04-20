@@ -158,6 +158,7 @@ class ActorExecutor:
                 try:
                     wit_execution = await self._create_wit_execution(new_inbox)
                 except GenesisMessageNotReadyError:
+                    #todo: log
                     continue
                 #starts the wit task but does not return it, has to be awaited separately
                 await wit_execution.run(self.ctx)
