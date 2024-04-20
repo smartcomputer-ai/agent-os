@@ -1,8 +1,8 @@
 import os
 import pytest
-from src.grit import *
-from src.wit import *
-from src.sync import ActorPush
+from aos.grit import *
+from aos.wit import *
+from aos.cli import ActorPush
 import helpers_sync as helpers
 
 def create_files(root_path):

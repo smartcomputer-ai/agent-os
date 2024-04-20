@@ -1,10 +1,10 @@
 import os
 import pytest
 from pathlib import PureWindowsPath, PurePosixPath
-from src.grit.stores.memory import MemoryReferences, MemoryObjectStore
-from src.grit import *
-from src.wit import *
-import src.sync.sync_file as sync_file
+from aos.grit.stores.memory import MemoryReferences, MemoryObjectStore
+from aos.grit import *
+from aos.wit import *
+import aos.cli.sync_file as sync_file
 import helpers_sync as helpers
 
 def create_files(root_path):

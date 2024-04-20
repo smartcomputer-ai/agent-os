@@ -129,12 +129,15 @@ async def create_or_load_root_actor(object_store:ObjectStore, references:Referen
         #if it doesn't exist, create it, and the first step for that agent (without actually running a wit)
         #the original agent core is simple, it just contains the name of the agent
         last_id = None
-        for obj_id, obj_bytes in bootstrap_root_actor(agent_name):
-            actual_id = await object_store.store(obj_bytes)
-            if obj_id != actual_id:
-                raise ValueError(f"Object id mismatch: expected {obj_id.hex()}, but got {actual_id.hex()}. This should never happen!")
-            last_id = obj_id
-        gen_step_id = last_id # the last bootrap pair is the step, which is the genesis step
+        last_obj = None
+        for obj in bootstrap_root_actor_objects(agent_name):
+            object_id = await object_store.store(obj)
+            last_id = object_id
+            last_obj = obj
+        gen_step_id = last_id # the last bootstrap object is the step, which is the genesis step
+        agent_id = last_obj.actor
+        if agent_id is None:
+            raise ValueError("Agent id is None. Should not happen.")
         #set initial references
         await references.set(ref_step_head(agent_id), gen_step_id)
         await references.set(ref_root_actor(), agent_id)
@@ -152,39 +155,52 @@ async def create_or_load_root_actor(object_store:ObjectStore, references:Referen
         return agent_id, last_step_id
 
 
-def bootstrap_root_actor(agent_name:str, agent_id_only:bool=False):
+def bootstrap_root_actor_objects(agent_name:str, core_only:bool=False):
+    """Iterates over all the grit objects from initial core, up to the genesis step, to 
+    bootstrap the 'root actor' which represents the agent and the runtime."""
     import aos.grit.object_serialization as ser
 
     #initial core (which defines the agent id)
     name_blob = Blob({'ct': 's'}, agent_name.encode('utf-8'))
-    name_blob_bytes = ser.blob_to_bytes(name_blob)
-    name_blob_id = ser.get_object_id(name_blob_bytes)
-    yield name_blob_id, name_blob_bytes
+    yield name_blob
+    name_blob_id = ser.get_object_id( ser.blob_to_bytes(name_blob))
     core = {'name': name_blob_id}
-    core_bytes = ser.tree_to_bytes(core)
-    core_id = ser.get_object_id(core_bytes)
-    yield core_id, core_bytes
-    agent_id = core_id #the agent id is the core id
-    if(agent_id_only):
-        return
+    yield core
 
+    if(core_only):
+        return
+    
+    core_id = ser.get_object_id(ser.tree_to_bytes(core))
+    agent_id = core_id #the agent id is the core id
+    
     #genesis message
     msg = Message(previous=None, headers={"mt": "genesis"}, content=core_id)
-    msg_bytes = ser.message_to_bytes(msg)
-    msg_id = ser.get_object_id(msg_bytes)
-    yield msg_id, msg_bytes
+    yield msg
+    msg_id = ser.get_object_id(ser.message_to_bytes(msg))
+
     #genesis step inbox (from agent id to itself, nice old bootstrap!)
     inbox = {agent_id: msg_id}
-    inbox_bytes = ser.mailbox_to_bytes(inbox)
-    inbox_id = ser.get_object_id(inbox_bytes)
-    yield inbox_id, inbox_bytes
+    yield inbox
+    inbox_id = ser.get_object_id(ser.mailbox_to_bytes(inbox))
+
     #genesis step
     step = Step(previous=None, actor=agent_id, inbox=inbox_id, outbox=None, core=core_id)
-    step_bytes = ser.step_to_bytes(step)
-    step_id = ser.get_object_id(step_bytes)
-    yield step_id, step_bytes
+    yield step
+
+
+def bootstrap_root_actor_bytes(agent_name:str, core_only:bool=False):
+    """Iterates over all the object ids and associated serialized data to bootstrap the root actor. 
+    See: bootstrap_root_actor_objects"""
+    import aos.grit.object_serialization as ser
+    for obj in bootstrap_root_actor_objects(agent_name, core_only):
+        data = ser.object_to_bytes(obj)
+        yield ser.get_object_id(data), data
 
 
 def agent_id_from_root_actor_name(agent_name:str) -> AgentId:
-    agent_id, _ = list(bootstrap_root_actor(agent_name, agent_id_only=True))[-1]
+    """Generates the agent id from the agent name, by creating the root actor objects and extracting the agent id.
+    See: bootstrap_root_actor_objects"""
+    # how does this work? stop once the root actor core is created
+    # the root actor core is the actor's id, and the root actor id is also the agent id
+    agent_id, _ = list(bootstrap_root_actor_bytes(agent_name, core_only=True))[-1]
     return agent_id

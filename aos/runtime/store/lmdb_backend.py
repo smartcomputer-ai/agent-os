@@ -2,7 +2,7 @@ import logging
 import os
 import lmdb
 from aos.grit import *
-from aos.runtime.core.root_executor import bootstrap_root_actor, agent_id_from_root_actor_name
+from aos.runtime.core.root_executor import bootstrap_root_actor_bytes, agent_id_from_root_actor_name
 from aos.runtime.store import grit_store_pb2
 from aos.runtime.store import agent_store_pb2
 from aos.runtime.store import agent_store_pb2
@@ -302,7 +302,7 @@ class LmdbBackend:
             agent_id = agent_id_from_root_actor_name(agent_did)
 
             last_obj_id = None
-            for obj_id, obj_bytes in bootstrap_root_actor(agent_did):            
+            for obj_id, obj_bytes in bootstrap_root_actor_bytes(agent_did):            
                 txn.put(
                     _make_object_key(agent_id, obj_id), 
                     obj_bytes, 

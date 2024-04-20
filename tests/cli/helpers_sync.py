@@ -1,9 +1,9 @@
 import os
 
-from grit.stores.memory.memory_object_store import MemoryObjectStore
-from src.grit import *
-from src.wit import *
-from src.sync import *
+from aos.grit.stores.memory.memory_object_store import MemoryObjectStore
+from aos.grit import *
+from aos.wit import *
+from aos.cli import *
 
 def get_random_actor_id() -> ActorId:
     return get_object_id(os.urandom(20))

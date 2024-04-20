@@ -1,7 +1,7 @@
 import pytest
-from src.grit import *
-from src.wit import *
-import src.sync.sync_item as sync_item
+from aos.grit import *
+from aos.wit import *
+import aos.cli.sync_item as sync_item
 import helpers_sync as helpers
 
 async def test_sync_sync_from_push_value__empty_or_invalid_fails(tmp_path):
