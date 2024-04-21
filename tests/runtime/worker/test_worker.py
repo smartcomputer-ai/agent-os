@@ -10,7 +10,7 @@ from aos.runtime.apex import apex_api_pb2, apex_api_pb2_grpc
 from aos.runtime.apex import apex_workers_pb2, apex_workers_pb2_grpc
 from aos.runtime.apex.apex_client import ApexClient
 from aos.runtime.apex.apex_server import start_server as start_apex_server
-from aos.runtime.worker.worker import run_worker
+from aos.runtime.worker.worker_server import start_server as start_worker_server
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 async def test_worker(tmp_path):
     store_server_task = asyncio.create_task(start_store_server(str(tmp_path)))
     apex_server_task = asyncio.create_task(start_apex_server())
-    worker_task = asyncio.create_task(run_worker())
+    worker_task = asyncio.create_task(start_worker_server())
 
     store_client = StoreClient()
     await store_client.wait_for_async_channel_ready()
