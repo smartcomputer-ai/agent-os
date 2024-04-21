@@ -1,13 +1,15 @@
 import os
 import asyncio
 from concurrent import futures
-import logging
 import grpc
 from grpc import Server
 from aos.runtime.store import grit_store_pb2, grit_store_pb2_grpc
 from aos.runtime.store import agent_store_pb2, agent_store_pb2_grpc
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 from .lmdb_backend import LmdbBackend
+
+import logging
+logger = logging.getLogger(__name__)
 
 class GritStore(grit_store_pb2_grpc.GritStoreServicer):
     def __init__(self, backend:LmdbBackend) -> None:
@@ -84,8 +86,9 @@ def start_server_sync(grit_dir:str, port:str="50051"):
     agent_store_pb2_grpc.add_AgentStoreServicer_to_server(AgentStore(lmdb_backend), server)
     server.add_insecure_port("[::]:" + port)
     server.start()
+    logger.info("Store server started, listening on " + port)
     server.wait_for_termination()
-    print("Server started, listening on " + port)
+    logger.info("Store server stopped.")
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

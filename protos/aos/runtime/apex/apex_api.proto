@@ -9,12 +9,7 @@ service ApexApi {
   rpc StartAgent(StartAgentRequest) returns (StartAgentResponse) {}
   rpc StopAgent(StopAgentRequest) returns (StopAgentResponse) {}
 
-  // Sends a message to the recipient actor, the sender is the root actor, which represents the agent.
-  rpc InjectMessage(InjectMessageRequest) returns (InjectMessageResponse) {}
-
   //TODO: 
-  // send query
-  // subscribe to root actor (two way stream)
   // GetApexStatusStream (one way stream)
 }
 
@@ -71,53 +66,3 @@ message WorkerInfo{
   repeated bytes current_agents = 3;
 }
 
-//=========================================================
-// Grit Actor Ineraction Messages
-//=========================================================
-message InjectMessageRequest {
-  bytes agent_id = 1;
-  bytes recipient_id = 2;
-
-  oneof message {
-    //externally crafted message, with a valid message structure (advanced use case)
-    bytes message_id = 5;
-    //message_id will be created by runtime by creating the required Grit objects
-    InjectMessageData message_data = 6; 
-  }
-}
-
-message InjectMessageData{
-  map <string, string> headers = 3;
-  bool is_signal = 4;
-  oneof content {
-    //blob_id or tree_id (see Grit Message)
-    bytes content_id = 5;
-    //valid serialized Grit blob object  
-    bytes content_blob = 6; 
-  }
-}
-
-// It's not easy to reliably return a message id all the way from the runtime
-// because it is hard to guarantee that the message id is returned before a reply message is delivered through
-// a different subscription. So the api doen't offer returning message ids, if the message is injected not as an id already.
-message InjectMessageResponse {}
-
-message RunQueryRequest {
-  bytes agent_id = 1;
-  bytes actor_id = 2;
-  string query_name = 4;
-  optional bytes context = 5;
-}
-
-
-message RunQueryResponse{
-  bytes agent_id = 1; //32 bytes, of actor_id type
-  bytes actor_id = 2; //32 bytes, actor_id
-  oneof result { //can be a tree_id, or the actual blob data
-    //blob_id or tree_id (see Grit Query)
-    bytes result_id = 10;
-    //valid Grit blob object  
-    bytes result_blob = 11; 
-    string error = 12;
-  }
-}

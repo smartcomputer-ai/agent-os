@@ -41,58 +41,12 @@ message AgentAssignment{
   //todo: reason for assignment, maybe also what actors
 }
 
-message MessageInjection {
-  bytes agent_id = 1;
-  bytes recipient_id = 2;
-
-  oneof message {
-    //externally crafted message, with a valid message structure (advanced use case)
-    bytes message_id = 5;
-    //message_id will be created by runtime by creating the required Grit objects
-    InjectMessageData message_data = 6; 
-  }
-}
-
-message InjectMessageData{
-  map <string, string> headers = 3;
-  bool is_signal = 4;
-  oneof content {
-    //blob_id or tree_id (see Grit Message)
-    bytes content_id = 5;
-    //valid serialized Grit blob object  
-    bytes content_blob = 6; 
-  }
-}
-
-message Query{
-  bytes agent_id = 1; //32 bytes, of actor_id type
-  bytes actor_id = 2; //32 bytes, actor_id
-  string query_id = 3; //correlation_id for this query
-  string query_name = 4;
-  optional bytes context = 5; //
-}
-
-message QueryResult{
-  bytes agent_id = 1; //32 bytes, of actor_id type
-  bytes actor_id = 2; //32 bytes, actor_id
-  string query_id = 3; //correlation_id for this query, must match the ActorQuery
-  oneof result { //can be a tree_id, or the actual blob data
-    //blob_id or tree_id (see Grit Query)
-    bytes result_id = 10;
-    //valid Grit blob object  
-    bytes result_blob = 11; 
-    string error = 12;
-  }
-}
-
 
 message ApexToWorkerMessage {
   enum MessageType {
     PING = 0;
     GIVE_AGENT = 10; // give to worker
     YANK_AGENT = 11; // take from worker
-    INJECT_MESSAGE = 20; // send a message to an agent
-    QUERY = 30;  //send a query to an agent
   }
 
   //always required
@@ -100,8 +54,6 @@ message ApexToWorkerMessage {
 
   oneof payload {
     AgentAssignment assignment = 10; // GIVE_AGENT, YANK_AGENT
-    MessageInjection injection = 20; // INJECT_MESSAGE
-    Query query = 30; // QUERY
   }
 }
 
@@ -111,8 +63,6 @@ message WorkerToApexMessage {
     READY = 1; // start receiving messages from apex
     //MANIFEST_UPDATE = 2; // send a manifest update to apex (esp, when capacity changes)
     RETURN_AGENT = 11; // return agent to apex
-    // ACTOR_MESSAGE = 10; //the recipient is not on the worker and the message needs to be routed by apex
-    QUERY_RESULT = 30;  
   }
 
   //always required
@@ -123,6 +73,5 @@ message WorkerToApexMessage {
   oneof payload {
     WorkerManifest manifest = 10; //READY event
     AgentAssignment assignment = 11; //RETURN_AGENT
-    QueryResult query_result = 30; // QUERY_RESULT
   }
 }

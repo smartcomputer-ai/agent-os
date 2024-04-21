@@ -35,11 +35,6 @@ class ApexApiStub(object):
                 request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentRequest.SerializeToString,
                 response_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentResponse.FromString,
                 )
-        self.InjectMessage = channel.unary_unary(
-                '/ApexApi/InjectMessage',
-                request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageRequest.SerializeToString,
-                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageResponse.FromString,
-                )
 
 
 class ApexApiServicer(object):
@@ -70,13 +65,6 @@ class ApexApiServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def InjectMessage(self, request, context):
-        """Sends a message to the recipient actor, the sender is the root actor, which represents the agent.
-        """
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
 
 def add_ApexApiServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -99,11 +87,6 @@ def add_ApexApiServicer_to_server(servicer, server):
                     servicer.StopAgent,
                     request_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentRequest.FromString,
                     response_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentResponse.SerializeToString,
-            ),
-            'InjectMessage': grpc.unary_unary_rpc_method_handler(
-                    servicer.InjectMessage,
-                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageRequest.FromString,
-                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -181,22 +164,5 @@ class ApexApi(object):
         return grpc.experimental.unary_unary(request, target, '/ApexApi/StopAgent',
             aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentRequest.SerializeToString,
             aos_dot_runtime_dot_apex_dot_apex__api__pb2.StopAgentResponse.FromString,
-            options, channel_credentials,
-            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
-
-    @staticmethod
-    def InjectMessage(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/ApexApi/InjectMessage',
-            aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageRequest.SerializeToString,
-            aos_dot_runtime_dot_apex_dot_apex__api__pb2.InjectMessageResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+// APIs for CLI and Web
+service WorkerApi {
+
+  // Sends a message to the recipient actor, the sender is the root actor, which represents the agent.
+  rpc InjectMessage(InjectMessageRequest) returns (InjectMessageResponse) {}
+  rpc RunQuery(RunQueryRequest) returns (RunQueryResponse) {}
+
+  //TODO: 
+  // subscribe to root actor (two way stream)
+}
+
+
+//=========================================================
+// Grit Actor Ineraction Messages
+//=========================================================
+message InjectMessageRequest {
+  bytes agent_id = 1;
+  bytes recipient_id = 2;
+
+  oneof message {
+    //externally crafted message, with a valid message structure (advanced use case)
+    bytes message_id = 5;
+    //message_id will be created by runtime by creating the required Grit objects
+    InjectMessageData message_data = 6; 
+  }
+}
+
+message InjectMessageData{
+  map <string, string> headers = 3;
+  bool is_signal = 4;
+  oneof content {
+    //blob_id or tree_id (see Grit Message)
+    bytes content_id = 5;
+    //valid serialized Grit blob object  
+    bytes content_blob = 6; 
+  }
+}
+
+message InjectMessageResponse {
+  bytes agent_id = 1;
+  bytes message_id = 2;
+}
+
+message RunQueryRequest {
+  bytes agent_id = 1;
+  bytes actor_id = 2;
+  string query_name = 4;
+  optional bytes context = 5;
+}
+
+message RunQueryResponse{
+  bytes agent_id = 1; //32 bytes, of actor_id type
+  bytes actor_id = 2; //32 bytes, actor_id
+  oneof result { //can be a tree_id, or the actual blob data
+    //blob_id or tree_id (see Grit Query)
+    bytes object_id = 10;
+    //valid Grit blob object  
+    bytes object_blob = 11; 
+    string error = 12;
+  }
+}

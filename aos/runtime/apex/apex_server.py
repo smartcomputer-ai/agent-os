@@ -39,9 +39,6 @@ class ApexApi(apex_api_pb2_grpc.ApexApiServicer):
         await self.core_loop.stop_agent(request.agent_id)
         return apex_api_pb2.StopAgentResponse()
 
-    async def InjectMessage(self, request: apex_api_pb2.InjectMessageRequest, context) -> apex_api_pb2.InjectMessageResponse:
-        await self.core_loop.inject_message(request)
-        return apex_api_pb2.InjectMessageResponse()
 
 class ApexWorkers(apex_workers_pb2_grpc.ApexWorkersServicer):
     def __init__(self, core_loop:ApexCoreLoop):
@@ -139,13 +136,13 @@ async def start_server(
     server.add_insecure_port("[::]:" + port)
     await server.start()
     server_task = asyncio.create_task(server.wait_for_termination())
-    print("Server started, listening on " + port)
+    logger.info("Apex Server started, listening on " + port)
     await asyncio.wait([core_loop_task, server_task], return_when=asyncio.FIRST_COMPLETED)
     core_loop.stop()
     await asyncio.wait_for(core_loop_task, 0.5)
     await server.stop(0.5)
     await server_task
-    print("Server stopped.")
+    logger.info("Apex Server stopped.")
 
 
 # how to do graceful shutdown 

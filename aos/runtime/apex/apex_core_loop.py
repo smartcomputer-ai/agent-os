@@ -247,43 +247,6 @@ class ApexCoreLoop:
         removed_workers:list[WorkerId]|None = None
         desired_agents:dict[AgentId, WorkerId]|None = None
 
-    # @dataclass(frozen=True, slots=True)
-    # class _RouteMessageEvent:
-    #     worker_id:WorkerId|None #from which which worker, if None is generate by apex
-    #     message:apex_workers_pb2.ActorMessage
-
-    #     @property
-    #     def is_to_root_actor(self):
-    #         return self.message.recipient_id == self.message.agent_id
-
-    #     @classmethod
-    #     def from_mailbox_update(cls, agent_id:AgentId, mailbox_update:MailboxUpdate):
-    #         return cls(worker_id=None, message=apex_workers_pb2.ActorMessage(
-    #             agent_id=agent_id,
-    #             sender_id=mailbox_update[0],
-    #             recipient_id=mailbox_update[1],
-    #             message_id=mailbox_update[2]))
-
-    # @dataclass(frozen=True, slots=True)
-    # class _RouteQueryEvent:
-    #     worker_id:WorkerId
-    #     query:apex_workers_pb2.ActorQuery
-
-    # @dataclass(frozen=True, slots=True)
-    # class _RouteQueryResultEvent:
-    #     worker_id:WorkerId
-    #     query_result:apex_workers_pb2.ActorQueryResult
-
-    # class _RunQueryEvent(_EventWithResult):
-    #     query:apex_api_pb2.RunQueryRequest
-
-    #     def __init__(self, query:apex_api_pb2.RunQueryRequest) -> None:
-    #         super().__init__()
-    #         self.query = query
-
-    #     async def wait_for_result(self, timeout_seconds:float=90)-> apex_api_pb2.RunQueryResponse:
-    #         return await super().wait_for_result(timeout_seconds)
-    
     class _StartAgentEvent(_EventWithCompletion):
         agent_id:AgentId
         def __init__(self, agent_id:AgentId) -> None:
@@ -295,42 +258,6 @@ class ApexCoreLoop:
         def __init__(self, agent_id:AgentId) -> None:
             super().__init__()
             self.agent_id = agent_id
-
-    class _InjectMessageEvent(_EventWithCompletion):
-        agent_id:AgentId
-        inject_request:apex_api_pb2.InjectMessageRequest
-        def __init__(self, inject_request:apex_api_pb2.InjectMessageRequest) -> None:
-            super().__init__()
-            self.agent_id = inject_request.agent_id
-            self.inject_request = inject_request
-
-        def to_message_injection(self):
-            if self.inject_request.message_data is not None:
-                message_data = apex_workers_pb2.InjectMessageData(
-                    headers={k:v for k,v in self.inject_request.message_data.headers.items()},
-                    is_signal=self.inject_request.message_data.is_signal)
-                if self.inject_request.message_data.content_id is not None:
-                    message_data.content_id = self.inject_request.message_data.content_id
-                elif self.inject_request.message_data.content_blob is not None:
-                    message_data.content_blob = self.inject_request.message_data.content_blob
-            else:
-                message_data = None
-            injection = apex_workers_pb2.MessageInjection(
-                agent_id=self.agent_id,
-                recipient_id=self.inject_request.recipient_id)
-            if message_data is not None:
-                injection.message_data = message_data
-            else:
-                injection.message_id = self.inject_request.message_id
-            return injection
-                
-    
-
-        
-        # these kinds of things need to go a "emphemeral state" class
-        #unprocessed_messages:dict[ActorId, list[MailboxUpdate]] = {} #the recipient actor doesn't have a worker yet
-        #unporcessed_queries
-        #pending_queries (for callback and result routing)
 
 
     def __init__(
@@ -412,9 +339,6 @@ class ApexCoreLoop:
 
             elif isinstance(event, self._StopAgentEvent):
                 await self._handle_stop_agent(event, loop_state, store_client)
-
-            elif isinstance(event, self._InjectMessageEvent):
-                await self._handle_inject_message(event, loop_state)
 
             else:
                 logger.warning(f"Apex core loop: Unknown event type {type(event)}.")
@@ -585,18 +509,6 @@ class ApexCoreLoop:
         event.set_completion()
 
     
-    async def _handle_inject_message(self, event:_InjectMessageEvent, loop_state:ApexCoreState):
-        #check if the target agent is running
-        if event.agent_id not in loop_state.agents or event.agent_id not in loop_state.assigned_agents:
-            logger.warning(f"InjectMessageEvent: Agent {event.agent_id.hex()} is not running or assigned, cannot inject message for actor {event.inject_request.recipient_id.hex()}.")
-        else:
-            logger.info(f"InjectMessageEvent: Injecting message for agent {event.agent_id.hex()} to actor {event.inject_request.recipient_id.hex()}.")
-            #route the message to the worker that is running the agent
-            worker_state = loop_state.workers[loop_state.assigned_agents[event.agent_id]]
-            await worker_state.to_worker_queue.put(event.to_message_injection())
-        event.set_completion()
-
-
     #==============================================================
     # Apex interaction APIs 
     # Works by injecting events into the main loop
@@ -644,13 +556,6 @@ class ApexCoreLoop:
         self._ensure_running()
         event = self._WorkerDisconnectedEvent(worker_id)
         await self._event_queue.put(event)
-
-
-    async def inject_message(self, inject_request:apex_api_pb2.InjectMessageRequest) -> None:
-        self._ensure_running()
-        event = self._InjectMessageEvent(inject_request)
-        await self._event_queue.put(event)
-        await event.wait_for_completion(timeout_seconds=5)
 
 
     #==============================================================
