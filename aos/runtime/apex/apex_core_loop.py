@@ -296,14 +296,34 @@ class ApexCoreLoop:
             super().__init__()
             self.agent_id = agent_id
 
-    # class _InjectMessageEvent(_EventWithResult):
-    #     inject_request:apex_api_pb2.RunQueryRequest
-    #     def __init__(self, inject_request:apex_api_pb2.InjectMessageRequest) -> None:
-    #         super().__init__()
-    #         self.inject_request = inject_request
+    class _InjectMessageEvent(_EventWithCompletion):
+        agent_id:AgentId
+        inject_request:apex_api_pb2.InjectMessageRequest
+        def __init__(self, inject_request:apex_api_pb2.InjectMessageRequest) -> None:
+            super().__init__()
+            self.agent_id = inject_request.agent_id
+            self.inject_request = inject_request
 
-    #     async def wait_for_result(self, timeout_seconds:float=15)-> apex_api_pb2.InjectMessageResponse:
-    #         return await super().wait_for_result(timeout_seconds)
+        def to_message_injection(self):
+            if self.inject_request.message_data is not None:
+                message_data = apex_workers_pb2.InjectMessageData(
+                    headers={k:v for k,v in self.inject_request.message_data.headers.items()},
+                    is_signal=self.inject_request.message_data.is_signal)
+                if self.inject_request.message_data.content_id is not None:
+                    message_data.content_id = self.inject_request.message_data.content_id
+                elif self.inject_request.message_data.content_blob is not None:
+                    message_data.content_blob = self.inject_request.message_data.content_blob
+            else:
+                message_data = None
+            injection = apex_workers_pb2.MessageInjection(
+                agent_id=self.agent_id,
+                recipient_id=self.inject_request.recipient_id)
+            if message_data is not None:
+                injection.message_data = message_data
+            else:
+                injection.message_id = self.inject_request.message_id
+            return injection
+                
     
 
         
@@ -392,6 +412,9 @@ class ApexCoreLoop:
 
             elif isinstance(event, self._StopAgentEvent):
                 await self._handle_stop_agent(event, loop_state, store_client)
+
+            elif isinstance(event, self._InjectMessageEvent):
+                await self._handle_inject_message(event, loop_state)
 
             else:
                 logger.warning(f"Apex core loop: Unknown event type {type(event)}.")
@@ -561,6 +584,18 @@ class ApexCoreLoop:
             
         event.set_completion()
 
+    
+    async def _handle_inject_message(self, event:_InjectMessageEvent, loop_state:ApexCoreState):
+        #check if the target agent is running
+        if event.agent_id not in loop_state.agents or event.agent_id not in loop_state.assigned_agents:
+            logger.warning(f"InjectMessageEvent: Agent {event.agent_id.hex()} is not running or assigned, cannot inject message for actor {event.inject_request.recipient_id.hex()}.")
+        else:
+            logger.info(f"InjectMessageEvent: Injecting message for agent {event.agent_id.hex()} to actor {event.inject_request.recipient_id.hex()}.")
+            #route the message to the worker that is running the agent
+            worker_state = loop_state.workers[loop_state.assigned_agents[event.agent_id]]
+            await worker_state.to_worker_queue.put(event.to_message_injection())
+        event.set_completion()
+
 
     #==============================================================
     # Apex interaction APIs 
@@ -609,6 +644,13 @@ class ApexCoreLoop:
         self._ensure_running()
         event = self._WorkerDisconnectedEvent(worker_id)
         await self._event_queue.put(event)
+
+
+    async def inject_message(self, inject_request:apex_api_pb2.InjectMessageRequest) -> None:
+        self._ensure_running()
+        event = self._InjectMessageEvent(inject_request)
+        await self._event_queue.put(event)
+        await event.wait_for_completion(timeout_seconds=5)
 
 
     #==============================================================

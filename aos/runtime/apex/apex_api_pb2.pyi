@@ -101,7 +101,19 @@ class WorkerInfo(_message.Message):
     def __init__(self, worker_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ..., current_agents: _Optional[_Iterable[bytes]] = ...) -> None: ...
 
 class InjectMessageRequest(_message.Message):
-    __slots__ = ("agent_id", "recipient_id", "headers", "is_signal", "content_id", "content_blob")
+    __slots__ = ("agent_id", "recipient_id", "message_id", "message_data")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    RECIPIENT_ID_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_DATA_FIELD_NUMBER: _ClassVar[int]
+    agent_id: bytes
+    recipient_id: bytes
+    message_id: bytes
+    message_data: InjectMessageData
+    def __init__(self, agent_id: _Optional[bytes] = ..., recipient_id: _Optional[bytes] = ..., message_id: _Optional[bytes] = ..., message_data: _Optional[_Union[InjectMessageData, _Mapping]] = ...) -> None: ...
+
+class InjectMessageData(_message.Message):
+    __slots__ = ("headers", "is_signal", "content_id", "content_blob")
     class HeadersEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -109,27 +121,19 @@ class InjectMessageRequest(_message.Message):
         key: str
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
-    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    RECIPIENT_ID_FIELD_NUMBER: _ClassVar[int]
     HEADERS_FIELD_NUMBER: _ClassVar[int]
     IS_SIGNAL_FIELD_NUMBER: _ClassVar[int]
     CONTENT_ID_FIELD_NUMBER: _ClassVar[int]
     CONTENT_BLOB_FIELD_NUMBER: _ClassVar[int]
-    agent_id: bytes
-    recipient_id: bytes
     headers: _containers.ScalarMap[str, str]
     is_signal: bool
     content_id: bytes
     content_blob: bytes
-    def __init__(self, agent_id: _Optional[bytes] = ..., recipient_id: _Optional[bytes] = ..., headers: _Optional[_Mapping[str, str]] = ..., is_signal: bool = ..., content_id: _Optional[bytes] = ..., content_blob: _Optional[bytes] = ...) -> None: ...
+    def __init__(self, headers: _Optional[_Mapping[str, str]] = ..., is_signal: bool = ..., content_id: _Optional[bytes] = ..., content_blob: _Optional[bytes] = ...) -> None: ...
 
 class InjectMessageResponse(_message.Message):
-    __slots__ = ("agent_id", "message_id")
-    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
-    agent_id: bytes
-    message_id: bytes
-    def __init__(self, agent_id: _Optional[bytes] = ..., message_id: _Optional[bytes] = ...) -> None: ...
+    __slots__ = ()
+    def __init__(self) -> None: ...
 
 class RunQueryRequest(_message.Message):
     __slots__ = ("agent_id", "actor_id", "query_name", "context")
@@ -144,13 +148,15 @@ class RunQueryRequest(_message.Message):
     def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., query_name: _Optional[str] = ..., context: _Optional[bytes] = ...) -> None: ...
 
 class RunQueryResponse(_message.Message):
-    __slots__ = ("agent_id", "actor_id", "tree_id", "blob")
+    __slots__ = ("agent_id", "actor_id", "result_id", "result_blob", "error")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     ACTOR_ID_FIELD_NUMBER: _ClassVar[int]
-    TREE_ID_FIELD_NUMBER: _ClassVar[int]
-    BLOB_FIELD_NUMBER: _ClassVar[int]
+    RESULT_ID_FIELD_NUMBER: _ClassVar[int]
+    RESULT_BLOB_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
     actor_id: bytes
-    tree_id: bytes
-    blob: bytes
-    def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., tree_id: _Optional[bytes] = ..., blob: _Optional[bytes] = ...) -> None: ...
+    result_id: bytes
+    result_blob: bytes
+    error: str
+    def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., result_id: _Optional[bytes] = ..., result_blob: _Optional[bytes] = ..., error: _Optional[str] = ...) -> None: ...

@@ -843,7 +843,7 @@ class OutboxMessage:
     __previous_id:MessageId|None
     __is_signal:bool
     recipient_id:ActorId
-    content: BlobId | TreeId | BlobObject | TreeObject | None
+    content: BlobId | TreeId | BlobObject | TreeObject | any | None
     headers:dict[str, str]
 
     def __init__(self, recipient_id:ActorId, is_signal:bool=False):

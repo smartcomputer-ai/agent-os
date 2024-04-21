@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#aos/runtime/apex/apex_workers.proto\".\n\x19WorkerRegistrationRequest\x12\x11\n\tworker_id\x18\x01 \x01(\t\",\n\x1aWorkerRegistrationResponse\x12\x0e\n\x06ticket\x18\x01 \x01(\t\"\xc9\x01\n\x0eWorkerManifest\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x37\n\x0c\x63\x61pabilities\x18\n \x03(\x0b\x32!.WorkerManifest.CapabilitiesEntry\x12\x1e\n\x0e\x63urrent_agents\x18\x14 \x03(\x0b\x32\x06.Agent\x12\x16\n\x0e\x64\x65sired_agents\x18\x15 \x03(\x0c\x1a\x33\n\x11\x43\x61pabilitiesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\xa8\x01\n\x05\x41gent\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x11\n\tagent_did\x18\x02 \x01(\t\x12\x15\n\rstore_address\x18\x03 \x01(\t\x12.\n\x0c\x63\x61pabilities\x18\n \x03(\x0b\x32\x18.Agent.CapabilitiesEntry\x1a\x33\n\x11\x43\x61pabilitiesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"I\n\x0f\x41gentAssignment\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x1a\n\x05\x61gent\x18\x02 \x01(\x0b\x32\x06.AgentH\x00\x88\x01\x01\x42\x08\n\x06_agent\"\xb1\x01\n\x13\x41pexToWorkerMessage\x12.\n\x04type\x18\x01 \x01(\x0e\x32 .ApexToWorkerMessage.MessageType\x12&\n\nassignment\x18\x0b \x01(\x0b\x32\x10.AgentAssignmentH\x00\"7\n\x0bMessageType\x12\x08\n\x04PING\x10\x00\x12\x0e\n\nGIVE_AGENT\x10\n\x12\x0e\n\nYANK_AGENT\x10\x0b\x42\t\n\x07payload\"\xf6\x01\n\x13WorkerToApexMessage\x12.\n\x04type\x18\x01 \x01(\x0e\x32 .WorkerToApexMessage.MessageType\x12\x11\n\tworker_id\x18\x02 \x01(\t\x12\x0e\n\x06ticket\x18\x03 \x01(\t\x12#\n\x08manifest\x18\n \x01(\x0b\x32\x0f.WorkerManifestH\x00\x12&\n\nassignment\x18\x0b \x01(\x0b\x32\x10.AgentAssignmentH\x00\"4\n\x0bMessageType\x12\x08\n\x04PING\x10\x00\x12\t\n\x05READY\x10\x01\x12\x10\n\x0cRETURN_AGENT\x10\x0b\x42\t\n\x07payload2\x9d\x01\n\x0b\x41pexWorkers\x12K\n\x0eRegisterWorker\x12\x1a.WorkerRegistrationRequest\x1a\x1b.WorkerRegistrationResponse\"\x00\x12\x41\n\rConnectWorker\x12\x14.WorkerToApexMessage\x1a\x14.ApexToWorkerMessage\"\x00(\x01\x30\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#aos/runtime/apex/apex_workers.proto\".\n\x19WorkerRegistrationRequest\x12\x11\n\tworker_id\x18\x01 \x01(\t\",\n\x1aWorkerRegistrationResponse\x12\x0e\n\x06ticket\x18\x01 \x01(\t\"\xc9\x01\n\x0eWorkerManifest\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x37\n\x0c\x63\x61pabilities\x18\n \x03(\x0b\x32!.WorkerManifest.CapabilitiesEntry\x12\x1e\n\x0e\x63urrent_agents\x18\x14 \x03(\x0b\x32\x06.Agent\x12\x16\n\x0e\x64\x65sired_agents\x18\x15 \x03(\x0c\x1a\x33\n\x11\x43\x61pabilitiesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\xa8\x01\n\x05\x41gent\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x11\n\tagent_did\x18\x02 \x01(\t\x12\x15\n\rstore_address\x18\x03 \x01(\t\x12.\n\x0c\x63\x61pabilities\x18\n \x03(\x0b\x32\x18.Agent.CapabilitiesEntry\x1a\x33\n\x11\x43\x61pabilitiesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"I\n\x0f\x41gentAssignment\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x1a\n\x05\x61gent\x18\x02 \x01(\x0b\x32\x06.AgentH\x00\x88\x01\x01\x42\x08\n\x06_agent\"\x87\x01\n\x10MessageInjection\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x14\n\x0crecipient_id\x18\x02 \x01(\x0c\x12\x14\n\nmessage_id\x18\x05 \x01(\x0cH\x00\x12*\n\x0cmessage_data\x18\x06 \x01(\x0b\x32\x12.InjectMessageDataH\x00\x42\t\n\x07message\"\xc1\x01\n\x11InjectMessageData\x12\x30\n\x07headers\x18\x03 \x03(\x0b\x32\x1f.InjectMessageData.HeadersEntry\x12\x11\n\tis_signal\x18\x04 \x01(\x08\x12\x14\n\ncontent_id\x18\x05 \x01(\x0cH\x00\x12\x16\n\x0c\x63ontent_blob\x18\x06 \x01(\x0cH\x00\x1a.\n\x0cHeadersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\t\n\x07\x63ontent\"s\n\x05Query\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x10\n\x08\x61\x63tor_id\x18\x02 \x01(\x0c\x12\x10\n\x08query_id\x18\x03 \x01(\t\x12\x12\n\nquery_name\x18\x04 \x01(\t\x12\x14\n\x07\x63ontext\x18\x05 \x01(\x0cH\x00\x88\x01\x01\x42\n\n\x08_context\"\x8a\x01\n\x0bQueryResult\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x10\n\x08\x61\x63tor_id\x18\x02 \x01(\x0c\x12\x10\n\x08query_id\x18\x03 \x01(\t\x12\x13\n\tresult_id\x18\n \x01(\x0cH\x00\x12\x15\n\x0bresult_blob\x18\x0b \x01(\x0cH\x00\x12\x0f\n\x05\x65rror\x18\x0c \x01(\tH\x00\x42\x08\n\x06result\"\x91\x02\n\x13\x41pexToWorkerMessage\x12.\n\x04type\x18\x01 \x01(\x0e\x32 .ApexToWorkerMessage.MessageType\x12&\n\nassignment\x18\n \x01(\x0b\x32\x10.AgentAssignmentH\x00\x12&\n\tinjection\x18\x14 \x01(\x0b\x32\x11.MessageInjectionH\x00\x12\x17\n\x05query\x18\x1e \x01(\x0b\x32\x06.QueryH\x00\"V\n\x0bMessageType\x12\x08\n\x04PING\x10\x00\x12\x0e\n\nGIVE_AGENT\x10\n\x12\x0e\n\nYANK_AGENT\x10\x0b\x12\x12\n\x0eINJECT_MESSAGE\x10\x14\x12\t\n\x05QUERY\x10\x1e\x42\t\n\x07payload\"\xae\x02\n\x13WorkerToApexMessage\x12.\n\x04type\x18\x01 \x01(\x0e\x32 .WorkerToApexMessage.MessageType\x12\x11\n\tworker_id\x18\x02 \x01(\t\x12\x0e\n\x06ticket\x18\x03 \x01(\t\x12#\n\x08manifest\x18\n \x01(\x0b\x32\x0f.WorkerManifestH\x00\x12&\n\nassignment\x18\x0b \x01(\x0b\x32\x10.AgentAssignmentH\x00\x12$\n\x0cquery_result\x18\x1e \x01(\x0b\x32\x0c.QueryResultH\x00\"F\n\x0bMessageType\x12\x08\n\x04PING\x10\x00\x12\t\n\x05READY\x10\x01\x12\x10\n\x0cRETURN_AGENT\x10\x0b\x12\x10\n\x0cQUERY_RESULT\x10\x1e\x42\t\n\x07payload2\x9d\x01\n\x0b\x41pexWorkers\x12K\n\x0eRegisterWorker\x12\x1a.WorkerRegistrationRequest\x1a\x1b.WorkerRegistrationResponse\"\x00\x12\x41\n\rConnectWorker\x12\x14.WorkerToApexMessage\x1a\x14.ApexToWorkerMessage\"\x00(\x01\x30\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -25,6 +25,8 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_WORKERMANIFEST_CAPABILITIESENTRY']._serialized_options = b'8\001'
   _globals['_AGENT_CAPABILITIESENTRY']._options = None
   _globals['_AGENT_CAPABILITIESENTRY']._serialized_options = b'8\001'
+  _globals['_INJECTMESSAGEDATA_HEADERSENTRY']._options = None
+  _globals['_INJECTMESSAGEDATA_HEADERSENTRY']._serialized_options = b'8\001'
   _globals['_WORKERREGISTRATIONREQUEST']._serialized_start=39
   _globals['_WORKERREGISTRATIONREQUEST']._serialized_end=85
   _globals['_WORKERREGISTRATIONRESPONSE']._serialized_start=87
@@ -39,14 +41,24 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_AGENT_CAPABILITIESENTRY']._serialized_end=335
   _globals['_AGENTASSIGNMENT']._serialized_start=508
   _globals['_AGENTASSIGNMENT']._serialized_end=581
-  _globals['_APEXTOWORKERMESSAGE']._serialized_start=584
-  _globals['_APEXTOWORKERMESSAGE']._serialized_end=761
-  _globals['_APEXTOWORKERMESSAGE_MESSAGETYPE']._serialized_start=695
-  _globals['_APEXTOWORKERMESSAGE_MESSAGETYPE']._serialized_end=750
-  _globals['_WORKERTOAPEXMESSAGE']._serialized_start=764
-  _globals['_WORKERTOAPEXMESSAGE']._serialized_end=1010
-  _globals['_WORKERTOAPEXMESSAGE_MESSAGETYPE']._serialized_start=947
-  _globals['_WORKERTOAPEXMESSAGE_MESSAGETYPE']._serialized_end=999
-  _globals['_APEXWORKERS']._serialized_start=1013
-  _globals['_APEXWORKERS']._serialized_end=1170
+  _globals['_MESSAGEINJECTION']._serialized_start=584
+  _globals['_MESSAGEINJECTION']._serialized_end=719
+  _globals['_INJECTMESSAGEDATA']._serialized_start=722
+  _globals['_INJECTMESSAGEDATA']._serialized_end=915
+  _globals['_INJECTMESSAGEDATA_HEADERSENTRY']._serialized_start=858
+  _globals['_INJECTMESSAGEDATA_HEADERSENTRY']._serialized_end=904
+  _globals['_QUERY']._serialized_start=917
+  _globals['_QUERY']._serialized_end=1032
+  _globals['_QUERYRESULT']._serialized_start=1035
+  _globals['_QUERYRESULT']._serialized_end=1173
+  _globals['_APEXTOWORKERMESSAGE']._serialized_start=1176
+  _globals['_APEXTOWORKERMESSAGE']._serialized_end=1449
+  _globals['_APEXTOWORKERMESSAGE_MESSAGETYPE']._serialized_start=1352
+  _globals['_APEXTOWORKERMESSAGE_MESSAGETYPE']._serialized_end=1438
+  _globals['_WORKERTOAPEXMESSAGE']._serialized_start=1452
+  _globals['_WORKERTOAPEXMESSAGE']._serialized_end=1754
+  _globals['_WORKERTOAPEXMESSAGE_MESSAGETYPE']._serialized_start=1673
+  _globals['_WORKERTOAPEXMESSAGE_MESSAGETYPE']._serialized_end=1743
+  _globals['_APEXWORKERS']._serialized_start=1757
+  _globals['_APEXWORKERS']._serialized_end=1914
 # @@protoc_insertion_point(module_scope)

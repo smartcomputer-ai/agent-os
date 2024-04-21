@@ -35,6 +35,7 @@ Mailbox = dict[tuple(ActorId, str|None), MessageId]
         #NEW: Channel name (str), to allow to send on multiple channels to an actor
         #     if channel name is None then it is the "default channel"
         # ActorId can be either sender or receiver
+        # Rename Mailbox to "Channels"
 
 StepId = ObjectId
 
@@ -44,8 +45,8 @@ StepId = ObjectId
 Step = NamedTuple("Step",
     [('previous', StepId | None),
      ('actor', ActorId),
-     ('inbox', MailboxId | None),
-     ('outbox', MailboxId | None),
+     ('inbox', MailboxId | None), #NEW: rename to "inputs" or "incoming", if Mailbox gets renamed to "Channels"
+     ('outbox', MailboxId | None), #NEW: rename to "outputs" or "outgoing"
      ('core', TreeId)]) #still, cores must be trees and not a list (unlike JSON, where the top level can be a list or a dict)
 
 Object = Blob | Tree | List | Message | Mailbox | Step

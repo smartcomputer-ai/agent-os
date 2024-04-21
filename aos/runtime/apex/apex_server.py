@@ -39,9 +39,9 @@ class ApexApi(apex_api_pb2_grpc.ApexApiServicer):
         await self.core_loop.stop_agent(request.agent_id)
         return apex_api_pb2.StopAgentResponse()
 
-    async def InjectMessage(self, request: apex_api_pb2.InjectMessageRequest, context):
-        raise NotImplementedError()
-
+    async def InjectMessage(self, request: apex_api_pb2.InjectMessageRequest, context) -> apex_api_pb2.InjectMessageResponse:
+        await self.core_loop.inject_message(request)
+        return apex_api_pb2.InjectMessageResponse()
 
 class ApexWorkers(apex_workers_pb2_grpc.ApexWorkersServicer):
     def __init__(self, core_loop:ApexCoreLoop):

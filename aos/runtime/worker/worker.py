@@ -122,6 +122,11 @@ async def _worker_loop(
                 await _handle_give_agent(worker_state, message.assignment.agent)
             elif message.type == apex_workers_pb2.ApexToWorkerMessage.YANK_AGENT:
                 await _handle_yank_agent(worker_state, message.assignment.agent_id)
+            elif message.type == apex_workers_pb2.ApexToWorkerMessage.INJECT_MESSAGE:
+                await _handle_injections(worker_state, message.injection)
+            elif message.type == apex_workers_pb2.ApexToWorkerMessage.QUERY:
+                await _handle_query(worker_state, message.query, to_apex_queue)
+
     except grpc.aio.AioRpcError as e:
         logger.warning(f"Worker: Connection to apex was closed: {e.code()}: {e.details()}")
     except Exception as e:
@@ -199,6 +204,47 @@ async def _handle_yank_agent(worker_state:WorkerState, agent_id:AgentId):
     del worker_state.assigned_agents[agent_id]
     logger.info(f"Worker: Stopped runtime for {agent_id.hex()}.")
 
+
+async def _handle_injections(worker_state:WorkerState, injection:apex_workers_pb2.MessageInjection):
+    agent_id = injection.agent_id
+    if agent_id not in worker_state.assigned_agents:
+        logger.error(f"Worker: Tried to inject message into agent {agent_id.hex()}, but it is currently not running on this worker.")
+        return
+    
+    runtime = worker_state.runtimes[agent_id]
+    if injection.message_id:
+        #if the message_id was set, it is a mailbox update
+        message_id = await runtime.inject_mailbox_update((injection.agent_id, injection.recipient_id, injection.message_id))
+    else:
+        #otherwise, create a new message via mailbox update
+        msg = OutboxMessage(injection.recipient_id, injection.message_data.is_signal)
+        if injection.message_data.headers is not None and len(injection.message_data.headers) > 0:
+            msg.headers = injection.message_data.headers
+        if injection.message_data.content_id is not None:
+            msg.content = injection.message_data.content_id
+        else:
+            #the data is a serialized Grit blob (not just bytes), so it needs to be persisted in Grit first to get the content_id
+            content_id = await runtime.ctx.store.store(injection.message_data.content_blob)
+            msg.content = content_id
+        message_id = await runtime.inject_message(msg)
+    logger.info(f"Worker: Injected message into {agent_id.hex()} (message_id: {message_id.hex()}).")
+
+
+async def _handle_query(worker_state:WorkerState, query:apex_workers_pb2.Query, to_apex_queue:asyncio.Queue[apex_workers_pb2.WorkerToApexMessage]):
+    agent_id = query.agent_id
+    if agent_id not in worker_state.assigned_agents:
+        logger.error(f"Worker: Tried to query agent {agent_id.hex()}, but agent is currently not running on this worker.")
+        return
+    
+    runtime = worker_state.runtimes[agent_id]
+    try:
+        result = await runtime.query_executor.run(
+            query.actor_id,
+            query.query_name,
+            query.context,
+        )
+    except Exception as e:
+        logger.warning(f"Worker: Error while running query for {agent_id.hex()}.", exc_info=e)
 
 #convert the queue to an iterator (which is what the gRPC api expects)
 # cancel the queue/iterator by adding a None item 
