@@ -13,6 +13,7 @@ service ApexWorkers {
 
 message WorkerRegistrationRequest {
   string worker_id = 1;
+  string worker_address = 2; //how to connect to the worker
 }
 
 message WorkerRegistrationResponse {
@@ -30,7 +31,6 @@ message WorkerManifest{
 message Agent{
   bytes agent_id = 1; //32 bytes, of actor_id type
   string agent_did = 2;
-  string store_address = 3; //how to connect to the data store of this agent
   map<string, string> capabilities = 10; //what capabilities are requested by the agent
   //map<string, string> workers = 20; //worker_id, worker_address - > for later, what workers are assigned to this agent, so that workers can coordinate
 }

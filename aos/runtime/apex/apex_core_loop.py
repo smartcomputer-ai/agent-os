@@ -55,6 +55,7 @@ STORE_CAPABILITIES_VAR_PREFIX = "capabilities" #what capabilities the agent requ
 @dataclass(slots=True)
 class WorkerState:
     worker_id:str
+    worker_address:str
     ticket:str
     capabilities:dict[str, str] = field(default_factory=dict) 
     current_agents:set[AgentId] = field(default_factory=set) 
@@ -68,6 +69,7 @@ class WorkerState:
     def deep_copy(self):
         return WorkerState(
             worker_id=self.worker_id,
+            worker_address=self.worker_address,
             ticket=self.ticket,
             capabilities={k:v for k,v in self.capabilities.items()},
             current_agents={k for k in self.current_agents},
@@ -76,6 +78,7 @@ class WorkerState:
     def to_apex_api_worker_info(self):
         return apex_api_pb2.WorkerInfo(
             worker_id=self.worker_id,
+            worker_address=self.worker_address,
             capabilities={k:v for k,v in self.capabilities.items()},
             current_agents=list(self.current_agents))
 
@@ -84,28 +87,26 @@ class WorkerState:
 class AgentInfo:
     agent_id:AgentId
     agent_did:str
-    store_address:str
     capabilities:dict[str, str]
 
     def deep_copy(self):
         return AgentInfo(
             agent_id=self.agent_id,
             agent_did=self.agent_did,
-            store_address=self.store_address,
             capabilities={k:v for k,v in self.capabilities.items()})
     
-    def to_apex_api_agent_info(self):
+    def to_apex_api_agent_info(self, worker_lookup:dict[AgentId, WorkerState]|None=None):
         return apex_api_pb2.AgentInfo(
             agent_id=self.agent_id,
             agent_did=self.agent_did,
-            store_address=self.store_address,
+            worker_id=worker_lookup[self.agent_id].worker_id if worker_lookup is not None and self.agent_id in worker_lookup else None,
+            worker_address=worker_lookup[self.agent_id].worker_address if worker_lookup is not None and self.agent_id in worker_lookup else None,
             capabilities={k:v for k,v in self.capabilities.items()})
     
     def to_apex_worker_agent(self):
         return apex_workers_pb2.Agent(
             agent_id=self.agent_id,
             agent_did=self.agent_did,
-            store_address=self.store_address,
             capabilities={k:v for k,v in self.capabilities.items()})
     
 
@@ -144,9 +145,9 @@ class ApexCoreState:
         if agent_id in self.unassigned_agents:
             del self.unassigned_agents[agent_id]
         
-    def add_worker(self, worker_id:str, ticket:str):
+    def add_worker(self, worker_id:str, ticket:str, worker_address:str):
         self._mark_dirty()
-        self.workers[worker_id] = WorkerState(worker_id, ticket)
+        self.workers[worker_id] = WorkerState(worker_id=worker_id, worker_address=worker_address, ticket=ticket)
 
     def set_worker_connect(self, worker_id:str, capabilities:dict[str, str], to_worker_queue):
         self._mark_dirty()
@@ -228,6 +229,7 @@ class ApexCoreLoop:
     @dataclass(frozen=True, slots=True)
     class _RegisterWorkerEvent:
         worker_id:str
+        worker_address:str
         ticket:str
 
     @dataclass(frozen=True, slots=True)
@@ -362,7 +364,7 @@ class ApexCoreLoop:
                 logger.warning(f"RegisterWorkerEvent: Worker {event.worker_id} is already connected, disconnecting it.")
                 worker_state.to_worker_queue.put_nowait(None)
         #add worker with new ticket
-        loop_state.add_worker(event.worker_id, event.ticket)
+        loop_state.add_worker(event.worker_id, event.ticket, event.worker_address)
         logger.info(f"RegisterWorkerEvent: Worker {event.worker_id} with ticket {event.ticket} registered.")
 
 
@@ -473,7 +475,6 @@ class ApexCoreLoop:
                 agent_info = AgentInfo(
                     agent_id=agent_id,
                     agent_did=agent_response.agent_did,
-                    store_address=self._store_address,
                     capabilities=agent_capabilities)
                 loop_state.add_agent(agent_info)
                 logger.info(f"StartAgentEvent: Agent {agent_id.hex()} ({agent_info.agent_did}) started.")
@@ -532,11 +533,11 @@ class ApexCoreLoop:
         await event.wait_for_completion(timeout_seconds=10)
 
 
-    async def register_worker(self, worker_id:str) -> str:
+    async def register_worker(self, worker_id:str, worker_address:str) -> str:
         """Register a worker with the apex core loop. Returns a ticket that the worker must use to connect."""
         self._ensure_running()
         ticket = os.urandom(8).hex()
-        event = self._RegisterWorkerEvent(worker_id, ticket)
+        event = self._RegisterWorkerEvent(worker_id=worker_id, worker_address=worker_address, ticket=ticket)
         await self._event_queue.put(event)
         return ticket
     
@@ -581,7 +582,6 @@ class ApexCoreLoop:
             agent_info = AgentInfo(
                 agent_id=agent_id,
                 agent_did=did,
-                store_address=self._store_address,
                 capabilities=agent_capabilities_lookup[agent_id])
             loop_state.add_agent(agent_info)
 

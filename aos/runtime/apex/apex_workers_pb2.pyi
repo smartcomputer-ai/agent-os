@@ -7,10 +7,12 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class WorkerRegistrationRequest(_message.Message):
-    __slots__ = ("worker_id",)
+    __slots__ = ("worker_id", "worker_address")
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
+    WORKER_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     worker_id: str
-    def __init__(self, worker_id: _Optional[str] = ...) -> None: ...
+    worker_address: str
+    def __init__(self, worker_id: _Optional[str] = ..., worker_address: _Optional[str] = ...) -> None: ...
 
 class WorkerRegistrationResponse(_message.Message):
     __slots__ = ("ticket",)
@@ -38,7 +40,7 @@ class WorkerManifest(_message.Message):
     def __init__(self, worker_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ..., current_agents: _Optional[_Iterable[_Union[Agent, _Mapping]]] = ..., desired_agents: _Optional[_Iterable[bytes]] = ...) -> None: ...
 
 class Agent(_message.Message):
-    __slots__ = ("agent_id", "agent_did", "store_address", "capabilities")
+    __slots__ = ("agent_id", "agent_did", "capabilities")
     class CapabilitiesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -48,13 +50,11 @@ class Agent(_message.Message):
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     AGENT_DID_FIELD_NUMBER: _ClassVar[int]
-    STORE_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
     agent_did: str
-    store_address: str
     capabilities: _containers.ScalarMap[str, str]
-    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ..., store_address: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class AgentAssignment(_message.Message):
     __slots__ = ("agent_id", "agent")

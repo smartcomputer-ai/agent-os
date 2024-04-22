@@ -37,13 +37,27 @@ class WorkerApi(worker_api_pb2_grpc.WorkerApiServicer):
 
 
 async def start_server(
-        port:str="50053", 
+        store_address:str="localhost:50051",
         apex_address:str="localhost:50052",
+        port:str="50053", 
+        worker_address:str|None=None,
         worker_id:str|None=None,
         ) -> Server:
     
+    if worker_address is None:
+        worker_address = os.getenv("WORKER_ADDRESS", None)
+        if worker_address is None:
+            worker_address = "localhost:" + port
+
+    # see if a worker id needs to be generated
+    if worker_id is None:
+        worker_id = os.getenv("WORKER_ID", None)
+        if worker_id is None:
+            #create a random worker id
+            worker_id = f"worker-{os.urandom(8).hex()}"
+
     #start core loop
-    core_loop = WorkerCoreLoop(apex_address, worker_id)
+    core_loop = WorkerCoreLoop(apex_address=apex_address, worker_address=worker_address, worker_id=worker_id)
     core_loop_task = asyncio.create_task(core_loop.start())
     await core_loop.wait_until_running()
 

@@ -20,13 +20,13 @@ class ApexApi(apex_api_pb2_grpc.ApexApiServicer):
         state = await self.core_loop.get_state_copy()
         return apex_api_pb2.GetApexStatusResponse(
             state=apex_api_pb2.GetApexStatusResponse.UNKNOWN, #TODO: implement
-            node_id=self.core_loop._node_id,
             store_address=self.core_loop._store_address,
             workers=[agent.to_apex_api_worker_info() for agent in state.workers.values()]
         )
     
     async def GetRunningAgents(self, request: apex_api_pb2.GetRunningAgentsRequest, context) -> apex_api_pb2.GetRunningAgentsResponse:
         state = await self.core_loop.get_state_copy()
+        
         return apex_api_pb2.GetRunningAgentsResponse(
             agents=[agent.to_apex_api_agent_info() for agent in state.agents.values()]
         )

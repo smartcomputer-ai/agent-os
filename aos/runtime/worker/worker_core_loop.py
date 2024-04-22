@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass, field
@@ -127,19 +126,16 @@ class WorkerCoreLoop:
 
     def __init__(
             self,
+            store_address:str,
             apex_address:str,
-            worker_id:str|None=None,
+            worker_address:str,
+            worker_id:str,
             ) -> None:
         
-        # see if a worker id needs to be generated
-        if worker_id is None:
-            worker_id = os.getenv("WORKER_ID", None)
-            if worker_id is None:
-                #create a random worker id
-                worker_id = f"worker-{os.urandom(8).hex()}"
-
-        self._worker_id = worker_id
+        self._store_address = store_address
         self._apex_address = apex_address
+        self._worker_address = worker_address
+        self._worker_id = worker_id
         self._cancel_event = asyncio.Event()
         self._running_event = asyncio.Event()
         self._event_queue = asyncio.Queue()
@@ -178,15 +174,18 @@ class WorkerCoreLoop:
         while True:
             #todo: but connect into loop
             to_apex_queue:asyncio.Queue[apex_workers_pb2.WorkerToApexMessage] = asyncio.Queue()
-            client = ApexClient(self._apex_address)
+            apex_client = ApexClient(self._apex_address)
+            #TODO: maintain connection to store client here too (but maybe only do this in the store refactor (when agent-worker info comes from the store))
 
             try:
                 logger.info(f"Opening gRPC channel to apex...")
-                await client.wait_for_async_channel_ready(timeout_seconds=30*60) #30 minutes
-                worker_stub = client.get_apex_workers_stub_async()
+                await apex_client.wait_for_async_channel_ready(timeout_seconds=30*60) #30 minutes
+                worker_stub = apex_client.get_apex_workers_stub_async()
 
                 #register worker
-                register_response = await worker_stub.RegisterWorker(apex_workers_pb2.WorkerRegistrationRequest(worker_id=self._worker_id))
+                register_response = await worker_stub.RegisterWorker(apex_workers_pb2.WorkerRegistrationRequest(
+                    worker_id=self._worker_id,
+                    worker_address=self._worker_address))
                 #the ticket is needed to connect to the apex-worker duplex stream
                 ticket = register_response.ticket
                 logger.info(f"Registered worker. Ticket: {ticket}")
@@ -208,7 +207,7 @@ class WorkerCoreLoop:
             finally:
                 if two_way_task is not None:
                     two_way_task.cancel()
-                await client.close()
+                await apex_client.close()
                 logger.info(f"Closed gRPC channel to apex.")
     
 
@@ -324,7 +323,8 @@ class WorkerCoreLoop:
 
         worker_state.assigned_agents[agent_id] = agent
         #create a store client for the agent
-        store_address = agent.store_address
+        store_address = self._store_address 
+        #TODO: move worker_state.store_clients to outer loop
         if store_address not in worker_state.store_clients:
             store_client = StoreClient(store_address)
             await store_client.wait_for_async_channel_ready()
