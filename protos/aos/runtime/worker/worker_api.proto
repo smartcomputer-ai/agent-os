@@ -13,7 +13,7 @@ service WorkerApi {
 
 
 //=========================================================
-// Grit Actor Ineraction Messages
+// Agent or Actor Interactions
 //=========================================================
 message InjectMessageRequest {
   bytes agent_id = 1;
@@ -23,18 +23,20 @@ message InjectMessageRequest {
     //externally crafted message, with a valid message structure (advanced use case)
     bytes message_id = 5;
     //message_id will be created by runtime by creating the required Grit objects
-    InjectMessageData message_data = 6; 
+    MessageData message_data = 6; 
   }
 }
 
-message InjectMessageData{
+message MessageData{
   map <string, string> headers = 3;
   bool is_signal = 4;
+  bytes previous_id = 5;
+
   oneof content {
     //blob_id or tree_id (see Grit Message)
-    bytes content_id = 5;
+    bytes content_id = 10;
     //valid serialized Grit blob object  
-    bytes content_blob = 6; 
+    bytes content_blob = 11; 
   }
 }
 
@@ -60,4 +62,16 @@ message RunQueryResponse{
     bytes object_blob = 11; 
     string error = 12;
   }
+}
+
+message SubscriptionRequest{
+  bytes agent_id = 1;
+  //TODO: add filters
+}
+
+message SubscriptionMessage{
+  bytes agent_id = 1;
+  bytes sender_id = 2;
+  bytes message_id = 3;
+  MessageData message_data = 4;
 }

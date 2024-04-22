@@ -14,11 +14,11 @@ class InjectMessageRequest(_message.Message):
     agent_id: bytes
     recipient_id: bytes
     message_id: bytes
-    message_data: InjectMessageData
-    def __init__(self, agent_id: _Optional[bytes] = ..., recipient_id: _Optional[bytes] = ..., message_id: _Optional[bytes] = ..., message_data: _Optional[_Union[InjectMessageData, _Mapping]] = ...) -> None: ...
+    message_data: MessageData
+    def __init__(self, agent_id: _Optional[bytes] = ..., recipient_id: _Optional[bytes] = ..., message_id: _Optional[bytes] = ..., message_data: _Optional[_Union[MessageData, _Mapping]] = ...) -> None: ...
 
-class InjectMessageData(_message.Message):
-    __slots__ = ("headers", "is_signal", "content_id", "content_blob")
+class MessageData(_message.Message):
+    __slots__ = ("headers", "is_signal", "previous_id", "content_id", "content_blob")
     class HeadersEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -28,13 +28,15 @@ class InjectMessageData(_message.Message):
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     HEADERS_FIELD_NUMBER: _ClassVar[int]
     IS_SIGNAL_FIELD_NUMBER: _ClassVar[int]
+    PREVIOUS_ID_FIELD_NUMBER: _ClassVar[int]
     CONTENT_ID_FIELD_NUMBER: _ClassVar[int]
     CONTENT_BLOB_FIELD_NUMBER: _ClassVar[int]
     headers: _containers.ScalarMap[str, str]
     is_signal: bool
+    previous_id: bytes
     content_id: bytes
     content_blob: bytes
-    def __init__(self, headers: _Optional[_Mapping[str, str]] = ..., is_signal: bool = ..., content_id: _Optional[bytes] = ..., content_blob: _Optional[bytes] = ...) -> None: ...
+    def __init__(self, headers: _Optional[_Mapping[str, str]] = ..., is_signal: bool = ..., previous_id: _Optional[bytes] = ..., content_id: _Optional[bytes] = ..., content_blob: _Optional[bytes] = ...) -> None: ...
 
 class InjectMessageResponse(_message.Message):
     __slots__ = ("agent_id", "message_id")
@@ -69,3 +71,21 @@ class RunQueryResponse(_message.Message):
     object_blob: bytes
     error: str
     def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., object_id: _Optional[bytes] = ..., object_blob: _Optional[bytes] = ..., error: _Optional[str] = ...) -> None: ...
+
+class SubscriptionRequest(_message.Message):
+    __slots__ = ("agent_id",)
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    agent_id: bytes
+    def __init__(self, agent_id: _Optional[bytes] = ...) -> None: ...
+
+class SubscriptionMessage(_message.Message):
+    __slots__ = ("agent_id", "sender_id", "message_id", "message_data")
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    SENDER_ID_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_ID_FIELD_NUMBER: _ClassVar[int]
+    MESSAGE_DATA_FIELD_NUMBER: _ClassVar[int]
+    agent_id: bytes
+    sender_id: bytes
+    message_id: bytes
+    message_data: MessageData
+    def __init__(self, agent_id: _Optional[bytes] = ..., sender_id: _Optional[bytes] = ..., message_id: _Optional[bytes] = ..., message_data: _Optional[_Union[MessageData, _Mapping]] = ...) -> None: ...

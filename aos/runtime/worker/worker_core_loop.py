@@ -149,13 +149,13 @@ class WorkerCoreLoop:
     #==============================================================
     # Main Loop
     #==============================================================
-    async def _make_state_copy(self, loop_state:WorkerCoreState):
-        async with self._state_copy_lock:
-            self._state_copy = loop_state.deep_copy()
+    # async def _make_state_copy(self, loop_state:WorkerCoreState):
+    #     async with self._state_copy_lock:
+    #         self._state_copy = loop_state.deep_copy()
 
-    async def get_state_copy(self) -> WorkerCoreState:
-        async with self._state_copy_lock:
-            return self._state_copy
+    # async def get_state_copy(self) -> WorkerCoreState:
+    #     async with self._state_copy_lock:
+    #         return self._state_copy
         
     async def wait_until_running(self):
         await self._running_event.wait()
@@ -391,10 +391,12 @@ class WorkerCoreLoop:
                 msg.headers = injection.message_data.headers
             if injection.message_data.content_id is not None:
                 msg.content = injection.message_data.content_id
-            else:
+            elif injection.message_data.content_blob is not None:
                 #the data is a serialized Grit blob (not just bytes), so it needs to be persisted in Grit first to get the content_id
                 content_id = await runtime.ctx.store.store(injection.message_data.content_blob)
                 msg.content = content_id
+            else:
+                raise ValueError("Message data content is empty, set either content_id or content_blob.")
             message_id = await runtime.inject_message(msg)
         event.set_result(worker_api_pb2.InjectMessageResponse(
             agent_id=agent_id,
@@ -446,13 +448,13 @@ class WorkerCoreLoop:
         if not self._running_event.is_set() or self._cancel_event.is_set():
             raise RuntimeError("Worker core loop is not running.")
  
-    async def inject_message(self, inject_request:apex_api_pb2.InjectMessageRequest) -> apex_api_pb2.InjectMessageResponse:
+    async def inject_message(self, inject_request:worker_api_pb2.InjectMessageRequest) -> worker_api_pb2.InjectMessageResponse:
         self._ensure_running()
         event = self._InjectMessageEvent(inject_request)
         await self._event_queue.put(event)
         return await event.wait_for_result(timeout_seconds=5)
 
-    async def run_query(self, query_request:apex_api_pb2.RunQueryRequest) -> apex_api_pb2.RunQueryResponse:
+    async def run_query(self, query_request:worker_api_pb2.RunQueryRequest) -> worker_api_pb2.RunQueryResponse:
         self._ensure_running()
         event = self._RunQueryEvent(query_request)
         await self._event_queue.put(event)
