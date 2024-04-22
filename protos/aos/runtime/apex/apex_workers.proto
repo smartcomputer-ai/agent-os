@@ -10,6 +10,9 @@ service ApexWorkers {
   rpc ConnectWorker(stream WorkerToApexMessage) returns (stream ApexToWorkerMessage) {}
 }
 
+// TODO: the worker stream can be simplified into a single one-way apex stream on agent/worker updates
+// workers can subscribe to it, but they look at the store to find actors to work on (using some sort of distributed lock to coordinate between workers)
+
 
 message WorkerRegistrationRequest {
   string worker_id = 1;

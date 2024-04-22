@@ -42,29 +42,21 @@ class WebServer:
         self.references = runtime.references
 
     def app(self) -> Starlette:
-        grit_url_prefix = f"/ag/{{{self.__AGENT_ID_PARAM}}}/grit"
-        wit_url_prefix  = f"/ag/{{{self.__AGENT_ID_PARAM}}}/wit"
-        web_url_prefix  = f"/ag/{{{self.__AGENT_ID_PARAM}}}/web"
+        url_prefix = f"/agents/{{{self.__AGENT_ID_PARAM}}}"
         routes = [
             Route('/', self.get_root),
-            Route('/ag', self.agents_get_all),
+            Route('/agents', self.agents_get_all),
             #grit routes
-            Route(f"{grit_url_prefix}/refs", self.grit_get_refs),
-            Route(f"{grit_url_prefix}/refs/{{{self.__REFERENCE_PARAM}}}", self.grit_get_ref),
-            Route(f"{grit_url_prefix}/objects/{{{self.__OBJECT_ID_PARAM}}}", self.grit_get_object),
+            Route(f"{url_prefix}/refs", self.grit_get_refs),
+            Route(f"{url_prefix}/refs/{{{self.__REFERENCE_PARAM}}}", self.grit_get_ref),
+            Route(f"{url_prefix}/objects/{{{self.__OBJECT_ID_PARAM}}}", self.grit_get_object),
             #wit routes
-            Route(f"{wit_url_prefix}/actors", self.wit_get_actors),
-            Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/inbox", self.wit_get_inbox),
-            Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/inbox", self.wit_post_inbox, methods=['POST']),
-            Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/outbox", self.wit_get_outbox),
-            Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}", self.wit_query),
-            Route(f"{wit_url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}/{{{self.__QUERY_PATH_PARAM}:path}}", 
+            Route(f"{url_prefix}/actors", self.wit_get_actors),
+            Route(f"{url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/inbox", self.wit_post_inbox, methods=['POST']),
+            Route(f"{url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}", self.wit_query),
+            Route(f"{url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}/{{{self.__QUERY_PATH_PARAM}:path}}", 
                   self.wit_query),
-            Route(f"{wit_url_prefix}/messages-sse", self.wit_get_messages_sse),
-            #web routes
-            Route(f"{web_url_prefix}", self.web_get_ref),
-            Route(f"{web_url_prefix}/{{{self.__WEB_REF_PARAM}}}", self.web_get_ref),
-            Route(f"{web_url_prefix}/{{{self.__WEB_REF_PARAM}}}/{{{self.__WEB_PATH_PARAM}:path}}", self.web_get_ref),
+            Route(f"{url_prefix}/messages-sse", self.wit_get_messages_sse),
         ]
         return Starlette(routes=routes, debug=True)
 
@@ -170,20 +162,6 @@ class WebServer:
         actor_ids = self.runtime.get_actors()
         return JSONResponse([actor_id.hex() for actor_id in actor_ids])
 
-    async def wit_get_inbox(self, request:Request):
-        assert request.method == "GET"
-        self.__validate_agent_id(request)
-        actor_id = await self.__validate_actor_id(request)
-        inbox = await self.runtime.get_actor_inbox(actor_id)
-        return JSONResponse({k.hex(): v.hex() for k, v in inbox.items()})
-    
-    async def wit_get_outbox(self, request:Request):
-        assert request.method == "GET"
-        self.__validate_agent_id(request)
-        actor_id = await self.__validate_actor_id(request)
-        outbox = await self.runtime.get_actor_outbox(actor_id)
-        return JSONResponse({k.hex(): v.hex() for k, v in outbox.items()})
-    
     async def wit_post_inbox(self, request:Request):
         assert request.method == "POST"
         agent_id = self.__validate_agent_id(request)
@@ -231,7 +209,7 @@ class WebServer:
         query_name = request.path_params.get(self.__QUERY_NAME_PARAM)
         query_path = request.path_params.get(self.__QUERY_PATH_PARAM)
         if request.method == "GET":
-            # create a contect from the query sting
+            # create a context from the query sting
             #conver query_params, which is a ImmutableMultiDict, to a dict, converting multi entries to a list
             query_context = {}
             for k, v in request.query_params.multi_items():
@@ -346,54 +324,6 @@ class WebServer:
             headers={'Cache-Control': "public, max-age=3200"},
             )
 
-    async def web_get_ref(self, request:Request):
-        assert request.method == "GET"
-        self.__validate_agent_id(request)
-        ref = request.path_params.get(self.__WEB_REF_PARAM)
-        path = request.path_params.get(self.__WEB_PATH_PARAM)
-        #todo: consider just setting it to "root" and serve without redirect
-        if(ref is None):
-            return RedirectResponse(url=f"/ag/{request.path_params[self.__AGENT_ID_PARAM]}/web/root")
-        #try to get the web reference (must be set in the references store)
-        full_ref = f"web/{ref}"
-        object_id = await self.runtime.references.get(full_ref)
-        if(object_id is None):
-            raise HTTPException(status_code=404, detail=f"Web reference ({full_ref}) not found. Please set it in the references store.")
-        #get the object and serve it
-        object = await self.object_store.load(object_id)
-        if(object is None):
-            raise HTTPException(status_code=404, detail=f"Object ({object_id.hex()}) not found")
-        if(is_blob(object)):
-            if(path is not None):
-                raise HTTPException(status_code=400, detail=f"Path not supported for blob objects, do not specify a path beyond {ref}")
-            return self.__blob_object_to_response(object)
-        elif(is_tree(object)):
-            if(path is None):
-                return RedirectResponse(url=f"/ag/{request.path_params[self.__AGENT_ID_PARAM]}/web/{ref}/index")
-            tree_obj = TreeObject(self.runtime.store, object, object_id)
-            #split the path and descend the tree if there are multiple levels
-            path_parts = path.split('/')
-            path_parts = [part for part in path_parts if len(part) > 0]
-            while(len(path_parts) > 1):
-                sub_tree = await tree_obj.get(path_parts[0])
-                if(sub_tree is None):
-                    raise HTTPException(status_code=404, detail=f"Path part ({path_parts[0]} in {path}) not found")
-                #todo: brittle test
-                if(type(sub_tree).__name__ != "TreeObject"):
-                    raise HTTPException(status_code=400, detail=f"Path part ({path_parts[0]} in {path}) is not a tree")
-                tree_obj = sub_tree
-                path_parts = path_parts[1:]
-            #assume the last part of the tree is a blob
-            blob_obj = await tree_obj.get(path_parts[0])
-            if(blob_obj is None):
-                raise HTTPException(status_code=404, detail=f"Path part ({path_parts[0]} in {path}) not found")
-            if(type(blob_obj).__name__ != "BlobObject"):
-                raise HTTPException(status_code=400,
-                    detail=f"Path part ({path_parts[0]} in {path}) is not a blob, expected a blob at the end of the path")
-            return self.__blob_object_to_response(blob_obj.get_as_blob())
-        else:
-            raise HTTPException(status_code=400, 
-                detail=f"Object ({object_id.hex()}) is not a blob or tree object, the web endpoint only supports serving blob and tree objects")
 
     def __validate_agent_id(self, request:Request) -> bytes:
         if(self.__AGENT_ID_PARAM not in request.path_params):
