@@ -6,9 +6,7 @@ service WorkerApi {
   // Sends a message to the recipient actor, the sender is the root actor, which represents the agent.
   rpc InjectMessage(InjectMessageRequest) returns (InjectMessageResponse) {}
   rpc RunQuery(RunQueryRequest) returns (RunQueryResponse) {}
-
-  //TODO: 
-  // subscribe to root actor (two way stream)
+  rpc SubscribeToAgent(SubscriptionRequest) returns (stream SubscriptionMessage) {}
 }
 
 

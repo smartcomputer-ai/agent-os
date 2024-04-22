@@ -1,8 +1,0 @@
-syntax = "proto3";
-
-message AgentTest{
-    bytes agent_id = 1; //32 bytes, of actor_id type
-    string agent_name = 2;
-  
-    string grit_address = 3; //how to connect to grit of this agent
-  }

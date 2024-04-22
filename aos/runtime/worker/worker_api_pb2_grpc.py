@@ -25,6 +25,11 @@ class WorkerApiStub(object):
                 request_serializer=aos_dot_runtime_dot_worker_dot_worker__api__pb2.RunQueryRequest.SerializeToString,
                 response_deserializer=aos_dot_runtime_dot_worker_dot_worker__api__pb2.RunQueryResponse.FromString,
                 )
+        self.SubscribeToAgent = channel.unary_stream(
+                '/WorkerApi/SubscribeToAgent',
+                request_serializer=aos_dot_runtime_dot_worker_dot_worker__api__pb2.SubscriptionRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_worker_dot_worker__api__pb2.SubscriptionMessage.FromString,
+                )
 
 
 class WorkerApiServicer(object):
@@ -44,6 +49,12 @@ class WorkerApiServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def SubscribeToAgent(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkerApiServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -56,6 +67,11 @@ def add_WorkerApiServicer_to_server(servicer, server):
                     servicer.RunQuery,
                     request_deserializer=aos_dot_runtime_dot_worker_dot_worker__api__pb2.RunQueryRequest.FromString,
                     response_serializer=aos_dot_runtime_dot_worker_dot_worker__api__pb2.RunQueryResponse.SerializeToString,
+            ),
+            'SubscribeToAgent': grpc.unary_stream_rpc_method_handler(
+                    servicer.SubscribeToAgent,
+                    request_deserializer=aos_dot_runtime_dot_worker_dot_worker__api__pb2.SubscriptionRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_worker_dot_worker__api__pb2.SubscriptionMessage.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -99,5 +115,22 @@ class WorkerApi(object):
         return grpc.experimental.unary_unary(request, target, '/WorkerApi/RunQuery',
             aos_dot_runtime_dot_worker_dot_worker__api__pb2.RunQueryRequest.SerializeToString,
             aos_dot_runtime_dot_worker_dot_worker__api__pb2.RunQueryResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def SubscribeToAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(request, target, '/WorkerApi/SubscribeToAgent',
+            aos_dot_runtime_dot_worker_dot_worker__api__pb2.SubscriptionRequest.SerializeToString,
+            aos_dot_runtime_dot_worker_dot_worker__api__pb2.SubscriptionMessage.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

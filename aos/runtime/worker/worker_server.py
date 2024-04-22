@@ -10,6 +10,7 @@ from .worker_core_loop import WorkerCoreLoop
 import logging
 logger = logging.getLogger(__name__)
 
+
 class WorkerApi(worker_api_pb2_grpc.WorkerApiServicer):
     def __init__(self, core_loop:WorkerCoreLoop):
         self.core_loop = core_loop
@@ -26,6 +27,15 @@ class WorkerApi(worker_api_pb2_grpc.WorkerApiServicer):
             raise Exception("Failed to run query.")
         return result
     
+    async def SubscribeToAgent(self, request: worker_api_pb2.SubscriptionRequest, context) -> AsyncIterable[worker_api_pb2.SubscriptionMessage]:
+        subscription_queue = await self.core_loop.subscribe_to_agent(request)
+        while True:
+            message = await subscription_queue.get()
+            if message is None:
+                break
+            yield message
+
+
 async def start_server(
         port:str="50053", 
         apex_address:str="localhost:50052",

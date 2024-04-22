@@ -49,6 +49,7 @@ class WorkerCoreState:
     assigned_agents: dict[AgentId, apex_workers_pb2.Agent] = field(default_factory=dict)
     runtimes: dict[AgentId, Runtime] = field(default_factory=dict)
     runtime_tasks: dict[AgentId, asyncio.Task] = field(default_factory=dict)
+    runtime_subscriptions: dict[AgentId, list[asyncio.Task]] = field(default_factory=dict)
     
 
 #==============================================================
@@ -117,11 +118,11 @@ class WorkerCoreLoop:
         async def wait_for_result(self, timeout_seconds:float=90) -> worker_api_pb2.RunQueryResponse:
             return await super().wait_for_result(timeout_seconds)
         
-    #TODO
     @dataclass(frozen=True, slots=True)
-    class _SubscriptionEvent:
-        agentIds:list[AgentId]
-        to_subscription_queue:asyncio.Queue[apex_workers_pb2.ApexToWorkerMessage]
+    class _SubscribeToAgentEvent:
+        agent_id:AgentId
+        subscription_request:worker_api_pb2.SubscriptionRequest
+        to_subscription_queue:asyncio.Queue[worker_api_pb2.SubscriptionMessage]
 
 
     def __init__(
@@ -162,6 +163,7 @@ class WorkerCoreLoop:
 
     def stop(self):
         self._cancel_event.set()
+        
         
     async def start(self):
         logger.info(f"Starting worker core loop: {self._worker_id}")
@@ -440,6 +442,48 @@ class WorkerCoreLoop:
 
         event.set_result(response)
 
+
+    async def _handle_subscribe_to_agent(self, event:_SubscribeToAgentEvent, worker_state:WorkerCoreState):
+        agent_id = event.agent_id
+        if agent_id not in worker_state.assigned_agents:
+            logger.error(f"Tried to subscribe to agent {agent_id.hex()}, but agent is currently not running on this worker.")
+            return
+
+        subscription = event.subscription_request
+        runtime = worker_state.runtimes[agent_id]
+        
+        async def connect_subscription():
+            try:
+                with runtime.subscribe_to_messages() as subscription_queue:
+                    mailbox_update:MailboxUpdate = await subscription_queue.get()
+                    sender_id = mailbox_update[0]
+                    recipient_id = mailbox_update[1]
+                    message_id = mailbox_update[2]
+                    #load the message contents to provide more info to the subscriber
+                    message:Message = await runtime.ctx.store.load(message_id)
+                    subscription_message = worker_api_pb2.SubscriptionMessage(
+                        agent_id=agent_id,
+                        sender_id=sender_id,
+                        message_id=message_id,
+                        message=worker_api_pb2.MessageData(
+                            headers=message.headers,
+                            previous_id=message.previous,
+                            is_signal=(message.previous is None),
+                            content_id=message.content,
+                        ))
+                    await event.to_subscription_queue.put(subscription_message)
+            except asyncio.CancelledError as ce:
+                logger.info(f"Subscription to agent {agent_id.hex()} was cancelled.")
+            finally:
+                event.to_subscription_queue.put_nowait(None)
+
+        if worker_state.runtime_subscriptions.get(agent_id) is None:
+            worker_state.runtime_subscriptions[agent_id] = []
+        worker_state.runtime_subscriptions[agent_id].append(asyncio.create_task(connect_subscription()))
+
+        logger.info(f"Subscription to agent {agent_id.hex()} runtime created.")
+
+
     #==============================================================
     # Worker interaction APIs 
     # Works by injecting events into the main loop
@@ -448,17 +492,31 @@ class WorkerCoreLoop:
         if not self._running_event.is_set() or self._cancel_event.is_set():
             raise RuntimeError("Worker core loop is not running.")
  
+
     async def inject_message(self, inject_request:worker_api_pb2.InjectMessageRequest) -> worker_api_pb2.InjectMessageResponse:
         self._ensure_running()
         event = self._InjectMessageEvent(inject_request)
         await self._event_queue.put(event)
         return await event.wait_for_result(timeout_seconds=5)
 
+
     async def run_query(self, query_request:worker_api_pb2.RunQueryRequest) -> worker_api_pb2.RunQueryResponse:
         self._ensure_running()
         event = self._RunQueryEvent(query_request)
         await self._event_queue.put(event)
         return await event.wait_for_result(timeout_seconds=5)
+
+
+    async def subscribe_to_agent(self, subscription_request:worker_api_pb2.SubscriptionRequest) -> asyncio.Queue[worker_api_pb2.SubscriptionMessage]:
+        self._ensure_running()
+        agent_id = subscription_request.agent_id
+        to_subscription_queue = asyncio.Queue()
+        event = self._SubscribeToAgentEvent(
+            agent_id=agent_id, 
+            subscription_request=subscription_request,
+            to_subscription_queue=to_subscription_queue)
+        await self._event_queue.put(event)
+        return to_subscription_queue
 
 
 

@@ -21,21 +21,31 @@ DecoratedCallable = TypeVar("DecoratedCallable", bound=Callable[..., Any])
 #===================================================================================================
 # Context Classes
 #===================================================================================================
+#TODO: split contexts into multiple smaller classes that are provided by the runtime/worker
+# there will be some core contexts that are always provided, and some that are optional
+# for example: core (always true for the actor, needed to execute), step(current step info), secrets, query, request_response, ai (models), discovery  or discover(other actors, prototypes), indexes (for fast lookups, vector stores) 
+# the agent or actor then request the context (aka services) they need to execute the function
+# this works as our own dependency injection system
+# but these requested contexts need to bubble all the way up to apex so that it can decide which agent to assign to which worker
+# (or if the workers are self-server via store (next iteration of distributed), then they still need to know whether they can execute the agent/actor or not)
+# maybe these capabilities or contects need to be defined in the wit as some sort of manifest or "requirements" list
+# the wit router or runtime should throw an error if it cannot provide the requested contexts
+
 @dataclass(frozen=True)
 class MessageContext():
-    message:InboxMessage|None
-    messages:list[InboxMessage]|None
-    inbox:Inbox
-    outbox:Outbox
-    core:Core
-    step_id:StepId
-    actor_id:ActorId
-    agent_id:ActorId
-    store:ObjectStore
-    named_actors:dict[str,ActorId]
-    prototype_actors:dict[str,ActorId]
-    query:Query
-    request_response:RequestResponse
+    message:InboxMessage|None           #msg
+    messages:list[InboxMessage]|None    #msg
+    inbox:Inbox                         #step
+    outbox:Outbox                       #step
+    core:Core                           #step
+    step_id:StepId                      #step
+    actor_id:ActorId                    #core
+    agent_id:ActorId                    #core
+    store:ObjectStore                   #core
+    named_actors:dict[str,ActorId]      #discovery
+    prototype_actors:dict[str,ActorId]  #discovery
+    query:Query                         #query
+    request_response:RequestResponse    #request_response or "rails"
 
 @dataclass(frozen=True)
 class QueryContext():
