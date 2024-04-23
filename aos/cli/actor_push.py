@@ -9,6 +9,8 @@ from aos.grit.object_serialization import blob_to_bytes
 from aos.grit import *
 from aos.wit import *
 from aos.wit.prototype import wrap_in_prototype
+from aos.runtime.store.agent_object_store import AgentObjectStore
+from aos.runtime.store.agent_references import AgentReferences
 from .root_actor_offline import add_offline_message_to_root_outbox, remove_offline_message_from_root_outbox
 from . sync_item import SyncItem, sync_from_push_path, sync_from_push_value
 
@@ -54,8 +56,8 @@ class ActorPush():
 
         actor_id = await references.get(actor_ref)
         if actor_id is not None:
-            # the actor ref is a just helper reference, to make sure the actor 
-            # actually exists (i.e. the genesis step has run) also check if there 
+            # the actor ref is a just helper reference. To make sure the actor 
+            # actually exists (i.e. the genesis step has run), also check if there 
             # is a step head for this actor
             step_id = await references.get(ref_step_head(actor_id))
         else:
@@ -177,6 +179,11 @@ class ActorPush():
                         yield push_blob_path, f"error retrieving path: {ex}"
 
     async def create_and_inject_messages(self, store:ObjectStore, references:References, agent_name:str) -> StepId:
+        """Deprected. Only used for testing in-proc runtimes. Dangerous to use in production."""
+        #to make sure this is not running in prod
+        if isinstance(store, AgentObjectStore) or isinstance(references, AgentReferences):
+            raise Exception("Cannot use create_and_inject_messages in production. Instead, create a message separately (create_actor_message) and inject it.")
+
         # While pushing the first genesis core to actors, the initial wit can fail (not be found, code error, etc). 
         # If this is the case the developer will iterate on the push files and values and as a consequnce change the 
         # actor id of the target actor each time.
@@ -208,6 +215,19 @@ class ActorPush():
             return await self.__create_genesis_message(store)
         else:
             return self.__create_update_message()
+        
+    async def set_refs_if_genesis(self, references:References, actor_message:OutboxMessage):
+        """The actor message, is the message that was created by create_actor_message."""
+        if self.is_prototype:
+            actor_ref = ref_prototype_name(self.actor_name)
+        else:
+            actor_ref = ref_actor_name(self.actor_name)
+        # If this the genesis step, also create an actor ref
+        if(self._is_genesis and self.actor_name is not None):
+            # This may override the actor ref, if the genesis step changes over multiple initial pushes, 
+            # but once the runtime runs, the actor ref needs to be fix
+            # to see how _is_genesis is constructed, see the classmethod from_actor_name above.
+            await references.set(actor_ref, actor_message.recipient_id)
         
     async def __create_genesis_message(self, store:ObjectStore) -> OutboxMessage:
         core = self.to_core()

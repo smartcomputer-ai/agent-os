@@ -3,10 +3,12 @@ import asyncio
 import os
 import click
 from dataclasses import dataclass
+from aos.cli.actor_push import ActorPush
 from aos.grit import *
 from aos.runtime.store import agent_store_pb2, grit_store_pb2
 from aos.runtime.apex import apex_api_pb2
 from aos.runtime.web.agents_client import AgentsClient
+from . import sync_file as sf
 from . import agents_file as af
 from .agents_file import Agent
 
@@ -25,13 +27,15 @@ class AosContext:
     sync_file_path:str
     apex_address:str
 
-    def enforce_paths_exist(self):
+    def enforce_paths_exist(self, require_sync_file:bool=False):
         if not os.path.exists(self.work_dir):
             raise click.ClickException(f"work directory '{self.work_dir}' does not exist.")
         if not os.path.exists(self.aos_dir):
             raise click.ClickException(f"aos directory '{self.aos_dir}' does not exist.")
         if not os.path.exists(self.agents_file_path):
             raise click.ClickException(f"agents file '{self.agents_file_path}' does not exist.")
+        if require_sync_file and not os.path.exists(self.sync_file_path):
+            raise click.ClickException(f"sync file '{self.sync_file_path}' does not exist, but is required for this agent operation. Create a sync file stub with 'aos local init'.")
         
 @click.group()
 @click.pass_context
@@ -95,16 +99,14 @@ def create(ctx:click.Context, agent_alias:str):
         client = AgentsClient(aos_ctx.apex_address)
 
         #create the agent
-        store_client = await client._get_store_client()
-        agent_response:agent_store_pb2.CreateAgentResponse = await store_client.get_agent_store_stub_async().CreateAgent(agent_store_pb2.CreateAgentRequest())
-        agent = Agent(alias=agent_alias, agent_id=agent_response.agent_id.hex(), agent_did=agent_response.agent_did)
+        agent_id, agent_did = await client.create_agent()        
+        agent = Agent(alias=agent_alias, agent_id=agent_id.hex(), agent_did=agent_did)
         af.add_agent(aos_ctx.agents_file_path, agent)
-        print(f"Created agent with alias '{agent_alias}' and id '{agent_response.agent_id.hex()}' and did '{agent_response.agent_did}'")
+        print(f"Created agent with alias '{agent_alias}' and id '{agent_id.hex()}' and did '{agent_did}'")
 
         #start the agent
-        apex_client = await client._get_apex_client()
-        await apex_client.get_apex_api_stub_async().StartAgent(apex_api_pb2.StartAgentRequest(agent_id=agent_response.agent_id))
-        print(f"Started agent with alias '{agent_alias}' and id '{agent_response.agent_id.hex()}'")
+        await client.start_agent(agent_id)
+        print(f"Started agent with alias '{agent_alias}' and id '{agent_id.hex()}'")
 
     asyncio.run(ainit())
 
@@ -119,16 +121,53 @@ def push(ctx:click.Context, agent_alias:str):
     aos_ctx:AosContext = ctx.obj
 
     #sanity check that all needed paths exist
-    aos_ctx.enforce_paths_exist()
+    aos_ctx.enforce_paths_exist(require_sync_file=True)
 
     #find the agent 
     agents = af.load_agents(aos_ctx.agents_file_path)
     agent = next((a for a in agents if a.alias == agent_alias), None)
     if(agent is None):
-        raise click.ClickException(f"Agent with alias '{agent_alias}' does not exist in agent file {aos_ctx.agents_file_path}.")
+        raise click.ClickException(f"Agent with alias '{agent_alias}' does not exist in agent file {aos_ctx.agents_file_path}. Create it with 'aos agent create -a {agent_alias}'.")
     
+    agent_id = to_object_id(agent.agent_id)
+
     async def ainit():
-        pass
+        client = AgentsClient(aos_ctx.apex_address)
+        #make sure the agent is running
+        running_agents = await client.get_running_agents()
+        if(agent_id not in running_agents):
+            raise click.ClickException(f"Agent with alias '{agent_alias}' and id '{agent_id.hex()}' is not running. Start it with 'aos agent start -a {agent_alias}'.")
+
+        references = await client.get_references(agent_id)
+        object_store = await client.get_object_store(agent_id)
+
+        pushes = await sf.load_pushes(aos_ctx.sync_file_path, references)
+        if(len(pushes) == 0):
+            print(f"Nothing to push to actos. Define some actors under '[[actors]]' headings in the sync file: {aos_ctx.sync_file_path}")
+            return
+        
+        pushes_to_apply:list[ActorPush] = []
+        for push in pushes:
+            print(f"Diff of what to push to actor '{push.actor_name}' with id '{push.actor_id.hex() if not push.is_genesis else 'genesis'}'")
+            apply = False
+            async for path, reason in push.diff_core_with_actor(object_store, references):
+                print(f"  Diff '{path}' because '{reason}'")
+                apply = True
+            if(apply):
+                pushes_to_apply.append(push)
+            else:
+                print("  No changes to push.")
+        if(len(pushes_to_apply) == 0):
+            print("No pushes to actors.")
+            return
+        
+        for push in pushes_to_apply:
+            print(f"Pushing to actor: {push.actor_name} '{push.actor_id.hex() if not push.is_genesis else 'genesis'}'")
+            msg = await push.create_actor_message(object_store)
+            message_id = await client.inject_message(agent_id, msg)
+            # set a ref that points from the actor name to the actor id itself
+            await push.set_refs_if_genesis(references, msg)
+            print(f"  Injected message: {message_id.hex()}") 
 
     asyncio.run(ainit())
 

@@ -14,8 +14,8 @@ class WorkerClient(BaseClient):
         super().__init__(server_address)
     
     def get_worker_api_stub_sync(self):
-        return worker_api_pb2_grpc.WorkerApi(self.channel_sync)
+        return worker_api_pb2_grpc.WorkerApiStub(self.channel_sync)
     
     def get_worker_api_stub_async(self):
-        return worker_api_pb2_grpc.WorkerApi(self.channel_async)
+        return worker_api_pb2_grpc.WorkerApiStub(self.channel_async)
     

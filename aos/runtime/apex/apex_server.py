@@ -26,9 +26,13 @@ class ApexApi(apex_api_pb2_grpc.ApexApiServicer):
     
     async def GetRunningAgents(self, request: apex_api_pb2.GetRunningAgentsRequest, context) -> apex_api_pb2.GetRunningAgentsResponse:
         state = await self.core_loop.get_state_copy()
-        
+        worker_lookup = {}
+        for agent_id in state.assigned_agents:
+            worker_id = state.assigned_agents[agent_id]
+            if worker_id in state.workers:
+                worker_lookup[agent_id] = state.workers[worker_id] 
         return apex_api_pb2.GetRunningAgentsResponse(
-            agents=[agent.to_apex_api_agent_info() for agent in state.agents.values()]
+            agents=[agent.to_apex_api_agent_info(worker_lookup) for agent in state.agents.values()]
         )
 
     async def StartAgent(self, request: apex_api_pb2.StartAgentRequest, context):

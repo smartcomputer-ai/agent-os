@@ -14,12 +14,13 @@ class BaseClient:
         # see: https://stackoverflow.com/a/62761510 (last comment)
         self.channel_async = grpc.aio.insecure_channel(
             self.server_address,
-            # options=[
-            #     #("grpc.enable_retries", 0),
-            #     ("grpc.min_reconnect_backoff_ms", 5000),
-            #     ("grpc.max_reconnect_backoff_ms", 10000),
-            # ])
-        )
+            options=[
+                #("grpc.enable_retries", 0),
+                # ("grpc.min_reconnect_backoff_ms", 5000),
+                # ("grpc.max_reconnect_backoff_ms", 10000),
+                #('grpc.enable_http_proxy', 0),
+            ])
+        
         self.channel_sync = grpc.insecure_channel(self.server_address)
 
     async def wait_for_async_channel_ready(self, timeout_seconds:float=3000):

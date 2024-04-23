@@ -128,17 +128,18 @@ class LmdbBackend:
     def load(self, request:grit_store_pb2.LoadRequest) -> grit_store_pb2.LoadResponse:
         if(request is None):
             raise ValueError("request must not be None.")
-        if(not is_object_id(request.object_id)):
-            raise TypeError(f"object_id must be of type ObjectId, not '{type(request.object_id)}'.")
+        object_id = request.object_id
+        if not is_object_id(object_id):
+            raise ValueError(f"object_id is not a properly structured ObjectId: type '{type(object_id)}', len {len(object_id)}.")
         self._ensure_agent(request.agent_id)
-        object_key = _make_object_key(request.agent_id, request.object_id)
+        object_key = _make_object_key(request.agent_id, object_id)
         with self.begin_object_txn(write=False) as txn:
-            bytes = txn.get(object_key, default=None)
+            data = txn.get(object_key, default=None)
         
         return grit_store_pb2.LoadResponse(
             agent_id=request.agent_id,
-            object_id=request.object_id,
-            data=bytes)
+            object_id=object_id,
+            data=data)
     
 
     #=========================================================

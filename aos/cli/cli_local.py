@@ -112,10 +112,8 @@ def push(ctx:click.Context):
     print("-> Pushing Files to Actors")
     wit_ctx:LocalContext = ctx.obj
 
-    #the user might have deleted the grit directory, create it again (but only if the sync file exists, indicating it has been inintialized before)
-    # if(os.path.exists(wit_ctx.sync_file_path) and not os.path.exists(wit_ctx.grit_dir)):
-    #     os.makedirs(wit_ctx.grit_dir, exist_ok=True)
-    #     print("Created grit directory: " + wit_ctx.grit_dir)
+    if not os.path.exists(wit_ctx.sync_file_path):
+        raise click.ClickException(f"Sync file '{wit_ctx.sync_file_path}' does not exist, can only push from existing sync file, init file with 'aos local init'.")
 
     wit_ctx.enforce_paths_exist()
 

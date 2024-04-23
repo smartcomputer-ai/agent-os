@@ -12,6 +12,8 @@ class AgentObjectStore(ObjectStore):
     """An object store for a single agent. It connects to the Grit store server to perist data."""
     def __init__(self, store_client:StoreClient, agent_id:ActorId):
         super().__init__()
+        if not is_object_id(agent_id):
+            raise ValueError("agent_id must be an ObjectId (bytes).")
         self._agent_id = agent_id
         self._store_client = store_client
         self._store_stub_sync = store_client.get_grit_store_stub_sync()
@@ -36,6 +38,8 @@ class AgentObjectStore(ObjectStore):
         return request.object_id
     
     async def load(self, object_id:ObjectId) -> Object | None:
+        if not is_object_id(object_id):
+            raise ValueError(f"object_id is not a properly structured ObjectId: type '{type(object_id)}', len {len(object_id)}.")
         response:grit_store_pb2.LoadResponse = await self._store_stub_async.Load(
             self._to_load_request(object_id))
         if response.data is None:

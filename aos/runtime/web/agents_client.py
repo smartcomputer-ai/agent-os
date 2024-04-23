@@ -64,6 +64,10 @@ class AgentsClient:
                 raise
 
     async def _get_worker_client(self, worker_id:str, worker_address:str) -> WorkerClient:
+        if not worker_id:
+            raise ValueError("worker_id must be a non-empty string.")
+        if not worker_address:
+            raise ValueError("worker_address must be a non-empty string.")
         if worker_id in self._worker_clients:
             return self._worker_clients[worker_id]
         else:
@@ -74,6 +78,8 @@ class AgentsClient:
 
 
     async def _get_agent(self, agent_id:AgentId) -> _AgentState:
+        if not is_object_id(agent_id):
+            raise ValueError("agent_id must be an ObjectId (bytes).")
         async with self._agents_lock:
             if agent_id in self._agents:
                 return self._agents[agent_id]
@@ -88,21 +94,45 @@ class AgentsClient:
                 return agent
 
     async def _get_agent_worker_client(self, agent_id:AgentId) -> WorkerClient:
+        if not is_object_id(agent_id):
+            raise ValueError("agent_id must be an ObjectId (bytes).")
         agent = await self._get_agent(agent_id)
         #check if the worker_id is set for the agent, if not, try to determine it
         if agent.worker_id is None:
             # get the agent map from apex
             # TODO: this is inefficient, create an API that retrieves a single agent
             apex_client = await self._get_apex_client()
-            apex_response:apex_api_pb2.GetRunningAgentsResponse = apex_client.get_apex_api_stub_async().GetRunningAgents(apex_api_pb2.GetRunningAgentsRequest()) 
+            apex_response:apex_api_pb2.GetRunningAgentsResponse = await apex_client.get_apex_api_stub_async().GetRunningAgents(apex_api_pb2.GetRunningAgentsRequest()) 
             running_agent = next((agent for agent in apex_response.agents if agent.agent_id == agent_id), None)
             
             if running_agent is None:
-                raise Exception(f"Agent {agent_id} is not running.")
+                raise Exception(f"Agent {agent_id.hex()} is not running.")
+            if running_agent.worker_id is None:
+                raise Exception(f"Agent {agent_id.hex()} is running but has no worker_id.")
+            if running_agent.worker_address is None:
+                raise Exception(f"Agent {agent_id.hex()} is running but has no worker_address.")
             agent.worker_id = running_agent.worker_id
             return await self._get_worker_client(agent.worker_id, running_agent.worker_address)
 
         return self._worker_clients[agent.worker_id]
+
+    async def create_agent(self) -> tuple[AgentId, str]:
+        store_client = await self._get_store_client()
+        agent_response:agent_store_pb2.CreateAgentResponse = await store_client.get_agent_store_stub_async().CreateAgent(agent_store_pb2.CreateAgentRequest())
+        return agent_response.agent_id, agent_response.agent_did
+
+    async def get_running_agents(self) -> dict[AgentId, str]:
+        apex_client = await self._get_apex_client()
+        apex_response:apex_api_pb2.GetRunningAgentsResponse = await apex_client.get_apex_api_stub_async().GetRunningAgents(apex_api_pb2.GetRunningAgentsRequest())
+        return {agent.agent_id:agent.agent_did for agent in apex_response.agents}
+
+    async def start_agent(self, agent_id:AgentId):
+        apex_client = await self._get_apex_client()
+        await apex_client.get_apex_api_stub_async().StartAgent(apex_api_pb2.StartAgentRequest(agent_id=agent_id))
+
+    async def stop_agent(self, agent_id:AgentId):
+        apex_client = await self._get_apex_client()
+        await apex_client.get_apex_api_stub_async().StopAgent(apex_api_pb2.StopAgentRequest(agent_id=agent_id))
 
     async def get_object_store(self, agent_id:AgentId) -> ObjectStore:
         agent = await self._get_agent(agent_id)
@@ -157,12 +187,12 @@ class AgentsClient:
     async def inject_message(self, agent_id:AgentId, message:OutboxMessage) -> MessageId:
         worker_client = await self._get_agent_worker_client(agent_id)
         
-        if isinstance(message.content, BlobObject): 
-            content_blob = object_to_bytes(message.content.get_as_blob())
-        elif is_blob(message.content):
-            content_blob = object_to_bytes(message.content)
+        if is_object_id(message.content):
+            content_id = message.content
         else:
-            raise Exception("Message content must be a BlobObject or a Grit Blob.")
+            #persist the message contents to get a content_id
+            object_store = await self.get_object_store(agent_id)
+            content_id = await message.content.persist(object_store)
 
         try:
             inject_response:worker_api_pb2.InjectMessageResponse = await worker_client.get_worker_api_stub_async().InjectMessage(
@@ -173,7 +203,7 @@ class AgentsClient:
                         headers=message.headers,
                         is_signal=message.is_signal,
                         previous_id=message.previous_id,
-                        content_blob=content_blob)))
+                        content_id=content_id)))
         except grpc.aio.AioRpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 async with self._agents_lock:
