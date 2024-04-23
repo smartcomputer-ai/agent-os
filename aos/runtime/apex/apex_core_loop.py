@@ -226,11 +226,13 @@ class _EventWithCompletion(ABC):
 #==============================================================
 class ApexCoreLoop:
 
-    @dataclass(frozen=True, slots=True)
-    class _RegisterWorkerEvent:
+    class _RegisterWorkerEvent(_EventWithResult):
         worker_id:str
         worker_address:str
-        ticket:str
+        def __init__(self, worker_id:str, worker_address:str) -> None:
+            super().__init__()
+            self.worker_id = worker_id
+            self.worker_address = worker_address
 
     @dataclass(frozen=True, slots=True)
     class _WorkerConnectedEvent:
@@ -357,15 +359,22 @@ class ApexCoreLoop:
     # Event Handlers
     #==============================================================
     async def _handle_register_worker(self, event:_RegisterWorkerEvent, loop_state:ApexCoreState):
-        #if there is an existing worker with the same id, disconnect it
+        #if there is an existing worker with the same id do not allow the registration
         if event.worker_id in loop_state.workers:
-            worker_state = loop_state.workers[event.worker_id]
-            if worker_state.is_connected:
-                logger.warning(f"RegisterWorkerEvent: Worker {event.worker_id} is already connected, disconnecting it.")
-                worker_state.to_worker_queue.put_nowait(None)
+            existing_worker = loop_state.workers[event.worker_id]
+            logger.warning(f"RegisterWorkerEvent: Worker {event.worker_id} trying to register, but it is already registered.")
+            event.set_result(Exception(f"Worker {event.worker_id} is already registered on address {existing_worker.worker_address}."))
+            return
+        #if there is an existing worker with the same worker address, do not allow the registration
+        elif any(w.worker_address == event.worker_address for w in loop_state.workers.values()):
+            logger.warning(f"RegisterWorkerEvent: Worker with address {event.worker_address} trying to register, but it is already registered.")
+            event.set_result(Exception(f"Worker with address {event.worker_address} is already registered."))
+            return
         #add worker with new ticket
-        loop_state.add_worker(event.worker_id, event.ticket, event.worker_address)
-        logger.info(f"RegisterWorkerEvent: Worker {event.worker_id} with ticket {event.ticket} registered.")
+        ticket = os.urandom(8).hex()
+        loop_state.add_worker(event.worker_id, ticket, event.worker_address)
+        event.set_result(ticket)
+        logger.info(f"RegisterWorkerEvent: Worker {event.worker_id} with ticket {ticket} and address {event.worker_address} registered.")
 
 
     async def _handle_worker_connected(self, event:_WorkerConnectedEvent, loop_state:ApexCoreState):
@@ -536,9 +545,12 @@ class ApexCoreLoop:
     async def register_worker(self, worker_id:str, worker_address:str) -> str:
         """Register a worker with the apex core loop. Returns a ticket that the worker must use to connect."""
         self._ensure_running()
-        ticket = os.urandom(8).hex()
-        event = self._RegisterWorkerEvent(worker_id=worker_id, worker_address=worker_address, ticket=ticket)
+        event = self._RegisterWorkerEvent(worker_id=worker_id, worker_address=worker_address)
         await self._event_queue.put(event)
+        result = await event.wait_for_result()
+        if isinstance(result, Exception):
+            raise result
+        ticket = result
         return ticket
     
 

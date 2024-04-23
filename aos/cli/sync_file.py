@@ -10,9 +10,6 @@ from .actor_push import ActorPush
 #
 # The expected toml format is:
 # --------------------------
-# [agent]
-# name = "agent_name" #optional
-
 # [all] #optional
 # #push can also be a json (or inline table in TOML)
 # push = "path/to/common_code:/"
@@ -39,18 +36,18 @@ from .actor_push import ActorPush
 # runtime = "python" #which runtime to use, default is python
 # --------------------------
 
-def load_agent(toml_file_path:str) -> dict[str,str]:
-    doc = _read_toml_file(toml_file_path)
-    return loads_agent(doc)
+# def load_agent(toml_file_path:str) -> dict[str,str]:
+#     doc = _read_toml_file(toml_file_path)
+#     return loads_agent(doc)
 
-def loads_agent(toml:str|TOMLDocument) -> dict[str,str]:
-    if(isinstance(toml, str)):
-        doc = _read_toml_string(toml)
-    else:
-        doc = toml
-    _validate_doc(doc)
-    agent = doc["agent"]
-    return dict(agent)
+# def loads_agent(toml:str|TOMLDocument) -> dict[str,str]:
+#     if(isinstance(toml, str)):
+#         doc = _read_toml_string(toml)
+#     else:
+#         doc = toml
+#     _validate_doc(doc)
+#     agent = doc["agent"]
+#     return dict(agent)
 
 def load_paths(toml_file_path:str) -> dict[str,str]:
     doc = _read_toml_file(toml_file_path)

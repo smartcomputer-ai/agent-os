@@ -171,6 +171,7 @@ class WorkerCoreLoop:
         await asyncio.sleep(0) #yield to allow other tasks to run
         self._running_event.set() #signal that apex is about to start
         two_way_task = None
+        backoff = 1
         while True:
             #todo: but connect into loop
             to_apex_queue:asyncio.Queue[apex_workers_pb2.WorkerToApexMessage] = asyncio.Queue()
@@ -199,6 +200,8 @@ class WorkerCoreLoop:
                     ticket,
                     to_apex_queue,
                     previously_assigned_agents)
+                
+                backoff = 1
             except grpc.aio.AioRpcError as e:
                 logger.warning(f"Connection to apex failed: {e.code()}: {e.details()}")
             except Exception as e:
@@ -209,6 +212,8 @@ class WorkerCoreLoop:
                     two_way_task.cancel()
                 await apex_client.close()
                 logger.info(f"Closed gRPC channel to apex.")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 1.5, 60) #max 1 minute backoff
     
 
     async def _setup_two_way_stream(

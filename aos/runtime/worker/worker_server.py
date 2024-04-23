@@ -45,7 +45,7 @@ async def start_server(
         port:str="50053", 
         worker_address:str|None=None,
         worker_id:str|None=None,
-        ) -> Server:
+        ):
     
     if worker_address is None:
         worker_address = os.getenv("WORKER_ADDRESS", None)

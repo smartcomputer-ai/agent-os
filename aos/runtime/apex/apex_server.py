@@ -45,7 +45,11 @@ class ApexWorkers(apex_workers_pb2_grpc.ApexWorkersServicer):
         self.core_loop = core_loop
 
     async def RegisterWorker(self, request: apex_workers_pb2.WorkerRegistrationRequest, context) -> apex_workers_pb2.WorkerRegistrationResponse:
-        ticket = await self.core_loop.register_worker(request.worker_id, request.worker_address)
+        try:
+            ticket = await self.core_loop.register_worker(request.worker_id, request.worker_address)
+        except Exception as e:
+            logger.error(f"Error in RegisterWorker: {e}")
+            await context.abort(grpc.StatusCode.INTERNAL, str(e))
         return apex_workers_pb2.WorkerRegistrationResponse(ticket=ticket)
 
     async def ConnectWorker(

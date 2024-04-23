@@ -69,7 +69,7 @@ build-backend = "poetry.core.masonry.api"
 asyncio_mode = "auto"
 
 [tool.poetry.scripts]
-aos = "cli.aos:cli"
+aos = "aos.cli.cli:cli"
 gritserv = "aos.cluster.grit.grit_server:serve"
 perf = "tests.perf.perf:main"
 gen = "examples.coder.generator.gen_workbench:main"
