@@ -59,18 +59,14 @@ class RunQueryRequest(_message.Message):
     def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., query_name: _Optional[str] = ..., context: _Optional[bytes] = ...) -> None: ...
 
 class RunQueryResponse(_message.Message):
-    __slots__ = ("agent_id", "actor_id", "object_id", "object_blob", "error")
+    __slots__ = ("agent_id", "actor_id", "result")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
     ACTOR_ID_FIELD_NUMBER: _ClassVar[int]
-    OBJECT_ID_FIELD_NUMBER: _ClassVar[int]
-    OBJECT_BLOB_FIELD_NUMBER: _ClassVar[int]
-    ERROR_FIELD_NUMBER: _ClassVar[int]
+    RESULT_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
     actor_id: bytes
-    object_id: bytes
-    object_blob: bytes
-    error: str
-    def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., object_id: _Optional[bytes] = ..., object_blob: _Optional[bytes] = ..., error: _Optional[str] = ...) -> None: ...
+    result: bytes
+    def __init__(self, agent_id: _Optional[bytes] = ..., actor_id: _Optional[bytes] = ..., result: _Optional[bytes] = ...) -> None: ...
 
 class SubscriptionRequest(_message.Message):
     __slots__ = ("agent_id",)

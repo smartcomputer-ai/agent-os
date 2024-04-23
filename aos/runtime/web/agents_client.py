@@ -30,7 +30,12 @@ class _AgentState:
     references: AgentReferences
     worker_id:str|None
 
-class AgentClient:
+class AgentsClient:
+    """Gets information about agents, their actors. Allows querying and injecting messages, and subscribing to agents.
+    
+    Connects to store, apex, and the appropriate worker for each agent.
+    """
+
     def __init__(self, apex_address:str="localhost:50052") -> None:
         self._apex_address = apex_address
         self._apex_client = ApexClient(apex_address)
@@ -99,6 +104,13 @@ class AgentClient:
 
         return self._worker_clients[agent.worker_id]
 
+    async def get_object_store(self, agent_id:AgentId) -> ObjectStore:
+        agent = await self._get_agent(agent_id)
+        return agent.object_store
+    
+    async def get_references(self, agent_id:AgentId) -> References:
+        agent = await self._get_agent(agent_id)
+        return agent.references
 
     async def get_agents(self) -> dict[AgentId, str]:
         """Returns all agents, both running and not running."""
@@ -106,22 +118,20 @@ class AgentClient:
         agents_response:agent_store_pb2.GetAgentsResponse = await store_client.get_agent_store_stub_async().GetAgents(agent_store_pb2.GetAgentsRequest())
         return {agent_id:agent_did for agent_did, agent_id in agents_response.agents.items()}
 
-
     @alru_cache(maxsize=1000)  # noqa: B019
     async def agent_exists(self, agent_id:AgentId) -> bool:
         agents = await self.get_agents()
         return agent_id in agents
     
-    async def get_refs(self, agent_id:AgentId) -> dict[str, ObjectId]:
-        agent = await self._get_agent(agent_id)
-        return await agent.references.get_all()
-    
-    async def get_ref(self, agent_id:AgentId, ref:str) -> ObjectId:
-        agent = await self._get_agent(agent_id)
-        return await agent.references.get(ref)
+    @alru_cache(maxsize=1000)  # noqa: B019
+    async def lookup_agent_by_name(self, agent_name:str) -> AgentId|None:
+        agents = await self.get_agents()
+        agent_id = next((agent_id for agent_id, name in agents.items() if name == agent_name), None)
+        return agent_id
     
     async def get_actors(self, agent_id:AgentId) -> dict[ActorId, str|None]:
-        refs = await self.get_refs(agent_id)
+        references = await self.get_references(agent_id)
+        refs = await references.get_all()
         #keep refs that start with "heads/" to get the actors
         actors_ids = [bytes.fromhex(ref.removeprefix('heads/')) for ref in refs.keys() if ref.startswith("heads/")]
         #get the actor names (the ones that have one)
@@ -154,37 +164,77 @@ class AgentClient:
         else:
             raise Exception("Message content must be a BlobObject or a Grit Blob.")
 
-        inject_response:worker_api_pb2.InjectMessageResponse = await worker_client.get_worker_api_stub_async().InjectMessage(
-            worker_api_pb2.InjectMessageRequest(
-                agent_id=agent_id,
-                recipient_id=message.recipient_id,
-                message_data=worker_api_pb2.MessageData(
-                    headers=message.headers,
-                    is_signal=message.is_signal,
-                    previous_id=message.previous_id,
-                    content_blob=content_blob)))
-        
+        try:
+            inject_response:worker_api_pb2.InjectMessageResponse = await worker_client.get_worker_api_stub_async().InjectMessage(
+                worker_api_pb2.InjectMessageRequest(
+                    agent_id=agent_id,
+                    recipient_id=message.recipient_id,
+                    message_data=worker_api_pb2.MessageData(
+                        headers=message.headers,
+                        is_signal=message.is_signal,
+                        previous_id=message.previous_id,
+                        content_blob=content_blob)))
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                async with self._agents_lock:
+                    if agent_id in self._agents:
+                        self._agents[agent_id].worker_id = None
+                raise Exception(f"Agent {agent_id.hex()} not found.")
+            else:
+                raise e
+            
         return inject_response.message_id
         
-    async def query(self, agent_id:AgentId, actor_id:ActorId, query_name:str, query_context:Blob|None) -> ObjectId | Blob | None:
+        
+    async def run_query(self, agent_id:AgentId, actor_id:ActorId, query_name:str, query_context:Blob|None) -> ObjectId | Tree | Blob | None:
         worker_client = await self._get_agent_worker_client(agent_id)
 
-        query_response:worker_api_pb2.RunQueryResponse = await worker_client.get_worker_api_stub_async().RunQuery(
-            worker_api_pb2.RunQueryRequest(
-                agent_id=agent_id,
-                actor_id=actor_id,
-                query_name=query_name,
-                query_context_blob=object_to_bytes(query_context) if query_context is not None else None))
+        try:
+            query_response:worker_api_pb2.RunQueryResponse = await worker_client.get_worker_api_stub_async().RunQuery(
+                worker_api_pb2.RunQueryRequest(
+                    agent_id=agent_id,
+                    actor_id=actor_id,
+                    query_name=query_name,
+                    query_context_blob=object_to_bytes(query_context) if query_context is not None else None))
+        except grpc.aio.AioRpcError as e:
+            if e.code() == grpc.StatusCode.NOT_FOUND:
+                async with self._agents_lock:
+                    if agent_id in self._agents:
+                        self._agents[agent_id].worker_id = None
+                raise Exception(f"Agent {agent_id.hex()} not found on worker.")
+            else:
+                raise e
         
-        if query_response.HasField("object_id"):
-            return query_response.object_id
-        elif query_response.HasField("object_blob"):
-            return bytes_to_object(query_response.object_blob)
-        elif query_response.HasField("error"):
-            raise Exception(f"Error running query: {query_response.error}")
-        #TODO: properly support no result
-        else:
-            return None
+        if query_response.HasField("result"):
+            if query_response.result is None:
+                return None
+            elif is_object_id(query_response.result):
+                return query_response.result
+            else:
+                return bytes_to_object(query_response.result)
+        return None
 
 
+    async def subscribe_to_agent(self, agent_id:AgentId) -> AsyncIterable[tuple[ActorId, MessageId, Message]]:
+        worker_client = await self._get_agent_worker_client(agent_id)
 
+        response_iterable:AsyncIterable[worker_api_pb2.SubscriptionMessage] = await worker_client.get_worker_api_stub_async().SubscribeToAgent(
+            worker_api_pb2.SubscriptionRequest(
+                agent_id=agent_id))
+        
+        try:
+            async for response in response_iterable:
+                sender_id = response.sender_id
+                message_id = response.message_id
+                message = Message(
+                    headers=response.message_data.headers,
+                    previous=response.message_data.previous_id,
+                    content=response.message_data.content_id)
+                yield sender_id, message_id, message
+        except grpc.aio.AioRpcError as e:
+            logger.error(f"Error in agent {agent_id.hex()} subscription: {e}")
+        finally:
+            #when a subscription is terminated by the server, remove the worker id, so we have to check again on the next subscription
+            async with self._agents_lock:
+                if agent_id in self._agents:
+                    self._agents[agent_id].worker_id = None

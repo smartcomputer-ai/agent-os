@@ -566,7 +566,7 @@ class _WitQueryRouter:
                     kwargs[key] = value
         return kwargs
 
-    async def _convert_result_to_tree_or_blob(self, result:ValidQueryReturnValues, loader:ObjectLoader) -> Tree|Blob:
+    async def _convert_result_to_tree_or_blob(self, result:ValidQueryReturnValues, loader:ObjectLoader) -> Tree|Blob|None:
         if result is None:
             return None
         elif is_object_id(result):

@@ -8,9 +8,9 @@ from starlette.requests import Request
 from starlette.responses import Response, PlainTextResponse, JSONResponse, RedirectResponse
 from starlette.routing import Route
 from sse_starlette.sse import EventSourceResponse
-from grit import *
-from wit import *
-from runtime import Runtime
+from aos.grit import *
+from aos.wit import *
+from .agents_client import AgentsClient
 
 # First version of implementing a HTTP API and web server that can be used to interact with individual actors.
 # It utilizes the Starlette framework (https://www.starlette.io/).
@@ -33,13 +33,13 @@ class WebServer:
     __REFERENCE_PARAM = "ref"
     __QUERY_NAME_PARAM = "query_name"
     __QUERY_PATH_PARAM = "query_path"
-    __WEB_REF_PARAM = "web_ref"
-    __WEB_PATH_PARAM = "web_path"
 
-    def __init__(self, runtime:Runtime):
-        self.runtime = runtime
-        self.object_store = runtime.store
-        self.references = runtime.references
+    def __init__(self, agents_client:AgentsClient):
+        self._agents_client = agents_client
+
+    @classmethod
+    def from_apex_address(cls, apex_address:str="localhost:50052") -> 'WebServer':
+        return cls(AgentsClient(apex_address=apex_address))
 
     def app(self) -> Starlette:
         url_prefix = f"/agents/{{{self.__AGENT_ID_PARAM}}}"
@@ -85,33 +85,31 @@ class WebServer:
 
     async def agents_get_all(self, request:Request):
         assert request.method == "GET"
-        #in this setup, the API will only ever return a single agent id
-        agent_id = self.runtime.agent_id
-        agent_name = self.runtime.agent_name
-        logger.info(f"Agent name: {agent_name}")
-        logger.info(f"Agent id: {agent_id}")
-        return JSONResponse({ agent_name: agent_id.hex()})
+        agents = await self._agents_client.get_agents()
+        return JSONResponse({agent_id.hex():agent_name for agent_id, agent_name in agents.items()})
 
     async def grit_get_refs(self, request:Request):
         assert request.method == "GET"
-        self.__validate_agent_id(request)
-        refs = await self.references.get_all()
+        agent_id = await self._validate_agent_id(request)
+        references = await self._agents_client.get_references(agent_id)
+        refs = await references.get_all()
         return JSONResponse({ref:object_id.hex() for ref, object_id in refs.items()})
     
     async def grit_get_ref(self, request:Request):
         assert request.method == "GET"
-        self.__validate_agent_id(request)
+        agent_id = await self._validate_agent_id(request)
+        references = await self._agents_client.get_references(agent_id)
         ref = request.path_params[self.__REFERENCE_PARAM]
-        object_id = await self.references.get(ref)
+        object_id = await references.get(ref)
         if(object_id is None):
             raise HTTPException(status_code=404, detail=f"Reference ({ref}) not found")
         return JSONResponse({ref:object_id.hex()})
 
     async def grit_get_object(self, request:Request):
         assert request.method == "GET"
-        self.__validate_agent_id(request)
-        object_id = self.__validate_object_id(request)
-        object = await self.object_store.load(object_id)
+        agent_id = await self._validate_agent_id(request)
+        object_id = self._validate_object_id(request)
+        object = await self._agents_client.get_object(agent_id, object_id)
         if(object is None):
             raise HTTPException(status_code=404, detail=f"Object ({object_id.hex()}) not found")
         if is_blob(object):
@@ -158,14 +156,14 @@ class WebServer:
 
     async def wit_get_actors(self, request:Request):
         assert request.method == "GET"
-        self.__validate_agent_id(request)
-        actor_ids = self.runtime.get_actors()
-        return JSONResponse([actor_id.hex() for actor_id in actor_ids])
+        agent_id = await self._validate_agent_id(request)
+        actors = await self._agents_client.get_actors(agent_id)
+        return JSONResponse({actor_id.hex():name for actor_id, name in actors.items()})
 
     async def wit_post_inbox(self, request:Request):
         assert request.method == "POST"
-        agent_id = self.__validate_agent_id(request)
-        actor_id = await self.__validate_actor_id(request)
+        agent_id = await self._validate_agent_id(request)
+        actor_id = await self._validate_actor_id(request)
         request_body_bytes = await request.body()
         if(len(request_body_bytes) == 0):
             raise HTTPException(status_code=400, detail="Request body must not be empty")
@@ -195,17 +193,17 @@ class WebServer:
             actor_id, 
             BlobObject(Blob(blob_headers, request_body_bytes)))
         msg.headers = message_headers
-        message_id = await self.runtime.inject_message(msg)
+        message_id = await self._agents_client.inject_message(agent_id, msg)
         return Response(
             content=message_id.hex(), 
             media_type='text/plain', 
             status_code=201, 
-            headers={'Location': self.__get_object_id_path(agent_id, message_id)})
+            headers={'Location': self._get_object_id_path(agent_id, message_id)})
 
     async def wit_query(self, request:Request):
         assert request.method == "GET"
-        self.__validate_agent_id(request)
-        actor_id = await self.__validate_actor_id(request)
+        agent_id = await self._validate_agent_id(request)
+        actor_id = await self._validate_actor_id(request)
         query_name = request.path_params.get(self.__QUERY_NAME_PARAM)
         query_path = request.path_params.get(self.__QUERY_PATH_PARAM)
         if request.method == "GET":
@@ -222,7 +220,7 @@ class WebServer:
             #todo: allow PUT to upload a bigger context for a query
             query_context = None            
         # use the query executor to try to run the query
-        query_result = await self.runtime.query_executor.run(actor_id, query_name, query_context)
+        query_result = await self._agents_client.run_query(agent_id, actor_id, query_name, query_context)
         if(query_result is None):
             raise HTTPException(status_code=404, detail=f"Query ({query_name}) not found")
         if(is_blob(query_result)):
@@ -234,7 +232,8 @@ class WebServer:
             # as long as there is a path, descend the tree
             if(query_path is None):
                 query_path  = "/"
-            tree_obj = TreeObject(self.runtime.store, query_result)
+            object_store = await self._agents_client.get_object_store(agent_id)
+            tree_obj = TreeObject(object_store, query_result)
             #split the path and descend the tree if there are multiple levels
             path_parts = query_path.split('/')
             path_parts = [part for part in path_parts if len(part) > 0]
@@ -262,7 +261,7 @@ class WebServer:
                 detail=f"Query result ({query_name}) is not a blob or tree object, the query endpoint only supports serving blob and tree objects")
 
     async def wit_get_messages_sse(self, request:Request):
-        self.__validate_agent_id(request)
+        agent_id = await self._validate_agent_id(request)
 
         include_content = request.query_params.get('content', 'false').lower() == 'true'
         message_type_filters = request.query_params.getlist('mt')
@@ -272,48 +271,41 @@ class WebServer:
         request.headers.get('Last-Event-ID')
 
         async def subscribe_to_messages():
-            mailbox_updates_queue:asyncio.Queue[tuple[ActorId, ActorId, MessageId]]
             try:
-                with self.runtime.subscribe_to_messages() as mailbox_updates_queue:
-                    while True:
-                        #todo: add time out to handle cancel, etc
-                        mailbox_update = await mailbox_updates_queue.get()
-                        logger.debug(f"got mailbox update: {mailbox_update}")
-                        #take an empty message as a signal that the runtime is stoping
-                        if(mailbox_update is None):
-                            break
-                        message_id = mailbox_update[2]
-                        message_id_str = message_id.hex()
-                        message:Message = await self.runtime.store.load(message_id)
-                        if message.headers is not None and "mt" in message.headers:
-                            message_type = message.headers["mt"]
+                async for sender_id, message_id, message in self._agents_client.subscribe_to_agent(agent_id):
+                    #todo: add time out to handle cancel, etc
+                    message_id_str = message_id.hex()
+                    logger.debug(f"got mailbox update from sender {sender_id.hex()}, message {message_id_str}")
+                    if message.headers is not None and "mt" in message.headers:
+                        message_type = message.headers["mt"]
+                    else:
+                        message_type = "message"
+                    #if the subscriber defined a message type filter, skip messages that don't match
+                    if(message_type_filters is not None and message_type not in message_type_filters):
+                        logger.debug("skipping msg:", message_type)
+                        continue                            
+                    sse_data = { 
+                        "sender_id": sender_id.hex(),
+                        "reciever_id": agent_id.hex(),
+                        "message_id": message_id_str
+                    }
+                    if(include_content):
+                        #todo: is this inefficient?
+                        object_store = await self._agents_client.get_object_store(agent_id)
+                        message_content = await object_store.load(message.content)
+                        if is_blob(message_content):
+                            sse_data["content"] = message_content.data.decode('utf-8')
+                        elif is_tree(message_content):
+                            sse_data["content"] = json.dumps(message_content)
                         else:
-                            message_type = "message"
-                        #if the subscriber defined a message type filter, skip messages that don't match
-                        if(message_type_filters is not None and message_type not in message_type_filters):
-                            logger.debug("skipping msg:", message_type)
-                            continue                            
-                        sse_data = { 
-                            "sender_id": mailbox_update[0].hex(),
-                            "reciever_id": mailbox_update[1].hex(),
-                            "message_id": message_id_str
-                        }
-                        if(include_content):
-                            message_content = await self.runtime.store.load(message.content)
-                            if is_blob(message_content):
-                                sse_data["content"] = message_content.data.decode('utf-8')
-                            elif is_tree(message_content):
-                                sse_data["content"] = json.dumps(message_content)
-                            else:
-                                raise HTTPException(status_code=500, detail="Message content is not a blob or tree object.")
-                        yield { 
-                            #the data field is required by the SSE spec
-                            # and it needs to be a valid JSON string inside data
-                            "id": message_id_str,
-                            "event": message_type,
-                            "data": json.dumps(sse_data)
-                        }
-                        
+                            raise HTTPException(status_code=500, detail="Message content is not a blob or tree object.")
+                    yield { 
+                        #the data field is required by the SSE spec
+                        # and it needs to be a valid JSON string inside data
+                        "id": message_id_str,
+                        "event": message_type,
+                        "data": json.dumps(sse_data)
+                    }
             except asyncio.CancelledError as e:
                 logger.info(f"Disconnected from client (via refresh/close) {request.client}")
                 # todo: do any other cleanup, if any
@@ -325,36 +317,37 @@ class WebServer:
             )
 
 
-    def __validate_agent_id(self, request:Request) -> bytes:
-        if(self.__AGENT_ID_PARAM not in request.path_params):
+    async def _validate_agent_id(self, request:Request) -> bytes:
+        if self.__AGENT_ID_PARAM not in request.path_params:
             raise HTTPException(status_code=400, detail="Agent id not set")
         agent_id_or_name_str = request.path_params[self.__AGENT_ID_PARAM]
-        if(not is_object_id_str(agent_id_or_name_str)):
-            if(agent_id_or_name_str == self.runtime.agent_name):
-                return self.runtime.agent_id
+        if not is_object_id_str(agent_id_or_name_str):
+            agent_id = await self._agents_client.lookup_agent_by_name(agent_id_or_name_str)
+            if agent_id is not None:
+                return agent_id
             raise HTTPException(status_code=404, detail=f"Agent id ({agent_id_or_name_str}) not found") 
         else:
             agent_id = bytes.fromhex(agent_id_or_name_str)
-            if(agent_id == self.runtime.agent_id):
+            if await self._agents_client.agent_exists(agent_id):
                 return agent_id
             raise HTTPException(status_code=404, detail=f"Agent id ({agent_id_or_name_str}) not found") 
     
-    async def __validate_actor_id(self, request:Request) -> bytes:
-        if(self.__ACTOR_ID_PARAM not in request.path_params):
+    async def _validate_actor_id(self, request:Request) -> bytes:
+        if self.__ACTOR_ID_PARAM not in request.path_params:
             raise HTTPException(status_code=400, detail="Actor id not set")
         actor_id_or_ref_str = request.path_params[self.__ACTOR_ID_PARAM]
-        if(not is_object_id_str(actor_id_or_ref_str)):
-            actor_id = await self.references.get(ref_actor_name(actor_id_or_ref_str))
-            if(actor_id is not None):
+        if not is_object_id_str(actor_id_or_ref_str):
+            actor_id = await self._agents_client.lookup_actor_by_name(actor_id_or_ref_str)
+            if actor_id is not None:
                 return actor_id
             raise HTTPException(status_code=400, detail=f"Invalid actor id ({actor_id_or_ref_str})")
         else:
             actor_id = bytes.fromhex(actor_id_or_ref_str)
-            if(not self.runtime.actor_exists(actor_id)):
-                raise HTTPException(status_code=404, detail=f"Actor id ({actor_id_or_ref_str}) not found")
-            return actor_id
+            if await self._agents_client.actor_exists(actor_id):
+                return actor_id
+            raise HTTPException(status_code=404, detail=f"Actor id ({actor_id_or_ref_str}) not found")
     
-    def __validate_object_id(self, request:Request) -> bytes:
+    def _validate_object_id(self, request:Request) -> bytes:
         if(self.__OBJECT_ID_PARAM not in request.path_params):
             raise HTTPException(status_code=400, detail="Object id not set")
         object_id_str = request.path_params[self.__OBJECT_ID_PARAM]
@@ -362,9 +355,17 @@ class WebServer:
             raise HTTPException(status_code=400, detail=f"Invalid object id ({object_id_str})")
         return bytes.fromhex(object_id_str)
     
-    def __get_object_id_path(self, agent_id, object_id) -> str:
+    def _get_object_id_path(self, agent_id, object_id) -> str:
         if(isinstance(agent_id, bytes)):
             agent_id = agent_id.hex()
         if(isinstance(object_id, bytes)):
             object_id = object_id.hex()
         return f"/ag/{agent_id}/grit/objects/{object_id}"
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    async def arun():
+        server = WebServer.from_apex_address()
+        await server.run()
+    asyncio.run(arun())

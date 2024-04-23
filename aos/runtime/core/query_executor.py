@@ -22,7 +22,7 @@ class QueryExecutor(Query):
         self.resolver = resolver
         self.agent_id = agent_id
 
-    async def run(self, actor_id:ActorId, query_name:str, context:Blob|None) -> Tree | Blob:
+    async def run(self, actor_id:ActorId, query_name:str, context:Blob|None) -> Tree | Blob | None:
         actor_id_str = actor_id.hex()
         current_step_id = await self.references.get(ref_step_head(actor_id))
         if(current_step_id is None):

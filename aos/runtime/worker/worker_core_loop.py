@@ -411,6 +411,7 @@ class WorkerCoreLoop:
         agent_id = event.agent_id
         if agent_id not in worker_state.assigned_agents:
             logger.error(f"Tried to query agent {agent_id.hex()}, but agent is currently not running on this worker.")
+            event.set_result(None)
             return
         
         query = event.query_request
@@ -421,25 +422,26 @@ class WorkerCoreLoop:
                 query.query_name,
                 query.context,
             )
-            error = None
         except Exception as e:
-            logger.warning(f"Error while running query for {agent_id.hex()}.", exc_info=e)
-            result = None
-            error = str(e)
+            logger.error(f"Error while running query ({query.query_name}) for {agent_id.hex()}.", exc_info=e)
+            event.set_result(Exception(f"Error while running query ({query.query_name}) for {agent_id.hex()}: {str(e)}"))
+            return
 
+        final_result = None
+        if result is None:
+            pass
+        elif is_object_id(result):
+            final_result = result
+        elif is_tree(result) or is_blob(result):
+            final_result = object_to_bytes(result)
+        else:
+            event.set_result(ValueError(f"Error while running query ({query.query_name}) for for {agent_id.hex()}: result is not a valid type (must be object id, tree, or blob), was: {type(result)}."))
+            return
+        
         response = worker_api_pb2.RunQueryResponse(
             agent_id=agent_id,
             actor_id=query.actor_id,
-        )
-        if error is not None:
-            response.error = error
-        elif is_object_id(result):
-            response.object_id = result
-        elif isinstance(result, bytes):
-            response.object_blob = result
-        else:
-            raise ValueError(f"Query ({query.query_name}) result for {agent_id.hex()} and actor {query.actor_id.hex()} is not a valid type, was: {type(result)}.")
-
+            result=final_result)
         event.set_result(response)
 
 
@@ -447,6 +449,7 @@ class WorkerCoreLoop:
         agent_id = event.agent_id
         if agent_id not in worker_state.assigned_agents:
             logger.error(f"Tried to subscribe to agent {agent_id.hex()}, but agent is currently not running on this worker.")
+            event.to_subscription_queue.put_nowait(None)
             return
 
         subscription = event.subscription_request

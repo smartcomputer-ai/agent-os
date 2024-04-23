@@ -19,7 +19,7 @@ class ApexApi(apex_api_pb2_grpc.ApexApiServicer):
     async def GetApexStatus(self, request: apex_api_pb2.GetApexStatusRequest, context):
         state = await self.core_loop.get_state_copy()
         return apex_api_pb2.GetApexStatusResponse(
-            state=apex_api_pb2.GetApexStatusResponse.UNKNOWN, #TODO: implement
+            status=apex_api_pb2.GetApexStatusResponse.UNKNOWN, #TODO: implement
             store_address=self.core_loop._store_address,
             workers=[agent.to_apex_api_worker_info() for agent in state.workers.values()]
         )
@@ -45,7 +45,7 @@ class ApexWorkers(apex_workers_pb2_grpc.ApexWorkersServicer):
         self.core_loop = core_loop
 
     async def RegisterWorker(self, request: apex_workers_pb2.WorkerRegistrationRequest, context) -> apex_workers_pb2.WorkerRegistrationResponse:
-        ticket = await self.core_loop.register_worker(request.worker_id)
+        ticket = await self.core_loop.register_worker(request.worker_id, request.worker_address)
         return apex_workers_pb2.WorkerRegistrationResponse(ticket=ticket)
 
     async def ConnectWorker(

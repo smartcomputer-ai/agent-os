@@ -53,13 +53,7 @@ message RunQueryRequest {
 message RunQueryResponse{
   bytes agent_id = 1; //32 bytes, of actor_id type
   bytes actor_id = 2; //32 bytes, actor_id
-  oneof result { //can be a tree_id, or the actual blob data
-    //blob_id or tree_id (see Grit Query)
-    bytes object_id = 10;
-    //valid Grit blob object  
-    bytes object_blob = 11; 
-    string error = 12;
-  }
+  optional bytes result = 10; // can be a tree_id or a serizlized Grit Blob
 }
 
 message SubscriptionRequest{

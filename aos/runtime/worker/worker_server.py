@@ -15,16 +15,19 @@ class WorkerApi(worker_api_pb2_grpc.WorkerApiServicer):
     def __init__(self, core_loop:WorkerCoreLoop):
         self.core_loop = core_loop
 
-    async def InjectMessage(self, request: worker_api_pb2.InjectMessageRequest, context) -> worker_api_pb2.InjectMessageResponse:
+    async def InjectMessage(self, request: worker_api_pb2.InjectMessageRequest, context:grpc.aio.ServicerContext) -> worker_api_pb2.InjectMessageResponse:
         result = await self.core_loop.inject_message(request)
         if result is None:
-            raise Exception("Failed to inject message")
+            context.set_code(grpc.StatusCode.NOT_FOUND)
+            await context.abort(grpc.StatusCode.NOT_FOUND, "Agent not found.")
         return result
     
-    async def RunQuery(self, request: worker_api_pb2.RunQueryRequest, context) -> worker_api_pb2.RunQueryResponse:
+    async def RunQuery(self, request: worker_api_pb2.RunQueryRequest, context:grpc.aio.ServicerContext) -> worker_api_pb2.RunQueryResponse:
         result = await self.core_loop.run_query(request)
         if result is None:
-            raise Exception("Failed to run query.")
+            await context.abort(grpc.StatusCode.NOT_FOUND, "Agent not found.")
+        elif isinstance(result, Exception):
+            await context.abort(grpc.StatusCode.INTERNAL, str(result))
         return result
     
     async def SubscribeToAgent(self, request: worker_api_pb2.SubscriptionRequest, context) -> AsyncIterable[worker_api_pb2.SubscriptionMessage]:
@@ -57,7 +60,11 @@ async def start_server(
             worker_id = f"worker-{os.urandom(8).hex()}"
 
     #start core loop
-    core_loop = WorkerCoreLoop(apex_address=apex_address, worker_address=worker_address, worker_id=worker_id)
+    core_loop = WorkerCoreLoop(
+        apex_address=apex_address, 
+        store_address=store_address,
+        worker_address=worker_address, 
+        worker_id=worker_id)
     core_loop_task = asyncio.create_task(core_loop.start())
     await core_loop.wait_until_running()
 

@@ -9,5 +9,5 @@ class Query(ABC):
         actor_id:ActorId, 
         query_name:str, 
         context:Blob|None,
-        ) -> Tree | Blob:
+        ) -> Tree | Blob | None:
         pass
