@@ -163,7 +163,7 @@ class WebServer:
     async def wit_post_inbox(self, request:Request):
         assert request.method == "POST"
         agent_id = await self._validate_agent_id(request)
-        actor_id = await self._validate_actor_id(request)
+        actor_id = await self._validate_actor_id(request, agent_id)
         request_body_bytes = await request.body()
         if(len(request_body_bytes) == 0):
             raise HTTPException(status_code=400, detail="Request body must not be empty")
@@ -203,7 +203,7 @@ class WebServer:
     async def wit_query(self, request:Request):
         assert request.method == "GET"
         agent_id = await self._validate_agent_id(request)
-        actor_id = await self._validate_actor_id(request)
+        actor_id = await self._validate_actor_id(request, agent_id)
         query_name = request.path_params.get(self.__QUERY_NAME_PARAM)
         query_path = request.path_params.get(self.__QUERY_PATH_PARAM)
         if request.method == "GET":
@@ -332,18 +332,20 @@ class WebServer:
                 return agent_id
             raise HTTPException(status_code=404, detail=f"Agent id ({agent_id_or_name_str}) not found") 
     
-    async def _validate_actor_id(self, request:Request) -> bytes:
+    async def _validate_actor_id(self, request:Request, agent_id:AgentId) -> bytes:
+        if not is_object_id(agent_id):
+            raise HTTPException(status_code=500, detail="Internal error: agent id is not a valid object id")
         if self.__ACTOR_ID_PARAM not in request.path_params:
             raise HTTPException(status_code=400, detail="Actor id not set")
         actor_id_or_ref_str = request.path_params[self.__ACTOR_ID_PARAM]
         if not is_object_id_str(actor_id_or_ref_str):
-            actor_id = await self._agents_client.lookup_actor_by_name(actor_id_or_ref_str)
+            actor_id = await self._agents_client.lookup_actor_by_name(agent_id, actor_id_or_ref_str)
             if actor_id is not None:
                 return actor_id
             raise HTTPException(status_code=400, detail=f"Invalid actor id ({actor_id_or_ref_str})")
         else:
             actor_id = bytes.fromhex(actor_id_or_ref_str)
-            if await self._agents_client.actor_exists(actor_id):
+            if await self._agents_client.actor_exists(agent_id, actor_id):
                 return actor_id
             raise HTTPException(status_code=404, detail=f"Actor id ({actor_id_or_ref_str}) not found")
     

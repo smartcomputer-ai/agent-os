@@ -1,6 +1,6 @@
 import filetype
-from grit import *
-from wit import *
+from aos.grit import *
+from aos.wit import *
 
 class StoreWrapper:
     """Create a wrapper around the object store that has a flat interface, easy to understand and explain to an LLM."""

@@ -1,10 +1,10 @@
 import logging
-from grit import *
-from wit import *
-from jetpack.messages import *
-from jetpack.coder.coder_wit import create_coder_actor
-from jetpack.coder.retriever_wit import create_retriever_actor
-from jetpack.chat.chat_completions import chat_completion
+from aos.grit import *
+from aos.wit import *
+from agents.jetpack.messages import *
+from agents.jetpack.coder.coder_wit import create_coder_actor
+from agents.jetpack.coder.retriever_wit import create_retriever_actor
+from agents.jetpack.chat.chat_completions import chat_completion
 
 
 #========================================================================================

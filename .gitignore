@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Agent OS
+.aos/
+
 # Distribution / packaging
 .Python
 build/

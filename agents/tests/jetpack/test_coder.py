@@ -1,6 +1,6 @@
-from wit import *
-from runtime import *
-from grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit import *
+from aos.runtime.core import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
 from jetpack.messages import CodeSpec
 from jetpack.coder.coder_wit import app, create_coder_actor
 from .helpers_runtime import *

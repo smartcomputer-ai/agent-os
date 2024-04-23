@@ -1,9 +1,9 @@
 import logging
-from grit import *
-from wit import *
-from jetpack.messages import *
-from jetpack.coder.retriever_completions import *
-from jetpack.coder.coder_wit import create_coder_actor
+from aos.grit import *
+from aos.wit import *
+from agents.jetpack.messages import *
+from agents.jetpack.coder.retriever_completions import *
+from agents.jetpack.coder.coder_wit import create_coder_actor
 
 #========================================================================================
 # Setup & State

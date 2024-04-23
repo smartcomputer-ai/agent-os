@@ -494,10 +494,10 @@ class _WitQueryRouter:
             raise TypeError("The first argument to a wit query function must be a StepId.")
         query_name:Mailbox = args[1]
         if not isinstance(query_name, str):
-            raise TypeError("The second argument to a wit query function must be a str, the query name.")
+            raise TypeError(f"The second argument to a wit query function must be a str, the query name, but was {type(query_name)} ({str(query_name)}).")
         query_args:Blob|None = args[2]
         if query_args is not None and not is_blob(query_args):
-            raise TypeError("The third argument to a wit query function must be a Blob or None.")
+            raise TypeError(f"The third argument to a wit query function must be a Blob or None, but was {type(query_args)}.")
         return (step_id, query_name, query_args)
     
     def _enforce_required_kwargs(self, **kwargs) -> tuple[ActorId, ActorId, ObjectLoader]:

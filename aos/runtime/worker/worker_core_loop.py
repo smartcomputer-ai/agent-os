@@ -420,12 +420,17 @@ class WorkerCoreLoop:
             return
         
         query = event.query_request
+        if query.HasField("context"):
+            #deserialize to a Grit blob not raw binary bytes
+            contect_blob = bytes_to_object(query.context)
+        else:
+            contect_blob = None
         runtime = worker_state.runtimes[agent_id]
         try:
             result = await runtime.query_executor.run(
                 query.actor_id,
                 query.query_name,
-                query.context,
+                contect_blob,
             )
         except Exception as e:
             logger.error(f"Error while running query ({query.query_name}) for {agent_id.hex()}.", exc_info=e)

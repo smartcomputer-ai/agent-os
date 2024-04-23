@@ -1,5 +1,5 @@
-from wit import *
-from runtime import *
+from aos.wit import *
+from aos.runtime.core import *
 
 async def wait_for_message_type(runtime:Runtime, mt:str) -> Message:
     with runtime.subscribe_to_messages() as queue:

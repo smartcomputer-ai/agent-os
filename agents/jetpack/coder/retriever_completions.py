@@ -1,7 +1,7 @@
 import logging
 import openai
 from pydantic import BaseModel
-from completions import *
+from agents.lib.completions import *
 
 logger = logging.getLogger(__name__)
 

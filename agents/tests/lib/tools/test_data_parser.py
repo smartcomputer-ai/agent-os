@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from lib.tools import DataParser
+from agents.lib.tools import DataParser
 
 html = """
 <!DOCTYPE html>

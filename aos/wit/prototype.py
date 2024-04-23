@@ -24,7 +24,7 @@ def wrap_in_prototype(core:Core) -> Core:
     # create the prototype core
     wrapper_core = Core(None, None, None)
     # add the prototype wit
-    wit_ref = "external:wit.prototype:wit"
+    wit_ref = "external:aos.wit.prototype:wit"
     wrapper_core.makeb('wit').set_as_str(wit_ref)
     wrapper_core.makeb('wit_update').set_as_str(wit_ref)
     wrapper_core.add("prototype", core)

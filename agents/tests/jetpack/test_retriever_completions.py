@@ -1,3 +1,4 @@
+import json
 from jetpack.coder.retriever_completions import *
 from jetpack.messages.messages_coder import CodeSpec
 

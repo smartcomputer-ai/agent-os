@@ -84,7 +84,7 @@ async def send_message(runtime:Runtime, actor_id, content):
     await asyncio.sleep(0.1)
 
 # tests
-@pytest.mark.skip(reason="fix later")
+#@pytest.mark.skip(reason="fix later")
 async def test_prototype_with_create():
     runtime, running_task = await setup_runtime()
     prototype_id = await send_prototype_genesis_message(runtime, "wit", wit_a_async)
@@ -108,7 +108,7 @@ async def test_prototype_with_create():
     assert blob.get_as_str() == 'howdy'
 
 # tests
-@pytest.mark.skip(reason="fix later")
+#@pytest.mark.skip(reason="fix later")
 async def test_prototype_with_update():
     runtime, running_task = await setup_runtime()
     prototype_id = await send_prototype_genesis_message(runtime, "wit", wit_a_async)

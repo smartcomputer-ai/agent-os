@@ -35,6 +35,8 @@ def ref_step_head(actor_id:ActorId|str) -> str:
     return f"heads/{actor_id}"
 
 def ref_actor_name(actor_name_ref:str) -> str:
+    if actor_name_ref == "root":
+        raise ValueError("Actor name 'root' is reserver for the runtime root actor.")
     return f"actors/{actor_name_ref}"
 
 def ref_prototype_name(prototype_name_ref:str) -> str:

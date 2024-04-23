@@ -1,5 +1,5 @@
 import openai
-from completions import *
+from agents.lib.completions import *
 
 async def inputoutput_completion(
         task_description:str, 

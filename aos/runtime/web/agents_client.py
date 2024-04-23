@@ -162,11 +162,15 @@ class AgentsClient:
     async def get_actors(self, agent_id:AgentId) -> dict[ActorId, str|None]:
         references = await self.get_references(agent_id)
         refs = await references.get_all()
+        #print("all ref", {ref:actor_id.hex() for ref,actor_id in refs.items()})
         #keep refs that start with "heads/" to get the actors
         actors_ids = [bytes.fromhex(ref.removeprefix('heads/')) for ref in refs.keys() if ref.startswith("heads/")]
         #get the actor names (the ones that have one)
-        named_actors = {ref.removeprefix('actors/'):actor_id for ref,actor_id in refs.items() if ref.startswith('actors/')}
-        return {actor_id:named_actors.get(actor_id) for actor_id in actors_ids}
+        name_lookup = {actor_id:ref.removeprefix('actors/') for ref,actor_id in refs.items() if ref.startswith('actors/')}
+        #add the root actor
+        if ref_root_actor() in refs:
+            name_lookup[refs[ref_root_actor()]] = "root"
+        return {actor_id:name_lookup.get(actor_id) for actor_id in actors_ids}
 
     @alru_cache(maxsize=1000)
     async def lookup_actor_by_name(self, agent_id:AgentId, actor_name:str) -> ActorId|None:
@@ -225,7 +229,7 @@ class AgentsClient:
                     agent_id=agent_id,
                     actor_id=actor_id,
                     query_name=query_name,
-                    query_context_blob=object_to_bytes(query_context) if query_context is not None else None))
+                    context=object_to_bytes(query_context) if query_context is not None else None))
         except grpc.aio.AioRpcError as e:
             if e.code() == grpc.StatusCode.NOT_FOUND:
                 async with self._agents_lock:
