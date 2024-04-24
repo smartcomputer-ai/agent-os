@@ -43,7 +43,7 @@ async def test_msgs__runtime_pending():
     resolver = ExternalResolver(store)
     resolver.register('wit_a', wit_a)
     resolver.register('wit_b', wit_b)
-    runtime = Runtime(store, refs, "test_agent", resolver)
+    runtime = Runtime(store, refs, resolver=resolver)
 
     #create wit_a
     wit_a_gen_step_id = await helpers.create_actor(store, refs, runtime.agent_id, 'wit_a')

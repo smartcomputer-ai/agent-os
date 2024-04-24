@@ -6,7 +6,7 @@ from aos.wit import *
 from .resolvers import *
 from .query_executor import QueryExecutor
 from .actor_executor import ExecutionContext, ActorExecutor, MailboxUpdate
-from .root_executor import RootActorExecutor, agent_id_from_root_actor_name
+from .root_executor import RootActorExecutor, agent_id_from_point
 from .request_response_executor import RequestResponseExecutor
 
 logger = logging.getLogger(__name__)
@@ -28,14 +28,14 @@ class Runtime:
     def __init__(self, 
             store:ObjectStore, 
             references:References, 
-            agent_name:str, 
+            point:Point=0, 
             resolver:Resolver=None):
         if not isinstance(store, ObjectStore):
             raise TypeError('store must be an ObjectStore')
         if not isinstance(references, References):
             raise TypeError('references must be a References')
-        if agent_name is not None and not isinstance(agent_name, str):
-            raise TypeError('agent_name, if provided, must be a string.')
+        if point is None or not isinstance(point, Point):
+            raise TypeError('point, must be provided and be an int.')
         
         self.ctx = ExecutionContext()
         self.ctx.store = store
@@ -45,12 +45,8 @@ class Runtime:
         else:
             self.ctx.resolver = MetaResover.with_all(store)
 
-        #if no agent_name was provided, it will be loaded later, in __init_agent_executor 
-        if agent_name is None:
-            raise ValueError('agent_name must be provided')
-        
-        self.ctx.agent_name = agent_name
-        self.ctx.agent_id = agent_id_from_root_actor_name(agent_name)
+        self.ctx.point = point
+        self.ctx.agent_id = agent_id_from_point(point)
 
         self.ctx.query = QueryExecutor(self.ctx.store, self.ctx.references, self.ctx.resolver, self.ctx.agent_id)
 
@@ -62,8 +58,9 @@ class Runtime:
         self.__executor_lock = asyncio.Lock()
 
     @property
-    def agent_name(self) -> str|None:
-        return self.ctx.agent_name
+    def point(self) -> Point:
+        return self.ctx.point
+    
     @property
     def agent_id(self) -> ActorId:
         return self.ctx.agent_id
@@ -127,9 +124,9 @@ class Runtime:
         async with self.__executor_lock:
             if(self.__root_executor is not None):
                 return
-            self.__root_executor = await RootActorExecutor.from_agent_name(self.ctx, self.agent_name)
+            self.__root_executor = await RootActorExecutor.from_point(self.ctx, self.point)
             if(self.agent_id != self.__root_executor.agent_id):
-                raise Exception(f"Agent name {self.agent_name} with id '{self.agent_id.hex()}' does not match the agent executor id "+
+                raise Exception(f"Agent name {self.point} with id '{self.agent_id.hex()}' does not match the agent executor id "+
                                 f"'{self.__root_executor.agent_id.hex()}'. Did you use the right name?")
             # the request-response executor can only be created now that the runtime executor exists
             # but we might want to consider to move the construction of such "user-space" dependencies somewhere else

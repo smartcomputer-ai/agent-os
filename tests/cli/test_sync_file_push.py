@@ -31,9 +31,6 @@ def create_files(root_path):
         posix_root_path = root_path
 
     toml_string=f'''
-[agent]
-name = "test"
-
 [all] 
 push = ["{posix_root_path}/code/common:/code/common", "{posix_root_path}/data/common:/data/common"]
 
@@ -81,9 +78,8 @@ async def test_sync_file_push(tmp_path):
     pushes = await sync_file.load_pushes(f"{tmp_path}/sync.toml", refs)
     assert len(pushes) == 2
 
-    agent = sync_file.load_agent(f"{tmp_path}/sync.toml")
     for push in pushes:
-        await push.create_and_inject_messages(store, refs, agent['name'])
+        await push.create_and_inject_messages(store, refs, 1)
 
     all_refs = await refs.get_all()
     for ref, id in all_refs.items():
@@ -96,15 +92,13 @@ async def test_sync_file_push_twice(tmp_path):
     store = MemoryObjectStore()
     refs = MemoryReferences()
     pushes = await sync_file.load_pushes(f"{tmp_path}/sync.toml", refs)
-    agent = sync_file.load_agent(f"{tmp_path}/sync.toml")
     for push in pushes:
-        await push.create_and_inject_messages(store, refs, agent['name'])
+        await push.create_and_inject_messages(store, refs, 1)
 
     #must clear out the previous genesis message and replace it with the new one
     pushes = await sync_file.load_pushes(f"{tmp_path}/sync.toml", refs)
-    agent = sync_file.load_agent(f"{tmp_path}/sync.toml")
     for push in pushes:
-        await push.create_and_inject_messages(store, refs, agent['name'])
+        await push.create_and_inject_messages(store, refs, 1)
 
     all_refs = await refs.get_all()
     for ref, id in all_refs.items():

@@ -1,12 +1,12 @@
 import logging
 import os
+import random
 import lmdb
 from aos.grit import *
-from aos.runtime.core.root_executor import bootstrap_root_actor_bytes, agent_id_from_root_actor_name
+from aos.runtime.core.root_executor import bootstrap_root_actor_bytes, agent_id_from_point
 from aos.runtime.store import grit_store_pb2
 from aos.runtime.store import agent_store_pb2
 from aos.runtime.store import agent_store_pb2
-from aos.runtime.crypto.did_key import generate_did
 
 _GRIT_ID_LEN = 32
 
@@ -19,7 +19,6 @@ class LmdbBackend:
     def __init__(self, store_path:str, writemap:bool=False):
         self.store_path = store_path
         self._resizing = False
-        self._agents = None
         os.makedirs(self.store_path, exist_ok=True)
         self.env = lmdb.Environment(
             store_path, 
@@ -88,17 +87,11 @@ class LmdbBackend:
         return new_size
 
     def _ensure_agent(self, agent_id:ActorId):
-        if(self._agents is None):
-            self._agents = set()
-            #load all the agents
-            with self.begin_agents_txn(write=False) as txn:
-                cursor = txn.cursor()
-                cursor.first()
-                while cursor.next():
-                    agent_id = cursor.value()
-                    self._agents.add(agent_id)
-        if not agent_id in self._agents:
-            raise ValueError(f"Agent with id '{agent_id.hex()}' does not exist.")
+        #load all the agents
+        with self.begin_agents_txn(write=False) as txn:
+            existing_point = txn.get(agent_id)
+            if existing_point is None:
+                raise ValueError(f"Agent with id '{agent_id.hex()}' does not exist.")
 
     #=========================================================
     # Grit Object Store API
@@ -196,29 +189,29 @@ class LmdbBackend:
     def get_agent(self, request:agent_store_pb2.GetAgentRequest) -> agent_store_pb2.GetAgentResponse:
         if(request is None):
             raise ValueError("request must not be None.")
-        if (request.agent_did is None and request.agent_id is None):
-            raise ValueError("either agent_did or agent_id must be provided.")
+        if (not request.HasField("point") and not request.HasField("agent_id")):
+            raise ValueError("either point or agent_id must be provided.")
         
         with self.begin_agents_txn(write=False) as txn:
             if request.agent_id:
-                agent_did = txn.get(request.agent_id)
-                if agent_did is not None:
+                point_bytes = txn.get(request.agent_id)
+                if point_bytes is not None:
                     return agent_store_pb2.GetAgentResponse(
                         exists=True,
                         agent_id=request.agent_id,
-                        agent_did=agent_did.decode('utf-8'))
+                        point=bytes_to_point(point_bytes))
             else:
-                agent_id = txn.get(request.agent_did.encode('utf-8'))
+                agent_id = txn.get(point_to_bytes(request.point))
                 if agent_id is not None:
                     return agent_store_pb2.GetAgentResponse(
                         exists=True,
                         agent_id=agent_id,
-                        agent_did=request.agent_did)
+                        point=request.point)
         return agent_store_pb2.GetAgentResponse(exists=False)
 
 
     def get_agents(self, request:agent_store_pb2.GetAgentsRequest) -> agent_store_pb2.GetAgentsResponse:
-        agents = {}
+        agents:dict[int, bytes] = {}
 
         agents_db = self.get_agents_db()
         vars_db = self.get_vars_db()
@@ -226,15 +219,13 @@ class LmdbBackend:
             agents_cursor = txn.cursor(db=agents_db)
             agents_cursor.first()
             while agents_cursor.next():
-                #since agents are stored both by did and agent_id, check that this is a did entry
-                try:
-                    agent_did = agents_cursor.key().decode('utf-8')
-                    if not agent_did.startswith('did:key'):
-                        continue
-                except UnicodeDecodeError:
+                #since agents are stored both by point and agent_id, check that this is a point entry
+                point_bytes = agents_cursor.key()
+                if len(point_bytes) != 8:
                     continue
                 
-                agent_id = agents_cursor.value()
+                point = bytes_to_point(point_bytes)
+                agent_id:bytes = agents_cursor.value()
 
                 #if filters are set, check if the agent matches the filter
                 if request.var_filters is not None and len(request.var_filters) > 0:
@@ -246,10 +237,10 @@ class LmdbBackend:
                             break
                     else:
                         #all filters matched
-                        agents[agent_did] = agent_id
+                        agents[point] = agent_id
                 else:
                     #no filters
-                    agents[agent_did] = agent_id
+                    agents[point] = agent_id
 
         return agent_store_pb2.GetAgentsResponse(agents=agents)
     
@@ -258,38 +249,44 @@ class LmdbBackend:
         if(request is None):
             raise ValueError("request must not be None.")
         
-        if(request.agent_did):
-            if not request.agent_did.startswith('did:key'):
-                #TODO: support other DID methods
-                #TODO: more rigorous DID validation
-                raise ValueError("agent DID must use the did:key method (see DID spec).")
-            if request.agent_did_private_key is None:
-                raise ValueError("agent DID private key must be provided, when providing an external DID.")
-            agent_did = request.agent_did
-            agent_did_private_key = request.agent_did_private_key
-            agent_did_private_key_bytes = bytes.fromhex(agent_did_private_key)
-            #TODO: check that the private key matches the public key of the DID
-        else:
-            logger.info("Generating new agent DID.")
-            agent_did, _, agent_did_private_key_bytes = generate_did()
-            agent_did_private_key = agent_did_private_key_bytes.hex()
-            logger.info(f"Generated agent DID: {agent_did}")
-
         #create the agent in the db
         agents_db = self.get_agents_db()
         object_db = self.get_object_db()
         refs_db = self.get_refs_db()
         vars_db = self.get_vars_db()
         with self.env.begin(write=True) as txn:
+
+            if request.HasField("point"):
+                point = request.point
+            else:
+                point = None
+                logger.info("Generating new agent point.")
+                range_start = pow(2,17)
+                range_end = pow(2, 19)-1
+                max_tries = 100000
+                for _ in range(max_tries):
+                    point = random.randint(range_start, range_end)
+                    #make sure it doesn't exist already
+                    existing_agent_id = txn.get(point_to_bytes(point), db=agents_db)
+                    if existing_agent_id is None:
+                        break
+                    else:
+                        point = None
+                if point is None:
+                    raise Exception(f"Failed to generate a new point in range ({range_start} - {range_end}) after {max_tries} tries.")
+                
+                logger.info(f"Generated agent point: {point}")
+
             #check if the agent already exists
-            existing_agent_id = txn.get(agent_did.encode('utf-8'), db=agents_db)
+            existing_agent_id = txn.get(point_to_bytes(point), db=agents_db)
             if existing_agent_id is not None:
-                logger.warning(f"Agent for DID '{agent_did}' already exists, will return existing agent.")
+                logger.warning(f"Agent point '{point}' already exists for agent id {existing_agent_id.hex()}, will return existing agent.")
                 return agent_store_pb2.CreateAgentResponse(
                     agent_id=existing_agent_id,
-                    agent_did=agent_did)
+                    point=point)
             
-            logger.info(f"Creating agent for DID '{agent_did}'")
+            logger.info(f"Creating agent for point '{point}'")
+
             #since the agent doesn't exist we need to create the root actor for that agent,
             # which determines the agent_id: the agent_id is the actor_id of the root actor
             # the "root actor" is a priviledged actor that represents the runtime and the agent itself
@@ -298,12 +295,19 @@ class LmdbBackend:
             # but the the id is not known until all the objects and initial core exists for that root actor
             # however, the trick is to construct all relevant grit objects in memory, derrive the actor id from there
             # and then write all the objects to the db in a single transaction
-            # there are helper methods for this!
+            # there are some helper functions for this which are used here: agent_id_from_point, bootstrap_root_actor_bytes
+            agent_id = agent_id_from_point(point)
 
-            agent_id = agent_id_from_root_actor_name(agent_did)
+            #create the agent (both ways, so they can be found by point or agent_id)
+            #TODO: do this as a separte transaction above. there is a subble race condition now, where the same agent 
+            #      can be created for the same point at the same time
+            #      this really needs to be implemented as a two-phase commit
+            if (not txn.put(point_to_bytes(point), agent_id, db=agents_db, overwrite=False) or
+                not txn.put(agent_id, point_to_bytes(point), db=agents_db, overwrite=False)):
+                raise Exception(f"Failed to create agent for point {point} and {agent_id.hex()}, it already existed.")
 
             last_obj_id = None
-            for obj_id, obj_bytes in bootstrap_root_actor_bytes(agent_did):            
+            for obj_id, obj_bytes in bootstrap_root_actor_bytes(point):            
                 txn.put(
                     _make_object_key(agent_id, obj_id), 
                     obj_bytes, 
@@ -323,30 +327,16 @@ class LmdbBackend:
                 agent_id,
                 db=refs_db)
 
-            #create the agent (both ways, so they can be found by DID or agent_id)
-            txn.put(agent_did.encode('utf-8'), agent_id, db=agents_db)
-            txn.put(agent_id, agent_did.encode('utf-8'), db=agents_db)
-
-            #store the private key in vars
-            #note the key is stored not in the raw binary format, but as a binary encoded hex string (because the API's assumption is that all vars are strings)
-            txn.put(_make_var_key(agent_id, 'secrets.did_private_key'), agent_did_private_key.encode('utf-8'), db=vars_db)
-
-            #store the agent in the in-memory cache
-            #not thread safe, but should be fine for now (since this is lunning only in one process)
-            if self._agents is None:
-                self._agents = set()
-            self._agents.add(agent_id)
-
             return agent_store_pb2.CreateAgentResponse(
                 agent_id=agent_id,
-                agent_did=agent_did)
+                point=point)
         
 
     def delete_agent(self, request:agent_store_pb2.DeleteAgentRequest) -> agent_store_pb2.DeleteAgentResponse:
         if(request is None):
             raise ValueError("request must not be None.")
-        if (request.agent_did is None and request.agent_id is None):
-            raise ValueError("either agent_did or agent_id must be provided.")
+        if (not request.HasField("point") and not request.HasField("agent_id")):
+            raise ValueError("either point or agent_id must be provided.")
         
         agents_db = self.get_agents_db()
         object_db = self.get_object_db()
@@ -356,17 +346,18 @@ class LmdbBackend:
         with self.env.begin(write=True) as txn:
             #get the agent id
             agent_id = request.agent_id
-            agent_did = request.agent_did
+            point = request.point
             if agent_id is None:
-                agent_id = txn.get(request.agent_did.encode('utf-8'), db=agents_db)
+                agent_id = txn.get(point_to_bytes(point), db=agents_db)
                 #if the agent id is still None, then the agent does not exist
                 if agent_id is None:
-                    return None
+                    return agent_store_pb2.DeleteAgentResponse()
             else:
-                #check that the agent did actually exists
-                agent_did = txn.get(agent_id, db=agents_db)
-                if agent_did is None:
-                    return None
+                #check that the agent point actually exists
+                point_bytes = txn.get(agent_id, db=agents_db)
+                if point_bytes is None:
+                    return agent_store_pb2.DeleteAgentResponse()
+                point = bytes_to_point(point_bytes)
             
             #delete all objects
             cursor = txn.cursor(db=object_db)
@@ -390,10 +381,10 @@ class LmdbBackend:
                 cursor.next()
 
             #delete the agent
-            txn.delete(agent_did.encode('utf-8'), db=agents_db)
+            txn.delete(point_to_bytes(point), db=agents_db)
             txn.delete(agent_id, db=agents_db)
         
-        return None
+        return agent_store_pb2.DeleteAgentResponse()
     
     #=========================================================
     # Agent Var(iables) Store API

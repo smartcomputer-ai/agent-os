@@ -116,15 +116,15 @@ class AgentsClient:
 
         return self._worker_clients[agent.worker_id]
 
-    async def create_agent(self) -> tuple[AgentId, str]:
+    async def create_agent(self) -> tuple[AgentId, Point]:
         store_client = await self._get_store_client()
         agent_response:agent_store_pb2.CreateAgentResponse = await store_client.get_agent_store_stub_async().CreateAgent(agent_store_pb2.CreateAgentRequest())
-        return agent_response.agent_id, agent_response.agent_did
+        return agent_response.agent_id, agent_response.point
 
-    async def get_running_agents(self) -> dict[AgentId, str]:
+    async def get_running_agents(self) -> dict[AgentId, Point]:
         apex_client = await self._get_apex_client()
         apex_response:apex_api_pb2.GetRunningAgentsResponse = await apex_client.get_apex_api_stub_async().GetRunningAgents(apex_api_pb2.GetRunningAgentsRequest())
-        return {agent.agent_id:agent.agent_did for agent in apex_response.agents}
+        return {agent.agent_id:agent.point for agent in apex_response.agents}
 
     async def start_agent(self, agent_id:AgentId):
         apex_client = await self._get_apex_client()
@@ -142,11 +142,11 @@ class AgentsClient:
         agent = await self._get_agent(agent_id)
         return agent.references
 
-    async def get_agents(self) -> dict[AgentId, str]:
+    async def get_agents(self) -> dict[AgentId, Point]:
         """Returns all agents, both running and not running."""
         store_client = await self._get_store_client()
         agents_response:agent_store_pb2.GetAgentsResponse = await store_client.get_agent_store_stub_async().GetAgents(agent_store_pb2.GetAgentsRequest())
-        return {agent_id:agent_did for agent_did, agent_id in agents_response.agents.items()}
+        return {agent_id:point for point, agent_id in agents_response.agents.items()}
 
     @alru_cache(maxsize=1000)  # noqa: B019
     async def agent_exists(self, agent_id:AgentId) -> bool:
@@ -154,9 +154,10 @@ class AgentsClient:
         return agent_id in agents
     
     @alru_cache(maxsize=1000)  # noqa: B019
-    async def lookup_agent_by_name(self, agent_name:str) -> AgentId|None:
+    async def lookup_agent_by_point(self, point_lookup:int|str) -> AgentId|None:
+        point_lookup = int(point_lookup)
         agents = await self.get_agents()
-        agent_id = next((agent_id for agent_id, name in agents.items() if name == agent_name), None)
+        agent_id = next((agent_id for agent_id, point in agents.items() if point == point_lookup), None)
         return agent_id
     
     async def get_actors(self, agent_id:AgentId) -> dict[ActorId, str|None]:

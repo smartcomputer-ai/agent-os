@@ -16,9 +16,6 @@ We'll use TOML files (https://toml.io/en/v1.0.0) for that.
 A discovery entry (or deployment entry) is a pointer to a wit directory, or file. Each entry is a TOML table.
 
 ```toml
-[agent]
-name = "agent_name" #optional
-
 [all] #optional
 #push can also be a json (or inline table in TOML)
 push = "path/to/common_code:/"

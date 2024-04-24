@@ -178,7 +178,7 @@ class ActorPush():
                     except Exception as ex:
                         yield push_blob_path, f"error retrieving path: {ex}"
 
-    async def create_and_inject_messages(self, store:ObjectStore, references:References, agent_name:str) -> StepId:
+    async def create_and_inject_messages(self, store:ObjectStore, references:References, point:int) -> StepId:
         """Deprected. Only used for testing in-proc runtimes. Dangerous to use in production."""
         #to make sure this is not running in prod
         if isinstance(store, AgentObjectStore) or isinstance(references, AgentReferences):
@@ -196,13 +196,13 @@ class ActorPush():
         if(self._is_genesis):
             previous_genesis_actor_id = await references.get(actor_ref)
             if(previous_genesis_actor_id is not None):
-                await remove_offline_message_from_root_outbox(store, references, agent_name, previous_genesis_actor_id)
+                await remove_offline_message_from_root_outbox(store, references, point, previous_genesis_actor_id)
         # Now, create the message
         msg = await self.create_actor_message(store)
         # Don't set previous, so that this message can be pushed multiple times, 
         # resulting in an override of the current message in the outbox.
         # With set_previous=False, the message is treated like a signal, and only the last message will apply.
-        step_id = await add_offline_message_to_root_outbox(store, references, agent_name, msg, set_previous=False)
+        step_id = await add_offline_message_to_root_outbox(store, references, point, msg, set_previous=False)
         # If this the genesis step, also create an actor ref
         if(self._is_genesis and self.actor_name is not None):
             # This may override the actor ref, if the genesis step changes over multiple initial pushes, 

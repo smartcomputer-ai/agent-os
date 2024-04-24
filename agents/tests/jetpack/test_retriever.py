@@ -16,7 +16,7 @@ async def test_retrieve():
     resolver.register('retriever_wit', app)
     resolver.register('coder_wit', coder_app)
 
-    runtime = Runtime(store, refs, "test", resolver)
+    runtime = Runtime(store, refs, resolver=resolver)
     running_task = asyncio.create_task(runtime.start())
 
     spec = CodeSpec(

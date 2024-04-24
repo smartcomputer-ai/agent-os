@@ -38,7 +38,6 @@ logger = logging.getLogger(__name__)
 # Type defs and constants
 #==============================================================
 AgentId = ActorId #the agent is defined by the id of the root actor, so technically, it's an actor id too
-AgendDID = str
 WorkerId = str
 MailboxUpdate = tuple[ActorId, ActorId, MessageId] # sender_id, recipient_id, message_id
 TimeSinceUnassigned = float #time since agent was unassigned (using perf_counter)
@@ -86,19 +85,19 @@ class WorkerState:
 @dataclass(slots=True)
 class AgentInfo:
     agent_id:AgentId
-    agent_did:str
+    point:Point
     capabilities:dict[str, str]
 
     def deep_copy(self):
         return AgentInfo(
             agent_id=self.agent_id,
-            agent_did=self.agent_did,
+            point=self.point,
             capabilities={k:v for k,v in self.capabilities.items()})
     
     def to_apex_api_agent_info(self, worker_lookup:dict[AgentId, WorkerState]|None=None):
         return apex_api_pb2.AgentInfo(
             agent_id=self.agent_id,
-            agent_did=self.agent_did,
+            point=self.point,
             worker_id=worker_lookup[self.agent_id].worker_id if worker_lookup is not None and self.agent_id in worker_lookup else None,
             worker_address=worker_lookup[self.agent_id].worker_address if worker_lookup is not None and self.agent_id in worker_lookup else None,
             capabilities={k:v for k,v in self.capabilities.items()})
@@ -106,7 +105,7 @@ class AgentInfo:
     def to_apex_worker_agent(self):
         return apex_workers_pb2.Agent(
             agent_id=self.agent_id,
-            agent_did=self.agent_did,
+            point=self.point,
             capabilities={k:v for k,v in self.capabilities.items()})
     
 
@@ -483,10 +482,10 @@ class ApexCoreLoop:
                 _, agent_capabilities = await self._gather_agent_capabilities(agent_id, store_client)
                 agent_info = AgentInfo(
                     agent_id=agent_id,
-                    agent_did=agent_response.agent_did,
+                    point=agent_response.point,
                     capabilities=agent_capabilities)
                 loop_state.add_agent(agent_info)
-                logger.info(f"StartAgentEvent: Agent {agent_id.hex()} ({agent_info.agent_did}) started.")
+                logger.info(f"StartAgentEvent: Agent {agent_id.hex()} ({agent_info.point}) started.")
             #rebalance
             await self._event_queue.put(self._RebalanceAgentsEvent())
         event.set_completion()
@@ -585,15 +584,15 @@ class ApexCoreLoop:
             .get_agent_store_stub_async()
             .GetAgents(agent_store_pb2.GetAgentsRequest(var_filters={STORE_APEX_STATUS_VAR_NAME: STORE_APEX_STATUS_STARTED})) 
         )
-        agent_id_to_did = {agent_id:did for did, agent_id in agents_response.agents.items()}
-        tasks = [self._gather_agent_capabilities(agent_id, store_client) for agent_id in agent_id_to_did.keys()]
+        agent_id_to_point = {agent_id:point for point, agent_id in agents_response.agents.items()}
+        tasks = [self._gather_agent_capabilities(agent_id, store_client) for agent_id in agent_id_to_point.keys()]
         agent_capabilities = await asyncio.gather(*tasks)
         agent_capabilities_lookup = {agent_id:capabilities for agent_id, capabilities in agent_capabilities}
 
-        for agent_id, did in agent_id_to_did.items():
+        for agent_id, point in agent_id_to_point.items():
             agent_info = AgentInfo(
                 agent_id=agent_id,
-                agent_did=did,
+                point=point,
                 capabilities=agent_capabilities_lookup[agent_id])
             loop_state.add_agent(agent_info)
 

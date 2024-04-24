@@ -13,14 +13,14 @@ from tomlkit.container import Container
 # [[agents]]
 # alias = "agent_alias"
 # agent_id = "azxzjemxwzxzx" #hex id of the agent
-# agent_did = "did:key:azxzjemxwzxzx" #did of the agent
+# point = 121231 #point key of the agent
 # --------------------------
 
 @dataclass
 class Agent:
     alias:str
     agent_id:str
-    agent_did:str
+    point:int
 
 def load_agents(toml_file_path:str) -> list[Agent]:
     doc = _read_toml_file(toml_file_path)
@@ -49,7 +49,7 @@ def add_agent(toml_file_path:str, agent:Agent):
     agent_item = item({
         "alias": agent.alias,
         "agent_id": agent.agent_id,
-        "agent_did": agent.agent_did
+        "point": agent.point
     })
     agents.append(agent_item)
     _write_toml_file(toml_file_path, doc)

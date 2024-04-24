@@ -100,58 +100,5 @@ def reset(ctx:click.Context, no_push:bool):
     #sanity check that all needed paths exist
     local_ctx.enforce_paths_exist()
 
-    if(not no_push):
-        ctx.invoke(push)
 
-#===========================================================
-# 'push' command
-#===========================================================
-@cli.command()
-@click.pass_context
-def push(ctx:click.Context):
-    print("-> Pushing Files to Actors")
-    wit_ctx:LocalContext = ctx.obj
-
-    if not os.path.exists(wit_ctx.sync_file_path):
-        raise click.ClickException(f"Sync file '{wit_ctx.sync_file_path}' does not exist, can only push from existing sync file, init file with 'aos local init'.")
-
-    wit_ctx.enforce_paths_exist()
-
-    agent_config = sf.load_agent(wit_ctx.sync_file_path)
-    agent_name = agent_config["name"]
-    print("Agent name: " + agent_name)
-
-    async def apush():
-        #check that agent exists
-        #create client
-
-        print("TODO, NO OP")
-        # store, refs = wit_ctx.init_stores()
-        
-        # pushes = await sf.load_pushes(wit_ctx.sync_file_path, refs)
-        # if(len(pushes) == 0):
-        #     print(f"Nothing to push to actos. Define some actors under '[[actors]]' headings in the sync file: {wit_ctx.sync_file_path}")
-        #     return
-        
-        # pushes_to_apply:list[ActorPush] = []
-        # for push in pushes:
-        #     print(f"Diff of what to push to actor '{push.actor_name}' with id '{push.actor_id.hex() if not push.is_genesis else 'genesis'}'")
-        #     apply = False
-        #     async for path, reason in push.diff_core_with_actor(store, refs):
-        #         print(f"  Diff '{path}' because '{reason}'")
-        #         apply = True
-        #     if(apply):
-        #         pushes_to_apply.append(push)
-        #     else:
-        #         print("  No changes to push.")
-        # if(len(pushes_to_apply) == 0):
-        #     print("No pushes to actors.")
-        #     return
-        
-        # for push in pushes_to_apply:
-        #     print(f"Pushing to actor: {push.actor_name} '{push.actor_id.hex() if not push.is_genesis else 'genesis'}'")
-        #     agent_step_id = await push.create_and_inject_messages(store, refs, agent_name)
-        #     print(f"  New agent step id for this push: {agent_step_id.hex()}")        
-
-    asyncio.run(apush())
      

@@ -29,7 +29,7 @@ async def test_msgs__single_wit():
     resolver.register('wit_a', wit_a)
     resolver.register('wit_b', wit_b)
 
-    runtime = Runtime(store, refs, "test", resolver)
+    runtime = Runtime(store, refs, resolver=resolver)
     running_task = asyncio.create_task(runtime.start())
     #genesis
     gen_a_message = await helpers.create_genesis_message(store, runtime.agent_id, 'wit_a')

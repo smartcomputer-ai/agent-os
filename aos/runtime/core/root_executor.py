@@ -29,8 +29,8 @@ class RootActorExecutor(ActorExecutor):
         self._external_message_subscriptions = set()
 
     @classmethod
-    async def from_agent_name(cls, ctx:ExecutionContext, agent_name:str) -> 'RootActorExecutor':
-        agent_id, last_step_id = await create_or_load_root_actor(ctx.store, ctx.references, agent_name)
+    async def from_point(cls, ctx:ExecutionContext, point:Point) -> 'RootActorExecutor':
+        agent_id, last_step_id = await create_or_load_root_actor(ctx.store, ctx.references, point)
         return await cls.from_last_step(ctx, agent_id, last_step_id)
     
     @property
@@ -119,7 +119,7 @@ class RootActorExecutor(ActorExecutor):
             self.executor._external_message_subscriptions.remove(self)
 
 
-async def create_or_load_root_actor(object_store:ObjectStore, references:References, agent_name:str) -> tuple[ActorId, StepId]:
+async def create_or_load_root_actor(object_store:ObjectStore, references:References, point:Point) -> tuple[ActorId, StepId]:
     #TODO: see code in lmdb_store, it also creates a root actor. this code should be moved here, and lmdb_store should use it from here
     #      the change here needs to be that raw Grit objets are used to create the core, but that code already exists in lmdb_store
     
@@ -130,7 +130,7 @@ async def create_or_load_root_actor(object_store:ObjectStore, references:Referen
         #the original agent core is simple, it just contains the name of the agent
         last_id = None
         last_obj = None
-        for obj in bootstrap_root_actor_objects(agent_name):
+        for obj in bootstrap_root_actor_objects(point):
             object_id = await object_store.store(obj)
             last_id = object_id
             last_obj = obj
@@ -144,27 +144,27 @@ async def create_or_load_root_actor(object_store:ObjectStore, references:Referen
         return agent_id, gen_step_id
     else:
         agent_genesis_core = await Core.from_core_id(object_store, agent_id)
-        #check that the names match
-        agent_genesis_core_name = (await agent_genesis_core.getb("name")).get_as_str()
-        if(agent_genesis_core_name != agent_name):
-            raise ValueError(f"Agent name mismatch: in agent genesis core: {agent_genesis_core_name}, but agent_name was {agent_name}")
+        #check that the points match
+        agent_genesis_core_point = bytes_to_point((await agent_genesis_core.getb("point")).get_as_bytes())
+        if(agent_genesis_core_point != point):
+            raise ValueError(f"Agent point mismatch: in agent genesis core: {agent_genesis_core_point}, but point was {point}")
         #load the last step
         last_step_id = await references.get(ref_step_head(agent_id))
         if(last_step_id is None):
-            raise Exception(f"Agent {agent_name} has no reference: '{ref_step_head(agent_id)}'.")
+            raise Exception(f"Agent {point} has no reference: '{ref_step_head(agent_id)}'.")
         return agent_id, last_step_id
 
 
-def bootstrap_root_actor_objects(agent_name:str, core_only:bool=False):
+def bootstrap_root_actor_objects(point:int, core_only:bool=False):
     """Iterates over all the grit objects from initial core, up to the genesis step, to 
     bootstrap the 'root actor' which represents the agent and the runtime."""
     import aos.grit.object_serialization as ser
 
     #initial core (which defines the agent id)
-    name_blob = Blob({'ct': 's'}, agent_name.encode('utf-8'))
-    yield name_blob
-    name_blob_id = ser.get_object_id( ser.blob_to_bytes(name_blob))
-    core = {'name': name_blob_id}
+    point_blob = Blob(None, point_to_bytes(point))
+    yield point_blob
+    name_blob_id = ser.get_object_id(ser.blob_to_bytes(point_blob))
+    core = {'point': name_blob_id}
     yield core
 
     if(core_only):
@@ -188,19 +188,19 @@ def bootstrap_root_actor_objects(agent_name:str, core_only:bool=False):
     yield step
 
 
-def bootstrap_root_actor_bytes(agent_name:str, core_only:bool=False):
+def bootstrap_root_actor_bytes(point:int, core_only:bool=False):
     """Iterates over all the object ids and associated serialized data to bootstrap the root actor. 
     See: bootstrap_root_actor_objects"""
     import aos.grit.object_serialization as ser
-    for obj in bootstrap_root_actor_objects(agent_name, core_only):
+    for obj in bootstrap_root_actor_objects(point, core_only):
         data = ser.object_to_bytes(obj)
         yield ser.get_object_id(data), data
 
 
-def agent_id_from_root_actor_name(agent_name:str) -> AgentId:
-    """Generates the agent id from the agent name, by creating the root actor objects and extracting the agent id.
+def agent_id_from_point(point:int) -> AgentId:
+    """Generates the agent id from the agent point, by creating the root actor objects and extracting the agent id.
     See: bootstrap_root_actor_objects"""
     # how does this work? stop once the root actor core is created
     # the root actor core is the actor's id, and the root actor id is also the agent id
-    agent_id, _ = list(bootstrap_root_actor_bytes(agent_name, core_only=True))[-1]
+    agent_id, _ = list(bootstrap_root_actor_bytes(point, core_only=True))[-1]
     return agent_id

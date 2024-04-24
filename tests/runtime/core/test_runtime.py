@@ -9,7 +9,7 @@ import helpers_runtime as helpers
 async def test_run_empty():
     store = MemoryObjectStore()
     refs = MemoryReferences()
-    runtime = Runtime(store, refs, "test")
+    runtime = Runtime(store, refs, point=1000)
     running_task = asyncio.create_task(runtime.start())
     await asyncio.sleep(0.1)
     runtime.stop()
@@ -20,8 +20,8 @@ async def test_run_empty():
     assert agent_id is not None
     agent_core = await store.load(agent_id)
     assert agent_core is not None
-    assert "name" in agent_core
-    assert (await BlobObject.from_blob_id(store, agent_core['name'])).get_as_str() == "test"
+    assert "point" in agent_core
+    assert bytes_to_point((await BlobObject.from_blob_id(store, agent_core['point'])).get_as_bytes()) == 1000
     # a step was created for he agent actor
     head = await refs.get(ref_step_head(agent_id))
     assert head is not None

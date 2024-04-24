@@ -15,7 +15,7 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import empty_pb2 as google_dot_protobuf_dot_empty__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#aos/runtime/store/agent_store.proto\x1a\x1bgoogle/protobuf/empty.proto\"x\n\x12\x43reateAgentRequest\x12\x16\n\tagent_did\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\"\n\x15\x61gent_did_private_key\x18\x03 \x01(\tH\x01\x88\x01\x01\x42\x0c\n\n_agent_didB\x18\n\x16_agent_did_private_key\":\n\x13\x43reateAgentResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x11\n\tagent_did\x18\x02 \x01(\t\"J\n\x12\x44\x65leteAgentRequest\x12\x12\n\x08\x61gent_id\x18\x01 \x01(\x0cH\x00\x12\x13\n\tagent_did\x18\x02 \x01(\tH\x00\x42\x0b\n\tdelete_by\"\x15\n\x13\x44\x65leteAgentResponse\"D\n\x0fGetAgentRequest\x12\x12\n\x08\x61gent_id\x18\x01 \x01(\x0cH\x00\x12\x13\n\tagent_did\x18\x02 \x01(\tH\x00\x42\x08\n\x06get_by\"l\n\x10GetAgentResponse\x12\x15\n\x08\x61gent_id\x18\x01 \x01(\x0cH\x00\x88\x01\x01\x12\x16\n\tagent_did\x18\x02 \x01(\tH\x01\x88\x01\x01\x12\x0e\n\x06\x65xists\x18\x03 \x01(\x08\x42\x0b\n\t_agent_idB\x0c\n\n_agent_did\"}\n\x10GetAgentsRequest\x12\x36\n\x0bvar_filters\x18\x01 \x03(\x0b\x32!.GetAgentsRequest.VarFiltersEntry\x1a\x31\n\x0fVarFiltersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"r\n\x11GetAgentsResponse\x12.\n\x06\x61gents\x18\x01 \x03(\x0b\x32\x1e.GetAgentsResponse.AgentsEntry\x1a-\n\x0b\x41gentsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\"=\n\rSetVarRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03key\x18\x02 \x01(\t\x12\r\n\x05value\x18\x03 \x01(\t\".\n\rGetVarRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03key\x18\x02 \x01(\t\"M\n\x0eGetVarResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03key\x18\x02 \x01(\t\x12\x12\n\x05value\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_value\"J\n\x0eGetVarsRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x17\n\nkey_prefix\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\r\n\x0b_key_prefix\"z\n\x0fGetVarsResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12(\n\x04vars\x18\x02 \x03(\x0b\x32\x1a.GetVarsResponse.VarsEntry\x1a+\n\tVarsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\"1\n\x10\x44\x65leteVarRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03key\x18\x02 \x01(\t2\xb8\x03\n\nAgentStore\x12:\n\x0b\x43reateAgent\x12\x13.CreateAgentRequest\x1a\x14.CreateAgentResponse\"\x00\x12:\n\x0b\x44\x65leteAgent\x12\x13.DeleteAgentRequest\x1a\x14.DeleteAgentResponse\"\x00\x12\x31\n\x08GetAgent\x12\x10.GetAgentRequest\x1a\x11.GetAgentResponse\"\x00\x12\x34\n\tGetAgents\x12\x11.GetAgentsRequest\x1a\x12.GetAgentsResponse\"\x00\x12\x32\n\x06SetVar\x12\x0e.SetVarRequest\x1a\x16.google.protobuf.Empty\"\x00\x12+\n\x06GetVar\x12\x0e.GetVarRequest\x1a\x0f.GetVarResponse\"\x00\x12.\n\x07GetVars\x12\x0f.GetVarsRequest\x1a\x10.GetVarsResponse\"\x00\x12\x38\n\tDeleteVar\x12\x11.DeleteVarRequest\x1a\x16.google.protobuf.Empty\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n#aos/runtime/store/agent_store.proto\x1a\x1bgoogle/protobuf/empty.proto\"2\n\x12\x43reateAgentRequest\x12\x12\n\x05point\x18\x02 \x01(\x04H\x00\x88\x01\x01\x42\x08\n\x06_point\"6\n\x13\x43reateAgentResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\r\n\x05point\x18\x02 \x01(\x04\"F\n\x12\x44\x65leteAgentRequest\x12\x12\n\x08\x61gent_id\x18\x01 \x01(\x0cH\x00\x12\x0f\n\x05point\x18\x02 \x01(\x04H\x00\x42\x0b\n\tdelete_by\"\x15\n\x13\x44\x65leteAgentResponse\"@\n\x0fGetAgentRequest\x12\x12\n\x08\x61gent_id\x18\x01 \x01(\x0cH\x00\x12\x0f\n\x05point\x18\x02 \x01(\x04H\x00\x42\x08\n\x06get_by\"d\n\x10GetAgentResponse\x12\x15\n\x08\x61gent_id\x18\x01 \x01(\x0cH\x00\x88\x01\x01\x12\x12\n\x05point\x18\x02 \x01(\x04H\x01\x88\x01\x01\x12\x0e\n\x06\x65xists\x18\x03 \x01(\x08\x42\x0b\n\t_agent_idB\x08\n\x06_point\"}\n\x10GetAgentsRequest\x12\x36\n\x0bvar_filters\x18\x01 \x03(\x0b\x32!.GetAgentsRequest.VarFiltersEntry\x1a\x31\n\x0fVarFiltersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"r\n\x11GetAgentsResponse\x12.\n\x06\x61gents\x18\x01 \x03(\x0b\x32\x1e.GetAgentsResponse.AgentsEntry\x1a-\n\x0b\x41gentsEntry\x12\x0b\n\x03key\x18\x01 \x01(\x04\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\"=\n\rSetVarRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03key\x18\x02 \x01(\t\x12\r\n\x05value\x18\x03 \x01(\t\".\n\rGetVarRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03key\x18\x02 \x01(\t\"M\n\x0eGetVarResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03key\x18\x02 \x01(\t\x12\x12\n\x05value\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x08\n\x06_value\"J\n\x0eGetVarsRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x17\n\nkey_prefix\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\r\n\x0b_key_prefix\"z\n\x0fGetVarsResponse\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12(\n\x04vars\x18\x02 \x03(\x0b\x32\x1a.GetVarsResponse.VarsEntry\x1a+\n\tVarsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x0c:\x02\x38\x01\"1\n\x10\x44\x65leteVarRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\x0b\n\x03key\x18\x02 \x01(\t2\xb8\x03\n\nAgentStore\x12:\n\x0b\x43reateAgent\x12\x13.CreateAgentRequest\x1a\x14.CreateAgentResponse\"\x00\x12:\n\x0b\x44\x65leteAgent\x12\x13.DeleteAgentRequest\x1a\x14.DeleteAgentResponse\"\x00\x12\x31\n\x08GetAgent\x12\x10.GetAgentRequest\x1a\x11.GetAgentResponse\"\x00\x12\x34\n\tGetAgents\x12\x11.GetAgentsRequest\x1a\x12.GetAgentsResponse\"\x00\x12\x32\n\x06SetVar\x12\x0e.SetVarRequest\x1a\x16.google.protobuf.Empty\"\x00\x12+\n\x06GetVar\x12\x0e.GetVarRequest\x1a\x0f.GetVarResponse\"\x00\x12.\n\x07GetVars\x12\x0f.GetVarsRequest\x1a\x10.GetVarsResponse\"\x00\x12\x38\n\tDeleteVar\x12\x11.DeleteVarRequest\x1a\x16.google.protobuf.Empty\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -29,39 +29,39 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_GETVARSRESPONSE_VARSENTRY']._options = None
   _globals['_GETVARSRESPONSE_VARSENTRY']._serialized_options = b'8\001'
   _globals['_CREATEAGENTREQUEST']._serialized_start=68
-  _globals['_CREATEAGENTREQUEST']._serialized_end=188
-  _globals['_CREATEAGENTRESPONSE']._serialized_start=190
-  _globals['_CREATEAGENTRESPONSE']._serialized_end=248
-  _globals['_DELETEAGENTREQUEST']._serialized_start=250
-  _globals['_DELETEAGENTREQUEST']._serialized_end=324
-  _globals['_DELETEAGENTRESPONSE']._serialized_start=326
-  _globals['_DELETEAGENTRESPONSE']._serialized_end=347
-  _globals['_GETAGENTREQUEST']._serialized_start=349
-  _globals['_GETAGENTREQUEST']._serialized_end=417
-  _globals['_GETAGENTRESPONSE']._serialized_start=419
-  _globals['_GETAGENTRESPONSE']._serialized_end=527
-  _globals['_GETAGENTSREQUEST']._serialized_start=529
-  _globals['_GETAGENTSREQUEST']._serialized_end=654
-  _globals['_GETAGENTSREQUEST_VARFILTERSENTRY']._serialized_start=605
-  _globals['_GETAGENTSREQUEST_VARFILTERSENTRY']._serialized_end=654
-  _globals['_GETAGENTSRESPONSE']._serialized_start=656
-  _globals['_GETAGENTSRESPONSE']._serialized_end=770
-  _globals['_GETAGENTSRESPONSE_AGENTSENTRY']._serialized_start=725
-  _globals['_GETAGENTSRESPONSE_AGENTSENTRY']._serialized_end=770
-  _globals['_SETVARREQUEST']._serialized_start=772
-  _globals['_SETVARREQUEST']._serialized_end=833
-  _globals['_GETVARREQUEST']._serialized_start=835
-  _globals['_GETVARREQUEST']._serialized_end=881
-  _globals['_GETVARRESPONSE']._serialized_start=883
-  _globals['_GETVARRESPONSE']._serialized_end=960
-  _globals['_GETVARSREQUEST']._serialized_start=962
-  _globals['_GETVARSREQUEST']._serialized_end=1036
-  _globals['_GETVARSRESPONSE']._serialized_start=1038
-  _globals['_GETVARSRESPONSE']._serialized_end=1160
-  _globals['_GETVARSRESPONSE_VARSENTRY']._serialized_start=1117
-  _globals['_GETVARSRESPONSE_VARSENTRY']._serialized_end=1160
-  _globals['_DELETEVARREQUEST']._serialized_start=1162
-  _globals['_DELETEVARREQUEST']._serialized_end=1211
-  _globals['_AGENTSTORE']._serialized_start=1214
-  _globals['_AGENTSTORE']._serialized_end=1654
+  _globals['_CREATEAGENTREQUEST']._serialized_end=118
+  _globals['_CREATEAGENTRESPONSE']._serialized_start=120
+  _globals['_CREATEAGENTRESPONSE']._serialized_end=174
+  _globals['_DELETEAGENTREQUEST']._serialized_start=176
+  _globals['_DELETEAGENTREQUEST']._serialized_end=246
+  _globals['_DELETEAGENTRESPONSE']._serialized_start=248
+  _globals['_DELETEAGENTRESPONSE']._serialized_end=269
+  _globals['_GETAGENTREQUEST']._serialized_start=271
+  _globals['_GETAGENTREQUEST']._serialized_end=335
+  _globals['_GETAGENTRESPONSE']._serialized_start=337
+  _globals['_GETAGENTRESPONSE']._serialized_end=437
+  _globals['_GETAGENTSREQUEST']._serialized_start=439
+  _globals['_GETAGENTSREQUEST']._serialized_end=564
+  _globals['_GETAGENTSREQUEST_VARFILTERSENTRY']._serialized_start=515
+  _globals['_GETAGENTSREQUEST_VARFILTERSENTRY']._serialized_end=564
+  _globals['_GETAGENTSRESPONSE']._serialized_start=566
+  _globals['_GETAGENTSRESPONSE']._serialized_end=680
+  _globals['_GETAGENTSRESPONSE_AGENTSENTRY']._serialized_start=635
+  _globals['_GETAGENTSRESPONSE_AGENTSENTRY']._serialized_end=680
+  _globals['_SETVARREQUEST']._serialized_start=682
+  _globals['_SETVARREQUEST']._serialized_end=743
+  _globals['_GETVARREQUEST']._serialized_start=745
+  _globals['_GETVARREQUEST']._serialized_end=791
+  _globals['_GETVARRESPONSE']._serialized_start=793
+  _globals['_GETVARRESPONSE']._serialized_end=870
+  _globals['_GETVARSREQUEST']._serialized_start=872
+  _globals['_GETVARSREQUEST']._serialized_end=946
+  _globals['_GETVARSRESPONSE']._serialized_start=948
+  _globals['_GETVARSRESPONSE']._serialized_end=1070
+  _globals['_GETVARSRESPONSE_VARSENTRY']._serialized_start=1027
+  _globals['_GETVARSRESPONSE_VARSENTRY']._serialized_end=1070
+  _globals['_DELETEVARREQUEST']._serialized_start=1072
+  _globals['_DELETEVARREQUEST']._serialized_end=1121
+  _globals['_AGENTSTORE']._serialized_start=1124
+  _globals['_AGENTSTORE']._serialized_end=1564
 # @@protoc_insertion_point(module_scope)

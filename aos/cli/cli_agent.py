@@ -99,10 +99,10 @@ def create(ctx:click.Context, agent_alias:str):
         client = AgentsClient(aos_ctx.apex_address)
 
         #create the agent
-        agent_id, agent_did = await client.create_agent()        
-        agent = Agent(alias=agent_alias, agent_id=agent_id.hex(), agent_did=agent_did)
+        agent_id, point = await client.create_agent()        
+        agent = Agent(alias=agent_alias, agent_id=agent_id.hex(), point=point)
         af.add_agent(aos_ctx.agents_file_path, agent)
-        print(f"Created agent with alias '{agent_alias}' and id '{agent_id.hex()}' and did '{agent_did}'")
+        print(f"Created agent with alias '{agent_alias}' and id '{agent_id.hex()}' and point '{point}'")
 
         #start the agent
         await client.start_agent(agent_id)

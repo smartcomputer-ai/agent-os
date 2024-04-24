@@ -16,7 +16,7 @@ async def arun() -> None:
     response:agent_store_pb2.CreateAgentResponse = await client.get_agent_store_stub_async().CreateAgent(agent_store_pb2.CreateAgentRequest())
     
     logging.info(f"Created agent with id {response.agent_id.hex()}")
-    logging.info(f"Created agent with DID {response.agent_did}")
+    logging.info(f"Created agent with point {response.point}")
     agent_id = response.agent_id
 
     # create a few more agents (just to make sure it all works)
@@ -28,8 +28,8 @@ async def arun() -> None:
     print("Getting agents")
     agent_by_id = await client.get_agent_store_stub_async().GetAgent(agent_store_pb2.GetAgentRequest(agent_id=response.agent_id))
     print(agent_by_id)
-    agent_by_did = await client.get_agent_store_stub_async().GetAgent(agent_store_pb2.GetAgentRequest(agent_did=response.agent_did))
-    print(agent_by_did)
+    agent_by_point = await client.get_agent_store_stub_async().GetAgent(agent_store_pb2.GetAgentRequest(point=response.point))
+    print(agent_by_point)
     all_agents = await client.get_agent_store_stub_async().GetAgents(agent_store_pb2.GetAgentsRequest())
     print(all_agents)
 

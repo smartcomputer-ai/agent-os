@@ -17,7 +17,7 @@ class ExecutionContext:
     store:ObjectStore
     references:References
     resolver:Resolver
-    agent_name:str
+    point:Point
     agent_id:ActorId
     async_semaphore:asyncio.Semaphore|None
     sync_semaphore:asyncio.Semaphore|None
@@ -30,7 +30,7 @@ class ExecutionContext:
         self.store = None
         self.references = None
         self.resolver = None
-        self.agent_name = None
+        self.point = None
         self.agent_id = None
         self.async_semaphore = None
         self.sync_semaphore = None
