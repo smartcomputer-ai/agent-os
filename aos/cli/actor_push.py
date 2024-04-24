@@ -29,8 +29,9 @@ class ActorPush():
     actor_name:str
     is_prototype:bool
     wit:str
-    wit_query:str
+    wit_genesis:str
     wit_update:str
+    wit_query:str
     runtime:str
 
     def __init__(self, is_genesis:bool, actor_id:ActorId|None=None):
@@ -42,8 +43,9 @@ class ActorPush():
         self.actor_name = None
         self.is_prototype = False
         self.wit = None
-        self.wit_query = None
+        self.wit_genesis = None
         self.wit_update = None
+        self.wit_query = None
         self.runtime = None
 
     @classmethod
@@ -121,6 +123,8 @@ class ActorPush():
             core.makeb("wit").set_as_str(self.wit)
         if(self.wit_query):
             core.makeb("wit_query").set_as_str(self.wit_query)
+        if(self.wit_genesis):
+            core.makeb("wit_genesis").set_as_str(self.wit_genesis)
         if(self.wit_update):
             core.makeb("wit_update").set_as_str(self.wit_update)
         if(self.runtime):

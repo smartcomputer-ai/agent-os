@@ -115,8 +115,10 @@ class Runtime:
         #see if the previous_id should be set
         #otherwise, messages can get overriden because they are treated like a signal (signal = no previous_id)
         if(not new_message.is_signal):
+            #print("Runtime, inject: trying to get previous_id")
             current_outbox = await self.__root_executor.get_current_outbox()
             if(new_message.recipient_id in current_outbox):
+                #print("Runtime, inject: setting previous to: ", current_outbox[new_message.recipient_id].hex())
                 new_message.previous_id = current_outbox[new_message.recipient_id]
         #use the agent_id as the sender_id
         new_update = await new_message.persist_to_mailbox_update(self.store, self.__root_executor.agent_id)

@@ -215,17 +215,17 @@ class LmdbBackend:
 
         agents_db = self.get_agents_db()
         vars_db = self.get_vars_db()
-        with self.env.begin(write=True) as txn:
+        with self.env.begin(write=False) as txn:
             agents_cursor = txn.cursor(db=agents_db)
             agents_cursor.first()
-            while agents_cursor.next():
+            for key, value in agents_cursor:
                 #since agents are stored both by point and agent_id, check that this is a point entry
-                point_bytes = agents_cursor.key()
-                if len(point_bytes) != 8:
+                if len(key) != 8:
                     continue
-                
+
+                point_bytes = key
                 point = bytes_to_point(point_bytes)
-                agent_id:bytes = agents_cursor.value()
+                agent_id:bytes = value
 
                 #if filters are set, check if the agent matches the filter
                 if request.var_filters is not None and len(request.var_filters) > 0:
@@ -302,8 +302,10 @@ class LmdbBackend:
             #TODO: do this as a separte transaction above. there is a subble race condition now, where the same agent 
             #      can be created for the same point at the same time
             #      this really needs to be implemented as a two-phase commit
-            if (not txn.put(point_to_bytes(point), agent_id, db=agents_db, overwrite=False) or
-                not txn.put(agent_id, point_to_bytes(point), db=agents_db, overwrite=False)):
+            create_1 = txn.put(point_to_bytes(point), agent_id, db=agents_db, overwrite=False)
+            create_2 = txn.put(agent_id, point_to_bytes(point), db=agents_db, overwrite=False)
+            
+            if (not create_1 or not create_2):
                 raise Exception(f"Failed to create agent for point {point} and {agent_id.hex()}, it already existed.")
 
             last_obj_id = None
