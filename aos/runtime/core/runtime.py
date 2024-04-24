@@ -8,6 +8,7 @@ from .query_executor import QueryExecutor
 from .actor_executor import ExecutionContext, ActorExecutor, MailboxUpdate
 from .root_executor import RootActorExecutor, agent_id_from_point
 from .request_response_executor import RequestResponseExecutor
+from .discovery_executor import DiscoveryExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ class Runtime:
         self.ctx.agent_id = agent_id_from_point(point)
 
         self.ctx.query = QueryExecutor(self.ctx.store, self.ctx.references, self.ctx.resolver, self.ctx.agent_id)
+        self.ctx.discovery = DiscoveryExecutor(self.ctx.references)
 
         self.__cancel_event = asyncio.Event()
         self.__running_event = asyncio.Event()
@@ -142,9 +144,6 @@ class Runtime:
         await self.__init_root_executor()
         refs = await self.references.get_all()
         actor_heads:dict[ActorId, StepId] = {bytes.fromhex(ref.removeprefix('heads/')):step_id for ref,step_id in refs.items() if ref.startswith('heads/')}
-
-        self.ctx.named_actors = {ref.removeprefix('actors/'):actor_id for ref,actor_id in refs.items() if ref.startswith('actors/')}
-        self.ctx.prototype_actors = {ref.removeprefix('prototypes/'):actor_id for ref,actor_id in refs.items() if ref.startswith('prototypes/')}
 
         async with self.__executor_lock:
             self.__executors:dict[ActorId, ActorExecutor] = {}
