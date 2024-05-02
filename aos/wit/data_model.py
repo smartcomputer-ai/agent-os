@@ -270,6 +270,8 @@ class TreeObject:
     @classmethod
     async def from_tree_id(cls, loader:ObjectLoader, tree_id:TreeId):
         tree = await loader.load(tree_id)
+        if not is_tree(tree):
+            raise TypeError(f"Object with id '{tree_id.hex()}' is not a tree, but a '{type(tree).__name__}'")
         return cls(loader, tree, tree_id)
    
     @property
@@ -550,6 +552,7 @@ class TreeObject:
             else:
                 raise TypeError(f"Cannot persist tree, invalid type for key '{key}', is '{type(value)}'.")
         self.__tree_id = await store.store(tree_to_store)
+        self.__tree = tree_to_store
         self.__dirty = False
         return self.__tree_id
 
