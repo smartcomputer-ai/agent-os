@@ -37,7 +37,7 @@ class GetRunningAgentsResponse(_message.Message):
     def __init__(self, agents: _Optional[_Iterable[_Union[AgentInfo, _Mapping]]] = ...) -> None: ...
 
 class AgentInfo(_message.Message):
-    __slots__ = ("agent_id", "agent_did", "worker_id", "worker_address", "capabilities")
+    __slots__ = ("agent_id", "point", "worker_id", "worker_address", "capabilities")
     class CapabilitiesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -46,16 +46,16 @@ class AgentInfo(_message.Message):
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    POINT_FIELD_NUMBER: _ClassVar[int]
     WORKER_ID_FIELD_NUMBER: _ClassVar[int]
     WORKER_ADDRESS_FIELD_NUMBER: _ClassVar[int]
     CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    agent_did: str
+    point: int
     worker_id: str
     worker_address: str
     capabilities: _containers.ScalarMap[str, str]
-    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ..., worker_id: _Optional[str] = ..., worker_address: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    def __init__(self, agent_id: _Optional[bytes] = ..., point: _Optional[int] = ..., worker_id: _Optional[str] = ..., worker_address: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class GetApexStatusRequest(_message.Message):
     __slots__ = ()

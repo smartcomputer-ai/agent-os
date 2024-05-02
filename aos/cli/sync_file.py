@@ -139,6 +139,8 @@ def _add_table_to_actor_push(actor_push:ActorPush, table:Container):
         actor_push.wit_query = table["wit_query"]
     if "wit_update" in table and not actor_push.is_genesis:
         actor_push.wit_update = table["wit_update"]
+    if "wit_genesis" in table and actor_push.is_genesis:
+        actor_push.wit_genesis = table["wit_genesis"]
 
 def _read_toml_file(file_path) -> TOMLDocument:
     file_path = _convert_posix_to_win(file_path)
@@ -191,7 +193,7 @@ def _validate_doc(doc:tomlkit.TOMLDocument) -> None:
     valid_all_keys = ['push', 'pull', 'sync', 'push_value', 'push_on_genesis', 'push_value_on_genesis', 'runtime', 'external_paths']
     if('all' in doc):
         validate_all(doc['all'], valid_all_keys)
-    valid_actor_keys = ['name', 'wit', 'wit_query', 'is_prototype'] + valid_all_keys
+    valid_actor_keys = ['name', 'wit', 'wit_query', 'wit_update', 'wit_genesis', 'is_prototype'] + valid_all_keys
     if 'actors' in doc:
         #raise ValueError('No actors table array (aka heading) is defined. Use [[actors]] to define one or more actors.')
         validate_actors(doc['actors'], valid_actor_keys)

@@ -22,7 +22,7 @@ async def setup_runtime():
     refs = MemoryReferences()
     resolver = ExternalResolver(store)
     resolver.register('wit_sync', wit_sync)
-    runtime = Runtime(store, refs, "test", resolver=resolver)
+    runtime = Runtime(store, refs, resolver=resolver)
     running_task = asyncio.create_task(runtime.start())
     await asyncio.sleep(0.05)
     return runtime, running_task

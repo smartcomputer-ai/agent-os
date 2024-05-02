@@ -31,8 +31,11 @@ async def create_env_actor(
     config.name = name
     config.enforce_content_type = enforce_content_type
     config.enforce_json_schema = enforce_json_schema
+    prototype_id = await ctx.discovery.find_prototype("scope")
+    if prototype_id is None:
+        raise Exception("scope prototype not found")
     return await create_actor_from_prototype_with_state(
-        ctx.prototype_actors["scope"], 
+        prototype_id, 
         config, 
         ctx.request_response, 
         ctx.store)

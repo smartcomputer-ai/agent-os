@@ -51,6 +51,16 @@ def is_mailbox(object:Object) -> bool:
     return (isinstance(object, dict) and len(object) > 0 and (isinstance(next(iter(object)), bytes) or isinstance(next(iter(object)), bytearray)) 
         and (isinstance(object[next(iter(object))], bytes) or isinstance(object[next(iter(object))], bytearray)))
 
+def point_to_bytes(point:Point) -> bytes:
+    # 64 bit uint
+    return point.to_bytes(8, byteorder="big", signed=False)
+    # or, should the size of the int be unbouned?
+    #return point.to_bytes((point.bit_length() + 7) // 8, byteorder="big")
+
+def bytes_to_point(bytes:bytes) -> Point:
+    return int.from_bytes(bytes, byteorder="big", signed=False)
+
+
 def object_to_bytes(object:Object) -> bytes:
     if is_blob(object):
         return blob_to_bytes(object)

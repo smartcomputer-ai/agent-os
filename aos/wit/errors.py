@@ -8,6 +8,9 @@ class InvalidWitException(Exception):
 class InvalidMessageException(Exception):
     pass
 
+class InvalidGenesisException(Exception):
+    pass
+
 class InvalidUpdateException(Exception):
     pass
 

@@ -7,50 +7,48 @@ from typing import ClassVar as _ClassVar, Mapping as _Mapping, Optional as _Opti
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class CreateAgentRequest(_message.Message):
-    __slots__ = ("agent_did", "agent_did_private_key")
-    AGENT_DID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_DID_PRIVATE_KEY_FIELD_NUMBER: _ClassVar[int]
-    agent_did: str
-    agent_did_private_key: str
-    def __init__(self, agent_did: _Optional[str] = ..., agent_did_private_key: _Optional[str] = ...) -> None: ...
+    __slots__ = ("point",)
+    POINT_FIELD_NUMBER: _ClassVar[int]
+    point: int
+    def __init__(self, point: _Optional[int] = ...) -> None: ...
 
 class CreateAgentResponse(_message.Message):
-    __slots__ = ("agent_id", "agent_did")
+    __slots__ = ("agent_id", "point")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    POINT_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    agent_did: str
-    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ...) -> None: ...
+    point: int
+    def __init__(self, agent_id: _Optional[bytes] = ..., point: _Optional[int] = ...) -> None: ...
 
 class DeleteAgentRequest(_message.Message):
-    __slots__ = ("agent_id", "agent_did")
+    __slots__ = ("agent_id", "point")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    POINT_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    agent_did: str
-    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ...) -> None: ...
+    point: int
+    def __init__(self, agent_id: _Optional[bytes] = ..., point: _Optional[int] = ...) -> None: ...
 
 class DeleteAgentResponse(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
 
 class GetAgentRequest(_message.Message):
-    __slots__ = ("agent_id", "agent_did")
+    __slots__ = ("agent_id", "point")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    POINT_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    agent_did: str
-    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ...) -> None: ...
+    point: int
+    def __init__(self, agent_id: _Optional[bytes] = ..., point: _Optional[int] = ...) -> None: ...
 
 class GetAgentResponse(_message.Message):
-    __slots__ = ("agent_id", "agent_did", "exists")
+    __slots__ = ("agent_id", "point", "exists")
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    POINT_FIELD_NUMBER: _ClassVar[int]
     EXISTS_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    agent_did: str
+    point: int
     exists: bool
-    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ..., exists: bool = ...) -> None: ...
+    def __init__(self, agent_id: _Optional[bytes] = ..., point: _Optional[int] = ..., exists: bool = ...) -> None: ...
 
 class GetAgentsRequest(_message.Message):
     __slots__ = ("var_filters",)
@@ -71,12 +69,12 @@ class GetAgentsResponse(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
+        key: int
         value: bytes
-        def __init__(self, key: _Optional[str] = ..., value: _Optional[bytes] = ...) -> None: ...
+        def __init__(self, key: _Optional[int] = ..., value: _Optional[bytes] = ...) -> None: ...
     AGENTS_FIELD_NUMBER: _ClassVar[int]
-    agents: _containers.ScalarMap[str, bytes]
-    def __init__(self, agents: _Optional[_Mapping[str, bytes]] = ...) -> None: ...
+    agents: _containers.ScalarMap[int, bytes]
+    def __init__(self, agents: _Optional[_Mapping[int, bytes]] = ...) -> None: ...
 
 class SetVarRequest(_message.Message):
     __slots__ = ("agent_id", "key", "value")

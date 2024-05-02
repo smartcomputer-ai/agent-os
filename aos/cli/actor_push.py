@@ -29,8 +29,9 @@ class ActorPush():
     actor_name:str
     is_prototype:bool
     wit:str
-    wit_query:str
+    wit_genesis:str
     wit_update:str
+    wit_query:str
     runtime:str
 
     def __init__(self, is_genesis:bool, actor_id:ActorId|None=None):
@@ -42,8 +43,9 @@ class ActorPush():
         self.actor_name = None
         self.is_prototype = False
         self.wit = None
-        self.wit_query = None
+        self.wit_genesis = None
         self.wit_update = None
+        self.wit_query = None
         self.runtime = None
 
     @classmethod
@@ -121,6 +123,8 @@ class ActorPush():
             core.makeb("wit").set_as_str(self.wit)
         if(self.wit_query):
             core.makeb("wit_query").set_as_str(self.wit_query)
+        if(self.wit_genesis):
+            core.makeb("wit_genesis").set_as_str(self.wit_genesis)
         if(self.wit_update):
             core.makeb("wit_update").set_as_str(self.wit_update)
         if(self.runtime):
@@ -178,7 +182,7 @@ class ActorPush():
                     except Exception as ex:
                         yield push_blob_path, f"error retrieving path: {ex}"
 
-    async def create_and_inject_messages(self, store:ObjectStore, references:References, agent_name:str) -> StepId:
+    async def create_and_inject_messages(self, store:ObjectStore, references:References, point:int) -> StepId:
         """Deprected. Only used for testing in-proc runtimes. Dangerous to use in production."""
         #to make sure this is not running in prod
         if isinstance(store, AgentObjectStore) or isinstance(references, AgentReferences):
@@ -196,13 +200,13 @@ class ActorPush():
         if(self._is_genesis):
             previous_genesis_actor_id = await references.get(actor_ref)
             if(previous_genesis_actor_id is not None):
-                await remove_offline_message_from_root_outbox(store, references, agent_name, previous_genesis_actor_id)
+                await remove_offline_message_from_root_outbox(store, references, point, previous_genesis_actor_id)
         # Now, create the message
         msg = await self.create_actor_message(store)
         # Don't set previous, so that this message can be pushed multiple times, 
         # resulting in an override of the current message in the outbox.
         # With set_previous=False, the message is treated like a signal, and only the last message will apply.
-        step_id = await add_offline_message_to_root_outbox(store, references, agent_name, msg, set_previous=False)
+        step_id = await add_offline_message_to_root_outbox(store, references, point, msg, set_previous=False)
         # If this the genesis step, also create an actor ref
         if(self._is_genesis and self.actor_name is not None):
             # This may override the actor ref, if the genesis step changes over multiple initial pushes, 

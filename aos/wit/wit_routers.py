@@ -12,6 +12,7 @@ from .errors import InvalidWitException, InvalidMessageException, QueryError
 from .wit_state import WitState
 from .query import Query
 from .request_response import RequestResponse
+from .discovery import Discovery
 
 # The classes are mostly used internally to wrap user defined functions and route wit messages to the
 # correct message handler.
@@ -42,10 +43,9 @@ class MessageContext():
     actor_id:ActorId                    #core
     agent_id:ActorId                    #core
     store:ObjectStore                   #core
-    named_actors:dict[str,ActorId]      #discovery
-    prototype_actors:dict[str,ActorId]  #discovery
     query:Query                         #query
     request_response:RequestResponse    #request_response or "rails"
+    discovery:Discovery                 #discovery
 
 @dataclass(frozen=True)
 class QueryContext():
@@ -60,6 +60,8 @@ class QueryContext():
     agent_id:ActorId
     loader:ObjectLoader
     query:Query
+    discovery:Discovery                
+
 
 #===================================================================================================
 # Function Wrapper Util
@@ -352,10 +354,9 @@ class _WitMessageRouter:
                 store=store,
                 actor_id=kwargs.get('actor_id'),
                 agent_id=kwargs.get('agent_id'),
-                named_actors=kwargs.get('named_actors', {}),
-                prototype_actors=kwargs.get('prototype_actors', {}),
                 query=kwargs.get('query', None),
                 request_response=kwargs.get('request_response', None),
+                discovery=kwargs.get('discovery', None),
             )
             kwargs[wrapper.context_param.name] = ctx
         return kwargs
@@ -556,6 +557,7 @@ class _WitQueryRouter:
                 actor_id=kwargs['actor_id'],
                 agent_id=kwargs['agent_id'],
                 query=kwargs.get('query', None),
+                discovery=kwargs.get('discovery', None),
                 )
         
         #finally, add the json args to the kwargs, so they can be accessed direcly by name

@@ -19,8 +19,11 @@ async def create_retriever_actor(
     state.code_request = request
     state.forward_to = forward_to
     state.notify.add(ctx.actor_id)
+    prototype_id = await ctx.discovery.find_prototype("retriever")
+    if prototype_id is None:
+        raise Exception("retriever prototype not found")
     return await create_actor_from_prototype_with_state(
-        ctx.prototype_actors["retriever"], 
+        prototype_id, 
         state, 
         ctx.request_response, 
         ctx.store)

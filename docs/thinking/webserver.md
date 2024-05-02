@@ -11,7 +11,7 @@ needed
 ## HTTP Grit
 `grit` endpoints are read-only. The runtime does not have to be running.
 
-`$GRIT_URL = http://<host>:<port>/grit/<agent_id|agent_name>`
+`$GRIT_URL = http://<host>:<port>/grit/<agent_id|point>`
 
 return all refs  
 `GET $GRIT_URL/refs`
@@ -24,7 +24,7 @@ return the object with that id
 
 `wit` endpoints support interaction with wits via the runtime  
 
-`$WIT_URL http://<host>:<port>/wit/<agent_id|agent_name>`
+`$WIT_URL http://<host>:<port>/wit/<agent_id|point>`
 
 (NOT NEEDED) get messages sent to the runtime from all actors  
 `GET $WIT_URL/messages/`

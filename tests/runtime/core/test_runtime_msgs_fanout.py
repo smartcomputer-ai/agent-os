@@ -57,7 +57,7 @@ async def test_msgs__fanout():
     resolver = ExternalResolver(store)
     resolver.register('wit_a', wit_a)
     resolver.register('wit_b', wit_b)
-    runtime = Runtime(store, refs, "test", resolver)
+    runtime = Runtime(store, refs, resolver=resolver)
 
     running_task = asyncio.create_task(runtime.start())
     await asyncio.sleep(0.05)

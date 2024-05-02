@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 # Type defs and constants
 #==============================================================
 AgentId = ActorId #the agent is defined by the id of the root actor, so technically, it's an actor id too
-AgendDID = str
 WorkerId = str
 MailboxUpdate = tuple[ActorId, ActorId, MessageId] # sender_id, recipient_id, message_id
 
@@ -324,7 +323,7 @@ class WorkerCoreLoop:
         if agent_id in worker_state.assigned_agents:
             logger.warning(f"Received agent {agent_id.hex()}, but it is already running on this worker. NO-OP.")
             return
-        logger.info(f"Received agent {agent_id.hex()} ({agent.agent_did}), will run it...")
+        logger.info(f"Received agent {agent_id.hex()} ({agent.point}), will run it...")
 
         worker_state.assigned_agents[agent_id] = agent
         #create a store client for the agent
@@ -342,7 +341,10 @@ class WorkerCoreLoop:
         references = AgentReferences(store_client, agent_id)
 
         #create a runtime for the agent
-        runtime = Runtime(object_store, references, agent.agent_did)
+        runtime = Runtime(
+            store=object_store, 
+            references=references, 
+            point=agent.point)
         worker_state.runtimes[agent_id] = runtime
 
         async def runtime_runner(agent_id:AgentId, runtime:Runtime):
@@ -355,7 +357,7 @@ class WorkerCoreLoop:
 
         runtime_task = asyncio.create_task(runtime_runner(agent_id, runtime))
         worker_state.runtime_tasks[agent_id] = runtime_task
-        logger.info(f"Started runtime for {agent_id.hex()} ({agent.agent_did}).")
+        logger.info(f"Started runtime for {agent_id.hex()} ({agent.point}).")
 
 
     async def _handle_yank_agent(self, event:_YankAgentEvent, worker_state:WorkerCoreState):

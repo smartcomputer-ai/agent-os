@@ -13,7 +13,7 @@ async def test_coder__img_resize():
     resolver = ExternalResolver(store)
     resolver.register('gen_wit', app)
 
-    runtime = Runtime(store, refs, "test", resolver)
+    runtime = Runtime(store, refs, resolver=resolver)
     running_task = asyncio.create_task(runtime.start())
 
     #genesis of the generator actor

@@ -48,7 +48,7 @@ async def wit_a_hi(msg:InboxMessage, core:Core) -> None:
 async def setup_runtime():
     store = MemoryObjectStore()
     refs = MemoryReferences()
-    runtime = Runtime(store, refs, "test")
+    runtime = Runtime(store, refs)
     running_task = asyncio.create_task(runtime.start())
     await asyncio.sleep(0.05)
     return runtime, running_task

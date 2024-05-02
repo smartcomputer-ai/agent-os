@@ -40,7 +40,7 @@ class WorkerManifest(_message.Message):
     def __init__(self, worker_id: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ..., current_agents: _Optional[_Iterable[_Union[Agent, _Mapping]]] = ..., desired_agents: _Optional[_Iterable[bytes]] = ...) -> None: ...
 
 class Agent(_message.Message):
-    __slots__ = ("agent_id", "agent_did", "capabilities")
+    __slots__ = ("agent_id", "point", "capabilities")
     class CapabilitiesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -49,12 +49,12 @@ class Agent(_message.Message):
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
-    AGENT_DID_FIELD_NUMBER: _ClassVar[int]
+    POINT_FIELD_NUMBER: _ClassVar[int]
     CAPABILITIES_FIELD_NUMBER: _ClassVar[int]
     agent_id: bytes
-    agent_did: str
+    point: int
     capabilities: _containers.ScalarMap[str, str]
-    def __init__(self, agent_id: _Optional[bytes] = ..., agent_did: _Optional[str] = ..., capabilities: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    def __init__(self, agent_id: _Optional[bytes] = ..., point: _Optional[int] = ..., capabilities: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class AgentAssignment(_message.Message):
     __slots__ = ("agent_id", "agent")

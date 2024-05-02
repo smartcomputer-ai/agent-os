@@ -13,7 +13,7 @@ async def test_coder__img_resize_as_job():
     resolver = ExternalResolver(store)
     resolver.register('coder_wit', app)
 
-    runtime = Runtime(store, refs, "test", resolver)
+    runtime = Runtime(store, refs, resolver=resolver)
     running_task = asyncio.create_task(runtime.start())
 
     upscale_spec = CodeSpec(

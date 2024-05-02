@@ -38,7 +38,7 @@ message GetRunningAgentsResponse {
 
 message AgentInfo{
   bytes agent_id = 1;
-  string agent_did = 2;
+  uint64 point = 2;
   string worker_id = 3;
   string worker_address = 4;
   map <string, string> capabilities = 10;

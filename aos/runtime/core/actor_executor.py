@@ -17,27 +17,25 @@ class ExecutionContext:
     store:ObjectStore
     references:References
     resolver:Resolver
-    agent_name:str
+    point:Point
     agent_id:ActorId
     async_semaphore:asyncio.Semaphore|None
     sync_semaphore:asyncio.Semaphore|None
-    named_actors:dict[str,ActorId]
-    prototype_actors:dict[str,ActorId]
     query:Query
     request_response:RequestResponse
+    discovery:Discovery
 
     def __init__(self):
         self.store = None
         self.references = None
         self.resolver = None
-        self.agent_name = None
+        self.point = None
         self.agent_id = None
         self.async_semaphore = None
         self.sync_semaphore = None
-        self.named_actors = {}
-        self.prototype_actors = {}
         self.query = None
         self.request_response = None
+        self.discovery = None
 
     @classmethod
     def from_store(cls, store:ObjectStore, references:References, resolver:Resolver, agent_id:ActorId) -> ExecutionContext:
@@ -299,6 +297,7 @@ class _WitExecution:
         else:
             # See if there is an update message in the current message list, then use that core
             # But if not, simply use the core from the previous step
+            #TODO: ensure order if there is more than one update message
             update_msg = next((msg for msg in execution.new_inbox_messages if msg.mt == 'update'), None)
             if update_msg is not None:
                 execution.executing_core_id = update_msg.content_id
@@ -317,9 +316,22 @@ class _WitExecution:
         # Now load the function from the executing_core_id (whose origin can differ depending if it is a genesis, update, or normal message)
         if execution.executing_core_id is None:
             raise Exception("Cannot resolve wit function from core because executing_core_id is None.")
-        if not execution.is_update :
+        if not execution.is_update and not execution.is_genesis:
             execution.func = await ctx.resolver.resolve(execution.executing_core_id, 'wit', True)
-        else:
+        elif execution.is_genesis:
+            # Is genesis
+            # Note:
+            # the wit_genesis is nowhere used right now, but that's how the semantics should be,
+            # if no, wit_genesis is provided, the default genesis function should be used
+            # this makes it safer to create new actors deterministically, with very low chance or running into an error during genesis execution
+            # providing a custom wit_genesis function, is considered a more advanced scenario
+            execution.func = await ctx.resolver.resolve(execution.executing_core_id, 'wit_genesis', False)
+            if(execution.func is None):
+                # Use the default genesis function, which merges the cores
+                genesis_wit = Wit(fail_on_unhandled_message=True, generate_wut_query=False)
+                genesis_wit.run_wit(default_genesis_wit)
+                execution.func = genesis_wit
+        elif execution.is_update:
             # Is an update
             execution.func = await ctx.resolver.resolve(execution.executing_core_id, 'wit_update', False)
             if(execution.func is None):
@@ -349,10 +361,9 @@ class _WitExecution:
             'object_store': ctx.store,
             'store': ctx.store,
             'cancel_event': self.cancel_event,
-            'named_actors': ctx.named_actors,
-            'prototype_actors': ctx.prototype_actors,
             'query': ctx.query,
             'request_response': ctx.request_response,
+            'discovery': ctx.discovery,
         }
         task_name = f'wit_function_{self.actor_id}'
         if(self.is_async):
@@ -387,6 +398,19 @@ class _WitExecution:
             #TODO: capture the cancel exception
         self.is_running = False
 
+async def default_genesis_wit(inbox:Inbox, outbox:Outbox, core:Core):
+    #expect a genesis message
+    msg = await inbox.read_new()
+    if len(msg) != 1:
+        raise InvalidGenesisException("Expected exactly one genesis message in the inbox.")
+    genesis_msg = msg[0]
+    if(genesis_msg.mt != 'genesis'):
+        raise InvalidGenesisException("Found one message in the inbox, but it was not a genesis message, it must have the header 'mt'='genesis'.")
+    #the current core, is the genesis core
+    if genesis_msg.content_id != core.get_as_object_id():
+        raise InvalidGenesisException("The genesis message content_id match the genesis core object id. They must be the same.")
+    print(f"Genesis message handled for core/actor {genesis_msg.content_id.hex()}")
+
 async def default_update_wit(inbox:Inbox, outbox:Outbox, core:Core):
     #expect an update message
     msg = await inbox.read_new()
@@ -399,7 +423,7 @@ async def default_update_wit(inbox:Inbox, outbox:Outbox, core:Core):
     if(not isinstance(new_core, TreeObject)):
         raise InvalidUpdateException("The update message did not contain a tree object.")
     #now, merge the new core into the current core
-    #print(f"Updating core {core.get_as_object_id().hex()} with new core {update_msg.content_id.hex()} by merging them.")
+    print(f"Updating core {core.get_as_object_id().hex()} with new core {update_msg.content_id.hex()} by merging them.")
     await core.merge(new_core)    
 
 

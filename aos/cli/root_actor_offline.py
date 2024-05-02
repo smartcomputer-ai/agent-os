@@ -8,13 +8,13 @@ from aos.runtime.core.root_executor import create_or_load_root_actor
 async def add_offline_message_to_root_outbox(
         object_store:ObjectStore, 
         references:References, 
-        agent_name:str, 
+        point:Point, 
         msg:OutboxMessage, 
         set_previous:bool=False,
         ) -> StepId:
     '''Dangerous! Do not use if the runtime is running!'''
     #extra check
-    agent_id, last_step_id = await create_or_load_root_actor(object_store, references, agent_name)
+    agent_id, last_step_id = await create_or_load_root_actor(object_store, references, point)
     last_step = await object_store.load(last_step_id)
     if(last_step.outbox is None):
         last_step_outbox = {}
@@ -37,12 +37,12 @@ async def add_offline_message_to_root_outbox(
 async def remove_offline_message_from_root_outbox(
         object_store:ObjectStore, 
         references:References, 
-        agent_name:str, 
+        point:Point, 
         recipient_id:ActorId,
         ) -> StepId:
     '''Dangerous! Do not use if the runtime is running!'''
     #todo: dedupe the code with add_offline_message_to_agent_outbox
-    agent_id, last_step_id = await create_or_load_root_actor(object_store, references, agent_name)
+    agent_id, last_step_id = await create_or_load_root_actor(object_store, references, point)
     last_step = await object_store.load(last_step_id)
     if(last_step.outbox is None):
         last_step_outbox = {}

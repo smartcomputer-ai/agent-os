@@ -33,7 +33,7 @@ message WorkerManifest{
 
 message Agent{
   bytes agent_id = 1; //32 bytes, of actor_id type
-  string agent_did = 2;
+  uint64 point = 2;
   map<string, string> capabilities = 10; //what capabilities are requested by the agent
   //map<string, string> workers = 20; //worker_id, worker_address - > for later, what workers are assigned to this agent, so that workers can coordinate
 }

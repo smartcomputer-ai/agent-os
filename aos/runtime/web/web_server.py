@@ -90,7 +90,7 @@ class WebServer:
     async def agents_get_all(self, request:Request):
         assert request.method == "GET"
         agents = await self._agents_client.get_agents()
-        return JSONResponse({agent_id.hex():agent_name for agent_id, agent_name in agents.items()})
+        return JSONResponse({agent_id.hex():point for agent_id, point in agents.items()})
 
     async def grit_get_refs(self, request:Request):
         assert request.method == "GET"
@@ -324,17 +324,17 @@ class WebServer:
     async def _validate_agent_id(self, request:Request) -> bytes:
         if self.__AGENT_ID_PARAM not in request.path_params:
             raise HTTPException(status_code=400, detail="Agent id not set")
-        agent_id_or_name_str = request.path_params[self.__AGENT_ID_PARAM]
-        if not is_object_id_str(agent_id_or_name_str):
-            agent_id = await self._agents_client.lookup_agent_by_name(agent_id_or_name_str)
+        agent_id_or_point_str = request.path_params[self.__AGENT_ID_PARAM]
+        if not is_object_id_str(agent_id_or_point_str):
+            agent_id = await self._agents_client.lookup_agent_by_point(agent_id_or_point_str)
             if agent_id is not None:
                 return agent_id
-            raise HTTPException(status_code=404, detail=f"Agent id ({agent_id_or_name_str}) not found") 
+            raise HTTPException(status_code=404, detail=f"Agent id ({agent_id_or_point_str}) not found") 
         else:
-            agent_id = bytes.fromhex(agent_id_or_name_str)
+            agent_id = bytes.fromhex(agent_id_or_point_str)
             if await self._agents_client.agent_exists(agent_id):
                 return agent_id
-            raise HTTPException(status_code=404, detail=f"Agent id ({agent_id_or_name_str}) not found") 
+            raise HTTPException(status_code=404, detail=f"Agent id ({agent_id_or_point_str}) not found") 
     
     async def _validate_actor_id(self, request:Request, agent_id:AgentId) -> bytes:
         if not is_object_id(agent_id):

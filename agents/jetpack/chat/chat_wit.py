@@ -21,8 +21,11 @@ async def create_chat_actor(
         ) -> ActorId:
     state = ChatState()
     state.name = name
+    prototype_id = await ctx.discovery.find_prototype("chat")
+    if prototype_id is None:
+        raise Exception("chat prototype not found")
     return await create_actor_from_prototype_with_state(
-        ctx.prototype_actors["chat"], 
+        prototype_id, 
         state, 
         ctx.request_response, 
         ctx.store)
