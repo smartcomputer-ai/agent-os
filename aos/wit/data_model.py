@@ -204,6 +204,22 @@ class BlobObject:
         self.__headers = {}
         self.mark_dirty()
         return self
+
+    def get_full_content_type(self) -> str:
+        if self.__headers is not None and len(self.__headers) > 0:
+            if "Content-Type" in self.__headers:
+                return self.__headers["Content-Type"]
+            elif "content-type" in self.__headers:
+                return self.__headers["content-type"]
+            elif "ct" in self.__headers:
+                if(self.__headers["ct"] == "b"):
+                    return "application/octet-stream"
+                elif(self.__headers["ct"] == "s"):
+                    return "text/plain"
+                elif(self.__headers["ct"] == "j"):
+                    return "application/json"
+        return None
+
     
     def integrate(self, parent:TreeObject|None, breadcrumb:str):
         '''Integrates a blob object into an existing tree object. Usually called by TreeObject.add(). 

@@ -20,7 +20,7 @@ pytest-asyncio = "^0.21.0"
 tomlkit = "^0.11.8"
 lmdb = "^1.4.1"
 watchfiles = "^0.19.0"
-starlette = "^0.28.0"
+starlette = "^0.37.2"
 sse-starlette = "^1.6.1"
 uvicorn = "^0.22.0"
 click = "^8.1.5"
@@ -30,6 +30,7 @@ py-multibase = "^1.0.3"
 py-multicodec = "^0.2.1"
 base58 = "^2.1.1"
 cryptography = "^42.0.5"
+grpcio-tools = "^1.62.2"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.1.1"
@@ -39,7 +40,6 @@ httpx-sse = "^0.4.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.3.7"
-grpcio-tools = "^1.62.1"
 
 
 [tool.poetry.group.agents]

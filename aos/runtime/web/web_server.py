@@ -41,9 +41,9 @@ class WebServer:
     def from_apex_address(cls, apex_address:str="localhost:50052") -> 'WebServer':
         return cls(AgentsClient(apex_address=apex_address))
 
-    def app(self) -> Starlette:
+    def routes(self):
         url_prefix = f"/agents/{{{self.__AGENT_ID_PARAM}}}"
-        routes = [
+        return [
             Route('/', self.get_root),
             Route('/agents', self.agents_get_all),
             #grit routes
@@ -58,6 +58,10 @@ class WebServer:
                   self.wit_query),
             Route(f"{url_prefix}/messages-sse", self.wit_get_messages_sse),
         ]
+    
+    def app(self) -> Starlette:
+        url_prefix = f"/agents/{{{self.__AGENT_ID_PARAM}}}"
+        routes = self.routes()
         return Starlette(routes=routes, debug=True)
 
     async def run(self, port:int=5000, watch_dir:str=None):
