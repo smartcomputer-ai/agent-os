@@ -220,6 +220,11 @@ class BlobObject:
                     return "application/json"
         return None
 
+    def get_full_media_type(self) -> str:
+        content_type = self.get_full_content_type()
+        if(content_type is None):
+            return None
+        return content_type.split(";")[0].strip()
     
     def integrate(self, parent:TreeObject|None, breadcrumb:str):
         '''Integrates a blob object into an existing tree object. Usually called by TreeObject.add(). 
@@ -290,6 +295,10 @@ class TreeObject:
             raise TypeError(f"Object with id '{tree_id.hex()}' is not a tree, but a '{type(tree).__name__}'")
         return cls(loader, tree, tree_id)
    
+    @classmethod
+    def from_empty(cls):
+        return cls(None, {})
+
     @property
     def tree_id(self) -> TreeId|None:
         return self.__tree_id
