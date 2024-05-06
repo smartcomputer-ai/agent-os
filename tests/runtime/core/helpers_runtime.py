@@ -7,7 +7,7 @@ def get_random_actor_id() -> ActorId:
 
 async def create_genesis_message(store:ObjectStore, sender_id:ActorId, wit_name:str) -> MailboxUpdate:
     '''Creates a genesis message and returns a MailboxUpdate'''
-    gen_core:TreeObject = Core.from_external_wit_ref(store, wit_name)
+    gen_core:TreeObject = Core.from_external_wit_ref(wit_name)
     gen_core.maket('data').makeb('args').set_as_json({'hello': 'world'})
     gen_message = await OutboxMessage.from_genesis(store, gen_core)
     gen_message_id = await gen_message.persist(store)

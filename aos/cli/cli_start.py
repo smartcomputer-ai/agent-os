@@ -5,6 +5,7 @@ import shutil
 import sys
 import click
 from dataclasses import dataclass
+from importlib.metadata import version
 from aos.grit import *
 from aos.runtime.store.store_server import start_server_sync as start_store_server_sync, start_server as start_store_server
 from aos.runtime.apex.apex_server import start_server as start_apex_server
@@ -67,12 +68,26 @@ def apex(ctx:click.Context, port:int, store_address:str):
 @click.option("--apex-address", required=False, default="localhost:50052", help="Address of the apex server.")
 @click.option("--worker-address", required=False, default=None, help="Address of this worker where others can reach it at, will be broadcasted to others via apex. If none is provided, will be set to localhost:<port>.")
 @click.option("--worker-id", required=False, default=None, help="The permanent identity of this worker. If not provided, an emphemeral id will be generated.")
-def worker(ctx:click.Context, port:int, store_address:str, apex_address:str, worker_address:str, worker_id:str|None):
+@click.option("--modules", "-m", required=False, default=None, help="What modules the worked should announce in its manifest. Worker will not start if the modules are not available.", multiple=True)
+def worker(ctx:click.Context, port:int, store_address:str, apex_address:str, worker_address:str, worker_id:str|None, modules:list[str]|None):
     """Starts a worker server. More than one worker server can be started, but the port and worker address must be different."""
     print("-> Starting Worker Server")
 
     if worker_address is None:
         worker_address = "localhost:" + str(port)
+
+    if modules is not None and len(modules) > 0:
+        print("Module versions:")
+        not_found = []
+        for module in modules:
+            try:
+                print(f"  {module}=={version(module)}")
+            except:
+                print(f"  {module}==unknown")
+                not_found.append(module)
+
+        if len(not_found) > 0:
+            raise click.ClickException(f"Modules not found: {not_found} (are they installed and is the worker running from within the correct environment?)")
 
     async def ainit():
         await start_worker_server(

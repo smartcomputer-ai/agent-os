@@ -53,7 +53,7 @@ async def test_msgs__runtime_pending():
     #send two messages to wit_b, but without ever running wit_b--just send messages to it
     # to do so, manually update the outbox *of wit a* with two message (gen & howdy) and create a new step that incoroprates that outbox
     outbox = Outbox({})
-    b_gen_messge = await OutboxMessage.from_genesis(store, Core.from_external_wit_ref(store, 'wit_b'))
+    b_gen_messge = await OutboxMessage.from_genesis(store, Core.from_external_wit_ref('wit_b'))
     wit_b_actor_id = b_gen_messge.content #will be the agent id of wit_b
     outbox.add(b_gen_messge)
     outbox.add(OutboxMessage.from_new(wit_b_actor_id, "Howdy"))

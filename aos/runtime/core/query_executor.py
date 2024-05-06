@@ -1,8 +1,14 @@
 from __future__ import annotations
+import logging
 from aos.grit import *
+from aos.runtime.core.external_storage_executor import ExternalStorageExecutor
+from aos.wit.discovery import Discovery
 from aos.wit.errors import QueryError
+from aos.wit.external_storage import ExternalStorage
 from aos.wit.query import Query
 from .resolvers import Resolver
+
+logger = logging.getLogger(__name__)
 
 class QueryExecutor(Query):
     """Executes wit queries against an actor's head step."""
@@ -15,12 +21,16 @@ class QueryExecutor(Query):
         loader:ObjectLoader, 
         references:References, 
         resolver:Resolver,
-        agent_id:ActorId,):
+        agent_id:ActorId,
+        discovery:Discovery|None=None,
+        external_storage:ExternalStorageExecutor|None=None):
 
         self.loader = loader
         self.references = references
         self.resolver = resolver
         self.agent_id = agent_id
+        self.discovery = discovery
+        self.external_storage = external_storage
 
     async def run(self, actor_id:ActorId, query_name:str, context:Blob|None) -> Tree | Blob | None:
         actor_id_str = actor_id.hex()
@@ -50,11 +60,16 @@ class QueryExecutor(Query):
             'actor_id': actor_id,
             'agent_id': self.agent_id,
             'query': self
-        } 
+        }
+        if(self.discovery is not None):
+            kwargs['discovery'] = self.discovery
+        if(self.external_storage is not None):
+            kwargs['external_storage'] = self.external_storage.make_for_actor(actor_id.hex())
         try:
             result = await query_func(*args, **kwargs)
             return result
         except Exception as e:
+            logger.error(f"Query '{query_name}' to '{actor_id_str}', with step '{current_step_id_str}', failed with an exception: {e}", exc_info=e)
             raise QueryError(f"Query '{query_name}' to '{actor_id_str}', with step '{current_step_id_str}', failed with an exception: {e}") from e
 
 

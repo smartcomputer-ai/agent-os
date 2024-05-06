@@ -52,7 +52,7 @@ class InProcessCluster:
 
     async def create_genesis_message(self, wit_name:str) -> MailboxUpdate:
         '''Creates a genesis message and returns a MailboxUpdate'''
-        gen_core:TreeObject = Core.from_external_wit_ref(self.store, wit_name, wit_name if self.create_query_wit else None)
+        gen_core:TreeObject = Core.from_external_wit_ref(wit_name, wit_name if self.create_query_wit else None)
         gen_message = await OutboxMessage.from_genesis(self.store, gen_core)
         gen_message_id = await gen_message.persist(self.store)
         return (self.runtime.agent_id, gen_message.recipient_id, gen_message_id)
@@ -68,6 +68,9 @@ class InProcessCluster:
         actor_id = await self.refs.get(ref_actor_name(actor_name))
         message = OutboxMessage.from_new(actor_id, content, is_signal=is_signal, mt=mt)
         await self.runtime.inject_message(message)
+
+    async def get_actor(self, actor_name:str) -> ActorId:
+        return await self.refs.get(ref_actor_name(actor_name))
 
     async def get_actor_step(self, actor_name:str) -> Step:
         actor_id = await self.refs.get(ref_actor_name(actor_name))

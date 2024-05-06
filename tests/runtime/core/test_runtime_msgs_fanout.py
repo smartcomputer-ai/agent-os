@@ -27,7 +27,7 @@ async def test_msgs__fanout():
             #if genesis message
             if(message.content_id == actor_id):
                 for i in range(100):
-                    actor_core_b_n = Core.from_external_wit_ref(object_store, 'wit_b')
+                    actor_core_b_n = Core.from_external_wit_ref('wit_b')
                     actor_core_b_n.maket('data').makeb('args').set_as_json({'number': i})
                     outbox.add(await OutboxMessage.from_genesis(object_store, actor_core_b_n))
             else:

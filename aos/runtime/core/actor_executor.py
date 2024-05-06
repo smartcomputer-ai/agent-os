@@ -6,6 +6,7 @@ from typing import Awaitable, Callable
 from aos.grit import *
 from aos.wit import *
 from .resolvers import Resolver
+from .external_storage_executor import ExternalStorageExecutor
 
 MailboxUpdate = tuple[ActorId, ActorId, MessageId] # sender_id, recipient_id, message_id
 MailboxUpdateCallback = Callable[[set[MailboxUpdate]], Awaitable[None]]
@@ -24,6 +25,7 @@ class ExecutionContext:
     query:Query
     request_response:RequestResponse
     discovery:Discovery
+    external_storage:ExternalStorageExecutor
 
     def __init__(self):
         self.store = None
@@ -36,6 +38,7 @@ class ExecutionContext:
         self.query = None
         self.request_response = None
         self.discovery = None
+        self.external_storage = None
 
     @classmethod
     def from_store(cls, store:ObjectStore, references:References, resolver:Resolver, agent_id:ActorId) -> ExecutionContext:
@@ -364,6 +367,7 @@ class _WitExecution:
             'query': ctx.query,
             'request_response': ctx.request_response,
             'discovery': ctx.discovery,
+            'external_storage': ctx.external_storage.make_for_actor(self.actor_id.hex()),
         }
         task_name = f'wit_function_{self.actor_id}'
         if(self.is_async):

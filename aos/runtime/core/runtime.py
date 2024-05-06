@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 import asyncio
 from aos.grit import *
+from aos.runtime.core.external_storage_executor import ExternalStorageExecutor
 from aos.wit import *
 from .resolvers import *
 from .query_executor import QueryExecutor
@@ -30,7 +31,8 @@ class Runtime:
             store:ObjectStore, 
             references:References, 
             point:Point=0, 
-            resolver:Resolver=None):
+            resolver:Resolver=None,
+            external_storage_dir:str=None,):
         if not isinstance(store, ObjectStore):
             raise TypeError('store must be an ObjectStore')
         if not isinstance(references, References):
@@ -49,8 +51,20 @@ class Runtime:
         self.ctx.point = point
         self.ctx.agent_id = agent_id_from_point(point)
 
-        self.ctx.query = QueryExecutor(self.ctx.store, self.ctx.references, self.ctx.resolver, self.ctx.agent_id)
         self.ctx.discovery = DiscoveryExecutor(self.ctx.references)
+
+        if external_storage_dir is None:
+            import tempfile
+            tempfile.gettempdir() 
+            external_storage_dir = os.path.join(tempfile.gettempdir(), 'aos', 'external_storage')
+            #the assumption is that if the the external_storage_dir was not specified in the params, this is a temporary directory and should be cleaned up between runs
+            if os.path.exists(external_storage_dir):
+                import shutil
+                shutil.rmtree(external_storage_dir)
+        self.ctx.external_storage = ExternalStorageExecutor(external_storage_dir, str(self.ctx.point), None)
+
+        self.ctx.query = QueryExecutor(self.ctx.store, self.ctx.references, self.ctx.resolver, self.ctx.agent_id, self.ctx.discovery, self.ctx.external_storage)
+
 
         self.__cancel_event = asyncio.Event()
         self.__running_event = asyncio.Event()

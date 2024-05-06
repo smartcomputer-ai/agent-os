@@ -13,6 +13,7 @@ from .wit_state import WitState
 from .query import Query
 from .request_response import RequestResponse
 from .discovery import Discovery
+from .external_storage import ExternalStorage
 
 # The classes are mostly used internally to wrap user defined functions and route wit messages to the
 # correct message handler.
@@ -42,10 +43,11 @@ class MessageContext():
     step_id:StepId                      #step
     actor_id:ActorId                    #core
     agent_id:ActorId                    #core
-    store:ObjectStore                   #core
-    query:Query                         #query
-    request_response:RequestResponse    #request_response or "rails"
-    discovery:Discovery                 #discovery
+    store:ObjectStore                   #core (or part of services)
+    query:Query                         #query (part of services)
+    request_response:RequestResponse    #request_response or "rails" (part of services)
+    discovery:Discovery                 #discovery (part of services)
+    external_storage:ExternalStorage    #external_storage (part of services)
 
 @dataclass(frozen=True)
 class QueryContext():
@@ -60,7 +62,8 @@ class QueryContext():
     agent_id:ActorId
     loader:ObjectLoader
     query:Query
-    discovery:Discovery                
+    discovery:Discovery
+    external_storage:ExternalStorage                
 
 
 #===================================================================================================
@@ -357,6 +360,7 @@ class _WitMessageRouter:
                 query=kwargs.get('query', None),
                 request_response=kwargs.get('request_response', None),
                 discovery=kwargs.get('discovery', None),
+                external_storage=kwargs.get('external_storage', None),
             )
             kwargs[wrapper.context_param.name] = ctx
         return kwargs
@@ -379,7 +383,7 @@ class _WitMessageRouter:
 # So, this is what this API provides.
 # Note, that in practice, the Error is not returned as a value, but thrown as an exception.
 #===================================================================================================
-ValidQueryReturnValues = None | BlobId | TreeId | Tree | Blob | BlobObject | TreeObject | str | bytes | dict, BaseModel
+ValidQueryReturnValues = None | BlobId | TreeId | Tree | Blob | BlobObject | TreeObject | str | bytes | dict | BaseModel
 
 class _QueryWrapper(_Wrapper):
     def __init__(self, func:Callable) -> None:
@@ -558,6 +562,7 @@ class _WitQueryRouter:
                 agent_id=kwargs['agent_id'],
                 query=kwargs.get('query', None),
                 discovery=kwargs.get('discovery', None),
+                external_storage=kwargs.get('external_storage', None),
                 )
         
         #finally, add the json args to the kwargs, so they can be accessed direcly by name

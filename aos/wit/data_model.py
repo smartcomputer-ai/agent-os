@@ -651,13 +651,31 @@ class Core(TreeObject):
         return cls(loader, core_tree, core_id)
 
     @classmethod
-    def from_external_wit_ref(cls, loader:ObjectLoader, wit_ref:str, query_ref:str=None) -> Core:
-        if(wit_ref is None):
+    def from_external_wit_ref(cls, wit_ref:str, query_ref:str=None) -> Core:
+        """Loads a wit function from a reference string, not a function path.
+        This is primarily used in testing, in conjunction with the 'ExternalResolver', which maps fixed string to a registerd wit or query function."""
+        if wit_ref is None:
             raise ValueError("wit_name cannot be None")
-        core = cls(loader, {}, None)
+        core = Core.from_empty()
         core.makeb('wit').set_as_str(f"external:{wit_ref}")
-        if(query_ref is not None):
+        if query_ref is not None:
             core.makeb('wit_query').set_as_str(f"external:{query_ref}")
+        return core
+    
+    @classmethod
+    def from_external_wit(cls, wit_function_path:str, query_function_path:str=None) -> Core:
+        """Create a core that loads its wit and query function from a python module that is in python evnironment that is executing the actor.
+        The function path my be in the format 'module:function'. If the module is a sub module, it should be an absolute path to the module, such as 'package.module:function'."""
+        if wit_function_path is None:
+            raise ValueError("wit_module_path cannot be None")
+        if len(wit_function_path.split(":")) != 2:
+            raise ValueError("wit_module_path must be in the format 'module:function'")
+        core = Core.from_empty()
+        core.makeb('wit').set_as_str(f"external:{wit_function_path}")
+        if(query_function_path is not None):
+            if len(query_function_path.split(":")) != 2:
+                raise ValueError("query_module_path must be in the format 'module:function'")
+            core.makeb('wit_query').set_as_str(f"external:{query_function_path}")
         return core
     
     def maket_path(self, path: str, exist_ok:bool=True) -> TreeObject:
