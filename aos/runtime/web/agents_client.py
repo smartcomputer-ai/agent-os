@@ -100,10 +100,10 @@ class AgentsClient:
         #check if the worker_id is set for the agent, if not, try to determine it
         if agent.worker_id is None:
             # get the agent map from apex
-            # TODO: this is inefficient, create an API that retrieves a single agent
             apex_client = await self._get_apex_client()
-            apex_response:apex_api_pb2.GetRunningAgentsResponse = await apex_client.get_apex_api_stub_async().GetRunningAgents(apex_api_pb2.GetRunningAgentsRequest()) 
-            running_agent = next((agent for agent in apex_response.agents if agent.agent_id == agent_id), None)
+            apex_response:apex_api_pb2.GetRunningAgentResponse = await apex_client.get_apex_api_stub_async().GetRunningAgent(
+                apex_api_pb2.GetRunningAgentRequest(agent_id=agent_id)) 
+            running_agent = apex_response.agent if apex_response.HasField("agent") else None
             
             if running_agent is None:
                 raise Exception(f"Agent {agent_id.hex()} is not running.")
@@ -115,12 +115,39 @@ class AgentsClient:
             return await self._get_worker_client(agent.worker_id, running_agent.worker_address)
 
         return self._worker_clients[agent.worker_id]
+    
+    async def is_agent_running(self, agent_id:AgentId) -> bool:
+        apex_client = await self._get_apex_client()
+        apex_response:apex_api_pb2.GetRunningAgentResponse = await apex_client.get_apex_api_stub_async().GetRunningAgent(
+            apex_api_pb2.GetRunningAgentRequest(agent_id=agent_id)) 
+        running_agent = apex_response.agent if apex_response.HasField("agent") else None
+        return running_agent is not None and running_agent.worker_id is not None
+        
+    async def wait_for_agent_running(self, agent_id:AgentId, timeout:int=10) -> bool:
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < timeout:
+            if await self.is_agent_running(agent_id):
+                return True
+            await asyncio.sleep(0.1)
+        return False
+    
+    async def wait_for_agent_stopped(self, agent_id:AgentId, timeout:int=10) -> bool:
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < timeout:
+            if not await self.is_agent_running(agent_id):
+                return True
+            await asyncio.sleep(0.1)
+        return False
 
     async def create_agent(self) -> tuple[AgentId, Point]:
         store_client = await self._get_store_client()
         agent_response:agent_store_pb2.CreateAgentResponse = await store_client.get_agent_store_stub_async().CreateAgent(agent_store_pb2.CreateAgentRequest())
         return agent_response.agent_id, agent_response.point
 
+    async def delete_agent(self, agent_id:AgentId):
+        store_client = await self._get_store_client()
+        agent_response:agent_store_pb2.DeleteAgentResponse = await store_client.get_agent_store_stub_async().DeleteAgent(agent_store_pb2.DeleteAgentRequest(agent_id=agent_id))
+        
     async def get_running_agents(self) -> dict[AgentId, Point]:
         apex_client = await self._get_apex_client()
         apex_response:apex_api_pb2.GetRunningAgentsResponse = await apex_client.get_apex_api_stub_async().GetRunningAgents(apex_api_pb2.GetRunningAgentsRequest())
@@ -147,6 +174,22 @@ class AgentsClient:
         store_client = await self._get_store_client()
         agents_response:agent_store_pb2.GetAgentsResponse = await store_client.get_agent_store_stub_async().GetAgents(agent_store_pb2.GetAgentsRequest())
         return {agent_id:point for point, agent_id in agents_response.agents.items()}
+
+    async def get_agent_by_point(self, point:Point) -> tuple[AgentId, Point] | None:
+        """Check if an agent exists in the agent store."""
+        store_client = await self._get_store_client()
+        agent_response:agent_store_pb2.GetAgentResponse = await store_client.get_agent_store_stub_async().GetAgent(agent_store_pb2.GetAgentRequest(point=point))
+        if agent_response.exists is True:
+            return agent_response.agent_id, agent_response.point
+        return None
+    
+    async def get_agent_by_id(self, agent_id:AgentId) -> tuple[AgentId, Point] | None:
+        """Check if an agent exists in the agent store."""
+        store_client = await self._get_store_client()
+        agent_response:agent_store_pb2.GetAgentResponse = await store_client.get_agent_store_stub_async().GetAgent(agent_store_pb2.GetAgentRequest(agent_id=agent_id))
+        if agent_response.exists is True:
+            return agent_response.agent_id, agent_response.point
+        return None
 
     @alru_cache(maxsize=1000)  # noqa: B019
     async def agent_exists(self, agent_id:AgentId) -> bool:

@@ -14,7 +14,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1f\x61os/runtime/apex/apex_api.proto\"%\n\x11StartAgentRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\"\x14\n\x12StartAgentResponse\"$\n\x10StopAgentRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\"\x13\n\x11StopAgentResponse\"\x19\n\x17GetRunningAgentsRequest\"6\n\x18GetRunningAgentsResponse\x12\x1a\n\x06\x61gents\x18\n \x03(\x0b\x32\n.AgentInfo\"\xc0\x01\n\tAgentInfo\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\r\n\x05point\x18\x02 \x01(\x04\x12\x11\n\tworker_id\x18\x03 \x01(\t\x12\x16\n\x0eworker_address\x18\x04 \x01(\t\x12\x32\n\x0c\x63\x61pabilities\x18\n \x03(\x0b\x32\x1c.AgentInfo.CapabilitiesEntry\x1a\x33\n\x11\x43\x61pabilitiesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x16\n\x14GetApexStatusRequest\"\xce\x01\n\x15GetApexStatusResponse\x12\x31\n\x06status\x18\x01 \x01(\x0e\x32!.GetApexStatusResponse.ApexStatus\x12\x15\n\rstore_address\x18\x03 \x01(\t\x12\x1c\n\x07workers\x18\n \x03(\x0b\x32\x0b.WorkerInfo\"M\n\nApexStatus\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x0c\n\x08STARTING\x10\x01\x12\x0b\n\x07RUNNING\x10\x02\x12\x0c\n\x08STOPPING\x10\x03\x12\t\n\x05\x45RROR\x10\n\"\xb9\x01\n\nWorkerInfo\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0eworker_address\x18\x02 \x01(\t\x12\x16\n\x0e\x63urrent_agents\x18\x03 \x03(\x0c\x12\x33\n\x0c\x63\x61pabilities\x18\n \x03(\x0b\x32\x1d.WorkerInfo.CapabilitiesEntry\x1a\x33\n\x11\x43\x61pabilitiesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x32\x85\x02\n\x07\x41pexApi\x12@\n\rGetApexStatus\x12\x15.GetApexStatusRequest\x1a\x16.GetApexStatusResponse\"\x00\x12I\n\x10GetRunningAgents\x12\x18.GetRunningAgentsRequest\x1a\x19.GetRunningAgentsResponse\"\x00\x12\x37\n\nStartAgent\x12\x12.StartAgentRequest\x1a\x13.StartAgentResponse\"\x00\x12\x34\n\tStopAgent\x12\x11.StopAgentRequest\x1a\x12.StopAgentResponse\"\x00\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1f\x61os/runtime/apex/apex_api.proto\"%\n\x11StartAgentRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\"\x14\n\x12StartAgentResponse\"$\n\x10StopAgentRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\"\x13\n\x11StopAgentResponse\"\x19\n\x17GetRunningAgentsRequest\"6\n\x18GetRunningAgentsResponse\x12\x1a\n\x06\x61gents\x18\n \x03(\x0b\x32\n.AgentInfo\"*\n\x16GetRunningAgentRequest\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\"C\n\x17GetRunningAgentResponse\x12\x1e\n\x05\x61gent\x18\n \x01(\x0b\x32\n.AgentInfoH\x00\x88\x01\x01\x42\x08\n\x06_agent\"\xc0\x01\n\tAgentInfo\x12\x10\n\x08\x61gent_id\x18\x01 \x01(\x0c\x12\r\n\x05point\x18\x02 \x01(\x04\x12\x11\n\tworker_id\x18\x03 \x01(\t\x12\x16\n\x0eworker_address\x18\x04 \x01(\t\x12\x32\n\x0c\x63\x61pabilities\x18\n \x03(\x0b\x32\x1c.AgentInfo.CapabilitiesEntry\x1a\x33\n\x11\x43\x61pabilitiesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x16\n\x14GetApexStatusRequest\"\xce\x01\n\x15GetApexStatusResponse\x12\x31\n\x06status\x18\x01 \x01(\x0e\x32!.GetApexStatusResponse.ApexStatus\x12\x15\n\rstore_address\x18\x03 \x01(\t\x12\x1c\n\x07workers\x18\n \x03(\x0b\x32\x0b.WorkerInfo\"M\n\nApexStatus\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x0c\n\x08STARTING\x10\x01\x12\x0b\n\x07RUNNING\x10\x02\x12\x0c\n\x08STOPPING\x10\x03\x12\t\n\x05\x45RROR\x10\n\"\xb9\x01\n\nWorkerInfo\x12\x11\n\tworker_id\x18\x01 \x01(\t\x12\x16\n\x0eworker_address\x18\x02 \x01(\t\x12\x16\n\x0e\x63urrent_agents\x18\x03 \x03(\x0c\x12\x33\n\x0c\x63\x61pabilities\x18\n \x03(\x0b\x32\x1d.WorkerInfo.CapabilitiesEntry\x1a\x33\n\x11\x43\x61pabilitiesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x32\xcd\x02\n\x07\x41pexApi\x12@\n\rGetApexStatus\x12\x15.GetApexStatusRequest\x1a\x16.GetApexStatusResponse\"\x00\x12I\n\x10GetRunningAgents\x12\x18.GetRunningAgentsRequest\x1a\x19.GetRunningAgentsResponse\"\x00\x12\x46\n\x0fGetRunningAgent\x12\x17.GetRunningAgentRequest\x1a\x18.GetRunningAgentResponse\"\x00\x12\x37\n\nStartAgent\x12\x12.StartAgentRequest\x1a\x13.StartAgentResponse\"\x00\x12\x34\n\tStopAgent\x12\x11.StopAgentRequest\x1a\x12.StopAgentResponse\"\x00\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,20 +37,24 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_GETRUNNINGAGENTSREQUEST']._serialized_end=180
   _globals['_GETRUNNINGAGENTSRESPONSE']._serialized_start=182
   _globals['_GETRUNNINGAGENTSRESPONSE']._serialized_end=236
-  _globals['_AGENTINFO']._serialized_start=239
-  _globals['_AGENTINFO']._serialized_end=431
-  _globals['_AGENTINFO_CAPABILITIESENTRY']._serialized_start=380
-  _globals['_AGENTINFO_CAPABILITIESENTRY']._serialized_end=431
-  _globals['_GETAPEXSTATUSREQUEST']._serialized_start=433
-  _globals['_GETAPEXSTATUSREQUEST']._serialized_end=455
-  _globals['_GETAPEXSTATUSRESPONSE']._serialized_start=458
-  _globals['_GETAPEXSTATUSRESPONSE']._serialized_end=664
-  _globals['_GETAPEXSTATUSRESPONSE_APEXSTATUS']._serialized_start=587
-  _globals['_GETAPEXSTATUSRESPONSE_APEXSTATUS']._serialized_end=664
-  _globals['_WORKERINFO']._serialized_start=667
-  _globals['_WORKERINFO']._serialized_end=852
-  _globals['_WORKERINFO_CAPABILITIESENTRY']._serialized_start=380
-  _globals['_WORKERINFO_CAPABILITIESENTRY']._serialized_end=431
-  _globals['_APEXAPI']._serialized_start=855
-  _globals['_APEXAPI']._serialized_end=1116
+  _globals['_GETRUNNINGAGENTREQUEST']._serialized_start=238
+  _globals['_GETRUNNINGAGENTREQUEST']._serialized_end=280
+  _globals['_GETRUNNINGAGENTRESPONSE']._serialized_start=282
+  _globals['_GETRUNNINGAGENTRESPONSE']._serialized_end=349
+  _globals['_AGENTINFO']._serialized_start=352
+  _globals['_AGENTINFO']._serialized_end=544
+  _globals['_AGENTINFO_CAPABILITIESENTRY']._serialized_start=493
+  _globals['_AGENTINFO_CAPABILITIESENTRY']._serialized_end=544
+  _globals['_GETAPEXSTATUSREQUEST']._serialized_start=546
+  _globals['_GETAPEXSTATUSREQUEST']._serialized_end=568
+  _globals['_GETAPEXSTATUSRESPONSE']._serialized_start=571
+  _globals['_GETAPEXSTATUSRESPONSE']._serialized_end=777
+  _globals['_GETAPEXSTATUSRESPONSE_APEXSTATUS']._serialized_start=700
+  _globals['_GETAPEXSTATUSRESPONSE_APEXSTATUS']._serialized_end=777
+  _globals['_WORKERINFO']._serialized_start=780
+  _globals['_WORKERINFO']._serialized_end=965
+  _globals['_WORKERINFO_CAPABILITIESENTRY']._serialized_start=493
+  _globals['_WORKERINFO_CAPABILITIESENTRY']._serialized_end=544
+  _globals['_APEXAPI']._serialized_start=968
+  _globals['_APEXAPI']._serialized_end=1301
 # @@protoc_insertion_point(module_scope)

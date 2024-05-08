@@ -25,6 +25,11 @@ class ApexApiStub(object):
                 request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsRequest.SerializeToString,
                 response_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsResponse.FromString,
                 )
+        self.GetRunningAgent = channel.unary_unary(
+                '/ApexApi/GetRunningAgent',
+                request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentRequest.SerializeToString,
+                response_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentResponse.FromString,
+                )
         self.StartAgent = channel.unary_unary(
                 '/ApexApi/StartAgent',
                 request_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.StartAgentRequest.SerializeToString,
@@ -48,6 +53,12 @@ class ApexApiServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def GetRunningAgents(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRunningAgent(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -77,6 +88,11 @@ def add_ApexApiServicer_to_server(servicer, server):
                     servicer.GetRunningAgents,
                     request_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsRequest.FromString,
                     response_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsResponse.SerializeToString,
+            ),
+            'GetRunningAgent': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRunningAgent,
+                    request_deserializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentRequest.FromString,
+                    response_serializer=aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentResponse.SerializeToString,
             ),
             'StartAgent': grpc.unary_unary_rpc_method_handler(
                     servicer.StartAgent,
@@ -130,6 +146,23 @@ class ApexApi(object):
         return grpc.experimental.unary_unary(request, target, '/ApexApi/GetRunningAgents',
             aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsRequest.SerializeToString,
             aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentsResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetRunningAgent(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/ApexApi/GetRunningAgent',
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentRequest.SerializeToString,
+            aos_dot_runtime_dot_apex_dot_apex__api__pb2.GetRunningAgentResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

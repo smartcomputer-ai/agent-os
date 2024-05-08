@@ -36,6 +36,18 @@ class GetRunningAgentsResponse(_message.Message):
     agents: _containers.RepeatedCompositeFieldContainer[AgentInfo]
     def __init__(self, agents: _Optional[_Iterable[_Union[AgentInfo, _Mapping]]] = ...) -> None: ...
 
+class GetRunningAgentRequest(_message.Message):
+    __slots__ = ("agent_id",)
+    AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    agent_id: bytes
+    def __init__(self, agent_id: _Optional[bytes] = ...) -> None: ...
+
+class GetRunningAgentResponse(_message.Message):
+    __slots__ = ("agent",)
+    AGENT_FIELD_NUMBER: _ClassVar[int]
+    agent: AgentInfo
+    def __init__(self, agent: _Optional[_Union[AgentInfo, _Mapping]] = ...) -> None: ...
+
 class AgentInfo(_message.Message):
     __slots__ = ("agent_id", "point", "worker_id", "worker_address", "capabilities")
     class CapabilitiesEntry(_message.Message):

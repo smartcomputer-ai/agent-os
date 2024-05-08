@@ -124,22 +124,31 @@ def web(ctx:click.Context, port:int, apex_address:str):
 #===========================================================
 @cli.command(context_settings={'show_default': True})
 @click.option("--store-dir", "-d", required=True, help="Where to store the data.")
+@click.option("--no-web", required=False,  is_flag=True, help="Don't start web server.")
+@click.option("--no-worker", required=False,  is_flag=True, help="Don't start worker server.")
 @click.pass_context
-def all(ctx:click.Context, store_dir:str):
+def all(ctx:click.Context, store_dir:str, no_web:bool=False, no_worker:bool=False):
     """Starts all servers in the same process, best for testing. Uses the default ports and addresses."""
     print("-> Starting All Servers")
 
     async def ainit():
+        tasks = []
         print("--> Starting Store Server")
         store_server_task = asyncio.create_task(start_store_server(grit_dir=store_dir))
+        tasks.append(store_server_task)
         print("--> Starting Apex Server")
         apex_server_task = asyncio.create_task(start_apex_server())
-        print("--> Starting Worker Server")
-        worker_server_task = asyncio.create_task(start_worker_server())
-        print("--> Starting Web Server")
-        web_server_task = asyncio.create_task(WebServer(AgentsClient()).run())
+        tasks.append(apex_server_task)
+        if not no_worker:
+            print("--> Starting Worker Server")
+            worker_server_task = asyncio.create_task(start_worker_server())
+            tasks.append(worker_server_task)
+        if not no_web:
+            print("--> Starting Web Server")
+            web_server_task = asyncio.create_task(WebServer(AgentsClient()).run())
+            tasks.append(web_server_task)
 
-        await asyncio.wait([store_server_task, apex_server_task, worker_server_task, web_server_task], return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         #cancel the rest
         store_server_task.cancel()
         apex_server_task.cancel()

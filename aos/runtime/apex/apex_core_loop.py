@@ -94,12 +94,12 @@ class AgentInfo:
             point=self.point,
             capabilities={k:v for k,v in self.capabilities.items()})
     
-    def to_apex_api_agent_info(self, worker_lookup:dict[AgentId, WorkerState]|None=None):
+    def to_apex_api_agent_info(self, worker_state:WorkerState|None=None):
         return apex_api_pb2.AgentInfo(
             agent_id=self.agent_id,
             point=self.point,
-            worker_id=worker_lookup[self.agent_id].worker_id if worker_lookup is not None and self.agent_id in worker_lookup else None,
-            worker_address=worker_lookup[self.agent_id].worker_address if worker_lookup is not None and self.agent_id in worker_lookup else None,
+            worker_id=worker_state.worker_id if worker_state is not None else None,
+            worker_address=worker_state.worker_address if worker_state is not None else None,
             capabilities={k:v for k,v in self.capabilities.items()})
     
     def to_apex_worker_agent(self):

@@ -6,6 +6,7 @@ service ApexApi {
   rpc GetApexStatus(GetApexStatusRequest) returns (GetApexStatusResponse) {}
   
   rpc GetRunningAgents(GetRunningAgentsRequest) returns (GetRunningAgentsResponse) {}
+  rpc GetRunningAgent(GetRunningAgentRequest) returns (GetRunningAgentResponse) {}
   rpc StartAgent(StartAgentRequest) returns (StartAgentResponse) {}
   rpc StopAgent(StopAgentRequest) returns (StopAgentResponse) {}
 
@@ -34,6 +35,14 @@ message GetRunningAgentsRequest {}
 
 message GetRunningAgentsResponse {
   repeated AgentInfo agents = 10;
+}
+
+message GetRunningAgentRequest {
+  bytes agent_id = 1;
+}
+
+message GetRunningAgentResponse {
+  optional AgentInfo agent = 10;
 }
 
 message AgentInfo{
