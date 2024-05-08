@@ -54,8 +54,7 @@ class WebServer:
             Route(f"{url_prefix}/actors", self.wit_get_actors),
             Route(f"{url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/inbox", self.wit_post_inbox, methods=['POST']),
             Route(f"{url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}", self.wit_query),
-            Route(f"{url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}/{{{self.__QUERY_PATH_PARAM}:path}}", 
-                  self.wit_query),
+            Route(f"{url_prefix}/actors/{{{self.__ACTOR_ID_PARAM}}}/query/{{{self.__QUERY_NAME_PARAM}}}/{{{self.__QUERY_PATH_PARAM}:path}}", self.wit_query),
             Route(f"{url_prefix}/messages-sse", self.wit_get_messages_sse),
         ]
     

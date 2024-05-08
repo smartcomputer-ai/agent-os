@@ -129,12 +129,14 @@ class WorkerCoreLoop:
             apex_address:str,
             worker_address:str,
             worker_id:str,
+            external_storage_dir:str|None=None,
             ) -> None:
         
         self._store_address = store_address
         self._apex_address = apex_address
         self._worker_address = worker_address
         self._worker_id = worker_id
+        self._external_storage_dir = external_storage_dir
         self._cancel_event = asyncio.Event()
         self._running_event = asyncio.Event()
         self._event_queue = asyncio.Queue()
@@ -344,7 +346,8 @@ class WorkerCoreLoop:
         runtime = Runtime(
             store=object_store, 
             references=references, 
-            point=agent.point)
+            point=agent.point,
+            external_storage_dir=self._external_storage_dir,)
         worker_state.runtimes[agent_id] = runtime
 
         async def runtime_runner(agent_id:AgentId, runtime:Runtime):

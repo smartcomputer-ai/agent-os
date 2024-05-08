@@ -69,7 +69,16 @@ def apex(ctx:click.Context, port:int, store_address:str):
 @click.option("--worker-address", required=False, default=None, help="Address of this worker where others can reach it at, will be broadcasted to others via apex. If none is provided, will be set to localhost:<port>.")
 @click.option("--worker-id", required=False, default=None, help="The permanent identity of this worker. If not provided, an emphemeral id will be generated.")
 @click.option("--modules", "-m", required=False, default=None, help="What modules the worked should announce in its manifest. Worker will not start if the modules are not available.", multiple=True)
-def worker(ctx:click.Context, port:int, store_address:str, apex_address:str, worker_address:str, worker_id:str|None, modules:list[str]|None):
+@click.option("--external-storage-dir", required=True, default=None, help="Where to store file system data for each actor. Currently used to store indexes.")
+def worker(
+        ctx:click.Context, 
+        port:int, 
+        store_address:str, 
+        apex_address:str, 
+        worker_address:str, 
+        worker_id:str|None, 
+        modules:list[str]|None,
+        external_storage_dir:str|None=None):
     """Starts a worker server. More than one worker server can be started, but the port and worker address must be different."""
     print("-> Starting Worker Server")
 
@@ -95,7 +104,8 @@ def worker(ctx:click.Context, port:int, store_address:str, apex_address:str, wor
             apex_address=apex_address,
             port=str(port),
             worker_address=worker_address,
-            worker_id=worker_id
+            worker_id=worker_id,
+            external_storage_dir=external_storage_dir,
             )
     
     asyncio.run(ainit())
@@ -126,8 +136,14 @@ def web(ctx:click.Context, port:int, apex_address:str):
 @click.option("--store-dir", "-d", required=True, help="Where to store the data.")
 @click.option("--no-web", required=False,  is_flag=True, help="Don't start web server.")
 @click.option("--no-worker", required=False,  is_flag=True, help="Don't start worker server.")
+@click.option("--external-storage-dir", required=True, default=None, help="Where to store file system data for each actor. Currently used to store indexes.")
 @click.pass_context
-def all(ctx:click.Context, store_dir:str, no_web:bool=False, no_worker:bool=False):
+def all(
+        ctx:click.Context, 
+        store_dir:str, 
+        no_web:bool=False, 
+        no_worker:bool=False,
+        external_storage_dir:str=None):
     """Starts all servers in the same process, best for testing. Uses the default ports and addresses."""
     print("-> Starting All Servers")
 
@@ -141,7 +157,7 @@ def all(ctx:click.Context, store_dir:str, no_web:bool=False, no_worker:bool=Fals
         tasks.append(apex_server_task)
         if not no_worker:
             print("--> Starting Worker Server")
-            worker_server_task = asyncio.create_task(start_worker_server())
+            worker_server_task = asyncio.create_task(start_worker_server(external_storage_dir=external_storage_dir))
             tasks.append(worker_server_task)
         if not no_web:
             print("--> Starting Web Server")

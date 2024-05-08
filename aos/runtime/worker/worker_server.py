@@ -45,6 +45,7 @@ async def start_server(
         port:str="50053", 
         worker_address:str|None=None,
         worker_id:str|None=None,
+        external_storage_dir:str|None=None,
         ):
     
     if worker_address is None:
@@ -64,7 +65,8 @@ async def start_server(
         apex_address=apex_address, 
         store_address=store_address,
         worker_address=worker_address, 
-        worker_id=worker_id)
+        worker_id=worker_id,
+        external_storage_dir=external_storage_dir)
     core_loop_task = asyncio.create_task(core_loop.start())
     await core_loop.wait_until_running()
 
