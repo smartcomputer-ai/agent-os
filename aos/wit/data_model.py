@@ -641,7 +641,7 @@ class TreeObject:
     
 
 class Core(TreeObject):
-    def __init__(self, loader:ObjectLoader, tree:Tree, tree_id:TreeId|None):
+    def __init__(self, loader:ObjectLoader, tree:Tree, tree_id:TreeId|None=None):
         super().__init__(loader, tree, tree_id, tree_parent=None)
     #todo: add methods to ensure the shape of the core tree
    
