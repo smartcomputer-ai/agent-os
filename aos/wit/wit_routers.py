@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 import inspect
+import logging
 from typing import Any, Callable, TypeVar
 from dataclasses import dataclass
 from itertools import islice
@@ -14,6 +15,8 @@ from .query import Query
 from .request_response import RequestResponse
 from .discovery import Discovery
 from .external_storage import ExternalStorage
+
+logger = logging.getLogger(__name__)
 
 # The classes are mostly used internally to wrap user defined functions and route wit messages to the
 # correct message handler.
@@ -274,7 +277,7 @@ class _WitMessageRouter:
 
     async def run(self, last_step_id:StepId, new_inbox:Mailbox, **kwargs) -> StepId:
         last_step_id, new_inbox = self._enforece_required_args(*(last_step_id, new_inbox,))
-        actor_id, _, object_store = self._enforce_required_kwargs(**kwargs)
+        actor_id, agent_id, object_store = self._enforce_required_kwargs(**kwargs)
         inbox, outbox, core = await load_step(object_store, actor_id, last_step_id, new_inbox)
         # build new kwargs
         
@@ -307,7 +310,8 @@ class _WitMessageRouter:
                     # dont fail on unhandeled genesis or update messages (because they are usually automatically handled)
                     if message.mt is not None and (message.mt == 'genesis' or message.mt == 'update'):
                         continue
-                    raise InvalidMessageException(f"Unhandled message type '{message.mt}' in message '{message.message_id.hex()}'.")
+                    raise InvalidMessageException(f"Unhandled message type '{message.mt}' in message '{message.message_id.hex()}' in actor {actor_id.hex()} and agent {agent_id.hex()}.")
+                logger.warning(f"Unhandled message type '{message.mt}' in message '{message.message_id.hex()}' in actor {actor_id.hex()} and agent {agent_id.hex()}.")
         # persist the step
         new_step_id = await persist_step(object_store, actor_id, last_step_id, inbox, outbox, core)
         return new_step_id
@@ -468,7 +472,7 @@ class _WitQueryRouter:
 
     async def run(self, step_id:StepId, query_name:str, query_args:Blob|None, **kwargs) -> Tree|Blob:
         step_id, query_name, query_args = self._enforece_required_args(*(step_id, query_name, query_args,))
-        _, _, object_loader = self._enforce_required_kwargs(**kwargs)
+        actor_id, agent_id, object_loader = self._enforce_required_kwargs(**kwargs)
         # load the step data
         (inbox, outbox, core) = await load_step_from_last(object_loader, step_id, None)
         # extend the kwargs so most combinations work
@@ -483,8 +487,9 @@ class _WitQueryRouter:
                 new_kwargs = self._build_new_kwargs(kwargs, handler, step_id, query_name, query_args, inbox, outbox, core, object_loader)
                 query_result = await handler(**new_kwargs)
             elif self.fail_on_unhandled:
-                raise QueryError(f"Unhandled query_name '{query_name}'.")
+                raise QueryError(f"Unhandled query_name '{query_name}' in actor {actor_id.hex()} and agent {agent_id.hex()}.")
             else:
+                logger.warning(f"Unhandled query_name '{query_name}' in actor {actor_id.hex()} and agent {agent_id.hex()}.")
                 query_result = None
         #convert the result to a tree or blob
         converted_result = await self._convert_result_to_tree_or_blob(query_result, object_loader)
