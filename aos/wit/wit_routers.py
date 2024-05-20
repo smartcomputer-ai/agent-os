@@ -15,6 +15,7 @@ from .query import Query
 from .request_response import RequestResponse
 from .discovery import Discovery
 from .external_storage import ExternalStorage
+from .presence import Presence
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,8 @@ class MessageContext():
     request_response:RequestResponse    #request_response or "rails" (part of services)
     discovery:Discovery                 #discovery (part of services)
     external_storage:ExternalStorage    #external_storage (part of services)
+    presence:Presence                   #presence (part of services)
+
 
 @dataclass(frozen=True)
 class QueryContext():
@@ -365,6 +368,7 @@ class _WitMessageRouter:
                 request_response=kwargs.get('request_response', None),
                 discovery=kwargs.get('discovery', None),
                 external_storage=kwargs.get('external_storage', None),
+                presence=kwargs.get('presence', None),
             )
             kwargs[wrapper.context_param.name] = ctx
         return kwargs

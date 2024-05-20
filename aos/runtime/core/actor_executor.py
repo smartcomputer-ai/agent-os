@@ -26,6 +26,7 @@ class ExecutionContext:
     request_response:RequestResponse
     discovery:Discovery
     external_storage:ExternalStorageExecutor
+    presence:Presence
 
     def __init__(self):
         self.store = None
@@ -39,6 +40,7 @@ class ExecutionContext:
         self.request_response = None
         self.discovery = None
         self.external_storage = None
+        self.presence = None
 
     @classmethod
     def from_store(cls, store:ObjectStore, references:References, resolver:Resolver, agent_id:ActorId) -> ExecutionContext:

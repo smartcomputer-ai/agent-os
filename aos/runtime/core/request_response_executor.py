@@ -14,9 +14,9 @@ from .root_executor import RootActorExecutor
 # In the future, we will want to make the rails executor its own runtime actor.
 
 class RequestResponseExecutor(RequestResponse):
-    def __init__(self, store:ObjectStore, runtime_executor:RootActorExecutor) -> None:
+    def __init__(self, store:ObjectStore, root_executor:RootActorExecutor) -> None:
         self.store = store
-        self.runtime_executor = runtime_executor
+        self.runtime_executor = root_executor
 
     async def run(
         self, 

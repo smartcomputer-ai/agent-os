@@ -130,6 +130,8 @@ class WorkerCoreLoop:
             worker_address:str,
             worker_id:str,
             external_storage_dir:str|None=None,
+            all_agents_subscription_queue:asyncio.Queue[worker_api_pb2.SubscriptionMessage]|None=None, #sends all root actor messages to this queue for all hosted agents
+            presence:Presence|None=None, #a service for actors to check presence of a user and publish on a channel
             ) -> None:
         
         self._store_address = store_address
@@ -142,7 +144,8 @@ class WorkerCoreLoop:
         self._event_queue = asyncio.Queue()
         self._state_copy = None
         self._state_copy_lock = asyncio.Lock()
-
+        self._all_agents_subscription_queue = all_agents_subscription_queue
+        self._presence = presence
 
     #==============================================================
     # Main Loop
@@ -299,6 +302,9 @@ class WorkerCoreLoop:
             elif isinstance(event, self._RunQueryEvent):
                 await self._handle_query(event, worker_state)
 
+            elif isinstance(event, self._SubscribeToAgentEvent):
+                await self._handle_subscribe_to_agent(event, worker_state)
+
         logger.info(f"Cleaning up inner worker state...")
         await to_apex_queue.put(None)
 
@@ -347,7 +353,8 @@ class WorkerCoreLoop:
             store=object_store, 
             references=references, 
             point=agent.point,
-            external_storage_dir=self._external_storage_dir,)
+            external_storage_dir=self._external_storage_dir,
+            presence=self._presence,)
         worker_state.runtimes[agent_id] = runtime
 
         async def runtime_runner(agent_id:AgentId, runtime:Runtime):
@@ -359,6 +366,17 @@ class WorkerCoreLoop:
                 raise
 
         runtime_task = asyncio.create_task(runtime_runner(agent_id, runtime))
+        
+        if self._all_agents_subscription_queue is not None:
+            await asyncio.sleep(0.01) #ensure the runtime is running
+            logger.info(f"Subscribing the 'all subscriptions queue' to agent {agent_id.hex()} runtime...")
+            #add an event that subscribes to this agents runtime with the all_agents_subscription_queue
+            await self._event_queue.put(
+                self._SubscribeToAgentEvent(
+                    agent_id=agent_id,
+                    subscription_request=worker_api_pb2.SubscriptionRequest(agent_id=agent_id),
+                    to_subscription_queue=self._all_agents_subscription_queue))
+            
         worker_state.runtime_tasks[agent_id] = runtime_task
         logger.info(f"Started runtime for {agent_id.hex()} ({agent.point}).")
 
@@ -467,40 +485,38 @@ class WorkerCoreLoop:
             event.to_subscription_queue.put_nowait(None)
             return
 
-        subscription = event.subscription_request
         runtime = worker_state.runtimes[agent_id]
-        
-        async def connect_subscription():
-            try:
-                with runtime.subscribe_to_messages() as subscription_queue:
-                    mailbox_update:MailboxUpdate = await subscription_queue.get()
-                    sender_id = mailbox_update[0]
-                    recipient_id = mailbox_update[1]
-                    message_id = mailbox_update[2]
-                    #load the message contents to provide more info to the subscriber
-                    message:Message = await runtime.ctx.store.load(message_id)
-                    subscription_message = worker_api_pb2.SubscriptionMessage(
-                        agent_id=agent_id,
-                        sender_id=sender_id,
-                        message_id=message_id,
-                        message=worker_api_pb2.MessageData(
-                            headers=message.headers,
-                            previous_id=message.previous,
-                            is_signal=(message.previous is None),
-                            content_id=message.content,
-                        ))
-                    await event.to_subscription_queue.put(subscription_message)
-            except asyncio.CancelledError as ce:
-                logger.info(f"Subscription to agent {agent_id.hex()} was cancelled.")
-            finally:
-                event.to_subscription_queue.put_nowait(None)
-
         if worker_state.runtime_subscriptions.get(agent_id) is None:
             worker_state.runtime_subscriptions[agent_id] = []
-        worker_state.runtime_subscriptions[agent_id].append(asyncio.create_task(connect_subscription()))
-
+        subscription_task = asyncio.create_task(self._connect_agent_subscription(runtime, event.to_subscription_queue))
+        worker_state.runtime_subscriptions[agent_id].append(subscription_task)
         logger.info(f"Subscription to agent {agent_id.hex()} runtime created.")
 
+
+    async def _connect_agent_subscription(self, runtime:Runtime, queue:asyncio.Queue[worker_api_pb2.SubscriptionMessage]):
+        try:
+            with runtime.subscribe_to_messages() as subscription_queue:
+                mailbox_update:MailboxUpdate = await subscription_queue.get()
+                sender_id = mailbox_update[0]
+                recipient_id = mailbox_update[1] #the recipient is the root actor which is the same as the agent id
+                message_id = mailbox_update[2]
+                #load the message contents to provide more info to the subscriber
+                message:Message = await runtime.ctx.store.load(message_id)
+                subscription_message = worker_api_pb2.SubscriptionMessage(
+                    agent_id=runtime.agent_id,
+                    sender_id=sender_id,
+                    message_id=message_id,
+                    message=worker_api_pb2.MessageData(
+                        headers=message.headers,
+                        previous_id=message.previous,
+                        is_signal=(message.previous is None),
+                        content_id=message.content,
+                    ))
+                await queue.put(subscription_message)
+        except asyncio.CancelledError as ce:
+            logger.info(f"Subscription to agent {runtime.agent_id.hex()} was cancelled.")
+        finally:
+            queue.put_nowait(None)
 
     #==============================================================
     # Worker interaction APIs 

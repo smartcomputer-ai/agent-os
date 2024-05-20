@@ -10,6 +10,7 @@ from .actor_executor import ExecutionContext, ActorExecutor, MailboxUpdate
 from .root_executor import RootActorExecutor, agent_id_from_point
 from .request_response_executor import RequestResponseExecutor
 from .discovery_executor import DiscoveryExecutor
+from .presence_executor import NoOpPresenceExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,8 @@ class Runtime:
             references:References, 
             point:Point=0, 
             resolver:Resolver=None,
-            external_storage_dir:str=None,):
+            external_storage_dir:str=None,
+            presence:Presence=None,):
         if not isinstance(store, ObjectStore):
             raise TypeError('store must be an ObjectStore')
         if not isinstance(references, References):
@@ -52,6 +54,11 @@ class Runtime:
         self.ctx.agent_id = agent_id_from_point(point)
 
         self.ctx.discovery = DiscoveryExecutor(self.ctx.references)
+
+        if presence is not None:
+            self.ctx.presence = presence
+        else:
+            self.ctx.presence = NoOpPresenceExecutor()
 
         if external_storage_dir is None:
             import tempfile
@@ -78,7 +85,7 @@ class Runtime:
         return self.ctx.point
     
     @property
-    def agent_id(self) -> ActorId:
+    def agent_id(self) -> AgentId:
         return self.ctx.agent_id
 
     #temporary
@@ -237,6 +244,7 @@ class Runtime:
                 raise ex
     
     def subscribe_to_messages(self) -> RootActorExecutor.ExternalMessageSubscription:
+        #TODO: possible race condition if the root executor is not yet initialized
         return self.__root_executor.subscribe_to_messages()
 
 def _sort_new_messages_for_recipients(outbox_updates:list[set[MailboxUpdate]]) -> dict[ActorId, list[MailboxUpdate]]:

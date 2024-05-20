@@ -148,7 +148,7 @@ def all(
     print("-> Starting All Servers")
 
     async def ainit():
-        tasks = []
+        tasks:list[asyncio.Task] = []
         print("--> Starting Store Server")
         store_server_task = asyncio.create_task(start_store_server(grit_dir=store_dir))
         tasks.append(store_server_task)
@@ -166,10 +166,9 @@ def all(
 
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         #cancel the rest
-        store_server_task.cancel()
-        apex_server_task.cancel()
-        worker_server_task.cancel()
-        web_server_task.cancel()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
 
     asyncio.run(ainit())
 
