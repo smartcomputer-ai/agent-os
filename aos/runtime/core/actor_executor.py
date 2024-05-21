@@ -404,7 +404,7 @@ class _WitExecution:
             #TODO: capture the cancel exception
         self.is_running = False
 
-async def default_genesis_wit(inbox:Inbox, outbox:Outbox, core:Core):
+async def default_genesis_wit(inbox:Inbox, outbox:Outbox, core:Core, ctx:MessageContext):
     #expect a genesis message
     msg = await inbox.read_new()
     if len(msg) != 1:
@@ -415,6 +415,7 @@ async def default_genesis_wit(inbox:Inbox, outbox:Outbox, core:Core):
     #the current core, is the genesis core
     if genesis_msg.content_id != core.get_as_object_id():
         raise InvalidGenesisException("The genesis message content_id match the genesis core object id. They must be the same.")
+    outbox.add_new_msg(ctx.actor_id, genesis_msg.content_id, mt="init")
     print(f"Genesis message handled for core/actor {genesis_msg.content_id.hex()}")
 
 async def default_update_wit(inbox:Inbox, outbox:Outbox, core:Core):

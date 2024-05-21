@@ -49,6 +49,9 @@ class Wit:
     def genesis_message(self, func, /) -> Callable[[], DecoratedCallable]:
         return self._wit_message_router.register_message_handler("genesis", func)
 
+    def init_message(self, func, /) -> Callable[[], DecoratedCallable]:
+        return self._wit_message_router.register_message_handler("init", func)
+
     def update_message(self, func, /) -> Callable[[], DecoratedCallable]:
         return self._wit_message_router.register_message_handler("update", func)
     
