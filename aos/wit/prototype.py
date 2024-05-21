@@ -38,6 +38,11 @@ def create_actor_from_prototype_msg(prototype_id:ActorId, args:ValidMessageConte
         args = {}
     return OutboxMessage.from_new(prototype_id, args, is_signal=True, mt="create")
 
+async def create_actor_from_prototype_msg_with_state(prototype_id:ActorId, state:WitState, store:ObjectStore) -> OutboxMessage:
+    state_tree_id = await state._persist_to_tree_id(store)
+    create_msg = create_actor_from_prototype_msg(prototype_id, state_tree_id)
+    return create_msg
+
 async def create_actor_from_prototype(prototype_id:ActorId, args:ValidMessageContent|None, request_response:RequestResponse) -> ActorId:
     create_msg = create_actor_from_prototype_msg(prototype_id, args)
     response = await request_response.run(create_msg, ["created"], 1.0)
@@ -45,8 +50,8 @@ async def create_actor_from_prototype(prototype_id:ActorId, args:ValidMessageCon
     return to_object_id(created_actor_id_str)
 
 async def create_actor_from_prototype_with_state(prototype_id:ActorId, state:WitState, request_response:RequestResponse, store:ObjectStore) -> ActorId:
-    tree_id = await state._persist_to_tree_id(store)
-    return await create_actor_from_prototype(prototype_id, tree_id, request_response)
+    state_tree_id = await state._persist_to_tree_id(store)
+    return await create_actor_from_prototype(prototype_id, state_tree_id, request_response)
 
 async def get_prototype_args(core:Core) -> TreeObject|BlobObject|None:
     state = await core.get("state")
@@ -114,6 +119,7 @@ async def on_create(msg:InboxMessage, ctx:MessageContext):
         actor_id_str = (await created.getb(state_id_str)).get_as_str()
     
     # reply with the new or existing actor_id
+    #TODO: this should not be a string, but just the actor_id (this works because it is a valit tree id (the core of the actor))
     ctx.outbox.add(OutboxMessage.from_reply(msg, actor_id_str, mt="created"))
 
 
