@@ -17,6 +17,7 @@ async def test_run_empty():
 
     callbacks = 0
     async def outbox_callback(outbox:Mailbox):
+        nonlocal callbacks
         callbacks += 1
 
     run_task = asyncio.create_task(gen_exec.start(outbox_callback))
@@ -43,6 +44,8 @@ async def test_run_with_genesis_message():
  
     outbox_callback_count = 0
     async def outbox_callback(outbox:Mailbox):
+        nonlocal outbox_callback_count
+        print('outbox_callback', outbox)
         outbox_callback_count += 1
  
     run_task = asyncio.create_task(gen_exec.start(outbox_callback))
@@ -85,6 +88,7 @@ async def test_run_with_many_messages():
  
     outbox_callback_count = 0
     async def outbox_callback(outbox:Mailbox):
+        nonlocal outbox_callback_count
         outbox_callback_count += 1
  
     run_task = asyncio.create_task(gen_exec.start(outbox_callback))

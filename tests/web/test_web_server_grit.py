@@ -1,8 +1,8 @@
 import os
 from starlette.testclient import TestClient
-from src.wit import *
-from src.web import *
-from src.runtime import *
+from aos.wit import *
+from aos.runtime.web import *
+from aos.runtime import *
 import helpers_web as helpers
 
 async def test_grit_get_refs_and_ref():

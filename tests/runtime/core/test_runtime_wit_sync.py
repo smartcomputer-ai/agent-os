@@ -30,6 +30,7 @@ async def setup_runtime():
 async def send_genesis_message(runtime:Runtime, wit_ref):
     gen_core = Core(runtime.store, {}, None)
     gen_core.makeb("wit").set_as_str(f"external:{wit_ref}")
+    gen_core.makeb("wit_genesis").set_as_str(f"external:{wit_ref}")
     gen_message = await OutboxMessage.from_genesis(runtime.store, gen_core)
     await runtime.inject_message(gen_message)
     await asyncio.sleep(0.1)

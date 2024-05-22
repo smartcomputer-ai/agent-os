@@ -102,7 +102,7 @@ async def on_create(msg:InboxMessage, ctx:MessageContext):
         new_core.add("args", msg.content_id)
 
     # check in 'created' to see if this actor has already been created with those args/state
-    # we cannot check for the actor id itself because the prototype core might have been updated in the meantime
+    # we cannot check for the actor id itself because the prototype core might have been updated in the meantime (so that's why we have to maintain a seperate "created" list)
     # which would change the actor id
     # if the state has also been changed as part of the update then a new actor will be created
     state_id_str = msg.content_id.hex()
@@ -114,12 +114,13 @@ async def on_create(msg:InboxMessage, ctx:MessageContext):
         # register the new actor in 'created'
         actor_id = gen_msg.recipient_id
         actor_id_str = actor_id.hex()
+        #TODO: use the actual actor id here too
         created.makeb(state_id_str).set_as_str(actor_id_str)
     else:
         actor_id_str = (await created.getb(state_id_str)).get_as_str()
     
     # reply with the new or existing actor_id
-    #TODO: this should not be a string, but just the actor_id (this works because it is a valit tree id (the core of the actor))
+    #TODO: this should not be a string, but just the actor_id (this works because it is a valid tree id (the core of the actor))
     ctx.outbox.add(OutboxMessage.from_reply(msg, actor_id_str, mt="created"))
 
 

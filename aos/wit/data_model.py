@@ -651,7 +651,7 @@ class Core(TreeObject):
         return cls(loader, core_tree, core_id)
 
     @classmethod
-    def from_external_wit_ref(cls, wit_ref:str, query_ref:str=None) -> Core:
+    def from_external_wit_ref(cls, wit_ref:str, query_ref:str=None, genesis_ref:str=None, update_ref:str=None) -> Core:
         """Loads a wit function from a reference string, not a function path.
         This is primarily used in testing, in conjunction with the 'ExternalResolver', which maps fixed string to a registerd wit or query function."""
         if wit_ref is None:
@@ -660,22 +660,32 @@ class Core(TreeObject):
         core.makeb('wit').set_as_str(f"external:{wit_ref}")
         if query_ref is not None:
             core.makeb('wit_query').set_as_str(f"external:{query_ref}")
+        if genesis_ref is not None:
+            core.makeb('wit_genesis').set_as_str(f"external:{genesis_ref}")
+        if update_ref is not None:
+            core.makeb('wit_update').set_as_str(f"external:{update_ref}")
         return core
     
     @classmethod
-    def from_external_wit(cls, wit_function_path:str, query_function_path:str=None) -> Core:
+    def from_external_wit(cls, wit_function_path:str, query_function_path:str=None, genesis_function_path:str=None, update_function_path:str=None) -> Core:
         """Create a core that loads its wit and query function from a python module that is in python evnironment that is executing the actor.
         The function path my be in the format 'module:function'. If the module is a sub module, it should be an absolute path to the module, such as 'package.module:function'."""
         if wit_function_path is None:
             raise ValueError("wit_module_path cannot be None")
-        if len(wit_function_path.split(":")) != 2:
-            raise ValueError("wit_module_path must be in the format 'module:function'")
+        def check_path(path:str):
+            if path is not None and len(path.split(":")) != 2:
+                raise ValueError(f"{path} must be in the format 'module:function'")
         core = Core.from_empty()
         core.makeb('wit').set_as_str(f"external:{wit_function_path}")
         if(query_function_path is not None):
-            if len(query_function_path.split(":")) != 2:
-                raise ValueError("query_module_path must be in the format 'module:function'")
+            check_path(query_function_path)
             core.makeb('wit_query').set_as_str(f"external:{query_function_path}")
+        if(genesis_function_path is not None):
+            check_path(genesis_function_path)
+            core.makeb('wit_genesis').set_as_str(f"external:{genesis_function_path}")
+        if(update_function_path is not None):
+            check_path(update_function_path)
+            core.makeb('wit_update').set_as_str(f"external:{update_function_path}")
         return core
     
     def maket_path(self, path: str, exist_ok:bool=True) -> TreeObject:
@@ -1001,7 +1011,10 @@ def _ensure_content(content:ValidMessageContent):
 
 class Outbox:
     __new_outbox:Mailbox
-    __outbox_buffer:dict[ActorId, OutboxMessage | list[OutboxMessage]] #if it's a signal, it's not a list; if it's queued, it's a list
+
+    #if it's a signal, a OutboxMessage; 
+    #if it's queued, it's a list of OutboxMessage
+    __outbox_buffer:dict[ActorId, OutboxMessage | list[OutboxMessage]] 
 
     def __init__(self, outbox:Mailbox):
         if(outbox is None):

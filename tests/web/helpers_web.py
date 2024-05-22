@@ -1,14 +1,17 @@
-from runtime.actor_executor import MailboxUpdate
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit import *
-from src.web import *
-from src.runtime import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit import *
+from aos.runtime.web import *
+from aos.runtime.core import *
 
 def setup_runtime() -> Runtime:
     store = MemoryObjectStore()
     refs = MemoryReferences()
     resolver = ExternalResolver(store)
-    runtime = Runtime(store, refs, 'test', resolver)
+    runtime = Runtime(
+        store=store, 
+        references=refs,
+        point=0,
+        resolver=resolver)
     return runtime
 
 def get_grit_url_prefix(runtime:Runtime) -> str:
@@ -28,7 +31,7 @@ async def create_genesis_message(store:ObjectStore, sender_id:ActorId, wit_name:
     '''Creates a genesis message and returns a MailboxUpdate'''
     if(wit_name is None):
         raise Exception('wit_name must not be None')
-    gen_core:TreeObject = Core.from_external_wit_ref(store, wit_name, query_ref)
+    gen_core:TreeObject = Core.from_external_wit_ref(wit_name, query_ref)
     gen_core.maket("first").maket("second").makeb("third").set_as_str("made it")
     gen_message = await OutboxMessage.from_genesis(store, gen_core)
     gen_message_id = await gen_message.persist(store)

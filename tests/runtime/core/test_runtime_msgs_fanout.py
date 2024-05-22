@@ -20,6 +20,7 @@ async def test_msgs__fanout():
         #print('wit_a')
         object_store:ObjectStore = kwargs['object_store']
         actor_id:ActorId = kwargs['actor_id']
+        nonlocal actors
         actors.add(actor_id)
 
         inbox_messages = await inbox.read_new()
@@ -27,12 +28,14 @@ async def test_msgs__fanout():
             #if genesis message
             if(message.content_id == actor_id):
                 for i in range(100):
-                    actor_core_b_n = Core.from_external_wit_ref('wit_b')
+                    actor_core_b_n = Core.from_external_wit_ref('wit_b', genesis_ref='wit_b')
                     actor_core_b_n.maket('data').makeb('args').set_as_json({'number': i})
                     outbox.add(await OutboxMessage.from_genesis(object_store, actor_core_b_n))
             else:
+                nonlocal messages_from_senders
                 messages_from_senders.setdefault(message.sender_id, 0)
                 messages_from_senders[message.sender_id] += 1
+                nonlocal roundtrip_times
                 roundtrip_times.add(time.time())
 
     wit_b = Wit()
@@ -40,6 +43,7 @@ async def test_msgs__fanout():
     async def wit_b_func(inbox:Inbox, outbox:Outbox, core:Core, **kwargs) -> None:
         #print('wit_b')
         actor_id:ActorId = kwargs['actor_id']
+        nonlocal actors
         actors.add(actor_id)
 
         inbox_messages = await inbox.read_new()
@@ -47,6 +51,7 @@ async def test_msgs__fanout():
             #if genesis message
             if(message.content_id == actor_id):
                 #await asyncio.sleep(0.01)
+                nonlocal messages_from_senders
                 messages_from_senders.setdefault(message.sender_id, 0)
                 messages_from_senders[message.sender_id] += 1
                 #send a message back
