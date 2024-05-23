@@ -1,13 +1,10 @@
 from __future__ import annotations
-from abc import ABC
 from dataclasses import dataclass, field
-import os
-import random
-import asyncio
 from typing import AsyncIterable
+import asyncio
 import grpc
 import time
-from enum import Enum
+from pydantic import BaseModel
 from async_lru import alru_cache
 from aos.grit import *
 from aos.wit import *
@@ -29,6 +26,7 @@ class _AgentState:
     object_store: AgentObjectStore
     references: AgentReferences
     worker_id:str|None
+
 
 class AgentsClient:
     """Gets information about agents, their actors. Allows querying and injecting messages, and subscribing to agents.
@@ -264,8 +262,23 @@ class AgentsClient:
         return inject_response.message_id
         
         
-    async def run_query(self, agent_id:AgentId, actor_id:ActorId, query_name:str, query_context:Blob|None) -> ObjectId | Tree | Blob | None:
+    async def run_query(
+            self, agent_id:AgentId, actor_id:ActorId, query_name:str, 
+            query_context:Blob|BlobObject|BaseModel|dict|str|None = None,
+            ) -> ObjectId | Tree | Blob | None:
         worker_client = await self._get_agent_worker_client(agent_id)
+
+        if query_context is not None:
+            if isinstance(query_context, BlobObject):
+                query_context = query_context.get_as_blob()
+            elif isinstance(query_context, BaseModel) or isinstance(query_context, dict):
+                query_context = BlobObject.from_json(query_context).get_as_blob()
+            elif isinstance(query_context, str):
+                query_context = BlobObject.from_str(query_context).get_as_blob()
+            elif is_blob(query_context):
+                query_context = query_context
+            else:
+                raise ValueError("query_context must be a Blob, BlobObject, BaseModel, dict, or str.")
 
         try:
             query_response:worker_api_pb2.RunQueryResponse = await worker_client.get_worker_api_stub_async().RunQuery(
@@ -291,6 +304,20 @@ class AgentsClient:
             else:
                 return bytes_to_object(query_response.result)
         return None
+    
+
+    async def run_query_as_model(
+            self, agent_id:AgentId, actor_id:ActorId, query_name:str, 
+            pydantic_model:Type[BaseModelType], 
+            query_context:Blob|BlobObject|BaseModel|dict|str|None = None,
+            ) -> BaseModelType | None:
+        result = await self.run_query(agent_id, actor_id, query_name, query_context)
+        if result is None:
+            return None
+        if not is_blob(result):
+            raise ValueError(f"Query result must be a blob, cannot convert to {pydantic_model}.")
+        result = BlobObject.from_blob(result)
+        return result.get_as_model(pydantic_model)
 
 
     async def subscribe_to_agent(self, agent_id:AgentId) -> AsyncIterable[tuple[ActorId, MessageId, Message]]:

@@ -2,7 +2,7 @@ from __future__ import print_function
 import asyncio
 import grpc
 from concurrent import futures
-from aos.runtime.store import grit_store_pb2_grpc, agent_store_pb2_grpc
+from aos.runtime.store import grit_store_pb2_grpc, agent_store_pb2_grpc, agent_store_pb2
 from .base_client import BaseClient
 
 import logging

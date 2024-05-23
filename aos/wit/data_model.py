@@ -3,11 +3,10 @@ import logging
 import posixpath as path
 import asyncio
 import json
-from typing import AsyncIterator, Callable, Iterable, Type
+from typing import AsyncIterator, Callable, Iterable, Type, TypeVar
 from pydantic import BaseModel
 from aos.grit import *
 from aos.grit.tree_helpers import _tree_path_parts, _blob_path_parts
-
 logger = logging.getLogger(__name__)
 
 # Contains the most important high-level abstractions for working with Grit objects.
@@ -17,6 +16,8 @@ logger = logging.getLogger(__name__)
 # BlobObject, TreeObject, and Core
 # These form the main utility objects to work with grit data.
 #===================================================================================================
+BaseModelType = TypeVar('BaseModelType', bound=BaseModel)
+
 class BlobObject:
     """Wraps a Grit blob object which is just a binary array with headers.
 
@@ -125,8 +126,7 @@ class BlobObject:
             return None
         return Blob(self.__headers.copy() if len(self.__headers) > 0 else None, self.__data)
 
-    #TODO make return type generic
-    def get_as_model(self, pydantic_type:Type[BaseModel]) -> BaseModel:
+    def get_as_model(self, pydantic_type:Type[BaseModelType]) -> BaseModelType:
         if(not issubclass(pydantic_type, BaseModel)):
             raise TypeError("pydantic_type must be a subclass of pydantic.BaseModel")
         if(self.__data is None):
@@ -974,15 +974,75 @@ class OutboxMessage:
         gen_content_id = await core.persist(store)
         msg = cls(gen_content_id, is_signal=False)
         msg.content = gen_content_id
-        msg.headers["mt"] = "genesis"
+        msg.mt = "genesis"
         return msg
+    
+    @classmethod
+    async def from_genesis_with_external_wit(cls, store:ObjectStore, wit_function_path:str, query_function_path:str=None, genesis_function_path:str=None, update_function_path:str=None, core_data:TreeObject|None=None,) -> OutboxMessage:
+        """Create a message that contains a genesis core that uses external wit functions that reference the module in the form of 'package.module:function'.
+
+        If core_data is provided, it will be merged into the core before it is persisted, this allows to provide additional data to the intial core."""
+        gen_core:TreeObject = Core.from_external_wit(wit_function_path=wit_function_path, query_function_path=query_function_path, genesis_function_path=genesis_function_path, update_function_path=update_function_path)
+        if core_data is not None:
+            await gen_core.merge(core_data)
+        gen_message = await cls.from_genesis(store, gen_core)
+        return gen_message
+    
+    @classmethod
+    async def from_genesis_with_external_wit_refs(cls, store:ObjectStore, wit_ref:str, query_ref:str=None, genesis_ref:str=None, update_ref:str=None, core_data:TreeObject|None=None,) -> OutboxMessage:
+        """Create a message that contains a genesis core that uses external wit references that are used in conjunction with an ExternalResolver. 
+        The refs are just stingst that match what was registered in the resolver.
+
+        Note: This is mostly used for testing.
+        
+        If core_data is provided, it will be merged into the core before it is persisted, this allows to provide additional data to the intial core."""
+        gen_core:TreeObject = Core.from_external_wit_ref(wit_ref=wit_ref, query_ref=query_ref, genesis_ref=genesis_ref, update_ref=update_ref)
+        if core_data is not None:
+            await gen_core.merge(core_data)
+        gen_message = await cls.from_genesis(store, gen_core)
+        return gen_message
+    
+    @classmethod
+    async def from_prototype_genesis_with_external_wit(cls, store:ObjectStore, wit_function_path:str, query_function_path:str=None, genesis_function_path:str=None, update_function_path:str=None, core_data:TreeObject|None=None,) -> OutboxMessage:
+        """Create a message that contains a prototype genesis message that uses external wit functions that reference the module in the form of 'package.module:function'.
+
+        If core_data is provided, it will be merged into the core before it is persisted, this allows to provide additional data to the intial core."""
+        from aos.wit.prototype import wrap_in_prototype
+        gen_core:TreeObject = Core.from_external_wit(wit_function_path=wit_function_path, query_function_path=query_function_path, genesis_function_path=genesis_function_path, update_function_path=update_function_path)
+        if core_data is not None:
+            await gen_core.merge(core_data)
+        prototype_gen_core = wrap_in_prototype(gen_core)
+        gen_message = await cls.from_genesis(store, prototype_gen_core)
+        return gen_message  
     
     @classmethod
     def from_update(cls, recipient_id:ActorId, core:TreeObject|TreeId) -> OutboxMessage:
         msg = cls(recipient_id, is_signal=False)
         msg.content = _ensure_content(core)
-        msg.headers["mt"] = "update"
+        msg.mt = "update"
         return msg
+    
+    @classmethod
+    async def from_update_with_external_wit(cls, recipient_id:ActorId, wit_function_path:str, query_function_path:str=None, genesis_function_path:str=None, update_function_path:str=None, core_data:TreeObject|None=None,) -> OutboxMessage:
+        """Create a message that contains an updated core that uses external wit functions that reference the module in the form of 'package.module:function'.
+
+        If core_data is provided, it will be merged into the update core, this allows to provide additional data to the target actor core."""
+        updated_core:TreeObject = Core.from_external_wit(wit_function_path=wit_function_path, query_function_path=query_function_path, genesis_function_path=genesis_function_path, update_function_path=update_function_path)
+        if core_data is not None:
+            await updated_core.merge(core_data)
+        return cls.from_update(recipient_id, updated_core)
+    
+    @classmethod
+    async def from_prototype_update_with_external_wit(cls, recipient_id:ActorId, wit_function_path:str, query_function_path:str=None, genesis_function_path:str=None, update_function_path:str=None, core_data:TreeObject|None=None,) -> OutboxMessage:
+        """Create a message that contains an updated prototype core that uses external wit functions that reference the module in the form of 'package.module:function'.
+
+        If core_data is provided, it will be merged into the update core, this allows to provide additional data to the target prototype."""
+        from aos.wit.prototype import wrap_in_prototype
+        updated_core:TreeObject = Core.from_external_wit(wit_function_path=wit_function_path, query_function_path=query_function_path, genesis_function_path=genesis_function_path, update_function_path=update_function_path)
+        if core_data is not None:
+            await updated_core.merge(core_data)
+        prototype_updated_core = wrap_in_prototype(updated_core)
+        return cls.from_update(recipient_id, prototype_updated_core)
 
     @classmethod
     def from_new(cls, recipient_id:ActorId, content:ValidMessageContent, is_signal:bool=False, mt:str|None=None) -> OutboxMessage:
@@ -1000,6 +1060,8 @@ class OutboxMessage:
         if(mt is not None):
             msg.mt = mt
         return msg
+    
+
 
 def _ensure_content(content:ValidMessageContent):
     if(content is None):

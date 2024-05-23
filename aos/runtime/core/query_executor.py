@@ -32,7 +32,7 @@ class QueryExecutor(Query):
         self.discovery = discovery
         self.external_storage = external_storage
 
-    async def run(self, actor_id:ActorId, query_name:str, context:Blob|None) -> Tree | Blob | None:
+    async def _run(self, actor_id:ActorId, query_name:str, context:Blob|None) -> Tree | Blob | None:
         actor_id_str = actor_id.hex()
         current_step_id = await self.references.get(ref_step_head(actor_id))
         if(current_step_id is None):

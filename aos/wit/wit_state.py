@@ -20,7 +20,6 @@ class WitState:
 
     def _include_attribute(self, attr_key:str):
         """Returns true if the attribute should be included in the state"""
-        getattr(self, attr_key)
         return (
             not attr_key.startswith('_') 
             and not attr_key.startswith('__') 
@@ -41,14 +40,20 @@ class WitState:
     def _after_persist(self):  # noqa: B027
         """Called after persisting state to core"""
         pass
+    
+    def _get_all_attributes(self):
+        instance_attributes = dir(self)
+        annotations = self.__class__.__dict__.get('__annotations__', {})
+        class_annotations = list(annotations.keys())
+        return set(instance_attributes + class_annotations)
 
     async def _load_from_core(self, core:Core):
         self._before_load()
-        attributes = dir(self)
+        attributes = self._get_all_attributes()
         state = core.maket_path(self._core_path, exist_ok=True)
         for attr_key in attributes:
             if self._include_attribute(attr_key):
-                #print(f'loading {attr_key}')
+                #print(f'LOADING STATE {attr_key}')
                 #try to find the blob
                 property_data = await state.get(attr_key)
                 if property_data is not None:
@@ -63,18 +68,23 @@ class WitState:
                             self.__setattr__(attr_key, None)
                     except Exception as e:
                         logger.exception(f'Error loading {attr_key}: {e}')
+                else:
+                    self.__setattr__(attr_key, None)
         self._after_load()
 
     async def _persist_to_core(self, core:Core):
         self._before_persist()
-        attributes = dir(self)
+        attributes = self._get_all_attributes()
         state = core.maket_path(self._core_path, exist_ok=True)
         for attr_key in attributes:
             if self._include_attribute(attr_key):
                 property_data = await state.getb(attr_key)
-                attr_value = self.__getattribute__(attr_key)
+                try:
+                    attr_value = self.__getattribute__(attr_key)
+                except:
+                    attr_value = None
                 if(attr_value is not None):
-                    #print(f'persisting {attr_key}')
+                    #print(f'PERSISTING STATE {attr_key}')
                     property_data.set_as_bytes(pickle.dumps(attr_value))
                 else:
                     property_data.set_empty()
