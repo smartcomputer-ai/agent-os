@@ -9,7 +9,8 @@ from aos.grit.tree_helpers import *
 from aos.wit.data_model import *
 from aos.runtime.core import *
 
-# A broader end-to-end test where the wits are executed from inside the core
+# Test prototype genesis and updates
+
 wit_a_async = """
 from aos.grit import *
 from aos.wit import * 
@@ -84,11 +85,10 @@ async def send_message(runtime:Runtime, actor_id, content):
     await asyncio.sleep(0.1)
 
 # tests
-#@pytest.mark.skip(reason="fix later")
 async def test_prototype_with_create():
     runtime, running_task = await setup_runtime()
     prototype_id = await send_prototype_genesis_message(runtime, "wit", wit_a_async)
-    await send_create_message(runtime, prototype_id, "init")
+    await send_create_message(runtime, prototype_id, "create")
 
     # there should be two actors now, one for the prototype and one for the created actor
     assert len(runtime.get_actors()) == 2
@@ -108,11 +108,10 @@ async def test_prototype_with_create():
     assert blob.get_as_str() == 'howdy'
 
 # tests
-#@pytest.mark.skip(reason="fix later")
 async def test_prototype_with_update():
     runtime, running_task = await setup_runtime()
     prototype_id = await send_prototype_genesis_message(runtime, "wit", wit_a_async)
-    await send_create_message(runtime, prototype_id, "init")
+    await send_create_message(runtime, prototype_id, "create")
     await send_prototype_update_message(runtime, prototype_id, wit_a_async_updated)
     # there should be two actors now, one for the prototype and one for the created actor
     assert len(runtime.get_actors()) == 2
@@ -129,6 +128,7 @@ async def test_prototype_with_update():
     step_id = await runtime.references.get(ref_step_head(actor_id))
     step = await runtime.store.load(step_id)
     core_id = step.core
+    #instead of 'hi-one' it should be 'hi-two'
     blob = BlobObject(await load_blob_path(runtime.store, core_id, "hi-two"))
     #print(blob.get_as_str())
     assert blob.get_as_str() == 'howdy'

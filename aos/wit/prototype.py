@@ -1,5 +1,6 @@
 from .wit_api import *
 from .wit_routers import *
+import uuid
 
 # A prototype is an actor that acts as a factory for a certain type of actor
 #
@@ -11,7 +12,6 @@ from .wit_routers import *
 # - prototype:     the core of the actor to be created
 #   - wit:         the wit of the target actor
 #   - create:      (optional) the arguments to create this actor
-#     - schema:    json schema for the create message and args
 #     - args:      (later) will only be created on 'create', and will be the contents of the create message (can be a tree or blob)
 #                  but if schema is provided, then it will need to be a json blob that matches the schema
 # - created:       a list of all the actors created by this prototype and who created them
@@ -26,6 +26,7 @@ def wrap_in_prototype(core:Core) -> Core:
     # add the prototype wit
     wit_ref = "external:aos.wit.prototype:wit"
     wrapper_core.makeb('wit').set_as_str(wit_ref)
+    wrapper_core.makeb('wit_genesis').set_as_str(wit_ref)
     wrapper_core.makeb('wit_update').set_as_str(wit_ref)
     wrapper_core.add("prototype", core)
     return wrapper_core
@@ -33,25 +34,48 @@ def wrap_in_prototype(core:Core) -> Core:
 #===================================================================================================
 # Create an actor from a prototype
 #===================================================================================================
-def create_actor_from_prototype_msg(prototype_id:ActorId, args:ValidMessageContent|None) -> OutboxMessage:
+def create_actor_from_prototype_msg(
+        prototype_id:ActorId, 
+        args:ValidMessageContent|None,
+        instance:str|None=None,
+        ) -> OutboxMessage:
     if args is None:
         args = {}
-    return OutboxMessage.from_new(prototype_id, args, is_signal=True, mt="create")
+    msg = OutboxMessage.from_new(prototype_id, args, is_signal=True, mt="create")
+    if instance is not None:
+        msg.headers["instance"] = instance
+    return msg
 
-async def create_actor_from_prototype_msg_with_state(prototype_id:ActorId, state:WitState, store:ObjectStore) -> OutboxMessage:
+async def create_actor_from_prototype_msg_with_state(
+        prototype_id:ActorId, 
+        state:WitState, 
+        store:ObjectStore,
+        instance:str|None=None,
+        ) -> OutboxMessage:
     state_tree_id = await state._persist_to_tree_id(store)
-    create_msg = create_actor_from_prototype_msg(prototype_id, state_tree_id)
+    create_msg = create_actor_from_prototype_msg(prototype_id, state_tree_id, instance=instance)
     return create_msg
 
-async def create_actor_from_prototype(prototype_id:ActorId, args:ValidMessageContent|None, request_response:RequestResponse) -> ActorId:
-    create_msg = create_actor_from_prototype_msg(prototype_id, args)
+async def create_actor_from_prototype(
+        prototype_id:ActorId, 
+        args:ValidMessageContent|None, 
+        request_response:RequestResponse,
+        instance:str|None=None,
+        ) -> ActorId:
+    create_msg = create_actor_from_prototype_msg(prototype_id, args, instance=instance)
     response = await request_response.run(create_msg, ["created"], 1.0)
     created_actor_id_str = (await response.get_content()).get_as_str()
     return to_object_id(created_actor_id_str)
 
-async def create_actor_from_prototype_with_state(prototype_id:ActorId, state:WitState, request_response:RequestResponse, store:ObjectStore) -> ActorId:
+async def create_actor_from_prototype_with_state(
+        prototype_id:ActorId, 
+        state:WitState, 
+        request_response:RequestResponse, 
+        store:ObjectStore,
+        instance:str|None=None,
+        ) -> ActorId:
     state_tree_id = await state._persist_to_tree_id(store)
-    return await create_actor_from_prototype(prototype_id, state_tree_id, request_response)
+    return await create_actor_from_prototype(prototype_id, state_tree_id, request_response, instance=instance)
 
 async def get_prototype_args(core:Core) -> TreeObject|BlobObject|None:
     state = await core.get("state")
@@ -88,6 +112,16 @@ async def on_genesis(msg:InboxMessage, ctx:MessageContext):
     
 @wit.message("create")
 async def on_create(msg:InboxMessage, ctx:MessageContext):
+
+    # the "instance" identifies the instance that is being created
+    # it can be supplied by the caller to make sure the exact instance is being created
+    # in fact, it is preferable to supply it, because it will also be returned in the reply
+    # which makes it easier to correlate the created actor with the initial request
+    if "instance" in msg.headers:
+        instance = msg.headers["instance"]
+    else:
+        instance = str(uuid.uuid4())
+
     p = await _ensure_prototype(ctx.core)
     new_core = await Core.from_core_id(ctx.store, p.get_as_object_id())
 
@@ -101,28 +135,25 @@ async def on_create(msg:InboxMessage, ctx:MessageContext):
             del new_core["args"]
         new_core.add("args", msg.content_id)
 
-    # check in 'created' to see if this actor has already been created with those args/state
-    # we cannot check for the actor id itself because the prototype core might have been updated in the meantime (so that's why we have to maintain a seperate "created" list)
-    # which would change the actor id
-    # if the state has also been changed as part of the update then a new actor will be created
-    state_id_str = msg.content_id.hex()
+    # Check in 'created' to see if this actor has already been created with those args/state
+    # we cannot check for the hypothetical future actor id itself because the prototype core might have been updated in the meantime,
+    # which would change the actor id. (so that's why we have to maintain a seperate "created" list)
+    # For example, if the state changes as part as part of the update then a new actor will be created.
     created = await ctx.core.gett("created")
-    if state_id_str not in created:
+    if instance not in created:
         # send the genesis message
         gen_msg = await OutboxMessage.from_genesis(ctx.store, new_core)
         ctx.outbox.add(gen_msg)
         # register the new actor in 'created'
         actor_id = gen_msg.recipient_id
-        actor_id_str = actor_id.hex()
-        #TODO: use the actual actor id here too
-        created.makeb(state_id_str).set_as_str(actor_id_str)
+        created.add(instance, actor_id)
     else:
-        actor_id_str = (await created.getb(state_id_str)).get_as_str()
+        actor_id = created.get_id(instance)
     
     # reply with the new or existing actor_id
-    #TODO: this should not be a string, but just the actor_id (this works because it is a valid tree id (the core of the actor))
-    ctx.outbox.add(OutboxMessage.from_reply(msg, actor_id_str, mt="created"))
-
+    reply = OutboxMessage.from_reply(msg, actor_id, mt="created")
+    reply.headers["instance"] = instance
+    ctx.outbox.add(reply)
 
 @wit.update_message
 async def on_update(msg:InboxMessage, ctx:MessageContext):
@@ -139,10 +170,9 @@ async def on_update(msg:InboxMessage, ctx:MessageContext):
     # update all actors that have been created based on this prototype
     created:TreeObject = await ctx.core.get("created")
     if created is not None:
-        for key in created:
-            actor_id_str = (await created.getb(key)).get_as_str()
-            print("sending update to actor: ", actor_id_str)
-            actor_id = to_object_id(actor_id_str)
+        for instance in created:
+            actor_id = created.get_id(instance)
+            print("sending update to actor: ", actor_id.hex())
             # do not send the whole merged core, because the update might be just a few objects not an entire core
             # and so it should be forwarded accordingly
             ctx.outbox.add(OutboxMessage.from_update(actor_id, p_new_id))

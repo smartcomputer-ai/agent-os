@@ -399,6 +399,16 @@ class TreeObject:
         if(not isinstance(value, BlobObject)):
             raise TypeError(f"'{key}' exists, but is not not a BlobObject, it is a '{type(value)}'.")
         return value
+    
+    def get_id(self, key:str) -> ObjectId:
+        value = self.__tree.get(key, None)
+        if value is not None:
+            if isinstance(value, ObjectId):
+                return value
+            #get_as_object_id exists for both TreeObject and BlobObject
+            #note: this will throw an exception if the object was loaded and then modified
+            return value.get_as_object_id()
+        raise KeyError(f"Key '{key}' not found in tree.")
 
     #==========================================
     # Make sub-object APIs
