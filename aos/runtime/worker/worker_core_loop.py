@@ -496,25 +496,31 @@ class WorkerCoreLoop:
     async def _connect_agent_subscription(self, runtime:Runtime, queue:asyncio.Queue[worker_api_pb2.SubscriptionMessage]):
         try:
             with runtime.subscribe_to_messages() as subscription_queue:
-                mailbox_update:MailboxUpdate = await subscription_queue.get()
-                sender_id = mailbox_update[0]
-                recipient_id = mailbox_update[1] #the recipient is the root actor which is the same as the agent id
-                message_id = mailbox_update[2]
-                #load the message contents to provide more info to the subscriber
-                message:Message = await runtime.ctx.store.load(message_id)
-                subscription_message = worker_api_pb2.SubscriptionMessage(
-                    agent_id=runtime.agent_id,
-                    sender_id=sender_id,
-                    message_id=message_id,
-                    message=worker_api_pb2.MessageData(
-                        headers=message.headers,
-                        previous_id=message.previous,
-                        is_signal=(message.previous is None),
-                        content_id=message.content,
-                    ))
-                await queue.put(subscription_message)
+                while True:
+                    mailbox_update:MailboxUpdate = await subscription_queue.get()
+                    if mailbox_update is None:
+                        break
+                    sender_id = mailbox_update[0]
+                    recipient_id = mailbox_update[1] #the recipient is the root actor which is the same as the agent id
+                    message_id = mailbox_update[2]
+                    #load the message contents to provide more info to the subscriber
+                    message:Message = await runtime.ctx.store.load(message_id)
+                    subscription_message = worker_api_pb2.SubscriptionMessage(
+                        agent_id=runtime.agent_id,
+                        sender_id=sender_id,
+                        message_id=message_id,
+                        message_data=worker_api_pb2.MessageData(
+                            headers=message.headers,
+                            previous_id=message.previous,
+                            is_signal=(message.previous is None),
+                            content_id=message.content,
+                        ))
+                    await queue.put(subscription_message)
+
         except asyncio.CancelledError as ce:
             logger.info(f"Subscription to agent {runtime.agent_id.hex()} was cancelled.")
+        except Exception as e:
+            logger.error(f"Error while subscribing to agent {runtime.agent_id.hex()}.", exc_info=e)
         finally:
             queue.put_nowait(None)
 
