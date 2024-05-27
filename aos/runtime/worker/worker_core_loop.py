@@ -366,9 +366,8 @@ class WorkerCoreLoop:
                 raise
 
         runtime_task = asyncio.create_task(runtime_runner(agent_id, runtime))
-        
         if self._all_agents_subscription_queue is not None:
-            await asyncio.sleep(0.01) #ensure the runtime is running
+            await runtime.wait_until_running()
             logger.info(f"Subscribing the 'all subscriptions queue' to agent {agent_id.hex()} runtime...")
             #add an event that subscribes to this agents runtime with the all_agents_subscription_queue
             await self._event_queue.put(
