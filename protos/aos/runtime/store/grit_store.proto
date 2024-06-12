@@ -1,0 +1,72 @@
+syntax = "proto3";
+import "google/protobuf/empty.proto";
+
+// Service methods for Grit object and reference store
+service GritStore {
+
+  rpc Store(StoreRequest) returns (google.protobuf.Empty) {}
+  rpc Load(LoadRequest) returns (LoadResponse) {}
+
+  rpc SetRef(SetRefRequest) returns (google.protobuf.Empty) {}
+  rpc GetRef(GetRefRequest) returns (GetRefResponse) {}
+  rpc GetRefs(GetRefsRequest) returns (GetRefsResponse) {}
+
+}
+
+enum ObjectType {
+  BLOB = 0;
+  TREE = 1;
+  MESSAGE = 4;
+  MAILBOX = 5;
+  STEP = 10;
+}
+
+message StoreRequest {
+  bytes agent_id = 1;
+  optional bytes object_id = 3;
+  bytes data = 10;
+}
+//store response is empty (see above)
+
+message LoadRequest {
+  bytes agent_id = 1;
+  bytes object_id = 3;
+}
+
+message LoadResponse {
+  bytes agent_id = 1;
+  bytes object_id = 3;
+  optional bytes data = 10;
+}
+
+message SetRefRequest {
+  bytes agent_id = 1;
+  string ref = 2;
+  bytes object_id = 3;
+}
+//set ref response is empty (see above)
+//maybe in the future, if there are race conditions on setting a ref, 
+// we could return the final object id that was set
+
+message GetRefRequest {
+  bytes agent_id = 1;
+  string ref = 2;
+}
+
+message GetRefResponse {
+  bytes agent_id = 1;
+  string ref = 2;
+  optional bytes object_id = 3;
+}
+
+message GetRefsRequest {
+  bytes agent_id = 1;
+  optional string ref_prefix = 2;
+}
+
+message GetRefsResponse {
+  bytes agent_id = 1;
+  map<string, bytes> refs = 2;
+}
+
+

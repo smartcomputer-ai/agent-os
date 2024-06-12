@@ -1,9 +1,8 @@
 import os
 import pytest
-from runtime.actor_executor import MailboxUpdate
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.wit import *
-from src.runtime import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit import *
+from aos.runtime import *
 import helpers_wit as helpers
 
 async def setup_call_and_return(wit:Wit, query_name:str, query_args:Blob|BlobObject|None) -> Blob|Tree:

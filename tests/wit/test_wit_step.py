@@ -1,6 +1,6 @@
-from src.grit.stores.memory import MemoryObjectStore, MemoryReferences
-from src.grit import *
-from src.wit import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.grit import *
+from aos.wit import *
 import helpers_wit as helpers
 
 # end-to-end test of the raw wit function: can it compute steps properly

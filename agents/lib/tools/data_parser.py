@@ -1,5 +1,5 @@
 import openai
-from completions import *
+from agents.lib.completions import *
 
 class DataParser:
 

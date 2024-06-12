@@ -6,17 +6,7 @@ authors = []
 license = "MIT"
 readme = "README.md"
 packages = [
-    {include = "grit", from = "src"}, 
-    {include = "wit", from = "src"}, 
-    {include = "sync", from = "src"}, 
-    {include = "web", from = "src"}, 
-    {include = "runtime", from = "src"},
-    {include = "cli", from = "src"},
-
-    {include = "completions", from = "agents/lib"},
-    {include = "tools", from = "agents/lib"},
-
-    {include = "jetpack", from = "agents"},
+    {include = "aos"}, 
 ]
 repository = "https://github.com/lukebuehler/agent-os"
 
@@ -30,11 +20,17 @@ pytest-asyncio = "^0.21.0"
 tomlkit = "^0.11.8"
 lmdb = "^1.4.1"
 watchfiles = "^0.19.0"
-starlette = "^0.28.0"
+starlette = "^0.37.2"
 sse-starlette = "^1.6.1"
 uvicorn = "^0.22.0"
 click = "^8.1.5"
 filetype = "^1.2.0"
+grpcio = "^1.62.1"
+py-multibase = "^1.0.3"
+py-multicodec = "^0.2.1"
+base58 = "^2.1.1"
+cryptography = "^42.0.5"
+grpcio-tools = "^1.62.2"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.1.1"
@@ -46,8 +42,8 @@ httpx-sse = "^0.4.0"
 ruff = "^0.3.7"
 
 
-# to install run poetry install --with agents
 [tool.poetry.group.agents]
+# to install run poetry install --with agents
 optional = true
 
 [tool.poetry.group.agents.dependencies]
@@ -73,7 +69,8 @@ build-backend = "poetry.core.masonry.api"
 asyncio_mode = "auto"
 
 [tool.poetry.scripts]
-aos = "cli.aos:cli"
+aos = "aos.cli.cli:cli"
+gritserv = "aos.cluster.grit.grit_server:serve"
 perf = "tests.perf.perf:main"
 gen = "examples.coder.generator.gen_workbench:main"
 

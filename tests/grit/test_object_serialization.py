@@ -1,8 +1,8 @@
 
 import os
 
-from src.grit.object_model import *
-from src.grit.object_serialization import *
+from aos.grit.object_model import *
+from aos.grit.object_serialization import *
 
 
 # random test data

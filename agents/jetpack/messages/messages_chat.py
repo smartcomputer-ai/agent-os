@@ -2,7 +2,7 @@ import mistune
 from uuid import UUID, uuid1
 from datetime import datetime
 from pydantic import BaseModel
-from wit import *
+from aos.wit import *
 
 #==============================================================
 # Chat Messages

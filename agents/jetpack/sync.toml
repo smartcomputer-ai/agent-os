@@ -7,22 +7,26 @@ external_paths=["./agents/jetpack/frontend", "./agents/jetpack/chat", "./agents/
 [[actors]]
 name="frontend"
 push=["./agents/jetpack/frontend/index.html:/templates/index.html"]
-wit="external:frontend_wit:app"
-wit_query="external:frontend_queries:app"
+wit_genesis="external:agents.jetpack.frontend.frontend_wit:app"
+wit="external:agents.jetpack.frontend.frontend_wit:app"
+wit_query="external:agents.jetpack.frontend.frontend_queries:app"
 
 [[actors]]
 name="chat"
 is_prototype=true
 push=["./agents/jetpack/chat/chat_messages.html:/templates/chat_messages.html", "./agents/jetpack/chat/artifacts.html:/templates/artifacts.html"]
-wit="external:chat_wit:app"
-wit_query="external:chat_queries:app"
+wit_genesis="external:agents.jetpack.chat.chat_wit:app"
+wit="external:agents.jetpack.chat.chat_wit:app"
+wit_query="external:agents.jetpack.chat.chat_queries:app"
 
 [[actors]]
 name="coder"
 is_prototype=true
-wit="external:coder_wit:app"
+wit_genesis="external:agents.jetpack.coder.coder_wit:app"
+wit="external:agents.jetpack.coder.coder_wit:app"
 
 [[actors]]
 name="retriever"
 is_prototype=true
-wit="external:retriever_wit:app"
+wit_genesis="external:agents.jetpack.coder.retriever_wit:app"
+wit="external:agents.jetpack.coder.retriever_wit:app"

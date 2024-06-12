@@ -1,9 +1,9 @@
 import logging
 import re
-from grit import *
-from wit import *
-from jetpack.messages import *
-from jetpack.chat.chat_wit import create_chat_actor
+from aos.grit import *
+from aos.wit import *
+from agents.jetpack.messages import *
+from agents.jetpack.chat.chat_wit import create_chat_actor
 
 logger = logging.getLogger(__name__)
 

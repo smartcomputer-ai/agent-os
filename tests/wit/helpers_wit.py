@@ -1,15 +1,14 @@
 import os
 
-from src.runtime.actor_executor import MailboxUpdate
-from src.grit import *
-from src.wit import *
+from aos.grit import *
+from aos.wit import *
 
 def get_random_actor_id() -> ActorId:
     return get_object_id(os.urandom(20))
 
 async def create_genesis_message(store:ObjectStore, sender_id:ActorId, wit_ref:str, query_ref:str=None) -> MailboxUpdate:
     '''Creates a genesis message and returns a MailboxUpdate'''
-    gen_core:TreeObject = Core.from_external_wit_ref(store, wit_ref, query_ref)
+    gen_core:TreeObject = Core.from_external_wit_ref(wit_ref, query_ref)
     gen_core.maket('data').makeb('args').set_as_json({'hello': 'world'})
     gen_message = await OutboxMessage.from_genesis(store, gen_core)
     gen_message_id = await gen_message.persist(store)

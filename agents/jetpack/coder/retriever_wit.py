@@ -1,9 +1,9 @@
 import logging
-from grit import *
-from wit import *
-from jetpack.messages import *
-from jetpack.coder.retriever_completions import *
-from jetpack.coder.coder_wit import create_coder_actor
+from aos.grit import *
+from aos.wit import *
+from agents.jetpack.messages import *
+from agents.jetpack.coder.retriever_completions import *
+from agents.jetpack.coder.coder_wit import create_coder_actor
 
 #========================================================================================
 # Setup & State
@@ -19,8 +19,11 @@ async def create_retriever_actor(
     state.code_request = request
     state.forward_to = forward_to
     state.notify.add(ctx.actor_id)
+    prototype_id = await ctx.discovery.find_prototype("retriever")
+    if prototype_id is None:
+        raise Exception("retriever prototype not found")
     return await create_actor_from_prototype_with_state(
-        ctx.prototype_actors["retriever"], 
+        prototype_id, 
         state, 
         ctx.request_response, 
         ctx.store)

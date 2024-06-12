@@ -1,6 +1,6 @@
-from wit import *
-from runtime import *
-from grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit import *
+from aos.runtime.core import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
 from jetpack.messages import CodeSpec
 from jetpack.coder.coder_wit import app, create_coder_actor
 from .helpers_runtime import *
@@ -13,7 +13,7 @@ async def test_coder__img_resize():
     resolver = ExternalResolver(store)
     resolver.register('gen_wit', app)
 
-    runtime = Runtime(store, refs, "test", resolver)
+    runtime = Runtime(store, refs, resolver=resolver)
     running_task = asyncio.create_task(runtime.start())
 
     #genesis of the generator actor

@@ -1,7 +1,7 @@
 
 from jinja2 import Environment, TemplateNotFound, select_autoescape
-from grit import *
-from wit import *
+from aos.grit import *
+from aos.wit import *
 
 app = Wit()
 

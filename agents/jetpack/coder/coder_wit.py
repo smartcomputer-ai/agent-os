@@ -1,11 +1,11 @@
 import logging
-from grit import *
-from wit import *
-from wit.wit_routers import _Wrapper
-from runtime import CoreResolver
-from tools import StoreWrapper
-from jetpack.messages import *
-from jetpack.coder.coder_completions import *
+from aos.grit import *
+from aos.wit import *
+from aos.wit.wit_routers import _Wrapper
+from aos.runtime.core import CoreResolver
+from agents.lib.tools import StoreWrapper
+from agents.jetpack.messages import *
+from agents.jetpack.coder.coder_completions import *
 
 #========================================================================================
 # Setup & State
@@ -23,8 +23,11 @@ async def create_coder_actor(
     state.code_spec = spec
     state.job_execution = job_execution
     state.notify.add(ctx.actor_id)
+    prototype_id = await ctx.discovery.find_prototype("coder")
+    if prototype_id is None:
+        raise Exception("coder prototype not found")
     return await create_actor_from_prototype_with_state(
-        ctx.prototype_actors["coder"], 
+        prototype_id, 
         state, 
         ctx.request_response, 
         ctx.store)

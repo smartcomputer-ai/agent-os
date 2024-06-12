@@ -1,0 +1,80 @@
+syntax = "proto3";
+//import "google/protobuf/empty.proto";
+//import "aos/runtime/apex/test.proto";
+
+// Internal service for worker nodes to communicate with the Apex node
+service ApexWorkers {
+  // Registers a worker to get ready for a streaming connection.
+  rpc RegisterWorker(WorkerRegistrationRequest) returns (WorkerRegistrationResponse) {}
+  // Connects a long running worker to the apex node via two-way streaming. Worker needs to register first.
+  rpc ConnectWorker(stream WorkerToApexMessage) returns (stream ApexToWorkerMessage) {}
+}
+
+// TODO: the worker stream can be simplified into a single one-way apex stream on agent/worker updates
+// workers can subscribe to it, but they look at the store to find actors to work on (using some sort of distributed lock to coordinate between workers)
+
+
+message WorkerRegistrationRequest {
+  string worker_id = 1;
+  string worker_address = 2; //how to connect to the worker
+}
+
+message WorkerRegistrationResponse {
+  string ticket = 1; //used to connect to the stream
+}
+
+message WorkerManifest{
+  string worker_id = 1;
+  map<string, string> capabilities = 10; //what capabilities can it satisfy
+  repeated Agent current_agents = 20; //not allowed to have any workers in it on READY (aka connect)
+  repeated bytes desired_agents = 21; //the agents that the worker wants to have (maybe because it had them previosuly, local caches, etc)
+  //capacity, load, etc so that apex can decide where to send agents
+}
+
+message Agent{
+  bytes agent_id = 1; //32 bytes, of actor_id type
+  uint64 point = 2;
+  map<string, string> capabilities = 10; //what capabilities are requested by the agent
+  //map<string, string> workers = 20; //worker_id, worker_address - > for later, what workers are assigned to this agent, so that workers can coordinate
+}
+
+message AgentAssignment{
+  bytes agent_id = 1;  //required
+  optional Agent agent = 2; //only needed when giving to worker
+  //todo: reason for assignment, maybe also what actors
+}
+
+
+message ApexToWorkerMessage {
+  enum MessageType {
+    PING = 0;
+    GIVE_AGENT = 10; // give to worker
+    YANK_AGENT = 11; // take from worker
+  }
+
+  //always required
+  MessageType type = 1;
+
+  oneof payload {
+    AgentAssignment assignment = 10; // GIVE_AGENT, YANK_AGENT
+  }
+}
+
+message WorkerToApexMessage {
+  enum MessageType {
+    PING = 0;
+    READY = 1; // start receiving messages from apex
+    //MANIFEST_UPDATE = 2; // send a manifest update to apex (esp, when capacity changes)
+    RETURN_AGENT = 11; // return agent to apex
+  }
+
+  //always required
+  MessageType type = 1;
+  string worker_id = 2;
+  string ticket = 3;
+
+  oneof payload {
+    WorkerManifest manifest = 10; //READY event
+    AgentAssignment assignment = 11; //RETURN_AGENT
+  }
+}

@@ -1,9 +1,9 @@
 import httpx
 from httpx_sse import aconnect_sse
 from starlette.testclient import TestClient
-from src.wit import *
-from src.web import *
-from src.runtime import *
+from aos.wit import *
+from aos.runtime.web import *
+from aos.runtime.core import *
 import helpers_web as helpers
 
 #===================================================================================================

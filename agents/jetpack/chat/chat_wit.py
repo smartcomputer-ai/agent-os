@@ -1,10 +1,10 @@
 import logging
-from grit import *
-from wit import *
-from jetpack.messages import *
-from jetpack.coder.coder_wit import create_coder_actor
-from jetpack.coder.retriever_wit import create_retriever_actor
-from jetpack.chat.chat_completions import chat_completion
+from aos.grit import *
+from aos.wit import *
+from agents.jetpack.messages import *
+from agents.jetpack.coder.coder_wit import create_coder_actor
+from agents.jetpack.coder.retriever_wit import create_retriever_actor
+from agents.jetpack.chat.chat_completions import chat_completion
 
 
 #========================================================================================
@@ -21,8 +21,11 @@ async def create_chat_actor(
         ) -> ActorId:
     state = ChatState()
     state.name = name
+    prototype_id = await ctx.discovery.find_prototype("chat")
+    if prototype_id is None:
+        raise Exception("chat prototype not found")
     return await create_actor_from_prototype_with_state(
-        ctx.prototype_actors["chat"], 
+        prototype_id, 
         state, 
         ctx.request_response, 
         ctx.store)
@@ -244,7 +247,7 @@ async def on_message_code_executed(exec:CodeExecuted, ctx:MessageContext, state:
 
 @app.message("code_failed")
 async def on_message_code_failed(fail:CodeFailed, ctx:MessageContext, state:ChatState) -> None:
-    logger.warn(f"'{state.name}': received callback: code_failed")
+    logger.warning(f"'{state.name}': received callback: code_failed")
     state.code_fail = fail
     if state.code_fail.errors is not None:
         #todo: also output as chat message

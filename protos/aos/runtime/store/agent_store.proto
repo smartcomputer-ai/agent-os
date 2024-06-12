@@ -1,0 +1,94 @@
+syntax = "proto3";
+import "google/protobuf/empty.proto";
+
+// Manage Agents
+service AgentStore {
+  rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse) {}
+  rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse) {}
+  rpc GetAgent(GetAgentRequest) returns (GetAgentResponse) {}
+  rpc GetAgents(GetAgentsRequest) returns (GetAgentsResponse) {}
+
+  rpc SetVar(SetVarRequest) returns (google.protobuf.Empty) {}
+  rpc GetVar(GetVarRequest) returns (GetVarResponse) {}
+  rpc GetVars(GetVarsRequest) returns (GetVarsResponse) {}
+  rpc DeleteVar(DeleteVarRequest) returns (google.protobuf.Empty) {}
+}
+
+//=========================================================
+// Agent CRUD messages
+//=========================================================
+
+message CreateAgentRequest {
+  optional uint64 point = 2; //if not provided, will be generated internally
+}
+
+message CreateAgentResponse {
+  bytes agent_id = 1;
+  uint64 point = 2;
+}
+
+message DeleteAgentRequest {
+  oneof delete_by {
+    bytes agent_id = 1;
+    uint64 point = 2;
+  }
+}
+message DeleteAgentResponse {}
+
+message GetAgentRequest {
+  oneof get_by {
+    bytes agent_id = 1;
+    uint64 point = 2;
+  }
+}
+
+message GetAgentResponse {
+  optional bytes agent_id = 1;
+  optional uint64 point = 2;
+  bool exists = 3;
+}
+
+message GetAgentsRequest {
+  //if set, filters the agents to the ones that have the specified key-value pairs
+  map<string, string> var_filters = 1;
+}
+
+message GetAgentsResponse {
+  map<uint64, bytes> agents = 1;
+}
+
+//=========================================================
+// Var(iables) CRUD Messages
+//=========================================================
+
+message SetVarRequest {
+  bytes agent_id = 1;
+  string key = 2;
+  string value = 3;
+}
+
+message GetVarRequest {
+  bytes agent_id = 1;
+  string key = 2;
+}
+
+message GetVarResponse{
+  bytes agent_id = 1;
+  string key = 2;
+  optional string value = 3;
+}
+
+message GetVarsRequest {
+  bytes agent_id = 1;
+  optional string key_prefix = 2;
+}
+
+message GetVarsResponse{
+  bytes agent_id = 1;
+  map<string, bytes> vars = 2;
+}
+
+message DeleteVarRequest {
+  bytes agent_id = 1;
+  string key = 2;
+}

@@ -1,6 +1,6 @@
-from wit import *
-from runtime import *
-from grit.stores.memory import MemoryObjectStore, MemoryReferences
+from aos.wit import *
+from aos.runtime.core import *
+from aos.grit.stores.memory import MemoryObjectStore, MemoryReferences
 from jetpack.coder.retriever_wit import *
 from jetpack.coder.coder_wit import app as coder_app
 from jetpack.messages import CodeSpec
@@ -16,7 +16,7 @@ async def test_retrieve():
     resolver.register('retriever_wit', app)
     resolver.register('coder_wit', coder_app)
 
-    runtime = Runtime(store, refs, "test", resolver)
+    runtime = Runtime(store, refs, resolver=resolver)
     running_task = asyncio.create_task(runtime.start())
 
     spec = CodeSpec(

@@ -1,9 +1,9 @@
 import logging
 from jinja2 import Environment, TemplateNotFound, select_autoescape
-from grit import *
-from wit import *
-from jetpack.messages import ChatMessage
-from jetpack.chat.chat_wit import ChatState
+from aos.grit import *
+from aos.wit import *
+from agents.jetpack.messages import ChatMessage
+from agents.jetpack.chat.chat_wit import ChatState
 
 logger = logging.getLogger(__name__)
 

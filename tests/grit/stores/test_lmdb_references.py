@@ -1,6 +1,6 @@
 import os
-from src.grit import *
-from src.grit.stores.lmdb import SharedEnvironment, LmdbReferences
+from aos.grit import *
+from aos.grit.stores.lmdb import SharedEnvironment, LmdbReferences
 
 def get_random_object_id() -> ObjectId:
     return get_object_id(os.urandom(20))

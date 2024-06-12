@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+// APIs for CLI and Web
+service ApexApi {
+
+  rpc GetApexStatus(GetApexStatusRequest) returns (GetApexStatusResponse) {}
+  
+  rpc GetRunningAgents(GetRunningAgentsRequest) returns (GetRunningAgentsResponse) {}
+  rpc GetRunningAgent(GetRunningAgentRequest) returns (GetRunningAgentResponse) {}
+  rpc StartAgent(StartAgentRequest) returns (StartAgentResponse) {}
+  rpc StopAgent(StopAgentRequest) returns (StopAgentResponse) {}
+
+  //TODO: 
+  // GetApexStatusStream (one way stream)
+}
+
+//=========================================================
+// Agent Management
+//=========================================================
+message StartAgentRequest {
+  bytes agent_id = 1;
+}
+
+message StartAgentResponse {
+}
+
+message StopAgentRequest {
+  bytes agent_id = 1;
+}
+
+message StopAgentResponse {
+}
+
+message GetRunningAgentsRequest {}
+
+message GetRunningAgentsResponse {
+  repeated AgentInfo agents = 10;
+}
+
+message GetRunningAgentRequest {
+  bytes agent_id = 1;
+}
+
+message GetRunningAgentResponse {
+  optional AgentInfo agent = 10;
+}
+
+message AgentInfo{
+  bytes agent_id = 1;
+  uint64 point = 2;
+  string worker_id = 3;
+  string worker_address = 4;
+  map <string, string> capabilities = 10;
+}
+
+message GetApexStatusRequest {}
+
+message GetApexStatusResponse {
+  enum ApexStatus {
+    UNKNOWN = 0;
+    STARTING = 1; 
+    RUNNING = 2; 
+    STOPPING = 3;
+    ERROR = 10;
+  }
+  ApexStatus status = 1;
+  string store_address = 3;
+  repeated WorkerInfo workers = 10;
+}
+
+message WorkerInfo{
+  string worker_id = 1;
+  string worker_address = 2;
+  repeated bytes current_agents = 3;
+  map<string, string> capabilities = 10;
+
+}
+

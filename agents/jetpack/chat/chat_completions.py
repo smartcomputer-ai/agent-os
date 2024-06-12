@@ -1,7 +1,7 @@
 import openai
-from grit import *
-from completions import *
-from jetpack.messages import ChatMessage, CodeRequest, CodeSpec, CodeExecution
+from aos.grit import *
+from agents.lib.completions import *
+from agents.jetpack.messages import ChatMessage, CodeRequest, CodeSpec, CodeExecution
 
 async def chat_completion(
         messages:list[ChatMessage],
