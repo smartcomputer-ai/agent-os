@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useWorld } from "@/app/world-provider";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -49,9 +48,6 @@ export function Navbar() {
   const activeFeature = getActiveFeature(location.pathname);
   const isAtFeatureRoot = isFeatureRoot(location.pathname);
 
-  const manifestLabel = world.manifestHash
-    ? world.manifestHash.slice(0, 8)
-    : null;
 
   const handleBackOrClose = () => {
     if (isAtFeatureRoot) {
@@ -117,13 +113,10 @@ export function Navbar() {
 
       {/* Right section */}
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-        <span className="hidden text-sm text-muted-foreground lg:inline">
-          {world.name ?? "World"}
-        </span>
-        {manifestLabel && (
-          <Badge variant="outline" className="hidden text-xs lg:inline-flex">
-            {manifestLabel}
-          </Badge>
+{world.name && (
+          <span className="hidden text-sm text-muted-foreground lg:inline">
+            {world.name}
+          </span>
         )}
         <TooltipProvider>
           <Tooltip>
