@@ -8,10 +8,14 @@ import type {
   DefsListResponse,
   EventsPostBody,
   EventsPostResponse,
+  GovGetPath,
+  GovGetResponse,
   GovApplyBody,
   GovApplyResponse,
   GovApproveBody,
   GovApproveResponse,
+  GovListQuery,
+  GovListResponse,
   GovProposeBody,
   GovProposeResponse,
   GovShadowBody,
@@ -69,6 +73,16 @@ export function defsGet(path: DefsGetPath): Promise<DefsGetResponse> {
 
 export function eventsPost(body: EventsPostBody): Promise<EventsPostResponse> {
   return apiRequestJson("post", "/api/events", { body });
+}
+
+export function govList(query?: GovListQuery): Promise<GovListResponse> {
+  return apiRequestJson("get", "/api/gov", { query });
+}
+
+export function govGet(path: GovGetPath): Promise<GovGetResponse> {
+  return apiRequestJson("get", "/api/gov/{proposal_id}", {
+    pathParams: path,
+  });
 }
 
 export function govApply(body: GovApplyBody): Promise<GovApplyResponse> {

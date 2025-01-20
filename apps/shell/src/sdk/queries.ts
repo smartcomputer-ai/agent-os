@@ -7,6 +7,10 @@ import type {
   DefsGetResponse,
   DefsListQuery,
   DefsListResponse,
+  GovGetPath,
+  GovGetResponse,
+  GovListQuery,
+  GovListResponse,
   HealthResponse,
   InfoResponse,
   JournalHeadResponse,
@@ -87,6 +91,28 @@ export function useDefsGet(
   return useQuery({
     queryKey: queryKeys.defsGet(path),
     queryFn: () => endpoints.defsGet(path),
+    ...options,
+  });
+}
+
+export function useGovList(
+  params?: GovListQuery,
+  options?: QueryOptions<GovListResponse, ReturnType<typeof queryKeys.govList>>,
+) {
+  return useQuery({
+    queryKey: queryKeys.govList(params),
+    queryFn: () => endpoints.govList(params),
+    ...options,
+  });
+}
+
+export function useGovGet(
+  path: GovGetPath,
+  options?: QueryOptions<GovGetResponse, ReturnType<typeof queryKeys.govGet>>,
+) {
+  return useQuery({
+    queryKey: queryKeys.govGet(path),
+    queryFn: () => endpoints.govGet(path),
     ...options,
   });
 }

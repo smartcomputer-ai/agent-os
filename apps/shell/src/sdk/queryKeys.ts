@@ -6,6 +6,8 @@ import type {
   StateCellsPath,
   StateGetPath,
   StateGetQuery,
+  GovGetPath,
+  GovListQuery,
   WorkspaceAnnotationsGetQuery,
   WorkspaceListQuery,
   WorkspaceReadBytesQuery,
@@ -20,6 +22,8 @@ export const queryKeys = {
   defsList: (params?: DefsListQuery) => ["defs_list", params ?? {}] as const,
   defsGet: (path: DefsGetPath) =>
     ["defs_get", path.kind, path.name] as const,
+  govList: (params?: GovListQuery) => ["gov_list", params ?? {}] as const,
+  govGet: (path: GovGetPath) => ["gov_get", path.proposal_id] as const,
   journalHead: () => ["journal_head"] as const,
   journalTail: (params?: JournalTailQuery) =>
     ["journal_tail", params ?? {}] as const,

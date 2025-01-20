@@ -42,6 +42,8 @@ use crate::http::{HttpState, control_call};
         workspace_empty_root,
         blob_put,
         blob_get,
+        gov_list,
+        gov_get,
         gov_propose,
         gov_shadow,
         gov_approve,
@@ -78,6 +80,10 @@ use crate::http::{HttpState, control_call};
             WorkspaceEmptyRootResponse,
             BlobPutRequest,
             BlobPutResponse,
+            GovGetResponse,
+            GovListResponse,
+            GovProposalDetail,
+            GovProposalSummary,
             GovProposeRequest,
             GovProposeResponse,
             GovShadowRequest,
@@ -327,6 +333,37 @@ struct GovApplyRequest {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
+struct GovProposalSummary {
+    id: u64,
+    description: Option<String>,
+    patch_hash: String,
+    state: String,
+    approver: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct GovProposalDetail {
+    id: u64,
+    description: Option<String>,
+    patch_hash: String,
+    state: String,
+    approver: Option<String>,
+    shadow_summary: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct GovListResponse {
+    proposals: Vec<GovProposalSummary>,
+    meta: MetaResponse,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct GovGetResponse {
+    proposal: GovProposalDetail,
+    meta: MetaResponse,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 struct EmptyResponse {}
 
 pub fn router() -> Router<HttpState> {
@@ -352,6 +389,8 @@ pub fn router() -> Router<HttpState> {
         .route("/workspace/empty-root", post(workspace_empty_root))
         .route("/blob", post(blob_put))
         .route("/blob/{hash}", get(blob_get))
+        .route("/gov", get(gov_list))
+        .route("/gov/{proposal_id}", get(gov_get))
         .route("/gov/propose", post(gov_propose))
         .route("/gov/shadow", post(gov_shadow))
         .route("/gov/approve", post(gov_approve))
@@ -1120,6 +1159,57 @@ async fn blob_get(
         [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
         bytes,
     ))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct GovListQuery {
+    status: Option<String>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/gov",
+    tag = "governance",
+    params(GovListQuery),
+    responses(
+        (status = 200, body = GovListResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
+async fn gov_list(
+    State(state): State<HttpState>,
+    Query(query): Query<GovListQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let payload = serde_json::json!({
+        "status": query.status.unwrap_or_else(|| "all".into()),
+    });
+    let result = control_call(&state, "gov-list", payload).await?;
+    Ok(Json(result))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/gov/{proposal_id}",
+    tag = "governance",
+    params(
+        ("proposal_id" = u64, Path, description = "Proposal id")
+    ),
+    responses(
+        (status = 200, body = GovGetResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 404, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
+async fn gov_get(
+    State(state): State<HttpState>,
+    Path(proposal_id): Path<u64>,
+) -> Result<impl IntoResponse, ApiError> {
+    let payload = serde_json::json!({ "proposal_id": proposal_id });
+    let result = control_call(&state, "gov-get", payload).await?;
+    Ok(Json(result))
 }
 
 #[utoipa::path(

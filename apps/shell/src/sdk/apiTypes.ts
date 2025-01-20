@@ -18,6 +18,14 @@ export type EventsPostBody =
 export type EventsPostResponse =
   operations["events_post"]["responses"][200]["content"]["application/json"];
 
+export type GovListQuery = operations["gov_list"]["parameters"]["query"];
+export type GovListResponse =
+  operations["gov_list"]["responses"][200]["content"]["application/json"];
+
+export type GovGetPath = operations["gov_get"]["parameters"]["path"];
+export type GovGetResponse =
+  operations["gov_get"]["responses"][200]["content"]["application/json"];
+
 export type GovApplyBody =
   operations["gov_apply"]["requestBody"]["content"]["application/json"];
 export type GovApplyResponse =
