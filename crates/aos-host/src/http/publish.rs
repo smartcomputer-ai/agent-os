@@ -167,8 +167,23 @@ async fn handle_publish(
     let Some(registry) = registry else {
         return Err(PublishError::not_found());
     };
-    let matched = match_publish_rule(&registry.rules, path)
-        .map_err(|err| PublishError::invalid(format!("match publish rule: {err:?}")))?;
+    let matched = match match_publish_rule(&registry.rules, path) {
+        Ok(Some(matched)) => Some(matched),
+        Ok(None) => None,
+        Err(MatchError::RequestPath(_)) => {
+            if accepts_html(&request_headers) {
+                if let Some(rule) = match_rule_by_raw_path(&registry.rules, req.uri().path()) {
+                    return serve_default_doc_for_rule(&state, rule, &request_headers).await;
+                }
+            }
+            return Err(PublishError::not_found());
+        }
+        Err(err) => {
+            return Err(PublishError::invalid(format!(
+                "match publish rule: {err:?}"
+            )));
+        }
+    };
     let Some(matched) = matched else {
         return Err(PublishError::not_found());
     };
@@ -197,7 +212,12 @@ async fn handle_publish(
     .await?
     {
         Some(entry) => entry,
-        None => return Err(PublishError::not_found()),
+        None => {
+            if accepts_html(&request_headers) {
+                return serve_default_doc_for_rule(&state, rule, &request_headers).await;
+            }
+            return Err(PublishError::not_found());
+        }
     };
 
     if entry.kind == "file" {
@@ -472,6 +492,83 @@ fn apply_cache_headers(rule: &HttpPublishRule, entry_hash: &str, headers: &mut H
             headers.insert(HeaderName::from_static("etag"), value);
         }
     }
+}
+
+fn match_rule_by_raw_path<'a>(
+    rules: &'a BTreeMap<String, HttpPublishRule>,
+    raw_path: &str,
+) -> Option<&'a HttpPublishRule> {
+    let mut best: Option<&HttpPublishRule> = None;
+    let mut best_len = 0usize;
+    for rule in rules.values() {
+        let prefix = rule.route_prefix.as_str();
+        if !raw_prefix_matches(prefix, raw_path) {
+            continue;
+        }
+        let len = prefix.trim_end_matches('/').len();
+        if best.is_none() || len > best_len {
+            best = Some(rule);
+            best_len = len;
+        }
+    }
+    best
+}
+
+fn raw_prefix_matches(prefix: &str, raw_path: &str) -> bool {
+    let prefix = if prefix == "/" {
+        "/"
+    } else {
+        prefix.trim_end_matches('/')
+    };
+    if prefix == "/" {
+        return raw_path.starts_with('/');
+    }
+    raw_path == prefix || raw_path.starts_with(&format!("{prefix}/"))
+}
+
+async fn serve_default_doc_for_rule(
+    state: &HttpState,
+    rule: &HttpPublishRule,
+    request_headers: &HeaderMap,
+) -> Result<Response, PublishError> {
+    let Some(default_doc) = rule.default_doc.as_deref() else {
+        return Err(PublishError::not_found());
+    };
+    let base_path = rule.workspace.path.as_deref();
+    let resolve = workspace_resolve(state, &rule.workspace).await?;
+    if !resolve.exists {
+        return Err(PublishError::not_found());
+    }
+    let root_hash = resolve
+        .root_hash
+        .ok_or_else(|| PublishError::invalid("workspace resolve missing root_hash"))?;
+    let doc_path = join_workspace_path(base_path, default_doc);
+    if let Some(doc_entry) = workspace_read_ref(state, &root_hash, &doc_path).await? {
+        if doc_entry.kind == "file" {
+            return serve_file(
+                state,
+                &root_hash,
+                &doc_path,
+                &doc_entry,
+                rule,
+                request_headers,
+                true,
+            )
+            .await;
+        }
+    }
+    Err(PublishError::not_found())
+}
+
+fn accepts_html(headers: &HeaderMap) -> bool {
+    let Some(value) = headers.get(header::ACCEPT) else {
+        return false;
+    };
+    let Ok(text) = value.to_str() else {
+        return false;
+    };
+    let text = text.to_ascii_lowercase();
+    text.contains("text/html") || text.contains("*/*")
 }
 
 fn parse_range_header(
