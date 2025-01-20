@@ -404,9 +404,11 @@ export interface components {
         };
         DefGetResponse: {
             def: unknown;
+            hash: string;
         };
         DefListingResponse: {
             cap_type?: string | null;
+            hash: string;
             kind: string;
             name: string;
             params_schema?: string | null;

@@ -60,8 +60,8 @@ Response:
 - `manifest-get { consistency?: "head"|"exact:<h>"|"at_least:<h>" }` → returns `{ manifest, journal_height, snapshot_hash?, manifest_hash }`.
 - `state-get { reducer, key_b64?, consistency?: "..."} ` → returns `{ state_b64?, meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
 - `state-list { reducer }` → returns `{ cells:[{ key_b64, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
-- `def-get { name }` → returns `{ def }` where `def` is the manifest entry for that name (`defschema`/`defmodule`/`defplan`/`defcap`/`defeffect`/`defpolicy`); errors if missing.
-- `def-list { kinds?: ["defschema"|"defmodule"|"defplan"|"defcap"|"defeffect"|"defpolicy"|"schema"|"module"|"plan"|"cap"|"effect"|"policy"], prefix?: "..." }` → returns `{ defs:[{ kind, name, cap_type?, params_schema?, receipt_schema?, plan_steps?, policy_rules? }], meta }` sorted by name (aliases normalized to `$kind`).
+- `def-get { name }` → returns `{ def, hash }` where `def` is the manifest entry for that name (`defschema`/`defmodule`/`defplan`/`defcap`/`defeffect`/`defpolicy`) and `hash` is the canonical CBOR hash of that def (`sha256:...`); errors if missing.
+- `def-list { kinds?: ["defschema"|"defmodule"|"defplan"|"defcap"|"defeffect"|"defpolicy"|"schema"|"module"|"plan"|"cap"|"effect"|"policy"], prefix?: "..." }` → returns `{ defs:[{ kind, name, hash, cap_type?, params_schema?, receipt_schema?, plan_steps?, policy_rules? }], meta }` sorted by name (aliases normalized to `$kind`).
 - `journal-head {}` → returns `{ journal_height, snapshot_hash?, manifest_hash }`.
 - `workspace-resolve { workspace, version? }` → returns `{ exists, resolved_version?, head?, root_hash? }`.
 - `workspace-empty-root { workspace }` → returns `{ root_hash }`.

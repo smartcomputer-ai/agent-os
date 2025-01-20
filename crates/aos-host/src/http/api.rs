@@ -129,6 +129,7 @@ struct MetaResponse {
 struct DefListingResponse {
     kind: String,
     name: String,
+    hash: String,
     cap_type: Option<String>,
     params_schema: Option<String>,
     receipt_schema: Option<String>,
@@ -145,6 +146,7 @@ struct DefsListResponse {
 #[derive(Debug, Serialize, ToSchema)]
 struct DefGetResponse {
     def: serde_json::Value,
+    hash: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

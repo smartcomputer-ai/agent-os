@@ -383,7 +383,9 @@ pub(crate) async fn handle_request(
                     .await
                     .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
                 let def = inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({ "def": def }))
+                let hash = Hash::of_cbor(&def)
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                Ok(serde_json::json!({ "def": def, "hash": hash.to_hex() }))
             }
             "def-list" | "defs-list" => {
                 let kinds: Option<Vec<String>> = req
