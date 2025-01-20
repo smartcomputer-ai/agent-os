@@ -60,6 +60,7 @@ Steps performed by the CLI:
 
 ## Open Questions
 
-- Should `aos ui install` auto-create the publish registry if missing?
-- Should the CLI support `--force` to overwrite existing `/` publish rules?
-- Do we want a default workspace name other than `shell`?
+Resolved:
+- `aos ui install` should auto-create the publish registry if missing (same as workspaces).
+- Add `--force` to overwrite existing `/` publish rules.
+- Default workspace name remains `shell`, but allow override via CLI option.
