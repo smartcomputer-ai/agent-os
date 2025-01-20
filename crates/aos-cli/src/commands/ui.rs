@@ -1,6 +1,6 @@
 //! `aos ui` commands.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -9,18 +9,15 @@ use clap::{Args, Subcommand};
 use serde_json::Value as JsonValue;
 use walkdir::WalkDir;
 
-use aos_air_types::{DefModule, HashRef, Manifest, RoutingEvent, SchemaRef, builtins};
+use aos_air_types::{AirNode, DefModule, HashRef, Manifest, RoutingEvent, SchemaRef, builtins};
 use aos_cbor::Hash;
-use aos_kernel::patch_doc::{
-    ManifestRef, PatchDocument, PatchOp, SetManifestRefs, SetRoutingEvents,
-    compile_patch_document,
-};
+use aos_kernel::governance::ManifestPatch;
 use aos_store::{FsStore, Store};
 use aos_sys::{HttpPublishRegistry, HttpPublishRule, HttpPublishSet, WorkspaceRef};
 
 use crate::opts::{WorldOpts, resolve_dirs};
 use crate::output::print_success;
-use crate::util::{latest_manifest_hash_from_journal, load_world_env, resolve_sys_module_wasm_hash};
+use crate::util::{load_world_env, resolve_sys_module_wasm_hash};
 
 use super::{create_host, prepare_world};
 use super::workspace_sync::{SyncPushOptions, sync_workspace_push};
@@ -99,9 +96,8 @@ async fn ui_install(opts: &WorldOpts, args: &UiInstallArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
     load_world_env(&dirs.world)?;
     let (store, loaded) = prepare_world(&dirs, opts)?;
-    let manifest = loaded.manifest.clone();
     let mut host = create_host(store.clone(), loaded, &dirs, opts)?;
-    ensure_sys_support(&mut host, store.as_ref(), &dirs, &manifest)?;
+    ensure_sys_support(&mut host, store.as_ref(), &dirs)?;
 
     let annotations = build_shell_annotations(&dist_dir)?;
     let ignore = vec!["!**".to_string()];
@@ -376,85 +372,75 @@ fn ensure_sys_support(
     host: &mut aos_host::host::WorldHost<FsStore>,
     store: &FsStore,
     dirs: &crate::opts::ResolvedDirs,
-    manifest: &Manifest,
 ) -> Result<()> {
-    let (patches, needs_patch) = build_sys_patch(store, dirs, manifest)?;
-    if !needs_patch {
-        return Ok(());
-    }
-
-    let base_hash = latest_manifest_hash_from_journal(&dirs.store_root)?
-        .ok_or_else(|| anyhow!("no manifest found in journal"))?;
-    let doc = PatchDocument {
-        version: "1".to_string(),
-        base_manifest_hash: base_hash.to_hex(),
-        patches,
-    };
-    let compiled = compile_patch_document(store, doc)?;
-    host.kernel_mut()
-        .apply_patch_direct(compiled)
-        .context("apply sys manifest patch")?;
-    Ok(())
-}
-
-fn build_sys_patch(
-    store: &FsStore,
-    dirs: &crate::opts::ResolvedDirs,
-    manifest: &Manifest,
-) -> Result<(Vec<PatchOp>, bool)> {
-    let mut patches = Vec::new();
-    let mut add_refs: Vec<ManifestRef> = Vec::new();
-    let mut missing_schemas = HashSet::new();
+    let base_hash = host.kernel().manifest_hash();
+    let mut manifest: Manifest = store.get_node(base_hash).context("load manifest from store")?;
+    let mut changed = false;
+    let mut nodes: Vec<AirNode> = Vec::new();
 
     for name in required_schema_refs() {
-        if !manifest.schemas.iter().any(|entry| entry.name == name) {
-            missing_schemas.insert(name);
+        if manifest.schemas.iter().any(|entry| entry.name == name) {
+            continue;
         }
-    }
-
-    for name in missing_schemas {
         let builtin = builtins::find_builtin_schema(&name)
             .ok_or_else(|| anyhow!("missing builtin schema '{name}'"))?;
-        add_refs.push(ManifestRef {
-            kind: "defschema".to_string(),
+        manifest.schemas.push(aos_air_types::NamedRef {
             name,
-            hash: builtin.hash_ref.to_string(),
+            hash: builtin.hash_ref.clone(),
         });
+        changed = true;
     }
 
     for name in required_module_refs() {
-        if manifest.modules.iter().any(|entry| entry.name == name) {
+        let (hash_ref, node) = build_sys_module_node(store, dirs, &name)?;
+        match manifest.modules.iter_mut().find(|entry| entry.name == name) {
+            Some(entry) => {
+                if entry.hash != hash_ref {
+                    entry.hash = hash_ref;
+                    changed = true;
+                    nodes.push(node);
+                }
+            }
+            None => {
+                manifest.modules.push(aos_air_types::NamedRef {
+                    name,
+                    hash: hash_ref,
+                });
+                changed = true;
+                nodes.push(node);
+            }
+        }
+    }
+
+    let routing = manifest.routing.get_or_insert_with(|| aos_air_types::Routing {
+        events: Vec::new(),
+        inboxes: Vec::new(),
+    });
+
+    let mut next_events = Vec::new();
+    let mut saw_publish = false;
+    let mut saw_workspace = false;
+    for route in &routing.events {
+        if route.event.as_str() == PUBLISH_EVENT && route.reducer == PUBLISH_REDUCER {
+            saw_publish = true;
+            next_events.push(route.clone());
             continue;
         }
-        let hash_ref = store_sys_module(store, dirs, &name)?;
-        add_refs.push(ManifestRef {
-            kind: "defmodule".to_string(),
-            name,
-            hash: hash_ref.to_string(),
-        });
+        if route.event.as_str() == WORKSPACE_EVENT && route.reducer == WORKSPACE_REDUCER {
+            saw_workspace = true;
+            if route.key_field.as_deref() != Some("workspace") {
+                let mut fixed = route.clone();
+                fixed.key_field = Some("workspace".to_string());
+                next_events.push(fixed);
+                changed = true;
+            } else {
+                next_events.push(route.clone());
+            }
+            continue;
+        }
+        next_events.push(route.clone());
     }
-
-    if !add_refs.is_empty() {
-        patches.push(PatchOp::SetManifestRefs {
-            set_manifest_refs: SetManifestRefs {
-                add: add_refs,
-                remove: Vec::new(),
-            },
-        });
-    }
-
-    let current_events = manifest
-        .routing
-        .as_ref()
-        .map(|routing| routing.events.clone())
-        .unwrap_or_default();
-    let mut next_events = current_events.clone();
-    let mut changed = false;
-
-    if !current_events
-        .iter()
-        .any(|route| route.event.as_str() == PUBLISH_EVENT && route.reducer == PUBLISH_REDUCER)
-    {
+    if !saw_publish {
         next_events.push(RoutingEvent {
             event: SchemaRef::new(PUBLISH_EVENT)?,
             reducer: PUBLISH_REDUCER.to_string(),
@@ -462,11 +448,7 @@ fn build_sys_patch(
         });
         changed = true;
     }
-
-    if !current_events
-        .iter()
-        .any(|route| route.event.as_str() == WORKSPACE_EVENT && route.reducer == WORKSPACE_REDUCER)
-    {
+    if !saw_workspace {
         next_events.push(RoutingEvent {
             event: SchemaRef::new(WORKSPACE_EVENT)?,
             reducer: WORKSPACE_REDUCER.to_string(),
@@ -474,38 +456,35 @@ fn build_sys_patch(
         });
         changed = true;
     }
-
     if changed {
-        let pre_hash = Hash::of_cbor(&current_events)
-            .map_err(|e| anyhow!("hash routing.events: {e}"))?
-            .to_hex();
-        patches.push(PatchOp::SetRoutingEvents {
-            set_routing_events: SetRoutingEvents {
-                pre_hash,
-                events: next_events,
-            },
-        });
+        routing.events = next_events;
     }
 
-    let needs_patch = !patches.is_empty();
-    Ok((patches, needs_patch))
+    if !changed {
+        return Ok(());
+    }
+    let patch = ManifestPatch { manifest, nodes };
+    host.kernel_mut()
+        .apply_patch_direct(patch)
+        .context("apply sys manifest patch")?;
+    Ok(())
 }
 
-fn store_sys_module(
+fn build_sys_module_node(
     store: &FsStore,
     dirs: &crate::opts::ResolvedDirs,
     name: &str,
-) -> Result<HashRef> {
+) -> Result<(HashRef, AirNode)> {
     let builtin = builtins::find_builtin_module(name)
         .ok_or_else(|| anyhow!("missing builtin module '{name}'"))?;
     let wasm_hash =
         resolve_sys_module_wasm_hash(store, &dirs.store_root, &dirs.world, name)?;
     let mut module: DefModule = builtin.module.clone();
     module.wasm_hash = wasm_hash;
-    let stored = store
-        .put_node(&module)
-        .context("store system module def")?;
-    HashRef::new(stored.to_hex()).context("create module hash ref")
+    let node = AirNode::Defmodule(module);
+    let hash = Hash::of_cbor(&node).context("hash system module")?;
+    let hash_ref = HashRef::new(hash.to_hex()).context("create module hash ref")?;
+    Ok((hash_ref, node))
 }
 
 fn required_schema_refs() -> Vec<String> {
