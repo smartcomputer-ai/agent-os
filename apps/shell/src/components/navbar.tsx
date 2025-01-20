@@ -28,7 +28,7 @@ type FeatureInfo = {
 };
 
 const FEATURES: FeatureInfo[] = [
-  { path: "/explorer", label: "Explorer", icon: Compass },
+  { path: "/manifest", label: "Manifest", icon: Compass },
   { path: "/workspaces", label: "Workspaces", icon: FolderTree },
   { path: "/governance", label: "Governance", icon: ShieldCheck },
 ];

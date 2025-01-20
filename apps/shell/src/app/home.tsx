@@ -13,9 +13,9 @@ type FeatureTile = {
 
 const FEATURES: FeatureTile[] = [
   {
-    to: "/explorer",
-    label: "Explorer",
-    description: "Manifest, defs, plans",
+    to: "/manifest",
+    label: "Manifest",
+    description: "Modules, plans, routing, defs",
     icon: Compass,
   },
   {
