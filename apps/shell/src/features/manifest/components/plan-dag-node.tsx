@@ -50,9 +50,9 @@ export const PlanDagNode = memo(function PlanDagNode({
             {step.event}
           </div>
         )}
-        {step.op === "await_receipt" && step.for && (
+        {step.op === "await_receipt" && step.for != null && (
           <div className="text-[10px] text-muted-foreground truncate">
-            for: {typeof step.for === "string" ? step.for : "..."}
+            for: {typeof step.for === "string" ? step.for : JSON.stringify(step.for)}
           </div>
         )}
         {step.op === "assign" && step.var && (

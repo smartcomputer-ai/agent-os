@@ -389,6 +389,23 @@ fn resolve_sys_module(
     resolve_from_sys_cache(store, store_root, spec.name)
 }
 
+pub fn resolve_sys_module_wasm_hash(
+    store: &FsStore,
+    store_root: &Path,
+    world_root: &Path,
+    module_name: &str,
+) -> Result<HashRef> {
+    let Some(spec) = sys_module_spec(module_name) else {
+        anyhow::bail!("unknown system module '{module_name}'");
+    };
+    if let Some(hash) = resolve_sys_module(store, store_root, world_root, spec)? {
+        return Ok(hash);
+    }
+    anyhow::bail!(
+        "system wasm for '{module_name}' not found; build with `cargo build -p aos-sys --target wasm32-unknown-unknown`"
+    );
+}
+
 fn persist_module_file(
     modules_dir: &Path,
     module_name: &str,

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useHealth, useManifest } from "@/sdk/queries";
-import { Hash, Layers, Library, Loader2, Braces, Compass, Info } from "lucide-react";
+import { Hash, Layers, Loader2, Braces, Compass, Info } from "lucide-react";
 import {
   ModulesSection,
   PlansSection,

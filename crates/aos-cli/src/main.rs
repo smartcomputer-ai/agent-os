@@ -19,6 +19,7 @@ use commands::pull::PullArgs;
 use commands::push::PushArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
+use commands::ui::UiArgs;
 use commands::workspace::WorkspaceArgs;
 use opts::{WorldOpts, resolve_world};
 
@@ -83,6 +84,9 @@ enum Command {
 
     /// Workspace commands
     Ws(WorkspaceArgs),
+
+    /// UI commands
+    Ui(UiArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -159,5 +163,6 @@ async fn main() -> Result<()> {
         Command::Defs(args) => commands::defs::cmd_defs(opts, &args).await,
         Command::Blob(args) => commands::blob::cmd_blob(opts, &args).await,
         Command::Ws(args) => commands::workspace::cmd_ws(opts, &args).await,
+        Command::Ui(args) => commands::ui::cmd_ui(opts, &args).await,
     }
 }

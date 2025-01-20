@@ -199,9 +199,6 @@ pub fn compile_patch_document<S: Store>(
                 )?;
             }
             PatchOp::SetManifestRefs { set_manifest_refs } => {
-                for reference in &set_manifest_refs.add {
-                    reject_sys_name(&reference.name, "add manifest ref for")?;
-                }
                 for reference in &set_manifest_refs.remove {
                     reject_sys_name(&reference.name, "remove manifest ref for")?;
                 }
