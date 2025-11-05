@@ -13,7 +13,7 @@ Recommended crate layout
 - aos-air-validate: structural + semantic validation (shape, references, DAG checks)
 - aos-cbor: canonical CBOR encode/decode + hashing
 - aos-store: content-addressed store (nodes/blobs), manifest loader
-- aos-wasm: deterministic Wasm runner (reducers/pure ABI)
+- aos-wasm: deterministic Wasm runner (reducer ABI)
 - aos-effects: effect intent/receipt schema and adapters interface
 - aos-kernel: plan executor, capability/policy gates, journal/snapshots, world loop
 - aos-cli: commands to init world, propose/shadow/apply, run, tail logs, etc.
@@ -435,22 +435,6 @@ impl WasmRuntime {
         Ok(out)
     }
 
-    pub fn call_pure_run(&self, wasm_bytes: &[u8], input_cbor: &[u8]) -> anyhow::Result<Vec<u8>> {
-        let module = Module::new(&self.engine, wasm_bytes)?;
-        let mut store = Store::new(&self.engine, ());
-        let mut linker = Linker::new(&self.engine);
-        let instance = linker.instantiate(&mut store, &module)?;
-        let func = instance.get_typed_func::<(i32,i32), (i32,i32), _>(&mut store, "run")
-            .context("export `run` not found")?;
-        let memory = instance.get_memory(&mut store, "memory").context("no memory")?;
-        let ptr = 0x10000;
-        memory.write(&mut store, ptr as usize, input_cbor)?;
-        let len = input_cbor.len() as i32;
-        let (out_ptr, out_len) = func.call(&mut store, (ptr, len))?;
-        let mut out = vec![0u8; out_len as usize];
-        memory.read(&mut store, out_ptr as usize, &mut out)?;
-        Ok(out)
-    }
 }
 ```
 
@@ -528,10 +512,12 @@ pub trait CapabilityGate {
 }
 
 pub trait PolicyGate {
-    fn decide(&self, intent: &EffectIntent, cap: &ResolvedCap) -> Decision;
+    fn decide(&self, intent: &EffectIntent, cap: &ResolvedCap, source: EffectSource) -> Decision;
 }
 
 pub enum Decision { Allow, Deny, RequireApproval }
+
+pub enum EffectSource { Reducer(String), Plan(String) }
 
 pub struct ResolvedCap {
     pub cap_type: String, // e.g., "http.out"
@@ -541,6 +527,74 @@ pub struct ResolvedCap {
 
 pub struct Budget { pub tokens: Option<u64>, pub bytes: Option<u64>, pub cents: Option<u64> }
 ```
+
+Reducer effect guardrails (v1)
+
+Enforce the architectural boundary between reducers and plans:
+
+```rust
+// aos-kernel/src/reducer_guards.rs
+const MICRO_EFFECTS: &[&str] = &["fs.blob.put", "fs.blob.get", "timer.set"];
+
+pub fn validate_reducer_effects(
+    module_name: &str,
+    effects: &[ReducerEffect],
+    declared_effects: &[String]
+) -> anyhow::Result<()> {
+    // Rule 1: At most one effect per step
+    if effects.len() > 1 {
+        anyhow::bail!(
+            "Reducer {} emitted {} effects; reducers may emit at most 1 per step. \
+             Lift complex orchestration to a plan.",
+            module_name, effects.len()
+        );
+    }
+
+    // Rule 2: Only micro-effects allowed
+    for eff in effects {
+        if !MICRO_EFFECTS.contains(&eff.kind.as_str()) {
+            anyhow::bail!(
+                "Reducer {} attempted to emit effect '{}'. \
+                 Reducers may only emit micro-effects (fs.blob.put, fs.blob.get, timer.set). \
+                 Network effects (http, llm, email, payment) must go through plans.",
+                module_name, eff.kind
+            );
+        }
+
+        // Rule 3: Must be in declared effects_emitted
+        if !declared_effects.contains(&eff.kind) {
+            anyhow::bail!(
+                "Reducer {} emitted effect '{}' not in declared effects_emitted",
+                module_name, eff.kind
+            );
+        }
+    }
+
+    Ok(())
+}
+```
+
+Policy gate should also check effect source:
+
+```rust
+impl PolicyGate for DefaultPolicy {
+    fn decide(&self, intent: &EffectIntent, cap: &ResolvedCap, source: EffectSource) -> Decision {
+        // If effect came from a reducer and is not a micro-effect, deny
+        if matches!(source, EffectSource::Reducer(_)) && !is_micro_effect(&intent.kind) {
+            return Decision::Deny;
+        }
+        // ... rest of policy logic
+    }
+}
+
+pub enum EffectSource { Reducer(String), Plan(String) }
+
+fn is_micro_effect(kind: &str) -> bool {
+    matches!(kind, "fs.blob.put" | "fs.blob.get" | "timer.set")
+}
+```
+
+This ensures the intent→plan→effect flow is respected and reducers stay focused on domain logic.
 
 8) Plan executor
 
@@ -609,7 +663,7 @@ impl PlanInstance {
             StepSpec::EmitEffect { kind, params, cap, bind } => {
                 let params_val = eval(params, &self.env).map_err(|e| ExecError::Runtime(format!("{e:?}")))?;
                 let intent = world.make_intent(kind.clone(), params_val, cap)?;
-                world.enqueue_intent(&intent)?;
+                world.enqueue_intent(&intent, EffectSource::Plan(self.name.clone()))?;
                 self.env.vars.insert(bind.clone(), aos_air_types::value::Value::Hash(format!("sha256:{}", hex::encode(intent.intent_hash))));
                 step.state = StepState::Done;
             }
@@ -732,9 +786,9 @@ impl<'a> WorldCtx<'a> {
         let ih = aos_cbor::Hash::of_cbor(&IntentHash{ kind: &kind, params: &params_cbor, cap, idk: &idk });
         Ok(EffectIntent{ kind, params_cbor, cap_name: cap.to_string(), idempotency_key: idk, intent_hash: ih.0 })
     }
-    pub fn enqueue_intent(&mut self, intent: &EffectIntent) -> anyhow::Result<()> {
+    pub fn enqueue_intent(&mut self, intent: &EffectIntent, source: EffectSource) -> anyhow::Result<()> {
         let cap = self.caps.resolve(&intent.cap_name, &intent.kind)?;
-        match self.policy.decide(intent, &cap) {
+        match self.policy.decide(intent, &cap, source) {
             Decision::Allow => { self.outbox.push(intent.clone()) }
             Decision::Deny => anyhow::bail!("policy denied"),
             Decision::RequireApproval => anyhow::bail!("approval required (v1)"),
@@ -870,5 +924,5 @@ Advice on libraries and details
 
 Final conclusions
 
-- Implement AIR evaluation in Rust as a small control-plane engine: canonicalize-and-hash all AIR nodes; load and semantically validate manifests; evaluate expressions with a total, deterministic interpreter; schedule plan steps through a single-threaded executor; call deterministic WASM reducers/pure modules via a tiny CBOR ABI; create effect intents and gate them by capability and policy; reconcile via signed receipts; and persist everything to a canonical journal and snapshots.
+- Implement AIR evaluation in Rust as a small control-plane engine: canonicalize-and-hash all AIR nodes; load and semantically validate manifests; evaluate expressions with a total, deterministic interpreter; schedule plan steps through a single-threaded executor; call deterministic WASM reducers via a tiny CBOR ABI; create effect intents and gate them by capability and policy; reconcile via signed receipts; and persist everything to a canonical journal and snapshots.
 - The code skeletons above give you the key types, traits, and function boundaries. Start with CBOR+hashing+store, then loader/validator, then expr eval, then Wasm runner, then the plan executor and gates, then effects/receipts and journal, then shadow-run. Keep tests “replay-or-die.” This will get you to an end-to-end deterministic PoC without building a full DSL.

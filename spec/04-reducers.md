@@ -138,6 +138,123 @@ Notes
 - Result events (e.g., PaymentResult) are raised by the plan and delivered to this reducer as `Event`.
 - For micro-effects (e.g., timer): push a ReducerEffect with `kind: "timer.set"` and `cap_slot: Some("timer")` and ensure a binding exists.
 
+## Complete Example: Reducer → Plan → Reducer Flow
+
+A typical pattern: reducer emits an intent, a plan performs the work, results return as events.
+
+### 1. Reducer emits a DomainIntent
+
+```rust
+// In OrderSM reducer
+match (&mut s.pc, input.event) {
+    (Pc::Idle, Event::OrderCreated { order_id, amount_cents }) => {
+        s.order_id = order_id.clone();
+        s.pc = Pc::AwaitingPayment;
+        // Emit DomainIntent to request external payment
+        domain_events.push(DomainEvent {
+            schema: "com.acme/ChargeRequested@1".into(),
+            value: cbor!({
+                "order_id": order_id,
+                "amount_cents": amount_cents
+            })
+        });
+    }
+    // ... other transitions
+}
+```
+
+### 2. Manifest trigger starts the plan
+
+```json
+{
+  "triggers": [
+    {
+      "event": "com.acme/ChargeRequested@1",
+      "plan": "com.acme/charge_plan@1",
+      "correlate_by": "order_id"
+    }
+  ]
+}
+```
+
+### 3. Plan performs the effect
+
+```json
+{
+  "$kind": "defplan",
+  "name": "com.acme/charge_plan@1",
+  "input": "com.acme/ChargeRequested@1",
+  "steps": [
+    {
+      "id": "charge",
+      "op": "emit_effect",
+      "kind": "payment.charge",
+      "params": {
+        "record": {
+          "order_id": {"ref": "@plan.input.order_id"},
+          "amount_cents": {"ref": "@plan.input.amount_cents"}
+        }
+      },
+      "cap": "payment_cap",
+      "bind": {"effect_id_as": "charge_id"}
+    },
+    {
+      "id": "wait",
+      "op": "await_receipt",
+      "for": {"ref": "@var:charge_id"},
+      "bind": {"as": "receipt"}
+    },
+    {
+      "id": "notify_reducer",
+      "op": "raise_event",
+      "reducer": "com.acme/OrderSM@1",
+      "event": {
+        "record": {
+          "$schema": {"text": "com.acme/PaymentResult@1"},
+          "order_id": {"ref": "@plan.input.order_id"},
+          "success": {
+            "op": "eq",
+            "args": [
+              {"ref": "@var:receipt.status"},
+              {"text": "ok"}
+            ]
+          },
+          "txn_id": {"ref": "@var:receipt.txn_id"}
+        }
+      }
+    },
+    {"id": "done", "op": "end"}
+  ],
+  "edges": [
+    {"from": "charge", "to": "wait"},
+    {"from": "wait", "to": "notify_reducer"},
+    {"from": "notify_reducer", "to": "done"}
+  ],
+  "required_caps": ["payment_cap"],
+  "allowed_effects": ["payment.charge"]
+}
+```
+
+### 4. Reducer consumes the result
+
+```rust
+match (&mut s.pc, input.event) {
+    (Pc::AwaitingPayment, Event::PaymentResult { success, txn_id }) => {
+        if success {
+            s.pc = Pc::Paid;
+            s.txn_id = Some(txn_id);
+            // Could emit next intent (e.g., ReserveInventory)
+        } else {
+            s.pc = Pc::Failed;
+            s.last_error = Some("Payment failed".into());
+        }
+    }
+    // ... other transitions
+}
+```
+
+This cycle keeps domain logic in reducers and external effects in plans. The plan acts as a deterministic, auditable orchestrator under capabilities and policy.
+
 ## ReceiptEvent And Correlation
 
 - ReceiptEvent envelope (conceptual): `{ intent_hash, effect_kind, adapter_id, status, receipt: <EffectReceiptValue> }`.
@@ -149,6 +266,32 @@ Notes
 
 - Allowed from reducers in v1: `fs.blob.put`, `fs.blob.get`, `timer.set`.
 - All other effect kinds should be denied by policy when originating from reducers and executed via plans instead.
+
+## Effect Boundaries and Guardrails
+
+To maintain clear separation between reducers and plans, the kernel enforces:
+
+### Reducer Effect Limits (v1)
+- **At most ONE effect per step**: reducers emit zero or one effect per invocation
+- **Only "micro-effects"**: `fs.blob.put`, `fs.blob.get`, `timer.set`
+- **NO network effects**: `http.request`, `llm.generate`, `email.send`, `payment.charge` must go through plans
+
+### Policy Enforcement
+- EffectKind not in declared `effects_emitted` → rejected by validator at load time
+- Disallowed kinds from reducers → policy denial at runtime: "Effect X requires plan orchestration"
+- Multiple effects in single step → rejected with diagnostic: "Reducers may emit at most one effect per step; lift complex orchestration to a plan"
+
+### Intent-Based Pattern
+- **Complex workflows**: emit DomainIntent event → manifest trigger starts plan → plan performs effects → plan raises result event → reducer consumes result
+- **Micro-effects**: emit directly from reducer if effect kind is in allowlist and bound to a valid `cap_slot`
+- **Human approvals**: must go through plans; reducers cannot request approvals directly
+
+### Enforcement Points
+- **Static validation**: defmodule `effects_emitted` checked against micro-effects allowlist
+- **Runtime policy gate**: checks effect source (reducer vs plan), denies prohibited combinations
+- **Linter warnings**: flag reducers emitting DomainIntents with no matching trigger in manifest
+
+This boundary ensures that high-risk external effects flow through the auditable, governable plan layer while keeping simple, low-risk effects available to reducers for tight state transitions.
 
 ## Capability Slot Resolution
 

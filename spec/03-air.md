@@ -79,20 +79,20 @@ See: spec/schemas/defschema.schema.json
 
 ## 6) defmodule
 
-Kinds
+Kind
 - reducer: deterministic state machine
-- pure: deterministic function (no effects, no state)
 
 Shape
-- `{ "$kind":"defmodule", "name": Name, "module_kind":"reducer"|"pure", "wasm_hash": Hash, "abi": { "reducer"?: { "state": SchemaRef, "event": SchemaRef, "annotations"?: SchemaRef, "effects_emitted"?: [EffectKind…], "cap_slots"?: { slot_name: CapType } }, "pure"?: { "input": SchemaRef, "output": SchemaRef } }, "key_schema"?: SchemaRef }`
+- `{ "$kind":"defmodule", "name": Name, "module_kind":"reducer", "wasm_hash": Hash, "abi": { "reducer": { "state": SchemaRef, "event": SchemaRef, "annotations"?: SchemaRef, "effects_emitted"?: [EffectKind…], "cap_slots"?: { slot_name: CapType } } }, "key_schema"?: SchemaRef }`
   - `key_schema` (v1.1 addendum): documents the key type when this reducer is routed as keyed; ABI remains a single `step` with a context that may include a key.
 
 ABI
 - Reducer export: `step(ptr,len) -> (ptr,len)`; input CBOR envelope includes optional key (see Cells spec); output CBOR `{state, domain_events?, effects?, ann?}`
-- Pure export: `run(ptr,len) -> (ptr,len)`; input/output CBOR per declared schemas.
 
 Determinism
 - No WASI ambient syscalls; no threads; no clock; all I/O via effect layer. Prefer dec128 in values; normalize NaNs if floats used internally.
+
+Note: Pure modules (stateless, side-effect-free functions) are deferred to v1.1+. Use reducers for all computation in v1.
 
 See: spec/schemas/defmodule.schema.json
 
@@ -143,6 +143,12 @@ See: spec/schemas/defpolicy.schema.json
 
 High level
 - Finite DAG of steps producing named outputs in a typed environment. Edges have optional guard predicates. Deterministic scheduler.
+
+Scope and Purpose
+- Plans are the orchestration layer, NOT a compute runtime. They coordinate external effects under capabilities and policy, wait for receipts and human approvals, and raise events to reducers to advance domain state.
+- Plans do NOT: perform heavy computation (use reducers), mutate reducer state directly (only via raise_event), or make business logic decisions (that's the reducer's domain).
+- Use plans when: coordinating multiple effects, requiring human gates/approvals, spanning long durations (minutes/hours), or needing centralized governance/audit.
+- Keep logic in reducers when: performing domain state transitions, enforcing business invariants, or emitting simple micro-effects (timer, blob).
 
 Shape
 - `{ "$kind":"defplan", "name":Name, "input":SchemaRef, "output"?:SchemaRef, "locals"?:{ name:SchemaRef… }, "steps":[ Step… ], "edges":[ {from:StepId, to:StepId, when?:Expr }… ], "required_caps":[CapGrantName…], "allowed_effects":[EffectKind…], "invariants"?:[Expr…] }`
@@ -236,16 +242,13 @@ Application
 20.1 defschema (FeedItem)
 - `{ "$kind":"defschema", "name":"com.acme/FeedItem@1", "type": { "record": { "title": {"text":{}}, "url": {"text":{}} } } }`
 
-20.2 defmodule (rss_fetch@1, pure)
-- `{ "$kind":"defmodule", "name":"com.acme/rss_fetch@1", "module_kind":"pure", "wasm_hash":"sha256:…", "abi": { "pure": { "input": { "record": { "url": {"text":{}} } }, "output": { "record": { "items": { "list": { "ref": "com.acme/FeedItem@1" } } } } } } }`
-
-20.3 defcap (http.out@1)
+20.2 defcap (http.out@1)
 - `{ "$kind":"defcap", "name":"sys/http.out@1", "cap_type":"http.out", "schema": { "record": { "hosts": { "set": { "text": {} } }, "verbs": { "set": { "text": {} } }, "rpm": { "nat": {} } } } }`
 
-20.4 defpolicy (allow google rss)
+20.3 defpolicy (allow google rss)
 - `{ "$kind":"defpolicy", "name":"com.acme/policy@1", "rules": [ { "when": { "effect_kind":"http.request", "host":"news.google.com" }, "decision":"allow", "limits": { "rpm":60 } }, { "when": { "effect_kind":"llm.generate" }, "decision":"require_approval" } ] }`
 
-20.5 defplan (daily_digest)
+20.4 defplan (daily_digest)
 - `{ "$kind":"defplan", "name":"com.acme/daily_digest@1", "input": {"unit":{}}, "steps": [
     { "id":"set_url", "op":"assign", "expr": { "text":"https://news.google.com/rss" }, "bind": { "as":"rss_url" } },
     { "id":"fetch", "op":"emit_effect", "kind":"http.request", "params": { "record": { "method": {"text":"GET"}, "url": { "ref":"@var:rss_url" }, "headers": { "map": [] } } }, "cap":"http_out_google", "bind": { "effect_id_as":"fetch_id" } },

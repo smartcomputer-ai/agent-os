@@ -27,13 +27,17 @@ This file provides guidance to coding agents when working with code in this repo
 **World**: Single-threaded deterministic event log. Replay journal + receipts = identical state.
 
 **Three layers**:
-- **Reducers** (WASM state machines): Domain logic, emit events. Micro-effects only (timer, fs.blob). See spec/04-reducers.md
-- **Plans** (DAG orchestration): Multi-step workflows. All risky effects (http, llm, payments). See spec/03-air.md §11
+- **Reducers** (WASM state machines): Domain logic, business invariants, emit events. May emit micro-effects (timer, fs.blob) ONLY. See spec/04-reducers.md
+- **Plans** (DAG orchestration): Multi-step effect workflows under governance. All risky effects (http, llm, payments, email). See spec/03-air.md §11
 - **Effects/Adapters**: Execute external actions, return signed receipts. See spec/02-architecture.md
 
 **Governance**: propose → shadow → approve → apply → execute → receipt → audit
 
-**Critical rule**: Reducers emit domain events (intents) → triggers start Plans → Plans do http/llm/payments → Plans raise result events → Reducers update state. NEVER orchestrate http/llm/payments in reducers.
+**Critical boundaries (v1)**:
+- **Reducers**: Own state and business logic. Emit DomainIntent events for external work. May emit at most ONE micro-effect per step (fs.blob.{put,get}, timer.set). NO network effects.
+- **Plans**: Orchestrate effects (http, llm, payments, email) triggered by intents. Raise result events back to reducers. NO compute or business logic.
+- **Flow**: Reducer emits intent → Manifest trigger starts Plan → Plan performs effects → Plan raises result event → Reducer advances state.
+- **Rule**: NEVER orchestrate http/llm/payments/email in reducers. NEVER put business logic in plans. Keep responsibilities clear.
 
 ## Key Principles
 
