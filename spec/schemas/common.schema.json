@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v1/common.schema.json",
+  "title": "AIR v1 Common Definitions",
+  "type": "object",
+  "$defs": {
+    "Name": {
+      "title": "Qualified name: namespace/name@version",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]*/[A-Za-z][A-Za-z0-9._-]*@([1-9][0-9]*)$"
+    },
+    "Hash": {
+      "title": "Content hash",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "EffectKind": {
+      "title": "Built-in effect kinds (v1)",
+      "type": "string",
+      "enum": ["http.request", "fs.blob.put", "fs.blob.get", "timer.set", "llm.generate"]
+    },
+    "CapType": {
+      "title": "Capability types (v1)",
+      "type": "string",
+      "enum": ["http.out", "fs.blob", "timer", "llm.basic"]
+    },
+    "VarName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
+    },
+    "StepId": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
+    },
+    "CapGrantName": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
+    },
+    "BytesB64": {
+      "type": "string",
+      "contentEncoding": "base64"
+    },
+    "DecimalString": {
+      "description": "Decimal128 represented as a string to avoid float issues",
+      "type": "string",
+      "pattern": "^[+-]?(\\d+)(\\.\\d+)?([eE][+-]?\\d+)?$"
+    },
+    "SchemaRef": { "$ref": "#/$defs/Name" },
+
+    "TypeExpr": {
+      "description": "Type expression: primitive, composite, or reference to a defschema",
+      "type": "object",
+      "oneOf": [
+        { "$ref": "#/$defs/TypePrimitive" },
+        { "$ref": "#/$defs/TypeComposite" },
+        {
+          "type": "object",
+          "properties": { "ref": { "$ref": "#/$defs/SchemaRef" } },
+          "required": ["ref"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "TypePrimitive": {
+      "type": "object",
+      "oneOf": [
+        { "properties": { "bool": { "type": "object", "maxProperties": 0 } }, "required": ["bool"], "additionalProperties": false },
+        { "properties": { "int": { "type": "object", "maxProperties": 0 } }, "required": ["int"], "additionalProperties": false },
+        { "properties": { "nat": { "type": "object", "maxProperties": 0 } }, "required": ["nat"], "additionalProperties": false },
+        { "properties": { "dec128": { "type": "object", "maxProperties": 0 } }, "required": ["dec128"], "additionalProperties": false },
+        { "properties": { "bytes": { "type": "object", "maxProperties": 0 } }, "required": ["bytes"], "additionalProperties": false },
+        { "properties": { "text": { "type": "object", "maxProperties": 0 } }, "required": ["text"], "additionalProperties": false },
+        { "properties": { "time": { "type": "object", "maxProperties": 0 } }, "required": ["time"], "additionalProperties": false },
+        { "properties": { "duration": { "type": "object", "maxProperties": 0 } }, "required": ["duration"], "additionalProperties": false },
+        { "properties": { "hash": { "type": "object", "maxProperties": 0 } }, "required": ["hash"], "additionalProperties": false },
+        { "properties": { "uuid": { "type": "object", "maxProperties": 0 } }, "required": ["uuid"], "additionalProperties": false },
+        { "properties": { "unit": { "type": "object", "maxProperties": 0} }, "required": ["unit"], "additionalProperties": false }
+      ]
+    },
+    "TypeComposite": {
+      "type": "object",
+      "oneOf": [
+        {
+          "properties": {
+            "record": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/TypeExpr" }
+            }
+          },
+          "required": ["record"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "variant": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/TypeExpr" }
+            }
+          },
+          "required": ["variant"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "list": { "$ref": "#/$defs/TypeExpr" }
+          },
+          "required": ["list"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "set": { "$ref": "#/$defs/TypeExpr" }
+          },
+          "required": ["set"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "map": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "description": "Key type must be int|nat|text|uuid|hash",
+                  "oneOf": [
+                    { "properties": { "int": { "type": "object", "maxProperties": 0 } }, "required": ["int"], "additionalProperties": false },
+                    { "properties": { "nat": { "type": "object", "maxProperties": 0 } }, "required": ["nat"], "additionalProperties": false },
+                    { "properties": { "text": { "type": "object", "maxProperties": 0 } }, "required": ["text"], "additionalProperties": false },
+                    { "properties": { "uuid": { "type": "object", "maxProperties": 0 } }, "required": ["uuid"], "additionalProperties": false },
+                    { "properties": { "hash": { "type": "object", "maxProperties": 0 } }, "required": ["hash"], "additionalProperties": false }
+                  ]
+                },
+                "value": { "$ref": "#/$defs/TypeExpr" }
+              },
+              "required": ["key", "value"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["map"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "option": { "$ref": "#/$defs/TypeExpr" }
+          },
+          "required": ["option"],
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "Expr": {
+      "description": "Side-effect-free expression used in guards, bindings, and parameter construction",
+      "type": "object",
+      "oneOf": [
+        { "$ref": "#/$defs/ExprRef" },
+        { "$ref": "#/$defs/ExprConst" },
+        { "$ref": "#/$defs/ExprOp" },
+        { "$ref": "#/$defs/ExprRecord" },
+        { "$ref": "#/$defs/ExprList" },
+        { "$ref": "#/$defs/ExprSet" },
+        { "$ref": "#/$defs/ExprMap" },
+        { "$ref": "#/$defs/ExprVariant" }
+      ]
+    },
+    "ExprRef": {
+      "type": "object",
+      "properties": {
+        "ref": {
+          "type": "string",
+          "description": "References: @plan.input[.path], @var:<name>, @step:<id>[.path]",
+          "pattern": "^@(plan\\.input(\\.[A-Za-z_][A-Za-z0-9_.-]*)*|var:[A-Za-z_][A-Za-z0-9_.-]*|step:[A-Za-z_][A-Za-z0-9_.-]*(\\.[A-Za-z_][A-Za-z0-9_.-]*)*)$"
+        }
+      },
+      "required": ["ref"],
+      "additionalProperties": false
+    },
+    "ExprConst": {
+      "type": "object",
+      "oneOf": [
+        { "properties": { "bool": { "type": "boolean" } }, "required": ["bool"], "additionalProperties": false },
+        { "properties": { "int": { "type": "integer" } }, "required": ["int"], "additionalProperties": false },
+        { "properties": { "nat": { "type": "integer", "minimum": 0 } }, "required": ["nat"], "additionalProperties": false },
+        { "properties": { "dec128": { "$ref": "#/$defs/DecimalString" } }, "required": ["dec128"], "additionalProperties": false },
+        { "properties": { "text": { "type": "string" } }, "required": ["text"], "additionalProperties": false },
+        { "properties": { "bytes_b64": { "$ref": "#/$defs/BytesB64" } }, "required": ["bytes_b64"], "additionalProperties": false },
+        { "properties": { "time_ns": { "type": "integer", "minimum": 0 } }, "required": ["time_ns"], "additionalProperties": false },
+        { "properties": { "duration_ns": { "type": "integer" } }, "required": ["duration_ns"], "additionalProperties": false },
+        { "properties": { "hash": { "$ref": "#/$defs/Hash" } }, "required": ["hash"], "additionalProperties": false },
+        { "properties": { "uuid": { "type": "string", "format": "uuid" } }, "required": ["uuid"], "additionalProperties": false }
+      ]
+    },
+    "ExprOp": {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": ["len","get","has","eq","ne","lt","le","gt","ge","and","or","not","concat","add","sub","mul","div","mod","starts_with","ends_with","contains"]
+        },
+        "args": { "type": "array", "items": { "$ref": "#/$defs/Expr" }, "minItems": 1 }
+      },
+      "required": ["op", "args"],
+      "additionalProperties": false
+    },
+    "ExprRecord": {
+      "type": "object",
+      "properties": {
+        "record": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/Expr" }
+        }
+      },
+      "required": ["record"],
+      "additionalProperties": false
+    },
+    "ExprList": {
+      "type": "object",
+      "properties": {
+        "list": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Expr" }
+        }
+      },
+      "required": ["list"],
+      "additionalProperties": false
+    },
+    "ExprSet": {
+      "type": "object",
+      "properties": {
+        "set": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Expr" }
+        }
+      },
+      "required": ["set"],
+      "additionalProperties": false
+    },
+    "ExprMap": {
+      "type": "object",
+      "properties": {
+        "map": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "$ref": "#/$defs/Expr" },
+              "value": { "$ref": "#/$defs/Expr" }
+            },
+            "required": ["key","value"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["map"],
+      "additionalProperties": false
+    },
+    "ExprVariant": {
+      "type": "object",
+      "properties": {
+        "variant": {
+          "type": "object",
+          "properties": {
+            "tag": { "type": "string" },
+            "value": { "$ref": "#/$defs/Expr" }
+          },
+          "required": ["tag"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["variant"],
+      "additionalProperties": false
+    },
+
+    "CapGrant": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "#/$defs/CapGrantName" },
+        "cap": { "$ref": "#/$defs/Name" },
+        "params": { "$ref": "#/$defs/Expr" },
+        "expiry_ns": { "type": "integer", "minimum": 0 },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "tokens": { "type": "integer", "minimum": 0 },
+            "bytes": { "type": "integer", "minimum": 0 },
+            "cents": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["name", "cap", "params"],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

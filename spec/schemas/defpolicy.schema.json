@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v1/defpolicy.schema.json",
+  "title": "AIR v1 defpolicy",
+  "type": "object",
+  "properties": {
+    "$kind": { "const": "defpolicy" },
+    "name": { "$ref": "common.schema.json#/$defs/Name" },
+    "rules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Rule" }
+    }
+  },
+  "required": ["$kind","name","rules"],
+  "additionalProperties": false,
+  "$defs": {
+    "Rule": {
+      "type": "object",
+      "properties": {
+        "when": { "$ref": "#/$defs/Match" },
+        "decision": { "type": "string", "enum": ["allow","deny","require_approval"] },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "rpm": { "type": "integer", "minimum": 0 },
+            "daily_budget": {
+              "type": "object",
+              "properties": {
+                "tokens": { "type": "integer", "minimum": 0 },
+                "bytes": { "type": "integer", "minimum": 0 },
+                "cents": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["when","decision"],
+      "additionalProperties": false
+    },
+    "Match": {
+      "type": "object",
+      "properties": {
+        "effect_kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
+        "cap_name": { "$ref": "common.schema.json#/$defs/CapGrantName" },
+        "host": { "type": "string" },
+        "path_prefix": { "type": "string" },
+        "method": { "type": "string" },
+        "principal": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

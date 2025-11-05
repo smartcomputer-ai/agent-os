@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v1/defplan.schema.json",
+  "title": "AIR v1 defplan",
+  "type": "object",
+  "properties": {
+    "$kind": { "const": "defplan" },
+    "name": { "$ref": "common.schema.json#/$defs/Name" },
+    "input": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+    "output": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+    "locals": {
+      "type": "object",
+      "additionalProperties": { "$ref": "common.schema.json#/$defs/SchemaRef" }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Step" }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": { "$ref": "common.schema.json#/$defs/StepId" },
+          "to": { "$ref": "common.schema.json#/$defs/StepId" },
+          "when": { "$ref": "common.schema.json#/$defs/Expr" }
+        },
+        "required": ["from","to"],
+        "additionalProperties": false
+      }
+    },
+    "required_caps": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/CapGrantName" }
+    },
+    "allowed_effects": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/EffectKind" }
+    },
+    "invariants": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/Expr" }
+    }
+  },
+  "required": ["$kind","name","input","steps"],
+  "additionalProperties": false,
+  "$defs": {
+    "Step": {
+      "type": "object",
+      "oneOf": [
+        { "$ref": "#/$defs/StepRaiseEvent" },
+        { "$ref": "#/$defs/StepEmitEffect" },
+        { "$ref": "#/$defs/StepAwaitReceipt" },
+        { "$ref": "#/$defs/StepAwaitEvent" },
+        { "$ref": "#/$defs/StepAssign" },
+        { "$ref": "#/$defs/StepEnd" }
+      ]
+    },
+    "StepBase": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "common.schema.json#/$defs/StepId" }
+      },
+      "required": ["id"]
+    },
+    "BindAs": {
+      "type": "object",
+      "properties": { "as": { "$ref": "common.schema.json#/$defs/VarName" } },
+      "required": ["as"],
+      "additionalProperties": false
+    },
+    "StepRaiseEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "raise_event" },
+            "reducer": { "$ref": "common.schema.json#/$defs/Name" },
+            "event": { "$ref": "common.schema.json#/$defs/Expr" },
+            "key": { "$ref": "common.schema.json#/$defs/Expr" }
+          },
+          "required": ["op","reducer","event"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepEmitEffect": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "emit_effect" },
+            "kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
+            "params": { "$ref": "common.schema.json#/$defs/Expr" },
+            "cap": { "$ref": "common.schema.json#/$defs/CapGrantName" },
+            "bind": {
+              "type": "object",
+              "properties": {
+                "effect_id_as": { "$ref": "common.schema.json#/$defs/VarName" }
+              },
+              "required": ["effect_id_as"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["op","kind","params","cap","bind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepAwaitReceipt": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "await_receipt" },
+            "for": { "$ref": "common.schema.json#/$defs/Expr" },
+            "bind": { "$ref": "#/$defs/BindAs" }
+          },
+          "required": ["op","for","bind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepAwaitEvent": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "await_event" },
+            "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+            "where": { "$ref": "common.schema.json#/$defs/Expr" },
+            "bind": { "$ref": "#/$defs/BindAs" }
+          },
+          "required": ["op","event","bind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepAssign": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "assign" },
+            "expr": { "$ref": "common.schema.json#/$defs/Expr" },
+            "bind": { "$ref": "#/$defs/BindAs" }
+          },
+          "required": ["op","expr","bind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepEnd": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "op": { "const": "end" },
+            "result": { "$ref": "common.schema.json#/$defs/Expr" }
+          },
+          "required": ["op"],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v1/defcap.schema.json",
+  "title": "AIR v1 defcap",
+  "type": "object",
+  "properties": {
+    "$kind": { "const": "defcap" },
+    "name": { "$ref": "common.schema.json#/$defs/Name" },
+    "cap_type": { "$ref": "common.schema.json#/$defs/CapType" },
+    "schema": { "$ref": "common.schema.json#/$defs/TypeExpr" }
+  },
+  "required": ["$kind","name","cap_type","schema"],
+  "additionalProperties": false
+}

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v1/manifest.schema.json",
+  "title": "AIR v1 manifest",
+  "type": "object",
+  "properties": {
+    "$kind": { "const": "manifest" },
+    "schemas": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NamedRef" }
+    },
+    "modules": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NamedRef" }
+    },
+    "plans": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NamedRef" }
+    },
+    "caps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NamedRef" }
+    },
+    "policies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NamedRef" }
+    },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "policy": { "$ref": "common.schema.json#/$defs/Name" },
+        "cap_grants": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/CapGrant" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "module_bindings": {
+      "description": "Module-level slot bindings: module Name → { slots: { slot_name → CapGrantName } }",
+      "type": "object",
+      "patternProperties": {
+        "^[a-z][a-z0-9._-]*/[A-Za-z][A-Za-z0-9._-]*@[1-9][0-9]*$": {
+          "type": "object",
+          "properties": {
+            "slots": {
+              "type": "object",
+              "patternProperties": {
+                "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$": { "$ref": "common.schema.json#/$defs/CapGrantName" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["slots"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+              "reducer": { "$ref": "common.schema.json#/$defs/Name" },
+              "key_field": { "type": "string", "description": "Field in event value that carries the cell key (for keyed reducers)" }
+            },
+            "required": ["event","reducer"],
+            "additionalProperties": false
+          }
+        },
+        "inboxes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "source": { "type": "string" },
+              "reducer": { "$ref": "common.schema.json#/$defs/Name" }
+            },
+            "required": ["source","reducer"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+    ,
+    "triggers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+          "plan": { "$ref": "common.schema.json#/$defs/Name" },
+          "correlate_by": { "type": "string" }
+        },
+        "required": ["event","plan"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["$kind","schemas","modules","plans","caps","policies"],
+  "additionalProperties": false,
+  "$defs": {
+    "NamedRef": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/Name" },
+        "hash": { "$ref": "common.schema.json#/$defs/Hash" }
+      },
+      "required": ["name","hash"],
+      "additionalProperties": false
+    }
+  }
+}

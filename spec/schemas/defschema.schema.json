@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v1/defschema.schema.json",
+  "title": "AIR v1 defschema",
+  "type": "object",
+  "properties": {
+    "$kind": { "const": "defschema" },
+    "name": { "$ref": "common.schema.json#/$defs/Name" },
+    "type": { "$ref": "common.schema.json#/$defs/TypeExpr" }
+  },
+  "required": ["$kind","name","type"],
+  "additionalProperties": false
+}
