@@ -62,12 +62,27 @@ Trade-offs
 - Snapshot semantics: define read snapshot as “state as of ticket−1”; v1 already behaves this way; write it down.
 - Journal fields: include event_id and optional lane_id (default 0) for future lanes.
 
+### Journal Hooks (Schema Stub)
+
+To make hooks concrete, journal entries can include `event_id` (monotonic, assigned by the sequencer) and `lane_id` (partition, default 0). Example shapes (CBOR/JSON conceptual):
+
+- StepScheduled { event_id, lane_id, kind: "run_step"|"cell_event", subject: { run_id? , reducer?: Name, key?: bytes } }
+- StepCommitted { event_id, lane_id, diffs_ref, domain_events_ref[], effects_intended_ref[] }
+- EffectQueued { event_id, lane_id, intent_hash, kind, cap_ref, params_ref }
+- ReceiptAppended { lane_id, intent_hash, receipt_ref, status }
+
+Event IDs and lane IDs are recorded to preserve replay order and support future partitioning without changing semantics.
+
 ## Validation & Testing (when adding parallelism)
 
 - Replay-or-die: parallel runs must replay serially to byte-identical snapshots.
 - Randomized schedulers in CI: vary worker counts and interleavings; assert journal equivalence.
 - Fault injection: re-validation failures, adapter delays, budget edge cases.
 - Invariant checkers: fail fast if commit would violate declared invariants.
+
+### Scheduling Fairness
+
+Use round-robin across ready Runs and Cells with bounded per-entity work (one step per tick). Optionally add simple weights or priority classes (e.g., aging or per-tenant caps); record scheduling decisions in metrics to diagnose starvation.
 
 ## Failure Handling
 
