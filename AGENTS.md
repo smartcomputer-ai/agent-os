@@ -16,9 +16,10 @@ This file provides guidance to coding agents when working with code in this repo
 2. **spec/02-architecture.md** - Runtime components, event flow, storage layout
 3. **spec/03-air.md** - **CRITICAL**: Complete AIR v1 spec (schemas, modules, plans, capabilities, policies)
 4. **spec/04-reducers.md** - Reducer semantics, ABI, relationship to plans
-5. **spec/05-cells.md** - Keyed reducers (v1.1)
-6. **spec/06-parallelism.md** - Future direction (deferred)
-7. **spec/03b-air-implementation.md** - Rust implementation guide with code skeletons
+5. **spec/07-workflow-patterns.md** - **IMPORTANT**: How to coordinate complex workflows (patterns, compensations, retries)
+6. **spec/05-cells.md** - Keyed reducers (v1.1)
+7. **spec/06-parallelism.md** - Future direction (deferred)
+8. **spec/10-air-implementation.md** - Rust implementation guide with code skeletons
 
 **spec/schemas/** - JSON Schemas for AIR node validation
 
@@ -38,6 +39,12 @@ This file provides guidance to coding agents when working with code in this repo
 - **Plans**: Orchestrate effects (http, llm, payments, email) triggered by intents. Raise result events back to reducers. NO compute or business logic.
 - **Flow**: Reducer emits intent → Manifest trigger starts Plan → Plan performs effects → Plan raises result event → Reducer advances state.
 - **Rule**: NEVER orchestrate http/llm/payments/email in reducers. NEVER put business logic in plans. Keep responsibilities clear.
+
+**Workflow patterns** (see spec/07-workflow-patterns.md):
+- **Single-plan**: One plan orchestrates full flow (best for governance/audit)
+- **Multi-plan**: Event-driven choreography (best for service boundaries)
+- **Reducer-driven**: Reducer owns state machine, plans are thin wrappers (best for complex business logic)
+- **Hybrid**: Plan orchestrates, reducer tracks (best for high-value workflows needing both)
 
 ## Key Principles
 
