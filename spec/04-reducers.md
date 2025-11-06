@@ -2,47 +2,86 @@
 
 Reducers are deterministic, WASM-compiled state machines that own application/domain state and business invariants. They consume events, update state, and may emit domain intents (events) and a constrained set of micro-effects. Complex, multi-step external orchestration is handled by AIR plans; reducers remain focused on domain evolution.
 
-Note on scope (v1.0)
-- This chapter describes reducers for v1.0: a reducer has a single state value. If you need many parallel instances of the same FSM, model them as a map<key, substate> inside this state (see “Coding Pattern” and “ReceiptEvent And Correlation”).
-- In v1.1, “Cells” make per-key instances first-class (per-cell state and mailboxes) with the same reducer ABI. See: spec/05-cells.md.
+## Scope Note (v1.0)
 
-## Role And Boundaries
+This chapter describes reducers for v1.0, where a reducer has a single state value. If you need many parallel instances of the same FSM, model them as a `map<key, substate>` inside this state (see "Coding Pattern" and "ReceiptEvent And Correlation").
 
-- Single source of state changes: reducers advance only when they receive events. Plans do not call reducers directly; they raise events the kernel routes to reducers.
-- Business logic lives here: validation, transitions, invariants, and shaping domain intents.
-- Effects policy: reducers may emit only micro-effects (e.g., fs.blob.put, timer.set) under explicit capability slots. High-risk or multi-hop external effects (email/http to third parties, LLM, payments) must be orchestrated by plans.
-- Orchestration handoff: reducers emit DomainIntent events (e.g., ChargeRequested, NotifyCustomer), which trigger plans via manifest triggers. Plans perform effects, await receipts, and raise result events back.
+Version 1.1 introduces "Cells," which make per-key instances first-class with per-cell state and mailboxes while keeping the same reducer ABI. See: spec/05-cells.md.
+
+## Role and Boundaries
+
+Reducers are the **single source of state changes**. They advance only when they receive events. Plans do not call reducers directly; they raise events the kernel routes to reducers.
+
+**Business logic lives here**: validation, transitions, invariants, and shaping domain intents.
+
+**Effects policy**: Reducers may emit only micro-effects (e.g., `fs.blob.put`, `timer.set`) under explicit capability slots. High-risk or multi-hop external effects (email/HTTP to third parties, LLM, payments) must be orchestrated by plans.
+
+**Orchestration handoff**: Reducers emit DomainIntent events (e.g., `ChargeRequested`, `NotifyCustomer`), which trigger plans via manifest triggers. Plans perform effects, await receipts, and raise result events back.
 
 ## Execution Environment (Deterministic WASM)
 
-- Target: core wasm (wasm32-unknown-unknown). No WASI, no threads, no ambient clock or randomness.
-- Deterministic numerics; prefer dec128 in values; normalize NaNs if floats used internally.
-- All I/O via returned effects; reducers cannot perform syscalls.
-- Replay: given the same input event stream and recorded receipts, reducers produce identical state bytes.
+Reducers target core WASM (`wasm32-unknown-unknown`). No WASI, no threads, no ambient clock or randomness. Deterministic numerics are required; prefer `dec128` in values; normalize NaNs if floats are used internally.
+
+All I/O happens via returned effects; reducers cannot perform syscalls. **Replay guarantee**: given the same input event stream and recorded receipts, reducers produce identical state bytes.
 
 ## ABI (Reducer)
 
-- Export: `step(ptr, len) -> (ptr, len)`
-- Input CBOR (canonical): `{ state: <bytes>, event: <bytes> }`
-  - `state` is canonical CBOR matching the declared state schema.
-  - `event` is canonical CBOR of a DomainEvent or a ReceiptEvent addressed to this reducer.
-- Output CBOR (canonical): `{ state: <bytes>, domain_events?: [ { schema: <Name>, value: <Value> } ], effects?: [ ReducerEffect ], ann?: <annotations> }`
-  - `state`: new canonical state bytes.
-  - `domain_events` (optional): zero or more domain events (including DomainIntent). Kernel appends them to the journal and routes by manifest.
-  - `effects` (optional): micro-effects only; see Effect Emission.
-  - `ann` (optional): structured annotations for observability.
+### Export
 
-ReducerEffect shape (semantic contract from reducer to kernel):
-- `{ kind: EffectKind, params: Value, cap_slot?: string }`
-  - `kind`: must be in reducer’s declared `effects_emitted` allowlist.
-  - `cap_slot` (optional): abstract slot to bind a concrete CapGrant via manifest.module_bindings.
+`step(ptr, len) -> (ptr, len)`
+
+### Input CBOR (canonical)
+
+```
+{
+  state: <bytes>,
+  event: <bytes>
+}
+```
+
+- `state` is canonical CBOR matching the declared state schema
+- `event` is canonical CBOR of a DomainEvent or ReceiptEvent addressed to this reducer
+
+### Output CBOR (canonical)
+
+```
+{
+  state: <bytes>,
+  domain_events?: [{schema: <Name>, value: <Value>}],
+  effects?: [<ReducerEffect>],
+  ann?: <annotations>
+}
+```
+
+- `state`: new canonical state bytes
+- `domain_events` (optional): zero or more domain events (including DomainIntent); kernel appends them to the journal and routes by manifest
+- `effects` (optional): micro-effects only; see Effect Emission
+- `ann` (optional): structured annotations for observability
+
+### ReducerEffect Shape
+
+Semantic contract from reducer to kernel:
+
+```
+{
+  kind: EffectKind,
+  params: Value,
+  cap_slot?: string
+}
+```
+
+- `kind`: must be in reducer's declared `effects_emitted` allowlist
+- `cap_slot` (optional): abstract slot to bind a concrete CapGrant via `manifest.module_bindings`
 
 ## Events Seen By Reducers
 
-- DomainEvent: business events and intents. Produced by other reducers or plans via raise_event. Versioned by schema Name.
-- ReceiptEvent: adapter receipts converted to events by the kernel for micro-effects (e.g., TimerFired for timer.set). For complex external work, plans raise result DomainEvents instead of relying on raw receipts. Correlate using stable fields in your events/effect params (e.g., a key like order_id or an idempotency key). In v1.1 Cells, this key becomes a first-class route; see spec/05-cells.md.
+Reducers consume two kinds of events:
 
-Reducers should be written as explicit typestate machines: a `pc` (program counter) enum plus fences/idempotency to handle duplicates and retries. This makes continuations data-driven and deterministic.
+**DomainEvent**: Business events and intents. Produced by other reducers or plans via `raise_event`. Versioned by schema Name.
+
+**ReceiptEvent**: Adapter receipts converted to events by the kernel for micro-effects (e.g., `TimerFired` for `timer.set`). For complex external work, plans raise result DomainEvents instead of relying on raw receipts. Correlate using stable fields in your events/effect params (e.g., a key like `order_id` or an idempotency key). In v1.1 Cells, this key becomes a first-class route; see spec/05-cells.md.
+
+Reducers should be written as explicit **typestate machines**: a `pc` (program counter) enum plus fences/idempotency to handle duplicates and retries. This makes continuations data-driven and deterministic.
 
 ## Effect Emission (Micro-Effects)
 
