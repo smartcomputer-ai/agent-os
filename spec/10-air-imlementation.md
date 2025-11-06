@@ -501,7 +501,7 @@ pub struct Receipt {
 pub enum ReceiptStatus { Ok, Error }
 ```
 
-Policy and capability gates:
+Policy and capability gates (v1):
 
 ```rust
 // aos-kernel/src/gates.rs
@@ -509,20 +509,30 @@ use aos_effects::types::EffectIntent;
 
 pub trait CapabilityGate {
     fn resolve(&self, cap_name: &str, effect_kind: &str) -> anyhow::Result<ResolvedCap>;
+    fn check_constraints(&self, intent: &EffectIntent, cap: &ResolvedCap) -> anyhow::Result<()>;
+    fn check_budget_precheck(&self, intent: &EffectIntent, cap: &ResolvedCap) -> anyhow::Result<()>;
 }
 
 pub trait PolicyGate {
     fn decide(&self, intent: &EffectIntent, cap: &ResolvedCap, source: EffectSource) -> Decision;
 }
 
-pub enum Decision { Allow, Deny, RequireApproval }
+pub enum Decision {
+    Allow,
+    Deny,
+    // RequireApproval reserved for v1.1+
+}
 
-pub enum EffectSource { Reducer(String), Plan(String) }
+pub enum EffectSource {
+    Reducer(String),  // origin_kind="reducer", origin_name=module name
+    Plan(String),     // origin_kind="plan", origin_name=plan name
+}
 
 pub struct ResolvedCap {
-    pub cap_type: String, // e.g., "http.out"
+    pub cap_type: String, // e.g., "http.out", "llm.basic"
     pub params_cbor: Vec<u8>,
     pub budget: Budget,
+    pub remaining_budget: Budget,  // for pre-checks
 }
 
 pub struct Budget { pub tokens: Option<u64>, pub bytes: Option<u64>, pub cents: Option<u64> }
@@ -574,20 +584,56 @@ pub fn validate_reducer_effects(
 }
 ```
 
-Policy gate should also check effect source:
+Policy gate with origin-aware matching (v1):
 
 ```rust
 impl PolicyGate for DefaultPolicy {
     fn decide(&self, intent: &EffectIntent, cap: &ResolvedCap, source: EffectSource) -> Decision {
-        // If effect came from a reducer and is not a micro-effect, deny
-        if matches!(source, EffectSource::Reducer(_)) && !is_micro_effect(&intent.kind) {
-            return Decision::Deny;
+        // Load policy from manifest (defpolicy with ordered rules)
+        let policy = self.load_policy();
+
+        // Build match context from intent and source
+        let match_ctx = MatchContext {
+            effect_kind: &intent.kind,
+            cap_name: &intent.cap_name,
+            host: extract_host(&intent),  // for http.request
+            method: extract_method(&intent),
+            origin_kind: match &source {
+                EffectSource::Reducer(_) => "reducer",
+                EffectSource::Plan(_) => "plan",
+            },
+            origin_name: match &source {
+                EffectSource::Reducer(name) | EffectSource::Plan(name) => name,
+            },
+        };
+
+        // First-match-wins over policy rules
+        for (idx, rule) in policy.rules.iter().enumerate() {
+            if matches_rule(&rule.when, &match_ctx) {
+                self.journal_decision(intent.intent_hash, idx, &rule.decision);
+                return match rule.decision.as_str() {
+                    "allow" => Decision::Allow,
+                    "deny" => Decision::Deny,
+                    _ => Decision::Deny,  // reserved values default to deny
+                };
+            }
         }
-        // ... rest of policy logic
+
+        // Default deny
+        Decision::Deny
     }
 }
 
-pub enum EffectSource { Reducer(String), Plan(String) }
+fn matches_rule(pattern: &Match, ctx: &MatchContext) -> bool {
+    // All specified fields must match
+    if let Some(ek) = &pattern.effect_kind { if ek != ctx.effect_kind { return false; } }
+    if let Some(cn) = &pattern.cap_name { if cn != ctx.cap_name { return false; } }
+    if let Some(h) = &pattern.host { if !host_matches(h, ctx.host) { return false; } }
+    if let Some(m) = &pattern.method { if Some(m.as_str()) != ctx.method { return false; } }
+    if let Some(ok) = &pattern.origin_kind { if ok != ctx.origin_kind { return false; } }
+    if let Some(on) = &pattern.origin_name { if on != ctx.origin_name { return false; } }
+    true
+}
 
 fn is_micro_effect(kind: &str) -> bool {
     matches!(kind, "fs.blob.put" | "fs.blob.get" | "timer.set")
@@ -787,11 +833,25 @@ impl<'a> WorldCtx<'a> {
         Ok(EffectIntent{ kind, params_cbor, cap_name: cap.to_string(), idempotency_key: idk, intent_hash: ih.0 })
     }
     pub fn enqueue_intent(&mut self, intent: &EffectIntent, source: EffectSource) -> anyhow::Result<()> {
+        // Step 1: Resolve capability grant
         let cap = self.caps.resolve(&intent.cap_name, &intent.kind)?;
+
+        // Step 2: Check capability constraints (v1: http hosts/verbs, llm models/max_tokens)
+        self.caps.check_constraints(intent, &cap)?;
+
+        // Step 3: Conservative budget pre-check for variable-cost effects
+        self.caps.check_budget_precheck(intent, &cap)?;
+
+        // Step 4: Policy decision (origin-aware, first-match-wins)
         match self.policy.decide(intent, &cap, source) {
-            Decision::Allow => { self.outbox.push(intent.clone()) }
-            Decision::Deny => anyhow::bail!("policy denied"),
-            Decision::RequireApproval => anyhow::bail!("approval required (v1)"),
+            Decision::Allow => {
+                self.journal_policy_decision(&intent.intent_hash, "allow");
+                self.outbox.push(intent.clone());
+            }
+            Decision::Deny => {
+                self.journal_policy_decision(&intent.intent_hash, "deny");
+                anyhow::bail!("policy denied");
+            }
         }
         Ok(())
     }
@@ -918,9 +978,9 @@ pub fn step_world(world: &mut World) -> anyhow::Result<()> {
 Advice on libraries and details
 
 - decimal128: if you truly need IEEE 754 decimal128 now, use bson::Decimal128 for internal representation and convert at the AIR boundary; otherwise, keep decimals as strings in v1 and add proper decimal later.
-- canonical CBOR: serde_cbor::ser::Serializer::canonical() is sufficient for v1; if you later need DAG-CBOR, switch to libipld and its dag-cbor codec (but you’ll have to drop tags).
+- canonical CBOR: serde_cbor::ser::Serializer::canonical() is sufficient for v1; if you later need DAG-CBOR, switch to libipld and its dag-cbor codec (but you'll have to drop tags).
 - Wasmtime determinism: keep to wasm32-unknown-unknown, avoid WASI, threads, random, time; compile with opt-level=z or s for size; pin Wasmtime version in Cargo.lock.
-- Policy and capability: keep gates simple now (glob host/path, verbs, budgets). Add OPA/CEL later behind the PolicyGate trait.
+- Policy and capability (v1): implement origin-aware first-match-wins policy with allow/deny only; capability constraints for http.out (hosts/verbs/path_prefixes) and llm.basic (providers/models/max_tokens_max/temperature_max/tools_allow); conservative budget pre-checks for llm.generate (max_tokens vs remaining tokens) and fs.blob.put (size vs remaining bytes); settle budgets on receipts. Defer approvals, rate limiting, identity/principal, and attestation to v1.1+. Add OPA/CEL later behind the PolicyGate trait if needed.
 
 Final conclusions
 

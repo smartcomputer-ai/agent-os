@@ -272,17 +272,44 @@
 
     "CapGrant": {
       "type": "object",
+      "description": "Capability grant instance. References a defcap and provides concrete parameter values (allowlists/ceilings) and optional budgets.",
       "properties": {
-        "name": { "$ref": "#/$defs/CapGrantName" },
-        "cap": { "$ref": "#/$defs/Name" },
-        "params": { "$ref": "#/$defs/Expr" },
-        "expiry_ns": { "type": "integer", "minimum": 0 },
+        "name": {
+          "$ref": "#/$defs/CapGrantName",
+          "description": "Unique grant name referenced by plans/modules"
+        },
+        "cap": {
+          "$ref": "#/$defs/Name",
+          "description": "defcap name this grant instantiates"
+        },
+        "params": {
+          "$ref": "#/$defs/Expr",
+          "description": "Concrete parameter values conforming to the defcap's schema. Enforced at enqueue."
+        },
+        "expiry_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional expiration time (nanoseconds since epoch). Grant denied after expiry."
+        },
         "budget": {
           "type": "object",
+          "description": "Optional spending/usage limits. Pre-checked conservatively for variable-cost effects (llm.generate max_tokens, fs.blob.put size); settled on receipt.",
           "properties": {
-            "tokens": { "type": "integer", "minimum": 0 },
-            "bytes": { "type": "integer", "minimum": 0 },
-            "cents": { "type": "integer", "minimum": 0 }
+            "tokens": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Token budget for LLM effects (prompt + completion)"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Byte budget for blob/http effects"
+            },
+            "cents": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Cost budget in cents"
+            }
           },
           "additionalProperties": false
         }

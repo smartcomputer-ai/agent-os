@@ -124,18 +124,75 @@ Receipt
 
 ## 9) defcap (Capability Types) and Grants
 
-- defcap: `{ "$kind":"defcap", "name":Name, "cap_type":"http.out"|"fs.blob"|"timer"|"llm.basic", "schema": SchemaRef }`
-- CapGrant (kernel state; referenced by name): `{ name:text, cap: Name(defcap), params: Value, expiry_ns?:nat, budget?:{ tokens?:nat, bytes?:nat, cents?:nat } }`
-- At emit, kernel checks grant existence/type/scope/expiry/budget.
+defcap definition
+- `{ "$kind":"defcap", "name":Name, "cap_type":"http.out"|"fs.blob"|"timer"|"llm.basic", "schema": SchemaRef }`
+- The schema defines parameter constraints that are enforced at enqueue time.
+
+Standard v1 capability types (built-in schemas)
+- sys/http.out@1
+  - `{ hosts: set<text>, verbs: set<text>, path_prefixes?: set<text> }`
+  - At enqueue: authority(url) ∈ hosts; method ∈ verbs; path starts_with any path_prefixes if present.
+- sys/llm.basic@1
+  - `{ providers?: set<text>, models?: set<text>, max_tokens_max?: nat, temperature_max?: dec128, tools_allow?: set<text> }`
+  - At enqueue: provider/model ∈ allowlists if present; max_tokens ≤ max_tokens_max; temperature ≤ temperature_max; tools ⊆ tools_allow.
+- sys/fs.blob@1
+  - `{ namespaces?: set<text> }` (minimal in v1)
+- sys/timer@1
+  - `{}` (no constraints in v1)
+
+CapGrant (kernel state; referenced by name)
+- `{ name:text, cap: Name(defcap), params: Value, expiry_ns?:nat, budget?:{ tokens?:nat, bytes?:nat, cents?:nat } }`
+- params must conform to the defcap's schema and encode concrete allowlists/ceilings.
+
+At enqueue, kernel checks
+1. Grant existence, expiry.
+2. Capability type matches effect kind.
+3. Effect params satisfy grant constraints (hosts, models, max_tokens_max, etc.).
+4. Conservative budget pre-check for variable-cost effects:
+   - llm.generate: if max_tokens declared, check max_tokens ≤ remaining tokens budget; deny if insufficient.
+   - fs.blob.put: if blob_ref size known from CAS, check size ≤ remaining bytes budget; deny if insufficient.
+5. Policy decision (see defpolicy).
+
+At receipt, kernel settles budgets
+- Decrements actual usage (token_usage, blob size, cost_cents) from grant.
+- If a dimension goes negative, mark grant exhausted; future enqueues using that grant are denied until replenished.
 
 See: spec/schemas/defcap.schema.json
 
 ## 10) defpolicy (Rule Pack)
 
+Shape
 - `{ "$kind":"defpolicy", "name":Name, "rules":[ Rule… ] }`
-- Rule: `{ when: Match, decision: "allow"|"deny"|"require_approval", limits?:{ rpm?:nat, daily_budget?:{ tokens?:nat, bytes?:nat, cents?:nat } } }`
-- Match (subset): `{ effect_kind?:EffectKind, cap_name?:text, host?:glob, path_prefix?:text, method?:text, principal?:text }`
-- First match wins; default deny. Policy evaluated on enqueue; decisions journaled. Budgets settle on receipt.
+
+Rule (v1)
+- `{ when: Match, decision: "allow"|"deny" }`
+
+Match (v1 fields)
+- `effect_kind?:EffectKind` – which effect kind (http.request, llm.generate, etc.)
+- `cap_name?:text` – which CapGrant name
+- `host?:text` – host suffix or glob (prefer using CapGrant.hosts instead)
+- `method?:text` – HTTP method
+- `origin_kind?: "plan"|"reducer"` – whether the effect originates from a plan or a reducer
+- `origin_name?: Name` – the specific plan or reducer Name
+
+Decision (v1)
+- "allow" or "deny" only.
+- "require_approval" is reserved for v1.1+ (not implemented in v1).
+
+Semantics
+- First match wins at enqueue time; default deny if no rule matches.
+- Kernel populates origin_kind and origin_name on each EffectIntent from context (plan instance or reducer invocation).
+- Policy is evaluated after capability constraint checks; both must pass for dispatch.
+- Decisions are journaled: PolicyDecisionRecorded { intent_hash, policy_name, rule_index, decision }.
+
+Recommended default policy
+- Deny llm.generate, payment.*, email.*, and http.request to non-allowlisted hosts from origin_kind="reducer".
+- Allow heavy effects only from specific plans under tightly scoped CapGrants.
+
+v1 removals and deferrals
+- Removed: limits (rpm, daily_budget) from rules; rate limiting deferred to v1.1+.
+- Removed: path_prefix from Match (use CapGrant.path_prefixes).
+- Removed: principal from Match (identity/authn deferred to v1.1+).
 
 See: spec/schemas/defpolicy.schema.json
 
@@ -203,15 +260,21 @@ Application
 
 ## 15) Journal Entries (AIR‑Related)
 
+Governance and control plane
 - Proposed { patch_hash, author, manifest_base }
 - ShadowReport { patch_hash, effects_predicted:[EffectKind…], diffs:[typed summary] }
 - Approved { patch_hash, approver }
 - Applied { manifest_hash_new }
+
+Plan and effect lifecycle
 - PlanStarted { plan_name, instance_id, input_hash }
-- EffectQueued { instance_id, intent_hash }
-- PolicyDecision { instance_id, intent_hash, rule_index, decision }
-- ReceiptAppended { intent_hash, status }
+- EffectQueued { instance_id, intent_hash, origin_kind, origin_name }
+- PolicyDecisionRecorded { intent_hash, policy_name, rule_index, decision }
+- ReceiptAppended { intent_hash, status, receipt_ref }
 - PlanEnded { instance_id, status:"ok"|"error", result_ref? }
+
+Budget and capability (optional, for observability)
+- BudgetExceeded { grant_name, dimension:"tokens"|"bytes"|"cents", delta:nat, new_balance:int } (appended when a receipt settlement drives a budget dimension negative; grant marked exhausted)
 
 ## 16) Determinism and Replay
 
@@ -245,8 +308,8 @@ Application
 20.2 defcap (http.out@1)
 - `{ "$kind":"defcap", "name":"sys/http.out@1", "cap_type":"http.out", "schema": { "record": { "hosts": { "set": { "text": {} } }, "verbs": { "set": { "text": {} } }, "rpm": { "nat": {} } } } }`
 
-20.3 defpolicy (allow google rss)
-- `{ "$kind":"defpolicy", "name":"com.acme/policy@1", "rules": [ { "when": { "effect_kind":"http.request", "host":"news.google.com" }, "decision":"allow", "limits": { "rpm":60 } }, { "when": { "effect_kind":"llm.generate" }, "decision":"require_approval" } ] }`
+20.3 defpolicy (allow google rss; deny LLM from reducers)
+- `{ "$kind":"defpolicy", "name":"com.acme/policy@1", "rules": [ { "when": { "effect_kind":"http.request", "host":"news.google.com" }, "decision":"allow" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"reducer" }, "decision":"deny" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"plan" }, "decision":"allow" } ] }`
 
 20.4 defplan (daily_digest)
 - `{ "$kind":"defplan", "name":"com.acme/daily_digest@1", "input": {"unit":{}}, "steps": [

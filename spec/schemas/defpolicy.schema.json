@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aos.dev/air/v1/defpolicy.schema.json",
   "title": "AIR v1 defpolicy",
+  "description": "Policy rule pack for allow/deny decisions at effect enqueue time. v1: origin-aware matching, no approvals or rate limits.",
   "type": "object",
   "properties": {
     "$kind": { "const": "defpolicy" },
@@ -18,22 +19,10 @@
       "type": "object",
       "properties": {
         "when": { "$ref": "#/$defs/Match" },
-        "decision": { "type": "string", "enum": ["allow","deny","require_approval"] },
-        "limits": {
-          "type": "object",
-          "properties": {
-            "rpm": { "type": "integer", "minimum": 0 },
-            "daily_budget": {
-              "type": "object",
-              "properties": {
-                "tokens": { "type": "integer", "minimum": 0 },
-                "bytes": { "type": "integer", "minimum": 0 },
-                "cents": { "type": "integer", "minimum": 0 }
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": false
+        "decision": {
+          "type": "string",
+          "enum": ["allow","deny"],
+          "description": "v1: allow or deny only. require_approval reserved for v1.1+"
         }
       },
       "required": ["when","decision"],
@@ -41,13 +30,33 @@
     },
     "Match": {
       "type": "object",
+      "description": "Match conditions for policy rules. All fields optional; first rule matching all provided conditions wins.",
       "properties": {
-        "effect_kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
-        "cap_name": { "$ref": "common.schema.json#/$defs/CapGrantName" },
-        "host": { "type": "string" },
-        "path_prefix": { "type": "string" },
-        "method": { "type": "string" },
-        "principal": { "type": "string" }
+        "effect_kind": {
+          "$ref": "common.schema.json#/$defs/EffectKind",
+          "description": "Match effect kind (http.request, llm.generate, etc.)"
+        },
+        "cap_name": {
+          "$ref": "common.schema.json#/$defs/CapGrantName",
+          "description": "Match capability grant name"
+        },
+        "host": {
+          "type": "string",
+          "description": "Match host suffix or glob (prefer using CapGrant.hosts instead)"
+        },
+        "method": {
+          "type": "string",
+          "description": "Match HTTP method (GET, POST, etc.)"
+        },
+        "origin_kind": {
+          "type": "string",
+          "enum": ["plan", "reducer"],
+          "description": "Match whether effect originates from a plan or reducer"
+        },
+        "origin_name": {
+          "$ref": "common.schema.json#/$defs/Name",
+          "description": "Match specific plan or reducer name"
+        }
       },
       "additionalProperties": false
     }

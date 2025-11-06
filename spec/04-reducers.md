@@ -50,9 +50,13 @@ Reducers should be written as explicit typestate machines: a `pc` (program count
   - `fs.blob.put/get` (content-addressed)
   - `timer.set` (for backoff, deadlines)
 - Disallowed from reducers (must go through plans):
-  - `http.request` to third-party hosts (unless narrowly allowlisted by policy), `llm.generate`, `email.send`, payments, provider SDK calls, etc.
+  - `http.request` to third-party hosts, `llm.generate`, `email.send`, payments, provider SDK calls, etc.
 
-All reducer-sourced effects pass through capability and policy gates. Gates can reject disallowed kinds or require that an effect originate from a plan. Budgets settle on receipts.
+All reducer-sourced effects pass through capability and policy gates. The v1 policy system enforces origin-aware rules:
+- Policy Match rules can specify `origin_kind: "reducer"` to deny heavy effects from reducers
+- Policy Match rules can specify `origin_kind: "plan"` to allow those same effects from plans
+- The kernel populates origin metadata (origin_kind and origin_name) on every EffectIntent for policy evaluation
+- Budgets settle on receipts
 
 ## Relationship To Plans
 
@@ -276,15 +280,18 @@ To maintain clear separation between reducers and plans, the kernel enforces:
 - **Only "micro-effects"**: `fs.blob.put`, `fs.blob.get`, `timer.set`
 - **NO network effects**: `http.request`, `llm.generate`, `email.send`, `payment.charge` must go through plans
 
-### Policy Enforcement
+### Policy Enforcement (v1)
 - EffectKind not in declared `effects_emitted` → rejected by validator at load time
-- Disallowed kinds from reducers → policy denial at runtime: "Effect X requires plan orchestration"
+- Disallowed kinds from reducers → policy denial at runtime via origin-aware rules:
+  - Policy rules with `{ origin_kind: "reducer", effect_kind: "llm.generate" }` → decision: "deny"
+  - Policy rules with `{ origin_kind: "plan", effect_kind: "llm.generate" }` → decision: "allow"
 - Multiple effects in single step → rejected with diagnostic: "Reducers may emit at most one effect per step; lift complex orchestration to a plan"
+- The kernel attaches `origin_kind="reducer"` and `origin_name=<module_name>` to all reducer-emitted effect intents for policy matching
 
 ### Intent-Based Pattern
 - **Complex workflows**: emit DomainIntent event → manifest trigger starts plan → plan performs effects → plan raises result event → reducer consumes result
 - **Micro-effects**: emit directly from reducer if effect kind is in allowlist and bound to a valid `cap_slot`
-- **Human approvals**: must go through plans; reducers cannot request approvals directly
+- **Governance and approvals**: deferred to v1.1+; v1 policy supports only allow/deny decisions
 
 ### Enforcement Points
 - **Static validation**: defmodule `effects_emitted` checked against micro-effects allowlist
@@ -346,8 +353,8 @@ Provide a small helper (aos-saga) to reduce boilerplate:
 
 ## Operational Guidance
 
-- Capabilities: bind reducer cap slots in manifest; keep scopes tight; budgets enforced on receipts.
-- Policy: deny high-risk effect kinds from reducers; require plans or approvals.
+- Capabilities: bind reducer cap slots in manifest; keep scopes tight; budgets enforced on receipts with conservative pre-checks for variable-cost effects (LLM tokens, blob sizes).
+- Policy (v1): use origin-aware rules to deny high-risk effect kinds from reducers (origin_kind="reducer") and allow them from plans (origin_kind="plan"). Default-deny posture recommended.
 - Tracing: include correlation ids (e.g., order_id) in events and annotate outputs for observability.
 - Upgrades: pin schema versions; treat changes as new module versions; let in-flight instances finish under old semantics.
 

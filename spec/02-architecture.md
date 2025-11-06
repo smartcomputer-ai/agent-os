@@ -75,10 +75,16 @@ This section describes the runtime components of AgentOS and how they work toget
 - Capability Ledger
   - Records grant/revoke events and current balances/budgets per capability token.
   - Capabilities are passed to plans/modules by handle; no ambient authority.
+  - Enforces parameter constraints (hosts, models, max_tokens ceilings) at enqueue time.
+  - Performs conservative budget pre-checks for variable-cost effects (LLM tokens, blob sizes).
 
-- Policy Gate
-  - Evaluates allow/deny/require‑approval decisions for effects and plan application.
-  - Budgets, rate limits, and approvals are enforced; decisions are logged as events.
+- Policy Gate (v1)
+  - Evaluates allow/deny decisions for effects based on origin-aware rules.
+  - Origin metadata (origin_kind: plan|reducer, origin_name) attached to all effect intents.
+  - First-match-wins rule evaluation; default deny if no rule matches.
+  - Decisions are journaled as PolicyDecisionRecorded events.
+  - Budgets settle on receipts; grant marked exhausted if dimension goes negative.
+  - Deferred to v1.1+: approvals (require_approval), rate limits (rpm), identity/principal.
 
 ## Triggers And Events
 
@@ -89,7 +95,7 @@ This section describes the runtime components of AgentOS and how they work toget
 - Communication pattern
   1) Reducer emits DomainIntent (e.g., `ChargeRequested`) as a domain event.
   2) Trigger starts a plan instance with the event as `@plan.input` and records correlation id if provided.
-  3) Plan emits one or more effects under capabilities; Policy Gate evaluates allow/deny/approval; Effect Manager dispatches.
+  3) Plan emits one or more effects under capabilities; kernel checks: (a) capability grant constraints, (b) conservative budget pre-check, (c) policy decision (origin-aware); Effect Manager dispatches if allowed.
   4) Adapter executes the effect and appends a signed receipt; the plan `await_receipt` step resumes with the receipt value.
   5) Plan `raise_event` publishes a result DomainEvent (e.g., `PaymentResult`) to the target reducer; the reducer consumes it and advances its typestate.
   6) Optional: plans may `await_event` for subsequent reducer‑produced events to continue orchestration in one instance.
