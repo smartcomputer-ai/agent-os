@@ -2,6 +2,12 @@
 
 This section describes the runtime components of AgentOS and how they work together. It focuses on the kernel, storage, execution, effects, and governance loops. AIR (the control‑plane IR) is referenced where it interfaces with the runtime; its forms and semantics are detailed in the next section.
 
+AgentOS operates in two conceptually distinct modes:
+- **runtime**: business as usual; reducers react to events, plans orchestrate effects, receipts flow back
+- **design time**: self‑modification—the system proposes, rehearses, and applies changes to its own control plane
+
+These are not separate runtimes. Under the hood, there is one unified system: the same kernel, journal, event processing, and blob storage handle both modes. Design-time changes (proposals, shadow runs, approvals) and runtime operations (domain events, effects, receipts) all flow through the same event log and deterministic stepper. This unification is possible because AIR represents the control plane as data and is stored like any other state. The constitutional loop (propose → shadow → approve → apply) is simply the governed pathway for modifying that control-plane data, after which it becomes active runtime behavior.
+
 ## Runtime Model
 
 One world is the unit of computation and ownership. Each world runs a single‑threaded deterministic stepper over an append‑only event journal with periodic snapshots. All control‑plane changes—modules, plans, schemas, policies, capabilities—are expressed as AIR patches and validated by the kernel before use.
@@ -32,12 +38,15 @@ The kernel processes exactly one event at a time per world. It applies events to
 
 ### Event Kinds (v1)
 
-The kernel handles several categories of events:
+The kernel handles several categories of events. The first four are **design-time** events (control-plane evolution); the rest are **runtime** events (normal operation):
 
+**Design-time events:**
 - **ProposalSubmitted** {patches, proposer}
 - **ShadowRunCompleted** {proposal_id, predicted_effects, diffs}
 - **ApprovalRecorded** {proposal_id, approver, decision}
 - **PlanApplied** {manifest_root, plan_id}
+
+**Runtime events:**
 - **EffectQueued** {intent_hash, kind, params_ref, cap_ref}
 - **ReceiptAppended** {intent_hash, receipt_ref, status}
 - **PolicyDecisionRecorded** {subject, decision, rationale_ref}
@@ -81,7 +90,9 @@ The policy gate evaluates allow/deny decisions for effects based on origin-aware
 
 Budgets settle on receipts; a grant is marked exhausted if any dimension goes negative. Deferred to v1.1+: approvals (require_approval), rate limits (rpm), and identity/principal support.
 
-## Triggers and Events
+## Triggers and Events (Runtime)
+
+This section describes **runtime** behavior: how reducers, plans, and effects collaborate to perform domain work.
 
 ### Triggers
 
@@ -89,7 +100,7 @@ The manifest contains `triggers`: mappings from DomainIntent event schemas to pl
 
 ### Communication Pattern
 
-The typical flow between reducers and plans follows six steps:
+The typical runtime flow between reducers and plans follows six steps:
 
 1. **Reducer emits DomainIntent** (e.g., `ChargeRequested`) as a domain event.
 2. **Trigger starts plan** with the event as `@plan.input` and records a correlation id if provided.
@@ -148,9 +159,9 @@ Version 1.2 will add **WASM-based adapters**: custom effect implementations that
 
 ReceiptAppended events advance plans and reducers waiting on effects. Budgets decrement on receipt; policy re‑checks may occur if costs exceed thresholds. During replay, the system consumes recorded receipts to produce identical state without re‑executing effects.
 
-## Constitutional Loop (Change Lifecycle)
+## Constitutional Loop (Design Time)
 
-The constitutional loop governs how changes are proposed, rehearsed, approved, and applied:
+The constitutional loop governs **design-time** changes: how the system proposes, rehearses, approves, and applies modifications to its own control plane:
 
 1. **Propose**: Submit AIR patches forming a proposal; the kernel validates and records ProposalSubmitted.
 2. **Shadow**: The kernel clones state and runs a shadow simulation with stubbed receipts; it records ShadowRunCompleted with diffs and predicted effects/costs.
@@ -158,7 +169,7 @@ The constitutional loop governs how changes are proposed, rehearsed, approved, a
 4. **Apply**: The kernel commits the new manifest root (PlanApplied); routing tables and capability bindings update atomically.
 5. **Execute**: Normal event flow resumes; new plans and modules are active under policy; effects produce receipts; audit trails accumulate.
 
-## Shadow Runs
+### Shadow Runs
 
 Shadow runs provide deterministic rehearsal of a proposal. They use a copy of the current state and manifest; effects are stubbed or use canned receipts. The output is a typed diff of control‑plane and reducer states, predicted effect counts and costs, and required capabilities. No changes persist until approval; outputs drive least‑privilege capability synthesis.
 
@@ -218,7 +229,7 @@ The minimal trusted base—kernel, validator, and receipt verification code—is
 
 ## Putting It Together (End‑to‑End)
 
-Here's how all the pieces fit together in a typical change workflow:
+Here's how all the pieces fit together in a typical **design‑time** change workflow:
 
 1. **Register**: A plan in AIR wires modules and declares allowed effects and required capabilities.
 2. **Propose**: A proposal patches the manifest with changes.
@@ -227,5 +238,7 @@ Here's how all the pieces fit together in a typical change workflow:
 5. **Apply**: The kernel commits the new manifest root; routing tables and capability bindings update atomically.
 6. **Execute**: Execution proceeds; effects produce signed receipts; budgets decrement; snapshots capture state.
 7. **Replay**: Replay from journal and receipts reproduces the exact same state.
+
+Once applied, changes become **runtime** behavior: reducers emit domain intents, triggers start plans, plans orchestrate effects under policy and capabilities, adapters produce signed receipts, and results flow back as events. Both modes—design time and runtime—share the same deterministic kernel and journal. The homoiconic control plane (AIR) is what makes this possible: the system can inspect, simulate, and safely modify its own definition using the same event‑sourced substrate it uses for application logic.
 
 This architecture yields a substrate where agents can co‑author and safely evolve systems: deterministic at the core, explicit and auditable at the edges, and unified by a small typed control plane.
