@@ -207,6 +207,11 @@ Scope and Purpose
 - Use plans when: coordinating multiple effects, requiring human gates/approvals, spanning long durations (minutes/hours), or needing centralized governance/audit.
 - Keep logic in reducers when: performing domain state transitions, enforcing business invariants, or emitting simple micro-effects (timer, blob).
 
+v1 scope and future extensions
+- v1.0 keeps plans minimal: emit_effect, await_receipt, raise_event, await_event, assign, end.
+- Structured concurrency (sub-plans, fan-out/fan-in) deferred to v1.1+ to validate real-world needs first.
+- See: spec/12-plans-v1.1.md for planned extensions (spawn_plan, await_plan, spawn_for_each, await_plans_all).
+
 Shape
 - `{ "$kind":"defplan", "name":Name, "input":SchemaRef, "output"?:SchemaRef, "locals"?:{ name:SchemaRef… }, "steps":[ Step… ], "edges":[ {from:StepId, to:StepId, when?:Expr }… ], "required_caps":[CapGrantName…], "allowed_effects":[EffectKind…], "invariants"?:[Expr…] }`
 

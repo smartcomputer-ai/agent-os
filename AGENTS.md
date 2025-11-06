@@ -16,10 +16,10 @@ This file provides guidance to coding agents when working with code in this repo
 2. **spec/02-architecture.md** - Runtime components, event flow, storage layout
 3. **spec/03-air.md** - **CRITICAL**: Complete AIR v1 spec (schemas, modules, plans, capabilities, policies)
 4. **spec/04-reducers.md** - Reducer semantics, ABI, relationship to plans
-5. **spec/07-workflow-patterns.md** - **IMPORTANT**: How to coordinate complex workflows (patterns, compensations, retries)
+5. **spec/07-workflow-patterns.md** - How to coordinate complex workflows (patterns, compensations, retries)
 6. **spec/05-cells.md** - Keyed reducers (v1.1)
-7. **spec/06-parallelism.md** - Future direction (deferred)
-8. **spec/10-air-implementation.md** - Rust implementation guide with code skeletons
+8. **spec/06-parallelism.md** - Future direction (deferred)
+9. **spec/10-air-implementation.md** - Rust implementation guide with code skeletons
 
 **spec/schemas/** - JSON Schemas for AIR node validation
 
