@@ -429,6 +429,24 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 
 **Predicates** are boolean Expr. Missing refs are errors (deterministic fail).
 
+### Guards (Edge Predicates)
+
+Edges can have optional `when` predicates called **guards**. A guard is a boolean expression that must evaluate to `true` for an edge to be traversable. This enables conditional branching in plan DAGs: a step becomes ready only when all predecessor edges are completed **and** all their guards evaluate to `true`.
+
+Example:
+```json
+{
+  "from": "charge",
+  "to": "reserve",
+  "when": {
+    "op": "eq",
+    "args": [{"ref": "@var:charge_rcpt.status"}, {"text": "ok"}]
+  }
+}
+```
+
+This edge is only traversable if `charge_rcpt.status == "ok"`. Guards enable branching logic (success vs. failure paths, retries, compensations) without putting business logic in the plan—the plan remains declarative orchestration.
+
 ### Scheduling
 
 A step is **ready** when predecessors are completed and its guard (if any) is true. The scheduler executes one ready step per tick; deterministic order by step id then insertion order.
@@ -545,25 +563,25 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 20.1 defschema (FeedItem)
 
-```
+```json
 { "$kind":"defschema", "name":"com.acme/FeedItem@1", "type": { "record": { "title": {"text":{}}, "url": {"text":{}} } } }
 ```
 
 20.2 defcap (http.out@1)
 
-```
+```json
 { "$kind":"defcap", "name":"sys/http.out@1", "cap_type":"http.out", "schema": { "record": { "hosts": { "set": { "text": {} } }, "verbs": { "set": { "text": {} } }, "rpm": { "nat": {} } } } }
 ```
 
 20.3 defpolicy (allow google rss; deny LLM from reducers)
 
-```
+```json
 { "$kind":"defpolicy", "name":"com.acme/policy@1", "rules": [ { "when": { "effect_kind":"http.request", "host":"news.google.com" }, "decision":"allow" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"reducer" }, "decision":"deny" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"plan" }, "decision":"allow" } ] }
 ```
 
 20.4 defplan (daily_digest)
 
-```
+```json
 { "$kind":"defplan", "name":"com.acme/daily_digest@1", "input": {"unit":{}}, "steps": [
     { "id":"set_url", "op":"assign", "expr": { "text":"https://news.google.com/rss" }, "bind": { "as":"rss_url" } },
     { "id":"fetch", "op":"emit_effect", "kind":"http.request", "params": { "record": { "method": {"text":"GET"}, "url": { "ref":"@var:rss_url" }, "headers": { "map": [] } } }, "cap":"http_out_google", "bind": { "effect_id_as":"fetch_id" } },
