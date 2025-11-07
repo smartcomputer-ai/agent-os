@@ -255,141 +255,6 @@ pub struct TypeRef {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EmptyObject {}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn text_type() -> TypeExpr {
-        TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText { text: EmptyObject::default() }))
-    }
-
-    #[test]
-    fn type_expr_matches_schema_shape() {
-        let mut record = IndexMap::new();
-        record.insert("id".to_string(), text_type());
-        record.insert(
-            "tags".to_string(),
-            TypeExpr::Set(TypeSet { set: Box::new(text_type()) }),
-        );
-        let ty = TypeExpr::Record(TypeRecord { record });
-        let value = serde_json::to_value(ty).expect("serialize");
-        assert_eq!(
-            value,
-            json!({
-                "record": {
-                    "id": {"text": {}},
-                    "tags": {"set": {"text": {}}}
-                }
-            })
-        );
-    }
-
-    #[test]
-    fn expr_serializes_to_expected_shape() {
-        let expr = Expr::Op(ExprOp {
-            op: ExprOpCode::Concat,
-            args: vec![
-                Expr::Const(ExprConst::Text { text: "hello".into() }),
-                Expr::Const(ExprConst::Text { text: "world".into() }),
-            ],
-        });
-        let value = serde_json::to_value(expr).unwrap();
-        assert_eq!(
-            value,
-            json!({
-                "op": "concat",
-                "args": [
-                    {"text": "hello"},
-                    {"text": "world"}
-                ]
-            })
-        );
-    }
-
-    #[test]
-    fn plan_step_round_trip() {
-        let json_value = json!({
-            "id": "emit",
-            "op": "emit_effect",
-            "kind": "http.request",
-            "params": {"record": {}},
-            "cap": "http_cap",
-            "bind": {"effect_id_as": "req"}
-        });
-        let step: PlanStep = serde_json::from_value(json_value.clone()).expect("deserialize");
-        let back = serde_json::to_value(step).expect("serialize");
-        assert_eq!(json_value, back);
-    }
-
-    #[test]
-    fn value_literal_serialization() {
-        let mut record = IndexMap::new();
-        record.insert(
-            "name".into(),
-            ValueLiteral::Text(ValueText { text: "demo".into() }),
-        );
-        record.insert(
-            "flags".into(),
-            ValueLiteral::Set(ValueSet {
-                set: vec![ValueLiteral::Text(ValueText { text: "a".into() })],
-            }),
-        );
-        let value = ValueLiteral::Record(ValueRecord { record });
-        let json_value = serde_json::to_value(&value).expect("serialize");
-        assert_eq!(
-            json_value,
-            json!({
-                "record": {
-                    "name": {"text": "demo"},
-                    "flags": {"set": [{"text": "a"}]}
-                }
-            })
-        );
-        let round_trip: ValueLiteral = serde_json::from_value(json_value).expect("deserialize");
-        matches!(round_trip, ValueLiteral::Record(_));
-    }
-
-    #[test]
-    fn manifest_round_trip() {
-        let manifest_json = json!({
-            "$kind": "manifest",
-            "schemas": [
-                {
-                    "name": "com.acme/Order@1",
-                    "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                }
-            ],
-            "modules": [
-                {
-                    "name": "com.acme/order_reducer@1",
-                    "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                }
-            ],
-            "plans": [
-                {
-                    "name": "com.acme/order_plan@1",
-                    "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-                }
-            ],
-            "caps": [],
-            "policies": [],
-            "routing": {
-                "events": [
-                    {
-                        "event": "com.acme/OrderCreated@1",
-                        "reducer": "com.acme/order_reducer@1"
-                    }
-                ]
-            }
-        });
-
-        let node: AirNode = serde_json::from_value(manifest_json.clone()).expect("deserialize");
-        let round_trip = serde_json::to_value(node).expect("serialize");
-        assert_eq!(manifest_json, round_trip);
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Expr {
@@ -808,3 +673,140 @@ pub enum EffectKind {
     #[serde(rename = "llm.generate")]
     LlmGenerate,
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn text_type() -> TypeExpr {
+        TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText { text: EmptyObject::default() }))
+    }
+
+    #[test]
+    fn type_expr_matches_schema_shape() {
+        let mut record = IndexMap::new();
+        record.insert("id".to_string(), text_type());
+        record.insert(
+            "tags".to_string(),
+            TypeExpr::Set(TypeSet { set: Box::new(text_type()) }),
+        );
+        let ty = TypeExpr::Record(TypeRecord { record });
+        let value = serde_json::to_value(ty).expect("serialize");
+        assert_eq!(
+            value,
+            json!({
+                "record": {
+                    "id": {"text": {}},
+                    "tags": {"set": {"text": {}}}
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn expr_serializes_to_expected_shape() {
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::Concat,
+            args: vec![
+                Expr::Const(ExprConst::Text { text: "hello".into() }),
+                Expr::Const(ExprConst::Text { text: "world".into() }),
+            ],
+        });
+        let value = serde_json::to_value(expr).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "op": "concat",
+                "args": [
+                    {"text": "hello"},
+                    {"text": "world"}
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn plan_step_round_trip() {
+        let json_value = json!({
+            "id": "emit",
+            "op": "emit_effect",
+            "kind": "http.request",
+            "params": {"record": {}},
+            "cap": "http_cap",
+            "bind": {"effect_id_as": "req"}
+        });
+        let step: PlanStep = serde_json::from_value(json_value.clone()).expect("deserialize");
+        let back = serde_json::to_value(step).expect("serialize");
+        assert_eq!(json_value, back);
+    }
+
+    #[test]
+    fn value_literal_serialization() {
+        let mut record = IndexMap::new();
+        record.insert(
+            "name".into(),
+            ValueLiteral::Text(ValueText { text: "demo".into() }),
+        );
+        record.insert(
+            "flags".into(),
+            ValueLiteral::Set(ValueSet {
+                set: vec![ValueLiteral::Text(ValueText { text: "a".into() })],
+            }),
+        );
+        let value = ValueLiteral::Record(ValueRecord { record });
+        let json_value = serde_json::to_value(&value).expect("serialize");
+        assert_eq!(
+            json_value,
+            json!({
+                "record": {
+                    "name": {"text": "demo"},
+                    "flags": {"set": [{"text": "a"}]}
+                }
+            })
+        );
+        let round_trip: ValueLiteral = serde_json::from_value(json_value).expect("deserialize");
+        matches!(round_trip, ValueLiteral::Record(_));
+    }
+
+    #[test]
+    fn manifest_round_trip() {
+        let manifest_json = json!({
+            "$kind": "manifest",
+            "schemas": [
+                {
+                    "name": "com.acme/Order@1",
+                    "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+            ],
+            "modules": [
+                {
+                    "name": "com.acme/order_reducer@1",
+                    "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+            ],
+            "plans": [
+                {
+                    "name": "com.acme/order_plan@1",
+                    "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+            ],
+            "caps": [],
+            "policies": [],
+            "routing": {
+                "events": [
+                    {
+                        "event": "com.acme/OrderCreated@1",
+                        "reducer": "com.acme/order_reducer@1"
+                    }
+                ]
+            }
+        });
+
+        let node: AirNode = serde_json::from_value(manifest_json.clone()).expect("deserialize");
+        let round_trip = serde_json::to_value(node).expect("serialize");
+        assert_eq!(manifest_json, round_trip);
+    }
+}
+
