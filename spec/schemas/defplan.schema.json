@@ -10,7 +10,10 @@
     "output": { "$ref": "common.schema.json#/$defs/SchemaRef" },
     "locals": {
       "type": "object",
-      "additionalProperties": { "$ref": "common.schema.json#/$defs/SchemaRef" }
+      "patternProperties": {
+        "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$": { "$ref": "common.schema.json#/$defs/SchemaRef" }
+      },
+      "additionalProperties": false
     },
     "steps": {
       "type": "array",

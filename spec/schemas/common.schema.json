@@ -270,6 +270,18 @@
       "additionalProperties": false
     },
 
+    "Value": {
+      "description": "Canonical value conforming to some schema; unrestricted JSON structure validated elsewhere.",
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/Value" } },
+        { "type": "object", "additionalProperties": { "$ref": "#/$defs/Value" } }
+      ]
+    },
+
     "CapGrant": {
       "type": "object",
       "description": "Capability grant instance. References a defcap and provides concrete parameter values (allowlists/ceilings) and optional budgets.",
@@ -283,7 +295,7 @@
           "description": "defcap name this grant instantiates"
         },
         "params": {
-          "$ref": "#/$defs/Expr",
+          "$ref": "#/$defs/Value",
           "description": "Concrete parameter values conforming to the defcap's schema. Enforced at enqueue."
         },
         "expiry_ns": {
