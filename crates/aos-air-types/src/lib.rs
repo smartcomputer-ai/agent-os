@@ -2,5 +2,6 @@
 
 mod model;
 pub mod validate;
+pub mod schemas;
 
 pub use model::*;
