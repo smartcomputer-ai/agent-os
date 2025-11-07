@@ -652,7 +652,7 @@ fn require_args_at_least(op: ExprOpCode, args: &[Value], min: usize) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_air_types::ExprRef;
+    use aos_air_types::{ExprMapEntry, ExprRef, VariantExpr};
     use indexmap::IndexMap;
 
     fn sample_env() -> Env {
@@ -767,5 +767,147 @@ mod tests {
         });
         let err = eval_expr(&expr, &sample_env()).unwrap_err();
         assert!(matches!(err, EvalError::MissingRef(name) if name == "@var:missing"));
+    }
+
+    #[test]
+    fn has_on_set() {
+        let set_expr = ExprSet {
+            set: vec![
+                Expr::Const(ExprConst::Int { int: 1 }),
+                Expr::Const(ExprConst::Int { int: 2 }),
+            ],
+        };
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::Has,
+            args: vec![Expr::Set(set_expr), Expr::Const(ExprConst::Int { int: 2 })],
+        });
+        let value = eval_expr(&expr, &sample_env()).unwrap();
+        assert_eq!(value, Value::Bool(true));
+    }
+
+    #[test]
+    fn less_than_over_ints() {
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::Lt,
+            args: vec![
+                Expr::Const(ExprConst::Int { int: 4 }),
+                Expr::Const(ExprConst::Int { int: 9 }),
+            ],
+        });
+        let value = eval_expr(&expr, &sample_env()).unwrap();
+        assert_eq!(value, Value::Bool(true));
+    }
+
+    #[test]
+    fn divide_by_zero_errors() {
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::Div,
+            args: vec![
+                Expr::Const(ExprConst::Nat { nat: 7 }),
+                Expr::Const(ExprConst::Nat { nat: 0 }),
+            ],
+        });
+        let err = eval_expr(&expr, &sample_env()).unwrap_err();
+        assert!(matches!(err, EvalError::DivideByZero(ExprOpCode::Div)));
+    }
+
+    #[test]
+    fn variant_literal_wraps_tag_and_value() {
+        let expr = Expr::Variant(ExprVariant {
+            variant: VariantExpr {
+                tag: "Ok".into(),
+                value: Some(Box::new(Expr::Const(ExprConst::Text {
+                    text: "done".into(),
+                }))),
+            },
+        });
+        let value = eval_expr(&expr, &sample_env()).unwrap();
+        match value {
+            Value::Record(fields) => {
+                assert_eq!(fields.get("$tag"), Some(&Value::Text("Ok".into())));
+                assert_eq!(fields.get("$value"), Some(&Value::Text("done".into())));
+            }
+            other => panic!("unexpected variant representation {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bytes_contains_subsequence() {
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::Contains,
+            args: vec![
+                Expr::Const(ExprConst::Bytes {
+                    bytes_b64: "YWJjZDEyMw==".into(), // "abcd123"
+                }),
+                Expr::Const(ExprConst::Bytes {
+                    bytes_b64: "Y2Qx".into(), // "cd1"
+                }),
+            ],
+        });
+        let value = eval_expr(&expr, &sample_env()).unwrap();
+        assert_eq!(value, Value::Bool(true));
+    }
+
+    #[test]
+    fn missing_field_in_path_errors() {
+        let expr = Expr::Ref(ExprRef {
+            reference: "@plan.input.order_id".into(),
+        });
+        let err = eval_expr(&expr, &sample_env()).unwrap_err();
+        assert!(matches!(err, EvalError::MissingField { field, .. } if field == "order_id"));
+    }
+
+    #[test]
+    fn map_contains_key() {
+        let map_expr = ExprMap {
+            map: vec![ExprMapEntry {
+                key: Expr::Const(ExprConst::Text { text: "foo".into() }),
+                value: Expr::Const(ExprConst::Int { int: 9 }),
+            }],
+        };
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::Contains,
+            args: vec![
+                Expr::Map(map_expr),
+                Expr::Const(ExprConst::Text { text: "foo".into() }),
+            ],
+        });
+        let value = eval_expr(&expr, &sample_env()).unwrap();
+        assert_eq!(value, Value::Bool(true));
+    }
+
+    #[test]
+    fn boolean_ops_require_bool_args() {
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::And,
+            args: vec![
+                Expr::Const(ExprConst::Bool { bool: true }),
+                Expr::Const(ExprConst::Int { int: 1 }),
+            ],
+        });
+        let err = eval_expr(&expr, &sample_env()).unwrap_err();
+        assert!(matches!(err, EvalError::TypeError { expected, .. } if expected == "bool"));
+    }
+
+    #[test]
+    fn list_index_out_of_bounds_errors() {
+        let list = ExprList {
+            list: vec![
+                Expr::Const(ExprConst::Int { int: 1 }),
+                Expr::Const(ExprConst::Int { int: 2 }),
+            ],
+        };
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::Get,
+            args: vec![Expr::List(list), Expr::Const(ExprConst::Nat { nat: 5 })],
+        });
+        let err = eval_expr(&expr, &sample_env()).unwrap_err();
+        assert!(matches!(
+            err,
+            EvalError::OpError {
+                op: ExprOpCode::Get,
+                ..
+            }
+        ));
     }
 }
