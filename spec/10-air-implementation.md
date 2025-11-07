@@ -9,14 +9,22 @@ Scope and non‑goals
 - v1 avoids the WASM Component Model and complex policy engines. Keep seams to add them later.
 
 Recommended crate layout
-- aos-air-types: AIR data types (serde), JSON Schema bundling, Expr AST
-- aos-air-validate: structural + semantic validation (shape, references, DAG checks)
+- aos-air-types: AIR data types (serde), JSON Schema bundling, Expr AST, semantic validation
+- aos-air-exec: expression/value evaluator used by plans/kernels (pure, deterministic)
 - aos-cbor: canonical CBOR encode/decode + hashing
 - aos-store: content-addressed store (nodes/blobs), manifest loader
+- aos-wasm-abi: shared no_std ABI envelopes for reducers and pure components (used by kernel and aos-wasm-sdk)
 - aos-wasm: deterministic Wasm runner (reducer ABI)
 - aos-effects: effect intent/receipt schema and adapters interface
 - aos-kernel: plan executor, capability/policy gates, journal/snapshots, world loop
+- aos-wasm-sdk: reducer-side helper API targeting wasm32-unknown-unknown
+- aos-testkit: in-memory store, fake adapters, deterministic clock, replay harness (publish = false)
 - aos-cli: commands to init world, propose/shadow/apply, run, tail logs, etc.
+
+Optional adapter crates (out-of-core executors)
+- aos-adapter-http, aos-adapter-llm, aos-adapter-fs, aos-adapter-timer (publish = false initially)
+  - Provide concrete adapter implementations behind the adapter trait registry.
+  - Keep async/provider deps out of the kernel; register via features in `aos-kernel` or `aos-cli`.
 
 Core dependencies
 - serde, serde_json
@@ -29,6 +37,34 @@ Core dependencies
 - globset for policy matching
 - indexmap for deterministic maps
 - tokio (optional) for adapters; core kernel remains single-threaded
+
+Workspace settings
+- Use Rust edition 2024 across all crates.
+- Workspace `Cargo.toml` uses resolver = "2" and sets the edition per-crate.
+
+```toml
+# Cargo.toml (workspace)
+[workspace]
+members = [
+  "crates/aos-air-types",
+  "crates/aos-air-exec",
+  "crates/aos-cbor",
+  "crates/aos-store",
+  "crates/aos-wasm",
+  "crates/aos-effects",
+  "crates/aos-kernel",
+  "crates/aos-wasm-sdk",
+  "crates/aos-testkit",
+  "crates/aos-cli",
+]
+resolver = "2"
+
+# Example per-crate Cargo.toml
+[package]
+name = "aos-air-types"
+edition = "2024"
+# publish = false  # set on internal crates until stabilized
+```
 
 1) Canonical CBOR and hashing
 
@@ -241,14 +277,14 @@ impl super::FsStore {
 }
 ```
 
-4) Semantic validator
+4) Semantic validation (in aos-air-types)
 
-Validate beyond JSON Schema: name resolution, DAG checks, type compatibility, capability/policy references.
+Validate beyond JSON Schema: name resolution, DAG checks, type compatibility, capability/policy references. The validator lives inside `aos-air-types` to keep the model and checks in one place.
 
 ```rust
-// aos-air-validate/src/lib.rs
+// aos-air-types/src/validate.rs
 use aos_air_types::*;
-use petgraph::{graphmap::DiGraphMap, Direction};
+use petgraph::graphmap::DiGraphMap;
 
 pub fn validate_plan_semantics(plan: &DefPlan) -> anyhow::Result<()> {
     // build graph and check acyclicity
@@ -440,9 +476,10 @@ impl WasmRuntime {
 
 Reducer call envelope (v1 and v1.1)
 
-Use a single reducer export `step` with a canonical CBOR envelope that carries optional key and a mode flag. This lets the same reducer binary run in v1 (monolithic state) and v1.1 (cells).
+Use a single reducer export `step` with a canonical CBOR envelope that carries optional key and a mode flag. This lets the same reducer binary run in v1 (monolithic state) and v1.1 (cells). Define these shared envelopes in `aos-wasm-abi` so both the kernel and `aos-wasm-sdk` depend on one source of truth.
 
 ```rust
+// aos-wasm-abi/src/lib.rs (no_std-friendly)
 #[derive(serde::Deserialize)]
 struct InEnvelope {
     version: u8, // =1
@@ -985,4 +1022,11 @@ Advice on libraries and details
 Final conclusions
 
 - Implement AIR evaluation in Rust as a small control-plane engine: canonicalize-and-hash all AIR nodes; load and semantically validate manifests; evaluate expressions with a total, deterministic interpreter; schedule plan steps through a single-threaded executor; call deterministic WASM reducers via a tiny CBOR ABI; create effect intents and gate them by capability and policy; reconcile via signed receipts; and persist everything to a canonical journal and snapshots.
-- The code skeletons above give you the key types, traits, and function boundaries. Start with CBOR+hashing+store, then loader/validator, then expr eval, then Wasm runner, then the plan executor and gates, then effects/receipts and journal, then shadow-run. Keep tests “replay-or-die.” This will get you to an end-to-end deterministic PoC without building a full DSL.
+- The code skeletons above give you the key types, traits, and function boundaries. Start with CBOR+hashing+store, then loader + validation (in aos-air-types), then expr eval (aos-air-exec), then Wasm runner, then the plan executor and gates, then effects/receipts and journal, then shadow-run. Keep tests “replay-or-die.” This will get you to an end-to-end deterministic PoC without building a full DSL.
+
+Testkit (aos-testkit)
+- In-memory CAS/store compatible with `aos-store` interfaces.
+- Fake adapters for http/llm/fs/timer with deterministic responses and cost counters.
+- Deterministic clock and seeded RNG helpers.
+- Replay harness: run a scenario, persist journal, replay from genesis, assert byte-identical snapshots.
+- Mark `publish = false` until APIs settle.
