@@ -7,4 +7,5 @@ publish = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
-
+thiserror = "1"
+serde_cbor = { version = "0.11", default-features = true }
