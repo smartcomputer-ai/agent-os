@@ -3,5 +3,7 @@
 mod model;
 pub mod validate;
 pub mod schemas;
+mod refs;
 
 pub use model::*;
+pub use refs::{HashRef, SchemaRef, RefError};

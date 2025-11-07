@@ -1,9 +1,8 @@
+use crate::{HashRef, SchemaRef};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 pub type Name = String;
-pub type HashRef = String;
-pub type SchemaRef = Name;
 pub type VarName = String;
 pub type StepId = String;
 pub type CapGrantName = String;

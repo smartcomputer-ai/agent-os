@@ -85,7 +85,7 @@ pub fn validate_plans(plans: &[DefPlan]) -> HashMap<String, Result<(), Validatio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DefPlan, EffectKind, Expr, ExprRecord, PlanBindEffect, PlanEdge, PlanStep, PlanStepEmitEffect, PlanStepEnd, PlanStepKind};
+    use crate::{DefPlan, EffectKind, Expr, ExprRecord, PlanBindEffect, PlanEdge, PlanStep, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, SchemaRef};
     use indexmap::IndexMap;
 
     fn sample_plan() -> DefPlan {
@@ -104,7 +104,7 @@ mod tests {
         };
         DefPlan {
             name: "com.acme/plan@1".into(),
-            input: "com.acme/Input@1".into(),
+            input: SchemaRef::new("com.acme/Input@1").unwrap(),
             output: None,
             locals: IndexMap::new(),
             steps: vec![emit, end],
