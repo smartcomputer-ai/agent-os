@@ -81,6 +81,47 @@ All crates use Rust edition 2024. Crates live under `crates/` and are organized 
 Optional adapters (planned as separate crates):
 - `aos-adapter-http`, `aos-adapter-llm`, `aos-adapter-fs`, `aos-adapter-timer` — Concrete adapter implementations. Keep async/provider deps out of the kernel.
 
+## Test Strategy (Concise, Deterministic)
+
+- Unit tests live next to code: place `mod tests` at the bottom of the same file with `#[cfg(test)]`. Keep them short, one behavior per test.
+- Integration tests go under `tests/` when they cross crate boundaries, hit I/O, spawn the kernel stepper, or involve adapters. Use `aos-testkit` fixtures.
+- Naming: use `function_under_test_condition_expected()` style; structure as arrange/act/assert. Prefer explicit inputs over shared mutable fixtures.
+- Determinism: no wall-clock or randomness in tests. If needed, use seeded RNG and deterministic clock from `aos-testkit`.
+- Errors: assert on error kinds/types (e.g., custom errors with `thiserror`) instead of string matching. Prefer `matches!`/`downcast_ref` over brittle text.
+- Parallel-safe: tests run in parallel by default. Avoid global state and temp dirs without unique prefixes. Only serialize when necessary.
+- Property tests (optional): add a small number of targeted property tests (e.g., canonical encoding invariants). Gate heavier fuzzing behind a feature.
+- Doctests: keep crate-level examples compilable; simple examples belong in doc comments and are run with `cargo test --doc`.
+- Snapshots/"goldens": for canonical CBOR and journals, store fixtures under `tests/data/`. Regenerate consciously; diff byte-for-byte to protect determinism.
+- Replay-or-die: for kernel/plan tests, run once to produce a journal, then replay from genesis and assert byte-identical snapshots.
+- Async tests: if needed, use `#[tokio::test(flavor = "current_thread")]` to keep scheduling deterministic.
+
+Example unit test layout (in-file):
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_canonical_cbor_is_stable() {
+        let bytes1 = to_canonical_cbor(&serde_json::json!({"a":1,"b":2})).unwrap();
+        let bytes2 = to_canonical_cbor(&serde_json::json!({"b":2,"a":1})).unwrap();
+        assert_eq!(bytes1, bytes2);
+    }
+}
+```
+
+Example integration test (under `tests/`):
+
+```rust
+#[test]
+fn replay_is_byte_identical() {
+    // arrange: build a tiny world with testkit
+    // act: run plan once (adapters stubbed), persist journal
+    // assert: replay from genesis yields identical snapshot bytes
+}
+```
+
 ## Keeping Documentation Updated
 
 **IMPORTANT**: When modifying specs or architecture:
