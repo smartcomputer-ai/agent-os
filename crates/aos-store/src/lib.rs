@@ -1,20 +1,16 @@
 //! Content-addressed storage abstractions plus filesystem and in-memory backends.
 
 mod fs_store;
-mod mem_store;
 pub mod manifest;
+mod mem_store;
 
 pub use fs_store::FsStore;
+pub use manifest::{Catalog, CatalogEntry, load_manifest_from_bytes, load_manifest_from_path};
 pub use mem_store::MemStore;
-pub use manifest::{load_manifest_from_bytes, load_manifest_from_path, Catalog, CatalogEntry};
 
 use aos_cbor::Hash;
-use serde::{de::DeserializeOwned, Serialize};
-use std::{
-    io,
-    path::PathBuf,
-    sync::Arc,
-};
+use serde::{Serialize, de::DeserializeOwned};
+use std::{io, path::PathBuf, sync::Arc};
 
 pub type StoreResult<T> = Result<T, StoreError>;
 pub type DynStore = Arc<dyn Store>;

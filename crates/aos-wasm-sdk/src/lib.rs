@@ -2,4 +2,3 @@
 //! Intended for wasm32-unknown-unknown target.
 
 pub fn entry_placeholder() {}
-

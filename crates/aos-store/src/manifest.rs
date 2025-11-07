@@ -1,9 +1,9 @@
 use std::{collections::HashMap, path::Path};
 
-use aos_air_types::{validate, AirNode, Manifest, NamedRef};
+use aos_air_types::{AirNode, Manifest, NamedRef, validate};
 use aos_cbor::Hash;
 
-use crate::{io_error, Store, StoreError, StoreResult};
+use crate::{Store, StoreError, StoreResult, io_error};
 
 #[derive(Debug, Clone)]
 pub struct CatalogEntry {
@@ -49,7 +49,10 @@ impl NodeKind {
     }
 }
 
-pub fn load_manifest_from_path<S: Store>(store: &S, path: impl AsRef<Path>) -> StoreResult<Catalog> {
+pub fn load_manifest_from_path<S: Store>(
+    store: &S,
+    path: impl AsRef<Path>,
+) -> StoreResult<Catalog> {
     let path_ref = path.as_ref();
     let bytes = std::fs::read(path_ref).map_err(|e| io_error(path_ref, e))?;
     load_manifest_from_bytes(store, &bytes)
@@ -85,13 +88,7 @@ fn load_refs<S: Store>(
                 expected: kind.label(),
             });
         }
-        nodes.insert(
-            reference.name.clone(),
-            CatalogEntry {
-                hash,
-                node,
-            },
-        );
+        nodes.insert(reference.name.clone(), CatalogEntry { hash, node });
     }
     Ok(())
 }
@@ -130,7 +127,9 @@ mod tests {
     use indexmap::IndexMap;
 
     fn sample_plan() -> DefPlan {
-        let expr = Expr::Const(ExprConst::Text { text: "payload".into() });
+        let expr = Expr::Const(ExprConst::Text {
+            text: "payload".into(),
+        });
         DefPlan {
             name: "com.acme/plan@1".into(),
             input: SchemaRef::new("com.acme/Input@1").unwrap(),
@@ -143,7 +142,9 @@ mod tests {
                         kind: EffectKind::HttpRequest,
                         params: expr.clone(),
                         cap: "http_cap".into(),
-                        bind: PlanBindEffect { effect_id_as: "req".into() },
+                        bind: PlanBindEffect {
+                            effect_id_as: "req".into(),
+                        },
                     }),
                 },
                 PlanStep {
@@ -160,9 +161,14 @@ mod tests {
                     kind: PlanStepKind::Assign(PlanStepAssign {
                         expr: Expr::Op(ExprOp {
                             op: ExprOpCode::Concat,
-                            args: vec![expr.clone(), Expr::Const(ExprConst::Text { text: "!".into() })],
+                            args: vec![
+                                expr.clone(),
+                                Expr::Const(ExprConst::Text { text: "!".into() }),
+                            ],
                         }),
-                        bind: PlanBind { var: "result".into() },
+                        bind: PlanBind {
+                            var: "result".into(),
+                        },
                     }),
                 },
                 PlanStep {
@@ -171,9 +177,21 @@ mod tests {
                 },
             ],
             edges: vec![
-                PlanEdge { from: "emit".into(), to: "await".into(), when: None },
-                PlanEdge { from: "await".into(), to: "assign".into(), when: None },
-                PlanEdge { from: "assign".into(), to: "end".into(), when: None },
+                PlanEdge {
+                    from: "emit".into(),
+                    to: "await".into(),
+                    when: None,
+                },
+                PlanEdge {
+                    from: "await".into(),
+                    to: "assign".into(),
+                    when: None,
+                },
+                PlanEdge {
+                    from: "assign".into(),
+                    to: "end".into(),
+                    when: None,
+                },
             ],
             required_caps: vec!["http_cap".into()],
             allowed_effects: vec![EffectKind::HttpRequest],

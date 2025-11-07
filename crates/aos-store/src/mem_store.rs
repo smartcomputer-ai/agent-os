@@ -1,6 +1,6 @@
 use crate::{EntryKind, Store, StoreError, StoreResult};
-use aos_cbor::{to_canonical_cbor, Hash};
-use serde::{de::DeserializeOwned, Serialize};
+use aos_cbor::{Hash, to_canonical_cbor};
+use serde::{Serialize, de::DeserializeOwned};
 use std::{
     collections::HashMap,
     io,
@@ -37,7 +37,11 @@ impl MemStore {
         }
     }
 
-    fn load_bytes(map: &RwLock<HashMap<Hash, Vec<u8>>>, kind: EntryKind, hash: Hash) -> StoreResult<Vec<u8>> {
+    fn load_bytes(
+        map: &RwLock<HashMap<Hash, Vec<u8>>>,
+        kind: EntryKind,
+        hash: Hash,
+    ) -> StoreResult<Vec<u8>> {
         let guard = map.read().unwrap();
         guard
             .get(&hash)
@@ -63,7 +67,11 @@ impl Store for MemStore {
         let bytes = Self::load_bytes(&self.nodes, EntryKind::Node, hash)?;
         let actual = Hash::of_bytes(&bytes);
         if actual != hash {
-            return Err(StoreError::HashMismatch { kind: EntryKind::Node, expected: hash, actual });
+            return Err(StoreError::HashMismatch {
+                kind: EntryKind::Node,
+                expected: hash,
+                actual,
+            });
         }
         Ok(serde_cbor::from_slice(&bytes)?)
     }
@@ -82,7 +90,11 @@ impl Store for MemStore {
         let bytes = Self::load_bytes(&self.blobs, EntryKind::Blob, hash)?;
         let actual = Hash::of_bytes(&bytes);
         if actual != hash {
-            return Err(StoreError::HashMismatch { kind: EntryKind::Blob, expected: hash, actual });
+            return Err(StoreError::HashMismatch {
+                kind: EntryKind::Blob,
+                expected: hash,
+                actual,
+            });
         }
         Ok(bytes)
     }

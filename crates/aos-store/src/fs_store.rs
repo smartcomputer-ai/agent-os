@@ -1,5 +1,5 @@
-use crate::{io_error, EntryKind, Store, StoreError, StoreResult};
-use aos_cbor::{to_canonical_cbor, Hash};
+use crate::{EntryKind, Store, StoreError, StoreResult, io_error};
+use aos_cbor::{Hash, to_canonical_cbor};
 use std::{
     fmt,
     fs::{self, OpenOptions},
@@ -31,18 +31,17 @@ impl FsStore {
         let blobs_dir = store_root.join("blobs").join("sha256");
         fs::create_dir_all(&nodes_dir).map_err(|e| io_error(&nodes_dir, e))?;
         fs::create_dir_all(&blobs_dir).map_err(|e| io_error(&blobs_dir, e))?;
-        Ok(Self { nodes_dir, blobs_dir })
+        Ok(Self {
+            nodes_dir,
+            blobs_dir,
+        })
     }
 
     fn write_once(path: &Path, bytes: &[u8]) -> StoreResult<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| io_error(parent, e))?;
         }
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-        {
+        match OpenOptions::new().write(true).create_new(true).open(path) {
             Ok(mut file) => {
                 file.write_all(bytes).map_err(|e| io_error(path, e))?;
                 file.sync_all().map_err(|e| io_error(path, e))?;
@@ -69,7 +68,11 @@ impl FsStore {
         let bytes = fs::read(&path).map_err(|e| io_error(path.clone(), e))?;
         let actual = Hash::of_bytes(&bytes);
         if actual != hash {
-            return Err(StoreError::HashMismatch { kind, expected: hash, actual });
+            return Err(StoreError::HashMismatch {
+                kind,
+                expected: hash,
+                actual,
+            });
         }
         Ok(bytes)
     }

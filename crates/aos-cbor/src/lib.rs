@@ -1,10 +1,7 @@
 //! Canonical CBOR helpers and stable SHA-256 hashing utilities used across AgentOS.
 
 use serde::Serialize;
-use serde_cbor::{
-    ser::Write as CborWrite,
-    value::Value as CborValue,
-};
+use serde_cbor::{ser::Write as CborWrite, value::Value as CborValue};
 use sha2::{Digest, Sha256};
 use std::fmt;
 
@@ -61,7 +58,9 @@ impl Hash {
 
     /// Parse a hash from its `sha256:`-prefixed hex string representation.
     pub fn from_hex_str(s: &str) -> Result<Self, HashParseError> {
-        let rest = s.strip_prefix(HASH_PREFIX).ok_or(HashParseError::MissingPrefix)?;
+        let rest = s
+            .strip_prefix(HASH_PREFIX)
+            .ok_or(HashParseError::MissingPrefix)?;
         if rest.len() != 64 {
             return Err(HashParseError::InvalidLength(rest.len()));
         }

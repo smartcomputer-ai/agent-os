@@ -29,5 +29,7 @@ embed_schema! {
 }
 
 pub fn find(name: &str) -> Option<&'static str> {
-    ALL.iter().find(|doc| doc.name.eq_ignore_ascii_case(name)).map(|doc| doc.json)
+    ALL.iter()
+        .find(|doc| doc.name.eq_ignore_ascii_case(name))
+        .map(|doc| doc.json)
 }

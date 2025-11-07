@@ -16,20 +16,33 @@ pub enum ValidationError {
     #[error("plan {plan} contains cycles")]
     CyclicPlan { plan: String },
     #[error("plan {plan} step {step_id} emits effect {kind:?} which is not in allowed_effects")]
-    EffectNotAllowed { plan: String, step_id: StepId, kind: EffectKind },
+    EffectNotAllowed {
+        plan: String,
+        step_id: StepId,
+        kind: EffectKind,
+    },
     #[error("plan {plan} step {step_id} uses cap {cap} which is not listed in required_caps")]
-    CapNotDeclared { plan: String, step_id: StepId, cap: CapGrantName },
+    CapNotDeclared {
+        plan: String,
+        step_id: StepId,
+        cap: CapGrantName,
+    },
 }
 
 pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
     if plan.steps.is_empty() {
-        return Err(ValidationError::EmptyPlan { plan: plan.name.clone() });
+        return Err(ValidationError::EmptyPlan {
+            plan: plan.name.clone(),
+        });
     }
 
     let mut step_ids = HashSet::new();
     for step in &plan.steps {
         if !step_ids.insert(&step.id) {
-            return Err(ValidationError::DuplicateStepId { plan: plan.name.clone(), step_id: step.id.clone() });
+            return Err(ValidationError::DuplicateStepId {
+                plan: plan.name.clone(),
+                step_id: step.id.clone(),
+            });
         }
     }
 
@@ -39,15 +52,23 @@ pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
     }
     for edge in &plan.edges {
         if !step_ids.contains(&edge.from) {
-            return Err(ValidationError::EdgeReferencesUnknownStep { plan: plan.name.clone(), step_id: edge.from.clone() });
+            return Err(ValidationError::EdgeReferencesUnknownStep {
+                plan: plan.name.clone(),
+                step_id: edge.from.clone(),
+            });
         }
         if !step_ids.contains(&edge.to) {
-            return Err(ValidationError::EdgeReferencesUnknownStep { plan: plan.name.clone(), step_id: edge.to.clone() });
+            return Err(ValidationError::EdgeReferencesUnknownStep {
+                plan: plan.name.clone(),
+                step_id: edge.to.clone(),
+            });
         }
         graph.add_edge(edge.from.as_str(), edge.to.as_str(), ());
     }
     if is_cyclic_directed(&graph) {
-        return Err(ValidationError::CyclicPlan { plan: plan.name.clone() });
+        return Err(ValidationError::CyclicPlan {
+            plan: plan.name.clone(),
+        });
     }
 
     let allowed_effects: HashSet<_> = plan.allowed_effects.iter().collect();
@@ -85,7 +106,10 @@ pub fn validate_plans(plans: &[DefPlan]) -> HashMap<String, Result<(), Validatio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DefPlan, EffectKind, Expr, ExprRecord, PlanBindEffect, PlanEdge, PlanStep, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, SchemaRef};
+    use crate::{
+        DefPlan, EffectKind, Expr, ExprRecord, PlanBindEffect, PlanEdge, PlanStep,
+        PlanStepEmitEffect, PlanStepEnd, PlanStepKind, SchemaRef,
+    };
     use indexmap::IndexMap;
 
     fn sample_plan() -> DefPlan {
@@ -93,9 +117,13 @@ mod tests {
             id: "emit".into(),
             kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                 kind: EffectKind::HttpRequest,
-                params: Expr::Record(ExprRecord { record: IndexMap::new() }),
+                params: Expr::Record(ExprRecord {
+                    record: IndexMap::new(),
+                }),
                 cap: "http_cap".into(),
-                bind: PlanBindEffect { effect_id_as: "req".into() },
+                bind: PlanBindEffect {
+                    effect_id_as: "req".into(),
+                },
             }),
         };
         let end = PlanStep {
@@ -108,7 +136,11 @@ mod tests {
             output: None,
             locals: IndexMap::new(),
             steps: vec![emit, end],
-            edges: vec![PlanEdge { from: "emit".into(), to: "end".into(), when: None }],
+            edges: vec![PlanEdge {
+                from: "emit".into(),
+                to: "end".into(),
+                when: None,
+            }],
             required_caps: vec!["http_cap".into()],
             allowed_effects: vec![EffectKind::HttpRequest],
             invariants: vec![],
@@ -134,13 +166,19 @@ mod tests {
         let mut plan = sample_plan();
         plan.edges[0].to = "unknown".into();
         let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(err, ValidationError::EdgeReferencesUnknownStep { step_id, .. } if step_id == "unknown"));
+        assert!(
+            matches!(err, ValidationError::EdgeReferencesUnknownStep { step_id, .. } if step_id == "unknown")
+        );
     }
 
     #[test]
     fn cycle_detected() {
         let mut plan = sample_plan();
-        plan.edges.push(PlanEdge { from: "end".into(), to: "emit".into(), when: None });
+        plan.edges.push(PlanEdge {
+            from: "end".into(),
+            to: "emit".into(),
+            when: None,
+        });
         let err = validate_plan(&plan).unwrap_err();
         assert!(matches!(err, ValidationError::CyclicPlan { .. }));
     }
@@ -150,7 +188,9 @@ mod tests {
         let mut plan = sample_plan();
         plan.allowed_effects = vec![EffectKind::TimerSet];
         let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(err, ValidationError::EffectNotAllowed { kind, .. } if kind == EffectKind::HttpRequest));
+        assert!(
+            matches!(err, ValidationError::EffectNotAllowed { kind, .. } if kind == EffectKind::HttpRequest)
+        );
     }
 
     #[test]
