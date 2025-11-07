@@ -349,6 +349,45 @@ mod tests {
         let round_trip: ValueLiteral = serde_json::from_value(json_value).expect("deserialize");
         matches!(round_trip, ValueLiteral::Record(_));
     }
+
+    #[test]
+    fn manifest_round_trip() {
+        let manifest_json = json!({
+            "$kind": "manifest",
+            "schemas": [
+                {
+                    "name": "com.acme/Order@1",
+                    "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+            ],
+            "modules": [
+                {
+                    "name": "com.acme/order_reducer@1",
+                    "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+            ],
+            "plans": [
+                {
+                    "name": "com.acme/order_plan@1",
+                    "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+            ],
+            "caps": [],
+            "policies": [],
+            "routing": {
+                "events": [
+                    {
+                        "event": "com.acme/OrderCreated@1",
+                        "reducer": "com.acme/order_reducer@1"
+                    }
+                ]
+            }
+        });
+
+        let node: AirNode = serde_json::from_value(manifest_json.clone()).expect("deserialize");
+        let round_trip = serde_json::to_value(node).expect("serialize");
+        assert_eq!(manifest_json, round_trip);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
