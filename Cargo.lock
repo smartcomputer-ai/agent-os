@@ -151,6 +151,9 @@ dependencies = [
  "aos-wasm",
  "aos-wasm-abi",
  "indexmap",
+ "serde",
+ "thiserror",
+ "wat",
 ]
 
 [[package]]
