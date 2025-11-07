@@ -1,21 +1,16 @@
-//! Effect intent and receipt types (skeleton)
+//! Shared effect intent/receipt/capability types and helpers.
 
-use serde::{Deserialize, Serialize};
+pub mod builtins;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EffectIntent {
-    pub kind: String,
-    pub cap_name: String,
-}
+mod capability;
+mod intent;
+mod kinds;
+mod receipt;
+pub mod traits;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ReceiptStatus {
-    Ok,
-    Error,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Receipt {
-    pub intent_kind: String,
-    pub status: ReceiptStatus,
-}
+pub use capability::{
+    CapabilityBudget, CapabilityEncodeError, CapabilityGrant, CapabilityGrantBuilder,
+};
+pub use intent::{EffectIntent, EffectSource, IdempotencyKey, IntentBuilder, IntentEncodeError};
+pub use kinds::EffectKind;
+pub use receipt::{EffectReceipt, ReceiptDecodeError, ReceiptStatus};

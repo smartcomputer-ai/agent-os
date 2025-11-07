@@ -1,0 +1,49 @@
+use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
+
+/// Identifies an effect kind (e.g., `http.request`). New kinds can be added via AIR.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct EffectKind(String);
+
+impl EffectKind {
+    pub const HTTP_REQUEST: &'static str = "http.request";
+    pub const FS_BLOB_PUT: &'static str = "fs.blob.put";
+    pub const FS_BLOB_GET: &'static str = "fs.blob.get";
+    pub const TIMER_SET: &'static str = "timer.set";
+    pub const LLM_GENERATE: &'static str = "llm.generate";
+
+    pub fn new(kind: impl Into<String>) -> Self {
+        Self(kind.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<S: Into<String>> From<S> for EffectKind {
+    fn from(value: S) -> Self {
+        Self::new(value)
+    }
+}
+
+impl FromStr for EffectKind {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(s.to_owned()))
+    }
+}
+
+impl fmt::Display for EffectKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl AsRef<str> for EffectKind {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}

@@ -106,7 +106,15 @@ dependencies = [
 name = "aos-effects"
 version = "0.1.0"
 dependencies = [
+ "aos-air-types",
+ "aos-cbor",
+ "hex",
+ "indexmap",
  "serde",
+ "serde_bytes",
+ "serde_cbor",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
