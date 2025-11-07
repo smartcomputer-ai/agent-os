@@ -184,7 +184,10 @@ mod tests {
 
     #[test]
     fn hash_validation() {
-        assert!(HashRef::new("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef").is_ok());
+        assert!(
+            HashRef::new("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+                .is_ok()
+        );
         assert!(HashRef::new("sha256:zzz").is_err());
     }
 

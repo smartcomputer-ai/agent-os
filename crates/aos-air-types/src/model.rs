@@ -295,7 +295,7 @@ pub struct ExprOp {
     pub args: Vec<Expr>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExprOpCode {
     Len,
@@ -674,14 +674,15 @@ pub enum EffectKind {
     LlmGenerate,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
     fn text_type() -> TypeExpr {
-        TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText { text: EmptyObject::default() }))
+        TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+            text: EmptyObject::default(),
+        }))
     }
 
     #[test]
@@ -690,7 +691,9 @@ mod tests {
         record.insert("id".to_string(), text_type());
         record.insert(
             "tags".to_string(),
-            TypeExpr::Set(TypeSet { set: Box::new(text_type()) }),
+            TypeExpr::Set(TypeSet {
+                set: Box::new(text_type()),
+            }),
         );
         let ty = TypeExpr::Record(TypeRecord { record });
         let value = serde_json::to_value(ty).expect("serialize");
@@ -710,8 +713,12 @@ mod tests {
         let expr = Expr::Op(ExprOp {
             op: ExprOpCode::Concat,
             args: vec![
-                Expr::Const(ExprConst::Text { text: "hello".into() }),
-                Expr::Const(ExprConst::Text { text: "world".into() }),
+                Expr::Const(ExprConst::Text {
+                    text: "hello".into(),
+                }),
+                Expr::Const(ExprConst::Text {
+                    text: "world".into(),
+                }),
             ],
         });
         let value = serde_json::to_value(expr).unwrap();
@@ -747,7 +754,9 @@ mod tests {
         let mut record = IndexMap::new();
         record.insert(
             "name".into(),
-            ValueLiteral::Text(ValueText { text: "demo".into() }),
+            ValueLiteral::Text(ValueText {
+                text: "demo".into(),
+            }),
         );
         record.insert(
             "flags".into(),
@@ -809,4 +818,3 @@ mod tests {
         assert_eq!(manifest_json, round_trip);
     }
 }
-

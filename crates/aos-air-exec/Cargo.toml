@@ -8,4 +8,7 @@ publish = false
 aos-air-types = { path = "../aos-air-types" }
 indexmap = "2"
 thiserror = "1"
-
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
+serde_bytes = "0.11"

@@ -1,5 +1,7 @@
-//! Expression/value execution engine (skeleton)
-//! Deterministic, side-effect-free evaluator used by plans.
+//! AIR expression evaluation engine plus deterministic value model.
 
-pub fn eval_placeholder() {}
+mod expr;
+mod value;
 
+pub use expr::{Env, EvalError, EvalResult, eval_expr};
+pub use value::{Value, ValueKey, ValueMap, ValueSet};
