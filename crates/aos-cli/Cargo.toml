@@ -1,0 +1,14 @@
+[package]
+name = "aos-cli"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+aos-kernel = { path = "../aos-kernel" }
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "aos"
+path = "src/main.rs"
+

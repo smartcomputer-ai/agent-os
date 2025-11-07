@@ -1,0 +1,11 @@
+[package]
+name = "aos-wasm-sdk"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+aos-wasm-abi = { path = "../aos-wasm-abi" }
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
+

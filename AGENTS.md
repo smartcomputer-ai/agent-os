@@ -62,6 +62,25 @@ See **spec/03b-air-implementation.md** for detailed Rust implementation guide.
 
 **Testing invariant**: "Replay-or-die" - replay from genesis must produce byte-identical snapshots.
 
+## Project Structure (Rust Workspace)
+
+All crates use Rust edition 2024. Crates live under `crates/` and are organized to keep deterministic core small and effectful code at the edges.
+
+- `aos-air-types` — AIR data types and semantic validation. Bundles JSON Schemas, Expr AST, and checks (DAG, references, bindings).
+- `aos-air-exec` — Pure, deterministic expression/value evaluator used by plan predicates and bindings.
+- `aos-cbor` — Canonical CBOR encode/decode and SHA-256 hashing helpers used across the stack.
+- `aos-store` — Content-addressed store primitives and (later) manifest loader utilities.
+- `aos-wasm-abi` — Shared no_std envelopes for reducer/pure-component ABIs (kernel and SDK share these types).
+- `aos-wasm` — Deterministic Wasm runner wrapper (wasmtime profile, reducer ABI integration).
+- `aos-effects` — Effect intent and receipt types plus adapter-facing traits.
+- `aos-kernel` — Deterministic stepper, plan executor, policy/capability gates, journal/snapshots.
+- `aos-wasm-sdk` — Reducer-side helper library targeting `wasm32-unknown-unknown` (entry wrapper, micro-effect helpers).
+- `aos-testkit` — In-memory store/adapters, deterministic clock/RNG, replay harness; for tests and shadow runs.
+- `aos-cli` — Operational tooling: init world, run loop, tail journal; wires adapters via features.
+
+Optional adapters (planned as separate crates):
+- `aos-adapter-http`, `aos-adapter-llm`, `aos-adapter-fs`, `aos-adapter-timer` — Concrete adapter implementations. Keep async/provider deps out of the kernel.
+
 ## Keeping Documentation Updated
 
 **IMPORTANT**: When modifying specs or architecture:

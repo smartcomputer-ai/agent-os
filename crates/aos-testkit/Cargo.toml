@@ -1,0 +1,12 @@
+[package]
+name = "aos-testkit"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+aos-store = { path = "../aos-store" }
+aos-effects = { path = "../aos-effects" }
+aos-kernel = { path = "../aos-kernel" }
+rand = "0.8"
+

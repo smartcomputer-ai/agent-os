@@ -1,0 +1,10 @@
+[package]
+name = "aos-wasm"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+aos-wasm-abi = { path = "../aos-wasm-abi" }
+anyhow = "1"
+
