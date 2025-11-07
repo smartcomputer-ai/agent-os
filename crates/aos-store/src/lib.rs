@@ -2,9 +2,11 @@
 
 mod fs_store;
 mod mem_store;
+pub mod manifest;
 
 pub use fs_store::FsStore;
 pub use mem_store::MemStore;
+pub use manifest::{load_manifest_from_bytes, load_manifest_from_path, Catalog, CatalogEntry};
 
 use aos_cbor::Hash;
 use serde::{de::DeserializeOwned, Serialize};
@@ -43,6 +45,23 @@ pub enum StoreError {
         kind: EntryKind,
         expected: Hash,
         actual: Hash,
+    },
+    #[error("invalid hash string '{value}': {source}")]
+    InvalidHashString {
+        value: String,
+        #[source]
+        source: aos_cbor::HashParseError,
+    },
+    #[error("node '{name}' is not a {expected}")]
+    NodeKindMismatch {
+        name: String,
+        expected: &'static str,
+    },
+    #[error("plan validation failed for '{name}': {source}")]
+    PlanValidation {
+        name: String,
+        #[source]
+        source: aos_air_types::validate::ValidationError,
     },
 }
 

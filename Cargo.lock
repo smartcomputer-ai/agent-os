@@ -125,8 +125,10 @@ name = "aos-store"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aos-air-types",
  "aos-cbor",
  "hex",
+ "indexmap",
  "serde",
  "serde_cbor",
  "tempfile",

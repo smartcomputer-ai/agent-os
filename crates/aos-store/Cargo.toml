@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 aos-cbor = { path = "../aos-cbor" }
+aos-air-types = { path = "../aos-air-types" }
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
 anyhow = "1"
@@ -14,3 +15,4 @@ hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+indexmap = "2"
