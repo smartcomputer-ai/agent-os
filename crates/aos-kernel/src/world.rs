@@ -273,15 +273,114 @@ mod tests {
 
     use aos_air_exec::Value as ExprValue;
     use aos_air_types::{
-        DefModule, DefPlan, EffectKind, Expr, ExprConst, HashRef, Manifest, ModuleAbi, ModuleKind,
-        NamedRef, PlanBindEffect, PlanStep, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
-        SchemaRef,
+        DefModule, DefPlan, EffectKind, Expr, ExprConst, ExprRecord, ExprRef, HashRef, Manifest,
+        ModuleAbi, ModuleKind, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
+        PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect,
+        PlanStepEnd, PlanStepKind, PlanStepRaiseEvent, Routing, RoutingEvent, SchemaRef, Trigger,
     };
     use aos_store::MemStore;
     use aos_wasm_abi::{ReducerEffect, ReducerOutput};
     use indexmap::IndexMap;
     use serde_cbor;
     use wat::parse_str;
+
+    const START_SCHEMA: &str = "com.acme/Start@1";
+
+    fn zero_hash() -> HashRef {
+        HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap()
+    }
+
+    fn schema(name: &str) -> SchemaRef {
+        SchemaRef::new(name).unwrap()
+    }
+
+    fn text_expr(value: &str) -> Expr {
+        Expr::Const(ExprConst::Text {
+            text: value.to_string(),
+        })
+    }
+
+    fn var_expr(name: &str) -> Expr {
+        Expr::Ref(ExprRef {
+            reference: format!("@var:{name}"),
+        })
+    }
+
+    fn plan_input_expr(field: &str) -> Expr {
+        Expr::Ref(ExprRef {
+            reference: format!("@plan.input.{field}"),
+        })
+    }
+
+    fn plan_input_record(fields: Vec<(&str, ExprValue)>) -> ExprValue {
+        ExprValue::Record(IndexMap::from_iter(fields.into_iter().map(|(k, v)| (
+            k.to_string(),
+            v,
+        ))))
+    }
+
+    fn build_loaded_manifest(
+        plans: Vec<DefPlan>,
+        triggers: Vec<Trigger>,
+        modules: Vec<DefModule>,
+        routing_events: Vec<RoutingEvent>,
+    ) -> LoadedManifest {
+        let plan_refs: Vec<NamedRef> = plans
+            .iter()
+            .map(|plan| NamedRef {
+                name: plan.name.clone(),
+                hash: zero_hash(),
+            })
+            .collect();
+        let module_refs: Vec<NamedRef> = modules
+            .iter()
+            .map(|module| NamedRef {
+                name: module.name.clone(),
+                hash: module.wasm_hash.clone(),
+            })
+            .collect();
+        let routing = if routing_events.is_empty() {
+            None
+        } else {
+            Some(Routing {
+                events: routing_events,
+                inboxes: vec![],
+            })
+        };
+        let manifest = Manifest {
+            schemas: vec![],
+            modules: module_refs,
+            plans: plan_refs,
+            caps: vec![],
+            policies: vec![],
+            defaults: None,
+            module_bindings: Default::default(),
+            routing,
+            triggers,
+        };
+        let modules_map = modules
+            .into_iter()
+            .map(|module| (module.name.clone(), module))
+            .collect();
+        let plans_map = plans
+            .into_iter()
+            .map(|plan| (plan.name.clone(), plan))
+            .collect();
+        LoadedManifest {
+            manifest,
+            modules: modules_map,
+            plans: plans_map,
+        }
+    }
+
+    fn start_trigger(plan: &str) -> Trigger {
+        Trigger {
+            event: schema(START_SCHEMA),
+            plan: plan.to_string(),
+            correlate_by: None,
+        }
+    }
 
     #[test]
     fn kernel_runs_reducer_and_queues_effects() {
@@ -418,5 +517,358 @@ mod tests {
             len = len,
             data = data_literal
         )
+    }
+
+    #[test]
+    fn plan_receipt_routing_resumes_waiting_instance() {
+        let store = Arc::new(MemStore::new());
+        let plan = DefPlan {
+            name: "com.acme/Plan@1".into(),
+            input: schema("com.acme/PlanIn@1"),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "emit".into(),
+                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                        kind: EffectKind::HttpRequest,
+                        params: text_expr("params"),
+                        cap: "cap_http".into(),
+                        bind: PlanBindEffect {
+                            effect_id_as: "req".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "await".into(),
+                    kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
+                        for_expr: var_expr("req"),
+                        bind: PlanBind { var: "resp".into() },
+                    }),
+                },
+                PlanStep {
+                    id: "assign".into(),
+                    kind: PlanStepKind::Assign(PlanStepAssign {
+                        expr: var_expr("resp"),
+                        bind: PlanBind {
+                            var: "copied".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "wait_evt".into(),
+                    kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
+                        event: schema("com.acme/Next@1"),
+                        where_clause: None,
+                        bind: PlanBind { var: "evt".into() },
+                    }),
+                },
+            ],
+            edges: vec![],
+            required_caps: vec!["cap_http".into()],
+            allowed_effects: vec![EffectKind::HttpRequest],
+            invariants: vec![],
+        };
+
+        let loaded = build_loaded_manifest(vec![plan.clone()], vec![start_trigger(&plan.name)], vec![], vec![]);
+        let mut kernel = Kernel::from_loaded_manifest(store, loaded).unwrap();
+        let plan_input = plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
+        let event_value = serde_cbor::to_vec(&plan_input).unwrap();
+        kernel.submit_domain_event(START_SCHEMA, event_value);
+        kernel.tick().unwrap();
+        kernel.tick().unwrap();
+
+        let mut effects = kernel.drain_effects();
+        assert_eq!(effects.len(), 1);
+        let effect = effects.remove(0);
+        assert_eq!(kernel.pending_receipts.len(), 1);
+        let (&receipt_hash, &plan_id) = kernel.pending_receipts.iter().next().unwrap();
+        assert_eq!(receipt_hash, effect.intent_hash);
+
+        let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
+        let receipt = aos_effects::EffectReceipt {
+            intent_hash: effect.intent_hash,
+            adapter_id: "adapter.http".into(),
+            status: aos_effects::ReceiptStatus::Ok,
+            payload_cbor: receipt_payload,
+            cost_cents: None,
+            signature: vec![],
+        };
+        kernel.handle_receipt(receipt).unwrap();
+        assert!(kernel.pending_receipts.is_empty());
+
+        kernel.tick().unwrap();
+        let plan_instance = kernel.plan_instances.get(&plan_id).unwrap();
+        assert_eq!(
+            plan_instance.env.vars.get("resp"),
+            Some(&ExprValue::Text("done".into()))
+        );
+        assert_eq!(
+            plan_instance.env.vars.get("copied"),
+            Some(&ExprValue::Text("done".into()))
+        );
+        assert_eq!(
+            kernel
+                .waiting_events
+                .get("com.acme/Next@1")
+                .map(|ids| ids.contains(&plan_id)),
+            Some(true)
+        );
+
+        let resume_event = DomainEvent::new(
+            "com.acme/Next@1",
+            serde_cbor::to_vec(&ExprValue::Int(1)).unwrap(),
+        );
+        kernel
+            .deliver_event_to_waiting_plans(&resume_event)
+            .unwrap();
+        kernel.tick().unwrap();
+        assert!(kernel.plan_instances.is_empty());
+    }
+
+    #[test]
+    fn plan_event_wakeup_only_resumes_matching_schema() {
+        let store = Arc::new(MemStore::new());
+        let plan_ready = DefPlan {
+            name: "com.acme/WaitReady@1".into(),
+            input: schema("com.acme/PlanIn@1"),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "wait".into(),
+                    kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
+                        event: schema("com.acme/Ready@1"),
+                        where_clause: None,
+                        bind: PlanBind { var: "evt".into() },
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+        let plan_other = DefPlan {
+            name: "com.acme/WaitOther@1".into(),
+            input: schema("com.acme/PlanIn@1"),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "wait".into(),
+                    kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
+                        event: schema("com.acme/Other@1"),
+                        where_clause: None,
+                        bind: PlanBind { var: "evt".into() },
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+
+        let loaded = build_loaded_manifest(
+            vec![plan_ready.clone(), plan_other.clone()],
+            vec![start_trigger(&plan_ready.name), start_trigger(&plan_other.name)],
+            vec![],
+            vec![],
+        );
+        let mut kernel = Kernel::from_loaded_manifest(store, loaded).unwrap();
+        let event_value = serde_cbor::to_vec(&plan_input_record(vec![])).unwrap();
+        kernel.submit_domain_event(START_SCHEMA, event_value);
+        kernel.tick().unwrap();
+        kernel.tick().unwrap();
+        kernel.tick().unwrap();
+
+        let ready_waiters = kernel.waiting_events.get("com.acme/Ready@1").unwrap();
+        let other_waiters = kernel.waiting_events.get("com.acme/Other@1").unwrap();
+        assert_eq!(ready_waiters.len(), 1);
+        assert_eq!(other_waiters.len(), 1);
+        let ready_plan_id = ready_waiters[0];
+        let other_plan_id = other_waiters[0];
+
+        let ready_event = DomainEvent::new(
+            "com.acme/Ready@1",
+            serde_cbor::to_vec(&ExprValue::Nat(7)).unwrap(),
+        );
+        kernel
+            .deliver_event_to_waiting_plans(&ready_event)
+            .unwrap();
+        kernel.tick().unwrap();
+
+        assert!(!kernel.plan_instances.contains_key(&ready_plan_id));
+        assert!(kernel.plan_instances.contains_key(&other_plan_id));
+        assert!(kernel
+            .waiting_events
+            .get("com.acme/Other@1")
+            .unwrap()
+            .contains(&other_plan_id));
+        assert!(!kernel
+            .waiting_events
+            .contains_key("com.acme/Ready@1"));
+    }
+
+    #[test]
+    fn guarded_branching_controls_effects_and_completion() {
+        let plan = DefPlan {
+            name: "com.acme/Guarded@1".into(),
+            input: schema("com.acme/PlanIn@1"),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "assign".into(),
+                    kind: PlanStepKind::Assign(PlanStepAssign {
+                        expr: plan_input_expr("flag"),
+                        bind: PlanBind { var: "flag".into() },
+                    }),
+                },
+                PlanStep {
+                    id: "emit".into(),
+                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                        kind: EffectKind::HttpRequest,
+                        params: text_expr("do it"),
+                        cap: "cap_http".into(),
+                        bind: PlanBindEffect {
+                            effect_id_as: "req".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![
+                PlanEdge {
+                    from: "assign".into(),
+                    to: "emit".into(),
+                    when: Some(var_expr("flag")),
+                },
+                PlanEdge {
+                    from: "emit".into(),
+                    to: "end".into(),
+                    when: None,
+                },
+            ],
+            required_caps: vec!["cap_http".into()],
+            allowed_effects: vec![EffectKind::HttpRequest],
+            invariants: vec![],
+        };
+        let plan_name = plan.name.clone();
+
+        // Guard true path produces effect and completes.
+        let loaded_true = build_loaded_manifest(vec![plan.clone()], vec![start_trigger(&plan.name)], vec![], vec![]);
+        let mut kernel_true =
+            Kernel::from_loaded_manifest(Arc::new(MemStore::new()), loaded_true).unwrap();
+        let true_input = plan_input_record(vec![("flag", ExprValue::Bool(true))]);
+        kernel_true.submit_domain_event(START_SCHEMA, serde_cbor::to_vec(&true_input).unwrap());
+        kernel_true.tick().unwrap();
+        kernel_true.tick().unwrap();
+        let effects = kernel_true.drain_effects();
+        assert_eq!(effects.len(), 1);
+        assert!(kernel_true.plan_instances.is_empty());
+
+        // Guard false path blocks effect and keeps plan pending.
+        let loaded_false = build_loaded_manifest(vec![plan], vec![start_trigger(&plan_name)], vec![], vec![]);
+        let mut kernel_false =
+            Kernel::from_loaded_manifest(Arc::new(MemStore::new()), loaded_false).unwrap();
+        let false_input = plan_input_record(vec![("flag", ExprValue::Bool(false))]);
+        kernel_false.submit_domain_event(START_SCHEMA, serde_cbor::to_vec(&false_input).unwrap());
+        kernel_false.tick().unwrap();
+        kernel_false.tick().unwrap();
+        assert!(kernel_false.drain_effects().is_empty());
+        assert!(!kernel_false.plan_instances.is_empty());
+    }
+
+    #[test]
+    fn raised_events_are_routed_to_reducers() {
+        let store = Arc::new(MemStore::new());
+        let reducer_output = ReducerOutput {
+            state: Some(vec![0xEE]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        };
+        let output_bytes = reducer_output.encode().unwrap();
+        let wasm_bytes = parse_str(&stub_reducer(&output_bytes)).expect("wat compile");
+        let wasm_hash = store.put_blob(&wasm_bytes).unwrap();
+        let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).unwrap();
+
+        let reducer_module = DefModule {
+            name: "com.acme/Reducer@1".into(),
+            module_kind: ModuleKind::Reducer,
+            wasm_hash: wasm_hash_ref,
+            key_schema: None,
+            abi: ModuleAbi { reducer: None },
+        };
+
+        let plan = DefPlan {
+            name: "com.acme/Raise@1".into(),
+            input: schema("com.acme/PlanIn@1"),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "raise".into(),
+                    kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
+                        reducer: reducer_module.name.clone(),
+                        event: Expr::Record(ExprRecord {
+                            record: IndexMap::from([
+                                (
+                                    "$schema".into(),
+                                    text_expr("com.acme/Raised@1"),
+                                ),
+                                ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
+                            ]),
+                        }),
+                        key: None,
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+
+        let routing = vec![RoutingEvent {
+            event: schema("com.acme/Raised@1"),
+            reducer: reducer_module.name.clone(),
+            key_field: None,
+        }];
+        let loaded = build_loaded_manifest(
+            vec![plan.clone()],
+            vec![start_trigger(&plan.name)],
+            vec![reducer_module],
+            routing,
+        );
+        let mut kernel = Kernel::from_loaded_manifest(store, loaded).unwrap();
+
+        let plan_input = plan_input_record(vec![]);
+        kernel.submit_domain_event(START_SCHEMA, serde_cbor::to_vec(&plan_input).unwrap());
+        kernel.tick().unwrap();
+        kernel.tick().unwrap();
+        kernel.tick().unwrap();
+
+        assert_eq!(
+            kernel.reducer_state("com.acme/Reducer@1"),
+            Some(&vec![0xEE])
+        );
     }
 }
