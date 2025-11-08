@@ -14,4 +14,10 @@ pub enum KernelError {
     ReducerOutput(String),
     #[error("effect manager error: {0}")]
     EffectManager(String),
+    #[error("unknown effect receipt for {0}")]
+    UnknownReceipt(String),
+    #[error("failed to decode receipt payload: {0}")]
+    ReceiptDecode(String),
+    #[error("unsupported reducer receipt kind '{0}'")]
+    UnsupportedReducerReceipt(String),
 }

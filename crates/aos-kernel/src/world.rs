@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{Manifest, Name};
+use aos_cbor::Hash as DigestHash;
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
 use serde_cbor;
@@ -12,8 +13,11 @@ use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
+use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
+
+const RECENT_RECEIPT_CACHE: usize = 512;
 
 pub struct Kernel<S: Store> {
     manifest: Manifest,
@@ -25,6 +29,9 @@ pub struct Kernel<S: Store> {
     plan_triggers: HashMap<String, Vec<String>>,
     waiting_events: HashMap<String, Vec<u64>>,
     pending_receipts: HashMap<[u8; 32], u64>,
+    pending_reducer_receipts: HashMap<[u8; 32], ReducerEffectContext>,
+    recent_receipts: VecDeque<[u8; 32]>,
+    recent_receipt_index: HashSet<[u8; 32]>,
     scheduler: Scheduler,
     effect_manager: EffectManager,
     reducer_state: HashMap<Name, Vec<u8>>,
@@ -83,6 +90,9 @@ impl<S: Store + 'static> Kernel<S> {
             plan_triggers,
             waiting_events: HashMap::new(),
             pending_receipts: HashMap::new(),
+            pending_reducer_receipts: HashMap::new(),
+            recent_receipts: VecDeque::new(),
+            recent_receipt_index: HashSet::new(),
             scheduler: Scheduler::default(),
             effect_manager: EffectManager::new(),
             reducer_state: HashMap::new(),
@@ -153,9 +163,16 @@ impl<S: Store + 'static> Kernel<S> {
             self.deliver_event_to_waiting_plans(&event)?;
             self.scheduler.push_reducer(ReducerEvent { event });
         }
-        if !output.effects.is_empty() {
-            self.effect_manager
-                .enqueue_reducer_effects(&output.effects)?;
+        for effect in &output.effects {
+            let hash = self.effect_manager.enqueue_reducer_effect(effect)?;
+            self.pending_reducer_receipts.insert(
+                hash,
+                ReducerEffectContext::new(
+                    reducer_name.clone(),
+                    effect.kind.clone(),
+                    effect.params_cbor.clone(),
+                ),
+            );
         }
         Ok(())
     }
@@ -229,9 +246,37 @@ impl<S: Store + 'static> Kernel<S> {
                 if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
                     self.scheduler.push_plan(plan_id);
                 }
+                self.remember_receipt(receipt.intent_hash);
+                return Ok(());
+            } else {
+                log::warn!(
+                    "receipt {} arrived for completed plan {}",
+                    format_intent_hash(&receipt.intent_hash),
+                    plan_id
+                );
+                self.remember_receipt(receipt.intent_hash);
+                return Ok(());
             }
         }
-        Ok(())
+
+        if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
+            let event = build_reducer_receipt_event(&context, &receipt)?;
+            self.scheduler.push_reducer(ReducerEvent { event });
+            self.remember_receipt(receipt.intent_hash);
+            return Ok(());
+        }
+
+        if self.recent_receipt_index.contains(&receipt.intent_hash) {
+            log::warn!(
+                "late receipt {} ignored (already applied)",
+                format_intent_hash(&receipt.intent_hash)
+            );
+            return Ok(());
+        }
+
+        Err(KernelError::UnknownReceipt(format_intent_hash(
+            &receipt.intent_hash,
+        )))
     }
 
     fn deliver_event_to_waiting_plans(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
@@ -264,6 +309,25 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
     }
+
+    fn remember_receipt(&mut self, hash: [u8; 32]) {
+        if self.recent_receipt_index.contains(&hash) {
+            return;
+        }
+        if self.recent_receipts.len() >= RECENT_RECEIPT_CACHE {
+            if let Some(old) = self.recent_receipts.pop_front() {
+                self.recent_receipt_index.remove(&old);
+            }
+        }
+        self.recent_receipts.push_back(hash);
+        self.recent_receipt_index.insert(hash);
+    }
+}
+
+fn format_intent_hash(hash: &[u8; 32]) -> String {
+    DigestHash::from_bytes(hash)
+        .map(|h| h.to_hex())
+        .unwrap_or_else(|_| format!("{:?}", hash))
 }
 
 #[cfg(test)]
@@ -271,16 +335,22 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    use crate::scheduler::Task;
     use aos_air_exec::Value as ExprValue;
     use aos_air_types::{
         DefModule, DefPlan, EffectKind, Expr, ExprConst, ExprRecord, ExprRef, HashRef, Manifest,
         ModuleAbi, ModuleKind, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-        PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect,
-        PlanStepEnd, PlanStepKind, PlanStepRaiseEvent, Routing, RoutingEvent, SchemaRef, Trigger,
+        PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
+        PlanStepKind, PlanStepRaiseEvent, Routing, RoutingEvent, SchemaRef, Trigger,
+    };
+    use aos_effects::{
+        EffectReceipt, ReceiptStatus,
+        builtins::{TimerSetParams, TimerSetReceipt},
     };
     use aos_store::MemStore;
     use aos_wasm_abi::{ReducerEffect, ReducerOutput};
     use indexmap::IndexMap;
+    use serde::Deserialize;
     use serde_cbor;
     use wat::parse_str;
 
@@ -314,10 +384,9 @@ mod tests {
     }
 
     fn plan_input_record(fields: Vec<(&str, ExprValue)>) -> ExprValue {
-        ExprValue::Record(IndexMap::from_iter(fields.into_iter().map(|(k, v)| (
-            k.to_string(),
-            v,
-        ))))
+        ExprValue::Record(IndexMap::from_iter(
+            fields.into_iter().map(|(k, v)| (k.to_string(), v)),
+        ))
     }
 
     fn build_loaded_manifest(
@@ -491,6 +560,72 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reducer_receipt_is_converted_into_event() {
+        let mut kernel = empty_kernel();
+        let hash = [7u8; 32];
+        let params = TimerSetParams {
+            deliver_at_ns: 5,
+            key: Some("retry".into()),
+        };
+        kernel.pending_reducer_receipts.insert(
+            hash,
+            ReducerEffectContext::new(
+                "com.acme/Reducer@1".into(),
+                aos_effects::EffectKind::TIMER_SET.into(),
+                serde_cbor::to_vec(&params).unwrap(),
+            ),
+        );
+
+        let timer_receipt = TimerSetReceipt {
+            delivered_at_ns: 9,
+            key: Some("retry".into()),
+        };
+        let receipt = EffectReceipt {
+            intent_hash: hash,
+            adapter_id: "adapter.timer".into(),
+            status: ReceiptStatus::Ok,
+            payload_cbor: serde_cbor::to_vec(&timer_receipt).unwrap(),
+            cost_cents: Some(1),
+            signature: vec![1, 2, 3],
+        };
+
+        kernel.handle_receipt(receipt.clone()).expect("handled");
+
+        match kernel.scheduler.pop() {
+            Some(Task::Reducer(ev)) => {
+                assert_eq!(ev.event.schema, "sys/TimerFired@1");
+                #[derive(Deserialize)]
+                struct Payload {
+                    #[serde(with = "serde_bytes")]
+                    intent_hash: Vec<u8>,
+                    receipt: TimerSetReceipt,
+                }
+                let decoded: Payload = serde_cbor::from_slice(&ev.event.value).unwrap();
+                assert_eq!(decoded.intent_hash, hash);
+                assert_eq!(
+                    decoded.receipt.delivered_at_ns,
+                    timer_receipt.delivered_at_ns
+                );
+            }
+            _ => panic!("expected reducer task"),
+        }
+
+        kernel.handle_receipt(receipt).expect("late ok");
+        assert!(kernel.scheduler.pop().is_none());
+
+        let unknown = EffectReceipt {
+            intent_hash: [9u8; 32],
+            adapter_id: "adapter.timer".into(),
+            status: ReceiptStatus::Ok,
+            payload_cbor: serde_cbor::to_vec(&timer_receipt).unwrap(),
+            cost_cents: None,
+            signature: vec![0],
+        };
+        let err = kernel.handle_receipt(unknown).unwrap_err();
+        assert!(matches!(err, KernelError::UnknownReceipt(_)));
+    }
+
     fn stub_reducer(output_bytes: &[u8]) -> String {
         let data_literal = output_bytes
             .iter()
@@ -570,7 +705,12 @@ mod tests {
             invariants: vec![],
         };
 
-        let loaded = build_loaded_manifest(vec![plan.clone()], vec![start_trigger(&plan.name)], vec![], vec![]);
+        let loaded = build_loaded_manifest(
+            vec![plan.clone()],
+            vec![start_trigger(&plan.name)],
+            vec![],
+            vec![],
+        );
         let mut kernel = Kernel::from_loaded_manifest(store, loaded).unwrap();
         let plan_input = plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
         let event_value = serde_cbor::to_vec(&plan_input).unwrap();
@@ -680,7 +820,10 @@ mod tests {
 
         let loaded = build_loaded_manifest(
             vec![plan_ready.clone(), plan_other.clone()],
-            vec![start_trigger(&plan_ready.name), start_trigger(&plan_other.name)],
+            vec![
+                start_trigger(&plan_ready.name),
+                start_trigger(&plan_other.name),
+            ],
             vec![],
             vec![],
         );
@@ -702,21 +845,19 @@ mod tests {
             "com.acme/Ready@1",
             serde_cbor::to_vec(&ExprValue::Nat(7)).unwrap(),
         );
-        kernel
-            .deliver_event_to_waiting_plans(&ready_event)
-            .unwrap();
+        kernel.deliver_event_to_waiting_plans(&ready_event).unwrap();
         kernel.tick().unwrap();
 
         assert!(!kernel.plan_instances.contains_key(&ready_plan_id));
         assert!(kernel.plan_instances.contains_key(&other_plan_id));
-        assert!(kernel
-            .waiting_events
-            .get("com.acme/Other@1")
-            .unwrap()
-            .contains(&other_plan_id));
-        assert!(!kernel
-            .waiting_events
-            .contains_key("com.acme/Ready@1"));
+        assert!(
+            kernel
+                .waiting_events
+                .get("com.acme/Other@1")
+                .unwrap()
+                .contains(&other_plan_id)
+        );
+        assert!(!kernel.waiting_events.contains_key("com.acme/Ready@1"));
     }
 
     #[test]
@@ -769,7 +910,12 @@ mod tests {
         let plan_name = plan.name.clone();
 
         // Guard true path produces effect and completes.
-        let loaded_true = build_loaded_manifest(vec![plan.clone()], vec![start_trigger(&plan.name)], vec![], vec![]);
+        let loaded_true = build_loaded_manifest(
+            vec![plan.clone()],
+            vec![start_trigger(&plan.name)],
+            vec![],
+            vec![],
+        );
         let mut kernel_true =
             Kernel::from_loaded_manifest(Arc::new(MemStore::new()), loaded_true).unwrap();
         let true_input = plan_input_record(vec![("flag", ExprValue::Bool(true))]);
@@ -781,7 +927,8 @@ mod tests {
         assert!(kernel_true.plan_instances.is_empty());
 
         // Guard false path blocks effect and keeps plan pending.
-        let loaded_false = build_loaded_manifest(vec![plan], vec![start_trigger(&plan_name)], vec![], vec![]);
+        let loaded_false =
+            build_loaded_manifest(vec![plan], vec![start_trigger(&plan_name)], vec![], vec![]);
         let mut kernel_false =
             Kernel::from_loaded_manifest(Arc::new(MemStore::new()), loaded_false).unwrap();
         let false_input = plan_input_record(vec![("flag", ExprValue::Bool(false))]);
@@ -826,10 +973,7 @@ mod tests {
                         reducer: reducer_module.name.clone(),
                         event: Expr::Record(ExprRecord {
                             record: IndexMap::from([
-                                (
-                                    "$schema".into(),
-                                    text_expr("com.acme/Raised@1"),
-                                ),
+                                ("$schema".into(), text_expr("com.acme/Raised@1")),
                                 ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
                             ]),
                         }),
@@ -870,5 +1014,25 @@ mod tests {
             kernel.reducer_state("com.acme/Reducer@1"),
             Some(&vec![0xEE])
         );
+    }
+
+    fn empty_kernel() -> Kernel<MemStore> {
+        let manifest = Manifest {
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            policies: vec![],
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: None,
+            triggers: vec![],
+        };
+        let loaded = LoadedManifest {
+            manifest,
+            modules: HashMap::new(),
+            plans: HashMap::new(),
+        };
+        Kernel::from_loaded_manifest(Arc::new(MemStore::new()), loaded).unwrap()
     }
 }

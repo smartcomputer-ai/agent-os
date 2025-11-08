@@ -30,22 +30,21 @@ impl EffectManager {
         }
     }
 
-    pub fn enqueue_reducer_effects(
+    pub fn enqueue_reducer_effect(
         &mut self,
-        effects: &[ReducerEffect],
-    ) -> Result<(), KernelError> {
-        for eff in effects {
-            let cap_name = eff.cap_slot.clone().unwrap_or_else(|| "default".into());
-            let intent = EffectIntent::from_raw_params(
-                eff.kind.clone().into(),
-                cap_name,
-                eff.params_cbor.clone(),
-                [0u8; 32],
-            )
-            .map_err(|err| KernelError::EffectManager(err.to_string()))?;
-            self.queue.push(intent);
-        }
-        Ok(())
+        effect: &ReducerEffect,
+    ) -> Result<[u8; 32], KernelError> {
+        let cap_name = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
+        let intent = EffectIntent::from_raw_params(
+            effect.kind.clone().into(),
+            cap_name,
+            effect.params_cbor.clone(),
+            [0u8; 32],
+        )
+        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        let hash = intent.intent_hash;
+        self.queue.push(intent);
+        Ok(hash)
     }
 
     pub fn drain(&mut self) -> Vec<EffectIntent> {
