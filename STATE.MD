@@ -1,33 +1,72 @@
 # AgentOS Dev State – November 2025
 
-## Current Focus: Kernel Testing & Remaining Work
+## Upcoming Work Packages
 
-### Tests in place (unit level)
-- `crates/aos-kernel/src/plan.rs` now has unit tests for:
-  - Assign steps updating the environment.
-  - Emit effect steps enqueueing intents and storing effect handles.
-  - Await receipt waiting/resuming behavior (hash mapping, deliver_receipt handshake).
-  - Await event waiting on schemas and resuming on DomainEvents.
-  - Guards blocking downstream steps when false.
-  - Raise event producing DomainEvents.
+Each package is scoped so an engineer can take it end-to-end. Tackle them roughly in order; later packages assume earlier infrastructure is in place.
 
-### Tests in place (integration level)
-- `crates/aos-kernel/src/world.rs` now has:
-  - Smoke test for reducer → plan → effect happy path.
-  - Plan receipt routing coverage ensuring receipts resume waiting plans and populate bindings.
-  - Plan event wake-up coverage ensuring only matching schemas resume queued plans.
-  - Guarded branching coverage verifying guarded effects complete only on the true path and remain pending otherwise.
-  - Raised event propagation coverage validating plan-raised events reach reducers through the scheduler.
+### Test Ownership & Coverage Boundaries
+- **Kernel crate (`crates/aos-kernel/`)** keeps fast unit tests that exercise local modules (plan scheduler, effect manager, capability resolver, reducer receipt conversion). These live next to the code they cover (`mod tests` or sibling `tests.rs` files) so refactors catch regressions quickly.
+- **Testkit crate (`crates/aos-testkit/`)** hosts reusable deterministic harnesses (world builder, fake adapters, manifest fixtures) plus higher-level integration tests under `crates/aos-testkit/tests/`. Kernel integration scenarios should migrate here once WP1 lands, so downstream crates (CLI, governance) can reuse the same helpers.
+- **Missing today**: only ad-hoc kernel integration tests exist (`crates/aos-kernel/src/world.rs`); `aos-testkit` is still a stub. WP1 will introduce the shared harness and relocate scenarios accordingly.
 
-### Tests to add next (integration level)
-1. **Reducer receipt delivery** – covered via the new `reducer_receipt_is_converted_into_event` test; follow-up scenarios can exercise blob receipts once adapters land.
+### WP1 – Kernel Integration Harness & Scenario Coverage
+- **Goal**: Move from bespoke tests in `crates/aos-kernel/src/world.rs` to reusable builders that make it trivial to describe reducer/plan manifolds and scripted event flows.
+- **Key Tasks**:
+  - Extract helper constructors for reducers, plans, schemas, capabilities, and manifests (fixtures should allow overriding cap slots/bindings, trigger routing, and plan DAG definitions).
+  - Relocate/port the existing happy-path, guard, and receipt-routing tests into `crates/aos-testkit/tests/` (driven by the new builders) while leaving lightweight unit coverage in the kernel crate.
+  - Add scenario coverage for at least: single-plan orchestration, reducer-driven retries (timer receipt), and guarded multi-branch plans as outlined in `spec/07-workflow-patterns.md`.
+  - Ensure tests assert on journal ordering (domain events → triggers → plan wakeups) and deterministic replay by re-running the scenario through the harness without redefinition.
+- **Deliverables**: Fixture module, migrated tests, and at least three new table-driven integration cases proving plan DAG scheduling, await_event/await_receipt behavior, and guard short-circuiting.
 
-Plan is to create helper builders (reducer module, manifest with plan, plan inputs) so tests stay concise. Tests should live either alongside `world.rs` (current module) or under `crates/aos-kernel/tests/` if they grow.
+### WP2 – Reducer Micro-Effect Receipts & Built-in Schemas
+- **Goal**: Wire the built-in schema catalog (`crates/aos-air-types/src/builtins.rs`) into the kernel so reducer-emitted micro-effects automatically produce typed `sys/*` events when receipts arrive.
+- **Key Tasks**:
+  - Load and cache `spec/defs/builtin-schemas.air.json` hashes inside the kernel’s router so manifests can reference `sys/TimerFired@1`, `sys/BlobPutResult@1`, etc. without bespoke plumbing.
+  - Extend the `pending_reducer_receipts` path to record `adapter_id`, serialized params, and reducer name so the emitted event payload matches the structure defined in `spec/03-air.md §7`.
+  - Implement conversion helpers that take `EffectReceipt` + pending context → typed `DomainEvent` bytes; cover timer and blob receipts, including error/timeout statuses.
+  - Add integration tests (leveraging WP1 harness) that stub timer/blob adapters, enqueue micro-effects, deliver receipts (including duplicates), and assert reducers observe the canonical `sys/*` payloads.
+- **Deliverables**: Updated kernel routing, schema lookup utilities, receipt → event conversion logic, and tests for timer/blobs verifying late-receipt suppression.
 
-### After integration tests
-1. **Reducer receipt handling** – kernel now tracks reducer-origin effects, converts `timer.set` and `blob.{put,get}` receipts into `sys/*` events, and logs late receipts. Next step: wire updated schemas/routing plus budget settlement off the new structured payload hook.
-2. **Capability/policy enforcement** – capability resolution + grant plumbing are now wired (plans and reducer slots must reference real grants, and effect intents resolve them before enqueue). Policy is still `AllowAll`; We will implementing real rule matching + budget enforcement later.
-3. **Journal/outbox** – persist events/effects for replay.
-4. **Governance loop & CLI integration** – once runtime is stable.
+### WP3 – Capability & Policy Enforcement w/ Budgets
+- **Goal**: Replace the current `AllowAllPolicy` placeholder with the spec’d capability + policy enforcement loop, including budget depletion on receipts.
+- **Key Tasks**:
+  - Extend `CapabilityResolver` to ingest manifest module bindings, enforce duplicate-grant detection, and surface cap-slot mismatches when reducers/plans reference unknown grants.
+  - Implement policy evaluation per `spec/03-air.md §10`: ordered rules, `origin_kind`/`origin_name` matches, host/method filters, and default deny semantics. Emit `PolicyDecisionRecorded` events for audit.
+  - Add pre-checks at enqueue (grant expiry, cap-type vs effect-kind, host/model constraints, conservative budget checks for LLM/token + blob sizes) and budget settlement on receipt (`tokens`, `bytes`, `cents`). Exhausted budgets must cause subsequent enqueues to fail until replenished.
+  - Write unit tests covering: missing grant, cap type mismatch, policy allow/deny, budget exhaustion mid-run, and origin-based rule enforcement for reducers vs plans.
+- **Deliverables**: Updated `crates/aos-kernel/src/capability.rs`, new policy gate implementation, budget tracking in the kernel, and comprehensive tests demonstrating deny paths and audit logging.
 
-Keep this file in sync as each milestone lands.
+### WP4 – Journal & Outbox Persistence
+- **Goal**: Implement the append-only journal and effect/receipt outbox so kernel state can be snapshotted and replayed deterministically (“replay-or-die”).
+- **Key Tasks**:
+  - Define on-disk layout for journal segments, CAS blobs, and snapshots as described in `spec/02-architecture.md` (canonical CBOR entries, monotonic segment numbers, fenced receipts).
+  - Implement serialization for events/effect intents/receipts, plus CAS-backed storage for large payloads (params, receipt bodies). Ensure `EffectIntent.intent_hash` acts as the idempotency key.
+  - Build a replay loader that rehydrates manifests, reducer states, queued plans, and pending receipts; verify idempotent processing of duplicate/late receipts using the logical height fence.
+  - Extend WP1 scenarios to run twice: first to generate journal + snapshot artifacts, then to replay from genesis and assert byte-identical reducer states and queues.
+- **Deliverables**: Journal writer/reader modules, snapshot serializer, replay harness with automated tests proving deterministic replays and proper handling of truncated/corrupt segments.
+
+### WP5 – Governance Loop & CLI Wiring
+- **Goal**: Stand up the constitutional workflow (propose → shadow → approve → apply) and expose it through the CLI so control-plane changes follow the governed path.
+- **Key Tasks**:
+  - Define journal events for ProposalSubmitted, ShadowRunCompleted, ApprovalRecorded, and PlanApplied; hook them into the kernel state machine.
+  - Implement a shadow-run executor that clones current state, reuses the plan/reducer harness with stubbed receipts, and records predicted effects/budgets/diffs for review.
+  - Add approval tracking and manifest switching logic so approved proposals atomically replace the active manifest, updating routing, module bindings, and cap grants.
+  - Extend `aos-cli` with commands: `proposal submit`, `proposal shadow`, `proposal approve`, `proposal apply`, plus inspection commands for predicted effects and required capabilities.
+  - Write integration tests that submit a manifest delta, run a shadow simulation, approve it, and verify routing/cap grants change only after `apply`.
+- **Deliverables**: Governance-state structures in the kernel, CLI plumbing, and end-to-end tests covering the happy path plus rejection/rollback scenarios.
+
+## Dependencies & Suggested Order
+1. **WP1** lays the groundwork for deterministic integration tests used by all later packages.
+2. **WP2** relies on the harness from WP1 and unlocks structured reducer receipt handling needed for budget settlement in WP3.
+3. **WP3** depends on WP2 events (for cost data) and provides enforcement guarantees required before persisting intent/receipt history in WP4.
+4. **WP4** supplies durable replay infrastructure that WP5’s shadow runs and governance proofs depend on.
+5. **WP5** requires deterministic runtime + persistence to safely simulate and apply control-plane changes.
+
+Keep this document updated as each package lands or is reprioritized.
+
+## Kernel Test Gaps To Close
+- No deterministic tests yet for reducer receipt → `sys/*` event conversion beyond timers; blob put/get and error paths remain uncovered until WP2 lands.
+- Capability + policy enforcement currently lacks unit tests for duplicate grants, slot mismatches, or policy deny cases; these must be added as part of WP3.
+- Effect manager budgeting, intent hashing, and audit logging are untested; motivators for WP3/WP4 work.
+- Journal/replay invariants (idempotent receipt handling, ordering fences) have zero coverage; WP4 should add integration tests via `aos-testkit` harness.
+- Governance loop behaviors (proposal/shadow/approval/apply) and CLI flows have no tests; WP5 must add both unit coverage in kernel components and end-to-end runs that reuse the shared testkit fixtures.
