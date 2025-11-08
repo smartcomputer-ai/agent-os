@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use aos_air_exec::{Env as ExprEnv, Value as ExprValue, eval_expr};
-use aos_air_types::DefPlan;
+use aos_air_types::{DefPlan, PlanEdge, PlanStep, PlanStepKind};
 use aos_wasm_abi::DomainEvent;
 use indexmap::IndexMap;
 use serde_cbor;
@@ -24,11 +24,24 @@ impl PlanRegistry {
     }
 }
 
+#[derive(Clone)]
+struct Dependency {
+    pred: String,
+    guard: Option<aos_air_types::Expr>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StepState {
+    Pending,
+    WaitingReceipt,
+    WaitingEvent,
+    Completed,
+}
+
 pub struct PlanInstance {
     pub id: u64,
     pub name: String,
     pub plan: DefPlan,
-    pub step_idx: usize,
     pub env: ExprEnv,
     pub completed: bool,
     effect_handles: HashMap<String, [u8; 32]>,
@@ -36,15 +49,20 @@ pub struct PlanInstance {
     receipt_value: Option<ExprValue>,
     event_wait: Option<EventWait>,
     event_value: Option<ExprValue>,
+    step_map: HashMap<String, PlanStep>,
+    step_order: Vec<String>,
+    predecessors: HashMap<String, Vec<Dependency>>,
+    step_states: HashMap<String, StepState>,
 }
 
 struct ReceiptWait {
+    step_id: String,
     intent_hash: [u8; 32],
 }
 
 struct EventWait {
+    step_id: String,
     schema: String,
-    bind_var: String,
 }
 
 #[derive(Default)]
@@ -57,11 +75,30 @@ pub struct PlanTickOutcome {
 
 impl PlanInstance {
     pub fn new(id: u64, plan: DefPlan, input: ExprValue) -> Self {
+        let mut step_map = HashMap::new();
+        let mut step_order = Vec::new();
+        for step in &plan.steps {
+            step_order.push(step.id.clone());
+            step_map.insert(step.id.clone(), step.clone());
+        }
+        let mut predecessors: HashMap<String, Vec<Dependency>> = HashMap::new();
+        for PlanEdge { from, to, when } in &plan.edges {
+            predecessors
+                .entry(to.clone())
+                .or_default()
+                .push(Dependency {
+                    pred: from.clone(),
+                    guard: when.clone(),
+                });
+        }
+        let mut step_states = HashMap::new();
+        for id in &step_order {
+            step_states.insert(id.clone(), StepState::Pending);
+        }
         Self {
             id,
             name: plan.name.clone(),
             plan,
-            step_idx: 0,
             env: ExprEnv {
                 plan_input: input,
                 vars: IndexMap::new(),
@@ -73,6 +110,10 @@ impl PlanInstance {
             receipt_value: None,
             event_wait: None,
             event_value: None,
+            step_map,
+            step_order,
+            predecessors,
+            step_states,
         }
     }
 
@@ -84,45 +125,39 @@ impl PlanInstance {
         }
 
         loop {
-            if self.step_idx >= self.plan.steps.len() {
-                self.completed = true;
-                outcome.completed = true;
-                return Ok(outcome);
-            }
-
-            let step = &self.plan.steps[self.step_idx];
-            match &step.kind {
-                aos_air_types::PlanStepKind::Assign(assign) => {
-                    let value = eval_expr(&assign.expr, &self.env).map_err(|err| {
-                        KernelError::Manifest(format!("plan assign eval error: {err}"))
-                    })?;
-                    self.env.vars.insert(assign.bind.var.clone(), value);
-                    self.step_idx += 1;
-                }
-                aos_air_types::PlanStepKind::EmitEffect(emit) => {
-                    let value = eval_expr(&emit.params, &self.env).map_err(|err| {
-                        KernelError::Manifest(format!("plan effect eval error: {err}"))
-                    })?;
-                    let params_cbor = serde_cbor::to_vec(&value)
-                        .map_err(|err| KernelError::Manifest(err.to_string()))?;
-                    let intent_hash =
-                        effects.enqueue_plan_effect(&emit.kind, &emit.cap, params_cbor)?;
-                    let handle = emit.bind.effect_id_as.clone();
-                    self.effect_handles.insert(handle.clone(), intent_hash);
-                    self.env
-                        .vars
-                        .insert(handle.clone(), ExprValue::Text(handle));
-                    self.step_idx += 1;
-                }
-                aos_air_types::PlanStepKind::AwaitReceipt(await_step) => {
-                    if let Some(value) = self.receipt_value.take() {
-                        self.env.vars.insert(await_step.bind.var.clone(), value);
-                        self.receipt_wait = None;
-                        self.step_idx += 1;
-                        continue;
+            if let Some(step_id) = self.next_ready_step()? {
+                let step = self.step_map.get(&step_id).expect("step must exist");
+                match &step.kind {
+                    PlanStepKind::Assign(assign) => {
+                        let value = eval_expr(&assign.expr, &self.env).map_err(|err| {
+                            KernelError::Manifest(format!("plan assign eval error: {err}"))
+                        })?;
+                        self.env.vars.insert(assign.bind.var.clone(), value);
+                        self.mark_completed(&step_id);
                     }
+                    PlanStepKind::EmitEffect(emit) => {
+                        let value = eval_expr(&emit.params, &self.env).map_err(|err| {
+                            KernelError::Manifest(format!("plan effect eval error: {err}"))
+                        })?;
+                        let params_cbor = serde_cbor::to_vec(&value)
+                            .map_err(|err| KernelError::Manifest(err.to_string()))?;
+                        let intent_hash =
+                            effects.enqueue_plan_effect(&emit.kind, &emit.cap, params_cbor)?;
+                        let handle = emit.bind.effect_id_as.clone();
+                        self.effect_handles.insert(handle.clone(), intent_hash);
+                        self.env
+                            .vars
+                            .insert(handle.clone(), ExprValue::Text(handle));
+                        self.mark_completed(&step_id);
+                    }
+                    PlanStepKind::AwaitReceipt(await_step) => {
+                        if let Some(value) = self.receipt_value.take() {
+                            self.env.vars.insert(await_step.bind.var.clone(), value);
+                            self.receipt_wait = None;
+                            self.mark_completed(&step_id);
+                            continue;
+                        }
 
-                    if self.receipt_wait.is_none() {
                         let handle_value =
                             eval_expr(&await_step.for_expr, &self.env).map_err(|err| {
                                 KernelError::Manifest(format!("plan await eval error: {err}"))
@@ -138,54 +173,63 @@ impl PlanInstance {
                         let intent_hash = *self.effect_handles.get(&handle).ok_or_else(|| {
                             KernelError::Manifest(format!("unknown effect handle '{handle}'"))
                         })?;
-                        self.receipt_wait = Some(ReceiptWait { intent_hash });
+                        self.receipt_wait = Some(ReceiptWait {
+                            step_id: step_id.clone(),
+                            intent_hash,
+                        });
+                        self.step_states
+                            .insert(step_id.clone(), StepState::WaitingReceipt);
                         outcome.waiting_receipt = Some(intent_hash);
                         return Ok(outcome);
-                    } else if let Some(wait) = &self.receipt_wait {
-                        outcome.waiting_receipt = Some(wait.intent_hash);
-                        return Ok(outcome);
                     }
-                }
-                aos_air_types::PlanStepKind::AwaitEvent(await_event) => {
-                    if let Some(value) = self.event_value.take() {
-                        self.env.vars.insert(await_event.bind.var.clone(), value);
-                        self.event_wait = None;
-                        self.step_idx += 1;
-                        continue;
-                    }
+                    PlanStepKind::AwaitEvent(await_event) => {
+                        if let Some(value) = self.event_value.take() {
+                            self.env.vars.insert(await_event.bind.var.clone(), value);
+                            self.event_wait = None;
+                            self.mark_completed(&step_id);
+                            continue;
+                        }
 
-                    if await_event.where_clause.is_some() {
-                        return Err(KernelError::Manifest(
-                            "await_event.where not yet supported".into(),
-                        ));
-                    }
+                        if await_event.where_clause.is_some() {
+                            return Err(KernelError::Manifest(
+                                "await_event.where not yet supported".into(),
+                            ));
+                        }
 
-                    if self.event_wait.is_none() {
-                        let schema = await_event.event.as_str().to_string();
                         self.event_wait = Some(EventWait {
-                            schema: schema.clone(),
-                            bind_var: await_event.bind.var.clone(),
+                            step_id: step_id.clone(),
+                            schema: await_event.event.as_str().to_string(),
                         });
-                        outcome.waiting_event = Some(schema);
+                        self.step_states
+                            .insert(step_id.clone(), StepState::WaitingEvent);
+                        outcome.waiting_event = Some(await_event.event.as_str().to_string());
                         return Ok(outcome);
-                    } else if let Some(wait) = &self.event_wait {
-                        outcome.waiting_event = Some(wait.schema.clone());
+                    }
+                    PlanStepKind::RaiseEvent(raise) => {
+                        let value = eval_expr(&raise.event, &self.env).map_err(|err| {
+                            KernelError::Manifest(format!("plan raise_event eval error: {err}"))
+                        })?;
+                        let event = expr_value_to_domain_event(value)?;
+                        outcome.raised_events.push(event);
+                        self.mark_completed(&step_id);
+                    }
+                    PlanStepKind::End(end) => {
+                        if end.result.is_some() {
+                            return Err(KernelError::Manifest(
+                                "end.result enforcement not implemented".into(),
+                            ));
+                        }
+                        self.completed = true;
+                        outcome.completed = true;
                         return Ok(outcome);
                     }
                 }
-                aos_air_types::PlanStepKind::RaiseEvent(raise) => {
-                    let value = eval_expr(&raise.event, &self.env).map_err(|err| {
-                        KernelError::Manifest(format!("plan raise_event eval error: {err}"))
-                    })?;
-                    let event = expr_value_to_domain_event(value)?;
-                    outcome.raised_events.push(event);
-                    self.step_idx += 1;
-                }
-                aos_air_types::PlanStepKind::End(_) => {
+            } else {
+                if self.all_steps_completed() {
                     self.completed = true;
                     outcome.completed = true;
-                    return Ok(outcome);
                 }
+                return Ok(outcome);
             }
         }
     }
@@ -202,6 +246,8 @@ impl PlanInstance {
                     Err(_) => ExprValue::Bytes(payload.to_vec()),
                 };
                 self.receipt_value = Some(value);
+                self.step_states
+                    .insert(wait.step_id.clone(), StepState::Pending);
                 return Ok(true);
             }
         }
@@ -214,14 +260,73 @@ impl PlanInstance {
                 let value = serde_cbor::from_slice(&event.value)
                     .unwrap_or(ExprValue::Bytes(event.value.clone()));
                 self.event_value = Some(value);
+                self.step_states
+                    .insert(wait.step_id.clone(), StepState::Pending);
                 return Ok(true);
             }
         }
         Ok(false)
     }
 
-    pub fn waiting_event_schema(&self) -> Option<String> {
-        self.event_wait.as_ref().map(|w| w.schema.clone())
+    pub fn waiting_event_schema(&self) -> Option<&str> {
+        self.event_wait.as_ref().map(|w| w.schema.as_str())
+    }
+
+    fn next_ready_step(&self) -> Result<Option<String>, KernelError> {
+        for id in &self.step_order {
+            if matches!(self.step_states[id], StepState::Pending)
+                && self.predecessors_satisfied(id)?
+            {
+                return Ok(Some(id.clone()));
+            }
+        }
+        Ok(None)
+    }
+
+    fn predecessors_satisfied(&self, step_id: &str) -> Result<bool, KernelError> {
+        if let Some(deps) = self.predecessors.get(step_id) {
+            for dep in deps {
+                if !matches!(self.step_states.get(&dep.pred), Some(StepState::Completed)) {
+                    return Ok(false);
+                }
+                if let Some(expr) = &dep.guard {
+                    let value = eval_expr(expr, &self.env)
+                        .map_err(|err| KernelError::Manifest(format!("guard eval error: {err}")))?;
+                    if !value_to_bool(value)? {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    fn mark_completed(&mut self, step_id: &str) {
+        self.step_states
+            .insert(step_id.to_string(), StepState::Completed);
+        if self
+            .step_states
+            .values()
+            .all(|s| matches!(s, StepState::Completed))
+        {
+            self.completed = true;
+        }
+    }
+
+    fn all_steps_completed(&self) -> bool {
+        self.step_states
+            .values()
+            .all(|state| matches!(state, StepState::Completed))
+    }
+}
+
+fn value_to_bool(value: ExprValue) -> Result<bool, KernelError> {
+    match value {
+        ExprValue::Bool(v) => Ok(v),
+        other => Err(KernelError::Manifest(format!(
+            "guard expression must return bool, got {:?}",
+            other
+        ))),
     }
 }
 

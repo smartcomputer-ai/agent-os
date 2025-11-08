@@ -189,11 +189,12 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn handle_plan_task(&mut self, id: u64) -> Result<(), KernelError> {
-        if let Some(schema) = self
+        let waiting_schema = self
             .plan_instances
             .get(&id)
             .and_then(|inst| inst.waiting_event_schema())
-        {
+            .map(|s| s.to_string());
+        if let Some(schema) = waiting_schema {
             self.remove_plan_from_waiting_events_for_schema(id, &schema);
         }
         if let Some(instance) = self.plan_instances.get_mut(&id) {
