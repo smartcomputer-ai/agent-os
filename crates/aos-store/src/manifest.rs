@@ -1,9 +1,12 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
-use aos_air_types::{AirNode, Manifest, NamedRef, validate};
+use aos_air_types::{AirNode, Manifest, NamedRef, builtins, validate};
 use aos_cbor::Hash;
 
-use crate::{Store, StoreError, StoreResult, io_error};
+use crate::{EntryKind, Store, StoreError, StoreResult, io_error};
 
 #[derive(Debug, Clone)]
 pub struct CatalogEntry {
@@ -17,7 +20,7 @@ pub struct Catalog {
     pub nodes: HashMap<String, CatalogEntry>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum NodeKind {
     Schema,
     Module,
@@ -59,7 +62,8 @@ pub fn load_manifest_from_path<S: Store>(
 }
 
 pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResult<Catalog> {
-    let manifest: Manifest = serde_cbor::from_slice(bytes)?;
+    let mut manifest: Manifest = serde_cbor::from_slice(bytes)?;
+    ensure_builtin_schema_refs(&mut manifest)?;
     let mut nodes = HashMap::new();
 
     load_refs(store, &manifest.schemas, NodeKind::Schema, &mut nodes)?;
@@ -80,6 +84,19 @@ fn load_refs<S: Store>(
     nodes: &mut HashMap<String, CatalogEntry>,
 ) -> StoreResult<()> {
     for reference in refs {
+        if kind == NodeKind::Schema {
+            if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
+                ensure_builtin_hash(reference, builtin)?;
+                nodes.insert(
+                    reference.name.clone(),
+                    CatalogEntry {
+                        hash: builtin.hash,
+                        node: AirNode::Defschema(builtin.schema.clone()),
+                    },
+                );
+                continue;
+            }
+        }
         let hash = parse_hash_str(reference.hash.as_str())?;
         let node: AirNode = store.get_node(hash)?;
         if !kind.matches(&node) {
@@ -98,6 +115,61 @@ fn parse_hash_str(value: &str) -> StoreResult<Hash> {
         value: value.to_string(),
         source,
     })
+}
+
+fn ensure_builtin_schema_refs(manifest: &mut Manifest) -> StoreResult<()> {
+    let mut present: HashSet<String> = HashSet::new();
+    for reference in &manifest.schemas {
+        if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
+            ensure_builtin_hash(reference, builtin)?;
+            present.insert(reference.name.clone());
+        }
+    }
+
+    for name in referenced_builtin_schema_names(manifest) {
+        if present.contains(&name) {
+            continue;
+        }
+        if let Some(builtin) = builtins::find_builtin_schema(&name) {
+            manifest.schemas.push(NamedRef {
+                name: builtin.schema.name.clone(),
+                hash: builtin.hash_ref.clone(),
+            });
+            present.insert(name);
+        }
+    }
+    Ok(())
+}
+
+fn referenced_builtin_schema_names(manifest: &Manifest) -> HashSet<String> {
+    let mut names = HashSet::new();
+    if let Some(routing) = manifest.routing.as_ref() {
+        for route in &routing.events {
+            maybe_add_builtin_name(route.event.as_str(), &mut names);
+        }
+    }
+    for trigger in &manifest.triggers {
+        maybe_add_builtin_name(trigger.event.as_str(), &mut names);
+    }
+    names
+}
+
+fn maybe_add_builtin_name(schema: &str, names: &mut HashSet<String>) {
+    if builtins::find_builtin_schema(schema).is_some() {
+        names.insert(schema.to_string());
+    }
+}
+
+fn ensure_builtin_hash(reference: &NamedRef, builtin: &builtins::BuiltinSchema) -> StoreResult<()> {
+    let actual = parse_hash_str(reference.hash.as_str())?;
+    if actual != builtin.hash {
+        return Err(StoreError::HashMismatch {
+            kind: EntryKind::Node,
+            expected: builtin.hash,
+            actual,
+        });
+    }
+    Ok(())
 }
 
 fn validate_plans(manifest: &Manifest, nodes: &HashMap<String, CatalogEntry>) -> StoreResult<()> {
@@ -120,9 +192,9 @@ mod tests {
     use crate::MemStore;
     use aos_air_types::{
         AirNode, DefPlan, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprRef,
-        HashRef, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
-        PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, SchemaRef, TypeExpr,
-        TypePrimitive, TypePrimitiveText,
+        HashRef, Manifest, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
+        PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, Routing, RoutingEvent,
+        SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText,
     };
     use indexmap::IndexMap;
 
@@ -263,5 +335,44 @@ mod tests {
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::PlanValidation { .. }));
+    }
+
+    #[test]
+    fn injects_builtin_schema_for_routed_events() {
+        let store = MemStore::default();
+        let manifest = Manifest {
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            policies: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: Some(Routing {
+                events: vec![RoutingEvent {
+                    event: SchemaRef::new("sys/TimerFired@1").unwrap(),
+                    reducer: "com.acme/Reducer@1".into(),
+                    key_field: None,
+                }],
+                inboxes: vec![],
+            }),
+            triggers: vec![],
+        };
+        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
+        let catalog = load_manifest_from_bytes(&store, &manifest_bytes).expect("load");
+        assert!(
+            catalog
+                .manifest
+                .schemas
+                .iter()
+                .any(|r| r.name == "sys/TimerFired@1")
+        );
+        assert!(matches!(
+            catalog
+                .nodes
+                .get("sys/TimerFired@1")
+                .map(|entry| &entry.node),
+            Some(AirNode::Defschema(_))
+        ));
     }
 }

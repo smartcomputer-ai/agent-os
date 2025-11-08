@@ -96,7 +96,9 @@ dependencies = [
 name = "aos-air-types"
 version = "0.1.0"
 dependencies = [
+ "aos-cbor",
  "indexmap",
+ "once_cell",
  "petgraph",
  "serde",
  "serde_json",
