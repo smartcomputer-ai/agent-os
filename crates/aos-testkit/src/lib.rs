@@ -149,6 +149,7 @@ pub mod fixtures {
             modules: modules_map,
             plans: plans_map,
             caps,
+            policies: HashMap::new(),
         }
     }
 

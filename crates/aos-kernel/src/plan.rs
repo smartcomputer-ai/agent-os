@@ -410,7 +410,7 @@ mod tests {
             ),
         ];
         let resolver = CapabilityResolver::from_runtime_grants(grants);
-        EffectManager::new(resolver, AllowAllPolicy)
+        EffectManager::new(resolver, Box::new(AllowAllPolicy))
     }
 
     /// Assign steps should synchronously write to the plan environment.

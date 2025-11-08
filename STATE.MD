@@ -26,14 +26,13 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
   - Add integration tests (leveraging WP1 harness) that stub timer/blob adapters, enqueue micro-effects, deliver receipts (including duplicates), and assert reducers observe the canonical `sys/*` payloads.
 - **Delivered**: Manifest loader now injects built-in defschemas, reducer receipt conversion covers timer + blob put/get payloads, and aos-testkit integration tests assert sys/TimerFired and sys/Blob* events reach reducers (including duplicate suppression/unknown receipt handling).
 
-### WP3 – Capability & Policy Enforcement w/ Budgets
-- **Goal**: Replace the current `AllowAllPolicy` placeholder with the spec’d capability + policy enforcement loop, including budget depletion on receipts.
-- **Key Tasks**:
-  - Extend `CapabilityResolver` to ingest manifest module bindings, enforce duplicate-grant detection, and surface cap-slot mismatches when reducers/plans reference unknown grants.
-  - Implement policy evaluation per `spec/03-air.md §10`: ordered rules, `origin_kind`/`origin_name` matches, host/method filters, and default deny semantics. Emit `PolicyDecisionRecorded` events for audit.
-  - Add pre-checks at enqueue (grant expiry, cap-type vs effect-kind, host/model constraints, conservative budget checks for LLM/token + blob sizes) and budget settlement on receipt (`tokens`, `bytes`, `cents`). Exhausted budgets must cause subsequent enqueues to fail until replenished.
-  - Write unit tests covering: missing grant, cap type mismatch, policy allow/deny, budget exhaustion mid-run, and origin-based rule enforcement for reducers vs plans.
-- **Deliverables**: Updated `crates/aos-kernel/src/capability.rs`, new policy gate implementation, budget tracking in the kernel, and comprehensive tests demonstrating deny paths and audit logging.
+### WP3 – Capability & Policy Enforcement *(Completed – minimal scope)*
+- **Goal**: Introduce manifest-defined policy rules and keep capability enforcement honest without over-designing budgets yet.
+- **Delivered**:
+  - Manifest loader now hydrates `defpolicy` nodes; kernels instantiate either `RulePolicy` (default deny, reducer/plan aware) or fallback `AllowAllPolicy` as needed.
+  - `EffectManager` evaluates policy decisions before queueing intents; reducers/plans missing bindings still get descriptive `KernelError`s.
+  - Receipt conversion covers timer + blob events; integration tests in `policy_integration.rs` show reducers being denied while plans are allowed under the same policy.
+  - Budgets/host-method constraints remain TODO pending broader design, but the scaffolding (RulePolicy + CapabilityResolver) makes that incremental.
 
 ### WP4 – Journal & Outbox Persistence
 - **Goal**: Implement the append-only journal and effect/receipt outbox so kernel state can be snapshotted and replayed deterministically (“replay-or-die”).

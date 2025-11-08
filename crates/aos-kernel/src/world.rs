@@ -14,7 +14,7 @@ use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
-use crate::policy::AllowAllPolicy;
+use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
@@ -86,6 +86,22 @@ impl<S: Store + 'static> Kernel<S> {
             CapabilityResolver::from_manifest(&loaded.manifest, &loaded.caps)?;
         ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
         ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
+        let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
+            .manifest
+            .defaults
+            .as_ref()
+            .and_then(|defaults| defaults.policy.clone())
+        {
+            Some(policy_name) => {
+                let def = loaded.policies.get(&policy_name).ok_or_else(|| {
+                    KernelError::Manifest(format!(
+                        "policy '{policy_name}' referenced by manifest defaults was not found"
+                    ))
+                })?;
+                Box::new(RulePolicy::from_def(def))
+            }
+            None => Box::new(AllowAllPolicy),
+        };
 
         Ok(Self {
             manifest: loaded.manifest,
@@ -101,7 +117,7 @@ impl<S: Store + 'static> Kernel<S> {
             recent_receipts: VecDeque::new(),
             recent_receipt_index: HashSet::new(),
             scheduler: Scheduler::default(),
-            effect_manager: EffectManager::new(capability_resolver, AllowAllPolicy),
+            effect_manager: EffectManager::new(capability_resolver, policy_gate),
             reducer_state: HashMap::new(),
         })
     }

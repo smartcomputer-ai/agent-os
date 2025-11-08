@@ -4,7 +4,7 @@ use aos_wasm_abi::ReducerEffect;
 
 use crate::capability::CapabilityResolver;
 use crate::error::KernelError;
-use crate::policy::{AllowAllPolicy, PolicyGate};
+use crate::policy::PolicyGate;
 
 #[derive(Default)]
 pub struct EffectQueue {
@@ -24,11 +24,11 @@ impl EffectQueue {
 pub struct EffectManager {
     queue: EffectQueue,
     capability_gate: CapabilityResolver,
-    policy_gate: AllowAllPolicy,
+    policy_gate: Box<dyn PolicyGate>,
 }
 
 impl EffectManager {
-    pub fn new(capability_gate: CapabilityResolver, policy_gate: AllowAllPolicy) -> Self {
+    pub fn new(capability_gate: CapabilityResolver, policy_gate: Box<dyn PolicyGate>) -> Self {
         Self {
             queue: EffectQueue::default(),
             capability_gate,
