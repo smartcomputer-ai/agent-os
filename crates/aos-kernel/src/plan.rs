@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use aos_air_exec::{Env as ExprEnv, Value as ExprValue, eval_expr};
-use aos_air_types::{DefPlan, PlanEdge, PlanStep, PlanStepKind};
+use aos_air_types::{DefPlan, Expr, PlanEdge, PlanStep, PlanStepKind};
 use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
 use indexmap::IndexMap;
@@ -67,15 +67,18 @@ pub struct ReceiptWait {
 pub struct EventWait {
     pub step_id: String,
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub where_clause: Option<Expr>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct PlanTickOutcome {
     pub raised_events: Vec<DomainEvent>,
     pub waiting_receipt: Option<[u8; 32]>,
     pub waiting_event: Option<String>,
     pub completed: bool,
     pub intents_enqueued: Vec<EffectIntent>,
+    pub result: Option<ExprValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +125,7 @@ impl PlanInstance {
                 plan_input: input,
                 vars: IndexMap::new(),
                 steps: IndexMap::new(),
+                current_event: None,
             },
             completed: false,
             effect_handles: HashMap::new(),
@@ -151,14 +155,15 @@ impl PlanInstance {
                         let value = eval_expr(&assign.expr, &self.env).map_err(|err| {
                             KernelError::Manifest(format!("plan assign eval error: {err}"))
                         })?;
-                        self.env.vars.insert(assign.bind.var.clone(), value);
-                        self.mark_completed(&step_id);
+                        self.env.vars.insert(assign.bind.var.clone(), value.clone());
+                        self.record_step_value(&step_id, value);
+                        self.complete_step(&step_id)?;
                     }
                     PlanStepKind::EmitEffect(emit) => {
-                        let value = eval_expr(&emit.params, &self.env).map_err(|err| {
+                        let params_value = eval_expr(&emit.params, &self.env).map_err(|err| {
                             KernelError::Manifest(format!("plan effect eval error: {err}"))
                         })?;
-                        let params_cbor = serde_cbor::to_vec(&value)
+                        let params_cbor = serde_cbor::to_vec(&params_value)
                             .map_err(|err| KernelError::Manifest(err.to_string()))?;
                         let intent = effects.enqueue_plan_effect(
                             &self.name,
@@ -170,16 +175,26 @@ impl PlanInstance {
                         let handle = emit.bind.effect_id_as.clone();
                         self.effect_handles
                             .insert(handle.clone(), intent.intent_hash);
-                        self.env
-                            .vars
-                            .insert(handle.clone(), ExprValue::Text(handle));
-                        self.mark_completed(&step_id);
+                        let handle_value = ExprValue::Text(handle.clone());
+                        self.env.vars.insert(handle.clone(), handle_value.clone());
+                        let mut record = IndexMap::new();
+                        record.insert("handle".into(), handle_value);
+                        record.insert(
+                            "intent_hash".into(),
+                            ExprValue::Bytes(intent.intent_hash.to_vec()),
+                        );
+                        record.insert("params".into(), params_value);
+                        self.record_step_value(&step_id, ExprValue::Record(record));
+                        self.complete_step(&step_id)?;
                     }
                     PlanStepKind::AwaitReceipt(await_step) => {
                         if let Some(value) = self.receipt_value.take() {
-                            self.env.vars.insert(await_step.bind.var.clone(), value);
+                            self.env
+                                .vars
+                                .insert(await_step.bind.var.clone(), value.clone());
+                            self.record_step_value(&step_id, value);
                             self.receipt_wait = None;
-                            self.mark_completed(&step_id);
+                            self.complete_step(&step_id)?;
                             continue;
                         }
 
@@ -209,21 +224,19 @@ impl PlanInstance {
                     }
                     PlanStepKind::AwaitEvent(await_event) => {
                         if let Some(value) = self.event_value.take() {
-                            self.env.vars.insert(await_event.bind.var.clone(), value);
+                            self.env
+                                .vars
+                                .insert(await_event.bind.var.clone(), value.clone());
+                            self.record_step_value(&step_id, value);
                             self.event_wait = None;
-                            self.mark_completed(&step_id);
+                            self.complete_step(&step_id)?;
                             continue;
-                        }
-
-                        if await_event.where_clause.is_some() {
-                            return Err(KernelError::Manifest(
-                                "await_event.where not yet supported".into(),
-                            ));
                         }
 
                         self.event_wait = Some(EventWait {
                             step_id: step_id.clone(),
                             schema: await_event.event.as_str().to_string(),
+                            where_clause: await_event.where_clause.clone(),
                         });
                         self.step_states
                             .insert(step_id.clone(), StepState::WaitingEvent);
@@ -234,18 +247,40 @@ impl PlanInstance {
                         let value = eval_expr(&raise.event, &self.env).map_err(|err| {
                             KernelError::Manifest(format!("plan raise_event eval error: {err}"))
                         })?;
+                        let event_record = value.clone();
                         let event = expr_value_to_domain_event(value)?;
                         outcome.raised_events.push(event);
-                        self.mark_completed(&step_id);
+                        self.record_step_value(&step_id, event_record);
+                        self.complete_step(&step_id)?;
                     }
                     PlanStepKind::End(end) => {
-                        if end.result.is_some() {
-                            return Err(KernelError::Manifest(
-                                "end.result enforcement not implemented".into(),
-                            ));
+                        match (&self.plan.output, &end.result) {
+                            (Some(_), None) => {
+                                return Err(KernelError::Manifest(
+                                    "plan declares output schema but end result missing".into(),
+                                ));
+                            }
+                            (None, Some(_)) => {
+                                return Err(KernelError::Manifest(
+                                    "plan without output schema cannot return a result".into(),
+                                ));
+                            }
+                            _ => {}
                         }
+
+                        if let Some(result_expr) = &end.result {
+                            let value = eval_expr(result_expr, &self.env).map_err(|err| {
+                                KernelError::Manifest(format!("plan end result eval error: {err}"))
+                            })?;
+                            self.record_step_value(&step_id, value.clone());
+                            outcome.result = Some(value);
+                        } else {
+                            self.record_step_value(&step_id, ExprValue::Unit);
+                        }
+
                         self.completed = true;
                         outcome.completed = true;
+                        self.enforce_invariants()?;
                         return Ok(outcome);
                     }
                 }
@@ -253,6 +288,7 @@ impl PlanInstance {
                 if self.all_steps_completed() {
                     self.completed = true;
                     outcome.completed = true;
+                    self.enforce_invariants()?;
                 }
                 return Ok(outcome);
             }
@@ -330,6 +366,16 @@ impl PlanInstance {
             if wait.schema == event.schema {
                 let value = serde_cbor::from_slice(&event.value)
                     .unwrap_or(ExprValue::Bytes(event.value.clone()));
+                if let Some(predicate) = &wait.where_clause {
+                    let prev = self.env.push_event(value.clone());
+                    let passes = eval_expr(predicate, &self.env).map_err(|err| {
+                        KernelError::Manifest(format!("await_event where eval error: {err}"))
+                    })?;
+                    self.env.restore_event(prev);
+                    if !value_to_bool(passes)? {
+                        return Ok(false);
+                    }
+                }
                 self.event_value = Some(value);
                 self.step_states
                     .insert(wait.step_id.clone(), StepState::Pending);
@@ -341,6 +387,30 @@ impl PlanInstance {
 
     pub fn waiting_event_schema(&self) -> Option<&str> {
         self.event_wait.as_ref().map(|w| w.schema.as_str())
+    }
+
+    fn record_step_value(&mut self, step_id: &str, value: ExprValue) {
+        self.env.steps.insert(step_id.to_string(), value);
+    }
+
+    fn complete_step(&mut self, step_id: &str) -> Result<(), KernelError> {
+        self.mark_completed(step_id);
+        self.enforce_invariants()
+    }
+
+    fn enforce_invariants(&mut self) -> Result<(), KernelError> {
+        for (idx, invariant) in self.plan.invariants.iter().enumerate() {
+            let value = eval_expr(invariant, &self.env).map_err(|err| {
+                KernelError::Manifest(format!("plan invariant {idx} eval error: {err}"))
+            })?;
+            if !value_to_bool(value)? {
+                return Err(KernelError::PlanInvariantFailed {
+                    plan: self.name.clone(),
+                    index: idx,
+                });
+            }
+        }
+        Ok(())
     }
 
     fn next_ready_step(&self) -> Result<Option<String>, KernelError> {
@@ -430,8 +500,9 @@ mod tests {
     use crate::capability::CapabilityResolver;
     use crate::policy::AllowAllPolicy;
     use aos_air_types::{
-        CapType, EffectKind, Expr, ExprConst, PlanBindEffect, PlanStep, PlanStepEmitEffect,
-        PlanStepEnd, PlanStepKind,
+        CapType, EffectKind, Expr, ExprConst, ExprOp, ExprOpCode, ExprRecord, ExprRef, PlanBind,
+        PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
+        PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, SchemaRef,
     };
     use aos_effects::CapabilityGrant;
 
@@ -628,5 +699,260 @@ mod tests {
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.raised_events.len(), 1);
         assert_eq!(outcome.raised_events[0].schema, "com.test/Evt@1");
+    }
+
+    #[test]
+    fn step_values_are_available_via_step_refs() {
+        let steps = vec![
+            PlanStep {
+                id: "first".into(),
+                kind: PlanStepKind::Assign(PlanStepAssign {
+                    expr: Expr::Record(ExprRecord {
+                        record: IndexMap::from([(
+                            "status".into(),
+                            Expr::Const(ExprConst::Text { text: "ok".into() }),
+                        )]),
+                    }),
+                    bind: PlanBind {
+                        var: "first_state".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "second".into(),
+                kind: PlanStepKind::Assign(PlanStepAssign {
+                    expr: Expr::Ref(ExprRef {
+                        reference: "@step:first.status".into(),
+                    }),
+                    bind: PlanBind {
+                        var: "copied".into(),
+                    },
+                }),
+            },
+        ];
+        let mut plan = base_plan(steps);
+        plan.edges.push(PlanEdge {
+            from: "first".into(),
+            to: "second".into(),
+            when: None,
+        });
+        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut effects = test_effect_manager();
+        let outcome = instance.tick(&mut effects).unwrap();
+        assert!(outcome.completed);
+        assert_eq!(
+            instance.env.vars.get("copied"),
+            Some(&ExprValue::Text("ok".into()))
+        );
+    }
+
+    #[test]
+    fn await_event_where_clause_filters_events() {
+        let steps = vec![
+            PlanStep {
+                id: "await".into(),
+                kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
+                    event: SchemaRef::new("com.test/Evt@1").unwrap(),
+                    where_clause: Some(Expr::Op(ExprOp {
+                        op: ExprOpCode::Eq,
+                        args: vec![
+                            Expr::Ref(ExprRef {
+                                reference: "@event.correlation_id".into(),
+                            }),
+                            Expr::Const(ExprConst::Text {
+                                text: "match".into(),
+                            }),
+                        ],
+                    })),
+                    bind: PlanBind { var: "evt".into() },
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ];
+        let mut plan = base_plan(steps);
+        plan.edges.push(PlanEdge {
+            from: "await".into(),
+            to: "end".into(),
+            when: None,
+        });
+        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut effects = test_effect_manager();
+        let outcome = instance.tick(&mut effects).unwrap();
+        assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
+
+        let mismatch_event = DomainEvent::new(
+            "com.test/Evt@1",
+            serde_cbor::to_vec(&ExprValue::Record(IndexMap::from([(
+                "correlation_id".into(),
+                ExprValue::Text("nope".into()),
+            )])))
+            .unwrap(),
+        );
+        assert!(!instance.deliver_event(&mismatch_event).unwrap());
+
+        let match_event = DomainEvent::new(
+            "com.test/Evt@1",
+            serde_cbor::to_vec(&ExprValue::Record(IndexMap::from([(
+                "correlation_id".into(),
+                ExprValue::Text("match".into()),
+            )])))
+            .unwrap(),
+        );
+        assert!(instance.deliver_event(&match_event).unwrap());
+        let outcome2 = instance.tick(&mut effects).unwrap();
+        assert!(outcome2.completed);
+        assert_eq!(
+            instance.env.vars.get("evt"),
+            Some(&ExprValue::Record(IndexMap::from([(
+                "correlation_id".into(),
+                ExprValue::Text("match".into()),
+            )])))
+        );
+    }
+
+    #[test]
+    fn end_step_returns_result_when_schema_declared() {
+        let steps = vec![PlanStep {
+            id: "end".into(),
+            kind: PlanStepKind::End(PlanStepEnd {
+                result: Some(Expr::Const(ExprConst::Int { int: 7 })),
+            }),
+        }];
+        let mut plan = base_plan(steps);
+        plan.output = Some(SchemaRef::new("test/Out@1").unwrap());
+        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut effects = test_effect_manager();
+        let outcome = instance.tick(&mut effects).unwrap();
+        assert!(outcome.completed);
+        assert_eq!(outcome.result, Some(ExprValue::Int(7)));
+    }
+
+    #[test]
+    fn end_step_requires_result_when_schema_present() {
+        let steps = vec![PlanStep {
+            id: "end".into(),
+            kind: PlanStepKind::End(PlanStepEnd { result: None }),
+        }];
+        let mut plan = base_plan(steps);
+        plan.output = Some(SchemaRef::new("test/Out@1").unwrap());
+        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut effects = test_effect_manager();
+        let err = instance.tick(&mut effects).unwrap_err();
+        assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("output schema")));
+    }
+
+    #[test]
+    fn end_step_cannot_return_without_schema() {
+        let steps = vec![PlanStep {
+            id: "end".into(),
+            kind: PlanStepKind::End(PlanStepEnd {
+                result: Some(Expr::Const(ExprConst::Nat { nat: 1 })),
+            }),
+        }];
+        let plan = base_plan(steps);
+        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut effects = test_effect_manager();
+        let err = instance.tick(&mut effects).unwrap_err();
+        assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("without output schema")));
+    }
+
+    #[test]
+    fn invariant_violation_errors_out_plan() {
+        let steps = vec![
+            PlanStep {
+                id: "set_ok".into(),
+                kind: PlanStepKind::Assign(PlanStepAssign {
+                    expr: Expr::Const(ExprConst::Int { int: 5 }),
+                    bind: PlanBind { var: "val".into() },
+                }),
+            },
+            PlanStep {
+                id: "set_bad".into(),
+                kind: PlanStepKind::Assign(PlanStepAssign {
+                    expr: Expr::Const(ExprConst::Int { int: 20 }),
+                    bind: PlanBind { var: "val".into() },
+                }),
+            },
+        ];
+        let mut plan = base_plan(steps);
+        plan.edges.push(PlanEdge {
+            from: "set_ok".into(),
+            to: "set_bad".into(),
+            when: None,
+        });
+        plan.invariants.push(Expr::Op(ExprOp {
+            op: ExprOpCode::Lt,
+            args: vec![
+                Expr::Ref(ExprRef {
+                    reference: "@var:val".into(),
+                }),
+                Expr::Const(ExprConst::Int { int: 10 }),
+            ],
+        }));
+        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut effects = test_effect_manager();
+        let err = instance.tick(&mut effects).unwrap_err();
+        assert!(matches!(err, KernelError::PlanInvariantFailed { .. }));
+    }
+
+    #[test]
+    fn snapshot_restores_waiting_receipt_state() {
+        let steps = vec![
+            PlanStep {
+                id: "emit".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: EffectKind::HttpRequest,
+                    params: Expr::Const(ExprConst::Text {
+                        text: "payload".into(),
+                    }),
+                    cap: "cap".into(),
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "await".into(),
+                kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
+                    for_expr: Expr::Const(ExprConst::Text { text: "req".into() }),
+                    bind: PlanBind { var: "resp".into() },
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ];
+        let mut plan_def = base_plan(steps);
+        plan_def.edges.extend([
+            PlanEdge {
+                from: "emit".into(),
+                to: "await".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "await".into(),
+                to: "end".into(),
+                when: None,
+            },
+        ]);
+        let mut instance = PlanInstance::new(1, plan_def.clone(), default_env());
+        let mut effects = test_effect_manager();
+        let first = instance.tick(&mut effects).unwrap();
+        let mut hash = first.waiting_receipt.expect("waiting receipt");
+        let snapshot = instance.snapshot();
+
+        let mut restored = PlanInstance::from_snapshot(snapshot, plan_def);
+        hash[0] ^= 0xAA;
+        restored.override_pending_receipt_hash(hash);
+        assert_eq!(restored.pending_receipt_hash(), Some(hash));
+        assert!(restored.deliver_receipt(hash, b"\x01").unwrap());
+        let mut effects = test_effect_manager();
+        let outcome = restored.tick(&mut effects).unwrap();
+        assert!(outcome.completed);
+        assert!(restored.receipt_wait.is_none());
     }
 }

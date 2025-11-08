@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{Manifest, Name};
-use aos_cbor::{to_canonical_cbor, Hash, Hash as DigestHash};
+use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
@@ -14,7 +14,6 @@ use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
 use crate::governance::{GovernanceManager, ManifestPatch};
-use crate::shadow::{ShadowConfig, ShadowHarness, ShadowExecutor, ShadowSummary};
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
@@ -29,6 +28,7 @@ use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
+use crate::shadow::{ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary};
 use crate::snapshot::{
     EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, ReducerReceiptSnapshot,
     receipts_to_vecdeque,
@@ -473,18 +473,13 @@ impl<S: Store + 'static> Kernel<S> {
             }
             IntentOriginRecord::Plan { name: _, plan_id } => {
                 self.reconcile_plan_replay_identity(plan_id, record.intent_hash);
-                self.pending_receipts
-                    .insert(record.intent_hash, plan_id);
+                self.pending_receipts.insert(record.intent_hash, plan_id);
             }
         }
         Ok(())
     }
 
-    fn reconcile_plan_replay_identity(
-        &mut self,
-        recorded_plan_id: u64,
-        intent_hash: [u8; 32],
-    ) {
+    fn reconcile_plan_replay_identity(&mut self, recorded_plan_id: u64, intent_hash: [u8; 32]) {
         let matching_instance_id = self
             .plan_instances
             .iter()

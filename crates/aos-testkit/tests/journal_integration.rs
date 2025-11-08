@@ -4,8 +4,8 @@ use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord};
-use aos_testkit::fixtures::{self, START_SCHEMA};
 use aos_testkit::TestWorld;
+use aos_testkit::fixtures::{self, START_SCHEMA};
 use serde_cbor;
 use tempfile::TempDir;
 
@@ -164,8 +164,15 @@ fn plan_journal_replay_resumes_waiting_receipt() {
     assert_eq!(pending[0].0, recorded_plan_id);
     assert_eq!(pending[0].1, recorded_intent_hash);
     let waits = replay_world.kernel.debug_plan_waits();
-    assert_eq!(waits.len(), 1, "expected one plan instance waiting on a receipt");
-    assert_eq!(waits[0].0, recorded_plan_id, "plan id should match recorded value");
+    assert_eq!(
+        waits.len(),
+        1,
+        "expected one plan instance waiting on a receipt"
+    );
+    assert_eq!(
+        waits[0].0, recorded_plan_id,
+        "plan id should match recorded value"
+    );
 
     let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
     let receipt = EffectReceipt {

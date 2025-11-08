@@ -113,3 +113,41 @@ pub enum ValueKey {
 
 pub type ValueSet = BTreeSet<ValueKey>;
 pub type ValueMap = BTreeMap<ValueKey, Value>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kind_reports_variant_name() {
+        assert_eq!(Value::Text("hello".into()).kind(), "text");
+        assert_eq!(Value::Nat(5).kind(), "nat");
+    }
+
+    #[test]
+    fn record_helper_builds_indexmap() {
+        let value = Value::record([("first", Value::Int(1)), ("second", Value::Bool(true))]);
+        match value {
+            Value::Record(map) => {
+                assert_eq!(map.get("first"), Some(&Value::Int(1)));
+                assert_eq!(map.get("second"), Some(&Value::Bool(true)));
+            }
+            other => panic!("expected record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn value_keys_order_deterministically() {
+        let mut set = ValueSet::new();
+        set.insert(ValueKey::Text("beta".into()));
+        set.insert(ValueKey::Text("alpha".into()));
+        let ordered: Vec<_> = set.into_iter().collect();
+        assert_eq!(
+            ordered,
+            vec![
+                ValueKey::Text("alpha".into()),
+                ValueKey::Text("beta".into()),
+            ]
+        );
+    }
+}

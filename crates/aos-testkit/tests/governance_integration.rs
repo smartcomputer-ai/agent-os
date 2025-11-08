@@ -25,13 +25,22 @@ fn governance_flow_applies_manifest_patch() {
         .map(AirNode::Defmodule)
         .collect();
     patch_nodes.extend(patch_loaded.caps.values().cloned().map(AirNode::Defcap));
-    patch_nodes.extend(patch_loaded.policies.values().cloned().map(AirNode::Defpolicy));
+    patch_nodes.extend(
+        patch_loaded
+            .policies
+            .values()
+            .cloned()
+            .map(AirNode::Defpolicy),
+    );
     patch_nodes.extend(patch_loaded.plans.values().cloned().map(AirNode::Defplan));
     let patch = ManifestPatch {
         manifest: patch_loaded.manifest.clone(),
         nodes: patch_nodes,
     };
-    let proposal_id = world.kernel.submit_proposal(patch, Some("test".into())).unwrap();
+    let proposal_id = world
+        .kernel
+        .submit_proposal(patch, Some("test".into()))
+        .unwrap();
 
     world
         .kernel

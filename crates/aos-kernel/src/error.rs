@@ -47,6 +47,8 @@ pub enum KernelError {
     ModuleCapabilityMissing { module: String, cap: String },
     #[error("policy denied effect '{effect_kind}' from {origin}")]
     PolicyDenied { effect_kind: String, origin: String },
+    #[error("plan '{plan}' invariant #{index} failed")]
+    PlanInvariantFailed { plan: String, index: usize },
     #[error("journal error: {0}")]
     Journal(String),
     #[error("snapshot unavailable: {0}")]

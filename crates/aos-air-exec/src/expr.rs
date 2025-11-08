@@ -17,6 +17,8 @@ pub struct Env {
     pub plan_input: Value,
     pub vars: IndexMap<String, Value>,
     pub steps: IndexMap<String, Value>,
+    #[serde(default)]
+    pub current_event: Option<Value>,
 }
 
 impl Env {
@@ -25,6 +27,7 @@ impl Env {
             plan_input,
             vars: IndexMap::new(),
             steps: IndexMap::new(),
+            current_event: None,
         }
     }
 
@@ -34,6 +37,16 @@ impl Env {
 
     pub fn insert_step(&mut self, id: impl Into<String>, value: Value) -> Option<Value> {
         self.steps.insert(id.into(), value)
+    }
+
+    /// Temporarily bind an event value for `@event` references.
+    pub fn push_event(&mut self, value: Value) -> Option<Value> {
+        self.current_event.replace(value)
+    }
+
+    /// Restores the previous event binding (if any).
+    pub fn restore_event(&mut self, prev: Option<Value>) {
+        self.current_event = prev;
     }
 }
 
@@ -263,6 +276,13 @@ fn resolve_ref(reference: &str, env: &Env) -> EvalResult {
             .get(var)
             .cloned()
             .ok_or_else(|| EvalError::MissingRef(reference.to_string()));
+    }
+    if let Some(rest) = reference.strip_prefix("@event") {
+        let event = env
+            .current_event
+            .as_ref()
+            .ok_or_else(|| EvalError::MissingRef(reference.to_string()))?;
+        return access_path(event, rest);
     }
     if let Some(step) = reference.strip_prefix("@step:") {
         let (id, tail) = split_step_ref(step);
@@ -664,6 +684,7 @@ mod tests {
             plan_input: Value::Record(input),
             vars: IndexMap::new(),
             steps: IndexMap::new(),
+            current_event: None,
         }
     }
 
@@ -797,6 +818,50 @@ mod tests {
         });
         let value = eval_expr(&expr, &sample_env()).unwrap();
         assert_eq!(value, Value::Bool(true));
+    }
+
+    #[test]
+    fn step_reference_reads_prior_output() {
+        let mut env = sample_env();
+        let mut record = IndexMap::new();
+        record.insert("status".into(), Value::Text("ok".into()));
+        env.insert_step("charge", Value::Record(record));
+        let expr = Expr::Ref(ExprRef {
+            reference: "@step:charge.status".into(),
+        });
+        let value = eval_expr(&expr, &env).unwrap();
+        assert_eq!(value, Value::Text("ok".into()));
+    }
+
+    #[test]
+    fn missing_step_reference_errors() {
+        let expr = Expr::Ref(ExprRef {
+            reference: "@step:unknown".into(),
+        });
+        let err = eval_expr(&expr, &sample_env()).unwrap_err();
+        assert!(matches!(err, EvalError::MissingRef(name) if name == "@step:unknown"));
+    }
+
+    #[test]
+    fn event_reference_available_when_bound() {
+        let mut env = sample_env();
+        let mut payload = IndexMap::new();
+        payload.insert("correlation_id".into(), Value::Text("abc".into()));
+        env.push_event(Value::Record(payload));
+        let expr = Expr::Ref(ExprRef {
+            reference: "@event.correlation_id".into(),
+        });
+        let value = eval_expr(&expr, &env).unwrap();
+        assert_eq!(value, Value::Text("abc".into()));
+    }
+
+    #[test]
+    fn missing_event_reference_errors() {
+        let expr = Expr::Ref(ExprRef {
+            reference: "@event.foo".into(),
+        });
+        let err = eval_expr(&expr, &sample_env()).unwrap_err();
+        assert!(matches!(err, EvalError::MissingRef(name) if name == "@event.foo"));
     }
 
     #[test]

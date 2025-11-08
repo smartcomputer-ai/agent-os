@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use aos_air_types::{AirNode, DefCap, DefModule, DefPlan, DefPolicy, Manifest, Name};
 use crate::manifest::LoadedManifest;
+use aos_air_types::{AirNode, DefCap, DefModule, DefPlan, DefPolicy, Manifest, Name};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{

@@ -4,13 +4,13 @@ use aos_air_types::{
 };
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_kernel::Kernel;
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
-use aos_kernel::Kernel;
 use aos_store::FsStore;
-use aos_testkit::fixtures::{self, START_SCHEMA};
 use aos_testkit::TestWorld;
+use aos_testkit::fixtures::{self, START_SCHEMA};
 use aos_wasm_abi::ReducerOutput;
 use serde_cbor;
 use std::sync::Arc;
@@ -104,7 +104,11 @@ fn plan_snapshot_preserves_effect_queue() {
     .unwrap();
 
     let mut intents = replay_world.drain_effects();
-    assert_eq!(intents.len(), 1, "effect queue should persist across snapshot");
+    assert_eq!(
+        intents.len(),
+        1,
+        "effect queue should persist across snapshot"
+    );
     let effect = intents.remove(0);
 
     let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
@@ -245,7 +249,8 @@ fn fs_store_and_journal_restore_snapshot() {
 
     let manifest = fs_persistent_manifest(&store);
     let journal = FsJournal::open(journal_dir.path()).unwrap();
-    let mut kernel = Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(journal)).unwrap();
+    let mut kernel =
+        Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(journal)).unwrap();
 
     let event = fixtures::plan_input_record(vec![]);
     let event_bytes = serde_cbor::to_vec(&event).unwrap();
@@ -257,12 +262,9 @@ fn fs_store_and_journal_restore_snapshot() {
 
     let manifest_reload = fs_persistent_manifest(&store);
     let journal_reload = FsJournal::open(journal_dir.path()).unwrap();
-    let kernel_replay = Kernel::from_loaded_manifest(
-        store.clone(),
-        manifest_reload,
-        Box::new(journal_reload),
-    )
-    .unwrap();
+    let kernel_replay =
+        Kernel::from_loaded_manifest(store.clone(), manifest_reload, Box::new(journal_reload))
+            .unwrap();
 
     assert_eq!(
         kernel_replay.reducer_state("com.acme/SimpleFs@1"),
@@ -335,7 +337,11 @@ fn restored_effects_bypass_new_policy_checks() {
     .unwrap();
 
     let mut intents = replay_world.drain_effects();
-    assert_eq!(intents.len(), 1, "restored intent queue should bypass policy re-check");
+    assert_eq!(
+        intents.len(),
+        1,
+        "restored intent queue should bypass policy re-check"
+    );
     let effect = intents.remove(0);
 
     let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
@@ -358,7 +364,8 @@ fn restored_effects_bypass_new_policy_checks() {
     );
 
     // New plan attempts should now be denied by the stricter policy.
-    let blocked_input = fixtures::plan_input_record(vec![("id", ExprValue::Text("blocked".into()))]);
+    let blocked_input =
+        fixtures::plan_input_record(vec![("id", ExprValue::Text("blocked".into()))]);
     replay_world.submit_event_value(START_SCHEMA, &blocked_input);
     let err = replay_world.kernel.tick_until_idle().unwrap_err();
     assert!(matches!(err, KernelError::PolicyDenied { .. }));

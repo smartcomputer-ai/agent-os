@@ -121,10 +121,8 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
             ann: None,
         },
     );
-    let unblock_event = fixtures::domain_event(
-        "com.acme/Unblock@1",
-        &fixtures::plan_input_record(vec![]),
-    );
+    let unblock_event =
+        fixtures::domain_event("com.acme/Unblock@1", &fixtures::plan_input_record(vec![]));
     let unblock_emitter = fixtures::stub_event_emitting_reducer(
         store,
         "com.acme/UnblockEmitter@1",
@@ -248,14 +246,11 @@ pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
 }
 
 /// Attaches a policy to the manifest defaults so it becomes the runtime policy gate.
-pub fn attach_default_policy(
-    loaded: &mut aos_kernel::manifest::LoadedManifest,
-    policy: DefPolicy,
-) {
-    loaded
-        .manifest
-        .policies
-        .push(NamedRef { name: policy.name.clone(), hash: zero_hash() });
+pub fn attach_default_policy(loaded: &mut aos_kernel::manifest::LoadedManifest, policy: DefPolicy) {
+    loaded.manifest.policies.push(NamedRef {
+        name: policy.name.clone(),
+        hash: zero_hash(),
+    });
     if let Some(defaults) = loaded.manifest.defaults.as_mut() {
         defaults.policy = Some(policy.name.clone());
     } else {
