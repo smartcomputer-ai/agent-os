@@ -354,6 +354,13 @@ pub fn effect_params_text(intent: &EffectIntent) -> String {
     }
 }
 
+/// Returns a fake hash reference with all bytes set to the provided value.
+/// Useful for creating placeholder hashes in tests without needing actual content.
+pub fn fake_hash(byte: u8) -> HashRef {
+    let hex = format!("{:02x}", byte);
+    HashRef::new(format!("sha256:{}", hex.repeat(32))).unwrap()
+}
+
 impl TestWorld {
     /// Construct a test world with a fresh in-memory store.
     pub fn new(loaded: LoadedManifest) -> Result<Self, KernelError> {
