@@ -1,25 +1,36 @@
+use std::sync::{Arc, Mutex};
+
 use super::{Journal, JournalEntry, JournalError, JournalKind, JournalSeq, OwnedJournalEntry};
 
 /// Simple in-memory journal useful for unit tests and TestWorld scenarios.
 #[derive(Debug, Default, Clone)]
 pub struct MemJournal {
-    entries: Vec<OwnedJournalEntry>,
+    entries: Arc<Mutex<Vec<OwnedJournalEntry>>>,
 }
 
 impl MemJournal {
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Arc::new(Mutex::new(Vec::new())),
+        }
     }
 
-    pub fn entries(&self) -> &[OwnedJournalEntry] {
-        &self.entries
+    pub fn from_entries(entries: &[OwnedJournalEntry]) -> Self {
+        Self {
+            entries: Arc::new(Mutex::new(entries.to_vec())),
+        }
+    }
+
+    pub fn entries(&self) -> Vec<OwnedJournalEntry> {
+        self.entries.lock().unwrap().clone()
     }
 }
 
 impl Journal for MemJournal {
     fn append(&mut self, entry: JournalEntry<'_>) -> Result<JournalSeq, JournalError> {
-        let seq = self.next_seq();
-        self.entries.push(OwnedJournalEntry {
+        let mut guard = self.entries.lock().unwrap();
+        let seq = guard.len() as JournalSeq;
+        guard.push(OwnedJournalEntry {
             seq,
             kind: entry.kind,
             payload: entry.payload.to_vec(),
@@ -29,15 +40,14 @@ impl Journal for MemJournal {
 
     fn load_from(&self, from: JournalSeq) -> Result<Vec<OwnedJournalEntry>, JournalError> {
         Ok(self
-            .entries
-            .iter()
+            .entries()
+            .into_iter()
             .filter(|entry| entry.seq >= from)
-            .cloned()
             .collect())
     }
 
     fn next_seq(&self) -> JournalSeq {
-        self.entries.len() as JournalSeq
+        self.entries.lock().unwrap().len() as JournalSeq
     }
 }
 

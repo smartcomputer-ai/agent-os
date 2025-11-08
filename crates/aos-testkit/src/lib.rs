@@ -10,7 +10,7 @@ use aos_air_types::{
     SchemaRef, Trigger, TypeExpr, TypeRecord, ValueLiteral, ValueRecord,
 };
 use aos_effects::EffectIntent;
-use aos_kernel::{Kernel, error::KernelError, journal::mem::MemJournal, manifest::LoadedManifest};
+use aos_kernel::{Kernel, error::KernelError, journal::mem::MemJournal, journal::Journal, manifest::LoadedManifest};
 use aos_store::{MemStore, Store};
 use aos_wasm_abi::{DomainEvent, ReducerOutput};
 use indexmap::IndexMap;
@@ -359,7 +359,20 @@ impl TestWorld {
 
     /// Construct a test world using the provided store (helpful when multiple worlds share blobs).
     pub fn with_store(store: Arc<TestStore>, loaded: LoadedManifest) -> Result<Self, KernelError> {
-        let kernel = Kernel::from_loaded_manifest(store.clone(), loaded, Box::new(MemJournal::new()))?;
+        let kernel = Kernel::from_loaded_manifest(
+            store.clone(),
+            loaded,
+            Box::new(MemJournal::new()),
+        )?;
+        Ok(Self { store, kernel })
+    }
+
+    pub fn with_store_and_journal(
+        store: Arc<TestStore>,
+        loaded: LoadedManifest,
+        journal: Box<dyn Journal>,
+    ) -> Result<Self, KernelError> {
+        let kernel = Kernel::from_loaded_manifest(store.clone(), loaded, journal)?;
         Ok(Self { store, kernel })
     }
 

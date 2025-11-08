@@ -31,4 +31,8 @@ impl Scheduler {
         self.next_plan_id += 1;
         id
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
 }

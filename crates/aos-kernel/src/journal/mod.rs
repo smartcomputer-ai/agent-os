@@ -25,7 +25,7 @@ pub enum JournalKind {
 /// `payload` field so downstream readers can match on the enum and decode the
 /// appropriate structure without bespoke wiring.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "record_kind", rename_all = "snake_case")]
 pub enum JournalRecord {
     DomainEvent(DomainEventRecord),
     EffectIntent(EffectIntentRecord),

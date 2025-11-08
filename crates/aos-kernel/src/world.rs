@@ -14,7 +14,7 @@ use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
 use crate::journal::mem::MemJournal;
-use crate::journal::{Journal, JournalEntry, JournalKind, JournalRecord, DomainEventRecord, EffectIntentRecord, EffectReceiptRecord};
+use crate::journal::{Journal, JournalEntry, JournalKind, JournalRecord, DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, OwnedJournalEntry};
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
 use crate::policy::{AllowAllPolicy, RulePolicy};
@@ -41,6 +41,7 @@ pub struct Kernel<S: Store> {
     effect_manager: EffectManager,
     reducer_state: HashMap<Name, Vec<u8>>,
     journal: Box<dyn Journal>,
+    suppress_journal: bool,
 }
 
 pub struct KernelBuilder<S: Store> {
@@ -117,7 +118,7 @@ impl<S: Store + 'static> Kernel<S> {
             None => Box::new(AllowAllPolicy),
         };
 
-        Ok(Self {
+        let mut kernel = Self {
             manifest: loaded.manifest,
             module_defs: loaded.modules,
             reducers: ReducerRegistry::new(store)?,
@@ -134,7 +135,10 @@ impl<S: Store + 'static> Kernel<S> {
             effect_manager: EffectManager::new(capability_resolver, policy_gate),
             reducer_state: HashMap::new(),
             journal,
-        })
+            suppress_journal: false,
+        };
+        kernel.replay_existing_entries()?;
+        Ok(kernel)
     }
 
     pub fn enqueue_event(&mut self, event: KernelEvent) {
@@ -200,8 +204,10 @@ impl<S: Store + 'static> Kernel<S> {
         }
         for event in output.domain_events {
             self.record_domain_event(&event)?;
-            self.deliver_event_to_waiting_plans(&event)?;
-            self.scheduler.push_reducer(ReducerEvent { event });
+            if !self.suppress_journal {
+                self.deliver_event_to_waiting_plans(&event)?;
+                self.scheduler.push_reducer(ReducerEvent { event });
+            }
         }
         for effect in &output.effects {
             let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
@@ -235,8 +241,58 @@ impl<S: Store + 'static> Kernel<S> {
         self.effect_manager.drain()
     }
 
+    fn replay_existing_entries(&mut self) -> Result<(), KernelError> {
+        let entries = self.journal.load_from(0)?;
+        if entries.is_empty() {
+            return Ok(());
+        }
+        self.suppress_journal = true;
+        for entry in entries {
+            let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
+                .map_err(|err| KernelError::Journal(err.to_string()))?;
+            self.apply_replay_record(record)?;
+        }
+        self.tick_until_idle()?;
+        self.suppress_journal = false;
+        Ok(())
+    }
+
+    fn apply_replay_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
+        match record {
+            JournalRecord::DomainEvent(event) => {
+                self.submit_domain_event(event.schema, event.value);
+                self.tick_until_idle()?;
+            }
+            JournalRecord::EffectReceipt(record) => {
+                let receipt = EffectReceipt {
+                    intent_hash: record.intent_hash,
+                    adapter_id: record.adapter_id,
+                    status: record.status,
+                    payload_cbor: record.payload_cbor,
+                    cost_cents: record.cost_cents,
+                    signature: record.signature,
+                };
+                self.handle_receipt(receipt)?;
+                self.tick_until_idle()?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn tick_until_idle(&mut self) -> Result<(), KernelError> {
+        while !self.scheduler.is_empty() {
+            self.tick()?;
+        }
+        Ok(())
+    }
+
     pub fn reducer_state(&self, reducer: &str) -> Option<&Vec<u8>> {
         self.reducer_state.get(reducer)
+    }
+
+    pub fn dump_journal(&self) -> Result<Vec<OwnedJournalEntry>, KernelError> {
+        Ok(self.journal.load_from(0)?)
     }
 
     fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
@@ -272,10 +328,12 @@ impl<S: Store + 'static> Kernel<S> {
             let outcome = instance.tick(&mut self.effect_manager)?;
             for event in &outcome.raised_events {
                 self.record_domain_event(event)?;
-                self.deliver_event_to_waiting_plans(event)?;
-                self.scheduler.push_reducer(ReducerEvent {
-                    event: event.clone(),
-                });
+                if !self.suppress_journal {
+                    self.deliver_event_to_waiting_plans(event)?;
+                    self.scheduler.push_reducer(ReducerEvent {
+                        event: event.clone(),
+                    });
+                }
             }
             for intent in &outcome.intents_enqueued {
                 self.record_effect_intent(intent)?;
@@ -328,7 +386,10 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
-            self.scheduler.push_reducer(ReducerEvent { event });
+            self.record_domain_event(&event)?;
+            if !self.suppress_journal {
+                self.scheduler.push_reducer(ReducerEvent { event });
+            }
             self.remember_receipt(receipt.intent_hash);
             return Ok(());
         }
@@ -383,6 +444,9 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn append_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
+        if self.suppress_journal {
+            return Ok(());
+        }
         let bytes = serde_cbor::to_vec(&record)
             .map_err(|err| KernelError::Journal(err.to_string()))?;
         self.journal
