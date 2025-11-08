@@ -23,7 +23,7 @@ Plan is to create helper builders (reducer module, manifest with plan, plan inpu
 
 ### After integration tests
 1. **Reducer receipt handling** – convert micro-effect receipts into reducer DomainEvents.
-2. **Capability/policy enforcement** – integrate Cap/Policy gates and budget tracking.
+2. **Capability/policy enforcement** – integrate Cap/Policy gates and budget tracking. We can wait on this, though, until later, the allow all approach works for now.
 3. **Journal/outbox** – persist events/effects for replay.
 4. **Governance loop & CLI integration** – once runtime is stable.
 
