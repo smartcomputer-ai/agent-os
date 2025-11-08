@@ -262,8 +262,8 @@ pub mod fixtures {
 
     /// Compiles a trivial WAT module whose `step` export always returns the provided
     /// `ReducerOutput` bytes. Useful for reducers that simply emit domain events or effects.
-    pub fn stub_reducer_module(
-        store: &Arc<TestStore>,
+    pub fn stub_reducer_module<S: Store + ?Sized>(
+        store: &Arc<S>,
         name: impl Into<String>,
         output: &ReducerOutput,
     ) -> DefModule {

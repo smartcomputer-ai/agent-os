@@ -5,10 +5,16 @@ use aos_air_types::{
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::error::KernelError;
+use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::Kernel;
+use aos_store::FsStore;
 use aos_testkit::fixtures::{self, START_SCHEMA};
 use aos_testkit::TestWorld;
+use aos_wasm_abi::ReducerOutput;
 use serde_cbor;
+use std::sync::Arc;
+use tempfile::TempDir;
 
 mod helpers;
 use helpers::{
@@ -228,6 +234,55 @@ fn snapshot_replay_restores_state() {
         replay_world.kernel.reducer_state("com.acme/Simple@1"),
         Some(&final_state)
     );
+}
+
+/// Snapshot blobs persisted via FsStore plus FsJournal should restore after a fresh process.
+#[test]
+fn fs_store_and_journal_restore_snapshot() {
+    let store_dir = TempDir::new().unwrap();
+    let journal_dir = TempDir::new().unwrap();
+    let store = Arc::new(FsStore::open(store_dir.path()).unwrap());
+
+    let manifest = fs_persistent_manifest(&store);
+    let journal = FsJournal::open(journal_dir.path()).unwrap();
+    let mut kernel = Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(journal)).unwrap();
+
+    let event = fixtures::plan_input_record(vec![]);
+    let event_bytes = serde_cbor::to_vec(&event).unwrap();
+    kernel.submit_domain_event(START_SCHEMA.to_string(), event_bytes);
+    kernel.tick_until_idle().unwrap();
+    kernel.create_snapshot().unwrap();
+
+    drop(kernel);
+
+    let manifest_reload = fs_persistent_manifest(&store);
+    let journal_reload = FsJournal::open(journal_dir.path()).unwrap();
+    let kernel_replay = Kernel::from_loaded_manifest(
+        store.clone(),
+        manifest_reload,
+        Box::new(journal_reload),
+    )
+    .unwrap();
+
+    assert_eq!(
+        kernel_replay.reducer_state("com.acme/SimpleFs@1"),
+        Some(&vec![0xAA])
+    );
+}
+
+fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedManifest {
+    let reducer = fixtures::stub_reducer_module(
+        store,
+        "com.acme/SimpleFs@1",
+        &ReducerOutput {
+            state: Some(vec![0xAA]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+    let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
+    fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)
 }
 
 /// Snapshot creation should automatically drain pending scheduler work before persisting state.
