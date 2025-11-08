@@ -1,21 +1,41 @@
-## Upcoming Kernel/AIR Tasks
+## Upcoming Kernel/AIR Tasks (ordered by priority)
 
-1. **Keyed Routing Pipeline**
-   - Detected gap: manifest `routing.events[].key_field` is still ignored at runtime, so keyed reducers can’t receive events even though plans can now emit `DomainEvent.key` bytes.
-   - Why it matters: Spec 05 (Cells) expects us to fan events to `(reducer, key)` and eventually persist per-cell state; without this plumbing, keyed reducers remain theoretical and plans can’t coordinate with stateful cells.
+1. **Validate Capability Grant Params (High)**
+   - Gap: `capability.rs` CBOR-encodes `CapGrant.params` without checking them against the referenced `defcap.schema`.
+   - Why: malformed grants currently slip through despite spec/JSON schema guarantees; enforcing schemas keeps effect gating deterministic and secure.
 
-2. **Plan Result Schema Enforcement**
-   - Detected gap: `PlanStep::End` enforces presence/absence of a result but never validates the returned value against the plan’s declared output schema.
-   - Why it matters: governance/shadow runs rely on typed outputs to diff manifests and produce receipts; accepting malformed results undermines deterministic replay and AIR guarantees in spec 03 §11.
+2. **Plan Result Schema & Journaling (High)**
+   - Gap: `PlanStep::End` enforces presence/absence only; values aren’t checked against `plan.output`, nor are results surfaced beyond `PlanTickOutcome`.
+   - Why: typed outputs are part of AIR’s contract (spec 03 §11). We need schema validation plus a persistence path (journal or governance shadow summary) so consumers can rely on plan outputs.
 
-3. **Expose Plan Results to Callers**
-   - Detected gap: `PlanTickOutcome.result` is computed but never surfaced—no journal record, no CLI inspection, no governance summary.
-   - Why it matters: operators and downstream reducers/plans need visibility into plan outputs for audit/shadow replay; persisting the result (and referencing it from governance/shadow reports) completes the orchestration loop promised in spec 02.
+3. **Raise Event Schema Alignment (High)**
+   - Gap: runtime still requires `$schema` inside the raise_event payload and doesn’t validate against actual schemas.
+   - Why: spec expects schema selection via step metadata; we should accept a SchemaRef, validate the payload (including key) before emitting `DomainEvent`, and drop the ad-hoc `$schema` requirement.
 
-4. **Invariants in Governance & Testkit**
-   - Detected gap: plan invariants now fail fast inside the runtime, but governance shadow runs and `aos-testkit` scenarios don’t report or assert on those failures.
-   - Why it matters: reviewers must understand invariant violations during proposal review, and integration suites should prove invariants stay satisfied across replays; wiring this into the shadow summary and adding fixture coverage keeps invariants actionable instead of silent aborts.
+4. **Strengthen Plan Validator (Medium)**
+   - Gap: `validate_plan` only checks DAG shape/allowed effects. It should verify await_receipt references, await_event schemas/where predicates, invariant expression types, and raise_event bindings.
+   - Why: catching these statically keeps bad AIR trees from hitting runtime and aligns with the spec’s semantic-check requirements.
 
-5. **Keyed Reducer Storage & Replay**
-   - Detected gap: even with keyed events, reducer state remains monolithic; there’s no per-cell storage/journal path described in spec 05 (Cells) §“Storage Layout and Snapshots”.
-   - Why it matters: shipping cell-mode requires CAS-backed per-key state files, snapshot inclusion, journal metadata, and replay hooks, otherwise keyed reducers can’t scale or survive restarts.
+5. **Typed Event & Receipt Validation (Medium)**
+   - Gap: awaited events/receipts are deserialized without schema checks; predicates can run on malformed data.
+   - Why: validating against declared schemas ensures replay safety and lets policy/budget logic trust the payloads.
+
+6. **Invariants in Governance & Testkit (Medium)**
+   - Gap: kernel enforces invariants, but governance shadow runs and testkit scenarios don’t report/assert on them.
+   - Why: reviewers need clear invariant failure diagnostics; tests should ensure invariants remain satisfied on replay.
+
+7. **Keyed Routing Pipeline (Medium)**
+   - Gap: manifest `routing.events[].key_field` isn’t used, so keyed reducers can’t receive events despite `DomainEvent.key` support.
+   - Why: spec 05 (Cells) requires routing to `(reducer,key)` before we can ship cell-mode or per-key observability.
+
+8. **Expose Plan Results to Callers (Medium)**
+   - Gap: even after validation, results must be inspectable (CLI, governance shadow summary, testkit assertions).
+   - Why: operators and downstream automation need the final value for audit and follow-up reducers/plans.
+
+9. **Keyed Reducer Storage & Replay (Medium-Low)**
+   - Gap: no CAS-backed per-cell state layout/snapshot story yet.
+   - Why: once keyed routing lands, we’ll need storage/replay to make cells real; not urgent until routing + schema enforcement stabilize.
+
+10. **AIR Versioning Plan (Low)**
+   - Gap: code still assumes spec v1.0 while v1.1 design notes exist.
+   - Why: before landing cell-mode or other v1.1 features, define how `AIR_SPEC_VERSION` increments and keep docs + code in sync. Not blocking current runtime fixes but should happen before large feature drops.
