@@ -1,0 +1,113 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "sys/TimerSetParams@1",
+    "type": {
+      "record": {
+        "deliver_at_ns": { "nat": {} },
+        "key": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/TimerSetReceipt@1",
+    "type": {
+      "record": {
+        "delivered_at_ns": { "nat": {} },
+        "key": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobPutParams@1",
+    "type": {
+      "record": {
+        "namespace": { "text": {} },
+        "blob_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobPutReceipt@1",
+    "type": {
+      "record": {
+        "blob_ref": { "hash": {} },
+        "size": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobGetParams@1",
+    "type": {
+      "record": {
+        "namespace": { "text": {} },
+        "key": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobGetReceipt@1",
+    "type": {
+      "record": {
+        "blob_ref": { "hash": {} },
+        "size": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/TimerFired@1",
+    "type": {
+      "record": {
+        "intent_hash": { "hash": {} },
+        "reducer": { "text": {} },
+        "effect_kind": { "text": {} },
+        "adapter_id": { "text": {} },
+        "status": { "text": {} },
+        "requested": { "ref": "sys/TimerSetParams@1" },
+        "receipt": { "ref": "sys/TimerSetReceipt@1" },
+        "cost_cents": { "nat": {} },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobPutResult@1",
+    "type": {
+      "record": {
+        "intent_hash": { "hash": {} },
+        "reducer": { "text": {} },
+        "effect_kind": { "text": {} },
+        "adapter_id": { "text": {} },
+        "status": { "text": {} },
+        "requested": { "ref": "sys/BlobPutParams@1" },
+        "receipt": { "ref": "sys/BlobPutReceipt@1" },
+        "cost_cents": { "nat": {} },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobGetResult@1",
+    "type": {
+      "record": {
+        "intent_hash": { "hash": {} },
+        "reducer": { "text": {} },
+        "effect_kind": { "text": {} },
+        "adapter_id": { "text": {} },
+        "status": { "text": {} },
+        "requested": { "ref": "sys/BlobGetParams@1" },
+        "receipt": { "ref": "sys/BlobGetReceipt@1" },
+        "cost_cents": { "nat": {} },
+        "signature": { "bytes": {} }
+      }
+    }
+  }
+]

@@ -209,6 +209,8 @@ Reducers that emit micro-effects rely on the kernel to translate adapter receipt
 
 Reducers should add routing entries for these schemas (e.g., `routing.events[].event = sys/TimerFired@1`). Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/budget enforcement can trust the same structures without changing reducer code.
 
+Canonical JSON definitions for these schemas (plus their parameter/receipt companions) live in `spec/defs/builtin-schemas.air.json` so manifests can hash and reference them directly.
+
 ## 8) Effect Intents and Receipts
 
 ### EffectIntent
