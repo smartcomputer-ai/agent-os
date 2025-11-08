@@ -20,7 +20,8 @@ use crate::journal::mem::MemJournal;
 use crate::journal::{
     DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, GovernanceRecord,
     IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, JournalSeq,
-    OwnedJournalEntry, ProposalSubmittedRecord, ShadowRunCompletedRecord, SnapshotRecord,
+    ManifestAppliedRecord, OwnedJournalEntry, ProposalApprovedRecord, ProposalSubmittedRecord,
+    ShadowRunCompletedRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
@@ -594,6 +595,41 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(summary)
     }
 
+    pub fn approve_proposal(
+        &mut self,
+        proposal_id: u64,
+        approver: impl Into<String>,
+    ) -> Result<(), KernelError> {
+        if !self.governance.proposals().contains_key(&proposal_id) {
+            return Err(KernelError::ProposalNotFound(proposal_id));
+        }
+        let record = GovernanceRecord::ProposalApproved(ProposalApprovedRecord {
+            proposal_id,
+            approver: approver.into(),
+        });
+        self.append_record(JournalRecord::Governance(record.clone()))?;
+        self.governance.apply_record(&record);
+        Ok(())
+    }
+
+    pub fn apply_proposal(&mut self, proposal_id: u64) -> Result<(), KernelError> {
+        let proposal = self
+            .governance
+            .proposals()
+            .get(&proposal_id)
+            .ok_or(KernelError::ProposalNotFound(proposal_id))?
+            .clone();
+        let patch = self.load_manifest_patch(&proposal.patch_hash)?;
+        self.swap_manifest(patch)?;
+        let record = GovernanceRecord::ManifestApplied(ManifestAppliedRecord {
+            proposal_id,
+            manifest_hash: proposal.patch_hash.clone(),
+        });
+        self.append_record(JournalRecord::Governance(record.clone()))?;
+        self.governance.apply_record(&record);
+        Ok(())
+    }
+
     fn load_manifest_patch(&self, hash_hex: &str) -> Result<ManifestPatch, KernelError> {
         let hash = Hash::from_hex_str(hash_hex)
             .map_err(|err| KernelError::Manifest(format!("invalid patch hash: {err}")))?;
@@ -601,6 +637,26 @@ impl<S: Store + 'static> Kernel<S> {
         let patch: ManifestPatch = serde_cbor::from_slice(&bytes)
             .map_err(|err| KernelError::Manifest(format!("decode patch: {err}")))?;
         Ok(patch)
+    }
+
+    fn swap_manifest(&mut self, patch: ManifestPatch) -> Result<(), KernelError> {
+        let loaded = crate::shadow::runner::loaded_manifest_from_patch(&patch);
+        self.manifest = loaded.manifest;
+        self.module_defs = loaded.modules;
+        self.plan_registry = crate::plan::PlanRegistry::default();
+        for plan in &loaded.plans {
+            self.plan_registry.register(plan.1.clone());
+        }
+        self.router.clear();
+        if let Some(routing) = self.manifest.routing.as_ref() {
+            for route in &routing.events {
+                self.router
+                    .entry(route.event.as_str().to_string())
+                    .or_insert_with(Vec::new)
+                    .push(route.reducer.clone());
+            }
+        }
+        Ok(())
     }
 
     fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
