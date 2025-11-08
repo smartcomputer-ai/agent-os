@@ -5,6 +5,7 @@ use aos_air_exec::Value as ExprValue;
 use aos_air_types::{Manifest, Name};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
+use serde_cbor;
 
 use crate::effects::EffectManager;
 use crate::error::KernelError;
@@ -22,6 +23,7 @@ pub struct Kernel<S: Store> {
     plan_registry: PlanRegistry,
     plan_instances: HashMap<u64, PlanInstance>,
     plan_triggers: HashMap<String, Vec<String>>,
+    pending_receipts: HashMap<[u8; 32], u64>,
     scheduler: Scheduler,
     effect_manager: EffectManager,
     reducer_state: HashMap<Name, Vec<u8>>,
@@ -78,6 +80,7 @@ impl<S: Store + 'static> Kernel<S> {
             plan_registry,
             plan_instances: HashMap::new(),
             plan_triggers,
+            pending_receipts: HashMap::new(),
             scheduler: Scheduler::default(),
             effect_manager: EffectManager::new(),
             reducer_state: HashMap::new(),
@@ -184,11 +187,31 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn handle_plan_task(&mut self, id: u64) -> Result<(), KernelError> {
         if let Some(instance) = self.plan_instances.get_mut(&id) {
-            let done = instance.tick(&mut self.effect_manager)?;
-            if done {
-                self.plan_instances.remove(&id);
-            } else {
+            let outcome = instance.tick(&mut self.effect_manager)?;
+            for event in outcome.raised_events {
+                self.scheduler.push_reducer(ReducerEvent { event });
+            }
+            if let Some(hash) = outcome.waiting_receipt {
+                self.pending_receipts.insert(hash, id);
+            } else if !outcome.completed {
                 self.scheduler.push_plan(id);
+            }
+            if outcome.completed {
+                self.plan_instances.remove(&id);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn handle_receipt(
+        &mut self,
+        receipt: aos_effects::EffectReceipt,
+    ) -> Result<(), KernelError> {
+        if let Some(plan_id) = self.pending_receipts.remove(&receipt.intent_hash) {
+            if let Some(instance) = self.plan_instances.get_mut(&plan_id) {
+                if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
+                    self.scheduler.push_plan(plan_id);
+                }
             }
         }
         Ok(())

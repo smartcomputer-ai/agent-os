@@ -57,7 +57,7 @@ impl EffectManager {
         kind: &EffectKind,
         cap_name: &str,
         params_cbor: Vec<u8>,
-    ) -> Result<(), KernelError> {
+    ) -> Result<[u8; 32], KernelError> {
         let intent = EffectIntent::from_raw_params(
             aos_effects::EffectKind::from_air(kind.clone()),
             cap_name.to_string(),
@@ -65,7 +65,8 @@ impl EffectManager {
             [0u8; 32],
         )
         .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        let hash = intent.intent_hash;
         self.queue.push(intent);
-        Ok(())
+        Ok(hash)
     }
 }
