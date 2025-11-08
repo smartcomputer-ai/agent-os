@@ -53,6 +53,8 @@ pub enum KernelError {
     SnapshotUnavailable(String),
     #[error("snapshot decode error: {0}")]
     SnapshotDecode(String),
+    #[error("proposal {0} not found")]
+    ProposalNotFound(u64),
 }
 
 impl From<crate::journal::JournalError> for KernelError {

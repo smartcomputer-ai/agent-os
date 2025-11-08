@@ -14,12 +14,13 @@ use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
 use crate::governance::{GovernanceManager, ManifestPatch};
+use crate::shadow::{ShadowConfig, ShadowHarness, ShadowExecutor, ShadowSummary};
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
     DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, GovernanceRecord,
     IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, JournalSeq,
-    OwnedJournalEntry, ProposalSubmittedRecord, SnapshotRecord,
+    OwnedJournalEntry, ProposalSubmittedRecord, ShadowRunCompletedRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
@@ -562,6 +563,44 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);
         Ok(proposal_id)
+    }
+
+    pub fn run_shadow(
+        &mut self,
+        proposal_id: u64,
+        harness: Option<ShadowHarness>,
+    ) -> Result<ShadowSummary, KernelError> {
+        let proposal = self
+            .governance
+            .proposals()
+            .get(&proposal_id)
+            .ok_or(KernelError::ProposalNotFound(proposal_id))?
+            .clone();
+        let patch = self.load_manifest_patch(&proposal.patch_hash)?;
+        let config = ShadowConfig {
+            proposal_id,
+            patch,
+            harness,
+        };
+        let summary = ShadowExecutor::run(self.store.clone(), &config)?;
+        let summary_bytes = serde_cbor::to_vec(&summary)
+            .map_err(|err| KernelError::Manifest(format!("encode summary: {err}")))?;
+        let record = GovernanceRecord::ShadowRunCompleted(ShadowRunCompletedRecord {
+            proposal_id,
+            summary: summary_bytes,
+        });
+        self.append_record(JournalRecord::Governance(record.clone()))?;
+        self.governance.apply_record(&record);
+        Ok(summary)
+    }
+
+    fn load_manifest_patch(&self, hash_hex: &str) -> Result<ManifestPatch, KernelError> {
+        let hash = Hash::from_hex_str(hash_hex)
+            .map_err(|err| KernelError::Manifest(format!("invalid patch hash: {err}")))?;
+        let bytes = self.store.get_blob(hash)?;
+        let patch: ManifestPatch = serde_cbor::from_slice(&bytes)
+            .map_err(|err| KernelError::Manifest(format!("decode patch: {err}")))?;
+        Ok(patch)
     }
 
     fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
