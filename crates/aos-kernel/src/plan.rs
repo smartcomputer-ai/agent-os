@@ -352,3 +352,174 @@ fn expr_value_to_domain_event(value: ExprValue) -> Result<DomainEvent, KernelErr
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aos_air_types::{
+        EffectKind, Expr, ExprConst, PlanBindEffect, PlanStep, PlanStepEmitEffect, PlanStepEnd,
+        PlanStepKind,
+    };
+
+    fn base_plan(steps: Vec<PlanStep>) -> DefPlan {
+        DefPlan {
+            name: "test/plan@1".into(),
+            input: aos_air_types::SchemaRef::new("test/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps,
+            edges: vec![],
+            required_caps: vec!["cap".into()],
+            allowed_effects: vec![EffectKind::HttpRequest],
+            invariants: vec![],
+        }
+    }
+
+    fn default_env() -> ExprValue {
+        ExprValue::Record(IndexMap::new())
+    }
+
+    #[test]
+    fn assign_step_updates_env() {
+        let steps = vec![PlanStep {
+            id: "assign".into(),
+            kind: PlanStepKind::Assign(aos_air_types::PlanStepAssign {
+                expr: Expr::Const(ExprConst::Int { int: 42 }),
+                bind: aos_air_types::PlanBind {
+                    var: "answer".into(),
+                },
+            }),
+        }];
+        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut effects = EffectManager::new();
+        let outcome = plan.tick(&mut effects).unwrap();
+        assert!(outcome.completed);
+        assert_eq!(plan.env.vars.get("answer").unwrap(), &ExprValue::Int(42));
+    }
+
+    #[test]
+    fn emit_effect_enqueues_intent() {
+        let steps = vec![PlanStep {
+            id: "emit".into(),
+            kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                kind: EffectKind::HttpRequest,
+                params: Expr::Const(ExprConst::Text {
+                    text: "data".into(),
+                }),
+                cap: "cap".into(),
+                bind: PlanBindEffect {
+                    effect_id_as: "req".into(),
+                },
+            }),
+        }];
+        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut effects = EffectManager::new();
+        let outcome = plan.tick(&mut effects).unwrap();
+        assert!(outcome.completed);
+        assert_eq!(effects.drain().len(), 1);
+        assert!(plan.effect_handles.contains_key("req"));
+    }
+
+    #[test]
+    fn await_receipt_waits_and_resumes() {
+        let steps = vec![
+            PlanStep {
+                id: "emit".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: EffectKind::HttpRequest,
+                    params: Expr::Const(ExprConst::Text {
+                        text: "data".into(),
+                    }),
+                    cap: "cap".into(),
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "await".into(),
+                kind: PlanStepKind::AwaitReceipt(aos_air_types::PlanStepAwaitReceipt {
+                    for_expr: Expr::Const(ExprConst::Text { text: "req".into() }),
+                    bind: aos_air_types::PlanBind { var: "rcpt".into() },
+                }),
+            },
+        ];
+        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut effects = EffectManager::new();
+        let first = plan.tick(&mut effects).unwrap();
+        assert!(first.waiting_receipt.is_some());
+        let hash = first.waiting_receipt.unwrap();
+        assert!(plan.deliver_receipt(hash, b"\x01").unwrap());
+        let second = plan.tick(&mut effects).unwrap();
+        assert!(second.completed);
+        assert!(plan.env.vars.contains_key("rcpt"));
+    }
+
+    #[test]
+    fn await_event_waits_for_schema() {
+        let steps = vec![PlanStep {
+            id: "await".into(),
+            kind: PlanStepKind::AwaitEvent(aos_air_types::PlanStepAwaitEvent {
+                event: aos_air_types::SchemaRef::new("com.test/Evt@1").unwrap(),
+                where_clause: None,
+                bind: aos_air_types::PlanBind { var: "evt".into() },
+            }),
+        }];
+        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut effects = EffectManager::new();
+        let outcome = plan.tick(&mut effects).unwrap();
+        assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
+        let event = DomainEvent::new(
+            "com.test/Evt@1",
+            serde_cbor::to_vec(&ExprValue::Int(5)).unwrap(),
+        );
+        assert!(plan.deliver_event(&event).unwrap());
+        let outcome2 = plan.tick(&mut effects).unwrap();
+        assert!(outcome2.completed);
+        assert!(plan.env.vars.contains_key("evt"));
+    }
+
+    #[test]
+    fn guard_blocks_step_until_true() {
+        let mut plan = base_plan(vec![PlanStep {
+            id: "end".into(),
+            kind: PlanStepKind::End(PlanStepEnd { result: None }),
+        }]);
+        plan.edges.push(PlanEdge {
+            from: "start".into(),
+            to: "end".into(),
+            when: Some(Expr::Const(ExprConst::Bool { bool: false })),
+        });
+        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut effects = EffectManager::new();
+        let outcome = instance.tick(&mut effects).unwrap();
+        assert!(!outcome.completed);
+    }
+
+    #[test]
+    fn raise_event_produces_domain_event() {
+        let steps = vec![PlanStep {
+            id: "raise".into(),
+            kind: PlanStepKind::RaiseEvent(aos_air_types::PlanStepRaiseEvent {
+                reducer: "irrelevant".into(),
+                key: None,
+                event: Expr::Record(aos_air_types::ExprRecord {
+                    record: IndexMap::from([
+                        (
+                            "$schema".into(),
+                            Expr::Const(ExprConst::Text {
+                                text: "com.test/Evt@1".into(),
+                            }),
+                        ),
+                        ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
+                    ]),
+                }),
+            }),
+        }];
+        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut effects = EffectManager::new();
+        let outcome = plan.tick(&mut effects).unwrap();
+        assert_eq!(outcome.raised_events.len(), 1);
+        assert_eq!(outcome.raised_events[0].schema, "com.test/Evt@1");
+    }
+}
