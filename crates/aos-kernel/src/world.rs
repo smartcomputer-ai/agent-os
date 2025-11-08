@@ -13,6 +13,7 @@ use crate::capability::CapabilityResolver;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
+use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
     DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, IntentOriginRecord, Journal,
@@ -68,6 +69,15 @@ impl<S: Store + 'static> KernelBuilder<S> {
     pub fn with_journal(mut self, journal: Box<dyn Journal>) -> Self {
         self.journal = journal;
         self
+    }
+
+    pub fn with_fs_journal(
+        mut self,
+        root: impl AsRef<std::path::Path>,
+    ) -> Result<Self, KernelError> {
+        let journal = FsJournal::open(root)?;
+        self.journal = Box::new(journal);
+        Ok(self)
     }
 
     pub fn from_manifest_path(

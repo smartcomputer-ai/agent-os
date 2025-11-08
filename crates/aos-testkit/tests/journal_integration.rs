@@ -1,11 +1,13 @@
 use aos_air_exec::Value as ExprValue;
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord};
 use aos_testkit::fixtures::{self, START_SCHEMA};
 use aos_testkit::TestWorld;
 use serde_cbor;
+use tempfile::TempDir;
 
 mod helpers;
 use helpers::{fulfillment_manifest, timer_manifest};
@@ -183,4 +185,60 @@ fn plan_journal_replay_resumes_waiting_receipt() {
             .reducer_state("com.acme/ResultReducer@1"),
         Some(&vec![0xEE])
     );
+}
+
+/// FsJournal should persist entries to disk and allow a fresh kernel to resume state.
+#[test]
+fn fs_journal_persists_across_restarts() {
+    let store = fixtures::new_mem_store();
+    let temp = TempDir::new().unwrap();
+
+    let final_state = {
+        let mut world = TestWorld::with_store_and_journal(
+            store.clone(),
+            fulfillment_manifest(&store),
+            Box::new(FsJournal::open(temp.path()).unwrap()),
+        )
+        .unwrap();
+
+        let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
+        world.submit_event_value(START_SCHEMA, &input);
+        world.tick_n(2).unwrap();
+
+        let mut effects = world.drain_effects();
+        assert_eq!(effects.len(), 1);
+        let effect = effects.remove(0);
+        let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
+        let receipt = EffectReceipt {
+            intent_hash: effect.intent_hash,
+            adapter_id: "adapter.http".into(),
+            status: ReceiptStatus::Ok,
+            payload_cbor: receipt_payload,
+            cost_cents: None,
+            signature: vec![],
+        };
+        world.kernel.handle_receipt(receipt).unwrap();
+        world.kernel.tick_until_idle().unwrap();
+
+        world
+            .kernel
+            .reducer_state("com.acme/ResultReducer@1")
+            .cloned()
+            .unwrap()
+    };
+
+    let replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        fulfillment_manifest(&store),
+        Box::new(FsJournal::open(temp.path()).unwrap()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        replay_world
+            .kernel
+            .reducer_state("com.acme/ResultReducer@1"),
+        Some(&final_state)
+    );
+    assert!(!replay_world.kernel.dump_journal().unwrap().is_empty());
 }

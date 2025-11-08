@@ -43,8 +43,7 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
   - Extend WP1 scenarios to run twice: first to generate journal + snapshot artifacts, then to replay from genesis and assert byte-identical reducer states and queues.
 - **Deliverables**: Journal writer/reader modules, snapshot serializer, replay harness with automated tests proving deterministic replays and proper handling of truncated/corrupt segments.
 - **Current Gaps**:
-  - Durable on-disk journal segments (fs backend) and corruption handling are still unimplemented; we only exercise the in-memory journal today.
-  - Need stress/fuzz tests for partial journals and receipt replays under truncation once the fs backend lands.
+  - FsJournal now backs the on-disk journal path; next step is to harden it with stress/fuzz tests for partial segments, truncation, and corruption handling plus corresponding repair tooling.
 
 - Recent additions: `plan_journal_replay_resumes_waiting_receipt` covers journal-only rehydration of plan intents, `snapshot_creation_quiesces_runtime` auto-drains the scheduler before snapshotting, `plan_snapshot_preserves_effect_queue` + `restored_effects_bypass_new_policy_checks` document the “already authorized” semantics for restored intents, and the timer/event/resume scenarios prove plan + reducer queues survive snapshots.
 
