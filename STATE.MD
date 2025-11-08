@@ -6,17 +6,16 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
 
 ### Test Ownership & Coverage Boundaries
 - **Kernel crate (`crates/aos-kernel/`)** keeps fast unit tests that exercise local modules (plan scheduler, effect manager, capability resolver, reducer receipt conversion). These live next to the code they cover (`mod tests` or sibling `tests.rs` files) so refactors catch regressions quickly.
-- **Testkit crate (`crates/aos-testkit/`)** hosts reusable deterministic harnesses (world builder, fake adapters, manifest fixtures) plus higher-level integration tests under `crates/aos-testkit/tests/`. Kernel integration scenarios should migrate here once WP1 lands, so downstream crates (CLI, governance) can reuse the same helpers.
-- **Missing today**: only ad-hoc kernel integration tests exist (`crates/aos-kernel/src/world.rs`); `aos-testkit` is still a stub. WP1 will introduce the shared harness and relocate scenarios accordingly.
+- **Testkit crate (`crates/aos-testkit/`)** now ships the reusable deterministic harness (world builder, fake adapters, manifest fixtures) plus higher-level scenarios under `crates/aos-testkit/tests/`. All kernel integration flows moved here as part of WP1 so downstream crates (CLI, governance) can reuse the same helpers.
 
-### WP1 – Kernel Integration Harness & Scenario Coverage
+### WP1 – Kernel Integration Harness & Scenario Coverage *(Completed)*
 - **Goal**: Move from bespoke tests in `crates/aos-kernel/src/world.rs` to reusable builders that make it trivial to describe reducer/plan manifolds and scripted event flows.
 - **Key Tasks**:
   - Extract helper constructors for reducers, plans, schemas, capabilities, and manifests (fixtures should allow overriding cap slots/bindings, trigger routing, and plan DAG definitions).
   - Relocate/port the existing happy-path, guard, and receipt-routing tests into `crates/aos-testkit/tests/` (driven by the new builders) while leaving lightweight unit coverage in the kernel crate.
   - Add scenario coverage for at least: single-plan orchestration, reducer-driven retries (timer receipt), and guarded multi-branch plans as outlined in `spec/07-workflow-patterns.md`.
   - Ensure tests assert on journal ordering (domain events → triggers → plan wakeups) and deterministic replay by re-running the scenario through the harness without redefinition.
-- **Deliverables**: Fixture module, migrated tests, and at least three new table-driven integration cases proving plan DAG scheduling, await_event/await_receipt behavior, and guard short-circuiting.
+- **Delivered**: `aos-testkit` fixture module, `TestWorld` harness, helpers for event-emitting reducers, and seven integration cases covering single-plan orchestration, reducer timer receipts, guarded branches, multi-stage plans, plan event wakeups, and plan-raised events. Kernel unit tests retain only local coverage.
 
 ### WP2 – Reducer Micro-Effect Receipts & Built-in Schemas
 - **Goal**: Wire the built-in schema catalog (`crates/aos-air-types/src/builtins.rs`) into the kernel so reducer-emitted micro-effects automatically produce typed `sys/*` events when receipts arrive.
@@ -65,7 +64,7 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
 Keep this document updated as each package lands or is reprioritized.
 
 ## Kernel Test Gaps To Close
-- No deterministic tests yet for reducer receipt → `sys/*` event conversion beyond timers; blob put/get and error paths remain uncovered until WP2 lands.
+- Reducer receipt → `sys/*` event conversion still lacks blob put/get and error coverage (timers exercised via WP1 scenarios). WP2 will extend the same harness to blob receipts.
 - Capability + policy enforcement currently lacks unit tests for duplicate grants, slot mismatches, or policy deny cases; these must be added as part of WP3.
 - Effect manager budgeting, intent hashing, and audit logging are untested; motivators for WP3/WP4 work.
 - Journal/replay invariants (idempotent receipt handling, ordering fences) have zero coverage; WP4 should add integration tests via `aos-testkit` harness.
