@@ -835,6 +835,7 @@ impl<S: Store + 'static> Kernel<S> {
         let record = JournalRecord::DomainEvent(DomainEventRecord {
             schema: event.schema.clone(),
             value: event.value.clone(),
+            key: event.key.clone(),
         });
         self.append_record(record)
     }

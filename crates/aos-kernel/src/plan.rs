@@ -247,8 +247,17 @@ impl PlanInstance {
                         let value = eval_expr(&raise.event, &self.env).map_err(|err| {
                             KernelError::Manifest(format!("plan raise_event eval error: {err}"))
                         })?;
+                        let key_value = if let Some(key_expr) = &raise.key {
+                            Some(eval_expr(key_expr, &self.env).map_err(|err| {
+                                KernelError::Manifest(format!(
+                                    "plan raise_event key eval error: {err}"
+                                ))
+                            })?)
+                        } else {
+                            None
+                        };
                         let event_record = value.clone();
-                        let event = expr_value_to_domain_event(value)?;
+                        let event = expr_value_to_domain_event(value, key_value)?;
                         outcome.raised_events.push(event);
                         self.record_step_value(&step_id, event_record);
                         self.complete_step(&step_id)?;
@@ -471,7 +480,10 @@ fn value_to_bool(value: ExprValue) -> Result<bool, KernelError> {
     }
 }
 
-fn expr_value_to_domain_event(value: ExprValue) -> Result<DomainEvent, KernelError> {
+fn expr_value_to_domain_event(
+    value: ExprValue,
+    key: Option<ExprValue>,
+) -> Result<DomainEvent, KernelError> {
     if let ExprValue::Record(mut map) = value {
         let schema_value = map
             .shift_remove("$schema")
@@ -486,7 +498,13 @@ fn expr_value_to_domain_event(value: ExprValue) -> Result<DomainEvent, KernelErr
         };
         let bytes = serde_cbor::to_vec(&ExprValue::Record(map))
             .map_err(|err| KernelError::Manifest(err.to_string()))?;
-        Ok(DomainEvent::new(schema, bytes))
+        let mut event = DomainEvent::new(schema, bytes);
+        if let Some(key_value) = key {
+            let key_bytes = serde_cbor::to_vec(&key_value)
+                .map_err(|err| KernelError::Manifest(format!("encode event key: {err}")))?;
+            event.key = Some(key_bytes);
+        }
+        Ok(event)
     } else {
         Err(KernelError::Manifest(
             "raise_event expects record value".into(),
@@ -680,7 +698,9 @@ mod tests {
             id: "raise".into(),
             kind: PlanStepKind::RaiseEvent(aos_air_types::PlanStepRaiseEvent {
                 reducer: "irrelevant".into(),
-                key: None,
+                key: Some(Expr::Const(ExprConst::Text {
+                    text: "cell-1".into(),
+                })),
                 event: Expr::Record(aos_air_types::ExprRecord {
                     record: IndexMap::from([
                         (
@@ -699,6 +719,8 @@ mod tests {
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.raised_events.len(), 1);
         assert_eq!(outcome.raised_events[0].schema, "com.test/Evt@1");
+        let expected_key = serde_cbor::to_vec(&ExprValue::Text("cell-1".into())).unwrap();
+        assert_eq!(outcome.raised_events[0].key.as_ref(), Some(&expected_key));
     }
 
     #[test]
