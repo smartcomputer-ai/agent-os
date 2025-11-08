@@ -620,7 +620,7 @@ impl<S: Store + 'static> Kernel<S> {
             .ok_or(KernelError::ProposalNotFound(proposal_id))?
             .clone();
         let patch = self.load_manifest_patch(&proposal.patch_hash)?;
-        self.swap_manifest(patch)?;
+        self.swap_manifest(&patch)?;
         let record = GovernanceRecord::ManifestApplied(ManifestAppliedRecord {
             proposal_id,
             manifest_hash: proposal.patch_hash.clone(),
@@ -639,8 +639,8 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(patch)
     }
 
-    fn swap_manifest(&mut self, patch: ManifestPatch) -> Result<(), KernelError> {
-        let loaded = crate::shadow::runner::loaded_manifest_from_patch(&patch);
+    fn swap_manifest(&mut self, patch: &ManifestPatch) -> Result<(), KernelError> {
+        let loaded = patch.to_loaded_manifest();
         self.manifest = loaded.manifest;
         self.module_defs = loaded.modules;
         self.plan_registry = crate::plan::PlanRegistry::default();

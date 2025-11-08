@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use aos_air_types::{AirNode, Manifest};
+use aos_air_types::{AirNode, DefCap, DefModule, DefPlan, DefPolicy, Manifest, Name};
+use crate::manifest::LoadedManifest;
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{
@@ -116,4 +117,37 @@ pub struct ManifestPatch {
     pub manifest: Manifest,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nodes: Vec<AirNode>,
+}
+
+impl ManifestPatch {
+    pub fn to_loaded_manifest(&self) -> LoadedManifest {
+        let mut modules: HashMap<Name, DefModule> = HashMap::new();
+        let mut plans: HashMap<Name, DefPlan> = HashMap::new();
+        let mut caps: HashMap<Name, DefCap> = HashMap::new();
+        let mut policies: HashMap<Name, DefPolicy> = HashMap::new();
+        for node in &self.nodes {
+            match node {
+                AirNode::Defmodule(m) => {
+                    modules.insert(m.name.clone(), m.clone());
+                }
+                AirNode::Defplan(p) => {
+                    plans.insert(p.name.clone(), p.clone());
+                }
+                AirNode::Defcap(c) => {
+                    caps.insert(c.name.clone(), c.clone());
+                }
+                AirNode::Defpolicy(p) => {
+                    policies.insert(p.name.clone(), p.clone());
+                }
+                _ => {}
+            }
+        }
+        LoadedManifest {
+            manifest: self.manifest.clone(),
+            modules,
+            plans,
+            caps,
+            policies,
+        }
+    }
 }

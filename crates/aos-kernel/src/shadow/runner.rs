@@ -1,11 +1,8 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use aos_air_types::{AirNode, DefCap, DefModule, DefPlan, DefPolicy, Name};
 use aos_store::Store;
 
 use crate::journal::mem::MemJournal;
-use crate::manifest::LoadedManifest;
 use crate::world::Kernel;
 use crate::{error::KernelError, shadow::{ShadowConfig, ShadowSummary}};
 use hex;
@@ -17,7 +14,7 @@ impl ShadowExecutor {
         store: Arc<S>,
         config: &ShadowConfig,
     ) -> Result<ShadowSummary, KernelError> {
-        let loaded = loaded_manifest_from_patch(&config.patch);
+        let loaded = config.patch.to_loaded_manifest();
         let mut kernel = Kernel::from_loaded_manifest(
             store.clone(),
             loaded,
@@ -49,37 +46,5 @@ impl ShadowExecutor {
             pending_receipts,
             raised_events,
         })
-    }
-}
-
-fn loaded_manifest_from_patch(patch: &crate::governance::ManifestPatch) -> LoadedManifest {
-    let mut modules: HashMap<Name, DefModule> = HashMap::new();
-    let mut plans: HashMap<Name, DefPlan> = HashMap::new();
-    let mut caps: HashMap<Name, DefCap> = HashMap::new();
-    let mut policies: HashMap<Name, DefPolicy> = HashMap::new();
-    for node in &patch.nodes {
-        match node {
-            AirNode::Defmodule(m) => {
-                modules.insert(m.name.clone(), m.clone());
-            }
-            AirNode::Defplan(p) => {
-                plans.insert(p.name.clone(), p.clone());
-            }
-            AirNode::Defcap(c) => {
-                caps.insert(c.name.clone(), c.clone());
-            }
-            AirNode::Defpolicy(p) => {
-                policies.insert(p.name.clone(), p.clone());
-            }
-            AirNode::Defschema(_) => {}
-            AirNode::Manifest(_) => {}
-        }
-    }
-    LoadedManifest {
-        manifest: patch.manifest.clone(),
-        modules,
-        plans,
-        caps,
-        policies,
     }
 }
