@@ -452,6 +452,86 @@ fn reducer_timer_receipt_routes_event_to_handler() {
     assert!(matches!(err, KernelError::UnknownReceipt(_)));
 }
 
+#[test]
+fn reducer_timer_receipt_replays_from_journal() {
+    fn build_timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
+        let timer_output = ReducerOutput {
+            state: Some(vec![0x01]),
+            domain_events: vec![],
+            effects: vec![ReducerEffect::new(
+                "timer.set",
+                serde_cbor::to_vec(&TimerSetParams {
+                    deliver_at_ns: 5,
+                    key: Some("retry".into()),
+                })
+                .unwrap(),
+            )],
+            ann: None,
+        };
+        let timer_emitter =
+            fixtures::stub_reducer_module(store, "com.acme/TimerEmitter@1", &timer_output);
+
+        let handler_output = ReducerOutput {
+            state: Some(vec![0xCC]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        };
+        let timer_handler =
+            fixtures::stub_reducer_module(store, "com.acme/TimerHandler@1", &handler_output);
+
+        let routing = vec![
+            fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
+            fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
+        ];
+        fixtures::build_loaded_manifest(vec![], vec![], vec![timer_emitter, timer_handler], routing)
+    }
+
+    let store = fixtures::new_mem_store();
+    let manifest = build_timer_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world.tick_n(1).unwrap();
+
+    let effect = world.drain_effects().pop().expect("timer effect");
+    let receipt = EffectReceipt {
+        intent_hash: effect.intent_hash,
+        adapter_id: "adapter.timer".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
+            delivered_at_ns: 10,
+            key: Some("retry".into()),
+        })
+        .unwrap(),
+        cost_cents: Some(1),
+        signature: vec![1, 2, 3],
+    };
+    world.kernel.handle_receipt(receipt).unwrap();
+    world.tick_n(1).unwrap();
+
+    let final_state = world
+        .kernel
+        .reducer_state("com.acme/TimerHandler@1")
+        .cloned()
+        .unwrap();
+    let journal_entries = world.kernel.dump_journal().unwrap();
+
+    let replay_manifest = build_timer_manifest(&store);
+    let replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        replay_manifest,
+        Box::new(MemJournal::from_entries(&journal_entries)),
+    )
+    .unwrap();
+
+    assert_eq!(
+        replay_world
+            .kernel
+            .reducer_state("com.acme/TimerHandler@1"),
+        Some(&final_state)
+    );
+}
+
 /// Guards on plan edges should gate side-effects and completion state.
 #[test]
 fn guarded_plan_branches_control_effects() {

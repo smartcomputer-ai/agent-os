@@ -64,6 +64,14 @@ pub struct EffectIntentRecord {
     pub params_cbor: Vec<u8>,
     #[serde(with = "serde_bytes")]
     pub idempotency_key: [u8; 32],
+    pub origin: IntentOriginRecord,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "origin_kind")]
+pub enum IntentOriginRecord {
+    Reducer { name: String },
+    Plan { name: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

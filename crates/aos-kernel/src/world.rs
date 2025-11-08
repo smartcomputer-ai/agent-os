@@ -4,7 +4,7 @@ use std::sync::Arc;
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{Manifest, Name};
 use aos_cbor::Hash as DigestHash;
-use aos_effects::{EffectIntent, EffectReceipt};
+use aos_effects::{EffectIntent, EffectReceipt, EffectKind};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
 use serde_cbor;
@@ -14,7 +14,10 @@ use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
 use crate::journal::mem::MemJournal;
-use crate::journal::{Journal, JournalEntry, JournalKind, JournalRecord, DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, OwnedJournalEntry};
+use crate::journal::{
+    IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, DomainEventRecord,
+    EffectIntentRecord, EffectReceiptRecord, OwnedJournalEntry,
+};
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
 use crate::policy::{AllowAllPolicy, RulePolicy};
@@ -204,10 +207,8 @@ impl<S: Store + 'static> Kernel<S> {
         }
         for event in output.domain_events {
             self.record_domain_event(&event)?;
-            if !self.suppress_journal {
-                self.deliver_event_to_waiting_plans(&event)?;
-                self.scheduler.push_reducer(ReducerEvent { event });
-            }
+            self.deliver_event_to_waiting_plans(&event)?;
+            self.scheduler.push_reducer(ReducerEvent { event });
         }
         for effect in &output.effects {
             let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
@@ -224,7 +225,12 @@ impl<S: Store + 'static> Kernel<S> {
             let intent = self
                 .effect_manager
                 .enqueue_reducer_effect(&reducer_name, &cap_name, effect)?;
-            self.record_effect_intent(&intent)?;
+            self.record_effect_intent(
+                &intent,
+                IntentOriginRecord::Reducer {
+                    name: reducer_name.clone(),
+                },
+            )?;
             self.pending_reducer_receipts.insert(
                 intent.intent_hash,
                 ReducerEffectContext::new(
@@ -263,6 +269,9 @@ impl<S: Store + 'static> Kernel<S> {
                 self.submit_domain_event(event.schema, event.value);
                 self.tick_until_idle()?;
             }
+            JournalRecord::EffectIntent(record) => {
+                self.restore_effect_intent(record)?;
+            }
             JournalRecord::EffectReceipt(record) => {
                 let receipt = EffectReceipt {
                     intent_hash: record.intent_hash,
@@ -276,6 +285,34 @@ impl<S: Store + 'static> Kernel<S> {
                 self.tick_until_idle()?;
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn restore_effect_intent(&mut self, record: EffectIntentRecord) -> Result<(), KernelError> {
+        if self.pending_reducer_receipts.contains_key(&record.intent_hash)
+            || self.pending_receipts.contains_key(&record.intent_hash)
+        {
+            return Ok(());
+        }
+        let intent = EffectIntent {
+            kind: EffectKind::new(record.kind.clone()),
+            cap_name: record.cap_name.clone(),
+            params_cbor: record.params_cbor.clone(),
+            idempotency_key: record.idempotency_key,
+            intent_hash: record.intent_hash,
+        };
+        let effect_kind = record.kind.clone();
+        let params_cbor = record.params_cbor.clone();
+        match record.origin {
+            IntentOriginRecord::Reducer { name } => {
+                self.pending_reducer_receipts.entry(intent.intent_hash).or_insert_with(|| {
+                    ReducerEffectContext::new(name, effect_kind, params_cbor)
+                });
+            }
+            IntentOriginRecord::Plan { .. } => {
+                // TODO: restore plan state once plan snapshots are journaled.
+            }
         }
         Ok(())
     }
@@ -324,19 +361,30 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(schema) = waiting_schema {
             self.remove_plan_from_waiting_events_for_schema(id, &schema);
         }
-        if let Some(instance) = self.plan_instances.get_mut(&id) {
-            let outcome = instance.tick(&mut self.effect_manager)?;
+        if self.plan_instances.contains_key(&id) {
+            let (plan_name, outcome) = {
+                let instance = self
+                    .plan_instances
+                    .get_mut(&id)
+                    .expect("instance must exist");
+                let name = instance.name.clone();
+                let outcome = instance.tick(&mut self.effect_manager)?;
+                (name, outcome)
+            };
             for event in &outcome.raised_events {
                 self.record_domain_event(event)?;
-                if !self.suppress_journal {
-                    self.deliver_event_to_waiting_plans(event)?;
-                    self.scheduler.push_reducer(ReducerEvent {
-                        event: event.clone(),
-                    });
-                }
+                self.deliver_event_to_waiting_plans(event)?;
+                self.scheduler.push_reducer(ReducerEvent {
+                    event: event.clone(),
+                });
             }
             for intent in &outcome.intents_enqueued {
-                self.record_effect_intent(intent)?;
+                self.record_effect_intent(
+                    intent,
+                    IntentOriginRecord::Plan {
+                        name: plan_name.clone(),
+                    },
+                )?;
             }
             if let Some(hash) = outcome.waiting_receipt {
                 self.pending_receipts.insert(hash, id);
@@ -387,9 +435,7 @@ impl<S: Store + 'static> Kernel<S> {
             self.record_effect_receipt(&receipt)?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
             self.record_domain_event(&event)?;
-            if !self.suppress_journal {
-                self.scheduler.push_reducer(ReducerEvent { event });
-            }
+            self.scheduler.push_reducer(ReducerEvent { event });
             self.remember_receipt(receipt.intent_hash);
             return Ok(());
         }
@@ -462,13 +508,18 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(record)
     }
 
-    fn record_effect_intent(&mut self, intent: &EffectIntent) -> Result<(), KernelError> {
+    fn record_effect_intent(
+        &mut self,
+        intent: &EffectIntent,
+        origin: IntentOriginRecord,
+    ) -> Result<(), KernelError> {
         let record = JournalRecord::EffectIntent(EffectIntentRecord {
             intent_hash: intent.intent_hash,
             kind: intent.kind.as_str().to_string(),
             cap_name: intent.cap_name.clone(),
             params_cbor: intent.params_cbor.clone(),
             idempotency_key: intent.idempotency_key,
+            origin,
         });
         self.append_record(record)
     }
