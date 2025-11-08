@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use aos_air_exec::Value as ExprValue;
 use aos_air_types::{Manifest, Name};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
@@ -9,14 +10,18 @@ use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
 use crate::manifest::{LoadedManifest, ManifestLoader};
+use crate::plan::{PlanInstance, PlanRegistry};
 use crate::reducer::ReducerRegistry;
-use crate::scheduler::Scheduler;
+use crate::scheduler::{Scheduler, Task};
 
 pub struct Kernel<S: Store> {
     manifest: Manifest,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
     reducers: ReducerRegistry<S>,
     router: HashMap<String, Vec<Name>>,
+    plan_registry: PlanRegistry,
+    plan_instances: HashMap<u64, PlanInstance>,
+    plan_triggers: HashMap<String, Vec<String>>,
     scheduler: Scheduler,
     effect_manager: EffectManager,
     reducer_state: HashMap<Name, Vec<u8>>,
@@ -54,11 +59,25 @@ impl<S: Store + 'static> Kernel<S> {
                     .push(route.reducer.clone());
             }
         }
+        let mut plan_registry = PlanRegistry::default();
+        for plan in loaded.plans.values() {
+            plan_registry.register(plan.clone());
+        }
+        let mut plan_triggers = HashMap::new();
+        for trigger in &loaded.manifest.triggers {
+            plan_triggers
+                .entry(trigger.event.as_str().to_string())
+                .or_insert_with(Vec::new)
+                .push(trigger.plan.clone());
+        }
         Ok(Self {
             manifest: loaded.manifest,
             module_defs: loaded.modules,
             reducers: ReducerRegistry::new(store)?,
             router,
+            plan_registry,
+            plan_instances: HashMap::new(),
+            plan_triggers,
             scheduler: Scheduler::default(),
             effect_manager: EffectManager::new(),
             reducer_state: HashMap::new(),
@@ -66,19 +85,21 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     pub fn enqueue_event(&mut self, event: KernelEvent) {
-        self.scheduler.push(event);
+        match event {
+            KernelEvent::Reducer(ev) => self.scheduler.push_reducer(ev),
+        }
     }
 
     pub fn submit_domain_event(&mut self, schema: impl Into<String>, value: Vec<u8>) {
         let event = DomainEvent::new(schema.into(), value);
-        self.scheduler
-            .push(KernelEvent::Reducer(ReducerEvent { event }));
+        self.scheduler.push_reducer(ReducerEvent { event });
     }
 
     pub fn tick(&mut self) -> Result<(), KernelError> {
-        if let Some(event) = self.scheduler.pop() {
-            match event {
-                KernelEvent::Reducer(reducer_event) => self.handle_reducer_event(reducer_event)?,
+        if let Some(task) = self.scheduler.pop() {
+            match task {
+                Task::Reducer(event) => self.handle_reducer_event(event)?,
+                Task::Plan(id) => self.handle_plan_task(id)?,
             }
         }
         Ok(())
@@ -106,6 +127,7 @@ impl<S: Store + 'static> Kernel<S> {
             let output = self.reducers.invoke(&reducer_name, &input)?;
             self.handle_reducer_output(reducer_name.clone(), output)?;
         }
+        self.start_plans_for_event(&event.event)?;
         Ok(())
     }
 
@@ -123,8 +145,7 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
         for event in output.domain_events {
-            self.scheduler
-                .push(KernelEvent::Reducer(ReducerEvent { event }));
+            self.scheduler.push_reducer(ReducerEvent { event });
         }
         if !output.effects.is_empty() {
             self.effect_manager
@@ -140,6 +161,38 @@ impl<S: Store + 'static> Kernel<S> {
     pub fn reducer_state(&self, reducer: &str) -> Option<&Vec<u8>> {
         self.reducer_state.get(reducer)
     }
+
+    fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+        if let Some(plan_names) = self.plan_triggers.get(&event.schema) {
+            for plan_name in plan_names {
+                if let Some(plan_def) = self.plan_registry.get(plan_name) {
+                    let input: ExprValue = serde_cbor::from_slice(&event.value).map_err(|err| {
+                        KernelError::Manifest(format!(
+                            "failed to decode plan input for {}: {err}",
+                            plan_name
+                        ))
+                    })?;
+                    let instance_id = self.scheduler.alloc_plan_id();
+                    let instance = PlanInstance::new(instance_id, plan_def.clone(), input);
+                    self.plan_instances.insert(instance_id, instance);
+                    self.scheduler.push_plan(instance_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_plan_task(&mut self, id: u64) -> Result<(), KernelError> {
+        if let Some(instance) = self.plan_instances.get_mut(&id) {
+            let done = instance.tick(&mut self.effect_manager)?;
+            if done {
+                self.plan_instances.remove(&id);
+            } else {
+                self.scheduler.push_plan(id);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -147,9 +200,16 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    use aos_air_types::{DefModule, HashRef, Manifest, ModuleAbi, ModuleKind, NamedRef, SchemaRef};
+    use aos_air_exec::Value as ExprValue;
+    use aos_air_types::{
+        DefModule, DefPlan, EffectKind, Expr, ExprConst, HashRef, Manifest, ModuleAbi, ModuleKind,
+        NamedRef, PlanBindEffect, PlanStep, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
+        SchemaRef,
+    };
     use aos_store::MemStore;
     use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+    use indexmap::IndexMap;
+    use serde_cbor;
     use wat::parse_str;
 
     #[test]
@@ -175,13 +235,49 @@ mod tests {
             abi: ModuleAbi { reducer: None },
         };
 
+        let plan_def = DefPlan {
+            name: "com.acme/Plan@1".into(),
+            input: SchemaRef::new("com.acme/PlanIn@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "emit".into(),
+                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                        kind: EffectKind::HttpRequest,
+                        params: Expr::Const(ExprConst::Text {
+                            text: "body".into(),
+                        }),
+                        cap: "cap_http".into(),
+                        bind: PlanBindEffect {
+                            effect_id_as: "req".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![],
+            required_caps: vec!["cap_http".into()],
+            allowed_effects: vec![EffectKind::HttpRequest],
+            invariants: vec![],
+        };
+
         let manifest = Manifest {
             schemas: vec![],
             modules: vec![NamedRef {
                 name: module_def.name.clone(),
                 hash: module_def.wasm_hash.clone(),
             }],
-            plans: vec![],
+            plans: vec![NamedRef {
+                name: plan_def.name.clone(),
+                hash: HashRef::new(
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                )
+                .unwrap(),
+            }],
             caps: vec![],
             policies: vec![],
             defaults: None,
@@ -194,20 +290,31 @@ mod tests {
                 }],
                 inboxes: vec![],
             }),
-            triggers: vec![],
+            triggers: vec![aos_air_types::Trigger {
+                event: SchemaRef::new("com.acme/Start@1").unwrap(),
+                plan: plan_def.name.clone(),
+                correlate_by: None,
+            }],
         };
 
         let loaded = LoadedManifest {
             manifest,
             modules: HashMap::from([(module_def.name.clone(), module_def)]),
+            plans: HashMap::from([(plan_def.name.clone(), plan_def)]),
         };
 
         let mut kernel = Kernel::from_loaded_manifest(store, loaded).unwrap();
-        kernel.submit_domain_event("com.acme/Start@1", vec![]);
+        let plan_input = ExprValue::Record(IndexMap::from([(
+            "id".into(),
+            ExprValue::Text("123".into()),
+        )]));
+        let event_value = serde_cbor::to_vec(&plan_input).unwrap();
+        kernel.submit_domain_event("com.acme/Start@1", event_value);
+        kernel.tick().unwrap();
         kernel.tick().unwrap();
 
         let effects = kernel.drain_effects();
-        assert_eq!(effects.len(), 1);
+        assert_eq!(effects.len(), 2);
         assert_eq!(
             kernel.reducer_state("com.acme/Reducer@1"),
             Some(&vec![0xAA])

@@ -1,3 +1,4 @@
+use aos_air_types::EffectKind;
 use aos_effects::EffectIntent;
 use aos_wasm_abi::ReducerEffect;
 
@@ -49,5 +50,22 @@ impl EffectManager {
 
     pub fn drain(&mut self) -> Vec<EffectIntent> {
         self.queue.drain()
+    }
+
+    pub fn enqueue_plan_effect(
+        &mut self,
+        kind: &EffectKind,
+        cap_name: &str,
+        params_cbor: Vec<u8>,
+    ) -> Result<(), KernelError> {
+        let intent = EffectIntent::from_raw_params(
+            aos_effects::EffectKind::from_air(kind.clone()),
+            cap_name.to_string(),
+            params_cbor,
+            [0u8; 32],
+        )
+        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        self.queue.push(intent);
+        Ok(())
     }
 }

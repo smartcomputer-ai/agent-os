@@ -47,3 +47,15 @@ impl AsRef<str> for EffectKind {
         self.as_str()
     }
 }
+
+impl EffectKind {
+    pub fn from_air(kind: aos_air_types::EffectKind) -> Self {
+        match kind {
+            aos_air_types::EffectKind::HttpRequest => EffectKind::new(Self::HTTP_REQUEST),
+            aos_air_types::EffectKind::FsBlobPut => EffectKind::new(Self::FS_BLOB_PUT),
+            aos_air_types::EffectKind::FsBlobGet => EffectKind::new(Self::FS_BLOB_GET),
+            aos_air_types::EffectKind::TimerSet => EffectKind::new(Self::TIMER_SET),
+            aos_air_types::EffectKind::LlmGenerate => EffectKind::new(Self::LLM_GENERATE),
+        }
+    }
+}

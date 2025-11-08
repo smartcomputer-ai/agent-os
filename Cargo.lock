@@ -152,6 +152,8 @@ dependencies = [
  "aos-wasm-abi",
  "indexmap",
  "serde",
+ "serde_cbor",
+ "serde_json",
  "thiserror",
  "wat",
 ]

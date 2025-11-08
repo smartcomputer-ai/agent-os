@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use aos_air_types::{AirNode, DefModule, Manifest, Name};
+use aos_air_types::{AirNode, DefModule, DefPlan, Manifest, Name};
 use aos_store::{Catalog, Store, load_manifest_from_path};
 
 use crate::error::KernelError;
@@ -8,6 +8,7 @@ use crate::error::KernelError;
 pub struct LoadedManifest {
     pub manifest: Manifest,
     pub modules: HashMap<Name, DefModule>,
+    pub plans: HashMap<Name, DefPlan>,
 }
 
 pub struct ManifestLoader;
@@ -23,14 +24,22 @@ impl ManifestLoader {
 
     fn from_catalog(catalog: Catalog) -> Result<LoadedManifest, KernelError> {
         let mut modules = HashMap::new();
+        let mut plans = HashMap::new();
         for (name, entry) in catalog.nodes {
-            if let AirNode::Defmodule(module) = entry.node {
-                modules.insert(name, module);
+            match entry.node {
+                AirNode::Defmodule(module) => {
+                    modules.insert(name, module);
+                }
+                AirNode::Defplan(plan) => {
+                    plans.insert(name, plan);
+                }
+                _ => {}
             }
         }
         Ok(LoadedManifest {
             manifest: catalog.manifest,
             modules,
+            plans,
         })
     }
 }
