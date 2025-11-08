@@ -34,10 +34,16 @@ pub struct PlanInstance {
     effect_handles: HashMap<String, [u8; 32]>,
     receipt_wait: Option<ReceiptWait>,
     receipt_value: Option<ExprValue>,
+    event_wait: Option<EventWait>,
+    event_value: Option<ExprValue>,
 }
 
 struct ReceiptWait {
     intent_hash: [u8; 32],
+}
+
+struct EventWait {
+    schema: String,
     bind_var: String,
 }
 
@@ -45,6 +51,7 @@ struct ReceiptWait {
 pub struct PlanTickOutcome {
     pub raised_events: Vec<DomainEvent>,
     pub waiting_receipt: Option<[u8; 32]>,
+    pub waiting_event: Option<String>,
     pub completed: bool,
 }
 
@@ -64,6 +71,8 @@ impl PlanInstance {
             effect_handles: HashMap::new(),
             receipt_wait: None,
             receipt_value: None,
+            event_wait: None,
+            event_value: None,
         }
     }
 
@@ -129,14 +138,38 @@ impl PlanInstance {
                         let intent_hash = *self.effect_handles.get(&handle).ok_or_else(|| {
                             KernelError::Manifest(format!("unknown effect handle '{handle}'"))
                         })?;
-                        self.receipt_wait = Some(ReceiptWait {
-                            intent_hash,
-                            bind_var: await_step.bind.var.clone(),
-                        });
+                        self.receipt_wait = Some(ReceiptWait { intent_hash });
                         outcome.waiting_receipt = Some(intent_hash);
                         return Ok(outcome);
                     } else if let Some(wait) = &self.receipt_wait {
                         outcome.waiting_receipt = Some(wait.intent_hash);
+                        return Ok(outcome);
+                    }
+                }
+                aos_air_types::PlanStepKind::AwaitEvent(await_event) => {
+                    if let Some(value) = self.event_value.take() {
+                        self.env.vars.insert(await_event.bind.var.clone(), value);
+                        self.event_wait = None;
+                        self.step_idx += 1;
+                        continue;
+                    }
+
+                    if await_event.where_clause.is_some() {
+                        return Err(KernelError::Manifest(
+                            "await_event.where not yet supported".into(),
+                        ));
+                    }
+
+                    if self.event_wait.is_none() {
+                        let schema = await_event.event.as_str().to_string();
+                        self.event_wait = Some(EventWait {
+                            schema: schema.clone(),
+                            bind_var: await_event.bind.var.clone(),
+                        });
+                        outcome.waiting_event = Some(schema);
+                        return Ok(outcome);
+                    } else if let Some(wait) = &self.event_wait {
+                        outcome.waiting_event = Some(wait.schema.clone());
                         return Ok(outcome);
                     }
                 }
@@ -152,12 +185,6 @@ impl PlanInstance {
                     self.completed = true;
                     outcome.completed = true;
                     return Ok(outcome);
-                }
-                _ => {
-                    return Err(KernelError::Manifest(format!(
-                        "unsupported plan step: {:?}",
-                        step.kind
-                    )));
                 }
             }
         }
@@ -179,6 +206,22 @@ impl PlanInstance {
             }
         }
         Ok(false)
+    }
+
+    pub fn deliver_event(&mut self, event: &DomainEvent) -> Result<bool, KernelError> {
+        if let Some(wait) = &self.event_wait {
+            if wait.schema == event.schema {
+                let value = serde_cbor::from_slice(&event.value)
+                    .unwrap_or(ExprValue::Bytes(event.value.clone()));
+                self.event_value = Some(value);
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    pub fn waiting_event_schema(&self) -> Option<String> {
+        self.event_wait.as_ref().map(|w| w.schema.clone())
     }
 }
 

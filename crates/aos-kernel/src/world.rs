@@ -23,6 +23,7 @@ pub struct Kernel<S: Store> {
     plan_registry: PlanRegistry,
     plan_instances: HashMap<u64, PlanInstance>,
     plan_triggers: HashMap<String, Vec<String>>,
+    waiting_events: HashMap<String, Vec<u64>>,
     pending_receipts: HashMap<[u8; 32], u64>,
     scheduler: Scheduler,
     effect_manager: EffectManager,
@@ -80,6 +81,7 @@ impl<S: Store + 'static> Kernel<S> {
             plan_registry,
             plan_instances: HashMap::new(),
             plan_triggers,
+            waiting_events: HashMap::new(),
             pending_receipts: HashMap::new(),
             scheduler: Scheduler::default(),
             effect_manager: EffectManager::new(),
@@ -148,6 +150,7 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
         for event in output.domain_events {
+            self.deliver_event_to_waiting_plans(&event)?;
             self.scheduler.push_reducer(ReducerEvent { event });
         }
         if !output.effects.is_empty() {
@@ -186,18 +189,31 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn handle_plan_task(&mut self, id: u64) -> Result<(), KernelError> {
+        if let Some(schema) = self
+            .plan_instances
+            .get(&id)
+            .and_then(|inst| inst.waiting_event_schema())
+        {
+            self.remove_plan_from_waiting_events_for_schema(id, &schema);
+        }
         if let Some(instance) = self.plan_instances.get_mut(&id) {
             let outcome = instance.tick(&mut self.effect_manager)?;
-            for event in outcome.raised_events {
-                self.scheduler.push_reducer(ReducerEvent { event });
+            for event in &outcome.raised_events {
+                self.deliver_event_to_waiting_plans(event)?;
+                self.scheduler.push_reducer(ReducerEvent {
+                    event: event.clone(),
+                });
             }
             if let Some(hash) = outcome.waiting_receipt {
                 self.pending_receipts.insert(hash, id);
-            } else if !outcome.completed {
-                self.scheduler.push_plan(id);
+            }
+            if let Some(schema) = outcome.waiting_event.clone() {
+                self.waiting_events.entry(schema).or_default().push(id);
             }
             if outcome.completed {
                 self.plan_instances.remove(&id);
+            } else if outcome.waiting_receipt.is_none() && outcome.waiting_event.is_none() {
+                self.scheduler.push_plan(id);
             }
         }
         Ok(())
@@ -215,6 +231,37 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
         Ok(())
+    }
+
+    fn deliver_event_to_waiting_plans(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+        if let Some(mut plan_ids) = self.waiting_events.remove(&event.schema) {
+            let mut still_waiting = Vec::new();
+            for id in plan_ids.drain(..) {
+                if let Some(instance) = self.plan_instances.get_mut(&id) {
+                    if instance.deliver_event(event)? {
+                        self.scheduler.push_plan(id);
+                    } else {
+                        still_waiting.push(id);
+                    }
+                }
+            }
+            if !still_waiting.is_empty() {
+                self.waiting_events
+                    .insert(event.schema.clone(), still_waiting);
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_plan_from_waiting_events_for_schema(&mut self, plan_id: u64, schema: &str) {
+        if let Some(ids) = self.waiting_events.get_mut(schema) {
+            if let Some(pos) = ids.iter().position(|id| *id == plan_id) {
+                ids.swap_remove(pos);
+            }
+            if ids.is_empty() {
+                self.waiting_events.remove(schema);
+            }
+        }
     }
 }
 
