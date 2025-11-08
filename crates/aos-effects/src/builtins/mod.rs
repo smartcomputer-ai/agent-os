@@ -33,25 +33,25 @@ pub struct RequestTimings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FsBlobPutParams {
-    pub ns: String,
+pub struct BlobPutParams {
+    pub namespace: String,
     pub blob_ref: HashRef,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FsBlobPutReceipt {
-    pub stored_ref: HashRef,
+pub struct BlobPutReceipt {
+    pub blob_ref: HashRef,
     pub size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FsBlobGetParams {
-    pub ns: String,
+pub struct BlobGetParams {
+    pub namespace: String,
     pub key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FsBlobGetReceipt {
+pub struct BlobGetReceipt {
     pub blob_ref: HashRef,
     pub size: u64,
 }

@@ -523,8 +523,8 @@ pub struct DefCap {
 pub enum CapType {
     #[serde(rename = "http.out")]
     HttpOut,
-    #[serde(rename = "fs.blob")]
-    FsBlob,
+    #[serde(rename = "blob")]
+    Blob,
     Timer,
     #[serde(rename = "llm.basic")]
     LlmBasic,
@@ -664,10 +664,10 @@ pub struct CapGrantBudget {
 pub enum EffectKind {
     #[serde(rename = "http.request")]
     HttpRequest,
-    #[serde(rename = "fs.blob.put")]
-    FsBlobPut,
-    #[serde(rename = "fs.blob.get")]
-    FsBlobGet,
+    #[serde(rename = "blob.put")]
+    BlobPut,
+    #[serde(rename = "blob.get")]
+    BlobGet,
     #[serde(rename = "timer.set")]
     TimerSet,
     #[serde(rename = "llm.generate")]

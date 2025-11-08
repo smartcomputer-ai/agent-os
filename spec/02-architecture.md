@@ -147,7 +147,7 @@ The Effect Manager maintains an outbox of effect intents; each intent is typed a
 Four adapters ship in v1:
 
 - **HTTP**: `http.request(method, url, headers, body_ref) → receipt(status, headers, body_ref, timings)`
-- **Blob/FS**: `fs.blob.{put,get} → receipt(root_hash, size)`
+- **Blob**: `blob.{put,get} → receipt(blob_ref, size)`
 - **Timer**: `timer.set(at/after) → receipt(delivered_at)`
 - **LLM**: `llm.generate(model, params, input_ref) → receipt(output_ref, token_usage, cost, provider_id)`
 

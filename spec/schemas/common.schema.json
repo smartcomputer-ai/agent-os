@@ -17,12 +17,12 @@
     "EffectKind": {
       "title": "Built-in effect kinds (v1)",
       "type": "string",
-      "enum": ["http.request", "fs.blob.put", "fs.blob.get", "timer.set", "llm.generate"]
+      "enum": ["http.request", "blob.put", "blob.get", "timer.set", "llm.generate"]
     },
     "CapType": {
       "title": "Capability types (v1)",
       "type": "string",
-      "enum": ["http.out", "fs.blob", "timer", "llm.basic"]
+      "enum": ["http.out", "blob", "timer", "llm.basic"]
     },
     "VarName": {
       "type": "string",
@@ -305,7 +305,7 @@
         },
         "budget": {
           "type": "object",
-          "description": "Optional spending/usage limits. Pre-checked conservatively for variable-cost effects (llm.generate max_tokens, fs.blob.put size); settled on receipt.",
+          "description": "Optional spending/usage limits. Pre-checked conservatively for variable-cost effects (llm.generate max_tokens, blob.put size); settled on receipt.",
           "properties": {
             "tokens": {
               "type": "integer",

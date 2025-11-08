@@ -14,7 +14,7 @@ Reducers are the **single source of state changes**. They advance only when they
 
 **Business logic lives here**: validation, transitions, invariants, and shaping domain intents.
 
-**Effects policy**: Reducers may emit only micro-effects (e.g., `fs.blob.put`, `timer.set`) under explicit capability slots. High-risk or multi-hop external effects (email/HTTP to third parties, LLM, payments) must be orchestrated by plans.
+**Effects policy**: Reducers may emit only micro-effects (e.g., `blob.put`, `timer.set`) under explicit capability slots. High-risk or multi-hop external effects (email/HTTP to third parties, LLM, payments) must be orchestrated by plans.
 
 **Orchestration handoff**: Reducers emit DomainIntent events (e.g., `ChargeRequested`, `NotifyCustomer`), which trigger plans via manifest triggers. Plans perform effects, await receipts, and raise result events back.
 
@@ -86,7 +86,7 @@ Reducers should be written as explicit **typestate machines**: a `pc` (program c
 ## Effect Emission (Micro-Effects)
 
 - Allowed from reducers: small, low-risk effects such as:
-  - `fs.blob.put/get` (content-addressed)
+- `blob.put/get` (content-addressed)
   - `timer.set` (for backoff, deadlines)
 - Disallowed from reducers (must go through plans):
   - `http.request` to third-party hosts, `llm.generate`, `email.send`, payments, provider SDK calls, etc.
@@ -307,7 +307,7 @@ This cycle keeps domain logic in reducers and external effects in plans. The pla
 
 ## Micro-Effects Allowlist
 
-- Allowed from reducers in v1: `fs.blob.put`, `fs.blob.get`, `timer.set`.
+- Allowed from reducers in v1: `blob.put`, `blob.get`, `timer.set`.
 - All other effect kinds should be denied by policy when originating from reducers and executed via plans instead.
 
 ## Effect Boundaries and Guardrails
@@ -316,7 +316,7 @@ To maintain clear separation between reducers and plans, the kernel enforces:
 
 ### Reducer Effect Limits (v1)
 - **At most ONE effect per step**: reducers emit zero or one effect per invocation
-- **Only "micro-effects"**: `fs.blob.put`, `fs.blob.get`, `timer.set`
+- **Only "micro-effects"**: `blob.put`, `blob.get`, `timer.set`
 - **NO network effects**: `http.request`, `llm.generate`, `email.send`, `payment.charge` must go through plans
 
 ### Policy Enforcement (v1)

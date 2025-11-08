@@ -1,6 +1,5 @@
 use aos_effects::builtins::{
-    FsBlobGetParams, FsBlobGetReceipt, FsBlobPutParams, FsBlobPutReceipt, TimerSetParams,
-    TimerSetReceipt,
+    BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_wasm_abi::DomainEvent;
@@ -9,8 +8,8 @@ use serde::Serialize;
 use crate::error::KernelError;
 
 const SYS_TIMER_FIRED_SCHEMA: &str = "sys/TimerFired@1";
-const SYS_FS_BLOB_PUT_RESULT_SCHEMA: &str = "sys/FsBlobPutResult@1";
-const SYS_FS_BLOB_GET_RESULT_SCHEMA: &str = "sys/FsBlobGetResult@1";
+const SYS_BLOB_PUT_RESULT_SCHEMA: &str = "sys/BlobPutResult@1";
+const SYS_BLOB_GET_RESULT_SCHEMA: &str = "sys/BlobGetResult@1";
 
 /// Metadata describing a reducer-origin effect that is awaiting a receipt.
 #[derive(Clone)]
@@ -47,7 +46,7 @@ struct TimerReceiptEvent {
 }
 
 #[derive(Serialize)]
-struct FsBlobReceiptEvent<TParams, TReceipt> {
+struct BlobReceiptEvent<TParams, TReceipt> {
     #[serde(with = "serde_bytes")]
     intent_hash: [u8; 32],
     reducer: String,
@@ -68,8 +67,8 @@ pub fn build_reducer_receipt_event(
 ) -> Result<DomainEvent, KernelError> {
     match ctx.effect_kind.as_str() {
         aos_effects::EffectKind::TIMER_SET => build_timer_event(ctx, receipt),
-        aos_effects::EffectKind::FS_BLOB_PUT => build_fs_blob_put_event(ctx, receipt),
-        aos_effects::EffectKind::FS_BLOB_GET => build_fs_blob_get_event(ctx, receipt),
+        aos_effects::EffectKind::BLOB_PUT => build_blob_put_event(ctx, receipt),
+        aos_effects::EffectKind::BLOB_GET => build_blob_get_event(ctx, receipt),
         other => Err(KernelError::UnsupportedReducerReceipt(other.to_string())),
     }
 }
@@ -94,13 +93,13 @@ fn build_timer_event(
     encode_event(SYS_TIMER_FIRED_SCHEMA, payload)
 }
 
-fn build_fs_blob_put_event(
+fn build_blob_put_event(
     ctx: &ReducerEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<DomainEvent, KernelError> {
-    let requested: FsBlobPutParams = decode(&ctx.params_cbor)?;
-    let blob_receipt: FsBlobPutReceipt = decode(&receipt.payload_cbor)?;
-    let payload = FsBlobReceiptEvent {
+    let requested: BlobPutParams = decode(&ctx.params_cbor)?;
+    let blob_receipt: BlobPutReceipt = decode(&receipt.payload_cbor)?;
+    let payload = BlobReceiptEvent {
         intent_hash: receipt.intent_hash,
         reducer: ctx.reducer.clone(),
         effect_kind: ctx.effect_kind.clone(),
@@ -111,16 +110,16 @@ fn build_fs_blob_put_event(
         cost_cents: receipt.cost_cents,
         signature: receipt.signature.clone(),
     };
-    encode_event(SYS_FS_BLOB_PUT_RESULT_SCHEMA, payload)
+    encode_event(SYS_BLOB_PUT_RESULT_SCHEMA, payload)
 }
 
-fn build_fs_blob_get_event(
+fn build_blob_get_event(
     ctx: &ReducerEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<DomainEvent, KernelError> {
-    let requested: FsBlobGetParams = decode(&ctx.params_cbor)?;
-    let blob_receipt: FsBlobGetReceipt = decode(&receipt.payload_cbor)?;
-    let payload = FsBlobReceiptEvent {
+    let requested: BlobGetParams = decode(&ctx.params_cbor)?;
+    let blob_receipt: BlobGetReceipt = decode(&receipt.payload_cbor)?;
+    let payload = BlobReceiptEvent {
         intent_hash: receipt.intent_hash,
         reducer: ctx.reducer.clone(),
         effect_kind: ctx.effect_kind.clone(),
@@ -131,7 +130,7 @@ fn build_fs_blob_get_event(
         cost_cents: receipt.cost_cents,
         signature: receipt.signature.clone(),
     };
-    encode_event(SYS_FS_BLOB_GET_RESULT_SCHEMA, payload)
+    encode_event(SYS_BLOB_GET_RESULT_SCHEMA, payload)
 }
 
 fn encode_event<T: Serialize>(schema: &str, payload: T) -> Result<DomainEvent, KernelError> {

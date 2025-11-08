@@ -20,12 +20,12 @@
   - Raised event propagation coverage validating plan-raised events reach reducers through the scheduler.
 
 ### Tests to add next (integration level)
-1. **Reducer receipt delivery** – covered via the new `reducer_receipt_is_converted_into_event` test; follow-up scenarios can exercise fs.blob receipts once adapters land.
+1. **Reducer receipt delivery** – covered via the new `reducer_receipt_is_converted_into_event` test; follow-up scenarios can exercise blob receipts once adapters land.
 
 Plan is to create helper builders (reducer module, manifest with plan, plan inputs) so tests stay concise. Tests should live either alongside `world.rs` (current module) or under `crates/aos-kernel/tests/` if they grow.
 
 ### After integration tests
-1. **Reducer receipt handling** – kernel now tracks reducer-origin effects, converts `timer.set` and `fs.blob.{put,get}` receipts into `sys/*` events, and logs late receipts. Next step: wire updated schemas/routing plus budget settlement off the new structured payload hook.
+1. **Reducer receipt handling** – kernel now tracks reducer-origin effects, converts `timer.set` and `blob.{put,get}` receipts into `sys/*` events, and logs late receipts. Next step: wire updated schemas/routing plus budget settlement off the new structured payload hook.
 2. **Capability/policy enforcement** – integrate Cap/Policy gates and budget tracking. We can wait on this, though, until later, the allow all approach works for now.
 3. **Journal/outbox** – persist events/effects for replay.
 4. **Governance loop & CLI integration** – once runtime is stable.

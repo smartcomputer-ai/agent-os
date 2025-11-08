@@ -581,7 +581,7 @@ Enforce the architectural boundary between reducers and plans:
 
 ```rust
 // aos-kernel/src/reducer_guards.rs
-const MICRO_EFFECTS: &[&str] = &["fs.blob.put", "fs.blob.get", "timer.set"];
+const MICRO_EFFECTS: &[&str] = &["blob.put", "blob.get", "timer.set"];
 
 pub fn validate_reducer_effects(
     module_name: &str,
@@ -602,7 +602,7 @@ pub fn validate_reducer_effects(
         if !MICRO_EFFECTS.contains(&eff.kind.as_str()) {
             anyhow::bail!(
                 "Reducer {} attempted to emit effect '{}'. \
-                 Reducers may only emit micro-effects (fs.blob.put, fs.blob.get, timer.set). \
+                Reducers may only emit micro-effects (blob.put, blob.get, timer.set). \
                  Network effects (http, llm, email, payment) must go through plans.",
                 module_name, eff.kind
             );
@@ -673,7 +673,7 @@ fn matches_rule(pattern: &Match, ctx: &MatchContext) -> bool {
 }
 
 fn is_micro_effect(kind: &str) -> bool {
-    matches!(kind, "fs.blob.put" | "fs.blob.get" | "timer.set")
+    matches!(kind, "blob.put" | "blob.get" | "timer.set")
 }
 ```
 
@@ -1017,7 +1017,7 @@ Advice on libraries and details
 - decimal128: if you truly need IEEE 754 decimal128 now, use bson::Decimal128 for internal representation and convert at the AIR boundary; otherwise, keep decimals as strings in v1 and add proper decimal later.
 - canonical CBOR: serde_cbor::ser::Serializer::canonical() is sufficient for v1; if you later need DAG-CBOR, switch to libipld and its dag-cbor codec (but you'll have to drop tags).
 - Wasmtime determinism: keep to wasm32-unknown-unknown, avoid WASI, threads, random, time; compile with opt-level=z or s for size; pin Wasmtime version in Cargo.lock.
-- Policy and capability (v1): implement origin-aware first-match-wins policy with allow/deny only; capability constraints for http.out (hosts/verbs/path_prefixes) and llm.basic (providers/models/max_tokens_max/temperature_max/tools_allow); conservative budget pre-checks for llm.generate (max_tokens vs remaining tokens) and fs.blob.put (size vs remaining bytes); settle budgets on receipts. Defer approvals, rate limiting, identity/principal, and attestation to v1.1+. Add OPA/CEL later behind the PolicyGate trait if needed.
+- Policy and capability (v1): implement origin-aware first-match-wins policy with allow/deny only; capability constraints for http.out (hosts/verbs/path_prefixes) and llm.basic (providers/models/max_tokens_max/temperature_max/tools_allow); conservative budget pre-checks for llm.generate (max_tokens vs remaining tokens) and blob.put (size vs remaining bytes); settle budgets on receipts. Defer approvals, rate limiting, identity/principal, and attestation to v1.1+. Add OPA/CEL later behind the PolicyGate trait if needed.
 
 Final conclusions
 

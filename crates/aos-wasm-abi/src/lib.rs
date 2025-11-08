@@ -86,7 +86,7 @@ impl CallContext {
     }
 }
 
-/// Micro-effect emitted directly from a reducer (timer/fs.blob, etc.).
+/// Micro-effect emitted directly from a reducer (timer/blob, etc.).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ReducerEffect {
     pub kind: String,

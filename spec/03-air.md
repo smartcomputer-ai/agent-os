@@ -19,7 +19,7 @@ AIR v1 provides one canonical, typed control plane the kernel can load, validate
 
 AIR is **control‑plane only**. It defines schemas, modules, plans, capabilities, policies, and the manifest. Application state lives in reducer state (deterministic WASM), encoded as canonical CBOR.
 
-The policy engine is minimal: ordered allow/deny rules with budgets enforced on receipts. Hooks are reserved for richer policy later. The effects set in v1 is also minimal: `http.request`, `fs.blob.{put,get}`, `timer.set`, `llm.generate`. Migrations are deferred; `defmigration` is reserved.
+The policy engine is minimal: ordered allow/deny rules with budgets enforced on receipts. Hooks are reserved for richer policy later. The effects set in v1 is also minimal: `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`. Migrations are deferred; `defmigration` is reserved.
 
 ## 1) Vocabulary and Identity
 
@@ -181,12 +181,12 @@ AgentOS ships with four built-in effect types. Each has parameter and receipt sc
 - params: `{ method:text, url:text, headers: map{text→text}, body_ref?:hash }`
 - receipt: `{ status:int, headers: map{text→text}, body_ref?:hash, timings:{start_ns:nat,end_ns:nat}, adapter_id:text }`
 
-**fs.blob.put**
-- params: `{ ns:text, blob_ref:hash }`
-- receipt: `{ stored_ref:hash, size:nat }`
+**blob.put**
+- params: `{ namespace:text, blob_ref:hash }`
+- receipt: `{ blob_ref:hash, size:nat }`
 
-**fs.blob.get**
-- params: `{ ns:text, key:text }`
+**blob.get**
+- params: `{ namespace:text, key:text }`
 - receipt: `{ blob_ref:hash, size:nat }`
 
 **timer.set**
@@ -196,6 +196,18 @@ AgentOS ships with four built-in effect types. Each has parameter and receipt sc
 **llm.generate**
 - params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, input_ref:hash, tools?:list<text> }`
 - receipt: `{ output_ref:hash, token_usage:{prompt:nat,completion:nat}, cost_cents:nat, provider_id:text }`
+
+### Built-in reducer receipt events
+
+Reducers that emit micro-effects rely on the kernel to translate adapter receipts into typed DomainEvents. AIR v1 reserves these `defschema` names so manifests can declare routing and reducers can count on stable payloads:
+
+| Schema | Purpose | Fields |
+| --- | --- | --- |
+| **`sys/TimerFired@1`** | Delivery of a `timer.set` receipt back to the originating reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text` (always `"timer.set"` in v1), `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/TimerSetParams@1`, `receipt:sys/TimerSetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+
+Reducers should add routing entries for these schemas (e.g., `routing.events[].event = sys/TimerFired@1`). Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/budget enforcement can trust the same structures without changing reducer code.
 
 ## 8) Effect Intents and Receipts
 
@@ -242,7 +254,7 @@ Capabilities define scoped permissions for effects. A `defcap` declares a capabi
 {
   "$kind": "defcap",
   "name": "namespace/name@version",
-  "cap_type": "http.out" | "fs.blob" | "timer" | "llm.basic",
+  "cap_type": "http.out" | "blob" | "timer" | "llm.basic",
   "schema": <SchemaRef>
 }
 ```
@@ -259,7 +271,7 @@ The schema defines parameter constraints enforced at enqueue time.
 - Schema: `{ providers?: set<text>, models?: set<text>, max_tokens_max?: nat, temperature_max?: dec128, tools_allow?: set<text> }`
 - At enqueue: `provider`/`model` ∈ allowlists if present; `max_tokens ≤ max_tokens_max`; `temperature ≤ temperature_max`; `tools ⊆ tools_allow`.
 
-**sys/fs.blob@1**
+**sys/blob@1**
 - Schema: `{ namespaces?: set<text> }` (minimal in v1)
 
 **sys/timer@1**
@@ -289,7 +301,7 @@ The `params` must conform to the defcap's schema and encode concrete allowlists/
 3. Effect params satisfy grant constraints (hosts, models, max_tokens_max, etc.).
 4. Conservative budget pre-check for variable-cost effects:
    - `llm.generate`: if `max_tokens` declared, check `max_tokens ≤ remaining tokens budget`; deny if insufficient.
-   - `fs.blob.put`: if blob_ref size known from CAS, check `size ≤ remaining bytes budget`; deny if insufficient.
+   - `blob.put`: if blob_ref size known from CAS, check `size ≤ remaining bytes budget`; deny if insufficient.
 5. Policy decision (see defpolicy).
 
 **At receipt, the kernel settles budgets:**

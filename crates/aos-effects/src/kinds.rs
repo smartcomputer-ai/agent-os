@@ -8,8 +8,8 @@ pub struct EffectKind(String);
 
 impl EffectKind {
     pub const HTTP_REQUEST: &'static str = "http.request";
-    pub const FS_BLOB_PUT: &'static str = "fs.blob.put";
-    pub const FS_BLOB_GET: &'static str = "fs.blob.get";
+    pub const BLOB_PUT: &'static str = "blob.put";
+    pub const BLOB_GET: &'static str = "blob.get";
     pub const TIMER_SET: &'static str = "timer.set";
     pub const LLM_GENERATE: &'static str = "llm.generate";
 
@@ -52,8 +52,8 @@ impl EffectKind {
     pub fn from_air(kind: aos_air_types::EffectKind) -> Self {
         match kind {
             aos_air_types::EffectKind::HttpRequest => EffectKind::new(Self::HTTP_REQUEST),
-            aos_air_types::EffectKind::FsBlobPut => EffectKind::new(Self::FS_BLOB_PUT),
-            aos_air_types::EffectKind::FsBlobGet => EffectKind::new(Self::FS_BLOB_GET),
+            aos_air_types::EffectKind::BlobPut => EffectKind::new(Self::BLOB_PUT),
+            aos_air_types::EffectKind::BlobGet => EffectKind::new(Self::BLOB_GET),
             aos_air_types::EffectKind::TimerSet => EffectKind::new(Self::TIMER_SET),
             aos_air_types::EffectKind::LlmGenerate => EffectKind::new(Self::LLM_GENERATE),
         }
