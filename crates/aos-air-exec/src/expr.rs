@@ -6,12 +6,13 @@ use aos_air_types::{
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::value::{Value, ValueKey, ValueMap, ValueSet};
 
 /// Evaluation environment wires plan input, bound vars, and prior step outputs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Env {
     pub plan_input: Value,
     pub vars: IndexMap<String, Value>,

@@ -39,4 +39,12 @@ impl Scheduler {
     pub fn clear(&mut self) {
         self.queue.clear();
     }
+
+    pub fn set_next_plan_id(&mut self, next: u64) {
+        self.next_plan_id = next;
+    }
+
+    pub fn next_plan_id(&self) -> u64 {
+        self.next_plan_id
+    }
 }

@@ -5,6 +5,7 @@ use aos_air_types::{DefPlan, PlanEdge, PlanStep, PlanStepKind};
 use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 use serde_cbor;
 
 use crate::effects::EffectManager;
@@ -25,14 +26,14 @@ impl PlanRegistry {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Dependency {
     pred: String,
     guard: Option<aos_air_types::Expr>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum StepState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StepState {
     Pending,
     WaitingReceipt,
     WaitingEvent,
@@ -56,14 +57,16 @@ pub struct PlanInstance {
     step_states: HashMap<String, StepState>,
 }
 
-struct ReceiptWait {
-    step_id: String,
-    intent_hash: [u8; 32],
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReceiptWait {
+    pub step_id: String,
+    pub intent_hash: [u8; 32],
 }
 
-struct EventWait {
-    step_id: String,
-    schema: String,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EventWait {
+    pub step_id: String,
+    pub schema: String,
 }
 
 #[derive(Default)]
@@ -73,6 +76,20 @@ pub struct PlanTickOutcome {
     pub waiting_event: Option<String>,
     pub completed: bool,
     pub intents_enqueued: Vec<EffectIntent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanInstanceSnapshot {
+    pub id: u64,
+    pub name: String,
+    pub env: ExprEnv,
+    pub completed: bool,
+    pub effect_handles: Vec<(String, [u8; 32])>,
+    pub receipt_wait: Option<ReceiptWait>,
+    pub receipt_value: Option<ExprValue>,
+    pub event_wait: Option<EventWait>,
+    pub event_value: Option<ExprValue>,
+    pub step_states: Vec<(String, StepState)>,
 }
 
 impl PlanInstance {
@@ -240,6 +257,42 @@ impl PlanInstance {
                 return Ok(outcome);
             }
         }
+    }
+
+    pub fn snapshot(&self) -> PlanInstanceSnapshot {
+        PlanInstanceSnapshot {
+            id: self.id,
+            name: self.name.clone(),
+            env: self.env.clone(),
+            completed: self.completed,
+            effect_handles: self
+                .effect_handles
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+            receipt_wait: self.receipt_wait.clone(),
+            receipt_value: self.receipt_value.clone(),
+            event_wait: self.event_wait.clone(),
+            event_value: self.event_value.clone(),
+            step_states: self
+                .step_states
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+        }
+    }
+
+    pub fn from_snapshot(snapshot: PlanInstanceSnapshot, plan: DefPlan) -> Self {
+        let mut instance = PlanInstance::new(snapshot.id, plan, snapshot.env.plan_input.clone());
+        instance.env = snapshot.env;
+        instance.completed = snapshot.completed;
+        instance.effect_handles = snapshot.effect_handles.into_iter().collect();
+        instance.receipt_wait = snapshot.receipt_wait;
+        instance.receipt_value = snapshot.receipt_value;
+        instance.event_wait = snapshot.event_wait;
+        instance.event_value = snapshot.event_value;
+        instance.step_states = snapshot.step_states.into_iter().collect();
+        instance
     }
 
     pub fn deliver_receipt(

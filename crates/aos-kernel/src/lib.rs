@@ -10,8 +10,8 @@ pub mod plan;
 pub mod policy;
 pub mod receipts;
 pub mod reducer;
-pub mod snapshot;
 pub mod scheduler;
+pub mod snapshot;
 pub mod world;
 
 pub use effects::{EffectManager, EffectQueue};

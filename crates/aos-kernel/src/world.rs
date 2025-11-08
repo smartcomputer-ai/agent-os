@@ -4,7 +4,7 @@ use std::sync::Arc;
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{Manifest, Name};
 use aos_cbor::{Hash, Hash as DigestHash};
-use aos_effects::{EffectIntent, EffectReceipt, EffectKind};
+use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
 use serde_cbor;
@@ -15,16 +15,19 @@ use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
 use crate::journal::mem::MemJournal;
 use crate::journal::{
-    IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, DomainEventRecord,
-    EffectIntentRecord, EffectReceiptRecord, OwnedJournalEntry, SnapshotRecord,
+    DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, IntentOriginRecord, Journal,
+    JournalEntry, JournalKind, JournalRecord, OwnedJournalEntry, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
 use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
-use crate::snapshot::{KernelSnapshot, receipts_to_vecdeque};
 use crate::scheduler::{Scheduler, Task};
+use crate::snapshot::{
+    EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, ReducerReceiptSnapshot,
+    receipts_to_vecdeque,
+};
 
 const RECENT_RECEIPT_CACHE: usize = 512;
 
@@ -225,9 +228,9 @@ impl<S: Store + 'static> Kernel<S> {
                     slot: slot.clone(),
                 })?
                 .clone();
-            let intent = self
-                .effect_manager
-                .enqueue_reducer_effect(&reducer_name, &cap_name, effect)?;
+            let intent =
+                self.effect_manager
+                    .enqueue_reducer_effect(&reducer_name, &cap_name, effect)?;
             self.record_effect_intent(
                 &intent,
                 IntentOriginRecord::Reducer {
@@ -251,14 +254,9 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     pub fn create_snapshot(&mut self) -> Result<(), KernelError> {
-        if !self.scheduler.is_empty()
-            || !self.plan_instances.is_empty()
-            || !self.pending_reducer_receipts.is_empty()
-            || !self.pending_receipts.is_empty()
-            || !self.waiting_events.is_empty()
-        {
+        if !self.scheduler.is_empty() {
             return Err(KernelError::SnapshotUnavailable(
-                "pending work must drain before snapshot".into(),
+                "scheduler must be idle before snapshot".into(),
             ));
         }
         let height = self.journal.next_seq();
@@ -268,7 +266,46 @@ impl<S: Store + 'static> Kernel<S> {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
         let recent_receipts: Vec<[u8; 32]> = self.recent_receipts.iter().cloned().collect();
-        let snapshot = KernelSnapshot::new(height, reducer_state, recent_receipts);
+        let plan_instances = self
+            .plan_instances
+            .values()
+            .map(|instance| instance.snapshot())
+            .collect();
+        let pending_plan_receipts = self
+            .pending_receipts
+            .iter()
+            .map(|(hash, plan_id)| PendingPlanReceiptSnapshot {
+                plan_id: *plan_id,
+                intent_hash: *hash,
+            })
+            .collect();
+        let waiting_events = self
+            .waiting_events
+            .iter()
+            .map(|(schema, ids)| (schema.clone(), ids.clone()))
+            .collect();
+        let queued_effects = self
+            .effect_manager
+            .queued()
+            .iter()
+            .map(EffectIntentSnapshot::from_intent)
+            .collect();
+        let pending_reducer_receipts = self
+            .pending_reducer_receipts
+            .iter()
+            .map(|(hash, ctx)| ReducerReceiptSnapshot::from_context(*hash, ctx))
+            .collect();
+        let snapshot = KernelSnapshot::new(
+            height,
+            reducer_state,
+            recent_receipts,
+            plan_instances,
+            pending_plan_receipts,
+            waiting_events,
+            self.scheduler.next_plan_id(),
+            queued_effects,
+            pending_reducer_receipts,
+        );
         let bytes = serde_cbor::to_vec(&snapshot)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
         let hash = self.store.put_blob(&bytes)?;
@@ -296,8 +333,8 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
         if let Some(snapshot) = latest_snapshot {
-            self.load_snapshot(&snapshot)?;
             resume_seq = snapshot.height;
+            self.load_snapshot(&snapshot)?;
         }
         self.suppress_journal = true;
         for entry in entries {
@@ -345,25 +382,64 @@ impl<S: Store + 'static> Kernel<S> {
         let bytes = self.store.get_blob(hash)?;
         let snapshot: KernelSnapshot = serde_cbor::from_slice(&bytes)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
-        self.apply_snapshot(snapshot);
+        self.apply_snapshot(snapshot)
+    }
+
+    fn apply_snapshot(&mut self, snapshot: KernelSnapshot) -> Result<(), KernelError> {
+        self.reducer_state = snapshot.reducer_state_entries().iter().cloned().collect();
+        let (deque, set) = receipts_to_vecdeque(snapshot.recent_receipts(), RECENT_RECEIPT_CACHE);
+        self.recent_receipts = deque;
+        self.recent_receipt_index = set;
+
+        self.plan_instances.clear();
+        for inst_snapshot in snapshot.plan_instances().iter().cloned() {
+            let plan = self
+                .plan_registry
+                .get(&inst_snapshot.name)
+                .ok_or_else(|| {
+                    KernelError::SnapshotUnavailable(format!(
+                        "plan '{}' missing while applying snapshot",
+                        inst_snapshot.name
+                    ))
+                })?
+                .clone();
+            let instance = PlanInstance::from_snapshot(inst_snapshot, plan);
+            self.plan_instances.insert(instance.id, instance);
+        }
+
+        self.pending_receipts = snapshot
+            .pending_plan_receipts()
+            .iter()
+            .cloned()
+            .map(|snap| (snap.intent_hash, snap.plan_id))
+            .collect();
+        self.pending_reducer_receipts = snapshot
+            .pending_reducer_receipts()
+            .iter()
+            .cloned()
+            .map(|snap| (snap.intent_hash, snap.into_context()))
+            .collect();
+        self.waiting_events = snapshot.waiting_events().iter().cloned().collect();
+
+        self.effect_manager.restore_queue(
+            snapshot
+                .queued_effects()
+                .iter()
+                .cloned()
+                .map(|snap| snap.into_intent())
+                .collect(),
+        );
+
+        self.scheduler.clear();
+        self.scheduler.set_next_plan_id(snapshot.next_plan_id());
+
         Ok(())
     }
 
-    fn apply_snapshot(&mut self, snapshot: KernelSnapshot) {
-        let receipts = snapshot.recent_receipts().to_vec();
-        self.reducer_state = snapshot.into_reducer_state();
-        let (deque, set) = receipts_to_vecdeque(&receipts, RECENT_RECEIPT_CACHE);
-        self.recent_receipts = deque;
-        self.recent_receipt_index = set;
-        self.pending_reducer_receipts.clear();
-        self.pending_receipts.clear();
-        self.plan_instances.clear();
-        self.waiting_events.clear();
-        self.scheduler.clear();
-    }
-
     fn restore_effect_intent(&mut self, record: EffectIntentRecord) -> Result<(), KernelError> {
-        if self.pending_reducer_receipts.contains_key(&record.intent_hash)
+        if self
+            .pending_reducer_receipts
+            .contains_key(&record.intent_hash)
             || self.pending_receipts.contains_key(&record.intent_hash)
         {
             return Ok(());
@@ -379,9 +455,9 @@ impl<S: Store + 'static> Kernel<S> {
         let params_cbor = record.params_cbor.clone();
         match record.origin {
             IntentOriginRecord::Reducer { name } => {
-                self.pending_reducer_receipts.entry(intent.intent_hash).or_insert_with(|| {
-                    ReducerEffectContext::new(name, effect_kind, params_cbor)
-                });
+                self.pending_reducer_receipts
+                    .entry(intent.intent_hash)
+                    .or_insert_with(|| ReducerEffectContext::new(name, effect_kind, params_cbor));
             }
             IntentOriginRecord::Plan { .. } => {
                 // TODO: restore plan state once plan snapshots are journaled.
@@ -574,8 +650,8 @@ impl<S: Store + 'static> Kernel<S> {
         if self.suppress_journal {
             return Ok(());
         }
-        let bytes = serde_cbor::to_vec(&record)
-            .map_err(|err| KernelError::Journal(err.to_string()))?;
+        let bytes =
+            serde_cbor::to_vec(&record).map_err(|err| KernelError::Journal(err.to_string()))?;
         self.journal
             .append(JournalEntry::new(record.kind(), &bytes))?;
         Ok(())

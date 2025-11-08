@@ -17,6 +17,95 @@ use indexmap::IndexMap;
 use serde_cbor;
 use std::sync::Arc;
 
+fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
+    let result_module = fixtures::stub_reducer_module(
+        store,
+        "com.acme/ResultReducer@1",
+        &ReducerOutput {
+            state: Some(vec![0xEE]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+
+    let plan_name = "com.acme/Fulfill@1".to_string();
+    let plan = DefPlan {
+        name: plan_name.clone(),
+        input: fixtures::schema("com.acme/PlanIn@1"),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![
+            PlanStep {
+                id: "emit".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: EffectKind::HttpRequest,
+                    params: fixtures::text_expr("body"),
+                    cap: "cap_http".into(),
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "await".into(),
+                kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
+                    for_expr: fixtures::var_expr("req"),
+                    bind: PlanBind { var: "resp".into() },
+                }),
+            },
+            PlanStep {
+                id: "raise".into(),
+                kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
+                    reducer: result_module.name.clone(),
+                    event: Expr::Record(ExprRecord {
+                        record: IndexMap::from([
+                            ("$schema".into(), fixtures::text_expr("com.acme/Result@1")),
+                            ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
+                        ]),
+                    }),
+                    key: None,
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ],
+        edges: vec![
+            PlanEdge {
+                from: "emit".into(),
+                to: "await".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "await".into(),
+                to: "raise".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "raise".into(),
+                to: "end".into(),
+                when: None,
+            },
+        ],
+        required_caps: vec!["cap_http".into()],
+        allowed_effects: vec![EffectKind::HttpRequest],
+        invariants: vec![],
+    };
+
+    let routing = vec![fixtures::routing_event(
+        "com.acme/Result@1",
+        &result_module.name,
+    )];
+    fixtures::build_loaded_manifest(
+        vec![plan],
+        vec![fixtures::start_trigger(&plan_name)],
+        vec![result_module],
+        routing,
+    )
+}
+
 /// Happy-path end-to-end: reducer emits an intent, plan does work, receipt feeds a result event
 /// back into the reducer. Mirrors the “single plan orchestration” pattern in the spec.
 #[test]
@@ -139,94 +228,8 @@ fn single_plan_orchestration_completes_after_receipt() {
 
 #[test]
 fn journal_replay_restores_state() {
-    fn build_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-        let result_module = fixtures::stub_reducer_module(
-            store,
-            "com.acme/ResultReducer@1",
-            &ReducerOutput {
-                state: Some(vec![0xEE]),
-                domain_events: vec![],
-                effects: vec![],
-                ann: None,
-            },
-        );
-
-        let plan_name = "com.acme/Fulfill@1".to_string();
-        let plan = DefPlan {
-            name: plan_name.clone(),
-            input: fixtures::schema("com.acme/PlanIn@1"),
-            output: None,
-            locals: IndexMap::new(),
-            steps: vec![
-                PlanStep {
-                    id: "emit".into(),
-                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                        kind: EffectKind::HttpRequest,
-                        params: fixtures::text_expr("body"),
-                        cap: "cap_http".into(),
-                        bind: PlanBindEffect {
-                            effect_id_as: "req".into(),
-                        },
-                    }),
-                },
-                PlanStep {
-                    id: "await".into(),
-                    kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
-                        for_expr: fixtures::var_expr("req"),
-                        bind: PlanBind { var: "resp".into() },
-                    }),
-                },
-                PlanStep {
-                    id: "raise".into(),
-                    kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                        reducer: result_module.name.clone(),
-                        event: Expr::Record(ExprRecord {
-                            record: IndexMap::from([
-                                ("$schema".into(), fixtures::text_expr("com.acme/Result@1")),
-                                ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
-                            ]),
-                        }),
-                        key: None,
-                    }),
-                },
-                PlanStep {
-                    id: "end".into(),
-                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
-                },
-            ],
-            edges: vec![
-                PlanEdge {
-                    from: "emit".into(),
-                    to: "await".into(),
-                    when: None,
-                },
-                PlanEdge {
-                    from: "await".into(),
-                    to: "raise".into(),
-                    when: None,
-                },
-                PlanEdge {
-                    from: "raise".into(),
-                    to: "end".into(),
-                    when: None,
-                },
-            ],
-            required_caps: vec!["cap_http".into()],
-            allowed_effects: vec![EffectKind::HttpRequest],
-            invariants: vec![],
-        };
-
-        let routing = vec![fixtures::routing_event("com.acme/Result@1", &result_module.name)];
-        fixtures::build_loaded_manifest(
-            vec![plan],
-            vec![fixtures::start_trigger(&plan_name)],
-            vec![result_module],
-            routing,
-        )
-    }
-
     let store = fixtures::new_mem_store();
-    let manifest_run = build_manifest(&store);
+    let manifest_run = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest_run).unwrap();
 
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
@@ -255,14 +258,11 @@ fn journal_replay_restores_state() {
         .unwrap();
     let journal_entries = world.kernel.dump_journal().unwrap();
 
-    let manifest_replay = build_manifest(&store);
+    let manifest_replay = fulfillment_manifest(&store);
     let replay_journal = MemJournal::from_entries(&journal_entries);
-    let replay_world = TestWorld::with_store_and_journal(
-        store.clone(),
-        manifest_replay,
-        Box::new(replay_journal),
-    )
-    .unwrap();
+    let replay_world =
+        TestWorld::with_store_and_journal(store.clone(), manifest_replay, Box::new(replay_journal))
+            .unwrap();
 
     assert_eq!(
         replay_world
@@ -525,10 +525,53 @@ fn reducer_timer_receipt_replays_from_journal() {
     .unwrap();
 
     assert_eq!(
+        replay_world.kernel.reducer_state("com.acme/TimerHandler@1"),
+        Some(&final_state)
+    );
+}
+
+#[test]
+fn plan_snapshot_resumes_after_receipt() {
+    let store = fixtures::new_mem_store();
+    let manifest = fulfillment_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
+    world.submit_event_value(START_SCHEMA, &input);
+    world.tick_n(2).unwrap();
+
+    let effect = world
+        .drain_effects()
+        .pop()
+        .expect("expected effect before snapshot");
+
+    world.kernel.create_snapshot().unwrap();
+    let journal_entries = world.kernel.dump_journal().unwrap();
+
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        fulfillment_manifest(&store),
+        Box::new(MemJournal::from_entries(&journal_entries)),
+    )
+    .unwrap();
+
+    let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
+    let receipt = EffectReceipt {
+        intent_hash: effect.intent_hash,
+        adapter_id: "adapter.http".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: receipt_payload,
+        cost_cents: None,
+        signature: vec![],
+    };
+    replay_world.kernel.handle_receipt(receipt).unwrap();
+    replay_world.tick_n(3).unwrap();
+
+    assert_eq!(
         replay_world
             .kernel
-            .reducer_state("com.acme/TimerHandler@1"),
-        Some(&final_state)
+            .reducer_state("com.acme/ResultReducer@1"),
+        Some(&vec![0xEE])
     );
 }
 
@@ -572,9 +615,7 @@ fn snapshot_replay_restores_state() {
     .unwrap();
 
     assert_eq!(
-        replay_world
-            .kernel
-            .reducer_state("com.acme/Simple@1"),
+        replay_world.kernel.reducer_state("com.acme/Simple@1"),
         Some(&final_state)
     );
 }

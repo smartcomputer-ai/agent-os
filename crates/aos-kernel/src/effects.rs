@@ -19,6 +19,14 @@ impl EffectQueue {
     pub fn drain(&mut self) -> Vec<EffectIntent> {
         std::mem::take(&mut self.intents)
     }
+
+    pub fn as_slice(&self) -> &[EffectIntent] {
+        &self.intents
+    }
+
+    pub fn set(&mut self, intents: Vec<EffectIntent>) {
+        self.intents = intents;
+    }
 }
 
 pub struct EffectManager {
@@ -51,6 +59,10 @@ impl EffectManager {
 
     pub fn drain(&mut self) -> Vec<EffectIntent> {
         self.queue.drain()
+    }
+
+    pub fn queued(&self) -> &[EffectIntent] {
+        self.queue.as_slice()
     }
 
     pub fn enqueue_plan_effect(
@@ -94,6 +106,10 @@ impl EffectManager {
                 origin: format_effect_origin(&source),
             }),
         }
+    }
+
+    pub fn restore_queue(&mut self, intents: Vec<EffectIntent>) {
+        self.queue.set(intents);
     }
 }
 
