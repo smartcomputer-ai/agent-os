@@ -1,15 +1,34 @@
 use aos_air_exec::Value as ExprValue;
+use aos_air_types::{
+    DefPolicy, EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch, PolicyRule,
+};
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_kernel::error::KernelError;
 use aos_kernel::journal::mem::MemJournal;
 use aos_testkit::fixtures::{self, START_SCHEMA};
 use aos_testkit::TestWorld;
-use aos_wasm_abi::ReducerOutput;
 use serde_cbor;
-use std::sync::Arc;
 
 mod helpers;
-use helpers::{await_event_manifest, fulfillment_manifest, timer_manifest};
+use helpers::{
+    attach_default_policy, await_event_manifest, fulfillment_manifest, simple_state_manifest,
+    timer_manifest,
+};
+
+fn deny_plan_http_policy() -> DefPolicy {
+    DefPolicy {
+        name: "com.acme/deny-plan-http@1".into(),
+        rules: vec![PolicyRule {
+            when: PolicyMatch {
+                effect_kind: Some(AirEffectKind::HttpRequest),
+                origin_kind: Some(OriginKind::Plan),
+                ..Default::default()
+            },
+            decision: PolicyDecision::Deny,
+        }],
+    }
+}
 
 /// Plan execution should resume correctly after snapshot when awaiting a receipt.
 #[test]
@@ -183,23 +202,8 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
 /// Simple snapshot/restore without any in-flight effects should restore reducer state.
 #[test]
 fn snapshot_replay_restores_state() {
-    fn build_manifest(store: &Arc<aos_testkit::TestStore>) -> aos_kernel::manifest::LoadedManifest {
-        let reducer = fixtures::stub_reducer_module(
-            store,
-            "com.acme/Simple@1",
-            &ReducerOutput {
-                state: Some(vec![0xAA]),
-                domain_events: vec![],
-                effects: vec![],
-                ann: None,
-            },
-        );
-        let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-        fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)
-    }
-
     let store = fixtures::new_mem_store();
-    let manifest = build_manifest(&store);
+    let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
     world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
     world.tick_n(1).unwrap();
@@ -215,7 +219,7 @@ fn snapshot_replay_restores_state() {
 
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        build_manifest(&store),
+        simple_state_manifest(&store),
         Box::new(MemJournal::from_entries(&entries)),
     )
     .unwrap();
@@ -224,4 +228,83 @@ fn snapshot_replay_restores_state() {
         replay_world.kernel.reducer_state("com.acme/Simple@1"),
         Some(&final_state)
     );
+}
+
+/// Snapshot creation should automatically drain pending scheduler work before persisting state.
+#[test]
+fn snapshot_creation_quiesces_runtime() {
+    let store = fixtures::new_mem_store();
+    let manifest = simple_state_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    // No manual ticks before snapshot; create_snapshot should quiesce the runtime.
+    world.kernel.create_snapshot().unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+
+    let replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        simple_state_manifest(&store),
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+
+    assert_eq!(
+        replay_world.kernel.reducer_state("com.acme/Simple@1"),
+        Some(&vec![0xAA])
+    );
+}
+
+/// Restored effect intents should bypass new policy checks (they were already authorized).
+#[test]
+fn restored_effects_bypass_new_policy_checks() {
+    let store = fixtures::new_mem_store();
+    let manifest = fulfillment_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("first".into()))]);
+    world.submit_event_value(START_SCHEMA, &input);
+    world.tick_n(2).unwrap();
+
+    world.kernel.create_snapshot().unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+
+    let mut denying_manifest = fulfillment_manifest(&store);
+    attach_default_policy(&mut denying_manifest, deny_plan_http_policy());
+
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        denying_manifest,
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+
+    let mut intents = replay_world.drain_effects();
+    assert_eq!(intents.len(), 1, "restored intent queue should bypass policy re-check");
+    let effect = intents.remove(0);
+
+    let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
+    let receipt = EffectReceipt {
+        intent_hash: effect.intent_hash,
+        adapter_id: "adapter.http".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: receipt_payload,
+        cost_cents: None,
+        signature: vec![],
+    };
+    replay_world.kernel.handle_receipt(receipt).unwrap();
+    replay_world.kernel.tick_until_idle().unwrap();
+
+    assert_eq!(
+        replay_world
+            .kernel
+            .reducer_state("com.acme/ResultReducer@1"),
+        Some(&vec![0xEE])
+    );
+
+    // New plan attempts should now be denied by the stricter policy.
+    let blocked_input = fixtures::plan_input_record(vec![("id", ExprValue::Text("blocked".into()))]);
+    replay_world.submit_event_value(START_SCHEMA, &blocked_input);
+    let err = replay_world.kernel.tick_until_idle().unwrap_err();
+    assert!(matches!(err, KernelError::PolicyDenied { .. }));
 }

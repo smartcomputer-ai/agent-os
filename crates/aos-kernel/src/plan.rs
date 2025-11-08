@@ -315,6 +315,16 @@ impl PlanInstance {
         Ok(false)
     }
 
+    pub fn pending_receipt_hash(&self) -> Option<[u8; 32]> {
+        self.receipt_wait.as_ref().map(|wait| wait.intent_hash)
+    }
+
+    pub fn override_pending_receipt_hash(&mut self, hash: [u8; 32]) {
+        if let Some(wait) = self.receipt_wait.as_mut() {
+            wait.intent_hash = hash;
+        }
+    }
+
     pub fn deliver_event(&mut self, event: &DomainEvent) -> Result<bool, KernelError> {
         if let Some(wait) = &self.event_wait {
             if wait.schema == event.schema {

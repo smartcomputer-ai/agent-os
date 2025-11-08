@@ -1,31 +1,16 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPolicy, EffectKind as AirEffectKind, ManifestDefaults, OriginKind, PolicyDecision,
-    PolicyMatch, PolicyRule,
+    DefPolicy, EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch, PolicyRule,
 };
 use aos_effects::builtins::HttpRequestParams;
 use aos_kernel::error::KernelError;
 use aos_testkit::TestWorld;
 use aos_testkit::fixtures;
-use aos_testkit::fixtures::zero_hash;
 use aos_wasm_abi::ReducerEffect;
 use indexmap::IndexMap;
 
-fn attach_default_policy(loaded: &mut aos_kernel::manifest::LoadedManifest, policy: DefPolicy) {
-    loaded.manifest.policies.push(aos_air_types::NamedRef {
-        name: policy.name.clone(),
-        hash: zero_hash(),
-    });
-    if let Some(defaults) = loaded.manifest.defaults.as_mut() {
-        defaults.policy = Some(policy.name.clone());
-    } else {
-        loaded.manifest.defaults = Some(ManifestDefaults {
-            policy: Some(policy.name.clone()),
-            cap_grants: vec![],
-        });
-    }
-    loaded.policies.insert(policy.name.clone(), policy);
-}
+mod helpers;
+use helpers::attach_default_policy;
 
 fn http_reducer_output() -> aos_wasm_abi::ReducerOutput {
     let params = HttpRequestParams {

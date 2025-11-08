@@ -16,7 +16,7 @@ use crate::event::{KernelEvent, ReducerEvent};
 use crate::journal::mem::MemJournal;
 use crate::journal::{
     DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, IntentOriginRecord, Journal,
-    JournalEntry, JournalKind, JournalRecord, OwnedJournalEntry, SnapshotRecord,
+    JournalEntry, JournalKind, JournalRecord, JournalSeq, OwnedJournalEntry, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
@@ -254,6 +254,7 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     pub fn create_snapshot(&mut self) -> Result<(), KernelError> {
+        self.tick_until_idle()?;
         if !self.scheduler.is_empty() {
             return Err(KernelError::SnapshotUnavailable(
                 "scheduler must be idle before snapshot".into(),
@@ -321,7 +322,7 @@ impl<S: Store + 'static> Kernel<S> {
         if entries.is_empty() {
             return Ok(());
         }
-        let mut resume_seq = 0;
+        let mut resume_seq: Option<JournalSeq> = None;
         let mut latest_snapshot: Option<SnapshotRecord> = None;
         for entry in &entries {
             if matches!(entry.kind, JournalKind::Snapshot) {
@@ -333,12 +334,12 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
         if let Some(snapshot) = latest_snapshot {
-            resume_seq = snapshot.height;
+            resume_seq = Some(snapshot.height);
             self.load_snapshot(&snapshot)?;
         }
         self.suppress_journal = true;
         for entry in entries {
-            if entry.seq <= resume_seq {
+            if resume_seq.map_or(false, |seq| entry.seq <= seq) {
                 continue;
             }
             let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
@@ -437,35 +438,51 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn restore_effect_intent(&mut self, record: EffectIntentRecord) -> Result<(), KernelError> {
-        if self
-            .pending_reducer_receipts
-            .contains_key(&record.intent_hash)
-            || self.pending_receipts.contains_key(&record.intent_hash)
-        {
-            return Ok(());
-        }
-        let intent = EffectIntent {
-            kind: EffectKind::new(record.kind.clone()),
-            cap_name: record.cap_name.clone(),
-            params_cbor: record.params_cbor.clone(),
-            idempotency_key: record.idempotency_key,
-            intent_hash: record.intent_hash,
-        };
         let effect_kind = record.kind.clone();
         let params_cbor = record.params_cbor.clone();
         match record.origin {
             IntentOriginRecord::Reducer { name } => {
+                if self
+                    .pending_reducer_receipts
+                    .contains_key(&record.intent_hash)
+                {
+                    return Ok(());
+                }
                 self.pending_reducer_receipts
-                    .entry(intent.intent_hash)
+                    .entry(record.intent_hash)
                     .or_insert_with(|| ReducerEffectContext::new(name, effect_kind, params_cbor));
             }
             IntentOriginRecord::Plan { name: _, plan_id } => {
+                self.reconcile_plan_replay_identity(plan_id, record.intent_hash);
                 self.pending_receipts
-                    .entry(record.intent_hash)
-                    .or_insert(plan_id);
+                    .insert(record.intent_hash, plan_id);
             }
         }
         Ok(())
+    }
+
+    fn reconcile_plan_replay_identity(
+        &mut self,
+        recorded_plan_id: u64,
+        intent_hash: [u8; 32],
+    ) {
+        let matching_instance_id = self
+            .plan_instances
+            .iter()
+            .find(|(_, instance)| instance.pending_receipt_hash() == Some(intent_hash))
+            .map(|(id, _)| *id);
+
+        if let Some(current_id) = matching_instance_id {
+            if current_id != recorded_plan_id {
+                if let Some(mut instance) = self.plan_instances.remove(&current_id) {
+                    instance.id = recorded_plan_id;
+                    instance.override_pending_receipt_hash(intent_hash);
+                    self.plan_instances.insert(recorded_plan_id, instance);
+                }
+            } else if let Some(instance) = self.plan_instances.get_mut(&current_id) {
+                instance.override_pending_receipt_hash(intent_hash);
+            }
+        }
     }
 
     pub fn tick_until_idle(&mut self) -> Result<(), KernelError> {
@@ -477,6 +494,24 @@ impl<S: Store + 'static> Kernel<S> {
 
     pub fn reducer_state(&self, reducer: &str) -> Option<&Vec<u8>> {
         self.reducer_state.get(reducer)
+    }
+
+    pub fn pending_plan_receipts(&self) -> Vec<(u64, [u8; 32])> {
+        self.pending_receipts
+            .iter()
+            .map(|(hash, plan_id)| (*plan_id, *hash))
+            .collect()
+    }
+
+    pub fn has_plan_instance(&self, id: u64) -> bool {
+        self.plan_instances.contains_key(&id)
+    }
+
+    pub fn debug_plan_waits(&self) -> Vec<(u64, Option<[u8; 32]>)> {
+        self.plan_instances
+            .iter()
+            .map(|(id, instance)| (*id, instance.pending_receipt_hash()))
+            .collect()
     }
 
     pub fn dump_journal(&self) -> Result<Vec<OwnedJournalEntry>, KernelError> {

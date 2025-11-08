@@ -7,13 +7,13 @@
 #![allow(dead_code)]
 
 use aos_air_types::{
-    DefPlan, EffectKind, Expr, ExprConst, ExprRecord, PlanBind, PlanBindEffect, PlanEdge,
-    PlanStep, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect,
-    PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+    DefPlan, DefPolicy, EffectKind, Expr, ExprConst, ExprRecord, ManifestDefaults, NamedRef,
+    PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAwaitEvent, PlanStepAwaitReceipt,
+    PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
 };
 use aos_effects::builtins::TimerSetParams;
 use aos_testkit::fixtures::{self, START_SCHEMA};
-use aos_testkit::TestStore;
+use aos_testkit::{TestStore, fixtures::zero_hash};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -229,4 +229,40 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
     ];
     fixtures::build_loaded_manifest(vec![], vec![], vec![timer_emitter, timer_handler], routing)
+}
+
+/// Builds a simple manifest with a single reducer that sets deterministic state when invoked.
+pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
+    let reducer = fixtures::stub_reducer_module(
+        store,
+        "com.acme/Simple@1",
+        &ReducerOutput {
+            state: Some(vec![0xAA]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+    let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
+    fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)
+}
+
+/// Attaches a policy to the manifest defaults so it becomes the runtime policy gate.
+pub fn attach_default_policy(
+    loaded: &mut aos_kernel::manifest::LoadedManifest,
+    policy: DefPolicy,
+) {
+    loaded
+        .manifest
+        .policies
+        .push(NamedRef { name: policy.name.clone(), hash: zero_hash() });
+    if let Some(defaults) = loaded.manifest.defaults.as_mut() {
+        defaults.policy = Some(policy.name.clone());
+    } else {
+        loaded.manifest.defaults = Some(ManifestDefaults {
+            policy: Some(policy.name.clone()),
+            cap_grants: vec![],
+        });
+    }
+    loaded.policies.insert(policy.name.clone(), policy);
 }
