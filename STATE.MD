@@ -45,15 +45,14 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
 - **Delivered**: FsJournal-backed persistence, snapshot serialization via CAS blobs, replay loader with plan/reducer queue recovery, and integration tests covering journal-only rehydration, snapshot resume (including FsStore/FsJournal cold starts), and intent semantics.
 - **Notes**: Hardening (stress/fuzz) will be revisited later, but the core WP4 infrastructure is in place.
 
-### WP5 – Governance Loop Runtime
+### WP5 – Governance Loop Runtime *(Completed)*
 - **Goal**: Implement the manifest governance pipeline (propose → shadow-run → approve → apply) inside the kernel so control-plane changes can be exercised and tested deterministically. CLI work will follow later once the runtime pieces are in place.
-- **Key Tasks**:
-  - Add governance state tracking (proposals, lifecycle states, metadata) plus journal events for Proposed, ShadowRunCompleted, ApprovalRecorded, and ManifestApplied.
-  - Implement the shadow executor: clone current world state from the latest snapshot, drive representative test events through the proposed manifest delta via the deterministic harness with stubbed adapters, and record predicted intent/effect summaries (stop at the first await/receipt boundary rather than replaying the full journal).
-  - Wire approval/application logic so approved proposals atomically swap the active manifest (routing, cap grants, policies) and emit auditable journal entries.
-  - Provide a kernel API to submit manifest patches (new nodes or replacements) that reuses the existing AIR loader/validator before entering the governance pipeline.
-  - Add an end-to-end integration test (in `aos-testkit`) that submits a simple manifest delta, runs propose → shadow → approve → apply, and asserts the new reducer/plan is live afterward.
-- **Deliverables**: Kernel governance structures + journal events, shadow-run executor, manifest patch ingestion, and an integration test proving the loop works without any CLI.
+- **Delivered**:
+  - Governance manager/state machine in the kernel with journal-backed ProposalSubmitted/ShadowRunCompleted/ProposalApproved/ManifestApplied events.
+  - `ManifestPatch` ingestion API that stores proposed AIR nodes, revalidates manifests, and emits deterministic journal records.
+  - Shadow executor module (config + runner + summary) that clones the latest snapshot, feeds representative events, and records predicted effects/pending receipts for auditing.
+  - Approval/apply APIs that atomically swap the active manifest, refresh routing/module registries, and journal the result.
+  - End-to-end integration test (`crates/aos-testkit/tests/governance_integration.rs`) proving a proposal can be submitted, shadow-run, approved, applied, and the new reducer comes online.
 
 ## Dependencies & Suggested Order
 1. **WP1** lays the groundwork for deterministic integration tests used by all later packages.

@@ -110,6 +110,10 @@ impl GovernanceManager {
     pub fn proposals(&self) -> &HashMap<u64, Proposal> {
         &self.proposals
     }
+
+    pub fn proposals_mut(&mut self) -> &mut HashMap<u64, Proposal> {
+        &mut self.proposals
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
