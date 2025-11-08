@@ -26,7 +26,7 @@ Plan is to create helper builders (reducer module, manifest with plan, plan inpu
 
 ### After integration tests
 1. **Reducer receipt handling** – kernel now tracks reducer-origin effects, converts `timer.set` and `blob.{put,get}` receipts into `sys/*` events, and logs late receipts. Next step: wire updated schemas/routing plus budget settlement off the new structured payload hook.
-2. **Capability/policy enforcement** – integrate Cap/Policy gates and budget tracking. We can wait on this, though, until later, the allow all approach works for now.
+2. **Capability/policy enforcement** – capability resolution + grant plumbing are now wired (plans and reducer slots must reference real grants, and effect intents resolve them before enqueue). Policy is still `AllowAll`; We will implementing real rule matching + budget enforcement later.
 3. **Journal/outbox** – persist events/effects for replay.
 4. **Governance loop & CLI integration** – once runtime is stable.
 
