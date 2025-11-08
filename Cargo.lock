@@ -181,10 +181,17 @@ dependencies = [
 name = "aos-testkit"
 version = "0.1.0"
 dependencies = [
+ "aos-air-exec",
+ "aos-air-types",
  "aos-effects",
  "aos-kernel",
  "aos-store",
+ "aos-wasm-abi",
+ "indexmap",
  "rand",
+ "serde",
+ "serde_cbor",
+ "wat",
 ]
 
 [[package]]

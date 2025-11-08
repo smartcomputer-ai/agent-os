@@ -3,8 +3,8 @@ use aos_effects::{EffectIntent, EffectKind as RuntimeEffectKind, EffectSource};
 use aos_wasm_abi::ReducerEffect;
 
 use crate::capability::CapabilityResolver;
-use crate::policy::{AllowAllPolicy, PolicyGate};
 use crate::error::KernelError;
+use crate::policy::{AllowAllPolicy, PolicyGate};
 
 #[derive(Default)]
 pub struct EffectQueue {

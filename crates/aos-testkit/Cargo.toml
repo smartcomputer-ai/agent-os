@@ -8,5 +8,11 @@ publish = false
 aos-store = { path = "../aos-store" }
 aos-effects = { path = "../aos-effects" }
 aos-kernel = { path = "../aos-kernel" }
+aos-air-types = { path = "../aos-air-types" }
+aos-air-exec = { path = "../aos-air-exec" }
+aos-wasm-abi = { path = "../aos-wasm-abi" }
+indexmap = "2"
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
+wat = "1"
 rand = "0.8"
-
