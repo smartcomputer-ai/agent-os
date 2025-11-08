@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
 use aos_cbor::to_canonical_cbor;
@@ -85,7 +85,12 @@ fn read_all_records(path: &Path) -> Result<Vec<OwnedJournalEntry>, JournalError>
         }
         let len = u32::from_le_bytes(len_buf) as usize;
         let mut buf = vec![0u8; len];
-        file.read_exact(&mut buf)?;
+        if let Err(err) = file.read_exact(&mut buf) {
+            if err.kind() == ErrorKind::UnexpectedEof {
+                return Err(JournalError::Corrupt("truncated entry payload".into()));
+            }
+            return Err(err.into());
+        }
         let entry: OwnedJournalEntry = serde_cbor::from_slice(&buf)?;
         entries.push(entry);
     }
@@ -130,5 +135,24 @@ mod tests {
         let entries = journal.load_from(2).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].payload, b"three");
+    }
+
+    #[test]
+    fn detects_truncated_entry() {
+        let tmp = TempDir::new().unwrap();
+        {
+            let mut journal = FsJournal::open(tmp.path()).unwrap();
+            journal
+                .append(JournalEntry::new(JournalKind::EffectIntent, b"payload"))
+                .unwrap();
+        }
+
+        let log_path = tmp.path().join(JOURNAL_DIR).join(JOURNAL_FILE);
+        let len = std::fs::metadata(&log_path).unwrap().len();
+        let file = OpenOptions::new().write(true).open(&log_path).unwrap();
+        file.set_len(len - 1).unwrap();
+
+        let err = FsJournal::open(tmp.path()).unwrap_err();
+        assert!(matches!(err, JournalError::Corrupt(_)));
     }
 }
