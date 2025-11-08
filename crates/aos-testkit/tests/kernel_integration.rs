@@ -1,10 +1,12 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPlan, EffectKind, Expr, ExprConst, ExprRecord, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-    PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
-    PlanStepKind, PlanStepRaiseEvent,
+    DefPlan, EffectKind, Expr, ExprConst, ExprRecord, HashRef, PlanBind, PlanBindEffect, PlanEdge,
+    PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect,
+    PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
 };
-use aos_effects::builtins::{TimerSetParams, TimerSetReceipt};
+use aos_effects::builtins::{
+    BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
+};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::error::KernelError;
 use aos_testkit::fixtures::{self, START_SCHEMA};
@@ -388,6 +390,161 @@ fn guarded_plan_branches_control_effects() {
     world_false.tick_n(2).unwrap();
     assert_eq!(world_false.drain_effects().len(), 0);
 }
+/// Blob.put receipts should be mapped into `sys/BlobPutResult@1` and delivered to reducers.
+#[test]
+fn blob_put_receipt_routes_event_to_handler() {
+    let store = fixtures::new_mem_store();
+
+    let emitter = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/BlobPutEmitter@1",
+        &ReducerOutput {
+            state: None,
+            domain_events: vec![],
+            effects: vec![ReducerEffect::new(
+                aos_effects::EffectKind::BLOB_PUT,
+                serde_cbor::to_vec(&BlobPutParams {
+                    namespace: "docs".into(),
+                    blob_ref: fake_hash(0x20),
+                })
+                .unwrap(),
+            )],
+            ann: None,
+        },
+    );
+
+    let handler = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/BlobPutHandler@1",
+        &ReducerOutput {
+            state: Some(vec![0xDD]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+
+    let routing = vec![
+        fixtures::routing_event(START_SCHEMA, &emitter.name),
+        fixtures::routing_event("sys/BlobPutResult@1", &handler.name),
+    ];
+    let mut loaded =
+        fixtures::build_loaded_manifest(vec![], vec![], vec![emitter, handler], routing);
+    if let Some(binding) = loaded
+        .manifest
+        .module_bindings
+        .get_mut(&"com.acme/BlobPutEmitter@1".to_string())
+    {
+        binding.slots.insert("default".into(), "blob_cap".into());
+    }
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world.tick_n(1).unwrap();
+
+    let mut effects = world.drain_effects();
+    assert_eq!(effects.len(), 1);
+    let intent = effects.remove(0);
+    assert_eq!(intent.kind.as_str(), aos_effects::EffectKind::BLOB_PUT);
+
+    let receipt = EffectReceipt {
+        intent_hash: intent.intent_hash,
+        adapter_id: "adapter.blob".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&BlobPutReceipt {
+            blob_ref: fake_hash(0x21),
+            size: 64,
+        })
+        .unwrap(),
+        cost_cents: Some(2),
+        signature: vec![7, 7],
+    };
+    world.kernel.handle_receipt(receipt).unwrap();
+    world.tick_n(1).unwrap();
+
+    assert_eq!(
+        world.kernel.reducer_state("com.acme/BlobPutHandler@1"),
+        Some(&vec![0xDD])
+    );
+}
+
+/// Blob.get receipts should similarly map into `sys/BlobGetResult@1` and wake reducers.
+#[test]
+fn blob_get_receipt_routes_event_to_handler() {
+    let store = fixtures::new_mem_store();
+
+    let emitter = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/BlobGetEmitter@1",
+        &ReducerOutput {
+            state: None,
+            domain_events: vec![],
+            effects: vec![ReducerEffect::new(
+                aos_effects::EffectKind::BLOB_GET,
+                serde_cbor::to_vec(&BlobGetParams {
+                    namespace: "docs".into(),
+                    key: "readme".into(),
+                })
+                .unwrap(),
+            )],
+            ann: None,
+        },
+    );
+
+    let handler = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/BlobGetHandler@1",
+        &ReducerOutput {
+            state: Some(vec![0xEE]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+
+    let routing = vec![
+        fixtures::routing_event(START_SCHEMA, &emitter.name),
+        fixtures::routing_event("sys/BlobGetResult@1", &handler.name),
+    ];
+    let mut loaded =
+        fixtures::build_loaded_manifest(vec![], vec![], vec![emitter, handler], routing);
+    if let Some(binding) = loaded
+        .manifest
+        .module_bindings
+        .get_mut(&"com.acme/BlobGetEmitter@1".to_string())
+    {
+        binding.slots.insert("default".into(), "blob_cap".into());
+    }
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world.tick_n(1).unwrap();
+
+    let mut effects = world.drain_effects();
+    assert_eq!(effects.len(), 1);
+    let intent = effects.remove(0);
+    assert_eq!(intent.kind.as_str(), aos_effects::EffectKind::BLOB_GET);
+
+    let receipt = EffectReceipt {
+        intent_hash: intent.intent_hash,
+        adapter_id: "adapter.blob".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&BlobGetReceipt {
+            blob_ref: fake_hash(0x22),
+            size: 128,
+        })
+        .unwrap(),
+        cost_cents: None,
+        signature: vec![8, 8],
+    };
+    world.kernel.handle_receipt(receipt).unwrap();
+    world.tick_n(1).unwrap();
+
+    assert_eq!(
+        world.kernel.reducer_state("com.acme/BlobGetHandler@1"),
+        Some(&vec![0xEE])
+    );
+}
 
 /// Complex plan scenario: emit effect → await receipt → emit → await domain event → emit. Ensures
 /// interleaving of effect receipts and raised events still produces deterministic progression.
@@ -762,4 +919,9 @@ fn raised_events_are_routed_to_reducers() {
         world.kernel.reducer_state("com.acme/Reducer@1"),
         Some(&vec![0xEE])
     );
+}
+
+fn fake_hash(byte: u8) -> HashRef {
+    let hex = format!("{:02x}", byte);
+    HashRef::new(format!("sha256:{}", hex.repeat(32))).unwrap()
 }

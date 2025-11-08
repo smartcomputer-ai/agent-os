@@ -1,3 +1,4 @@
+use aos_air_types::HashRef;
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
 };
@@ -149,6 +150,11 @@ mod tests {
     use aos_effects::EffectReceipt;
     use serde::Deserialize;
 
+    fn fake_hash(byte: u8) -> HashRef {
+        let hex = format!("{:02x}", byte);
+        HashRef::new(format!("sha256:{}", hex.repeat(32))).unwrap()
+    }
+
     fn base_receipt() -> EffectReceipt {
         EffectReceipt {
             intent_hash: [1u8; 32],
@@ -217,5 +223,69 @@ mod tests {
         );
         assert_eq!(decoded.cost_cents, Some(5));
         assert_eq!(decoded.signature, vec![9, 9]);
+    }
+
+    #[test]
+    fn blob_put_receipt_event_is_structured() {
+        let params = BlobPutParams {
+            namespace: "ns".into(),
+            blob_ref: fake_hash(0x10),
+        };
+        let ctx = ReducerEffectContext::new(
+            "com.acme/Reducer@1".into(),
+            aos_effects::EffectKind::BLOB_PUT.into(),
+            serde_cbor::to_vec(&params).unwrap(),
+        );
+        let receipt_body = BlobPutReceipt {
+            blob_ref: fake_hash(0x11),
+            size: 42,
+        };
+        let mut receipt = base_receipt();
+        receipt.payload_cbor = serde_cbor::to_vec(&receipt_body).unwrap();
+
+        let event = build_reducer_receipt_event(&ctx, &receipt).expect("event");
+        assert_eq!(event.schema, SYS_BLOB_PUT_RESULT_SCHEMA);
+
+        #[derive(Deserialize)]
+        struct Payload {
+            requested: BlobPutParams,
+            receipt: BlobPutReceipt,
+        }
+
+        let decoded: Payload = serde_cbor::from_slice(&event.value).unwrap();
+        assert_eq!(decoded.requested.namespace, "ns");
+        assert_eq!(decoded.receipt.size, 42);
+    }
+
+    #[test]
+    fn blob_get_receipt_event_is_structured() {
+        let params = BlobGetParams {
+            namespace: "ns".into(),
+            key: "doc".into(),
+        };
+        let ctx = ReducerEffectContext::new(
+            "com.acme/Reducer@1".into(),
+            aos_effects::EffectKind::BLOB_GET.into(),
+            serde_cbor::to_vec(&params).unwrap(),
+        );
+        let receipt_body = BlobGetReceipt {
+            blob_ref: fake_hash(0x12),
+            size: 99,
+        };
+        let mut receipt = base_receipt();
+        receipt.payload_cbor = serde_cbor::to_vec(&receipt_body).unwrap();
+
+        let event = build_reducer_receipt_event(&ctx, &receipt).expect("event");
+        assert_eq!(event.schema, SYS_BLOB_GET_RESULT_SCHEMA);
+
+        #[derive(Deserialize)]
+        struct Payload {
+            requested: BlobGetParams,
+            receipt: BlobGetReceipt,
+        }
+
+        let decoded: Payload = serde_cbor::from_slice(&event.value).unwrap();
+        assert_eq!(decoded.requested.key, "doc");
+        assert_eq!(decoded.receipt.blob_ref, receipt_body.blob_ref);
     }
 }

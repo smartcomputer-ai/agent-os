@@ -17,14 +17,14 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
   - Ensure tests assert on journal ordering (domain events → triggers → plan wakeups) and deterministic replay by re-running the scenario through the harness without redefinition.
 - **Delivered**: `aos-testkit` fixture module, `TestWorld` harness, helpers for event-emitting reducers, and seven integration cases covering single-plan orchestration, reducer timer receipts, guarded branches, multi-stage plans, plan event wakeups, and plan-raised events. Kernel unit tests retain only local coverage.
 
-### WP2 – Reducer Micro-Effect Receipts & Built-in Schemas
+### WP2 – Reducer Micro-Effect Receipts & Built-in Schemas *(Completed)*
 - **Goal**: Wire the built-in schema catalog (`crates/aos-air-types/src/builtins.rs`) into the kernel so reducer-emitted micro-effects automatically produce typed `sys/*` events when receipts arrive.
 - **Key Tasks**:
   - Load and cache `spec/defs/builtin-schemas.air.json` hashes inside the kernel’s router so manifests can reference `sys/TimerFired@1`, `sys/BlobPutResult@1`, etc. without bespoke plumbing.
   - Extend the `pending_reducer_receipts` path to record `adapter_id`, serialized params, and reducer name so the emitted event payload matches the structure defined in `spec/03-air.md §7`.
   - Implement conversion helpers that take `EffectReceipt` + pending context → typed `DomainEvent` bytes; cover timer and blob receipts, including error/timeout statuses.
   - Add integration tests (leveraging WP1 harness) that stub timer/blob adapters, enqueue micro-effects, deliver receipts (including duplicates), and assert reducers observe the canonical `sys/*` payloads.
-- **Deliverables**: Updated kernel routing, schema lookup utilities, receipt → event conversion logic, and tests for timer/blobs verifying late-receipt suppression.
+- **Delivered**: Manifest loader now injects built-in defschemas, reducer receipt conversion covers timer + blob put/get payloads, and aos-testkit integration tests assert sys/TimerFired and sys/Blob* events reach reducers (including duplicate suppression/unknown receipt handling).
 
 ### WP3 – Capability & Policy Enforcement w/ Budgets
 - **Goal**: Replace the current `AllowAllPolicy` placeholder with the spec’d capability + policy enforcement loop, including budget depletion on receipts.
@@ -64,7 +64,7 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
 Keep this document updated as each package lands or is reprioritized.
 
 ## Kernel Test Gaps To Close
-- Reducer receipt → `sys/*` event conversion still lacks blob put/get and error coverage (timers exercised via WP1 scenarios). WP2 will extend the same harness to blob receipts.
+- Reducer receipt error paths (decode failures, adapter error statuses) still lack coverage; extend WP2 harness to exercise those failure cases in kernel unit tests.
 - Capability + policy enforcement currently lacks unit tests for duplicate grants, slot mismatches, or policy deny cases; these must be added as part of WP3.
 - Effect manager budgeting, intent hashing, and audit logging are untested; motivators for WP3/WP4 work.
 - Journal/replay invariants (idempotent receipt handling, ordering fences) have zero coverage; WP4 should add integration tests via `aos-testkit` harness.

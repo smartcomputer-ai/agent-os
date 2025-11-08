@@ -163,7 +163,7 @@ pub mod fixtures {
     {
         manifest.defaults = Some(ManifestDefaults {
             policy: None,
-            cap_grants: vec![cap_http_grant(), timer_cap_grant()],
+            cap_grants: vec![cap_http_grant(), timer_cap_grant(), blob_cap_grant()],
         });
         let mut bindings = IndexMap::new();
         for module in modules {
@@ -178,6 +178,7 @@ pub mod fixtures {
         HashMap::from([
             ("sys/http.out@1".into(), http_defcap()),
             ("sys/timer@1".into(), timer_defcap()),
+            ("sys/blob@1".into(), blob_defcap()),
         ])
     }
 
@@ -201,6 +202,16 @@ pub mod fixtures {
         }
     }
 
+    pub fn blob_cap_grant() -> CapGrant {
+        CapGrant {
+            name: "blob_cap".into(),
+            cap: "sys/blob@1".into(),
+            params: empty_value_literal(),
+            expiry_ns: None,
+            budget: None,
+        }
+    }
+
     /// Minimal HTTP capability definition used inside tests.
     pub fn http_defcap() -> DefCap {
         DefCap {
@@ -217,6 +228,16 @@ pub mod fixtures {
         DefCap {
             name: "sys/timer@1".into(),
             cap_type: CapType::Timer,
+            schema: TypeExpr::Record(TypeRecord {
+                record: IndexMap::new(),
+            }),
+        }
+    }
+
+    pub fn blob_defcap() -> DefCap {
+        DefCap {
+            name: "sys/blob@1".into(),
+            cap_type: CapType::Blob,
             schema: TypeExpr::Record(TypeRecord {
                 record: IndexMap::new(),
             }),

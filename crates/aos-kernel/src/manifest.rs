@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use aos_air_types::{AirNode, DefCap, DefModule, DefPlan, Manifest, Name};
+use aos_air_types::{
+    AirNode, DefCap, DefModule, DefPlan, Manifest, Name, builtins::builtin_schemas,
+};
 use aos_store::{Catalog, Store, load_manifest_from_path};
 
 use crate::error::KernelError;
@@ -42,10 +44,26 @@ impl ManifestLoader {
             }
         }
         Ok(LoadedManifest {
-            manifest: catalog.manifest,
+            manifest: attach_builtin_schemas(catalog.manifest),
             modules,
             plans,
             caps,
         })
     }
+}
+
+fn attach_builtin_schemas(mut manifest: Manifest) -> Manifest {
+    for builtin in builtin_schemas() {
+        let exists = manifest
+            .schemas
+            .iter()
+            .any(|named| named.name == builtin.schema.name);
+        if !exists {
+            manifest.schemas.push(aos_air_types::NamedRef {
+                name: builtin.schema.name.clone(),
+                hash: builtin.hash_ref.clone(),
+            });
+        }
+    }
+    manifest
 }
