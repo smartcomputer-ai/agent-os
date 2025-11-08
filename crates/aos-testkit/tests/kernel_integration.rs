@@ -5,14 +5,16 @@ use aos_air_types::{
     PlanStepKind, PlanStepRaiseEvent,
 };
 use aos_effects::builtins::{TimerSetParams, TimerSetReceipt};
-use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::error::KernelError;
-use aos_testkit::TestWorld;
 use aos_testkit::fixtures::{self, START_SCHEMA};
-use aos_wasm_abi::{DomainEvent, ReducerEffect, ReducerOutput};
+use aos_testkit::{TestWorld, effect_params_text};
+use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use indexmap::IndexMap;
 use serde_cbor;
 
+/// Happy-path end-to-end: reducer emits an intent, plan does work, receipt feeds a result event
+/// back into the reducer. Mirrors the “single plan orchestration” pattern in the spec.
 #[test]
 fn single_plan_orchestration_completes_after_receipt() {
     let store = fixtures::new_mem_store();
@@ -131,6 +133,7 @@ fn single_plan_orchestration_completes_after_receipt() {
     );
 }
 
+/// Reducer micro-effects and plan-sourced effects should share the same outbox without interfering.
 #[test]
 fn reducer_and_plan_effects_are_enqueued() {
     let store = fixtures::new_mem_store();
@@ -208,6 +211,8 @@ fn reducer_and_plan_effects_are_enqueued() {
     );
 }
 
+/// Timer receipts emitted by reducers must be translated into `sys/TimerFired@1` and routed
+/// through the normal event pipeline (including duplicate suppression / unknown handling).
 #[test]
 fn reducer_timer_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
@@ -308,6 +313,7 @@ fn reducer_timer_receipt_routes_event_to_handler() {
     assert!(matches!(err, KernelError::UnknownReceipt(_)));
 }
 
+/// Guards on plan edges should gate side-effects and completion state.
 #[test]
 fn guarded_plan_branches_control_effects() {
     let plan_name = "com.acme/Guarded@1".to_string();
@@ -383,24 +389,20 @@ fn guarded_plan_branches_control_effects() {
     assert_eq!(world_false.drain_effects().len(), 0);
 }
 
+/// Complex plan scenario: emit effect → await receipt → emit → await domain event → emit. Ensures
+/// interleaving of effect receipts and raised events still produces deterministic progression.
 #[test]
 fn plan_waits_for_receipt_and_event_before_progressing() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/TwoStage@1".to_string();
 
-    let next_event = DomainEvent::new(
-        "com.acme/Next@1".to_string(),
-        serde_cbor::to_vec(&ExprValue::Int(1)).unwrap(),
-    );
-    let next_emitter = fixtures::stub_reducer_module(
+    let next_emitter = fixtures::stub_event_emitting_reducer(
         &store,
         "com.acme/NextEmitter@1",
-        &ReducerOutput {
-            state: None,
-            domain_events: vec![next_event],
-            effects: vec![],
-            ann: None,
-        },
+        vec![fixtures::domain_event(
+            "com.acme/Next@1",
+            &ExprValue::Int(1),
+        )],
     );
 
     let plan = DefPlan {
@@ -540,6 +542,8 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
     );
 }
 
+/// Plans blocked on `await_event` should only resume when the subscribed schema fires; different
+/// schemas should remain pending even if their triggers fire later.
 #[test]
 fn plan_event_wakeup_only_resumes_matching_schema() {
     let store = fixtures::new_mem_store();
@@ -644,31 +648,21 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
             fixtures::start_trigger(&plan_other.name),
         ],
         vec![
-            fixtures::stub_reducer_module(
+            fixtures::stub_event_emitting_reducer(
                 &store,
                 "com.acme/ReadyEmitter@1",
-                &ReducerOutput {
-                    state: None,
-                    domain_events: vec![DomainEvent::new(
-                        "com.acme/Ready@1".to_string(),
-                        serde_cbor::to_vec(&ExprValue::Nat(7)).unwrap(),
-                    )],
-                    effects: vec![],
-                    ann: None,
-                },
+                vec![fixtures::domain_event(
+                    "com.acme/Ready@1",
+                    &ExprValue::Nat(7),
+                )],
             ),
-            fixtures::stub_reducer_module(
+            fixtures::stub_event_emitting_reducer(
                 &store,
                 "com.acme/OtherEmitter@1",
-                &ReducerOutput {
-                    state: None,
-                    domain_events: vec![DomainEvent::new(
-                        "com.acme/Other@1".to_string(),
-                        serde_cbor::to_vec(&ExprValue::Nat(9)).unwrap(),
-                    )],
-                    effects: vec![],
-                    ann: None,
-                },
+                vec![fixtures::domain_event(
+                    "com.acme/Other@1",
+                    &ExprValue::Nat(9),
+                )],
             ),
         ],
         vec![
@@ -701,6 +695,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
     assert_eq!(effect_params_text(&more_effects.remove(0)), "other");
 }
 
+/// Plans that raise events should deliver them to reducers according to manifest routing.
 #[test]
 fn raised_events_are_routed_to_reducers() {
     let store = fixtures::new_mem_store();
@@ -767,11 +762,4 @@ fn raised_events_are_routed_to_reducers() {
         world.kernel.reducer_state("com.acme/Reducer@1"),
         Some(&vec![0xEE])
     );
-}
-
-fn effect_params_text(intent: &EffectIntent) -> String {
-    match serde_cbor::from_slice::<ExprValue>(&intent.params_cbor).unwrap() {
-        ExprValue::Text(text) => text,
-        other => panic!("expected text params, got {:?}", other),
-    }
 }

@@ -160,6 +160,7 @@ mod tests {
         }
     }
 
+    /// Rejects reducer receipts whose effect kind is not part of the built-in micro-effect set.
     #[test]
     fn rejects_unknown_effect_kind() {
         let ctx = ReducerEffectContext::new("reducer".into(), "unknown".into(), vec![]);
@@ -168,6 +169,7 @@ mod tests {
         assert!(matches!(err, KernelError::UnsupportedReducerReceipt(_)));
     }
 
+    /// Verifies timer receipts are converted into the canonical `sys/TimerFired@1` payload.
     #[test]
     fn timer_receipt_event_is_structured() {
         let params = TimerSetParams {

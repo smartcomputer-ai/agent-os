@@ -413,6 +413,7 @@ mod tests {
         EffectManager::new(resolver, AllowAllPolicy)
     }
 
+    /// Assign steps should synchronously write to the plan environment.
     #[test]
     fn assign_step_updates_env() {
         let steps = vec![PlanStep {
@@ -431,6 +432,7 @@ mod tests {
         assert_eq!(plan.env.vars.get("answer").unwrap(), &ExprValue::Int(42));
     }
 
+    /// `emit_effect` should enqueue an intent and record the effect handle for later awaits.
     #[test]
     fn emit_effect_enqueues_intent() {
         let steps = vec![PlanStep {
@@ -454,6 +456,7 @@ mod tests {
         assert!(plan.effect_handles.contains_key("req"));
     }
 
+    /// Plans must block on `await_receipt` until the referenced effect handle is fulfilled.
     #[test]
     fn await_receipt_waits_and_resumes() {
         let steps = vec![
@@ -489,6 +492,7 @@ mod tests {
         assert!(plan.env.vars.contains_key("rcpt"));
     }
 
+    /// `await_event` pauses the plan until a matching schema arrives and binds it into the env.
     #[test]
     fn await_event_waits_for_schema() {
         let steps = vec![PlanStep {
@@ -513,6 +517,7 @@ mod tests {
         assert!(plan.env.vars.contains_key("evt"));
     }
 
+    /// Guarded edges should prevent downstream steps from running when the guard is false.
     #[test]
     fn guard_blocks_step_until_true() {
         let mut plan = base_plan(vec![PlanStep {
@@ -530,6 +535,7 @@ mod tests {
         assert!(!outcome.completed);
     }
 
+    /// Raising an event should surface a DomainEvent with the serialized payload.
     #[test]
     fn raise_event_produces_domain_event() {
         let steps = vec![PlanStep {
