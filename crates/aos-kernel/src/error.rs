@@ -47,4 +47,12 @@ pub enum KernelError {
     ModuleCapabilityMissing { module: String, cap: String },
     #[error("policy denied effect '{effect_kind}' from {origin}")]
     PolicyDenied { effect_kind: String, origin: String },
+    #[error("journal error: {0}")]
+    Journal(String),
+}
+
+impl From<crate::journal::JournalError> for KernelError {
+    fn from(err: crate::journal::JournalError) -> Self {
+        KernelError::Journal(err.to_string())
+    }
 }

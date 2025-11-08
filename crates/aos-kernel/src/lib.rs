@@ -4,6 +4,7 @@ pub mod capability;
 pub mod effects;
 pub mod error;
 pub mod event;
+pub mod journal;
 pub mod manifest;
 pub mod plan;
 pub mod policy;

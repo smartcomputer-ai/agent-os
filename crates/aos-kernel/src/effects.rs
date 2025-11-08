@@ -41,7 +41,7 @@ impl EffectManager {
         reducer_name: &str,
         cap_name: &str,
         effect: &ReducerEffect,
-    ) -> Result<[u8; 32], KernelError> {
+    ) -> Result<EffectIntent, KernelError> {
         let source = EffectSource::Reducer {
             name: reducer_name.to_string(),
         };
@@ -59,7 +59,7 @@ impl EffectManager {
         kind: &EffectKind,
         cap_name: &str,
         params_cbor: Vec<u8>,
-    ) -> Result<[u8; 32], KernelError> {
+    ) -> Result<EffectIntent, KernelError> {
         let source = EffectSource::Plan {
             name: plan_name.to_string(),
         };
@@ -73,7 +73,7 @@ impl EffectManager {
         cap_name: &str,
         runtime_kind: RuntimeEffectKind,
         params_cbor: Vec<u8>,
-    ) -> Result<[u8; 32], KernelError> {
+    ) -> Result<EffectIntent, KernelError> {
         let grant = self
             .capability_gate
             .resolve(cap_name, runtime_kind.as_str())?;
@@ -86,9 +86,8 @@ impl EffectManager {
         .map_err(|err| KernelError::EffectManager(err.to_string()))?;
         match self.policy_gate.decide(&intent, &grant, &source)? {
             aos_effects::traits::PolicyDecision::Allow => {
-                let hash = intent.intent_hash;
-                self.queue.push(intent);
-                Ok(hash)
+                self.queue.push(intent.clone());
+                Ok(intent)
             }
             aos_effects::traits::PolicyDecision::Deny => Err(KernelError::PolicyDenied {
                 effect_kind: runtime_kind.as_str().to_string(),

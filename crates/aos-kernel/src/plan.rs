@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use aos_air_exec::{Env as ExprEnv, Value as ExprValue, eval_expr};
 use aos_air_types::{DefPlan, PlanEdge, PlanStep, PlanStepKind};
+use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
 use indexmap::IndexMap;
 use serde_cbor;
@@ -71,6 +72,7 @@ pub struct PlanTickOutcome {
     pub waiting_receipt: Option<[u8; 32]>,
     pub waiting_event: Option<String>,
     pub completed: bool,
+    pub intents_enqueued: Vec<EffectIntent>,
 }
 
 impl PlanInstance {
@@ -141,14 +143,16 @@ impl PlanInstance {
                         })?;
                         let params_cbor = serde_cbor::to_vec(&value)
                             .map_err(|err| KernelError::Manifest(err.to_string()))?;
-                        let intent_hash = effects.enqueue_plan_effect(
+                        let intent = effects.enqueue_plan_effect(
                             &self.name,
                             &emit.kind,
                             &emit.cap,
                             params_cbor,
                         )?;
+                        outcome.intents_enqueued.push(intent.clone());
                         let handle = emit.bind.effect_id_as.clone();
-                        self.effect_handles.insert(handle.clone(), intent_hash);
+                        self.effect_handles
+                            .insert(handle.clone(), intent.intent_hash);
                         self.env
                             .vars
                             .insert(handle.clone(), ExprValue::Text(handle));

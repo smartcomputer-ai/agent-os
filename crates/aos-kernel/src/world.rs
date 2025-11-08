@@ -4,6 +4,7 @@ use std::sync::Arc;
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{Manifest, Name};
 use aos_cbor::Hash as DigestHash;
+use aos_effects::{EffectIntent, EffectReceipt};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
 use serde_cbor;
@@ -12,6 +13,8 @@ use crate::capability::CapabilityResolver;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
+use crate::journal::mem::MemJournal;
+use crate::journal::{Journal, JournalEntry, JournalKind, JournalRecord, DomainEventRecord, EffectIntentRecord, EffectReceiptRecord};
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
 use crate::policy::{AllowAllPolicy, RulePolicy};
@@ -37,15 +40,25 @@ pub struct Kernel<S: Store> {
     scheduler: Scheduler,
     effect_manager: EffectManager,
     reducer_state: HashMap<Name, Vec<u8>>,
+    journal: Box<dyn Journal>,
 }
 
 pub struct KernelBuilder<S: Store> {
     store: Arc<S>,
+    journal: Box<dyn Journal>,
 }
 
 impl<S: Store + 'static> KernelBuilder<S> {
     pub fn new(store: Arc<S>) -> Self {
-        Self { store }
+        Self {
+            store,
+            journal: Box::new(MemJournal::new()),
+        }
+    }
+
+    pub fn with_journal(mut self, journal: Box<dyn Journal>) -> Self {
+        self.journal = journal;
+        self
     }
 
     pub fn from_manifest_path(
@@ -53,7 +66,7 @@ impl<S: Store + 'static> KernelBuilder<S> {
         path: impl AsRef<std::path::Path>,
     ) -> Result<Kernel<S>, KernelError> {
         let loaded = ManifestLoader::load_from_path(&*self.store, path)?;
-        Kernel::from_loaded_manifest(self.store, loaded)
+        Kernel::from_loaded_manifest(self.store, loaded, self.journal)
     }
 }
 
@@ -61,6 +74,7 @@ impl<S: Store + 'static> Kernel<S> {
     pub fn from_loaded_manifest(
         store: Arc<S>,
         loaded: LoadedManifest,
+        journal: Box<dyn Journal>,
     ) -> Result<Self, KernelError> {
         let mut router = HashMap::new();
         if let Some(routing) = loaded.manifest.routing.as_ref() {
@@ -119,6 +133,7 @@ impl<S: Store + 'static> Kernel<S> {
             scheduler: Scheduler::default(),
             effect_manager: EffectManager::new(capability_resolver, policy_gate),
             reducer_state: HashMap::new(),
+            journal,
         })
     }
 
@@ -130,6 +145,7 @@ impl<S: Store + 'static> Kernel<S> {
 
     pub fn submit_domain_event(&mut self, schema: impl Into<String>, value: Vec<u8>) {
         let event = DomainEvent::new(schema.into(), value);
+        let _ = self.record_domain_event(&event);
         self.scheduler.push_reducer(ReducerEvent { event });
     }
 
@@ -183,6 +199,7 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
         for event in output.domain_events {
+            self.record_domain_event(&event)?;
             self.deliver_event_to_waiting_plans(&event)?;
             self.scheduler.push_reducer(ReducerEvent { event });
         }
@@ -198,11 +215,12 @@ impl<S: Store + 'static> Kernel<S> {
                     slot: slot.clone(),
                 })?
                 .clone();
-            let hash =
-                self.effect_manager
-                    .enqueue_reducer_effect(&reducer_name, &cap_name, effect)?;
+            let intent = self
+                .effect_manager
+                .enqueue_reducer_effect(&reducer_name, &cap_name, effect)?;
+            self.record_effect_intent(&intent)?;
             self.pending_reducer_receipts.insert(
-                hash,
+                intent.intent_hash,
                 ReducerEffectContext::new(
                     reducer_name.clone(),
                     effect.kind.clone(),
@@ -253,10 +271,14 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(instance) = self.plan_instances.get_mut(&id) {
             let outcome = instance.tick(&mut self.effect_manager)?;
             for event in &outcome.raised_events {
+                self.record_domain_event(event)?;
                 self.deliver_event_to_waiting_plans(event)?;
                 self.scheduler.push_reducer(ReducerEvent {
                     event: event.clone(),
                 });
+            }
+            for intent in &outcome.intents_enqueued {
+                self.record_effect_intent(intent)?;
             }
             if let Some(hash) = outcome.waiting_receipt {
                 self.pending_receipts.insert(hash, id);
@@ -277,7 +299,15 @@ impl<S: Store + 'static> Kernel<S> {
         &mut self,
         receipt: aos_effects::EffectReceipt,
     ) -> Result<(), KernelError> {
+        if self.recent_receipt_index.contains(&receipt.intent_hash) {
+            log::warn!(
+                "late receipt {} ignored (already applied)",
+                format_intent_hash(&receipt.intent_hash)
+            );
+            return Ok(());
+        }
         if let Some(plan_id) = self.pending_receipts.remove(&receipt.intent_hash) {
+            self.record_effect_receipt(&receipt)?;
             if let Some(instance) = self.plan_instances.get_mut(&plan_id) {
                 if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
                     self.scheduler.push_plan(plan_id);
@@ -296,17 +326,10 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
+            self.record_effect_receipt(&receipt)?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
             self.scheduler.push_reducer(ReducerEvent { event });
             self.remember_receipt(receipt.intent_hash);
-            return Ok(());
-        }
-
-        if self.recent_receipt_index.contains(&receipt.intent_hash) {
-            log::warn!(
-                "late receipt {} ignored (already applied)",
-                format_intent_hash(&receipt.intent_hash)
-            );
             return Ok(());
         }
 
@@ -357,6 +380,45 @@ impl<S: Store + 'static> Kernel<S> {
         }
         self.recent_receipts.push_back(hash);
         self.recent_receipt_index.insert(hash);
+    }
+
+    fn append_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
+        let bytes = serde_cbor::to_vec(&record)
+            .map_err(|err| KernelError::Journal(err.to_string()))?;
+        self.journal
+            .append(JournalEntry::new(record.kind(), &bytes))?;
+        Ok(())
+    }
+
+    fn record_domain_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+        let record = JournalRecord::DomainEvent(DomainEventRecord {
+            schema: event.schema.clone(),
+            value: event.value.clone(),
+        });
+        self.append_record(record)
+    }
+
+    fn record_effect_intent(&mut self, intent: &EffectIntent) -> Result<(), KernelError> {
+        let record = JournalRecord::EffectIntent(EffectIntentRecord {
+            intent_hash: intent.intent_hash,
+            kind: intent.kind.as_str().to_string(),
+            cap_name: intent.cap_name.clone(),
+            params_cbor: intent.params_cbor.clone(),
+            idempotency_key: intent.idempotency_key,
+        });
+        self.append_record(record)
+    }
+
+    fn record_effect_receipt(&mut self, receipt: &EffectReceipt) -> Result<(), KernelError> {
+        let record = JournalRecord::EffectReceipt(EffectReceiptRecord {
+            intent_hash: receipt.intent_hash,
+            adapter_id: receipt.adapter_id.clone(),
+            status: receipt.status.clone(),
+            payload_cbor: receipt.payload_cbor.clone(),
+            cost_cents: receipt.cost_cents,
+            signature: receipt.signature.clone(),
+        });
+        self.append_record(record)
     }
 }
 
