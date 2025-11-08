@@ -6,6 +6,7 @@ pub mod error;
 pub mod event;
 pub mod manifest;
 pub mod plan;
+pub mod policy;
 pub mod receipts;
 pub mod reducer;
 pub mod scheduler;

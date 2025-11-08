@@ -8,12 +8,13 @@ use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
 use serde_cbor;
 
-use crate::capability::{AllowAllPolicy, CapabilityResolver};
+use crate::capability::CapabilityResolver;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
+use crate::policy::AllowAllPolicy;
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};

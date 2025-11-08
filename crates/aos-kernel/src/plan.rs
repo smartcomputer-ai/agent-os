@@ -360,7 +360,8 @@ fn expr_value_to_domain_event(value: ExprValue) -> Result<DomainEvent, KernelErr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::{AllowAllPolicy, CapabilityResolver};
+    use crate::capability::CapabilityResolver;
+    use crate::policy::AllowAllPolicy;
     use aos_air_types::{
         CapType, EffectKind, Expr, ExprConst, PlanBindEffect, PlanStep, PlanStepEmitEffect,
         PlanStepEnd, PlanStepKind,

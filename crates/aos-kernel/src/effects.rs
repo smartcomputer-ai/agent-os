@@ -2,7 +2,8 @@ use aos_air_types::EffectKind;
 use aos_effects::{EffectIntent, EffectKind as RuntimeEffectKind, EffectSource};
 use aos_wasm_abi::ReducerEffect;
 
-use crate::capability::{AllowAllPolicy, CapabilityResolver, PolicyGate};
+use crate::capability::CapabilityResolver;
+use crate::policy::{AllowAllPolicy, PolicyGate};
 use crate::error::KernelError;
 
 #[derive(Default)]
