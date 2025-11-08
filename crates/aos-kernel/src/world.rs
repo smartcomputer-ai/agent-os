@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{Manifest, Name};
-use aos_cbor::Hash as DigestHash;
+use aos_cbor::{Hash, Hash as DigestHash};
 use aos_effects::{EffectIntent, EffectReceipt, EffectKind};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
@@ -16,18 +16,20 @@ use crate::event::{KernelEvent, ReducerEvent};
 use crate::journal::mem::MemJournal;
 use crate::journal::{
     IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, DomainEventRecord,
-    EffectIntentRecord, EffectReceiptRecord, OwnedJournalEntry,
+    EffectIntentRecord, EffectReceiptRecord, OwnedJournalEntry, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
 use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
+use crate::snapshot::{KernelSnapshot, receipts_to_vecdeque};
 use crate::scheduler::{Scheduler, Task};
 
 const RECENT_RECEIPT_CACHE: usize = 512;
 
 pub struct Kernel<S: Store> {
+    store: Arc<S>,
     manifest: Manifest,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
     reducers: ReducerRegistry<S>,
@@ -122,6 +124,7 @@ impl<S: Store + 'static> Kernel<S> {
         };
 
         let mut kernel = Self {
+            store: store.clone(),
             manifest: loaded.manifest,
             module_defs: loaded.modules,
             reducers: ReducerRegistry::new(store)?,
@@ -247,13 +250,60 @@ impl<S: Store + 'static> Kernel<S> {
         self.effect_manager.drain()
     }
 
+    pub fn create_snapshot(&mut self) -> Result<(), KernelError> {
+        if !self.scheduler.is_empty()
+            || !self.plan_instances.is_empty()
+            || !self.pending_reducer_receipts.is_empty()
+            || !self.pending_receipts.is_empty()
+            || !self.waiting_events.is_empty()
+        {
+            return Err(KernelError::SnapshotUnavailable(
+                "pending work must drain before snapshot".into(),
+            ));
+        }
+        let height = self.journal.next_seq();
+        let reducer_state = self
+            .reducer_state
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let recent_receipts: Vec<[u8; 32]> = self.recent_receipts.iter().cloned().collect();
+        let snapshot = KernelSnapshot::new(height, reducer_state, recent_receipts);
+        let bytes = serde_cbor::to_vec(&snapshot)
+            .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
+        let hash = self.store.put_blob(&bytes)?;
+        self.append_record(JournalRecord::Snapshot(SnapshotRecord {
+            snapshot_ref: hash.to_hex(),
+            height,
+        }))?;
+        Ok(())
+    }
+
     fn replay_existing_entries(&mut self) -> Result<(), KernelError> {
         let entries = self.journal.load_from(0)?;
         if entries.is_empty() {
             return Ok(());
         }
+        let mut resume_seq = 0;
+        let mut latest_snapshot: Option<SnapshotRecord> = None;
+        for entry in &entries {
+            if matches!(entry.kind, JournalKind::Snapshot) {
+                let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
+                    .map_err(|err| KernelError::Journal(err.to_string()))?;
+                if let JournalRecord::Snapshot(snapshot) = record {
+                    latest_snapshot = Some(snapshot);
+                }
+            }
+        }
+        if let Some(snapshot) = latest_snapshot {
+            self.load_snapshot(&snapshot)?;
+            resume_seq = snapshot.height;
+        }
         self.suppress_journal = true;
         for entry in entries {
+            if entry.seq <= resume_seq {
+                continue;
+            }
             let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
                 .map_err(|err| KernelError::Journal(err.to_string()))?;
             self.apply_replay_record(record)?;
@@ -287,6 +337,29 @@ impl<S: Store + 'static> Kernel<S> {
             _ => {}
         }
         Ok(())
+    }
+
+    fn load_snapshot(&mut self, record: &SnapshotRecord) -> Result<(), KernelError> {
+        let hash = Hash::from_hex_str(&record.snapshot_ref)
+            .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
+        let bytes = self.store.get_blob(hash)?;
+        let snapshot: KernelSnapshot = serde_cbor::from_slice(&bytes)
+            .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
+        self.apply_snapshot(snapshot);
+        Ok(())
+    }
+
+    fn apply_snapshot(&mut self, snapshot: KernelSnapshot) {
+        let receipts = snapshot.recent_receipts().to_vec();
+        self.reducer_state = snapshot.into_reducer_state();
+        let (deque, set) = receipts_to_vecdeque(&receipts, RECENT_RECEIPT_CACHE);
+        self.recent_receipts = deque;
+        self.recent_receipt_index = set;
+        self.pending_reducer_receipts.clear();
+        self.pending_receipts.clear();
+        self.plan_instances.clear();
+        self.waiting_events.clear();
+        self.scheduler.clear();
     }
 
     fn restore_effect_intent(&mut self, record: EffectIntentRecord) -> Result<(), KernelError> {
@@ -437,6 +510,14 @@ impl<S: Store + 'static> Kernel<S> {
             self.record_domain_event(&event)?;
             self.scheduler.push_reducer(ReducerEvent { event });
             self.remember_receipt(receipt.intent_hash);
+            return Ok(());
+        }
+
+        if self.suppress_journal {
+            log::warn!(
+                "receipt {} ignored during replay (no pending context)",
+                format_intent_hash(&receipt.intent_hash)
+            );
             return Ok(());
         }
 

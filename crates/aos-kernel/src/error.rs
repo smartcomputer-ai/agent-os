@@ -49,6 +49,10 @@ pub enum KernelError {
     PolicyDenied { effect_kind: String, origin: String },
     #[error("journal error: {0}")]
     Journal(String),
+    #[error("snapshot unavailable: {0}")]
+    SnapshotUnavailable(String),
+    #[error("snapshot decode error: {0}")]
+    SnapshotDecode(String),
 }
 
 impl From<crate::journal::JournalError> for KernelError {

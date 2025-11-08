@@ -532,6 +532,53 @@ fn reducer_timer_receipt_replays_from_journal() {
     );
 }
 
+#[test]
+fn snapshot_replay_restores_state() {
+    fn build_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
+        let reducer = fixtures::stub_reducer_module(
+            store,
+            "com.acme/Simple@1",
+            &ReducerOutput {
+                state: Some(vec![0xAA]),
+                domain_events: vec![],
+                effects: vec![],
+                ann: None,
+            },
+        );
+        let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
+        fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)
+    }
+
+    let store = fixtures::new_mem_store();
+    let manifest = build_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world.tick_n(1).unwrap();
+
+    world.kernel.create_snapshot().unwrap();
+
+    let final_state = world
+        .kernel
+        .reducer_state("com.acme/Simple@1")
+        .cloned()
+        .unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+
+    let replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        build_manifest(&store),
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+
+    assert_eq!(
+        replay_world
+            .kernel
+            .reducer_state("com.acme/Simple@1"),
+        Some(&final_state)
+    );
+}
+
 /// Guards on plan edges should gate side-effects and completion state.
 #[test]
 fn guarded_plan_branches_control_effects() {

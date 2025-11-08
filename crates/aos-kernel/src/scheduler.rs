@@ -35,4 +35,8 @@ impl Scheduler {
     pub fn is_empty(&self) -> bool {
         self.queue.is_empty()
     }
+
+    pub fn clear(&mut self) {
+        self.queue.clear();
+    }
 }
