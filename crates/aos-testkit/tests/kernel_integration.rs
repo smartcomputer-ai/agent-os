@@ -106,6 +106,125 @@ fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
     )
 }
 
+fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
+    let result_module = fixtures::stub_reducer_module(
+        store,
+        "com.acme/EventResult@1",
+        &ReducerOutput {
+            state: Some(vec![0xAB]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+    let unblock_event = fixtures::domain_event(
+        "com.acme/Unblock@1",
+        &fixtures::plan_input_record(vec![]),
+    );
+    let unblock_emitter = fixtures::stub_event_emitting_reducer(
+        store,
+        "com.acme/UnblockEmitter@1",
+        vec![unblock_event],
+    );
+
+    let plan_name = "com.acme/WaitForEvent@1".to_string();
+    let plan = DefPlan {
+        name: plan_name.clone(),
+        input: fixtures::schema("com.acme/PlanIn@1"),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![
+            PlanStep {
+                id: "await".into(),
+                kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
+                    event: fixtures::schema("com.acme/Unblock@1"),
+                    where_clause: None,
+                    bind: PlanBind { var: "evt".into() },
+                }),
+            },
+            PlanStep {
+                id: "raise".into(),
+                kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
+                    reducer: result_module.name.clone(),
+                    key: None,
+                    event: Expr::Record(ExprRecord {
+                        record: IndexMap::from([
+                            (
+                                "$schema".into(),
+                                fixtures::text_expr("com.acme/EventDone@1"),
+                            ),
+                            ("value".into(), Expr::Const(ExprConst::Int { int: 5 })),
+                        ]),
+                    }),
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ],
+        edges: vec![
+            PlanEdge {
+                from: "await".into(),
+                to: "raise".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "raise".into(),
+                to: "end".into(),
+                when: None,
+            },
+        ],
+        required_caps: vec![],
+        allowed_effects: vec![],
+        invariants: vec![],
+    };
+
+    let routing = vec![
+        fixtures::routing_event("com.acme/EventDone@1", &result_module.name),
+        fixtures::routing_event("com.acme/EmitUnblock@1", &unblock_emitter.name),
+    ];
+    fixtures::build_loaded_manifest(
+        vec![plan],
+        vec![fixtures::start_trigger(&plan_name)],
+        vec![result_module, unblock_emitter],
+        routing,
+    )
+}
+
+fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
+    let timer_output = ReducerOutput {
+        state: Some(vec![0x01]),
+        domain_events: vec![],
+        effects: vec![ReducerEffect::new(
+            "timer.set",
+            serde_cbor::to_vec(&TimerSetParams {
+                deliver_at_ns: 5,
+                key: Some("retry".into()),
+            })
+            .unwrap(),
+        )],
+        ann: None,
+    };
+    let timer_emitter =
+        fixtures::stub_reducer_module(store, "com.acme/TimerEmitter@1", &timer_output);
+
+    let handler_output = ReducerOutput {
+        state: Some(vec![0xCC]),
+        domain_events: vec![],
+        effects: vec![],
+        ann: None,
+    };
+    let timer_handler =
+        fixtures::stub_reducer_module(store, "com.acme/TimerHandler@1", &handler_output);
+
+    let routing = vec![
+        fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
+        fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
+    ];
+    fixtures::build_loaded_manifest(vec![], vec![], vec![timer_emitter, timer_handler], routing)
+}
+
 /// Happy-path end-to-end: reducer emits an intent, plan does work, receipt feeds a result event
 /// back into the reducer. Mirrors the “single plan orchestration” pattern in the spec.
 #[test]
@@ -355,44 +474,8 @@ fn reducer_and_plan_effects_are_enqueued() {
 #[test]
 fn reducer_timer_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
-
-    let timer_output = ReducerOutput {
-        state: Some(vec![0x01]),
-        domain_events: vec![],
-        effects: vec![ReducerEffect::new(
-            "timer.set",
-            serde_cbor::to_vec(&TimerSetParams {
-                deliver_at_ns: 5,
-                key: Some("retry".into()),
-            })
-            .unwrap(),
-        )],
-        ann: None,
-    };
-    let timer_emitter =
-        fixtures::stub_reducer_module(&store, "com.acme/TimerEmitter@1", &timer_output);
-
-    let handler_output = ReducerOutput {
-        state: Some(vec![0xCC]),
-        domain_events: vec![],
-        effects: vec![],
-        ann: None,
-    };
-    let timer_handler =
-        fixtures::stub_reducer_module(&store, "com.acme/TimerHandler@1", &handler_output);
-
-    let routing = vec![
-        fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
-        fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
-    ];
-    let loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
-        vec![timer_emitter, timer_handler],
-        routing,
-    );
-
-    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    let manifest = timer_manifest(&store);
+    let mut world = TestWorld::with_store(store, manifest).unwrap();
     world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
     world.tick_n(1).unwrap();
 
@@ -454,41 +537,8 @@ fn reducer_timer_receipt_routes_event_to_handler() {
 
 #[test]
 fn reducer_timer_receipt_replays_from_journal() {
-    fn build_timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-        let timer_output = ReducerOutput {
-            state: Some(vec![0x01]),
-            domain_events: vec![],
-            effects: vec![ReducerEffect::new(
-                "timer.set",
-                serde_cbor::to_vec(&TimerSetParams {
-                    deliver_at_ns: 5,
-                    key: Some("retry".into()),
-                })
-                .unwrap(),
-            )],
-            ann: None,
-        };
-        let timer_emitter =
-            fixtures::stub_reducer_module(store, "com.acme/TimerEmitter@1", &timer_output);
-
-        let handler_output = ReducerOutput {
-            state: Some(vec![0xCC]),
-            domain_events: vec![],
-            effects: vec![],
-            ann: None,
-        };
-        let timer_handler =
-            fixtures::stub_reducer_module(store, "com.acme/TimerHandler@1", &handler_output);
-
-        let routing = vec![
-            fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
-            fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
-        ];
-        fixtures::build_loaded_manifest(vec![], vec![], vec![timer_emitter, timer_handler], routing)
-    }
-
     let store = fixtures::new_mem_store();
-    let manifest = build_timer_manifest(&store);
+    let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
     world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
     world.tick_n(1).unwrap();
@@ -516,10 +566,9 @@ fn reducer_timer_receipt_replays_from_journal() {
         .unwrap();
     let journal_entries = world.kernel.dump_journal().unwrap();
 
-    let replay_manifest = build_timer_manifest(&store);
     let replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        replay_manifest,
+        timer_manifest(&store),
         Box::new(MemJournal::from_entries(&journal_entries)),
     )
     .unwrap();
@@ -572,6 +621,82 @@ fn plan_snapshot_resumes_after_receipt() {
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
         Some(&vec![0xEE])
+    );
+}
+
+#[test]
+fn plan_snapshot_resumes_after_event() {
+    let store = fixtures::new_mem_store();
+    let manifest = await_event_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("evt".into()))]);
+    world.submit_event_value(START_SCHEMA, &input);
+    world.tick_n(1).unwrap();
+    world.tick_n(1).unwrap();
+
+    world.kernel.create_snapshot().unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        await_event_manifest(&store),
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+
+    let unblock = fixtures::plan_input_record(vec![]);
+    replay_world.submit_event_value("com.acme/EmitUnblock@1", &unblock);
+    replay_world.kernel.tick_until_idle().unwrap();
+
+    assert_eq!(
+        replay_world.kernel.reducer_state("com.acme/EventResult@1"),
+        Some(&vec![0xAB])
+    );
+}
+
+#[test]
+fn reducer_timer_snapshot_resumes_on_receipt() {
+    let store = fixtures::new_mem_store();
+    let manifest = timer_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world.tick_n(1).unwrap();
+
+    let effect = world
+        .drain_effects()
+        .pop()
+        .expect("expected timer effect before snapshot");
+
+    world.kernel.create_snapshot().unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        timer_manifest(&store),
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+
+    let receipt = EffectReceipt {
+        intent_hash: effect.intent_hash,
+        adapter_id: "adapter.timer".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
+            delivered_at_ns: 10,
+            key: Some("retry".into()),
+        })
+        .unwrap(),
+        cost_cents: Some(1),
+        signature: vec![1, 2, 3],
+    };
+    replay_world.kernel.handle_receipt(receipt).unwrap();
+    replay_world.tick_n(2).unwrap();
+
+    assert_eq!(
+        replay_world.kernel.reducer_state("com.acme/TimerHandler@1"),
+        Some(&vec![0xCC])
     );
 }
 

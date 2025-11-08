@@ -42,6 +42,11 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
   - Build a replay loader that rehydrates manifests, reducer states, queued plans, and pending receipts; verify idempotent processing of duplicate/late receipts using the logical height fence.
   - Extend WP1 scenarios to run twice: first to generate journal + snapshot artifacts, then to replay from genesis and assert byte-identical reducer states and queues.
 - **Deliverables**: Journal writer/reader modules, snapshot serializer, replay harness with automated tests proving deterministic replays and proper handling of truncated/corrupt segments.
+- **Current Gaps**:
+  - Replay ignores plan-origin `EffectIntent` records. Without snapshots we still can’t fully restore in-flight plans from the journal alone; the replay loader must hydrate pending plan receipts/events from those entries.
+  - Snapshot creation still rejects whenever plans or receipts are pending, even though the snapshot format now captures that state. We need either a deterministic drain before taking a snapshot or support for capturing live queues without error.
+- Snapshot coverage now includes plan event waits (`plan_snapshot_resumes_after_event`) and reducer micro-effects (`reducer_timer_snapshot_resumes_on_receipt`), but we still need an integration case that proves effect intent queues survive snapshot/restore.
+  - Restored effect intents bypass capability/policy checks; we should document/validate the intended semantics (e.g., intents recorded in the journal are treated as already authorized) and add guardrails/tests.
 
 ### WP5 – Governance Loop & CLI Wiring
 - **Goal**: Stand up the constitutional workflow (propose → shadow → approve → apply) and expose it through the CLI so control-plane changes follow the governed path.

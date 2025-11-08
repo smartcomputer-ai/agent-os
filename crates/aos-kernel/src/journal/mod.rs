@@ -71,7 +71,7 @@ pub struct EffectIntentRecord {
 #[serde(rename_all = "snake_case", tag = "origin_kind")]
 pub enum IntentOriginRecord {
     Reducer { name: String },
-    Plan { name: String },
+    Plan { name: String, plan_id: u64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -459,14 +459,16 @@ impl<S: Store + 'static> Kernel<S> {
                     .entry(intent.intent_hash)
                     .or_insert_with(|| ReducerEffectContext::new(name, effect_kind, params_cbor));
             }
-            IntentOriginRecord::Plan { .. } => {
-                // TODO: restore plan state once plan snapshots are journaled.
+            IntentOriginRecord::Plan { name: _, plan_id } => {
+                self.pending_receipts
+                    .entry(record.intent_hash)
+                    .or_insert(plan_id);
             }
         }
         Ok(())
     }
 
-    fn tick_until_idle(&mut self) -> Result<(), KernelError> {
+    pub fn tick_until_idle(&mut self) -> Result<(), KernelError> {
         while !self.scheduler.is_empty() {
             self.tick()?;
         }
@@ -532,6 +534,7 @@ impl<S: Store + 'static> Kernel<S> {
                     intent,
                     IntentOriginRecord::Plan {
                         name: plan_name.clone(),
+                        plan_id: id,
                     },
                 )?;
             }
