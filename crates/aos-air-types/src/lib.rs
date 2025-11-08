@@ -4,7 +4,9 @@ pub mod builtins;
 mod model;
 mod refs;
 pub mod schemas;
+pub mod typecheck;
 pub mod validate;
 
 pub use model::*;
 pub use refs::{HashRef, RefError, SchemaRef};
+pub use typecheck::{ValueTypeError, validate_value_literal};

@@ -47,6 +47,12 @@ pub enum KernelError {
     ModuleCapabilityMissing { module: String, cap: String },
     #[error("policy denied effect '{effect_kind}' from {origin}")]
     PolicyDenied { effect_kind: String, origin: String },
+    #[error("capability grant '{grant}' params do not match schema for '{cap}': {reason}")]
+    CapabilityParamInvalid {
+        grant: String,
+        cap: String,
+        reason: String,
+    },
     #[error("plan '{plan}' invariant #{index} failed")]
     PlanInvariantFailed { plan: String, index: usize },
     #[error("journal error: {0}")]

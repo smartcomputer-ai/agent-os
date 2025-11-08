@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use aos_air_types::{CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, ValueLiteral};
+use aos_air_types::{
+    CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, ValueLiteral, validate_value_literal,
+};
 use aos_cbor::to_canonical_cbor;
 use aos_effects::{CapabilityBudget, CapabilityGrant};
 
@@ -87,6 +89,13 @@ fn resolve_grant(
     let defcap = caps
         .get(&grant.cap)
         .ok_or_else(|| KernelError::CapabilityDefinitionNotFound(grant.cap.clone()))?;
+    validate_value_literal(&grant.params, &defcap.schema).map_err(|err| {
+        KernelError::CapabilityParamInvalid {
+            grant: grant.name.clone(),
+            cap: grant.cap.clone(),
+            reason: err.to_string(),
+        }
+    })?;
     let params_cbor = encode_value_literal(&grant.params)?;
     let capability_grant = CapabilityGrant {
         name: grant.name.clone(),
@@ -129,5 +138,95 @@ fn cap_type_as_str(cap_type: &CapType) -> &'static str {
         CapType::Blob => "blob",
         CapType::Timer => "timer",
         CapType::LlmBasic => "llm.basic",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aos_air_types::{
+        CapGrant, Manifest, ManifestDefaults, TypeExpr, TypePrimitive, TypeRecord, TypeSet,
+        ValueLiteral, ValueRecord, ValueSet, ValueText,
+    };
+    use indexmap::IndexMap;
+
+    fn text_literal(text: &str) -> ValueLiteral {
+        ValueLiteral::Text(ValueText { text: text.into() })
+    }
+
+    fn hosts_schema() -> TypeExpr {
+        TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([(
+                "hosts".into(),
+                TypeExpr::Set(TypeSet {
+                    set: Box::new(TypeExpr::Primitive(TypePrimitive::Text(
+                        aos_air_types::TypePrimitiveText {
+                            text: aos_air_types::EmptyObject {},
+                        },
+                    ))),
+                }),
+            )]),
+        })
+    }
+
+    fn manifest_with_grant(params: ValueLiteral) -> Manifest {
+        Manifest {
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            policies: vec![],
+            defaults: Some(ManifestDefaults {
+                policy: None,
+                cap_grants: vec![CapGrant {
+                    name: "http_cap".into(),
+                    cap: "sys/http.out@1".into(),
+                    params,
+                    expiry_ns: None,
+                    budget: None,
+                }],
+            }),
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        }
+    }
+
+    fn defcap() -> DefCap {
+        DefCap {
+            name: "sys/http.out@1".into(),
+            cap_type: CapType::HttpOut,
+            schema: hosts_schema(),
+        }
+    }
+
+    #[test]
+    fn capability_params_must_match_schema() {
+        let mut record = IndexMap::new();
+        record.insert(
+            "hosts".into(),
+            ValueLiteral::Set(ValueSet {
+                set: vec![text_literal("example.com")],
+            }),
+        );
+        let manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord { record }));
+        let caps = HashMap::from([("sys/http.out@1".into(), defcap())]);
+        assert!(CapabilityResolver::from_manifest(&manifest, &caps).is_ok());
+    }
+
+    #[test]
+    fn invalid_capability_params_error() {
+        let manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord {
+            record: IndexMap::new(),
+        }));
+        let caps = HashMap::from([("sys/http.out@1".into(), defcap())]);
+        let err = match CapabilityResolver::from_manifest(&manifest, &caps) {
+            Ok(_) => panic!("expected validation error"),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            KernelError::CapabilityParamInvalid { grant, .. } if grant == "http_cap"
+        ));
     }
 }
