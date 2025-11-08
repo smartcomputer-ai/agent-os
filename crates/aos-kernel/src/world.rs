@@ -8,6 +8,7 @@ use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
 use serde_cbor;
 
+use crate::capability::{AllowAllPolicy, CapabilityResolver};
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
@@ -80,6 +81,11 @@ impl<S: Store + 'static> Kernel<S> {
                 .or_insert_with(Vec::new)
                 .push(trigger.plan.clone());
         }
+        let capability_resolver =
+            CapabilityResolver::from_manifest(&loaded.manifest, &loaded.caps)?;
+        ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
+        ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
+
         Ok(Self {
             manifest: loaded.manifest,
             module_defs: loaded.modules,
@@ -94,7 +100,7 @@ impl<S: Store + 'static> Kernel<S> {
             recent_receipts: VecDeque::new(),
             recent_receipt_index: HashSet::new(),
             scheduler: Scheduler::default(),
-            effect_manager: EffectManager::new(),
+            effect_manager: EffectManager::new(capability_resolver, AllowAllPolicy),
             reducer_state: HashMap::new(),
         })
     }
@@ -164,7 +170,20 @@ impl<S: Store + 'static> Kernel<S> {
             self.scheduler.push_reducer(ReducerEvent { event });
         }
         for effect in &output.effects {
-            let hash = self.effect_manager.enqueue_reducer_effect(effect)?;
+            let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
+            let cap_name = self
+                .manifest
+                .module_bindings
+                .get(&reducer_name)
+                .and_then(|binding| binding.slots.get(&slot))
+                .ok_or_else(|| KernelError::CapabilityBindingMissing {
+                    reducer: reducer_name.clone(),
+                    slot: slot.clone(),
+                })?
+                .clone();
+            let hash =
+                self.effect_manager
+                    .enqueue_reducer_effect(&reducer_name, &cap_name, effect)?;
             self.pending_reducer_receipts.insert(
                 hash,
                 ReducerEffectContext::new(
@@ -330,6 +349,40 @@ fn format_intent_hash(hash: &[u8; 32]) -> String {
         .unwrap_or_else(|_| format!("{:?}", hash))
 }
 
+fn ensure_plan_capabilities(
+    plans: &HashMap<Name, aos_air_types::DefPlan>,
+    resolver: &CapabilityResolver,
+) -> Result<(), KernelError> {
+    for plan in plans.values() {
+        for cap in &plan.required_caps {
+            if !resolver.has_grant(cap) {
+                return Err(KernelError::PlanCapabilityMissing {
+                    plan: plan.name.clone(),
+                    cap: cap.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn ensure_module_capabilities(
+    manifest: &Manifest,
+    resolver: &CapabilityResolver,
+) -> Result<(), KernelError> {
+    for (module, binding) in &manifest.module_bindings {
+        for (_slot, cap) in &binding.slots {
+            if !resolver.has_grant(cap) {
+                return Err(KernelError::ModuleCapabilityMissing {
+                    module: module.clone(),
+                    cap: cap.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,10 +391,11 @@ mod tests {
     use crate::scheduler::Task;
     use aos_air_exec::Value as ExprValue;
     use aos_air_types::{
-        DefModule, DefPlan, EffectKind, Expr, ExprConst, ExprRecord, ExprRef, HashRef, Manifest,
-        ModuleAbi, ModuleKind, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-        PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
-        PlanStepKind, PlanStepRaiseEvent, Routing, RoutingEvent, SchemaRef, Trigger,
+        CapGrant, CapType, DefCap, DefModule, DefPlan, EffectKind, Expr, ExprConst, ExprRecord,
+        ExprRef, HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind,
+        NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
+        PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+        Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr, TypeRecord, ValueLiteral, ValueRecord,
     };
     use aos_effects::{
         EffectReceipt, ReceiptStatus,
@@ -417,7 +471,7 @@ mod tests {
                 inboxes: vec![],
             })
         };
-        let manifest = Manifest {
+        let mut manifest = Manifest {
             schemas: vec![],
             modules: module_refs,
             plans: plan_refs,
@@ -428,19 +482,91 @@ mod tests {
             routing,
             triggers,
         };
-        let modules_map = modules
+        let modules_map: HashMap<Name, DefModule> = modules
             .into_iter()
             .map(|module| (module.name.clone(), module))
             .collect();
-        let plans_map = plans
+        let plans_map: HashMap<Name, DefPlan> = plans
             .into_iter()
             .map(|plan| (plan.name.clone(), plan))
             .collect();
+        let caps = attach_test_capabilities(&mut manifest, modules_map.keys());
         LoadedManifest {
             manifest,
             modules: modules_map,
             plans: plans_map,
+            caps,
         }
+    }
+
+    fn attach_test_capabilities<'a, I>(manifest: &mut Manifest, modules: I) -> HashMap<Name, DefCap>
+    where
+        I: IntoIterator<Item = &'a Name>,
+    {
+        manifest.defaults = Some(ManifestDefaults {
+            policy: None,
+            cap_grants: vec![cap_http_grant(), timer_cap_grant()],
+        });
+        let mut bindings = IndexMap::new();
+        for module in modules {
+            bindings.insert(
+                module.clone(),
+                ModuleBinding {
+                    slots: IndexMap::from([("default".into(), "timer_cap".into())]),
+                },
+            );
+        }
+        manifest.module_bindings = bindings;
+        HashMap::from([
+            ("sys/http.out@1".into(), http_defcap()),
+            ("sys/timer@1".into(), timer_defcap()),
+        ])
+    }
+
+    fn cap_http_grant() -> CapGrant {
+        CapGrant {
+            name: "cap_http".into(),
+            cap: "sys/http.out@1".into(),
+            params: empty_value_literal(),
+            expiry_ns: None,
+            budget: None,
+        }
+    }
+
+    fn timer_cap_grant() -> CapGrant {
+        CapGrant {
+            name: "timer_cap".into(),
+            cap: "sys/timer@1".into(),
+            params: empty_value_literal(),
+            expiry_ns: None,
+            budget: None,
+        }
+    }
+
+    fn http_defcap() -> DefCap {
+        DefCap {
+            name: "sys/http.out@1".into(),
+            cap_type: CapType::HttpOut,
+            schema: TypeExpr::Record(TypeRecord {
+                record: IndexMap::new(),
+            }),
+        }
+    }
+
+    fn timer_defcap() -> DefCap {
+        DefCap {
+            name: "sys/timer@1".into(),
+            cap_type: CapType::Timer,
+            schema: TypeExpr::Record(TypeRecord {
+                record: IndexMap::new(),
+            }),
+        }
+    }
+
+    fn empty_value_literal() -> ValueLiteral {
+        ValueLiteral::Record(ValueRecord {
+            record: IndexMap::new(),
+        })
     }
 
     fn start_trigger(plan: &str) -> Trigger {
@@ -504,7 +630,7 @@ mod tests {
             invariants: vec![],
         };
 
-        let manifest = Manifest {
+        let mut manifest = Manifest {
             schemas: vec![],
             modules: vec![NamedRef {
                 name: module_def.name.clone(),
@@ -535,11 +661,12 @@ mod tests {
                 correlate_by: None,
             }],
         };
-
+        let caps = attach_test_capabilities(&mut manifest, [&module_def.name]);
         let loaded = LoadedManifest {
             manifest,
             modules: HashMap::from([(module_def.name.clone(), module_def)]),
             plans: HashMap::from([(plan_def.name.clone(), plan_def)]),
+            caps,
         };
 
         let mut kernel = Kernel::from_loaded_manifest(store, loaded).unwrap();
@@ -1032,6 +1159,7 @@ mod tests {
             manifest,
             modules: HashMap::new(),
             plans: HashMap::new(),
+            caps: HashMap::new(),
         };
         Kernel::from_loaded_manifest(Arc::new(MemStore::new()), loaded).unwrap()
     }

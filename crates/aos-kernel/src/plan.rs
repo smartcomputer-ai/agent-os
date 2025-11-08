@@ -141,8 +141,12 @@ impl PlanInstance {
                         })?;
                         let params_cbor = serde_cbor::to_vec(&value)
                             .map_err(|err| KernelError::Manifest(err.to_string()))?;
-                        let intent_hash =
-                            effects.enqueue_plan_effect(&emit.kind, &emit.cap, params_cbor)?;
+                        let intent_hash = effects.enqueue_plan_effect(
+                            &self.name,
+                            &emit.kind,
+                            &emit.cap,
+                            params_cbor,
+                        )?;
                         let handle = emit.bind.effect_id_as.clone();
                         self.effect_handles.insert(handle.clone(), intent_hash);
                         self.env
@@ -356,10 +360,12 @@ fn expr_value_to_domain_event(value: ExprValue) -> Result<DomainEvent, KernelErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::{AllowAllPolicy, CapabilityResolver};
     use aos_air_types::{
-        EffectKind, Expr, ExprConst, PlanBindEffect, PlanStep, PlanStepEmitEffect, PlanStepEnd,
-        PlanStepKind,
+        CapType, EffectKind, Expr, ExprConst, PlanBindEffect, PlanStep, PlanStepEmitEffect,
+        PlanStepEnd, PlanStepKind,
     };
+    use aos_effects::CapabilityGrant;
 
     fn base_plan(steps: Vec<PlanStep>) -> DefPlan {
         DefPlan {
@@ -379,6 +385,33 @@ mod tests {
         ExprValue::Record(IndexMap::new())
     }
 
+    fn test_effect_manager() -> EffectManager {
+        let grants = vec![
+            (
+                CapabilityGrant {
+                    name: "cap".into(),
+                    cap: "sys/http.out@1".into(),
+                    params_cbor: Vec::new(),
+                    expiry_ns: None,
+                    budget: None,
+                },
+                CapType::HttpOut,
+            ),
+            (
+                CapabilityGrant {
+                    name: "cap_http".into(),
+                    cap: "sys/http.out@1".into(),
+                    params_cbor: Vec::new(),
+                    expiry_ns: None,
+                    budget: None,
+                },
+                CapType::HttpOut,
+            ),
+        ];
+        let resolver = CapabilityResolver::from_runtime_grants(grants);
+        EffectManager::new(resolver, AllowAllPolicy)
+    }
+
     #[test]
     fn assign_step_updates_env() {
         let steps = vec![PlanStep {
@@ -391,7 +424,7 @@ mod tests {
             }),
         }];
         let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
-        let mut effects = EffectManager::new();
+        let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert!(outcome.completed);
         assert_eq!(plan.env.vars.get("answer").unwrap(), &ExprValue::Int(42));
@@ -413,7 +446,7 @@ mod tests {
             }),
         }];
         let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
-        let mut effects = EffectManager::new();
+        let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert!(outcome.completed);
         assert_eq!(effects.drain().len(), 1);
@@ -445,7 +478,7 @@ mod tests {
             },
         ];
         let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
-        let mut effects = EffectManager::new();
+        let mut effects = test_effect_manager();
         let first = plan.tick(&mut effects).unwrap();
         assert!(first.waiting_receipt.is_some());
         let hash = first.waiting_receipt.unwrap();
@@ -466,7 +499,7 @@ mod tests {
             }),
         }];
         let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
-        let mut effects = EffectManager::new();
+        let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
         let event = DomainEvent::new(
@@ -491,7 +524,7 @@ mod tests {
             when: Some(Expr::Const(ExprConst::Bool { bool: false })),
         });
         let mut instance = PlanInstance::new(1, plan, default_env());
-        let mut effects = EffectManager::new();
+        let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert!(!outcome.completed);
     }
@@ -517,7 +550,7 @@ mod tests {
             }),
         }];
         let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
-        let mut effects = EffectManager::new();
+        let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.raised_events.len(), 1);
         assert_eq!(outcome.raised_events[0].schema, "com.test/Evt@1");
