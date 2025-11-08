@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use aos_air_types::{AirNode, Manifest};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{
@@ -41,18 +42,33 @@ impl Proposal {
 #[derive(Debug, Default)]
 pub struct GovernanceManager {
     proposals: HashMap<u64, Proposal>,
+    next_id: u64,
 }
 
 impl GovernanceManager {
     pub fn new() -> Self {
         Self {
             proposals: HashMap::new(),
+            next_id: 0,
+        }
+    }
+
+    pub fn alloc_proposal_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    fn observe_proposal_id(&mut self, id: u64) {
+        if id >= self.next_id {
+            self.next_id = id + 1;
         }
     }
 
     pub fn apply_record(&mut self, record: &GovernanceRecord) {
         match record {
             GovernanceRecord::ProposalSubmitted(submitted) => {
+                self.observe_proposal_id(submitted.proposal_id);
                 self.proposals
                     .entry(submitted.proposal_id)
                     .or_insert_with(|| Proposal::new(submitted));
@@ -70,6 +86,7 @@ impl GovernanceManager {
                 }
             }
             GovernanceRecord::ManifestApplied(applied) => {
+                self.observe_proposal_id(applied.proposal_id);
                 if let Some(proposal) = self.proposals.get_mut(&applied.proposal_id) {
                     proposal.state = ProposalState::Applied;
                 } else {
@@ -92,4 +109,11 @@ impl GovernanceManager {
     pub fn proposals(&self) -> &HashMap<u64, Proposal> {
         &self.proposals
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestPatch {
+    pub manifest: Manifest,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nodes: Vec<AirNode>,
 }

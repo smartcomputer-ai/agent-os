@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{Manifest, Name};
-use aos_cbor::{Hash, Hash as DigestHash};
+use aos_cbor::{to_canonical_cbor, Hash, Hash as DigestHash};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
@@ -13,13 +13,13 @@ use crate::capability::CapabilityResolver;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
-use crate::governance::GovernanceManager;
+use crate::governance::{GovernanceManager, ManifestPatch};
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
     DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, GovernanceRecord,
     IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, JournalSeq,
-    OwnedJournalEntry, SnapshotRecord,
+    OwnedJournalEntry, ProposalSubmittedRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
@@ -537,6 +537,31 @@ impl<S: Store + 'static> Kernel<S> {
 
     pub fn governance(&self) -> &GovernanceManager {
         &self.governance
+    }
+
+    pub fn submit_proposal(
+        &mut self,
+        patch: ManifestPatch,
+        description: Option<String>,
+    ) -> Result<u64, KernelError> {
+        let proposal_id = self.governance.alloc_proposal_id();
+
+        for node in &patch.nodes {
+            self.store.put_node(node)?;
+        }
+        self.store.put_node(&patch.manifest)?;
+
+        let patch_bytes = to_canonical_cbor(&patch)
+            .map_err(|err| KernelError::Manifest(format!("encode patch: {err}")))?;
+        let patch_hash = self.store.put_blob(&patch_bytes)?;
+        let record = GovernanceRecord::ProposalSubmitted(ProposalSubmittedRecord {
+            proposal_id,
+            description,
+            patch_hash: patch_hash.to_hex(),
+        });
+        self.append_record(JournalRecord::Governance(record.clone()))?;
+        self.governance.apply_record(&record);
+        Ok(proposal_id)
     }
 
     fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
