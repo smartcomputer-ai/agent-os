@@ -34,7 +34,7 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
   - Receipt conversion covers timer + blob events; integration tests in `policy_integration.rs` show reducers being denied while plans are allowed under the same policy.
   - Budgets/host-method constraints remain TODO pending broader design, but the scaffolding (RulePolicy + CapabilityResolver) makes that incremental.
 
-### WP4 – Journal & Outbox Persistence
+### WP4 – Journal & Outbox Persistence *(Completed)*
 - **Goal**: Implement the append-only journal and effect/receipt outbox so kernel state can be snapshotted and replayed deterministically (“replay-or-die”).
 - **Key Tasks**:
   - Define on-disk layout for journal segments, CAS blobs, and snapshots as described in `spec/02-architecture.md` (canonical CBOR entries, monotonic segment numbers, fenced receipts).
@@ -42,20 +42,18 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
   - Build a replay loader that rehydrates manifests, reducer states, queued plans, and pending receipts; verify idempotent processing of duplicate/late receipts using the logical height fence.
   - Extend WP1 scenarios to run twice: first to generate journal + snapshot artifacts, then to replay from genesis and assert byte-identical reducer states and queues.
 - **Deliverables**: Journal writer/reader modules, snapshot serializer, replay harness with automated tests proving deterministic replays and proper handling of truncated/corrupt segments.
-- **Current Gaps**:
-  - FsJournal now backs the on-disk journal path; next step is to harden it with stress/fuzz tests for partial segments, truncation, and corruption handling plus corresponding repair tooling.
+- **Delivered**: FsJournal-backed persistence, snapshot serialization via CAS blobs, replay loader with plan/reducer queue recovery, and integration tests covering journal-only rehydration, snapshot resume (including FsStore/FsJournal cold starts), and intent semantics.
+- **Notes**: Hardening (stress/fuzz) will be revisited later, but the core WP4 infrastructure is in place.
 
-- Recent additions: `plan_journal_replay_resumes_waiting_receipt` covers journal-only rehydration of plan intents, `snapshot_creation_quiesces_runtime` auto-drains the scheduler before snapshotting, `plan_snapshot_preserves_effect_queue` + `restored_effects_bypass_new_policy_checks` document the “already authorized” semantics for restored intents, and the timer/event/resume scenarios prove plan + reducer queues survive snapshots.
-
-### WP5 – Governance Loop & CLI Wiring
-- **Goal**: Stand up the constitutional workflow (propose → shadow → approve → apply) and expose it through the CLI so control-plane changes follow the governed path.
+### WP5 – Governance Loop Runtime
+- **Goal**: Implement the manifest governance pipeline (propose → shadow-run → approve → apply) inside the kernel so control-plane changes can be exercised and tested deterministically. CLI work will follow later once the runtime pieces are in place.
 - **Key Tasks**:
-  - Define journal events for ProposalSubmitted, ShadowRunCompleted, ApprovalRecorded, and PlanApplied; hook them into the kernel state machine.
-  - Implement a shadow-run executor that clones current state, reuses the plan/reducer harness with stubbed receipts, and records predicted effects/budgets/diffs for review.
-  - Add approval tracking and manifest switching logic so approved proposals atomically replace the active manifest, updating routing, module bindings, and cap grants.
-  - Extend `aos-cli` with commands: `proposal submit`, `proposal shadow`, `proposal approve`, `proposal apply`, plus inspection commands for predicted effects and required capabilities.
-  - Write integration tests that submit a manifest delta, run a shadow simulation, approve it, and verify routing/cap grants change only after `apply`.
-- **Deliverables**: Governance-state structures in the kernel, CLI plumbing, and end-to-end tests covering the happy path plus rejection/rollback scenarios.
+  - Add governance state tracking (proposals, lifecycle states, metadata) plus journal events for Proposed, ShadowRunCompleted, ApprovalRecorded, and ManifestApplied.
+  - Implement the shadow executor: clone current world state from the latest snapshot, drive representative test events through the proposed manifest delta via the deterministic harness with stubbed adapters, and record predicted intent/effect summaries (stop at the first await/receipt boundary rather than replaying the full journal).
+  - Wire approval/application logic so approved proposals atomically swap the active manifest (routing, cap grants, policies) and emit auditable journal entries.
+  - Provide a kernel API to submit manifest patches (new nodes or replacements) that reuses the existing AIR loader/validator before entering the governance pipeline.
+  - Add an end-to-end integration test (in `aos-testkit`) that submits a simple manifest delta, runs propose → shadow → approve → apply, and asserts the new reducer/plan is live afterward.
+- **Deliverables**: Kernel governance structures + journal events, shadow-run executor, manifest patch ingestion, and an integration test proving the loop works without any CLI.
 
 ## Dependencies & Suggested Order
 1. **WP1** lays the groundwork for deterministic integration tests used by all later packages.
