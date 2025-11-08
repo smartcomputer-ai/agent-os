@@ -45,7 +45,7 @@ Each package is scoped so an engineer can take it end-to-end. Tackle them roughl
 - **Current Gaps**:
   - Replay ignores plan-origin `EffectIntent` records. Without snapshots we still can’t fully restore in-flight plans from the journal alone; the replay loader must hydrate pending plan receipts/events from those entries.
   - Snapshot creation still rejects whenever plans or receipts are pending, even though the snapshot format now captures that state. We need either a deterministic drain before taking a snapshot or support for capturing live queues without error.
-- Snapshot coverage now includes plan event waits (`plan_snapshot_resumes_after_event`) and reducer micro-effects (`reducer_timer_snapshot_resumes_on_receipt`), but we still need an integration case that proves effect intent queues survive snapshot/restore.
+- Snapshot coverage now includes plan event waits (`plan_snapshot_resumes_after_event`), reducer micro-effects (`reducer_timer_snapshot_resumes_on_receipt`), and effect intent queues (`plan_snapshot_preserves_effect_queue`); remaining persistence gaps center on documenting intent-queue semantics and validating capability/policy bypass expectations.
   - Restored effect intents bypass capability/policy checks; we should document/validate the intended semantics (e.g., intents recorded in the journal are treated as already authorized) and add guardrails/tests.
 
 ### WP5 – Governance Loop & CLI Wiring

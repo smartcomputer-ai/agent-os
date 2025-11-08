@@ -337,7 +337,7 @@ fn single_plan_orchestration_completes_after_receipt() {
         signature: vec![],
     };
     world.kernel.handle_receipt(receipt).unwrap();
-    world.tick_n(3).unwrap();
+    world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/ResultReducer@1"),
@@ -368,7 +368,7 @@ fn journal_replay_restores_state() {
         signature: vec![],
     };
     world.kernel.handle_receipt(receipt).unwrap();
-    world.tick_n(3).unwrap();
+    world.kernel.tick_until_idle().unwrap();
 
     let final_state = world
         .kernel
@@ -614,7 +614,51 @@ fn plan_snapshot_resumes_after_receipt() {
         signature: vec![],
     };
     replay_world.kernel.handle_receipt(receipt).unwrap();
-    replay_world.tick_n(3).unwrap();
+    replay_world.kernel.tick_until_idle().unwrap();
+
+    assert_eq!(
+        replay_world
+            .kernel
+            .reducer_state("com.acme/ResultReducer@1"),
+        Some(&vec![0xEE])
+    );
+}
+
+#[test]
+fn plan_snapshot_preserves_effect_queue() {
+    let store = fixtures::new_mem_store();
+    let manifest = fulfillment_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
+    world.submit_event_value(START_SCHEMA, &input);
+    world.tick_n(2).unwrap();
+
+    world.kernel.create_snapshot().unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        fulfillment_manifest(&store),
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+
+    let mut intents = replay_world.drain_effects();
+    assert_eq!(intents.len(), 1, "effect queue should persist across snapshot");
+    let effect = intents.remove(0);
+
+    let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
+    let receipt = EffectReceipt {
+        intent_hash: effect.intent_hash,
+        adapter_id: "adapter.http".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: receipt_payload,
+        cost_cents: None,
+        signature: vec![],
+    };
+    replay_world.kernel.handle_receipt(receipt).unwrap();
+    replay_world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(
         replay_world
@@ -1119,7 +1163,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
     assert_eq!(effect_params_text(&second_intent), "after_receipt");
 
     world.submit_event_value("com.acme/PulseNext@1", &fixtures::plan_input_record(vec![]));
-    world.tick_n(3).unwrap();
+    world.kernel.tick_until_idle().unwrap();
 
     let mut after_event_effects = world.drain_effects();
     assert_eq!(after_event_effects.len(), 1);
@@ -1267,7 +1311,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         "com.acme/TriggerReady@1",
         &fixtures::plan_input_record(vec![]),
     );
-    world.tick_n(3).unwrap();
+    world.kernel.tick_until_idle().unwrap();
     let mut effects = world.drain_effects();
     assert_eq!(effects.len(), 1);
     assert_eq!(effect_params_text(&effects.remove(0)), "ready");
@@ -1276,7 +1320,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         "com.acme/TriggerOther@1",
         &fixtures::plan_input_record(vec![]),
     );
-    world.tick_n(3).unwrap();
+    world.kernel.tick_until_idle().unwrap();
     let mut more_effects = world.drain_effects();
     assert_eq!(more_effects.len(), 1);
     assert_eq!(effect_params_text(&more_effects.remove(0)), "other");
@@ -1343,7 +1387,7 @@ fn raised_events_are_routed_to_reducers() {
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
-    world.tick_n(3).unwrap();
+    world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/Reducer@1"),
