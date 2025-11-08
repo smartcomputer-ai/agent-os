@@ -18,6 +18,7 @@ pub enum JournalKind {
     EffectReceipt,
     Snapshot,
     PolicyDecision,
+    Governance,
     Custom,
 }
 
@@ -32,6 +33,7 @@ pub enum JournalRecord {
     EffectReceipt(EffectReceiptRecord),
     PolicyDecision(PolicyDecisionRecord),
     Snapshot(SnapshotRecord),
+    Governance(GovernanceRecord),
     Custom(CustomRecord),
 }
 
@@ -43,6 +45,7 @@ impl JournalRecord {
             JournalRecord::EffectReceipt(_) => JournalKind::EffectReceipt,
             JournalRecord::PolicyDecision(_) => JournalKind::PolicyDecision,
             JournalRecord::Snapshot(_) => JournalKind::Snapshot,
+            JournalRecord::Governance(_) => JournalKind::Governance,
             JournalRecord::Custom(_) => JournalKind::Custom,
         }
     }
@@ -108,6 +111,40 @@ pub struct SnapshotRecord {
     pub snapshot_ref: String,
     /// Logical height the snapshot represents (number of events applied).
     pub height: JournalSeq,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum GovernanceRecord {
+    ProposalSubmitted(ProposalSubmittedRecord),
+    ShadowRunCompleted(ShadowRunCompletedRecord),
+    ProposalApproved(ProposalApprovedRecord),
+    ManifestApplied(ManifestAppliedRecord),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProposalSubmittedRecord {
+    pub proposal_id: u64,
+    pub description: Option<String>,
+    pub patch_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ShadowRunCompletedRecord {
+    pub proposal_id: u64,
+    #[serde(with = "serde_bytes")]
+    pub summary: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProposalApprovedRecord {
+    pub proposal_id: u64,
+    pub approver: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManifestAppliedRecord {
+    pub proposal_id: u64,
+    pub manifest_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

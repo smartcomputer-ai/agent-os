@@ -13,11 +13,13 @@ use crate::capability::CapabilityResolver;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
+use crate::governance::GovernanceManager;
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
-    DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, IntentOriginRecord, Journal,
-    JournalEntry, JournalKind, JournalRecord, JournalSeq, OwnedJournalEntry, SnapshotRecord,
+    DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, GovernanceRecord,
+    IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, JournalSeq,
+    OwnedJournalEntry, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry};
@@ -51,6 +53,7 @@ pub struct Kernel<S: Store> {
     reducer_state: HashMap<Name, Vec<u8>>,
     journal: Box<dyn Journal>,
     suppress_journal: bool,
+    governance: GovernanceManager,
 }
 
 pub struct KernelBuilder<S: Store> {
@@ -155,6 +158,7 @@ impl<S: Store + 'static> Kernel<S> {
             reducer_state: HashMap::new(),
             journal,
             suppress_journal: false,
+            governance: GovernanceManager::new(),
         };
         kernel.replay_existing_entries()?;
         Ok(kernel)
@@ -382,6 +386,9 @@ impl<S: Store + 'static> Kernel<S> {
                 self.handle_receipt(receipt)?;
                 self.tick_until_idle()?;
             }
+            JournalRecord::Governance(record) => {
+                self.governance.apply_record(&record);
+            }
             _ => {}
         }
         Ok(())
@@ -526,6 +533,10 @@ impl<S: Store + 'static> Kernel<S> {
 
     pub fn dump_journal(&self) -> Result<Vec<OwnedJournalEntry>, KernelError> {
         Ok(self.journal.load_from(0)?)
+    }
+
+    pub fn governance(&self) -> &GovernanceManager {
+        &self.governance
     }
 
     fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
