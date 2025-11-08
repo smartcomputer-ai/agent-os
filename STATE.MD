@@ -1,35 +1,30 @@
 # AgentOS Dev State – November 2025
 
-## Recently Completed
-- **Core primitives**: `aos-cbor`, `aos-air-types`, `aos-store` fully working (canonical CBOR, AIR schema models/validation, CAS backends, manifest loader).
-- **Expression runtime**: `aos-air-exec` evaluator/value model covers all Expr ops with good tests.
-- **Effects layer**: `aos-effects` now has effect kinds/intents/receipts, capability grants/budgets, adapter/policy traits, and typed structs for built-ins.
-- **WASM stack**: `aos-wasm-abi` canonical IO envelopes; `aos-wasm` deterministic Wasmtime runner with tests.
-- **Kernel**:
-  - Reducer loop wired to manifest loader, reducer registry/cache, scheduler, effect queue, reducer state tracking.
-  - Plan runtime v1: manifest triggers start plan instances; steps support `assign`, `emit_effect`, `await_receipt`, `await_event`, `raise_event`, `end`. Plans track effect handles, park on receipts/events, resume on delivery, and raise events back to reducers.
-  - Scheduler multiplexes reducer events and plan ticks; effect manager returns intent hashes for receipt routing; kernel handles receipts for both reducers (future) and plans.
-  - Tests cover reducer → plan → effect pipeline with receipt handling.
+## Current Focus: Kernel Testing & Remaining Work
 
-## Current Gaps / TODOs
-- **Plan DAG semantics**: edges/guards are not evaluated; we currently execute steps sequentially. Need a per-step readiness model honoring predecessors + `edges[].when` expressions.
-- **Capability/policy/budget enforcement**: still stubbed; effect emission always allowed.
-- **Reducer receipt delivery**: plan side implemented, reducer micro-effects (timer/blob) still need receipt-to-event plumbing.
-- **Journal/outbox**: no persistent journal yet; world state/effects are in-memory only.
+### Tests in place (unit level)
+- `crates/aos-kernel/src/plan.rs` now has unit tests for:
+  - Assign steps updating the environment.
+  - Emit effect steps enqueueing intents and storing effect handles.
+  - Await receipt waiting/resuming behavior (hash mapping, deliver_receipt handshake).
+  - Await event waiting on schemas and resuming on DomainEvents.
+  - Guards blocking downstream steps when false.
+  - Raise event producing DomainEvents.
+- `crates/aos-kernel/src/world.rs` still only has the original smoke test covering reducer → plan → effect happy path. No integration tests exist yet for receipts, waiting events, or reducer receipt handling.
 
-## Immediate Next Steps
-1. **Plan edges/guards**
-   - Track predecessor completion and evaluate guard expressions before scheduling steps, so branching matches AIR spec.
-   - Honor `end.result` schema (validate output expression).
-2. **Reducer receipt events**
-   - Convert micro-effect receipts into DomainEvents and deliver to reducers, mirroring the plan receipt flow.
-3. **Capability/policy enforcement** (after above)
-   - Integrate Cap/Policy gates + budget tracking across reducers/plans.
+### Tests to add next (integration level)
+1. **Plan receipt routing**: plan emits effect, waits, adapter receipt via `Kernel::handle_receipt` resumes the plan; verify bind var populated, pending_receipts cleared.
+2. **Plan event wake-up**: multiple plan instances waiting on different schemas; deliver DomainEvent matching one schema and ensure only that plan is re-queued/run.
+3. **Reducer receipt delivery**: (once reducer micro-effect receipt flow is implemented) convert receipts into DomainEvents for reducers.
+4. **Guarded branching end-to-end**: manifest plan with guard false vs true; assert effect queue outcomes and plan completion.
+5. **Raised event propagation**: plan raises an event that is routed to reducers via scheduler.
 
-## Medium-Term Plan
-- Add journaling/snapshots for deterministic replay and persistence.
-- Expand adapter integration + CLI for running worlds, dispatching effects, ingesting receipts.
-- Flesh out governance loop once runtime spine is stable.
-- Iterate towards plan v1.1 features once v1.0 semantics are fully covered.
+Plan is to create helper builders (reducer module, manifest with plan, plan inputs) so tests stay concise. Tests should live either alongside `world.rs` (current module) or under `crates/aos-kernel/tests/` if they grow.
 
-Keep this file updated as each milestone lands.
+### After integration tests
+1. **Reducer receipt handling** – convert micro-effect receipts into reducer DomainEvents.
+2. **Capability/policy enforcement** – integrate Cap/Policy gates and budget tracking.
+3. **Journal/outbox** – persist events/effects for replay.
+4. **Governance loop & CLI integration** – once runtime is stable.
+
+Keep this file in sync as each milestone lands.
