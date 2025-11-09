@@ -37,10 +37,6 @@ Start here:
 
 For implementation guidance, project structure, and coding conventions, see **[AGENTS.md](AGENTS.md)**.
 
-## License
-
-Sure — here’s a concise, professional paragraph you can drop straight into your **README.md** under a `## License` heading.
-
 
 ## License
 
