@@ -17,11 +17,12 @@ This file provides guidance to coding agents when working with code in this repo
 3. **spec/03-air.md** - **CRITICAL**: Complete AIR v1 spec (schemas, modules, plans, capabilities, policies)
 4. **spec/04-reducers.md** - Reducer semantics, ABI, relationship to plans
 5. **spec/07-workflow-patterns.md** - How to coordinate complex workflows (patterns, compensations, retries)
-6. **spec/05-cells.md** - Keyed reducers (v1.1)
-8. **spec/06-parallelism.md** - Future direction (deferred)
-9. **spec/10-air-implementation.md** - Rust implementation guide with code skeletons
+6. **spec/05-cells.md** - Keyed reducers (v1.1+, deferred)
+7. **spec/06-parallelism.md** - Future direction (deferred)
 
-**spec/schemas/** - JSON Schemas for AIR node validation
+**spec/schemas/** - JSON Schemas for AIR node validation (common.schema.json, defplan.schema.json, etc.)
+**spec/defs/** - Built-in schemas (Timer, Blob, HTTP, LLM effect params/receipts)
+**spec/patch.md** - Historical: v1 design notes for JSON lenses, ExprOrValue, and built-ins (now integrated into main specs)
 
 ## Core Architecture (TL;DR)
 
@@ -54,19 +55,18 @@ This file provides guidance to coding agents when working with code in this repo
 4. Minimal trusted base
 5. Content-addressed, portable worlds
 
-## Authoring Notes (v1 updates)
-
-- AIR text now has **two JSON lenses**. Author in schema-directed sugar (plain JSON) or tagged canonical form (`{"nat":42}` etc.); the loader accepts both, canonicalizes to CBOR, and hashes with the schema hash. Use canonical lens when building automated diffs/patches.
-- Plans gained `ExprOrValue` in literal-heavy slots (`emit_effect.params`, `raise_event.event`, `assign.expr`, `end.result`). Supplying a plain JSON value is fine; guards/predicates still use full `Expr`.
-- HTTP and LLM effect schemas are now first-class built-ins under `spec/defs/builtin-schemas.air.json`, matching the catalog described in spec/03-air.md §7. Use those schema refs (e.g., `sys/HttpRequestParams@1`) instead of ad-hoc copies.
-
 ## Implementation Path (if building)
-
-See **spec/03b-air-implementation.md** for detailed Rust implementation guide.
 
 **Build order**: CBOR+hashing → store/loader → validator → WASM runner → effect manager → plan executor → governance loop → shadow-run
 
 **Testing invariant**: "Replay-or-die" - replay from genesis must produce byte-identical snapshots.
+
+**Key implementation notes**:
+- Loader must accept both JSON lenses (authoring sugar and canonical JSON), validate against schemas, and emit canonical CBOR
+- Validator enforces semantic checks: DAG acyclicity, capability bindings, policy compliance, effect allowlists
+- Plan executor evaluates expressions, guards edges, awaits receipts deterministically
+- Effect manager routes intents through policy gates, invokes adapters, validates receipt signatures
+- See `spec/02-architecture.md` for runtime components and `spec/03-air.md` for AIR semantics
 
 ## Project Structure (Rust Workspace)
 
@@ -101,31 +101,6 @@ Optional adapters (planned as separate crates):
 - Replay-or-die: for kernel/plan tests, run once to produce a journal, then replay from genesis and assert byte-identical snapshots.
 - Async tests: if needed, use `#[tokio::test(flavor = "current_thread")]` to keep scheduling deterministic.
 
-Example unit test layout (in-file):
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn to_canonical_cbor_is_stable() {
-        let bytes1 = to_canonical_cbor(&serde_json::json!({"a":1,"b":2})).unwrap();
-        let bytes2 = to_canonical_cbor(&serde_json::json!({"b":2,"a":1})).unwrap();
-        assert_eq!(bytes1, bytes2);
-    }
-}
-```
-
-Example integration test (under `tests/`):
-
-```rust
-#[test]
-fn replay_is_byte_identical() {
-    // arrange: build a tiny world with testkit
-    // act: run plan once (adapters stubbed), persist journal
-    // assert: replay from genesis yields identical snapshot bytes
-}
 ```
 
 ## Keeping Documentation Updated
