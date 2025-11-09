@@ -369,10 +369,7 @@ fn expr_or_value_accepts_full_expr_trees() {
         "required_caps": ["cap_http"],
         "allowed_effects": ["http.request"]
     });
-    // Skip JSON Schema validation here because the current `ExprOrValue` schema
-    // uses `oneOf` between `Expr` and the unrestricted `Value` type, which makes
-    // expression objects fail validation (they match both branches). This test
-    // exercises the loader path directly to ensure expressions still pass through.
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
     normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).expect("normalize");
     let crate::PlanStepKind::Assign(assign) = &plan.steps[0].kind else {

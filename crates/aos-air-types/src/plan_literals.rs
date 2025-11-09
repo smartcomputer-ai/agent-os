@@ -675,7 +675,9 @@ fn normalize_raise_event_literal(
 mod tests {
     use super::*;
     use crate::builtins::builtin_schemas;
-    use serde_json::json;
+    use crate::{TypePrimitiveInt, TypePrimitiveNat, TypePrimitiveText, TypePrimitiveUuid};
+    use aos_cbor::{to_canonical_cbor, Hash};
+    use serde_json::{Value, json};
 
     fn schema_index() -> SchemaIndex {
         let mut map = HashMap::new();
@@ -810,5 +812,119 @@ mod tests {
 
         let err = normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).unwrap_err();
         assert!(matches!(err, PlanLiteralError::ReducerNotFound { .. }));
+    }
+
+    fn assert_sugar_and_tagged_equal(schema: TypeExpr, sugar: Value, tagged: Value) {
+        let schemas = SchemaIndex::new(HashMap::new());
+        let mut sugar_literal = parse_json_literal(&sugar, &schema, &schemas).expect("parse sugar");
+        canonicalize_literal(&mut sugar_literal, &schema, &schemas).expect("canonicalize sugar");
+
+        let mut tagged_literal: ValueLiteral =
+            serde_json::from_value(tagged).expect("tagged literal json");
+        canonicalize_literal(&mut tagged_literal, &schema, &schemas)
+            .expect("canonicalize tagged literal");
+
+        let sugar_bytes = to_canonical_cbor(&sugar_literal).expect("sugar cbor");
+        let tagged_bytes = to_canonical_cbor(&tagged_literal).expect("tagged cbor");
+        assert_eq!(sugar_bytes, tagged_bytes, "canonical CBOR mismatch");
+
+        let sugar_hash = Hash::of_cbor(&sugar_literal).expect("hash sugar");
+        let tagged_hash = Hash::of_cbor(&tagged_literal).expect("hash tagged");
+        assert_eq!(sugar_hash, tagged_hash, "value hash mismatch");
+    }
+
+    #[test]
+    fn sugar_text_literal_matches_tagged_literal() {
+        let schema = TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+            text: crate::EmptyObject::default(),
+        }));
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!("hello"),
+            json!({"text": "hello"}),
+        );
+    }
+
+    #[test]
+    fn sugar_stringified_int_matches_tagged_literal() {
+        let schema = TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
+            int: crate::EmptyObject::default(),
+        }));
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!("-42"),
+            json!({"int": -42}),
+        );
+    }
+
+    #[test]
+    fn sugar_set_dedupes_and_matches_tagged_literal() {
+        let schema = TypeExpr::Set(TypeSet {
+            set: Box::new(TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                text: crate::EmptyObject::default(),
+            }))),
+        });
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!(["beta", "alpha", "beta"]),
+            json!({"set": [{"text": "alpha"}, {"text": "beta"}]}),
+        );
+    }
+
+    #[test]
+    fn sugar_map_object_matches_tagged_literal() {
+        let schema = TypeExpr::Map(TypeMap {
+            map: TypeMapEntry {
+                key: TypeMapKey::Text(TypePrimitiveText {
+                    text: crate::EmptyObject::default(),
+                }),
+                value: Box::new(TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
+                    nat: crate::EmptyObject::default(),
+                }))),
+            },
+        });
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!({"b": 2, "a": "1"}),
+            json!({
+                "map": [
+                    {"key": {"text": "a"}, "value": {"nat": 1}},
+                    {"key": {"text": "b"}, "value": {"nat": 2}}
+                ]
+            }),
+        );
+    }
+
+    #[test]
+    fn sugar_map_tuple_form_matches_tagged_literal() {
+        let schema = TypeExpr::Map(TypeMap {
+            map: TypeMapEntry {
+                key: TypeMapKey::Uuid(TypePrimitiveUuid {
+                    uuid: crate::EmptyObject::default(),
+                }),
+                value: Box::new(TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
+                    nat: crate::EmptyObject::default(),
+                }))),
+            },
+        });
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!([
+                ["123e4567-e89b-12d3-a456-426614174000", 1],
+                ["223e4567-e89b-12d3-a456-426614174000", 2]
+            ]),
+            json!({
+                "map": [
+                    {
+                        "key": {"uuid": "123e4567-e89b-12d3-a456-426614174000"},
+                        "value": {"nat": 1}
+                    },
+                    {
+                        "key": {"uuid": "223e4567-e89b-12d3-a456-426614174000"},
+                        "value": {"nat": 2}
+                    }
+                ]
+            }),
+        );
     }
 }

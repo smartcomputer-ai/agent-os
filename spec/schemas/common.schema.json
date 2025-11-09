@@ -150,7 +150,7 @@
 
     "ExprOrValue": {
       "description": "Convenience union: either a full Expr tree or a plain Value literal interpreted by surrounding schema.",
-      "oneOf": [
+      "anyOf": [
         { "$ref": "#/$defs/Expr" },
         { "$ref": "#/$defs/Value" }
       ]
