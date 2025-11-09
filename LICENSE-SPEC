@@ -1,0 +1,34 @@
+AgentOS AIR and Schema Specifications
+=====================================
+
+Copyright (c) 2025 Smart Computer Co. and the AgentOS contributors
+
+Textual specifications, schemas, and diagrams describing the AIR format,
+schemas, and manifest semantics are licensed under the
+Creative Commons Attribution 4.0 International License (CC BY 4.0).
+
+You are free to share and adapt this material for any purpose, even
+commercially, provided you give appropriate credit, provide a link to
+the license, and indicate if changes were made.
+See: https://creativecommons.org/licenses/by/4.0/
+
+Patent Non-Assert
+-----------------
+To promote open implementations, each contributor to the AIR
+specification and its schemas grants a perpetual, worldwide,
+royalty-free, non-exclusive license to any patent claims that are
+necessarily infringed by implementing the normative portions of
+these specifications.
+
+This patent license applies only to implementations of the AIR
+specification as defined here; it does not grant rights for any
+other use of a contributor’s patents.
+
+If a contributor initiates or participates in a claim alleging that
+an implementation of this specification infringes a patent it owns
+or controls, this license and non-assert from that contributor
+terminate as of the date the claim is filed.
+
+The AgentOS name and logo are trademarks of the AgentOS project and
+may not be used to imply endorsement or certification except as
+permitted under published trademark guidelines.

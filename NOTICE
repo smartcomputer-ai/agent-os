@@ -1,0 +1,10 @@
+AgentOS – A deterministic substrate and runtime for agent systems
+Copyright (c) 2025 Smart Computer Co. and the AgentOS contributors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this work except in compliance with the License.
+You may obtain a copy at: http://www.apache.org/licenses/LICENSE-2.0
+
+This distribution includes code, documentation, and schemas contributed
+by independent developers under the same license. Individual source files
+may carry additional notices and attribution per Section 4(d) of the License.
