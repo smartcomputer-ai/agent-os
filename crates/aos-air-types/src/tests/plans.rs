@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::panic::{self, AssertUnwindSafe};
 
 use serde_json::json;
 
@@ -179,4 +180,84 @@ fn literal_without_local_schema_errors() {
         err,
         crate::plan_literals::PlanLiteralError::MissingSchema { .. }
     ));
+}
+
+#[test]
+fn plan_schema_accepts_all_step_kinds() {
+    let plan_json = json!({
+        "$kind": "defplan",
+        "name": "com.acme/Plan@2",
+        "input": "com.acme/Input@1",
+        "output": "com.acme/Result@1",
+        "locals": { "tmp": "com.acme/Text@1" },
+        "steps": [
+            { "id": "assign", "op": "assign", "expr": "hi", "bind": {"as": "tmp"} },
+            {
+                "id": "emit",
+                "op": "emit_effect",
+                "kind": "http.request",
+                "params": {
+                    "method": "POST",
+                    "url": "https://example.com/notify",
+                    "headers": {"x-test": "true"}
+                },
+                "cap": "cap_http",
+                "bind": {"effect_id_as": "req"}
+            },
+            {
+                "id": "await_receipt",
+                "op": "await_receipt",
+                "for": {"ref": "@step:emit"},
+                "bind": {"as": "receipt"}
+            },
+            {
+                "id": "await_event",
+                "op": "await_event",
+                "event": "sys/TimerFired@1",
+                "where": {"ref": "@plan.input.id"},
+                "bind": {"as": "fired"}
+            },
+            {
+                "id": "raise",
+                "op": "raise_event",
+                "reducer": "com.acme/Reducer@1",
+                "event": {"status": "ok"},
+                "key": {"ref": "@plan.input.id"}
+            },
+            { "id": "end", "op": "end" }
+        ],
+        "edges": [
+            {"from": "assign", "to": "emit"},
+            {"from": "emit", "to": "await_receipt"},
+            {"from": "await_receipt", "to": "await_event", "when": {"ref": "@var:receipt"}},
+            {"from": "await_event", "to": "raise"},
+            {"from": "raise", "to": "end"}
+        ],
+        "required_caps": ["cap_http"],
+        "allowed_effects": ["http.request"],
+        "invariants": [{"ref": "@plan.input.id"}]
+    });
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
+    let plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
+    assert_eq!(plan.steps.len(), 6);
+    assert_eq!(plan.edges.len(), 5);
+}
+
+#[test]
+fn await_event_without_bind_is_schema_error() {
+    let plan_json = json!({
+        "$kind": "defplan",
+        "name": "com.acme/Plan@bad",
+        "input": "com.acme/Input@1",
+        "steps": [
+            {
+                "id": "await_event",
+                "op": "await_event",
+                "event": "sys/TimerFired@1"
+            }
+        ]
+    });
+    assert!(
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(crate::schemas::DEFPLAN, &plan_json))).is_err()
+    );
 }
