@@ -456,7 +456,7 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 
 **end**: Complete the plan
 - `{ id, op:"end", result?:ExprOrValue }`
-- Must match output schema if provided
+- Must match output schema if provided. The runtime canonicalizes/validates this result against `plan.output` before persisting it, and the canonical value is appended to the journal as a `plan_result` record so operators/shadow runs can see exactly what a plan produced.
 
 ### Literals vs. Expressions (`ExprOrValue`)
 
@@ -472,6 +472,8 @@ Loaders may optionally lift literals into constant expressions internally so dia
 **Expr** is side‑effect‑free over a typed Value: constants; refs (`@plan.input`, `@var:name`, `@step:ID.field…`); operators `len|get|has|eq|ne|lt|le|gt|ge|and|or|not|concat|add|sub|mul|div|mod|starts_with|ends_with|contains`.
 
 **Predicates** are boolean Expr. Missing refs are errors (deterministic fail).
+
+**Await/invariant references**: Authoring tools and the kernel validator now statically ensure that `await_receipt.for` references an emitted handle (`@var:<handle>`), that `await_event.where` predicates only reference declared locals/step outputs/plan input, and that plan `invariants[]` never reference `@event` or undeclared symbols. These checks surface manifest issues during validation rather than at runtime.
 
 ### Guards (Edge Predicates)
 
@@ -519,7 +521,7 @@ The kernel validator enforces these semantic checks:
 
 **defmodule**: `wasm_hash` present; referenced schemas exist; `effects_emitted`/`cap_slots` (if present) are well‑formed.
 
-**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `emit_effect.kind` ∈ `allowed_effects`; `emit_effect.cap` ∈ `required_caps` or defaults; `await_receipt.for` references earlier emit; `raise_event.event` must evaluate to a value conforming to a declared schema; if the target reducer is keyed (by routing or by `key_schema`), `raise_event.key` is required and must typecheck to that key schema; if `await_event` present, `event` must be a known schema; `end.result` matches output schema.
+**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `emit_effect.kind` ∈ `allowed_effects`; `emit_effect.cap` ∈ `required_caps` or defaults; `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.event` must evaluate to a value conforming to a declared schema (and keyed reducers require matching keys); invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
 
 **defpolicy**: Rule shapes valid; referenced effect kinds known.
 
@@ -565,11 +567,14 @@ The journal records both design-time (governance) and runtime (execution) events
 
 ### Plan and Effect Lifecycle (Runtime)
 
-- **PlanStarted** `{ plan_name, instance_id, input_hash }`
-- **EffectQueued** `{ instance_id, intent_hash, origin_kind, origin_name }`
-- **PolicyDecisionRecorded** `{ intent_hash, policy_name, rule_index, decision }`
-- **ReceiptAppended** `{ intent_hash, status, receipt_ref }`
-- **PlanEnded** `{ instance_id, status:"ok"|"error", result_ref? }`
+Runtime journal entries are canonical CBOR enums; the important ones for AIR plans are:
+
+- **DomainEvent** `{ schema, value, key? }` – emitted by reducers or plan raise_event; replay feeds reducers and triggers.
+- **EffectIntent** `{ intent_hash, kind, cap_name, params_cbor, idempotency_key, origin }` – queued effects from reducers and plans.
+- **EffectReceipt** `{ intent_hash, adapter_id, status, payload_cbor, cost_cents?, signature }` – adapters’ signed receipts; replay reproduces plan/resume behavior.
+- **PlanResult** `{ plan_name, plan_id, output_schema, value_cbor }` – appended when an `end` step returns a value; shadow/governance tooling can surface outputs directly from the journal without re-running expressions.
+- **Snapshot** `{ snapshot_ref, height }` – pointer to CAS snapshot blob; enables fast replay.
+- **Governance** – proposal/shadow/approve/apply records (design-time control plane).
 
 ### Budget and Capability (Optional, for Observability)
 

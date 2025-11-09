@@ -481,6 +481,16 @@ Plan:
 
 ## Complex Scenarios
 
+### Runtime Enforcement & Visibility
+
+The runtime now enforces the schema boundaries described in spec/03-air.md at execution time:
+
+- `raise_event` payloads/keys are canonicalized against the reducer's declared schemas, and invalid payloads are rejected before journaling.
+- `await_receipt` and `await_event` references are validated when the manifest is loaded, so orchestration bugs (missing handles, typos in predicates) fail fast.
+- `end` step results are canonicalized against `plan.output`. When a plan returns a value, the kernel appends a `PlanResult` journal record capturing `{plan_name, plan_id, output_schema, value_cbor}` and caches recent results for operators/CLI tooling.
+
+**Operational impact**: governance reviewers and on-call engineers can now rely on the journal alone to answer “what did this plan produce?” without replaying expressions. Shadow runs also surface the same canonical outputs, making approval diffs clearer. If your workflow depends on downstream automation, use the recorded `PlanResult` entries instead of parsing reducer events.
+
 ### Compensations (Saga Pattern)
 
 Three approaches:

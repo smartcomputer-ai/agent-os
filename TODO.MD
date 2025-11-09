@@ -15,8 +15,9 @@
 5. **Manifest/Test Fixtures Schema Coverage**
    - `fixtures::build_loaded_manifest` now auto-registers placeholder schemas for plan inputs/outputs, triggers, reducer ABIs, and routing events so every helper manifest is schema-complete by default. Tests still opt-in with richer schema shapes via `insert_test_schemas`, but nothing ships without the references wired into the manifest catalog.
 
+6. **Governance/Journaling Docs Refresh**
+   - `spec/03-air.md` and `spec/05-workflows.md` now document the enforced schema boundaries, `PlanResult` journal entries, and how plan outputs become visible to governance/shadow tooling, closing the loop between runtime behavior and operator documentation.
+
 ## Upcoming Kernel/AIR Tasks (ordered by priority)
 
-1. **Governance/Journaling Docs Refresh (Med)**
-   - Gap: spec patches mention raise_event/cap validation, but `spec/03-air.md` and `spec/05-workflows.md` still need an explicit “runtime enforces schemas” callout in governance + journaling sections, and TODO should reference the new workflow.
-   - Why: keeps implementers and reviewers aware of the enforced boundaries and the audit story when reviewing manifests or plan diffs.
+_(Nothing queued — add the next kernel/AIR task above as it emerges.)_
