@@ -439,6 +439,7 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 **raise_event**: Publish an event to a reducer
 - `{ id, op:"raise_event", reducer:Name, key?:Expr, event:ExprOrValue }`
 - If target reducer is keyed, `key` is required and must typecheck to its key schema
+- The kernel infers the payload schema from the reducer's manifest entry and validates/canonicalizes the event (and optional key) before emitting, so authors should not embed `$schema` fields inside the payload.
 
 **emit_effect**: Request an external effect
 - `{ id, op:"emit_effect", kind:EffectKind, params:ExprOrValue, cap:CapGrantName, bind:{effect_id_as:VarName} }`

@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
 use aos_air_types::{
-    CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, ValueLiteral, validate_value_literal,
+    CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, TypeExpr, TypeList, TypeMap,
+    TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, validate_value_literal,
+    plan_literals::SchemaIndex,
 };
 use aos_cbor::to_canonical_cbor;
 use aos_effects::{CapabilityBudget, CapabilityGrant};
+use indexmap::IndexMap;
 
 use crate::error::KernelError;
 
@@ -67,6 +70,7 @@ impl CapabilityResolver {
     pub fn from_manifest(
         manifest: &Manifest,
         caps: &HashMap<Name, DefCap>,
+        schema_index: &SchemaIndex,
     ) -> Result<Self, KernelError> {
         let mut grants = HashMap::new();
         if let Some(defaults) = manifest.defaults.as_ref() {
@@ -74,7 +78,7 @@ impl CapabilityResolver {
                 if grants.contains_key(&grant.name) {
                     return Err(KernelError::DuplicateCapabilityGrant(grant.name.clone()));
                 }
-                let resolved = resolve_grant(grant, caps)?;
+                let resolved = resolve_grant(grant, caps, schema_index)?;
                 grants.insert(grant.name.clone(), resolved);
             }
         }
@@ -85,11 +89,13 @@ impl CapabilityResolver {
 fn resolve_grant(
     grant: &CapGrant,
     caps: &HashMap<Name, DefCap>,
+    schema_index: &SchemaIndex,
 ) -> Result<ResolvedGrant, KernelError> {
     let defcap = caps
         .get(&grant.cap)
         .ok_or_else(|| KernelError::CapabilityDefinitionNotFound(grant.cap.clone()))?;
-    validate_value_literal(&grant.params, &defcap.schema).map_err(|err| {
+    let expanded_schema = expand_cap_schema(&defcap.schema, schema_index, defcap.name.as_str())?;
+    validate_value_literal(&grant.params, &expanded_schema).map_err(|err| {
         KernelError::CapabilityParamInvalid {
             grant: grant.name.clone(),
             cap: grant.cap.clone(),
@@ -141,12 +147,65 @@ fn cap_type_as_str(cap_type: &CapType) -> &'static str {
     }
 }
 
+fn expand_cap_schema(
+    schema: &TypeExpr,
+    schema_index: &SchemaIndex,
+    context: &str,
+) -> Result<TypeExpr, KernelError> {
+    match schema {
+        TypeExpr::Primitive(_) => Ok(schema.clone()),
+        TypeExpr::Record(record) => {
+            let mut expanded = IndexMap::with_capacity(record.record.len());
+            for (field, field_schema) in &record.record {
+                let nested = format!("{context}.{field}");
+                expanded.insert(
+                    field.clone(),
+                    expand_cap_schema(field_schema, schema_index, &nested)?,
+                );
+            }
+            Ok(TypeExpr::Record(TypeRecord { record: expanded }))
+        }
+        TypeExpr::Variant(variant) => {
+            let mut expanded = IndexMap::with_capacity(variant.variant.len());
+            for (tag, ty) in &variant.variant {
+                let nested = format!("{context}::{tag}");
+                expanded.insert(tag.clone(), expand_cap_schema(ty, schema_index, &nested)?);
+            }
+            Ok(TypeExpr::Variant(TypeVariant { variant: expanded }))
+        }
+        TypeExpr::List(list) => Ok(TypeExpr::List(TypeList {
+            list: Box::new(expand_cap_schema(&list.list, schema_index, context)?),
+        })),
+        TypeExpr::Set(set) => Ok(TypeExpr::Set(TypeSet {
+            set: Box::new(expand_cap_schema(&set.set, schema_index, context)?),
+        })),
+        TypeExpr::Map(map) => Ok(TypeExpr::Map(TypeMap {
+            map: aos_air_types::TypeMapEntry {
+                key: map.map.key.clone(),
+                value: Box::new(expand_cap_schema(&map.map.value, schema_index, context)?),
+            },
+        })),
+        TypeExpr::Option(opt) => Ok(TypeExpr::Option(TypeOption {
+            option: Box::new(expand_cap_schema(&opt.option, schema_index, context)?),
+        })),
+        TypeExpr::Ref(reference) => {
+            let schema_name = reference.reference.as_str();
+            let target = schema_index.get(schema_name).ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "schema '{schema_name}' referenced by {context} not found"
+                ))
+            })?;
+            expand_cap_schema(target, schema_index, schema_name)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use aos_air_types::{
-        CapGrant, Manifest, ManifestDefaults, TypeExpr, TypePrimitive, TypeRecord, TypeSet,
-        ValueLiteral, ValueRecord, ValueSet, ValueText,
+        CapGrant, Manifest, ManifestDefaults, SchemaRef, TypeExpr, TypePrimitive, TypeRecord,
+        TypeRef, TypeSet, ValueLiteral, ValueRecord, ValueSet, ValueText,
     };
     use indexmap::IndexMap;
 
@@ -200,6 +259,10 @@ mod tests {
         }
     }
 
+    fn empty_schema_index() -> SchemaIndex {
+        SchemaIndex::new(HashMap::new())
+    }
+
     #[test]
     fn capability_params_must_match_schema() {
         let mut record = IndexMap::new();
@@ -211,7 +274,9 @@ mod tests {
         );
         let manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord { record }));
         let caps = HashMap::from([("sys/http.out@1".into(), defcap())]);
-        assert!(CapabilityResolver::from_manifest(&manifest, &caps).is_ok());
+        assert!(
+            CapabilityResolver::from_manifest(&manifest, &caps, &empty_schema_index()).is_ok()
+        );
     }
 
     #[test]
@@ -220,13 +285,54 @@ mod tests {
             record: IndexMap::new(),
         }));
         let caps = HashMap::from([("sys/http.out@1".into(), defcap())]);
-        let err = match CapabilityResolver::from_manifest(&manifest, &caps) {
+        let err = match CapabilityResolver::from_manifest(&manifest, &caps, &empty_schema_index()) {
             Ok(_) => panic!("expected validation error"),
             Err(err) => err,
         };
         assert!(matches!(
             err,
             KernelError::CapabilityParamInvalid { grant, .. } if grant == "http_cap"
+        ));
+    }
+
+    #[test]
+    fn capability_schema_refs_are_expanded() {
+        let referenced_schema = "com.acme/GrantSchema@1";
+        let ref_schema = hosts_schema();
+        let cap_with_ref = DefCap {
+            name: "sys/http.out@1".into(),
+            cap_type: CapType::HttpOut,
+            schema: TypeExpr::Ref(TypeRef {
+                reference: SchemaRef::new(referenced_schema).expect("schema ref"),
+            }),
+        };
+        let schema_index = SchemaIndex::new(HashMap::from([(
+            referenced_schema.to_string(),
+            ref_schema,
+        )]));
+
+        let mut record = IndexMap::new();
+        record.insert(
+            "hosts".into(),
+            ValueLiteral::Set(ValueSet {
+                set: vec![text_literal("example.com")],
+            }),
+        );
+        let manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord { record }));
+        let caps = HashMap::from([("sys/http.out@1".into(), cap_with_ref.clone())]);
+        assert!(CapabilityResolver::from_manifest(&manifest, &caps, &schema_index).is_ok());
+
+        let invalid_manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord {
+            record: IndexMap::new(),
+        }));
+        let err = match CapabilityResolver::from_manifest(&invalid_manifest, &caps, &schema_index)
+        {
+            Ok(_) => panic!("schema refs should enforce fields"),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            KernelError::CapabilityParamInvalid { cap, .. } if cap == "sys/http.out@1"
         ));
     }
 }

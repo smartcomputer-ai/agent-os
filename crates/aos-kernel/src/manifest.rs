@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use aos_air_types::{
-    AirNode, DefCap, DefModule, DefPlan, DefPolicy, Manifest, Name, builtins::builtin_schemas,
+    AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
+    builtins::builtin_schemas,
 };
 use aos_store::{Catalog, Store, load_manifest_from_path};
 
@@ -13,6 +14,7 @@ pub struct LoadedManifest {
     pub plans: HashMap<Name, DefPlan>,
     pub caps: HashMap<Name, DefCap>,
     pub policies: HashMap<Name, DefPolicy>,
+    pub schemas: HashMap<Name, DefSchema>,
 }
 
 pub struct ManifestLoader;
@@ -31,6 +33,7 @@ impl ManifestLoader {
         let mut plans = HashMap::new();
         let mut caps = HashMap::new();
         let mut policies = HashMap::new();
+        let mut schemas = HashMap::new();
         for (name, entry) in catalog.nodes {
             match entry.node {
                 AirNode::Defmodule(module) => {
@@ -45,6 +48,9 @@ impl ManifestLoader {
                 AirNode::Defpolicy(policy) => {
                     policies.insert(name, policy);
                 }
+                AirNode::Defschema(schema) => {
+                    schemas.insert(name, schema);
+                }
                 _ => {}
             }
         }
@@ -54,6 +60,7 @@ impl ManifestLoader {
             plans,
             caps,
             policies,
+            schemas,
         })
     }
 }

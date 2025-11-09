@@ -560,7 +560,6 @@ receipt: {
       "reducer": "com.acme/OrderSM@1",
       "event": {
         "record": {
-          "$schema": { "text": "com.acme/PaymentSuccess@1" },
           "order_id": { "ref": "@plan.input.order_id" },
           "txn_id": { "ref": "@var:charge_result.Ok.txn_id" }
         }
@@ -572,7 +571,6 @@ receipt: {
       "reducer": "com.acme/OrderSM@1",
       "event": {
         "record": {
-          "$schema": { "text": "com.acme/PaymentFailed@1" },
           "order_id": { "ref": "@plan.input.order_id" },
           "error": { "ref": "@var:charge_result.Error.message" }
         }
@@ -668,7 +666,6 @@ receipt: {
       "reducer": "com.acme/ReportSM@1",
       "event": {
         "record": {
-          "$schema": { "text": "com.acme/BatchSummaryComplete@1" },
           "report": { "ref": "@var:report" }
         }
       }

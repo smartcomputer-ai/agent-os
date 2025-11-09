@@ -161,11 +161,13 @@ fn step_impl(input: StepInput<OrderState, Event>) -> StepOutput<OrderState, serd
             s.order_id = order_id.clone();
             s.pc = Pc::PendingPayment;
             // Emit a DomainIntent to trigger a plan (no external effect here)
-            domain_events.push(cbor!({
-                "$schema": "com.acme/ChargeRequested@1",
-                "order_id": order_id,
-                "amount_cents": amount_cents
-            }));
+            domain_events.push(DomainEvent {
+                schema: "com.acme/ChargeRequested@1".into(),
+                value: cbor!({
+                    "order_id": order_id,
+                    "amount_cents": amount_cents
+                })
+            });
         }
         Event::PaymentResult { order_id: _, ok, txn_id: _ } if matches!(s.pc, Pc::PendingPayment) => {
             if ok { s.pc = Pc::Done; } else { s.pc = Pc::Failed; }
@@ -254,16 +256,17 @@ Note: This example uses v1 authoring sugar. The `params` and `event` fields acce
       "op": "raise_event",
       "reducer": "com.acme/OrderSM@1",
       "event": {
-        "$schema": "com.acme/PaymentResult@1",
-        "order_id": {"ref": "@plan.input.order_id"},
-        "success": {
-          "op": "eq",
-          "args": [
-            {"ref": "@var:receipt.status"},
-            "ok"
-          ]
-        },
-        "txn_id": {"ref": "@var:receipt.txn_id"}
+        "record": {
+          "order_id": {"ref": "@plan.input.order_id"},
+          "success": {
+            "op": "eq",
+            "args": [
+              {"ref": "@var:receipt.status"},
+              "ok"
+            ]
+          },
+          "txn_id": {"ref": "@var:receipt.txn_id"}
+        }
       }
     },
     {"id": "done", "op": "end"}

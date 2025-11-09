@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::manifest::LoadedManifest;
-use aos_air_types::{AirNode, DefCap, DefModule, DefPlan, DefPolicy, Manifest, Name};
+use aos_air_types::{AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{
@@ -129,6 +129,7 @@ impl ManifestPatch {
         let mut plans: HashMap<Name, DefPlan> = HashMap::new();
         let mut caps: HashMap<Name, DefCap> = HashMap::new();
         let mut policies: HashMap<Name, DefPolicy> = HashMap::new();
+        let mut schemas: HashMap<Name, DefSchema> = HashMap::new();
         for node in &self.nodes {
             match node {
                 AirNode::Defmodule(m) => {
@@ -143,6 +144,9 @@ impl ManifestPatch {
                 AirNode::Defpolicy(p) => {
                     policies.insert(p.name.clone(), p.clone());
                 }
+                AirNode::Defschema(s) => {
+                    schemas.insert(s.name.clone(), s.clone());
+                }
                 _ => {}
             }
         }
@@ -152,6 +156,7 @@ impl ManifestPatch {
             plans,
             caps,
             policies,
+            schemas,
         }
     }
 }

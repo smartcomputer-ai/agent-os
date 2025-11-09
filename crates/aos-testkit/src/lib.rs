@@ -153,6 +153,7 @@ pub mod fixtures {
             plans: plans_map,
             caps,
             policies: HashMap::new(),
+            schemas: HashMap::new(),
         }
     }
 

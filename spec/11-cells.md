@@ -112,7 +112,7 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 - Trigger with correlation:
   - `{ "event": "com.acme/ChargeRequested@1", "plan": "com.acme/charge_flow@3", "correlate_by": "key" }`
 - Plan step targeting a cell:
-  - `{ "id":"apply", "op":"raise_event", "reducer":"com.acme/OrderSM@2", "key": { "ref":"@plan.input.key" }, "event": { "record": { "$schema":"com.acme/PaymentApplied@1", "order_id": { "ref":"@plan.input.order_id" } } } }`
+  - `{ "id":"apply", "op":"raise_event", "reducer":"com.acme/OrderSM@2", "key": { "ref":"@plan.input.key" }, "event": { "record": { "order_id": { "ref":"@plan.input.order_id" } } } }`
 
 ## Non‑Goals (v1.1)
 

@@ -27,7 +27,7 @@ use crate::journal::{
     ShadowRunCompletedRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
-use crate::plan::{PlanInstance, PlanRegistry};
+use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
 use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
@@ -47,6 +47,8 @@ pub struct Kernel<S: Store> {
     reducers: ReducerRegistry<S>,
     router: HashMap<String, Vec<Name>>,
     plan_registry: PlanRegistry,
+    schema_index: Arc<SchemaIndex>,
+    reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
     plan_instances: HashMap<u64, PlanInstance>,
     plan_triggers: HashMap<String, Vec<String>>,
     waiting_events: HashMap<String, Vec<u64>>,
@@ -124,10 +126,16 @@ impl<S: Store + 'static> Kernel<S> {
                 .or_insert_with(Vec::new)
                 .push(trigger.plan.clone());
         }
-        let capability_resolver =
-            CapabilityResolver::from_manifest(&loaded.manifest, &loaded.caps)?;
+        let schema_index = Arc::new(build_schema_index_from_loaded(store.as_ref(), &loaded)?);
+        let capability_resolver = CapabilityResolver::from_manifest(
+            &loaded.manifest,
+            &loaded.caps,
+            schema_index.as_ref(),
+        )?;
         ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
         ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
+        let reducer_schemas =
+            Arc::new(build_reducer_schemas(&loaded.modules, schema_index.as_ref())?);
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
             .defaults
@@ -149,6 +157,8 @@ impl<S: Store + 'static> Kernel<S> {
             store: store.clone(),
             manifest: loaded.manifest,
             module_defs: loaded.modules,
+            schema_index: schema_index.clone(),
+            reducer_schemas: reducer_schemas.clone(),
             reducers: ReducerRegistry::new(store)?,
             router,
             plan_registry,
@@ -427,7 +437,12 @@ impl<S: Store + 'static> Kernel<S> {
                     ))
                 })?
                 .clone();
-            let instance = PlanInstance::from_snapshot(inst_snapshot, plan);
+            let instance = PlanInstance::from_snapshot(
+                inst_snapshot,
+                plan,
+                self.schema_index.clone(),
+                self.reducer_schemas.clone(),
+            );
             self.plan_instances.insert(instance.id, instance);
         }
 
@@ -642,11 +657,15 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn swap_manifest(&mut self, patch: &ManifestPatch) -> Result<(), KernelError> {
         let loaded = patch.to_loaded_manifest();
+        let schema_index =
+            Arc::new(build_schema_index_from_loaded(self.store.as_ref(), &loaded)?);
+        let reducer_schemas = Arc::new(build_reducer_schemas(&loaded.modules, &schema_index)?);
+
         self.manifest = loaded.manifest;
         self.module_defs = loaded.modules;
-        self.plan_registry = crate::plan::PlanRegistry::default();
-        for plan in &loaded.plans {
-            self.plan_registry.register(plan.1.clone());
+        self.plan_registry = PlanRegistry::default();
+        for plan in loaded.plans.values() {
+            self.plan_registry.register(plan.clone());
         }
         self.router.clear();
         if let Some(routing) = self.manifest.routing.as_ref() {
@@ -657,6 +676,8 @@ impl<S: Store + 'static> Kernel<S> {
                     .push(route.reducer.clone());
             }
         }
+        self.schema_index = schema_index;
+        self.reducer_schemas = reducer_schemas;
         Ok(())
     }
 
@@ -671,7 +692,13 @@ impl<S: Store + 'static> Kernel<S> {
                         ))
                     })?;
                     let instance_id = self.scheduler.alloc_plan_id();
-                    let instance = PlanInstance::new(instance_id, plan_def.clone(), input);
+                    let instance = PlanInstance::new(
+                        instance_id,
+                        plan_def.clone(),
+                        input,
+                        self.schema_index.clone(),
+                        self.reducer_schemas.clone(),
+                    );
                     self.plan_instances.insert(instance_id, instance);
                     self.scheduler.push_plan(instance_id);
                 }
@@ -969,6 +996,63 @@ fn format_intent_hash(hash: &[u8; 32]) -> String {
     DigestHash::from_bytes(hash)
         .map(|h| h.to_hex())
         .unwrap_or_else(|_| format!("{:?}", hash))
+}
+
+fn build_schema_index_from_loaded<S: Store>(
+    store: &S,
+    loaded: &LoadedManifest,
+) -> Result<SchemaIndex, KernelError> {
+    let mut schema_map = HashMap::new();
+    for builtin in builtins::builtin_schemas() {
+        schema_map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
+    }
+    for (name, schema) in &loaded.schemas {
+        schema_map.insert(name.clone(), schema.ty.clone());
+    }
+    extend_schema_map_from_store(store, &loaded.manifest.schemas, &mut schema_map)?;
+    Ok(SchemaIndex::new(schema_map))
+}
+
+fn build_reducer_schemas(
+    modules: &HashMap<Name, aos_air_types::DefModule>,
+    schema_index: &SchemaIndex,
+) -> Result<HashMap<Name, ReducerSchema>, KernelError> {
+    let mut map = HashMap::new();
+    for (name, module) in modules {
+        if let Some(reducer) = module.abi.reducer.as_ref() {
+            let schema_name = reducer.event.as_str();
+            let event_schema = schema_index
+                .get(schema_name)
+                .ok_or_else(|| {
+                    KernelError::Manifest(format!("schema '{schema_name}' not found for reducer '{name}'"))
+                })?
+                .clone();
+            let key_schema = if let Some(key_ref) = &module.key_schema {
+                let schema_name = key_ref.as_str();
+                Some(
+                    schema_index
+                        .get(schema_name)
+                        .ok_or_else(|| {
+                            KernelError::Manifest(format!(
+                                "schema '{schema_name}' not found for reducer '{name}' key"
+                            ))
+                        })?
+                        .clone(),
+                )
+            } else {
+                None
+            };
+            map.insert(
+                name.clone(),
+                ReducerSchema {
+                    event_schema_name: schema_name.to_string(),
+                    event_schema,
+                    key_schema,
+                },
+            );
+        }
+    }
+    Ok(map)
 }
 
 fn ensure_plan_capabilities(

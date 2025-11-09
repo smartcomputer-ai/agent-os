@@ -14,7 +14,7 @@ use crate::{
     ValueUuid, ValueVariant,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SchemaIndex {
     schemas: HashMap<String, TypeExpr>,
 }
@@ -157,7 +157,7 @@ fn normalize_expr_or_value(
     })
 }
 
-fn validate_literal(
+pub fn validate_literal(
     literal: &ValueLiteral,
     schema: &TypeExpr,
     schema_name: &str,
@@ -512,7 +512,7 @@ fn parse_option(
     }
 }
 
-fn canonicalize_literal(
+pub fn canonicalize_literal(
     literal: &mut ValueLiteral,
     schema: &TypeExpr,
     schemas: &SchemaIndex,
