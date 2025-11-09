@@ -39,7 +39,18 @@ For implementation guidance, project structure, and coding conventions, see **[A
 
 ## License
 
-[To be determined]
+Sure — here’s a concise, professional paragraph you can drop straight into your **README.md** under a `## License` heading.
+
+
+## License
+
+AgentOS is open-source software licensed under the **Apache License 2.0**.
+The runtime, kernel, adapters, and SDKs are available for free use and modification under that license, with an explicit grant of patent rights.
+
+The **AIR specification and schema documents** are published under the **Creative Commons Attribution 4.0 International (CC BY 4.0)** license with a **royalty-free patent non-assert**, so anyone can build compatible implementations.
+
+See [`LICENSE`](./LICENSE) and [`LICENSE-SPEC`](./LICENSE-SPEC) for full terms.
+
 
 ## Current Status
 
