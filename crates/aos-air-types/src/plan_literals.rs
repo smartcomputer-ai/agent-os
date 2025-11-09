@@ -754,6 +754,44 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_llm_generate_params_literals() {
+        let mut plan = DefPlan {
+            name: "com.acme/Plan@1".into(),
+            input: crate::SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![crate::PlanStep {
+                id: "emit".into(),
+                kind: crate::PlanStepKind::EmitEffect(crate::PlanStepEmitEffect {
+                    kind: EffectKind::LlmGenerate,
+                    params: ExprOrValue::Json(json!({
+                        "provider": "openai",
+                        "model": "gpt-4",
+                        "temperature": "0.5",
+                        "max_tokens": 128,
+                        "input_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "tools": ["function.call"]
+                    })),
+                    cap: "cap_llm".into(),
+                    bind: crate::PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec!["cap_llm".into()],
+            allowed_effects: vec![EffectKind::LlmGenerate],
+            invariants: vec![],
+        };
+        normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).unwrap();
+        if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
+            assert!(matches!(step.params, ExprOrValue::Literal(_)));
+        } else {
+            panic!("expected emit_effect step");
+        }
+    }
+
+    #[test]
     fn normalizes_raise_event_literals_against_reducer_schema() {
         let mut plan = DefPlan {
             name: "com.acme/Plan@1".into(),

@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 use serde_json::Value;
 
 pub mod caps;
+pub mod effects;
 pub mod manifest;
 pub mod modules;
 pub mod plans;
