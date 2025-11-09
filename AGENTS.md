@@ -6,8 +6,6 @@ This file provides guidance to coding agents when working with code in this repo
 
 **AgentOS** is a deterministic, event-sourced computing substrate for AI agents. **AIR (Agent Intermediate Representation)** is the typed control-plane IR governing modules, plans, schemas, policies, and capabilities.
 
-**Current state**: Specification-only repository. No implementation exists yet.
-
 ## Reading the Specs
 
 **Read specs in this order:**
@@ -57,9 +55,7 @@ Stuff that we plan to work on in the future is in specs numbered 10 and higher.
 4. Minimal trusted base
 5. Content-addressed, portable worlds
 
-## Implementation Path (if building)
-
-**Build order**: CBOR+hashing → store/loader → validator → WASM runner → effect manager → plan executor → governance loop → shadow-run
+## Implementation Notes
 
 **Testing invariant**: "Replay-or-die" - replay from genesis must produce byte-identical snapshots.
 
