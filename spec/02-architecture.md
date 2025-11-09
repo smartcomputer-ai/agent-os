@@ -78,7 +78,9 @@ The manifest is read‑only at runtime and serves as the authoritative catalog o
 
 ### AIR Loader/Validator
 
-The loader parses text form (JSON/S‑expression) and produces canonical CBOR. It validates references, shapes, capability declarations, and plan graphs, then exposes a typed view for the kernel. (For AIR semantics, see the next section.)
+Authoring ergonomics and determinism meet here. The loader accepts either JSON lens described in the AIR spec—concise schema-directed “sugar” JSON or the tagged canonical overlay used by tools/agents—and canonicalizes both to typed values before anything touches the kernel. Every value is normalized (set dedupe/order, map ordering, numeric range checks, decimal128, option/variant envelopes) and then encoded as canonical CBOR with the declared schema hash bound in. That canonical form is the only thing the kernel, store, and hash engine ever see.
+
+After canonicalization, the loader validates references, shapes, capability declarations, and plan graphs, then exposes a typed view for the kernel. Tooling hooks (`air fmt`, `air diff`, `air patch`) operate on the same canonical CBOR but can render either lens for humans.
 
 ### Capability Ledger
 

@@ -148,6 +148,13 @@
       ]
     },
 
+    "ExprOrValue": {
+      "description": "Convenience union: either a full Expr tree or a plain Value literal interpreted by surrounding schema.",
+      "oneOf": [
+        { "$ref": "#/$defs/Expr" },
+        { "$ref": "#/$defs/Value" }
+      ]
+    },
     "Expr": {
       "description": "Side-effect-free expression used in guards, bindings, and parameter construction",
       "type": "object",

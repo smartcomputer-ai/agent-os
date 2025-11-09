@@ -54,6 +54,12 @@ This file provides guidance to coding agents when working with code in this repo
 4. Minimal trusted base
 5. Content-addressed, portable worlds
 
+## Authoring Notes (v1 updates)
+
+- AIR text now has **two JSON lenses**. Author in schema-directed sugar (plain JSON) or tagged canonical form (`{"nat":42}` etc.); the loader accepts both, canonicalizes to CBOR, and hashes with the schema hash. Use canonical lens when building automated diffs/patches.
+- Plans gained `ExprOrValue` in literal-heavy slots (`emit_effect.params`, `raise_event.event`, `assign.expr`, `end.result`). Supplying a plain JSON value is fine; guards/predicates still use full `Expr`.
+- HTTP and LLM effect schemas are now first-class built-ins under `spec/defs/builtin-schemas.air.json`, matching the catalog described in spec/03-air.md §7. Use those schema refs (e.g., `sys/HttpRequestParams@1`) instead of ad-hoc copies.
+
 ## Implementation Path (if building)
 
 See **spec/03b-air-implementation.md** for detailed Rust implementation guide.

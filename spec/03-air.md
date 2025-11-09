@@ -58,24 +58,42 @@ See: spec/schemas/common.schema.json and spec/schemas/defschema.schema.json
 
 ## 3) Encoding
 
-AIR nodes exist in two forms: human-readable text and canonical binary.
+AIR nodes exist in two interchangeable JSON lenses plus one canonical binary form. All persisted identity and hashing stays bound to canonical CBOR; the dual JSON lenses exist purely for ergonomics and tooling.
 
-### Text Form
+### 3.1 JSON Lenses (Authoring vs. Canonical)
 
-JSON with explicit `$kind` and, where needed, `$type` tags for unions. Field order is irrelevant in text form.
+**Why**: Humans want concise, schema-directed JSON; agents and tools often need an explicit, lossless overlay. Accepting both lenses at load time keeps authoring pleasant without sacrificing determinism.
 
-### Binary Form
+1. **Authoring sugar (default)** — plain JSON interpreted using the surrounding schema reference. Use natural literals (`true`, `42`, `"text"`, `{field: …}`, arrays) exactly as before.
+2. **Canonical JSON (tagged)** — every literal carries an explicit type tag mirroring `ExprConst` (`{ "nat": 42 }`, `{ "list": [ { "text": "a" } ] }`, `{ "variant": { "tag": "Ok", "value": { "text": "done" } } }`, etc.). This lens is ideal for diffs, automated patches, and inspector output because it round-trips without schema context.
 
-Canonical [CBOR](https://cbor.io/) (RFC 8949) with strict determinism:
-- Deterministic map key ordering (bytewise of encoded keys)
-- Shortest integer form
-- Definite lengths
-- `dec128` encoded as tagged byte string (tag 2000) of 16 bytes
-- `time` and `duration` as int nanoseconds
+The loader **MUST** accept either lens at every typed value position, resolve the schema from context (plan IO, effect params, reducer schemas, capability params, etc.), and convert to a typed value before hashing.
 
-### Node Hash
+### 3.2 Canonicalization Rules (Sugar → Typed → CBOR)
 
-`sha256` over canonical CBOR bytes of the node. Values bound to a schema include the schema_hash in the value node before hashing, which prevents shape collisions.
+Regardless of the JSON lens, the loader applies the same canonicalization before emitting CBOR:
+
+- **Deterministic CBOR**: Canonical [CBOR](https://cbor.io/) (RFC 8949) with deterministic map key ordering (bytewise order of encoded keys), shortest integer encodings, and definite lengths.
+- **Sets**: Deduplicate by typed equality, then sort elements by their canonical CBOR bytes. Encode as CBOR arrays in that order so `["b","a","a"]` and `["a","b"]` hash identically once typed.
+- **Maps**:
+  - `map<text,V>` may be authored as JSON objects; encode as CBOR maps sorted by canonical key bytes.
+  - Maps with non-text keys are authored as `[[key,value], …]` pairs; encode as CBOR maps sorted by the key’s canonical bytes.
+- **Numeric domains**: Accept numbers or string literals (for large ints/decimals); reject out-of-range values and always encode using the shortest CBOR int.
+- **`dec128`**: Author as a decimal string; encode as the dedicated tag (2000) with a 16-byte payload.
+- **`time` / `duration`**: Allow RFC 3339 strings or integer nanoseconds; encode as signed/unsigned nanosecond integers.
+- **`bytes`**: Author as base64 strings; encode as CBOR byte strings.
+- **`hash`**: Author as `"sha256:<64hex>"`; encode as raw 32-byte values.
+- **`uuid`**: Author as RFC 4122 strings; encode as 16-byte values.
+- **`variant`**: Sugar `{ "Tag": <value?> }` expands to a canonical envelope (e.g., `{ "variant": { "tag": "Tag", "value": … } }`) before CBOR.
+- **`option<T>`**: Represent `none` as `null` in sugar or `{ "option": null }` in canonical JSON; `some` wraps the nested value.
+
+These rules make previously implicit loader behavior normative and testable.
+
+### 3.3 Binary Form and Hashing
+
+Canonical CBOR remains the storage and hashing format. The node hash is `sha256(cbor(node))`.
+
+When hashing a typed value (plan IO, cap params, etc.), always bind the **schema hash** alongside the canonical bytes. This prevents two different schemas that serialize to the same JSON shape from colliding and keeps “schema + value” as the identity pair.
 
 ## 4) Manifest
 
@@ -173,9 +191,11 @@ No WASI ambient syscalls, no threads, no clock. All I/O happens via the effect l
 
 See: spec/schemas/defmodule.schema.json
 
-## 7) Effect Catalog (Built‑in v1)
+## 7) Effect Catalog (Built-in v1)
 
-AgentOS ships with four built-in effect types. Each has parameter and receipt schemas defined as built-in defschema.
+AgentOS ships with a small, explicit catalog of effect kinds. Their schema definitions live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same canonical shapes. Keeping them in the repo (instead of prose-only) lets tooling type-check effect params/receipts and keeps adapters honest about wire formats.
+
+Built-in kinds in v1:
 
 **http.request**
 - params: `{ method:text, url:text, headers: map{text→text}, body_ref?:hash }`
@@ -417,11 +437,11 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 ### Steps (discriminated by `op`)
 
 **raise_event**: Publish an event to a reducer
-- `{ id, op:"raise_event", reducer:Name, key?:Expr, event:Expr }`
+- `{ id, op:"raise_event", reducer:Name, key?:Expr, event:ExprOrValue }`
 - If target reducer is keyed, `key` is required and must typecheck to its key schema
 
 **emit_effect**: Request an external effect
-- `{ id, op:"emit_effect", kind:EffectKind, params:Expr, cap:CapGrantName, bind:{effect_id_as:VarName} }`
+- `{ id, op:"emit_effect", kind:EffectKind, params:ExprOrValue, cap:CapGrantName, bind:{effect_id_as:VarName} }`
 
 **await_receipt**: Wait for an effect receipt
 - `{ id, op:"await_receipt", for:Expr /*effect_id*/, bind:{as:VarName} }`
@@ -431,11 +451,20 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 - Waits until a matching DomainEvent appears; `where` is a boolean predicate over the event value
 
 **assign**: Bind a value to a variable
-- `{ id, op:"assign", expr:Expr, bind:{as:VarName} }`
+- `{ id, op:"assign", expr:ExprOrValue, bind:{as:VarName} }`
 
 **end**: Complete the plan
-- `{ id, op:"end", result?:Expr }`
+- `{ id, op:"end", result?:ExprOrValue }`
 - Must match output schema if provided
+
+### Literals vs. Expressions (`ExprOrValue`)
+
+Authoring ergonomic insight: most plan fields already know the target schema (effect params, event payloads, locals, outputs). Requiring verbose `ExprRecord`/`ExprList` wrappers for simple literals made everyday plans noisy. In v1 we therefore allow `ExprOrValue` in four places (`emit_effect.params`, `raise_event.event`, `assign.expr`, `end.result`). Authors may provide:
+
+1. A plain JSON value (in sugar or canonical lens), which the loader interprets via the declared schema.
+2. A fully tagged `Expr` tree when dynamic computation or references are needed.
+
+Loaders may optionally lift literals into constant expressions internally so diagnostics stay consistent. Guards (`edges[].when`), `await_receipt.for`, and other predicate positions remain full `Expr` to keep intent clear: if branching logic or lookups are happening, you must be explicit.
 
 ### Expr and Predicates
 
@@ -507,6 +536,8 @@ Patches describe changes to the control plane (design-time modifications).
   patches: [<Patch>…]
 }
 ```
+
+`node` and `new_node` accept either JSON lens (authoring sugar or tagged canonical). The loader canonicalizes to CBOR, supplies schema context, and hashes before validation. This ensures diffs/patches generated by agents remain deterministic even if they emit tagged literals.
 
 ### Operations
 

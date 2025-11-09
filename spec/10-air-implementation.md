@@ -1012,6 +1012,20 @@ pub fn step_world(world: &mut World) -> anyhow::Result<()> {
 }
 ```
 
+Dual JSON lenses & loader behavior
+- Accept both **authoring sugar** and **tagged canonical JSON** anywhere a typed value appears (plan IO, cap params, manifest defaults, etc.). Use the surrounding schema_ref to disambiguate, then canonicalize: dedupe/sort sets, sort maps by canonical key bytes, normalize numbers to the shortest CBOR ints, convert RFC3339 timestamps to ns, wrap variants/options into explicit envelopes, and reject shapes that don’t match the target schema (e.g., JSON object map for non-text keys).
+- After canonicalization, always hash the combo `(schema_hash || canonical_value_bytes)`. Store only canonical CBOR; never persist raw JSON.
+- Tooling hooks (`air fmt --sugar|--canon`, `air diff --view=sugar|canon`, `air patch apply`) should read canonical CBOR, perform structural operations in that space, then render whichever lens the user requested. This keeps diffs stable even if someone author-s a map with re-ordered keys.
+- In Expr-friendly fields that now accept `ExprOrValue`, detect whether the JSON looks like an expression (object with `op`, `ref`, etc.). If not, lift it into an `ExprConst` so diagnostics and downstream tooling don’t have to special-case literal vs expression.
+
+Testing matrix (minimum scenarios)
+- **Sugar ↔ Canonical parity**: For every primitive/composite type, author one sugar value and one tagged canonical value; confirm canonical CBOR bytes (and schema-bound hashes) match.
+- **Set/map determinism**: Sugar-authored sets with dupes/out-of-order items must round-trip to sorted, deduped CBOR; `map<text,V>` authored as JSON object must land in canonical key order; non-text keyed maps authored as `[[k,v]]` must reject object sugar.
+- **Numeric, time, bytes domains**: Accept boundary ints authored as numbers or strings, reject out-of-range data, and prove decimal/timestamp canonicalization by comparing hashed outputs.
+- **ExprOrValue plan slots**: For each of `emit_effect.params`, `raise_event.event`, `assign.expr`, and `end.result`, cover (a) literal sugar, (b) canonical tagged JSON, (c) an actual Expr tree referencing input/vars. Each path should produce the same typed value once canonicalized.
+- **Built-in effect schemas**: Instantiate `sys/HttpRequest*` and `sys/LlmGenerate*` via sugar and canonical JSON; ensure policy/cap validation sees the same schemas the adapters use and that receipts settle budgets correctly.
+- **Diff/Patch stability**: Diff two manifests that differ only by sugar formatting (map order, whitespace) and verify `air diff` reports no change. Apply patches where `node/new_node` use different lenses but lead to identical manifest hashes.
+
 Advice on libraries and details
 
 - decimal128: if you truly need IEEE 754 decimal128 now, use bson::Decimal128 for internal representation and convert at the AIR boundary; otherwise, keep decimals as strings in v1 and add proper decimal later.

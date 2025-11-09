@@ -81,7 +81,7 @@
           "properties": {
             "op": { "const": "raise_event" },
             "reducer": { "$ref": "common.schema.json#/$defs/Name" },
-            "event": { "$ref": "common.schema.json#/$defs/Expr" },
+            "event": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
             "key": { "$ref": "common.schema.json#/$defs/Expr" }
           },
           "required": ["op","reducer","event"],
@@ -97,7 +97,7 @@
           "properties": {
             "op": { "const": "emit_effect" },
             "kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
-            "params": { "$ref": "common.schema.json#/$defs/Expr" },
+            "params": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
             "cap": { "$ref": "common.schema.json#/$defs/CapGrantName" },
             "bind": {
               "type": "object",
@@ -151,7 +151,7 @@
           "type": "object",
           "properties": {
             "op": { "const": "assign" },
-            "expr": { "$ref": "common.schema.json#/$defs/Expr" },
+            "expr": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
             "bind": { "$ref": "#/$defs/BindAs" }
           },
           "required": ["op","expr","bind"],
@@ -166,7 +166,7 @@
           "type": "object",
           "properties": {
             "op": { "const": "end" },
-            "result": { "$ref": "common.schema.json#/$defs/Expr" }
+            "result": { "$ref": "common.schema.json#/$defs/ExprOrValue" }
           },
           "required": ["op"],
           "additionalProperties": false
