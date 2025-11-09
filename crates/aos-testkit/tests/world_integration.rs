@@ -124,7 +124,6 @@ fn sugar_literal_plan_executes_http_flow() {
         if let PlanStepKind::RaiseEvent(raise) = &mut step.kind {
             raise.event = Expr::Record(ExprRecord {
                 record: IndexMap::from([
-                    ("$schema".into(), fixtures::text_expr("com.acme/ResultEvent@1")),
                     (
                         "value".into(),
                         Expr::Record(ExprRecord {
@@ -229,10 +228,10 @@ fn single_plan_orchestration_completes_after_receipt() {
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
                     reducer: result_module.name.clone(),
                     event: Expr::Record(ExprRecord {
-                        record: IndexMap::from([
-                            ("$schema".into(), fixtures::text_expr("com.acme/Result@1")),
-                            ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
-                        ]),
+                        record: IndexMap::from([(
+                            "value".into(),
+                            Expr::Const(ExprConst::Int { int: 9 }),
+                        )]),
                     })
                     .into(),
                     key: None,
@@ -1009,10 +1008,10 @@ fn raised_events_are_routed_to_reducers() {
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
                     reducer: reducer_module.name.clone(),
                     event: Expr::Record(ExprRecord {
-                        record: IndexMap::from([
-                            ("$schema".into(), fixtures::text_expr("com.acme/Raised@1")),
-                            ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
-                        ]),
+                        record: IndexMap::from([(
+                            "value".into(),
+                            Expr::Const(ExprConst::Int { int: 9 }),
+                        )]),
                     })
                     .into(),
                     key: None,

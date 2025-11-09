@@ -7,9 +7,10 @@
 #![allow(dead_code)]
 
 use aos_air_types::{
-    DefPlan, DefPolicy, EffectKind, Expr, ExprConst, ExprRecord, ManifestDefaults, NamedRef,
-    PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAwaitEvent, PlanStepAwaitReceipt,
-    PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+    DefPlan, DefPolicy, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprRecord,
+    ManifestDefaults, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAwaitEvent,
+    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+    ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText, TypeRecord,
 };
 use aos_effects::builtins::TimerSetParams;
 use aos_testkit::fixtures::{self, START_SCHEMA};
@@ -21,7 +22,7 @@ use std::sync::Arc;
 /// Builds a test manifest with a plan that emits an HTTP effect, awaits its receipt,
 /// and raises an event to a result reducer.
 pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let result_module = fixtures::stub_reducer_module(
+    let mut result_module = fixtures::stub_reducer_module(
         store,
         "com.acme/ResultReducer@1",
         &ReducerOutput {
@@ -31,6 +32,15 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
             ann: None,
         },
     );
+    let result_state_schema = fixtures::schema("com.acme/ResultState@1");
+    let result_event_schema = fixtures::schema("com.acme/ResultEvent@1");
+    result_module.abi.reducer = Some(ReducerAbi {
+        state: result_state_schema.clone(),
+        event: result_event_schema.clone(),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: IndexMap::new(),
+    });
 
     let plan_name = "com.acme/Fulfill@1".to_string();
     let plan = DefPlan {
@@ -63,7 +73,6 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
                     reducer: result_module.name.clone(),
                     event: Expr::Record(ExprRecord {
                         record: IndexMap::from([
-                            ("$schema".into(), fixtures::text_expr("com.acme/Result@1")),
                             ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
                         ]),
                     })
@@ -102,12 +111,32 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
         "com.acme/Result@1",
         &result_module.name,
     )];
-    fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![result_module],
         routing,
-    )
+    );
+
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/ResultEvent@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::from([( "value".into(), int_type() )]),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/ResultState@1".into(),
+                ty: TypeExpr::Record(TypeRecord { record: IndexMap::new() }),
+            },
+        ],
+    );
+
+    loaded
 }
 
 /// Builds a test manifest with a plan that awaits a domain event before proceeding.
@@ -152,10 +181,6 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
                     key: None,
                     event: Expr::Record(ExprRecord {
                         record: IndexMap::from([
-                            (
-                                "$schema".into(),
-                                fixtures::text_expr("com.acme/EventDone@1"),
-                            ),
                             ("value".into(), Expr::Const(ExprConst::Int { int: 5 })),
                         ]),
                     })
@@ -228,7 +253,25 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
         fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
     ];
-    fixtures::build_loaded_manifest(vec![], vec![], vec![timer_emitter, timer_handler], routing)
+    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![timer_emitter, timer_handler], routing);
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: fixtures::SYS_TIMER_FIRED.into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::from([(
+                        "key".into(),
+                        TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                            text: EmptyObject {},
+                        })),
+                    )]),
+                }),
+            },
+        ],
+    );
+    loaded
 }
 
 /// Builds a simple manifest with a single reducer that sets deterministic state when invoked.
@@ -244,7 +287,56 @@ pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
         },
     );
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)
+    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    insert_test_schemas(
+        &mut loaded,
+        vec![def_text_record_schema(START_SCHEMA, vec![("id", text_type())])],
+    );
+    loaded
+}
+
+fn text_type() -> TypeExpr {
+    TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+        text: EmptyObject {},
+    }))
+}
+
+fn int_type() -> TypeExpr {
+    TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
+        int: EmptyObject {},
+    }))
+}
+
+fn def_text_record_schema(name: &str, fields: Vec<(&str, TypeExpr)>) -> DefSchema {
+    DefSchema {
+        name: name.into(),
+        ty: TypeExpr::Record(TypeRecord {
+            record: IndexMap::from_iter(
+                fields.into_iter().map(|(k, ty)| (k.to_string(), ty)),
+            ),
+        }),
+    }
+}
+
+fn insert_test_schemas(
+    loaded: &mut aos_kernel::manifest::LoadedManifest,
+    schemas: Vec<DefSchema>,
+) {
+    for schema in schemas {
+        let name = schema.name.clone();
+        loaded.schemas.insert(name.clone(), schema);
+        if !loaded
+            .manifest
+            .schemas
+            .iter()
+            .any(|existing| existing.name == name)
+        {
+            loaded.manifest.schemas.push(NamedRef {
+                name,
+                hash: zero_hash(),
+            });
+        }
+    }
 }
 
 /// Attaches a policy to the manifest defaults so it becomes the runtime policy gate.

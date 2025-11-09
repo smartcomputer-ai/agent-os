@@ -803,12 +803,16 @@ mod tests {
     use crate::capability::CapabilityResolver;
     use crate::policy::AllowAllPolicy;
     use aos_air_types::{
-        CapType, EffectKind, Expr, ExprConst, ExprOp, ExprOpCode, ExprRecord, ExprRef, PlanBind,
+        CapType, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprRecord, ExprRef, PlanBind,
         PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
         PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
-        SchemaRef, ValueInt, ValueLiteral, ValueRecord, ValueText,
+        SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText, TypeRecord,
+        ValueInt, ValueLiteral, ValueRecord, ValueText,
     };
+    use aos_air_types::plan_literals::SchemaIndex;
     use aos_effects::CapabilityGrant;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     fn base_plan(steps: Vec<PlanStep>) -> DefPlan {
         DefPlan {
@@ -855,6 +859,34 @@ mod tests {
         EffectManager::new(resolver, Box::new(AllowAllPolicy))
     }
 
+    fn empty_schema_index() -> Arc<SchemaIndex> {
+        Arc::new(SchemaIndex::new(HashMap::new()))
+    }
+
+    fn empty_reducer_schemas() -> Arc<HashMap<String, ReducerSchema>> {
+        Arc::new(HashMap::new())
+    }
+
+    fn new_plan_instance(plan: DefPlan) -> PlanInstance {
+        PlanInstance::new(1, plan, default_env(), empty_schema_index(), empty_reducer_schemas())
+    }
+
+    fn reducer_schema_map(
+        reducer: &str,
+        event_schema_name: &str,
+        event_schema: TypeExpr,
+        key_schema: Option<TypeExpr>,
+    ) -> Arc<HashMap<String, ReducerSchema>> {
+        Arc::new(HashMap::from([(
+            reducer.to_string(),
+            ReducerSchema {
+                event_schema_name: event_schema_name.to_string(),
+                event_schema,
+                key_schema,
+            },
+        )]))
+    }
+
     /// Assign steps should synchronously write to the plan environment.
     #[test]
     fn assign_step_updates_env() {
@@ -867,7 +899,7 @@ mod tests {
                 },
             }),
         }];
-        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut plan = new_plan_instance(base_plan(steps));
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert!(outcome.completed);
@@ -888,7 +920,7 @@ mod tests {
                 },
             }),
         }];
-        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut plan = new_plan_instance(base_plan(steps));
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert!(outcome.completed);
@@ -915,7 +947,7 @@ mod tests {
                 },
             }),
         }];
-        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut plan = new_plan_instance(base_plan(steps));
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert!(outcome.completed);
@@ -944,7 +976,7 @@ mod tests {
                 },
             }),
         }];
-        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut plan = new_plan_instance(base_plan(steps));
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert!(outcome.completed);
@@ -977,7 +1009,7 @@ mod tests {
                 }),
             },
         ];
-        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut plan = new_plan_instance(base_plan(steps));
         let mut effects = test_effect_manager();
         let first = plan.tick(&mut effects).unwrap();
         assert!(first.waiting_receipt.is_some());
@@ -999,7 +1031,7 @@ mod tests {
                 bind: aos_air_types::PlanBind { var: "evt".into() },
             }),
         }];
-        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut plan = new_plan_instance(base_plan(steps));
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
@@ -1025,7 +1057,7 @@ mod tests {
             to: "end".into(),
             when: Some(Expr::Const(ExprConst::Bool { bool: false })),
         });
-        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut instance = new_plan_instance(plan);
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert!(!outcome.completed);
@@ -1034,28 +1066,44 @@ mod tests {
     /// Raising an event should surface a DomainEvent with the serialized payload.
     #[test]
     fn raise_event_produces_domain_event() {
+        let reducer = "com.test/Reducer@1";
+        let event_schema = TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([(
+                "value".into(),
+                TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
+                    int: EmptyObject {},
+                })),
+            )]),
+        });
+        let key_schema = TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+            text: EmptyObject {},
+        }));
+        let reducer_schemas = reducer_schema_map(
+            reducer,
+            "com.test/Evt@1",
+            event_schema,
+            Some(key_schema),
+        );
         let steps = vec![PlanStep {
             id: "raise".into(),
             kind: PlanStepKind::RaiseEvent(aos_air_types::PlanStepRaiseEvent {
-                reducer: "irrelevant".into(),
+                reducer: reducer.into(),
                 key: Some(Expr::Const(ExprConst::Text {
                     text: "cell-1".into(),
                 })),
                 event: Expr::Record(aos_air_types::ExprRecord {
-                    record: IndexMap::from([
-                        (
-                            "$schema".into(),
-                            Expr::Const(ExprConst::Text {
-                                text: "com.test/Evt@1".into(),
-                            }),
-                        ),
-                        ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
-                    ]),
+                    record: IndexMap::from([("value".into(), Expr::Const(ExprConst::Int { int: 9 }))]),
                 })
                 .into(),
             }),
         }];
-        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut plan = PlanInstance::new(
+            1,
+            base_plan(steps),
+            default_env(),
+            empty_schema_index(),
+            reducer_schemas,
+        );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.raised_events.len(), 1);
@@ -1066,26 +1114,42 @@ mod tests {
 
     #[test]
     fn raise_event_accepts_literal_payload() {
+        let reducer = "com.test/Reducer@1";
+        let event_schema = TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([(
+                "value".into(),
+                TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
+                    int: EmptyObject {},
+                })),
+            )]),
+        });
+        let reducer_schemas = reducer_schema_map(
+            reducer,
+            "com.test/Literal@1",
+            event_schema,
+            None,
+        );
         let literal_event = ValueLiteral::Record(ValueRecord {
-            record: IndexMap::from([
-                (
-                    "$schema".into(),
-                    ValueLiteral::Text(ValueText {
-                        text: "com.test/Literal@1".into(),
-                    }),
-                ),
-                ("value".into(), ValueLiteral::Int(ValueInt { int: 3 })),
-            ]),
+            record: IndexMap::from([(
+                "value".into(),
+                ValueLiteral::Int(ValueInt { int: 3 }),
+            )]),
         });
         let steps = vec![PlanStep {
             id: "raise".into(),
             kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                reducer: "irrelevant".into(),
+                reducer: reducer.into(),
                 event: literal_event.into(),
                 key: None,
             }),
         }];
-        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut plan = PlanInstance::new(
+            1,
+            base_plan(steps),
+            default_env(),
+            empty_schema_index(),
+            reducer_schemas,
+        );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert!(outcome.completed);
@@ -1130,7 +1194,7 @@ mod tests {
             to: "second".into(),
             when: None,
         });
-        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut instance = new_plan_instance(plan);
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert!(outcome.completed);
@@ -1172,7 +1236,7 @@ mod tests {
             to: "end".into(),
             when: None,
         });
-        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut instance = new_plan_instance(plan);
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
@@ -1217,7 +1281,7 @@ mod tests {
         }];
         let mut plan = base_plan(steps);
         plan.output = Some(SchemaRef::new("test/Out@1").unwrap());
-        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut instance = new_plan_instance(plan);
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert!(outcome.completed);
@@ -1232,7 +1296,7 @@ mod tests {
         }];
         let mut plan = base_plan(steps);
         plan.output = Some(SchemaRef::new("test/Out@1").unwrap());
-        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut instance = new_plan_instance(plan);
         let mut effects = test_effect_manager();
         let err = instance.tick(&mut effects).unwrap_err();
         assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("output schema")));
@@ -1247,7 +1311,7 @@ mod tests {
             }),
         }];
         let plan = base_plan(steps);
-        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut instance = new_plan_instance(plan);
         let mut effects = test_effect_manager();
         let err = instance.tick(&mut effects).unwrap_err();
         assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("without output schema")));
@@ -1286,7 +1350,7 @@ mod tests {
                 Expr::Const(ExprConst::Int { int: 10 }),
             ],
         }));
-        let mut instance = PlanInstance::new(1, plan, default_env());
+        let mut instance = new_plan_instance(plan);
         let mut effects = test_effect_manager();
         let err = instance.tick(&mut effects).unwrap_err();
         assert!(matches!(err, KernelError::PlanInvariantFailed { .. }));
@@ -1334,13 +1398,26 @@ mod tests {
                 when: None,
             },
         ]);
-        let mut instance = PlanInstance::new(1, plan_def.clone(), default_env());
+        let schema_index = empty_schema_index();
+        let reducer_schemas = empty_reducer_schemas();
+        let mut instance = PlanInstance::new(
+            1,
+            plan_def.clone(),
+            default_env(),
+            schema_index.clone(),
+            reducer_schemas.clone(),
+        );
         let mut effects = test_effect_manager();
         let first = instance.tick(&mut effects).unwrap();
         let mut hash = first.waiting_receipt.expect("waiting receipt");
         let snapshot = instance.snapshot();
 
-        let mut restored = PlanInstance::from_snapshot(snapshot, plan_def);
+        let mut restored = PlanInstance::from_snapshot(
+            snapshot,
+            plan_def,
+            schema_index,
+            reducer_schemas,
+        );
         hash[0] ^= 0xAA;
         restored.override_pending_receipt_hash(hash);
         assert_eq!(restored.pending_receipt_hash(), Some(hash));
