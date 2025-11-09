@@ -3,10 +3,10 @@ use serde_json::json;
 use super::assert_json_schema;
 use crate::{
     DefSchema, EmptyObject, TypeExpr, TypeList, TypeMap, TypeMapEntry, TypeMapKey, TypeOption,
-    TypePrimitive, TypePrimitiveBool, TypePrimitiveBytes, TypePrimitiveInt,
-    TypePrimitiveNat, TypePrimitiveText, TypePrimitiveUuid, TypeRecord, TypeRef, TypeSet,
-    TypeVariant, ValueLiteral, ValueList, ValueMap, ValueMapEntry as ValueMapEntryLiteral,
-    ValueRecord, ValueSet, ValueText, ValueVariant, ValueInt, ValueNat, validate_value_literal,
+    TypePrimitive, TypePrimitiveBool, TypePrimitiveBytes, TypePrimitiveInt, TypePrimitiveNat,
+    TypePrimitiveText, TypePrimitiveUuid, TypeRecord, TypeRef, TypeSet, TypeVariant, ValueInt,
+    ValueList, ValueLiteral, ValueMap, ValueMapEntry as ValueMapEntryLiteral, ValueNat,
+    ValueRecord, ValueSet, ValueText, ValueVariant, validate_value_literal,
 };
 
 #[test]
@@ -241,7 +241,9 @@ fn map_literal_must_match_key_type() {
 
     let literal = ValueLiteral::Map(ValueMap {
         map: vec![ValueMapEntryLiteral {
-            key: ValueLiteral::Text(ValueText { text: "prod".into() }),
+            key: ValueLiteral::Text(ValueText {
+                text: "prod".into(),
+            }),
             value: ValueLiteral::Nat(ValueNat { nat: 1 }),
         }],
     });
@@ -303,7 +305,9 @@ fn list_literal_respects_element_shape() {
     validate_value_literal(&literal, &def.ty).expect("list literal valid");
 
     let bad_literal = ValueLiteral::List(ValueList {
-        list: vec![ValueLiteral::Text(ValueText { text: "oops".into() })],
+        list: vec![ValueLiteral::Text(ValueText {
+            text: "oops".into(),
+        })],
     });
     assert!(validate_value_literal(&bad_literal, &def.ty).is_err());
 }

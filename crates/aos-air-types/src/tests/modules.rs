@@ -81,7 +81,10 @@ fn reducer_module_with_annotations_and_key_schema_validates() {
     });
     assert_json_schema(crate::schemas::DEFMODULE, &module_json);
     let module: DefModule = serde_json::from_value(module_json).expect("module json");
-    assert_eq!(module.key_schema.as_ref().unwrap().as_str(), "com.acme/Key@1");
+    assert_eq!(
+        module.key_schema.as_ref().unwrap().as_str(),
+        "com.acme/Key@1"
+    );
     let reducer = module.abi.reducer.expect("reducer abi");
     assert_eq!(reducer.effects_emitted.len(), 2);
     assert_eq!(reducer.cap_slots.len(), 2);
@@ -97,7 +100,11 @@ fn reducer_module_without_abi_is_rejected_by_schema() {
         "abi": {}
     });
     assert!(
-        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(crate::schemas::DEFMODULE, &module_json))).is_err(),
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::DEFMODULE,
+            &module_json
+        )))
+        .is_err(),
         "schema should reject reducer modules missing reducer ABI"
     );
 }
@@ -120,7 +127,11 @@ fn cap_slot_names_must_match_pattern() {
         }
     });
     assert!(
-        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(crate::schemas::DEFMODULE, &module_json))).is_err(),
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::DEFMODULE,
+            &module_json
+        )))
+        .is_err(),
         "patternProperties should reject leading digit"
     );
 }

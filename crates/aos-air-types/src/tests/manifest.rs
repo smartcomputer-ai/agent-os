@@ -92,7 +92,11 @@ fn module_binding_requires_slots_schema() {
         }
     });
     assert!(
-        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(crate::schemas::MANIFEST, &manifest_json))).is_err(),
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::MANIFEST,
+            &manifest_json
+        )))
+        .is_err(),
         "schema should require slots object inside module binding"
     );
 }

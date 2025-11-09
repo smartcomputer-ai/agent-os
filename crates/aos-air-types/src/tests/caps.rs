@@ -86,7 +86,11 @@ fn rejects_unknown_cap_type_via_schema() {
         "schema": {"record": {}}
     });
     assert!(
-        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(crate::schemas::DEFCAP, &cap_json))).is_err()
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::DEFCAP,
+            &cap_json
+        )))
+        .is_err()
     );
 }
 

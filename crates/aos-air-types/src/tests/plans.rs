@@ -5,11 +5,11 @@ use serde_json::json;
 
 use super::assert_json_schema;
 use crate::{
-    builtins::builtin_schemas,
-    plan_literals::{normalize_plan_literals, PlanLiteralError, SchemaIndex},
     DefModule, DefPlan, EffectKind, ExprOrValue, HashRef, ModuleAbi, ModuleKind, ReducerAbi,
     SchemaRef, TypeExpr, TypeMap, TypeMapEntry, TypeMapKey, TypePrimitive, TypePrimitiveNat,
     TypePrimitiveText, TypePrimitiveUuid, TypeSet,
+    builtins::builtin_schemas,
+    plan_literals::{PlanLiteralError, SchemaIndex, normalize_plan_literals},
 };
 
 fn schema_index() -> SchemaIndex {
@@ -48,9 +48,11 @@ fn schema_index() -> SchemaIndex {
     map.insert(
         "com.acme/Tags@1".into(),
         TypeExpr::Set(TypeSet {
-            set: Box::new(TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
-                text: crate::EmptyObject::default(),
-            }))),
+            set: Box::new(TypeExpr::Primitive(TypePrimitive::Text(
+                TypePrimitiveText {
+                    text: crate::EmptyObject::default(),
+                },
+            ))),
         }),
     );
     map.insert(
@@ -251,7 +253,9 @@ fn emit_effect_requires_known_params_schema() {
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
     let err = normalize_plan_literals(&mut plan, &schemas, &reducer_modules()).unwrap_err();
-    assert!(matches!(err, PlanLiteralError::SchemaNotFound { name } if name == "sys/LlmGenerateParams@1"));
+    assert!(
+        matches!(err, PlanLiteralError::SchemaNotFound { name } if name == "sys/LlmGenerateParams@1")
+    );
 }
 
 #[test]
@@ -512,6 +516,10 @@ fn await_event_without_bind_is_schema_error() {
         ]
     });
     assert!(
-        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(crate::schemas::DEFPLAN, &plan_json))).is_err()
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::DEFPLAN,
+            &plan_json
+        )))
+        .is_err()
     );
 }

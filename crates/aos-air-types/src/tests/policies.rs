@@ -86,6 +86,10 @@ fn rule_without_when_is_rejected_by_schema() {
         "rules": [rule]
     });
     assert!(
-        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(crate::schemas::DEFPOLICY, &policy_json))).is_err()
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::DEFPOLICY,
+            &policy_json
+        )))
+        .is_err()
     );
 }

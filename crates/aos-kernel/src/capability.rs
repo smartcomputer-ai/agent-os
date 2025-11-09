@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use aos_air_types::{
     CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, TypeExpr, TypeList, TypeMap,
-    TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, validate_value_literal,
-    plan_literals::SchemaIndex,
+    TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral,
+    plan_literals::SchemaIndex, validate_value_literal,
 };
 use aos_cbor::to_canonical_cbor;
 use aos_effects::{CapabilityBudget, CapabilityGrant};
@@ -274,9 +274,7 @@ mod tests {
         );
         let manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord { record }));
         let caps = HashMap::from([("sys/http.out@1".into(), defcap())]);
-        assert!(
-            CapabilityResolver::from_manifest(&manifest, &caps, &empty_schema_index()).is_ok()
-        );
+        assert!(CapabilityResolver::from_manifest(&manifest, &caps, &empty_schema_index()).is_ok());
     }
 
     #[test]
@@ -306,10 +304,8 @@ mod tests {
                 reference: SchemaRef::new(referenced_schema).expect("schema ref"),
             }),
         };
-        let schema_index = SchemaIndex::new(HashMap::from([(
-            referenced_schema.to_string(),
-            ref_schema,
-        )]));
+        let schema_index =
+            SchemaIndex::new(HashMap::from([(referenced_schema.to_string(), ref_schema)]));
 
         let mut record = IndexMap::new();
         record.insert(
@@ -325,8 +321,7 @@ mod tests {
         let invalid_manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord {
             record: IndexMap::new(),
         }));
-        let err = match CapabilityResolver::from_manifest(&invalid_manifest, &caps, &schema_index)
-        {
+        let err = match CapabilityResolver::from_manifest(&invalid_manifest, &caps, &schema_index) {
             Ok(_) => panic!("schema refs should enforce fields"),
             Err(err) => err,
         };

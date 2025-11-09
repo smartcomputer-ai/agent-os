@@ -1,8 +1,6 @@
 use crate::{
-    builtins::find_builtin_schema,
-    validate_value_literal,
     EmptyObject, HashRef, ValueList, ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull,
-    ValueRecord, ValueText,
+    ValueRecord, ValueText, builtins::find_builtin_schema, validate_value_literal,
 };
 
 fn text(value: &str) -> ValueLiteral {
@@ -57,10 +55,7 @@ fn http_request_params_literal_matches_builtin_schema() {
         ("url", text("https://example.com")),
         (
             "headers",
-            map(vec![(
-                text("content-type"),
-                text("application/json"),
-            )]),
+            map(vec![(text("content-type"), text("application/json"))]),
         ),
         (
             "body_ref",
@@ -75,17 +70,11 @@ fn http_request_receipt_literal_matches_builtin_schema() {
     let schema = find_builtin_schema("sys/HttpRequestReceipt@1").expect("http receipt schema");
     let literal = record(vec![
         ("status", ValueLiteral::Int(crate::ValueInt { int: 200 })),
-        (
-            "headers",
-            map(vec![(text("server"), text("nginx"))]),
-        ),
+        ("headers", map(vec![(text("server"), text("nginx"))])),
         ("body_ref", null()),
         (
             "timings",
-            record(vec![
-                ("start_ns", nat(1)),
-                ("end_ns", nat(2)),
-            ]),
+            record(vec![("start_ns", nat(1)), ("end_ns", nat(2))]),
         ),
         ("adapter_id", text("http-adapter")),
     ]);
@@ -124,10 +113,7 @@ fn llm_generate_receipt_literal_matches_builtin_schema() {
         ),
         (
             "token_usage",
-            record(vec![
-                ("prompt", nat(128)),
-                ("completion", nat(64)),
-            ]),
+            record(vec![("prompt", nat(128)), ("completion", nat(64))]),
         ),
         ("cost_cents", nat(42)),
         ("provider_id", text("openai")),
@@ -143,10 +129,7 @@ fn llm_generate_receipt_requires_token_usage_fields() {
             "output_ref",
             hash("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
         ),
-        (
-            "token_usage",
-            record(vec![("prompt", nat(1))]),
-        ),
+        ("token_usage", record(vec![("prompt", nat(1))])),
         ("cost_cents", nat(0)),
         ("provider_id", text("openai")),
     ]);

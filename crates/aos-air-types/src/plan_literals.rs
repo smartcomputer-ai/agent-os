@@ -680,7 +680,7 @@ mod tests {
         TypePrimitiveInt, TypePrimitiveNat, TypePrimitiveText, TypePrimitiveTime,
         TypePrimitiveUuid,
     };
-    use aos_cbor::{to_canonical_cbor, Hash};
+    use aos_cbor::{Hash, to_canonical_cbor};
     use serde_json::{Value, json};
 
     fn schema_index() -> SchemaIndex {
@@ -880,11 +880,7 @@ mod tests {
         let schema = TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
             text: crate::EmptyObject::default(),
         }));
-        assert_sugar_and_tagged_equal(
-            schema,
-            json!("hello"),
-            json!({"text": "hello"}),
-        );
+        assert_sugar_and_tagged_equal(schema, json!("hello"), json!({"text": "hello"}));
     }
 
     #[test]
@@ -892,11 +888,7 @@ mod tests {
         let schema = TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
             int: crate::EmptyObject::default(),
         }));
-        assert_sugar_and_tagged_equal(
-            schema,
-            json!("-42"),
-            json!({"int": -42}),
-        );
+        assert_sugar_and_tagged_equal(schema, json!("-42"), json!({"int": -42}));
     }
 
     #[test]
@@ -904,11 +896,7 @@ mod tests {
         let schema = TypeExpr::Primitive(TypePrimitive::Dec128(TypePrimitiveDec128 {
             dec128: crate::EmptyObject::default(),
         }));
-        assert_sugar_and_tagged_equal(
-            schema,
-            json!("3.14159"),
-            json!({"dec128": "3.14159"}),
-        );
+        assert_sugar_and_tagged_equal(schema, json!("3.14159"), json!({"dec128": "3.14159"}));
     }
 
     #[test]
@@ -916,11 +904,7 @@ mod tests {
         let schema = TypeExpr::Primitive(TypePrimitive::Bytes(TypePrimitiveBytes {
             bytes: crate::EmptyObject::default(),
         }));
-        assert_sugar_and_tagged_equal(
-            schema,
-            json!("AAEC"),
-            json!({"bytes_b64": "AAEC"}),
-        );
+        assert_sugar_and_tagged_equal(schema, json!("AAEC"), json!({"bytes_b64": "AAEC"}));
     }
 
     #[test]
@@ -974,9 +958,11 @@ mod tests {
     #[test]
     fn sugar_set_dedupes_and_matches_tagged_literal() {
         let schema = TypeExpr::Set(TypeSet {
-            set: Box::new(TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
-                text: crate::EmptyObject::default(),
-            }))),
+            set: Box::new(TypeExpr::Primitive(TypePrimitive::Text(
+                TypePrimitiveText {
+                    text: crate::EmptyObject::default(),
+                },
+            ))),
         });
         assert_sugar_and_tagged_equal(
             schema,
@@ -1052,9 +1038,15 @@ mod tests {
                 })),
             )]),
         });
-        let err = parse_json_literal(&json!({"Err": "oops"}), &schema, &SchemaIndex::new(HashMap::new()))
-            .unwrap_err();
-        assert!(matches!(err, PlanLiteralError::InvalidJson(message) if message.contains("unknown variant tag")));
+        let err = parse_json_literal(
+            &json!({"Err": "oops"}),
+            &schema,
+            &SchemaIndex::new(HashMap::new()),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, PlanLiteralError::InvalidJson(message) if message.contains("unknown variant tag"))
+        );
     }
 
     #[test]
@@ -1071,6 +1063,8 @@ mod tests {
         });
         let err = parse_json_literal(&json!([[1]]), &schema, &SchemaIndex::new(HashMap::new()))
             .unwrap_err();
-        assert!(matches!(err, PlanLiteralError::InvalidJson(message) if message.contains("map literals must be [[key, value]")));
+        assert!(
+            matches!(err, PlanLiteralError::InvalidJson(message) if message.contains("map literals must be [[key, value]"))
+        );
     }
 }

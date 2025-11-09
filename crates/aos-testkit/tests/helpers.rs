@@ -72,9 +72,10 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
                     reducer: result_module.name.clone(),
                     event: Expr::Record(ExprRecord {
-                        record: IndexMap::from([
-                            ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
-                        ]),
+                        record: IndexMap::from([(
+                            "value".into(),
+                            Expr::Const(ExprConst::Int { int: 9 }),
+                        )]),
                     })
                     .into(),
                     key: None,
@@ -126,12 +127,14 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
             DefSchema {
                 name: "com.acme/ResultEvent@1".into(),
                 ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([( "value".into(), int_type() )]),
+                    record: IndexMap::from([("value".into(), int_type())]),
                 }),
             },
             DefSchema {
                 name: "com.acme/ResultState@1".into(),
-                ty: TypeExpr::Record(TypeRecord { record: IndexMap::new() }),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
             },
         ],
     );
@@ -189,9 +192,10 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
                     reducer: result_module.name.clone(),
                     key: None,
                     event: Expr::Record(ExprRecord {
-                        record: IndexMap::from([
-                            ("value".into(), Expr::Const(ExprConst::Int { int: 5 })),
-                        ]),
+                        record: IndexMap::from([(
+                            "value".into(),
+                            Expr::Const(ExprConst::Int { int: 5 }),
+                        )]),
                     })
                     .into(),
                 }),
@@ -238,12 +242,14 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
             DefSchema {
                 name: "com.acme/EventDone@1".into(),
                 ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([( "value".into(), int_type() )]),
+                    record: IndexMap::from([("value".into(), int_type())]),
                 }),
             },
             DefSchema {
                 name: "com.acme/EventResultState@1".into(),
-                ty: TypeExpr::Record(TypeRecord { record: IndexMap::new() }),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
             },
         ],
     );
@@ -282,7 +288,12 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
         fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
     ];
-    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![timer_emitter, timer_handler], routing);
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![],
+        vec![],
+        vec![timer_emitter, timer_handler],
+        routing,
+    );
     insert_test_schemas(
         &mut loaded,
         vec![
@@ -319,7 +330,10 @@ pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
     insert_test_schemas(
         &mut loaded,
-        vec![def_text_record_schema(START_SCHEMA, vec![("id", text_type())])],
+        vec![def_text_record_schema(
+            START_SCHEMA,
+            vec![("id", text_type())],
+        )],
     );
     loaded
 }
@@ -340,9 +354,7 @@ pub fn def_text_record_schema(name: &str, fields: Vec<(&str, TypeExpr)>) -> DefS
     DefSchema {
         name: name.into(),
         ty: TypeExpr::Record(TypeRecord {
-            record: IndexMap::from_iter(
-                fields.into_iter().map(|(k, ty)| (k.to_string(), ty)),
-            ),
+            record: IndexMap::from_iter(fields.into_iter().map(|(k, ty)| (k.to_string(), ty))),
         }),
     }
 }

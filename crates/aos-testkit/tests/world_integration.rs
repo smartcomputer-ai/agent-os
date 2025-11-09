@@ -14,13 +14,12 @@ use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::{JournalKind, mem::MemJournal};
 use aos_testkit::fixtures::{self, START_SCHEMA};
-use aos_testkit::{TestStore, TestWorld, effect_params_text, fake_hash};
+use aos_testkit::{TestWorld, effect_params_text, fake_hash};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use indexmap::IndexMap;
 use serde_cbor;
 use serde_json::json;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 mod helpers;
 use helpers::{def_text_record_schema, insert_test_schemas, int_type, text_type, timer_manifest};
