@@ -675,7 +675,11 @@ fn normalize_raise_event_literal(
 mod tests {
     use super::*;
     use crate::builtins::builtin_schemas;
-    use crate::{TypePrimitiveInt, TypePrimitiveNat, TypePrimitiveText, TypePrimitiveUuid};
+    use crate::{
+        TypePrimitiveBytes, TypePrimitiveDec128, TypePrimitiveDuration, TypePrimitiveHash,
+        TypePrimitiveInt, TypePrimitiveNat, TypePrimitiveText, TypePrimitiveTime,
+        TypePrimitiveUuid,
+    };
     use aos_cbor::{to_canonical_cbor, Hash};
     use serde_json::{Value, json};
 
@@ -854,6 +858,78 @@ mod tests {
             schema,
             json!("-42"),
             json!({"int": -42}),
+        );
+    }
+
+    #[test]
+    fn sugar_dec128_literal_matches_tagged_literal() {
+        let schema = TypeExpr::Primitive(TypePrimitive::Dec128(TypePrimitiveDec128 {
+            dec128: crate::EmptyObject::default(),
+        }));
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!("3.14159"),
+            json!({"dec128": "3.14159"}),
+        );
+    }
+
+    #[test]
+    fn sugar_bytes_literal_matches_tagged_literal() {
+        let schema = TypeExpr::Primitive(TypePrimitive::Bytes(TypePrimitiveBytes {
+            bytes: crate::EmptyObject::default(),
+        }));
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!("AAEC"),
+            json!({"bytes_b64": "AAEC"}),
+        );
+    }
+
+    #[test]
+    fn sugar_hash_literal_matches_tagged_literal() {
+        let schema = TypeExpr::Primitive(TypePrimitive::Hash(TypePrimitiveHash {
+            hash: crate::EmptyObject::default(),
+        }));
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            json!({"hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}),
+        );
+    }
+
+    #[test]
+    fn sugar_uuid_literal_matches_tagged_literal() {
+        let schema = TypeExpr::Primitive(TypePrimitive::Uuid(TypePrimitiveUuid {
+            uuid: crate::EmptyObject::default(),
+        }));
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!("123e4567-e89b-12d3-a456-426614174000"),
+            json!({"uuid": "123e4567-e89b-12d3-a456-426614174000"}),
+        );
+    }
+
+    #[test]
+    fn sugar_time_literal_matches_tagged_literal() {
+        let schema = TypeExpr::Primitive(TypePrimitive::Time(TypePrimitiveTime {
+            time: crate::EmptyObject::default(),
+        }));
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!(1_700_000_000_000_000_000u64),
+            json!({"time_ns": 1_700_000_000_000_000_000u64}),
+        );
+    }
+
+    #[test]
+    fn sugar_duration_literal_matches_tagged_literal() {
+        let schema = TypeExpr::Primitive(TypePrimitive::Duration(TypePrimitiveDuration {
+            duration: crate::EmptyObject::default(),
+        }));
+        assert_sugar_and_tagged_equal(
+            schema,
+            json!(-1_000_000i64),
+            json!({"duration_ns": -1_000_000}),
         );
     }
 
