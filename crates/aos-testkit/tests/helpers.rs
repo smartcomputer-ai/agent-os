@@ -108,7 +108,7 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     };
 
     let routing = vec![fixtures::routing_event(
-        "com.acme/Result@1",
+        result_event_schema.as_str(),
         &result_module.name,
     )];
     let mut loaded = fixtures::build_loaded_manifest(
@@ -141,7 +141,7 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
 
 /// Builds a test manifest with a plan that awaits a domain event before proceeding.
 pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let result_module = fixtures::stub_reducer_module(
+    let mut result_module = fixtures::stub_reducer_module(
         store,
         "com.acme/EventResult@1",
         &ReducerOutput {
@@ -151,6 +151,15 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
             ann: None,
         },
     );
+    let result_state_schema = fixtures::schema("com.acme/EventResultState@1");
+    let result_event_schema = fixtures::schema("com.acme/EventDone@1");
+    result_module.abi.reducer = Some(ReducerAbi {
+        state: result_state_schema.clone(),
+        event: result_event_schema.clone(),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: IndexMap::new(),
+    });
     let unblock_event =
         fixtures::domain_event("com.acme/Unblock@1", &fixtures::plan_input_record(vec![]));
     let unblock_emitter = fixtures::stub_event_emitting_reducer(
@@ -210,15 +219,35 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     };
 
     let routing = vec![
-        fixtures::routing_event("com.acme/EventDone@1", &result_module.name),
+        fixtures::routing_event(result_event_schema.as_str(), &result_module.name),
         fixtures::routing_event("com.acme/EmitUnblock@1", &unblock_emitter.name),
     ];
-    fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![result_module, unblock_emitter],
         routing,
-    )
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            def_text_record_schema("com.acme/EmitUnblock@1", vec![]),
+            def_text_record_schema("com.acme/Unblock@1", vec![]),
+            DefSchema {
+                name: "com.acme/EventDone@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::from([( "value".into(), int_type() )]),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/EventResultState@1".into(),
+                ty: TypeExpr::Record(TypeRecord { record: IndexMap::new() }),
+            },
+        ],
+    );
+    loaded
 }
 
 /// Builds a test manifest with a reducer that emits a timer effect and another reducer
@@ -295,19 +324,19 @@ pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
     loaded
 }
 
-fn text_type() -> TypeExpr {
+pub fn text_type() -> TypeExpr {
     TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
         text: EmptyObject {},
     }))
 }
 
-fn int_type() -> TypeExpr {
+pub fn int_type() -> TypeExpr {
     TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
         int: EmptyObject {},
     }))
 }
 
-fn def_text_record_schema(name: &str, fields: Vec<(&str, TypeExpr)>) -> DefSchema {
+pub fn def_text_record_schema(name: &str, fields: Vec<(&str, TypeExpr)>) -> DefSchema {
     DefSchema {
         name: name.into(),
         ty: TypeExpr::Record(TypeRecord {
@@ -318,7 +347,7 @@ fn def_text_record_schema(name: &str, fields: Vec<(&str, TypeExpr)>) -> DefSchem
     }
 }
 
-fn insert_test_schemas(
+pub fn insert_test_schemas(
     loaded: &mut aos_kernel::manifest::LoadedManifest,
     schemas: Vec<DefSchema>,
 ) {

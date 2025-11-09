@@ -1,9 +1,9 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPlan, EffectKind, EmptyObject, Expr, ExprConst, ExprRecord, PlanBind, PlanBindEffect,
-    PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect,
-    PlanStepEnd, PlanStepKind, PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive,
-    TypePrimitiveText, TypeRecord, builtins::builtin_schemas,
+    DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprRecord, PlanBind,
+    PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt,
+    PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent, ReducerAbi, TypeExpr,
+    TypePrimitive, TypePrimitiveText, TypeRecord, builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_effects::builtins::{
@@ -20,7 +20,9 @@ use serde_cbor;
 use std::collections::HashMap;
 
 mod helpers;
-use helpers::timer_manifest;
+use helpers::{
+    def_text_record_schema, insert_test_schemas, int_type, text_type, timer_manifest,
+};
 
 fn builtin_schema_index_with_custom_types() -> SchemaIndex {
     let mut map = HashMap::new();
@@ -149,11 +151,30 @@ fn sugar_literal_plan_executes_http_flow() {
 
     let routing =
         vec![fixtures::routing_event("com.acme/ResultEvent@1", &result_module.name)];
-    let loaded = fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(plan_name)],
         vec![result_module.clone()],
         routing,
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            def_text_record_schema("com.acme/Result@1", vec![("message", text_type())]),
+            DefSchema {
+                name: "com.acme/ResultEvent@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::from([(
+                        "value".into(),
+                        TypeExpr::Record(TypeRecord {
+                            record: IndexMap::from([("message".into(), text_type())]),
+                        }),
+                    )]),
+                }),
+            },
+        ],
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
@@ -187,7 +208,7 @@ fn sugar_literal_plan_executes_http_flow() {
 fn single_plan_orchestration_completes_after_receipt() {
     let store = fixtures::new_mem_store();
 
-    let result_module = fixtures::stub_reducer_module(
+    let mut result_module = fixtures::stub_reducer_module(
         &store,
         "com.acme/ResultReducer@1",
         &ReducerOutput {
@@ -197,6 +218,13 @@ fn single_plan_orchestration_completes_after_receipt() {
             ann: None,
         },
     );
+    result_module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/Result@1"),
+        event: fixtures::schema("com.acme/ResultEvent@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: IndexMap::new(),
+    });
 
     let plan_name = "com.acme/Fulfill@1".to_string();
     let plan = DefPlan {
@@ -265,14 +293,31 @@ fn single_plan_orchestration_completes_after_receipt() {
     };
 
     let routing = vec![fixtures::routing_event(
-        "com.acme/Result@1",
+        "com.acme/ResultEvent@1",
         &result_module.name,
     )];
-    let loaded = fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![result_module],
         routing,
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            def_text_record_schema("com.acme/Result@1", vec![("message", text_type())]),
+            DefSchema {
+                name: "com.acme/ResultEvent@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::from([(
+                        "value".into(),
+                        int_type(),
+                    )]),
+                }),
+            },
+        ],
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
@@ -994,8 +1039,16 @@ fn raised_events_are_routed_to_reducers() {
         effects: vec![],
         ann: None,
     };
-    let reducer_module =
+    let mut reducer_module =
         fixtures::stub_reducer_module(&store, "com.acme/Reducer@1", &reducer_output);
+    reducer_module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/RaisedState@1"),
+        event: fixtures::schema("com.acme/Raised@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: IndexMap::new(),
+    });
+    let reducer_name = reducer_module.name.clone();
 
     let plan = DefPlan {
         name: "com.acme/Raise@1".into(),
@@ -1006,7 +1059,7 @@ fn raised_events_are_routed_to_reducers() {
             PlanStep {
                 id: "raise".into(),
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                    reducer: reducer_module.name.clone(),
+                    reducer: reducer_name.clone(),
                     event: Expr::Record(ExprRecord {
                         record: IndexMap::from([(
                             "value".into(),
@@ -1032,15 +1085,42 @@ fn raised_events_are_routed_to_reducers() {
         invariants: vec![],
     };
 
-    let routing = vec![fixtures::routing_event(
-        "com.acme/Raised@1",
-        &reducer_module.name,
-    )];
-    let loaded = fixtures::build_loaded_manifest(
+    let routing = vec![fixtures::routing_event("com.acme/Raised@1", &reducer_name)];
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan.clone()],
         vec![fixtures::start_trigger(&plan.name)],
         vec![reducer_module],
         routing,
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/Raised@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::from([(
+                        "value".into(),
+                        int_type(),
+                    )]),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/RaisedState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        ],
+    );
+    assert!(
+        loaded
+            .modules
+            .get(&reducer_name)
+            .and_then(|module| module.abi.reducer.as_ref())
+            .is_some(),
+        "Reducer ABI missing"
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
