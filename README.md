@@ -12,6 +12,8 @@ AgentOS makes determinism and governed evolution first-class. Build portable, fo
 
 ## Our Architecture in Short
 
+The current experimental runtime is written in Rust and supports the following features:
+
 - **Deterministic kernel**: Single-threaded worlds with replay-identical state
 - **AIR (Agent Intermediate Representation)**: Typed control plane for modules, plans, schemas, policies, and capabilities (homoiconic in spirit, where agents can read and edit their own runtime)
 - **Capability security**: No ambient authority. All effects are scoped, budgeted, and gated by policy
@@ -43,7 +45,7 @@ For implementation guidance, project structure, and coding conventions, see **[A
 AgentOS is open-source software licensed under the **Apache License 2.0**.
 The runtime, kernel, adapters, and SDKs are available for free use and modification under that license, with an explicit grant of patent rights.
 
-The **AIR specification and schema documents** are published under the **Creative Commons Attribution 4.0 International (CC BY 4.0)** license with a **royalty-free patent non-assert**, so anyone can build compatible implementations.
+The AIR specification and schema documents are published under the **Creative Commons Attribution 4.0 International (CC BY 4.0)** license with a royalty-free patent non-assert, so anyone can build compatible implementations.
 
 See [`LICENSE`](./LICENSE) and [`LICENSE-SPEC`](./LICENSE-SPEC) for full terms.
 
