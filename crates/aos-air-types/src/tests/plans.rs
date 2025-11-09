@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde_json::json;
 
+use super::assert_json_schema;
 use crate::{
     DefModule, DefPlan, EffectKind, ExprOrValue, HashRef, ModuleAbi, ModuleKind, ReducerAbi,
     SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText,
@@ -130,6 +131,7 @@ fn normalizes_all_expr_or_value_slots() {
         "allowed_effects": ["http.request"]
     });
 
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
     normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).expect("normalize");
 
@@ -170,6 +172,7 @@ fn literal_without_local_schema_errors() {
         "required_caps": [],
         "allowed_effects": []
     });
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
     let err = normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).unwrap_err();
     assert!(matches!(

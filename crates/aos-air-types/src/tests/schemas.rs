@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use super::assert_json_schema;
 use crate::{
     DefSchema, EmptyObject, TypeExpr, TypePrimitive, TypePrimitiveText, ValueLiteral, ValueRecord,
     ValueText, validate_value_literal,
@@ -17,6 +18,7 @@ fn parses_record_schema_and_validates_literal() {
             }
         }
     });
+    assert_json_schema(crate::schemas::DEFSCHEMA, &schema_json);
     let def: DefSchema = serde_json::from_value(schema_json).expect("parse defschema");
     assert_eq!(def.name, "com.acme/Message@1");
 

@@ -79,6 +79,7 @@
         {
           "type": "object",
           "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
             "op": { "const": "raise_event" },
             "reducer": { "$ref": "common.schema.json#/$defs/Name" },
             "event": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
@@ -95,6 +96,7 @@
         {
           "type": "object",
           "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
             "op": { "const": "emit_effect" },
             "kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
             "params": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
@@ -119,6 +121,7 @@
         {
           "type": "object",
           "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
             "op": { "const": "await_receipt" },
             "for": { "$ref": "common.schema.json#/$defs/Expr" },
             "bind": { "$ref": "#/$defs/BindAs" }
@@ -134,6 +137,7 @@
         {
           "type": "object",
           "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
             "op": { "const": "await_event" },
             "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
             "where": { "$ref": "common.schema.json#/$defs/Expr" },
@@ -150,6 +154,7 @@
         {
           "type": "object",
           "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
             "op": { "const": "assign" },
             "expr": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
             "bind": { "$ref": "#/$defs/BindAs" }
@@ -165,6 +170,7 @@
         {
           "type": "object",
           "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
             "op": { "const": "end" },
             "result": { "$ref": "common.schema.json#/$defs/ExprOrValue" }
           },

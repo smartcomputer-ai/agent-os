@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use super::assert_json_schema;
 use crate::{DefPolicy, PolicyDecision, PolicyMatch, PolicyRule};
 
 #[test]
@@ -14,6 +15,7 @@ fn parses_policy_rules() {
             }
         ]
     });
+    assert_json_schema(crate::schemas::DEFPOLICY, &policy_json);
     let policy: DefPolicy = serde_json::from_value(policy_json).expect("policy json");
     assert_eq!(policy.rules.len(), 1);
     assert!(matches!(policy.rules[0].decision, PolicyDecision::Allow));

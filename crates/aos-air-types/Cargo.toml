@@ -12,3 +12,6 @@ petgraph = "0.6"
 thiserror = "1"
 once_cell = "1"
 aos-cbor = { path = "../aos-cbor" }
+
+[dev-dependencies]
+jsonschema = "0.17"

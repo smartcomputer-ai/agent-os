@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use super::assert_json_schema;
 use crate::{
     CapGrant, DefCap, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord, TypeSet,
     validate_value_literal,
@@ -32,6 +33,7 @@ fn parses_cap_definition_and_grant() {
             }
         }
     });
+    assert_json_schema(crate::schemas::DEFCAP, &cap_json);
     let cap: DefCap = serde_json::from_value(cap_json).expect("cap json");
     assert_eq!(cap.cap_type, crate::CapType::HttpOut);
 

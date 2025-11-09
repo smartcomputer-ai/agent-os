@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use super::assert_json_schema;
 use crate::{Manifest, NamedRef};
 
 #[test]
@@ -13,6 +14,7 @@ fn manifest_json_round_trip() {
         "policies": [],
         "triggers": []
     });
+    assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
     let manifest: Manifest = serde_json::from_value(manifest_json.clone()).expect("manifest json");
     assert_eq!(manifest.plans.len(), 1);
     let round = serde_json::to_value(manifest).expect("serialize");
