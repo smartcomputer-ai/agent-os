@@ -493,8 +493,11 @@ fn eval_expr_or_value(
         ExprOrValue::Expr(expr) => {
             eval_expr(expr, env).map_err(|err| KernelError::Manifest(format!("{context}: {err}")))
         }
-        ExprOrValue::Value(literal) => literal_to_value(literal)
+        ExprOrValue::Literal(literal) => literal_to_value(literal)
             .map_err(|err| KernelError::Manifest(format!("{context}: {err}"))),
+        ExprOrValue::Json(_) => Err(KernelError::Manifest(
+            "plan literals must be normalized before execution".into(),
+        )),
     }
 }
 
@@ -691,7 +694,9 @@ mod tests {
                     text: "literal".into(),
                 })
                 .into(),
-                bind: PlanBind { var: "greeting".into() },
+                bind: PlanBind {
+                    var: "greeting".into(),
+                },
             }),
         }];
         let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
@@ -880,10 +885,7 @@ mod tests {
                         text: "com.test/Literal@1".into(),
                     }),
                 ),
-                (
-                    "value".into(),
-                    ValueLiteral::Int(ValueInt { int: 3 }),
-                ),
+                ("value".into(), ValueLiteral::Int(ValueInt { int: 3 })),
             ]),
         });
         let steps = vec![PlanStep {

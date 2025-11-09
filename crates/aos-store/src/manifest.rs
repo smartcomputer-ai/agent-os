@@ -3,7 +3,7 @@ use std::{
     path::Path,
 };
 
-use aos_air_types::{AirNode, Manifest, NamedRef, builtins, validate};
+use aos_air_types::{AirNode, Manifest, NamedRef, builtins, plan_literals::SchemaIndex, validate};
 use aos_cbor::Hash;
 
 use crate::{EntryKind, Store, StoreError, StoreResult, io_error};
@@ -72,6 +72,7 @@ pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResul
     load_refs(store, &manifest.caps, NodeKind::Cap, &mut nodes)?;
     load_refs(store, &manifest.policies, NodeKind::Policy, &mut nodes)?;
 
+    normalize_plan_literals(&mut nodes)?;
     validate_plans(&manifest, &nodes)?;
 
     Ok(Catalog { manifest, nodes })
@@ -106,6 +107,41 @@ fn load_refs<S: Store>(
             });
         }
         nodes.insert(reference.name.clone(), CatalogEntry { hash, node });
+    }
+    Ok(())
+}
+
+fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreResult<()> {
+    use aos_air_types::plan_literals::normalize_plan_literals;
+
+    let mut schema_map = HashMap::new();
+    let mut module_map = HashMap::new();
+    for entry in nodes.values() {
+        match &entry.node {
+            AirNode::Defschema(schema) => {
+                schema_map.insert(schema.name.clone(), schema.ty.clone());
+            }
+            AirNode::Defmodule(module) => {
+                module_map.insert(module.name.clone(), module.clone());
+            }
+            _ => {}
+        }
+    }
+    for builtin in builtins::builtin_schemas() {
+        schema_map
+            .entry(builtin.schema.name.clone())
+            .or_insert(builtin.schema.ty.clone());
+    }
+    let schema_index = SchemaIndex::new(schema_map);
+    for (name, entry) in nodes.iter_mut() {
+        if let AirNode::Defplan(plan) = &mut entry.node {
+            normalize_plan_literals(plan, &schema_index, &module_map).map_err(|source| {
+                StoreError::PlanNormalization {
+                    name: name.clone(),
+                    source,
+                }
+            })?;
+        }
     }
     Ok(())
 }

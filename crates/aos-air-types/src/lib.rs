@@ -2,6 +2,7 @@
 
 pub mod builtins;
 mod model;
+pub mod plan_literals;
 mod refs;
 pub mod schemas;
 pub mod typecheck;

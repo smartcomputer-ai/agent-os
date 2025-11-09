@@ -59,6 +59,12 @@ pub enum StoreError {
         #[source]
         source: aos_air_types::validate::ValidationError,
     },
+    #[error("plan literal normalization failed for '{name}': {source}")]
+    PlanNormalization {
+        name: String,
+        #[source]
+        source: aos_air_types::plan_literals::PlanLiteralError,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

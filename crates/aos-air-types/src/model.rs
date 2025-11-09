@@ -1,6 +1,7 @@
 use crate::{HashRef, SchemaRef};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 pub type Name = String;
 pub type VarName = String;
@@ -272,7 +273,8 @@ pub enum Expr {
 #[serde(untagged)]
 pub enum ExprOrValue {
     Expr(Expr),
-    Value(ValueLiteral),
+    Literal(ValueLiteral),
+    Json(JsonValue),
 }
 
 impl From<Expr> for ExprOrValue {
@@ -289,13 +291,13 @@ impl From<&Expr> for ExprOrValue {
 
 impl From<ValueLiteral> for ExprOrValue {
     fn from(value: ValueLiteral) -> Self {
-        ExprOrValue::Value(value)
+        ExprOrValue::Literal(value)
     }
 }
 
 impl From<&ValueLiteral> for ExprOrValue {
     fn from(value: &ValueLiteral) -> Self {
-        ExprOrValue::Value(value.clone())
+        ExprOrValue::Literal(value.clone())
     }
 }
 
