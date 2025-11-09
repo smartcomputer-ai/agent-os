@@ -1,8 +1,10 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPlan, EffectKind, Expr, ExprConst, ExprRecord, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-    PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
-    PlanStepKind, PlanStepRaiseEvent,
+    DefPlan, EffectKind, EmptyObject, Expr, ExprConst, ExprRecord, PlanBind, PlanBindEffect,
+    PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect,
+    PlanStepEnd, PlanStepKind, PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive,
+    TypePrimitiveText, TypeRecord, builtins::builtin_schemas,
+    plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
@@ -13,13 +15,175 @@ use aos_testkit::fixtures::{self, START_SCHEMA};
 use aos_testkit::{TestWorld, effect_params_text, fake_hash};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use indexmap::IndexMap;
+use serde_json::json;
 use serde_cbor;
+use std::collections::HashMap;
 
 mod helpers;
 use helpers::timer_manifest;
 
+fn builtin_schema_index_with_custom_types() -> SchemaIndex {
+    let mut map = HashMap::new();
+    for builtin in builtin_schemas() {
+        map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
+    }
+    let message_field = TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+        text: EmptyObject::default(),
+    }));
+    map.insert(
+        "com.acme/Result@1".into(),
+        TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([("message".into(), message_field.clone())]),
+        }),
+    );
+    map.insert(
+        "com.acme/ResultEvent@1".into(),
+        TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([("message".into(), message_field)]),
+        }),
+    );
+    SchemaIndex::new(map)
+}
+
 /// Happy-path end-to-end: reducer emits an intent, plan does work, receipt feeds a result event
 /// back into the reducer. Mirrors the “single plan orchestration” pattern in the spec.
+#[test]
+fn sugar_literal_plan_executes_http_flow() {
+    let store = fixtures::new_mem_store();
+    let mut result_module = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/ResultReducer@1",
+        &ReducerOutput {
+            state: Some(vec![0xEE]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+    result_module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/Result@1"),
+        event: fixtures::schema("com.acme/ResultEvent@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: IndexMap::new(),
+    });
+
+    let plan_name = "com.acme/SugarPlan@1";
+    let plan_json = json!({
+        "$kind": "defplan",
+        "name": plan_name,
+        "input": "com.acme/PlanIn@1",
+        "output": "com.acme/Result@1",
+        "locals": { "resp": "sys/HttpRequestReceipt@1" },
+        "steps": [
+            {
+                "id": "emit",
+                "op": "emit_effect",
+                "kind": "http.request",
+                "params": {
+                    "method": "POST",
+                    "url": "https://example.com",
+                    "headers": { "content-type": "application/json" },
+                    "body_ref": null
+                },
+                "cap": "cap_http",
+                "bind": { "effect_id_as": "req" }
+            },
+            {
+                "id": "await",
+                "op": "await_receipt",
+                "for": { "ref": "@var:req" },
+                "bind": { "as": "resp" }
+            },
+            {
+                "id": "raise",
+                "op": "raise_event",
+                "reducer": "com.acme/ResultReducer@1",
+                "event": { "message": "done" }
+            },
+            {
+                "id": "end",
+                "op": "end",
+                "result": { "message": "done" }
+            }
+        ],
+        "edges": [
+            { "from": "emit", "to": "await" },
+            { "from": "await", "to": "raise" },
+            { "from": "raise", "to": "end" }
+        ],
+        "required_caps": ["cap_http"],
+        "allowed_effects": ["http.request"]
+    });
+    let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
+    if let Some(step) = plan
+        .steps
+        .iter_mut()
+        .find(|step| step.id == "raise")
+    {
+        if let PlanStepKind::RaiseEvent(raise) = &mut step.kind {
+            raise.event = Expr::Record(ExprRecord {
+                record: IndexMap::from([
+                    ("$schema".into(), fixtures::text_expr("com.acme/ResultEvent@1")),
+                    (
+                        "value".into(),
+                        Expr::Record(ExprRecord {
+                            record: IndexMap::from([(
+                                "message".into(),
+                                fixtures::text_expr("done"),
+                            )]),
+                        }),
+                    ),
+                ]),
+            })
+            .into();
+        }
+    }
+    let mut modules = HashMap::new();
+    modules.insert(result_module.name.clone(), result_module.clone());
+    normalize_plan_literals(
+        &mut plan,
+        &builtin_schema_index_with_custom_types(),
+        &modules,
+    )
+    .expect("normalize literals");
+
+    let routing =
+        vec![fixtures::routing_event("com.acme/ResultEvent@1", &result_module.name)];
+    let loaded = fixtures::build_loaded_manifest(
+        vec![plan],
+        vec![fixtures::start_trigger(plan_name)],
+        vec![result_module.clone()],
+        routing,
+    );
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
+    world.submit_event_value(START_SCHEMA, &input);
+    world.tick_n(2).unwrap();
+
+    let mut effects = world.drain_effects();
+    assert_eq!(effects.len(), 1);
+    let effect = effects.remove(0);
+
+    let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("ok".into())).unwrap();
+    let receipt = EffectReceipt {
+        intent_hash: effect.intent_hash,
+        adapter_id: "adapter.http".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: receipt_payload,
+        cost_cents: None,
+        signature: vec![],
+    };
+    world.kernel.handle_receipt(receipt).unwrap();
+    world.kernel.tick_until_idle().unwrap();
+
+    assert_eq!(
+        world.kernel.reducer_state("com.acme/ResultReducer@1"),
+        Some(&vec![0xEE])
+    );
+}
+
 #[test]
 fn single_plan_orchestration_completes_after_receipt() {
     let store = fixtures::new_mem_store();

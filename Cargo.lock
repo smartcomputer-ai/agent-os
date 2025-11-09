@@ -206,6 +206,7 @@ dependencies = [
  "rand",
  "serde",
  "serde_cbor",
+ "serde_json",
  "tempfile",
  "wat",
 ]
