@@ -1003,4 +1003,36 @@ mod tests {
             }),
         );
     }
+
+    #[test]
+    fn variant_literal_with_unknown_tag_errors() {
+        let schema = TypeExpr::Variant(TypeVariant {
+            variant: IndexMap::from([(
+                "Ok".into(),
+                TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                    text: crate::EmptyObject::default(),
+                })),
+            )]),
+        });
+        let err = parse_json_literal(&json!({"Err": "oops"}), &schema, &SchemaIndex::new(HashMap::new()))
+            .unwrap_err();
+        assert!(matches!(err, PlanLiteralError::InvalidJson(message) if message.contains("unknown variant tag")));
+    }
+
+    #[test]
+    fn map_tuple_form_requires_key_value_pairs() {
+        let schema = TypeExpr::Map(TypeMap {
+            map: TypeMapEntry {
+                key: TypeMapKey::Nat(TypePrimitiveNat {
+                    nat: crate::EmptyObject::default(),
+                }),
+                value: Box::new(TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
+                    nat: crate::EmptyObject::default(),
+                }))),
+            },
+        });
+        let err = parse_json_literal(&json!([[1]]), &schema, &SchemaIndex::new(HashMap::new()))
+            .unwrap_err();
+        assert!(matches!(err, PlanLiteralError::InvalidJson(message) if message.contains("map literals must be [[key, value]")));
+    }
 }

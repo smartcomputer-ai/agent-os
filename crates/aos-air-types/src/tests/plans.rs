@@ -205,6 +205,56 @@ fn literal_without_local_schema_errors() {
 }
 
 #[test]
+fn end_result_without_output_schema_errors() {
+    let plan_json = json!({
+        "$kind": "defplan",
+        "name": "com.acme/Plan@1",
+        "input": "com.acme/Input@1",
+        "steps": [
+            {
+                "id": "end",
+                "op": "end",
+                "result": {"message": "done"}
+            }
+        ],
+        "edges": [],
+        "required_caps": [],
+        "allowed_effects": []
+    });
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
+    let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
+    let err = normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).unwrap_err();
+    assert!(matches!(err, PlanLiteralError::MissingSchema { context } if context == "end.result"));
+}
+
+#[test]
+fn emit_effect_requires_known_params_schema() {
+    let schemas = SchemaIndex::new(HashMap::new());
+    let plan_json = json!({
+        "$kind": "defplan",
+        "name": "com.acme/Plan@1",
+        "input": "com.acme/Input@1",
+        "steps": [
+            {
+                "id": "emit",
+                "op": "emit_effect",
+                "kind": "llm.generate",
+                "params": {"prompt": "hello"},
+                "cap": "cap_llm",
+                "bind": {"effect_id_as": "req"}
+            }
+        ],
+        "edges": [],
+        "required_caps": ["cap_llm"],
+        "allowed_effects": ["llm.generate"]
+    });
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
+    let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
+    let err = normalize_plan_literals(&mut plan, &schemas, &reducer_modules()).unwrap_err();
+    assert!(matches!(err, PlanLiteralError::SchemaNotFound { name } if name == "sys/LlmGenerateParams@1"));
+}
+
+#[test]
 fn set_literals_are_sorted_and_deduped() {
     let plan_json = json!({
         "$kind": "defplan",
