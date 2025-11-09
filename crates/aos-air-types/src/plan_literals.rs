@@ -8,10 +8,10 @@ use thiserror::Error;
 use crate::typecheck::validate_value_literal;
 use crate::{
     DefModule, DefPlan, EffectKind, ExprOrValue, HashRef, TypeExpr, TypeList, TypeMap,
-    TypeMapKey, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueBytes,
-    ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList, ValueLiteral, ValueMap,
-    ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText, ValueTimeNs, ValueUuid,
-    ValueVariant,
+    TypeMapEntry, TypeMapKey, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant,
+    ValueBytes, ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList, ValueLiteral,
+    ValueMap, ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText, ValueTimeNs,
+    ValueUuid, ValueVariant,
 };
 
 #[derive(Debug, Default)]
@@ -54,7 +54,7 @@ pub enum PlanLiteralError {
 pub fn normalize_plan_literals(
     plan: &mut DefPlan,
     schemas: &SchemaIndex,
-    _modules: &HashMap<String, DefModule>,
+    modules: &HashMap<String, DefModule>,
 ) -> Result<(), PlanLiteralError> {
     for step in &mut plan.steps {
         match &mut step.kind {
@@ -120,11 +120,7 @@ pub fn normalize_plan_literals(
                 }
             }
             crate::PlanStepKind::RaiseEvent(step) => {
-                if matches!(step.event, ExprOrValue::Json(_)) {
-                    return Err(PlanLiteralError::MissingSchema {
-                        context: "raise_event.event",
-                    });
-                }
+                normalize_raise_event_literal(step, schemas, modules)?;
             }
             _ => {}
         }
@@ -143,12 +139,12 @@ fn normalize_expr_or_value(
         ExprOrValue::Expr(_) => Ok(()),
         ExprOrValue::Literal(literal) => {
             canonicalize_literal(literal, schema, schemas)?;
-            validate_literal(literal, schema_name, schema)
+            validate_literal(literal, schema, schema_name, schemas)
         }
         ExprOrValue::Json(json) => {
             let mut literal = parse_json_literal(json, schema, schemas)?;
             canonicalize_literal(&mut literal, schema, schemas)?;
-            validate_literal(&literal, schema_name, schema)?;
+            validate_literal(&literal, schema, schema_name, schemas)?;
             *value = ExprOrValue::Literal(literal);
             Ok(())
         }
@@ -163,13 +159,96 @@ fn normalize_expr_or_value(
 
 fn validate_literal(
     literal: &ValueLiteral,
-    schema_name: &str,
     schema: &TypeExpr,
+    schema_name: &str,
+    schemas: &SchemaIndex,
 ) -> Result<(), PlanLiteralError> {
-    validate_value_literal(literal, schema).map_err(|err| PlanLiteralError::InvalidLiteral {
-        schema: schema_name.to_string(),
+    let (expanded, resolved_name) = expand_schema(schema, schema_name, schemas)?;
+    validate_value_literal(literal, &expanded).map_err(|err| PlanLiteralError::InvalidLiteral {
+        schema: resolved_name,
         message: err.to_string(),
     })
+}
+
+fn expand_schema(
+    schema: &TypeExpr,
+    schema_name: &str,
+    schemas: &SchemaIndex,
+) -> Result<(TypeExpr, String), PlanLiteralError> {
+    match schema {
+        TypeExpr::Ref(reference) => {
+            let target_name = reference.reference.as_str();
+            let target =
+                schemas
+                    .get(target_name)
+                    .ok_or_else(|| PlanLiteralError::SchemaNotFound {
+                        name: target_name.to_string(),
+                    })?;
+            expand_schema(target, target_name, schemas)
+        }
+        TypeExpr::Primitive(_) => Ok((schema.clone(), schema_name.to_string())),
+        TypeExpr::Record(record) => {
+            let mut expanded = IndexMap::new();
+            for (field, field_type) in &record.record {
+                let (expanded_field, _) = expand_schema(field_type, schema_name, schemas)?;
+                expanded.insert(field.clone(), expanded_field);
+            }
+            Ok((
+                TypeExpr::Record(TypeRecord { record: expanded }),
+                schema_name.to_string(),
+            ))
+        }
+        TypeExpr::Variant(variant) => {
+            let mut expanded = IndexMap::new();
+            for (tag, ty) in &variant.variant {
+                let (expanded_ty, _) = expand_schema(ty, schema_name, schemas)?;
+                expanded.insert(tag.clone(), expanded_ty);
+            }
+            Ok((
+                TypeExpr::Variant(TypeVariant { variant: expanded }),
+                schema_name.to_string(),
+            ))
+        }
+        TypeExpr::List(list) => {
+            let (expanded_inner, _) = expand_schema(&list.list, schema_name, schemas)?;
+            Ok((
+                TypeExpr::List(TypeList {
+                    list: Box::new(expanded_inner),
+                }),
+                schema_name.to_string(),
+            ))
+        }
+        TypeExpr::Set(set) => {
+            let (expanded_inner, _) = expand_schema(&set.set, schema_name, schemas)?;
+            Ok((
+                TypeExpr::Set(TypeSet {
+                    set: Box::new(expanded_inner),
+                }),
+                schema_name.to_string(),
+            ))
+        }
+        TypeExpr::Map(map) => {
+            let (expanded_value, _) = expand_schema(&map.map.value, schema_name, schemas)?;
+            Ok((
+                TypeExpr::Map(TypeMap {
+                    map: TypeMapEntry {
+                        key: map.map.key.clone(),
+                        value: Box::new(expanded_value),
+                    },
+                }),
+                schema_name.to_string(),
+            ))
+        }
+        TypeExpr::Option(option) => {
+            let (expanded_inner, _) = expand_schema(&option.option, schema_name, schemas)?;
+            Ok((
+                TypeExpr::Option(TypeOption {
+                    option: Box::new(expanded_inner),
+                }),
+                schema_name.to_string(),
+            ))
+        }
+    }
 }
 
 fn parse_json_literal(
@@ -455,12 +534,12 @@ fn canonicalize_literal(
                 }
                 let mut ordered = IndexMap::new();
                 for (field, field_type) in &record.record {
-                    let mut field_value = value_record
-                        .record
-                        .shift_remove(field)
-                        .ok_or_else(|| PlanLiteralError::InvalidJson(format!(
-                            "record missing field '{field}'",
-                        )))?;
+                    let mut field_value =
+                        value_record.record.shift_remove(field).ok_or_else(|| {
+                            PlanLiteralError::InvalidJson(
+                                format!("record missing field '{field}'",),
+                            )
+                        })?;
                     canonicalize_literal(&mut field_value, field_type, schemas)?;
                     ordered.insert(field.clone(), field_value);
                 }
@@ -559,6 +638,39 @@ fn effect_params_schema(kind: &EffectKind) -> Option<&'static str> {
     }
 }
 
+fn normalize_raise_event_literal(
+    step: &mut crate::PlanStepRaiseEvent,
+    schemas: &SchemaIndex,
+    modules: &HashMap<String, DefModule>,
+) -> Result<(), PlanLiteralError> {
+    let module = modules
+        .get(&step.reducer)
+        .ok_or_else(|| PlanLiteralError::ReducerNotFound {
+            name: step.reducer.clone(),
+        })?;
+    let reducer_abi =
+        module
+            .abi
+            .reducer
+            .as_ref()
+            .ok_or_else(|| PlanLiteralError::ReducerMissingAbi {
+                name: step.reducer.clone(),
+            })?;
+    let schema_name = reducer_abi.event.as_str();
+    let schema = schemas
+        .get(schema_name)
+        .ok_or_else(|| PlanLiteralError::SchemaNotFound {
+            name: schema_name.to_string(),
+        })?;
+    normalize_expr_or_value(
+        &mut step.event,
+        schema,
+        schema_name,
+        schemas,
+        "raise_event.event",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -571,6 +683,32 @@ mod tests {
             map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
         }
         SchemaIndex::new(map)
+    }
+
+    fn reducer_modules() -> HashMap<String, DefModule> {
+        let mut modules = HashMap::new();
+        modules.insert(
+            "com.acme/Reducer@1".into(),
+            DefModule {
+                name: "com.acme/Reducer@1".into(),
+                module_kind: crate::ModuleKind::Reducer,
+                wasm_hash: HashRef::new(
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                )
+                .unwrap(),
+                key_schema: None,
+                abi: crate::ModuleAbi {
+                    reducer: Some(crate::ReducerAbi {
+                        state: crate::SchemaRef::new("sys/TimerSetParams@1").unwrap(),
+                        event: crate::SchemaRef::new("sys/TimerFired@1").unwrap(),
+                        annotations: None,
+                        effects_emitted: vec![],
+                        cap_slots: IndexMap::new(),
+                    }),
+                },
+            },
+        );
+        modules
     }
 
     #[test]
@@ -607,5 +745,70 @@ mod tests {
         } else {
             panic!("expected emit_effect step");
         }
+    }
+
+    #[test]
+    fn normalizes_raise_event_literals_against_reducer_schema() {
+        let mut plan = DefPlan {
+            name: "com.acme/Plan@1".into(),
+            input: crate::SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![crate::PlanStep {
+                id: "raise".into(),
+                kind: crate::PlanStepKind::RaiseEvent(crate::PlanStepRaiseEvent {
+                    reducer: "com.acme/Reducer@1".into(),
+                    event: ExprOrValue::Json(json!({
+                        "intent_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                        "reducer": "com.acme/Reducer@1",
+                        "effect_kind": "timer.set",
+                        "adapter_id": "timer",
+                        "status": "ok",
+                        "requested": { "deliver_at_ns": 1, "key": "remind" },
+                        "receipt": { "delivered_at_ns": 2, "key": "remind" },
+                        "cost_cents": 0,
+                        "signature": "AA=="
+                    })),
+                    key: None,
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+
+        normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).unwrap();
+
+        if let crate::PlanStepKind::RaiseEvent(step) = &plan.steps[0].kind {
+            assert!(matches!(step.event, ExprOrValue::Literal(_)));
+        } else {
+            panic!("expected raise_event step");
+        }
+    }
+
+    #[test]
+    fn raise_event_literal_without_reducer_errors() {
+        let mut plan = DefPlan {
+            name: "com.acme/Plan@1".into(),
+            input: crate::SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![crate::PlanStep {
+                id: "raise".into(),
+                kind: crate::PlanStepKind::RaiseEvent(crate::PlanStepRaiseEvent {
+                    reducer: "com.acme/Missing@1".into(),
+                    event: ExprOrValue::Json(json!({})),
+                    key: None,
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+
+        let err = normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).unwrap_err();
+        assert!(matches!(err, PlanLiteralError::ReducerNotFound { .. }));
     }
 }
