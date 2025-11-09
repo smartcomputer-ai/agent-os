@@ -145,13 +145,13 @@ pub struct HashLengthError(pub usize);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
+    use serde_json::{Value, json};
     use std::{fs, path::PathBuf};
 
-    fn load_schema(name: &str) -> Value {
+    fn load_spec(relative: &str) -> Value {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../spec/schemas")
-            .join(name);
+            .join("../../")
+            .join(relative);
         let data = fs::read_to_string(path).expect("schema file");
         serde_json::from_str(&data).expect("valid json")
     }
@@ -160,37 +160,41 @@ mod tests {
     fn canonical_round_trip_and_hashes() {
         let cases = [
             (
-                "common.schema.json",
-                "sha256:6cee8449567aace43341788e0773ca16d88c89fd7aeb7844d68d993cecead708",
+                "spec/schemas/common.schema.json",
+                "sha256:0886b2602e68e66ece4243fad3eeb7dfe693a69d9863618ce00fc7200bbb8b15",
             ),
             (
-                "defschema.schema.json",
+                "spec/schemas/defschema.schema.json",
                 "sha256:492c7e9583481d3060bf444efb82f7263434f49f85aab238504152ff8ec1115c",
             ),
             (
-                "defmodule.schema.json",
+                "spec/schemas/defmodule.schema.json",
                 "sha256:9db4dc958903289dde3e63efc4ebc91e5c4a00fd4a910a0a90b69efa9cb006eb",
             ),
             (
-                "defplan.schema.json",
-                "sha256:116af2ab6512d3f625dbdba0d8a5026545a4413252c2565bc733117927afd379",
+                "spec/schemas/defplan.schema.json",
+                "sha256:1a99b2ce961f3274f492854b763bdac297906da9fa1a2f15208dc06c40e8c8e0",
             ),
             (
-                "defcap.schema.json",
+                "spec/schemas/defcap.schema.json",
                 "sha256:f047e723439070c602b096fe8d5872eda39c144ab95f202bbdba7a04e8d61243",
             ),
             (
-                "defpolicy.schema.json",
+                "spec/schemas/defpolicy.schema.json",
                 "sha256:8fc34e93510ea5d23bf8fd7edad69a610b4ece9d63e26ddb9436440e8ffd17ee",
             ),
             (
-                "manifest.schema.json",
+                "spec/schemas/manifest.schema.json",
                 "sha256:377d11b05843e834a87730ca2d425f73ad8d26ed73e7149dd7e75f037a7065b3",
+            ),
+            (
+                "spec/defs/builtin-schemas.air.json",
+                "sha256:bcad962543ea0f32507ab20cb827f57bd19f60c649559d3d2e4b10233cc6e51d",
             ),
         ];
 
         for (name, expected_hash) in cases {
-            let value = load_schema(name);
+            let value = load_spec(name);
             let bytes = to_canonical_cbor(&value).expect("canonical encode");
             let decoded: Value = serde_cbor::from_slice(&bytes).expect("decode");
             assert_eq!(value, decoded, "round trip mismatch for {name}");
@@ -206,5 +210,33 @@ mod tests {
         assert_eq!(hash.to_hex(), original);
         assert!(Hash::from_hex_str("0123").is_err());
         assert!(Hash::from_bytes(&[0u8; 31]).is_err());
+    }
+
+    #[test]
+    fn hash_is_order_insensitive_for_maps() {
+        let alpha_first = json!({"a": 1, "b": 2});
+        let beta_first = json!({"b": 2, "a": 1});
+        let hash1 = Hash::of_cbor(&alpha_first).expect("hash");
+        let hash2 = Hash::of_cbor(&beta_first).expect("hash");
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn canonical_serializer_orders_map_keys() {
+        let shuffled = json!({"b": 1, "a": {"inner": 2}});
+        let mut buf = Vec::new();
+        write_canonical_cbor(&shuffled, &mut buf).expect("serialize");
+        let decoded: serde_cbor::Value = serde_cbor::from_slice(&buf).expect("decode");
+        let serde_cbor::Value::Map(entries) = decoded else {
+            panic!("expected CBOR map");
+        };
+        let keys: Vec<String> = entries
+            .iter()
+            .map(|(key, _)| match key {
+                serde_cbor::Value::Text(text) => text.clone(),
+                other => panic!("unexpected key {:?}", other),
+            })
+            .collect();
+        assert_eq!(keys, vec!["a", "b"], "map keys must be sorted canonically");
     }
 }
