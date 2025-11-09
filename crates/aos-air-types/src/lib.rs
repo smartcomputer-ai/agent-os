@@ -11,3 +11,6 @@ pub mod validate;
 pub use model::*;
 pub use refs::{HashRef, RefError, SchemaRef};
 pub use typecheck::{ValueTypeError, validate_value_literal};
+
+#[cfg(test)]
+mod tests;
