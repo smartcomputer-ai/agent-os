@@ -119,7 +119,8 @@ mod tests {
                 kind: EffectKind::HttpRequest,
                 params: Expr::Record(ExprRecord {
                     record: IndexMap::new(),
-                }),
+                })
+                .into(),
                 cap: "http_cap".into(),
                 bind: PlanBindEffect {
                     effect_id_as: "req".into(),

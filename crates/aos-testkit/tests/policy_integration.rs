@@ -78,7 +78,7 @@ fn plan_effect_allowed_by_policy() {
             id: "emit".into(),
             kind: aos_air_types::PlanStepKind::EmitEffect(aos_air_types::PlanStepEmitEffect {
                 kind: AirEffectKind::HttpRequest,
-                params: fixtures::text_expr("body"),
+                params: fixtures::text_expr("body").into(),
                 cap: "cap_http".into(),
                 bind: aos_air_types::PlanBindEffect {
                     effect_id_as: "req".into(),

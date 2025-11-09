@@ -43,7 +43,7 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("body"),
+                    params: fixtures::text_expr("body").into(),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -66,7 +66,8 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
                             ("$schema".into(), fixtures::text_expr("com.acme/Result@1")),
                             ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
                         ]),
-                    }),
+                    })
+                    .into(),
                     key: None,
                 }),
             },
@@ -157,7 +158,8 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
                             ),
                             ("value".into(), Expr::Const(ExprConst::Int { int: 5 })),
                         ]),
-                    }),
+                    })
+                    .into(),
                 }),
             },
             PlanStep {

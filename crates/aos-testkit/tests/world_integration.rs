@@ -46,7 +46,7 @@ fn single_plan_orchestration_completes_after_receipt() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("body"),
+                    params: fixtures::text_expr("body").into(),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -69,7 +69,8 @@ fn single_plan_orchestration_completes_after_receipt() {
                             ("$schema".into(), fixtures::text_expr("com.acme/Result@1")),
                             ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
                         ]),
-                    }),
+                    })
+                    .into(),
                     key: None,
                 }),
             },
@@ -170,7 +171,7 @@ fn reducer_and_plan_effects_are_enqueued() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("plan"),
+                    params: fixtures::text_expr("plan").into(),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -295,7 +296,7 @@ fn guarded_plan_branches_control_effects() {
             PlanStep {
                 id: "assign".into(),
                 kind: PlanStepKind::Assign(PlanStepAssign {
-                    expr: fixtures::plan_input_expr("flag"),
+                    expr: fixtures::plan_input_expr("flag").into(),
                     bind: PlanBind { var: "flag".into() },
                 }),
             },
@@ -303,7 +304,7 @@ fn guarded_plan_branches_control_effects() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("do it"),
+                    params: fixtures::text_expr("do it").into(),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -539,7 +540,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("first"),
+                    params: fixtures::text_expr("first").into(),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -557,7 +558,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                 id: "after_receipt".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("after_receipt"),
+                    params: fixtures::text_expr("after_receipt").into(),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "second".into(),
@@ -576,7 +577,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                 id: "after_event".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("after_event"),
+                    params: fixtures::text_expr("after_event").into(),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "third".into(),
@@ -689,7 +690,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("ready"),
+                    params: fixtures::text_expr("ready").into(),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -736,7 +737,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("other"),
+                    params: fixtures::text_expr("other").into(),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -848,7 +849,8 @@ fn raised_events_are_routed_to_reducers() {
                             ("$schema".into(), fixtures::text_expr("com.acme/Raised@1")),
                             ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
                         ]),
-                    }),
+                    })
+                    .into(),
                     key: None,
                 }),
             },

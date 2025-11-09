@@ -212,7 +212,7 @@ mod tests {
                     id: "emit".into(),
                     kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                         kind: EffectKind::HttpRequest,
-                        params: expr.clone(),
+                        params: expr.clone().into(),
                         cap: "http_cap".into(),
                         bind: PlanBindEffect {
                             effect_id_as: "req".into(),
@@ -237,7 +237,8 @@ mod tests {
                                 expr.clone(),
                                 Expr::Const(ExprConst::Text { text: "!".into() }),
                             ],
-                        }),
+                        })
+                        .into(),
                         bind: PlanBind {
                             var: "result".into(),
                         },

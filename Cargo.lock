@@ -152,6 +152,7 @@ dependencies = [
  "aos-store",
  "aos-wasm",
  "aos-wasm-abi",
+ "base64 0.21.7",
  "hex",
  "indexmap",
  "log",

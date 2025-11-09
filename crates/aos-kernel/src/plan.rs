@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
-use aos_air_exec::{Env as ExprEnv, Value as ExprValue, eval_expr};
-use aos_air_types::{DefPlan, Expr, PlanEdge, PlanStep, PlanStepKind};
+use aos_air_exec::{Env as ExprEnv, Value as ExprValue, ValueKey, ValueMap, ValueSet, eval_expr};
+use aos_air_types::{DefPlan, Expr, ExprOrValue, PlanEdge, PlanStep, PlanStepKind, ValueLiteral};
 use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
@@ -152,17 +154,15 @@ impl PlanInstance {
                 let step = self.step_map.get(&step_id).expect("step must exist");
                 match &step.kind {
                     PlanStepKind::Assign(assign) => {
-                        let value = eval_expr(&assign.expr, &self.env).map_err(|err| {
-                            KernelError::Manifest(format!("plan assign eval error: {err}"))
-                        })?;
+                        let value =
+                            eval_expr_or_value(&assign.expr, &self.env, "plan assign eval error")?;
                         self.env.vars.insert(assign.bind.var.clone(), value.clone());
                         self.record_step_value(&step_id, value);
                         self.complete_step(&step_id)?;
                     }
                     PlanStepKind::EmitEffect(emit) => {
-                        let params_value = eval_expr(&emit.params, &self.env).map_err(|err| {
-                            KernelError::Manifest(format!("plan effect eval error: {err}"))
-                        })?;
+                        let params_value =
+                            eval_expr_or_value(&emit.params, &self.env, "plan effect eval error")?;
                         let params_cbor = serde_cbor::to_vec(&params_value)
                             .map_err(|err| KernelError::Manifest(err.to_string()))?;
                         let intent = effects.enqueue_plan_effect(
@@ -244,9 +244,11 @@ impl PlanInstance {
                         return Ok(outcome);
                     }
                     PlanStepKind::RaiseEvent(raise) => {
-                        let value = eval_expr(&raise.event, &self.env).map_err(|err| {
-                            KernelError::Manifest(format!("plan raise_event eval error: {err}"))
-                        })?;
+                        let value = eval_expr_or_value(
+                            &raise.event,
+                            &self.env,
+                            "plan raise_event eval error",
+                        )?;
                         let key_value = if let Some(key_expr) = &raise.key {
                             Some(eval_expr(key_expr, &self.env).map_err(|err| {
                                 KernelError::Manifest(format!(
@@ -278,9 +280,11 @@ impl PlanInstance {
                         }
 
                         if let Some(result_expr) = &end.result {
-                            let value = eval_expr(result_expr, &self.env).map_err(|err| {
-                                KernelError::Manifest(format!("plan end result eval error: {err}"))
-                            })?;
+                            let value = eval_expr_or_value(
+                                result_expr,
+                                &self.env,
+                                "plan end result eval error",
+                            )?;
                             self.record_step_value(&step_id, value.clone());
                             outcome.result = Some(value);
                         } else {
@@ -480,6 +484,95 @@ fn value_to_bool(value: ExprValue) -> Result<bool, KernelError> {
     }
 }
 
+fn eval_expr_or_value(
+    expr_or_value: &ExprOrValue,
+    env: &ExprEnv,
+    context: &str,
+) -> Result<ExprValue, KernelError> {
+    match expr_or_value {
+        ExprOrValue::Expr(expr) => {
+            eval_expr(expr, env).map_err(|err| KernelError::Manifest(format!("{context}: {err}")))
+        }
+        ExprOrValue::Value(literal) => literal_to_value(literal)
+            .map_err(|err| KernelError::Manifest(format!("{context}: {err}"))),
+    }
+}
+
+fn literal_to_value(literal: &ValueLiteral) -> Result<ExprValue, String> {
+    match literal {
+        ValueLiteral::Null(_) => Ok(ExprValue::Null),
+        ValueLiteral::Bool(v) => Ok(ExprValue::Bool(v.bool)),
+        ValueLiteral::Int(v) => Ok(ExprValue::Int(v.int)),
+        ValueLiteral::Nat(v) => Ok(ExprValue::Nat(v.nat)),
+        ValueLiteral::Dec128(v) => Ok(ExprValue::Dec128(v.dec128.clone())),
+        ValueLiteral::Bytes(v) => {
+            let bytes = BASE64
+                .decode(v.bytes_b64.as_bytes())
+                .map_err(|err| format!("invalid bytes literal: {err}"))?;
+            Ok(ExprValue::Bytes(bytes))
+        }
+        ValueLiteral::Text(v) => Ok(ExprValue::Text(v.text.clone())),
+        ValueLiteral::TimeNs(v) => Ok(ExprValue::TimeNs(v.time_ns)),
+        ValueLiteral::DurationNs(v) => Ok(ExprValue::DurationNs(v.duration_ns)),
+        ValueLiteral::Hash(v) => Ok(ExprValue::Hash(v.hash.clone())),
+        ValueLiteral::Uuid(v) => Ok(ExprValue::Uuid(v.uuid.clone())),
+        ValueLiteral::List(list) => {
+            let mut out = Vec::with_capacity(list.list.len());
+            for value in &list.list {
+                out.push(literal_to_value(value)?);
+            }
+            Ok(ExprValue::List(out))
+        }
+        ValueLiteral::Set(set) => {
+            let mut out = ValueSet::new();
+            for item in &set.set {
+                out.insert(literal_to_value_key(item)?);
+            }
+            Ok(ExprValue::Set(out))
+        }
+        ValueLiteral::Map(map) => {
+            let mut out = ValueMap::new();
+            for entry in &map.map {
+                let key = literal_to_value_key(&entry.key)?;
+                let value = literal_to_value(&entry.value)?;
+                out.insert(key, value);
+            }
+            Ok(ExprValue::Map(out))
+        }
+        ValueLiteral::Record(record) => {
+            let mut out = IndexMap::with_capacity(record.record.len());
+            for (key, value) in &record.record {
+                out.insert(key.clone(), literal_to_value(value)?);
+            }
+            Ok(ExprValue::Record(out))
+        }
+        ValueLiteral::Variant(variant) => {
+            let mut record = IndexMap::with_capacity(2);
+            record.insert("$tag".into(), ExprValue::Text(variant.tag.clone()));
+            let value = match &variant.value {
+                Some(inner) => literal_to_value(inner)?,
+                None => ExprValue::Unit,
+            };
+            record.insert("$value".into(), value);
+            Ok(ExprValue::Record(record))
+        }
+    }
+}
+
+fn literal_to_value_key(literal: &ValueLiteral) -> Result<ValueKey, String> {
+    match literal {
+        ValueLiteral::Int(v) => Ok(ValueKey::Int(v.int)),
+        ValueLiteral::Nat(v) => Ok(ValueKey::Nat(v.nat)),
+        ValueLiteral::Text(v) => Ok(ValueKey::Text(v.text.clone())),
+        ValueLiteral::Uuid(v) => Ok(ValueKey::Uuid(v.uuid.clone())),
+        ValueLiteral::Hash(v) => Ok(ValueKey::Hash(v.hash.as_str().to_string())),
+        other => Err(format!(
+            "map/set key must be int|nat|text|uuid|hash, got {:?}",
+            other
+        )),
+    }
+}
+
 fn expr_value_to_domain_event(
     value: ExprValue,
     key: Option<ExprValue>,
@@ -520,7 +613,8 @@ mod tests {
     use aos_air_types::{
         CapType, EffectKind, Expr, ExprConst, ExprOp, ExprOpCode, ExprRecord, ExprRef, PlanBind,
         PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
-        PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, SchemaRef,
+        PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+        SchemaRef, ValueInt, ValueLiteral, ValueRecord, ValueText,
     };
     use aos_effects::CapabilityGrant;
 
@@ -575,7 +669,7 @@ mod tests {
         let steps = vec![PlanStep {
             id: "assign".into(),
             kind: PlanStepKind::Assign(aos_air_types::PlanStepAssign {
-                expr: Expr::Const(ExprConst::Int { int: 42 }),
+                expr: Expr::Const(ExprConst::Int { int: 42 }).into(),
                 bind: aos_air_types::PlanBind {
                     var: "answer".into(),
                 },
@@ -588,6 +682,28 @@ mod tests {
         assert_eq!(plan.env.vars.get("answer").unwrap(), &ExprValue::Int(42));
     }
 
+    #[test]
+    fn assign_step_accepts_literal_value() {
+        let steps = vec![PlanStep {
+            id: "assign_lit".into(),
+            kind: PlanStepKind::Assign(PlanStepAssign {
+                expr: ValueLiteral::Text(ValueText {
+                    text: "literal".into(),
+                })
+                .into(),
+                bind: PlanBind { var: "greeting".into() },
+            }),
+        }];
+        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut effects = test_effect_manager();
+        let outcome = plan.tick(&mut effects).unwrap();
+        assert!(outcome.completed);
+        assert_eq!(
+            plan.env.vars.get("greeting"),
+            Some(&ExprValue::Text("literal".into()))
+        );
+    }
+
     /// `emit_effect` should enqueue an intent and record the effect handle for later awaits.
     #[test]
     fn emit_effect_enqueues_intent() {
@@ -597,7 +713,8 @@ mod tests {
                 kind: EffectKind::HttpRequest,
                 params: Expr::Const(ExprConst::Text {
                     text: "data".into(),
-                }),
+                })
+                .into(),
                 cap: "cap".into(),
                 bind: PlanBindEffect {
                     effect_id_as: "req".into(),
@@ -612,6 +729,34 @@ mod tests {
         assert!(plan.effect_handles.contains_key("req"));
     }
 
+    #[test]
+    fn emit_effect_accepts_literal_params() {
+        let params_literal = ValueLiteral::Record(ValueRecord {
+            record: IndexMap::from([(
+                "body".into(),
+                ValueLiteral::Text(ValueText {
+                    text: "literal".into(),
+                }),
+            )]),
+        });
+        let steps = vec![PlanStep {
+            id: "emit".into(),
+            kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                kind: EffectKind::HttpRequest,
+                params: params_literal.into(),
+                cap: "cap".into(),
+                bind: PlanBindEffect {
+                    effect_id_as: "req".into(),
+                },
+            }),
+        }];
+        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut effects = test_effect_manager();
+        let outcome = plan.tick(&mut effects).unwrap();
+        assert!(outcome.completed);
+        assert_eq!(effects.drain().len(), 1);
+    }
+
     /// Plans must block on `await_receipt` until the referenced effect handle is fulfilled.
     #[test]
     fn await_receipt_waits_and_resumes() {
@@ -622,7 +767,8 @@ mod tests {
                     kind: EffectKind::HttpRequest,
                     params: Expr::Const(ExprConst::Text {
                         text: "data".into(),
-                    }),
+                    })
+                    .into(),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -711,7 +857,8 @@ mod tests {
                         ),
                         ("value".into(), Expr::Const(ExprConst::Int { int: 9 })),
                     ]),
-                }),
+                })
+                .into(),
             }),
         }];
         let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
@@ -721,6 +868,38 @@ mod tests {
         assert_eq!(outcome.raised_events[0].schema, "com.test/Evt@1");
         let expected_key = serde_cbor::to_vec(&ExprValue::Text("cell-1".into())).unwrap();
         assert_eq!(outcome.raised_events[0].key.as_ref(), Some(&expected_key));
+    }
+
+    #[test]
+    fn raise_event_accepts_literal_payload() {
+        let literal_event = ValueLiteral::Record(ValueRecord {
+            record: IndexMap::from([
+                (
+                    "$schema".into(),
+                    ValueLiteral::Text(ValueText {
+                        text: "com.test/Literal@1".into(),
+                    }),
+                ),
+                (
+                    "value".into(),
+                    ValueLiteral::Int(ValueInt { int: 3 }),
+                ),
+            ]),
+        });
+        let steps = vec![PlanStep {
+            id: "raise".into(),
+            kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
+                reducer: "irrelevant".into(),
+                event: literal_event.into(),
+                key: None,
+            }),
+        }];
+        let mut plan = PlanInstance::new(1, base_plan(steps), default_env());
+        let mut effects = test_effect_manager();
+        let outcome = plan.tick(&mut effects).unwrap();
+        assert!(outcome.completed);
+        assert_eq!(outcome.raised_events.len(), 1);
+        assert_eq!(outcome.raised_events[0].schema, "com.test/Literal@1");
     }
 
     #[test]
@@ -734,7 +913,8 @@ mod tests {
                             "status".into(),
                             Expr::Const(ExprConst::Text { text: "ok".into() }),
                         )]),
-                    }),
+                    })
+                    .into(),
                     bind: PlanBind {
                         var: "first_state".into(),
                     },
@@ -745,7 +925,8 @@ mod tests {
                 kind: PlanStepKind::Assign(PlanStepAssign {
                     expr: Expr::Ref(ExprRef {
                         reference: "@step:first.status".into(),
-                    }),
+                    })
+                    .into(),
                     bind: PlanBind {
                         var: "copied".into(),
                     },
@@ -840,7 +1021,7 @@ mod tests {
         let steps = vec![PlanStep {
             id: "end".into(),
             kind: PlanStepKind::End(PlanStepEnd {
-                result: Some(Expr::Const(ExprConst::Int { int: 7 })),
+                result: Some(Expr::Const(ExprConst::Int { int: 7 }).into()),
             }),
         }];
         let mut plan = base_plan(steps);
@@ -871,7 +1052,7 @@ mod tests {
         let steps = vec![PlanStep {
             id: "end".into(),
             kind: PlanStepKind::End(PlanStepEnd {
-                result: Some(Expr::Const(ExprConst::Nat { nat: 1 })),
+                result: Some(Expr::Const(ExprConst::Nat { nat: 1 }).into()),
             }),
         }];
         let plan = base_plan(steps);
@@ -887,14 +1068,14 @@ mod tests {
             PlanStep {
                 id: "set_ok".into(),
                 kind: PlanStepKind::Assign(PlanStepAssign {
-                    expr: Expr::Const(ExprConst::Int { int: 5 }),
+                    expr: Expr::Const(ExprConst::Int { int: 5 }).into(),
                     bind: PlanBind { var: "val".into() },
                 }),
             },
             PlanStep {
                 id: "set_bad".into(),
                 kind: PlanStepKind::Assign(PlanStepAssign {
-                    expr: Expr::Const(ExprConst::Int { int: 20 }),
+                    expr: Expr::Const(ExprConst::Int { int: 20 }).into(),
                     bind: PlanBind { var: "val".into() },
                 }),
             },
@@ -929,7 +1110,8 @@ mod tests {
                     kind: EffectKind::HttpRequest,
                     params: Expr::Const(ExprConst::Text {
                         text: "payload".into(),
-                    }),
+                    })
+                    .into(),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),

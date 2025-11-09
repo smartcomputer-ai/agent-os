@@ -269,6 +269,37 @@ pub enum Expr {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ExprOrValue {
+    Expr(Expr),
+    Value(ValueLiteral),
+}
+
+impl From<Expr> for ExprOrValue {
+    fn from(expr: Expr) -> Self {
+        ExprOrValue::Expr(expr)
+    }
+}
+
+impl From<&Expr> for ExprOrValue {
+    fn from(expr: &Expr) -> Self {
+        ExprOrValue::Expr(expr.clone())
+    }
+}
+
+impl From<ValueLiteral> for ExprOrValue {
+    fn from(value: ValueLiteral) -> Self {
+        ExprOrValue::Value(value)
+    }
+}
+
+impl From<&ValueLiteral> for ExprOrValue {
+    fn from(value: &ValueLiteral) -> Self {
+        ExprOrValue::Value(value.clone())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExprRef {
     #[serde(rename = "ref")]
     pub reference: String,
@@ -459,7 +490,7 @@ pub enum PlanStepKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStepRaiseEvent {
     pub reducer: Name,
-    pub event: Expr,
+    pub event: ExprOrValue,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<Expr>,
 }
@@ -467,7 +498,7 @@ pub struct PlanStepRaiseEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStepEmitEffect {
     pub kind: EffectKind,
-    pub params: Expr,
+    pub params: ExprOrValue,
     pub cap: CapGrantName,
     pub bind: PlanBindEffect,
 }
@@ -495,14 +526,14 @@ pub struct PlanStepAwaitEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStepAssign {
-    pub expr: Expr,
+    pub expr: ExprOrValue,
     pub bind: PlanBind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStepEnd {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<Expr>,
+    pub result: Option<ExprOrValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
