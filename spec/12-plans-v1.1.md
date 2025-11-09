@@ -4,6 +4,12 @@
 
 This document describes planned extensions to AIR plans for v1.1 and beyond. These additions are **not implemented in v1.0** and should be considered **forward-looking design notes** to guide future development. v1.0 ships with a minimal plan feature set (emit_effect, await_receipt, raise_event, await_event, assign, end) that covers essential orchestration needs through documented patterns.
 
+**v1 Integration Note**: This spec has been updated to align with AIR v1 changes (see `spec/patch.md` and `spec/03-air.md`), particularly:
+- The `ExprOrValue` union introduced in v1 is adopted here for `spawn_plan.input` and `spawn_for_each.inputs`
+- References to authoring sugar vs. canonical JSON lenses follow v1 terminology
+- JSON schema snippets use `ExprOrValue` where appropriate
+- All canonicalization rules remain consistent with v1's CBOR encoding and schema-bound hashing
+
 ## Rationale for deferring to v1.1
 
 Plans in v1.0 are intentionally narrow, focused on orchestrating external effects under governance. The extensions below—structured concurrency, sub-plans, fan-out/fan-in—are valuable but not required for a useful first release. Deferring allows:
@@ -88,10 +94,12 @@ Deterministically start a child plan instance from within a parent plan. Pure co
 }
 ```
 
+**Note**: The `input` field accepts `ExprOrValue` (as of v1), so you may provide a plain value in authoring sugar or canonical JSON form, or a full `Expr` tree (`ExprRef`, `ExprOp`, etc.) when dynamic computation is needed.
+
 ### Semantics
 
 1. Validate that `plan` exists in manifest
-2. Evaluate `input` expression
+2. Evaluate `input` expression (or literal value)
 3. Type-check evaluated input against child plan's declared `input` schema
 4. Create child instance with:
    - New UUID
@@ -179,9 +187,11 @@ Spawn the same child plan for each element in a list. Deterministic fan-out.
 }
 ```
 
+**Note**: The `inputs` field accepts `ExprOrValue`, so you may provide a plain list value or a dynamic expression.
+
 ### Semantics
 
-1. Evaluate `inputs` expression → must be a `list<ChildInputType>`
+1. Evaluate `inputs` expression (or literal list) → must be a `list<ChildInputType>`
 2. Type-check each element against child plan's input schema
 3. Check `max_fanout` constraint if present; fail if `len(inputs) > max_fanout`
 4. For each input (in order):
@@ -249,7 +259,7 @@ Order matches the input handles list.
 
 ### Downstream processing
 
-Use expressions to filter/map results:
+Use expressions to filter/map results (note: `assign.expr` accepts `ExprOrValue`, so you can provide a full expression tree as shown, or a plain value when static):
 
 ```json
 {
@@ -333,7 +343,7 @@ Add to `Step` union in `spec/schemas/defplan.schema.json`:
           "properties": {
             "op": { "const": "spawn_plan" },
             "plan": { "$ref": "common.schema.json#/$defs/Name" },
-            "input": { "$ref": "common.schema.json#/$defs/Expr" },
+            "input": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
             "bind": {
               "type": "object",
               "properties": {
@@ -366,7 +376,7 @@ Add to `Step` union in `spec/schemas/defplan.schema.json`:
           "properties": {
             "op": { "const": "spawn_for_each" },
             "plan": { "$ref": "common.schema.json#/$defs/Name" },
-            "inputs": { "$ref": "common.schema.json#/$defs/Expr" },
+            "inputs": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
             "max_fanout": { "type": "integer", "minimum": 1 },
             "bind": {
               "type": "object",
@@ -400,9 +410,11 @@ Add to `Step` union in `spec/schemas/defplan.schema.json`:
 ### Validation rules (semantic)
 
 - **await_plan**: `for` must reference a prior `spawn_plan` step; infer `ChildOutputType` from spawned plan's output schema
-- **spawn_for_each**: `inputs` must type-check to `list<ChildInputType>`; enforce `max_fanout` if present
+- **spawn_for_each**: `inputs` must type-check to `list<ChildInputType>` (accepts `ExprOrValue`, so may be a plain list or expression); enforce `max_fanout` if present
 - **await_plans_all**: `handles` must be a list from `spawn_for_each` or homogeneous `spawn_plan`; enforce homogeneity for typing
 - **Invariants**: Must be boolean expressions; total (no missing refs); side-effect-free
+
+**Note on `ExprOrValue`**: As of v1, `spawn_plan.input` and `spawn_for_each.inputs` accept `ExprOrValue`, allowing authors to provide plain values (in authoring sugar or canonical JSON) when the schema is statically known, or full expressions when dynamic computation is needed. Guards (`for`, `handles`, `edges[].when`) remain full `Expr` because they are predicates or references requiring expression semantics.
 
 ---
 
@@ -520,6 +532,8 @@ receipt: {
 ### Example A: Single child composition
 
 **Scenario**: Parent spawns a charge plan, waits for result, raises typed event to reducer.
+
+**Note**: The examples below use authoring sugar for readability (plain JSON values). You may also use canonical JSON (tagged) or full `Expr` trees where `ExprOrValue` is accepted.
 
 ```json
 {
