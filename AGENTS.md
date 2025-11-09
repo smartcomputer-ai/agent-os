@@ -16,13 +16,15 @@ This file provides guidance to coding agents when working with code in this repo
 2. **spec/02-architecture.md** - Runtime components, event flow, storage layout
 3. **spec/03-air.md** - **CRITICAL**: Complete AIR v1 spec (schemas, modules, plans, capabilities, policies)
 4. **spec/04-reducers.md** - Reducer semantics, ABI, relationship to plans
-5. **spec/07-workflow-patterns.md** - How to coordinate complex workflows (patterns, compensations, retries)
-6. **spec/05-cells.md** - Keyed reducers (v1.1+, deferred)
-7. **spec/06-parallelism.md** - Future direction (deferred)
+5. **spec/05-workflows.md** - How to coordinate complex workflows (patterns, compensations, retries)
 
 **spec/schemas/** - JSON Schemas for AIR node validation (common.schema.json, defplan.schema.json, etc.)
 **spec/defs/** - Built-in schemas (Timer, Blob, HTTP, LLM effect params/receipts)
 **spec/patch.md** - Historical: v1 design notes for JSON lenses, ExprOrValue, and built-ins (now integrated into main specs)
+
+**Future Work**
+Stuff that we plan to work on in the future is in specs numbered 10 and higher.
+
 
 ## Core Architecture (TL;DR)
 
