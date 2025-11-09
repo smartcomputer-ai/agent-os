@@ -1,0 +1,16 @@
+[workspace]
+members = [
+  "crates/aos-air-types",
+  "crates/aos-air-exec",
+  "crates/aos-cbor",
+  "crates/aos-store",
+  "crates/aos-wasm-abi",
+  "crates/aos-wasm",
+  "crates/aos-effects",
+  "crates/aos-kernel",
+  "crates/aos-wasm-sdk",
+  "crates/aos-testkit",
+  "crates/aos-cli",
+]
+resolver = "2"
+

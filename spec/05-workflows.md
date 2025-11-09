@@ -25,7 +25,6 @@ Plans can raise events that are delivered to reducers.
   "reducer": "com.acme/OrderSM@1",
   "event": {
     "record": {
-      "$schema": {"text": "com.acme/PaymentResult@1"},
       "order_id": {"ref": "@plan.input.order_id"},
       "success": {"ref": "@var:charge_rcpt.ok"},
       "txn_id": {"ref": "@var:charge_rcpt.txn_id"}
@@ -34,7 +33,7 @@ Plans can raise events that are delivered to reducers.
 }
 ```
 
-**Semantics**: Kernel serializes the event, appends to journal, delivers to reducer on next tick.
+**Semantics**: Kernel serializes the event, appends to journal, delivers to reducer on next tick. The reducer declaration already pins the payload schema, so authors only provide the payload fields.
 
 ### 2. Reducer → Plan (manifest triggers)
 
@@ -169,7 +168,7 @@ Plan `fulfillment_plan@1`:
     {"id": "wait_reserve", "op": "await_receipt", "for": {"ref": "@var:reserve_id"}, "bind": {"as": "reserve_rcpt"}},
     {"id": "notify", "op": "emit_effect", "kind": "email.send", "params": {...}, "cap": "mailer_cap", "bind": {"effect_id_as": "email_id"}},
     {"id": "wait_notify", "op": "await_receipt", "for": {"ref": "@var:email_id"}, "bind": {"as": "email_rcpt"}},
-    {"id": "raise_result", "op": "raise_event", "reducer": "com.acme/OrderSM@1", "event": {"record": {"$schema": {"text": "OrderCompleted@1"}, "order_id": {"ref": "@plan.input.order_id"}}}},
+    {"id": "raise_result", "op": "raise_event", "reducer": "com.acme/OrderSM@1", "event": {"record": {"order_id": {"ref": "@plan.input.order_id"}}}},
     {"id": "done", "op": "end"}
   ],
   "edges": [
@@ -249,7 +248,7 @@ Each plan is small:
   "steps": [
     {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
     {"id": "wait", "op": "await_receipt", ...},
-    {"id": "notify", "op": "raise_event", "reducer": "EventBus@1", "event": {"$schema": "PaymentCompleted@1", ...}},
+    {"id": "notify", "op": "raise_event", "reducer": "EventBus@1", "event": {...}},
     {"id": "done", "op": "end"}
   ]
 }
@@ -378,7 +377,7 @@ Plans are thin wrappers (one per intent type):
   "steps": [
     {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
     {"id": "wait", "op": "await_receipt", ...},
-    {"id": "result", "op": "raise_event", "reducer": "com.acme/OrderSM@1", "event": {"$schema": "ChargeResult@1", "success": {"ref": "@var:rcpt.ok"}, ...}},
+    {"id": "result", "op": "raise_event", "reducer": "com.acme/OrderSM@1", "event": {"record": {"success": {"ref": "@var:rcpt.ok"}, ...}}},
     {"id": "done", "op": "end"}
   ]
 }
@@ -459,10 +458,10 @@ Plan:
   "steps": [
     {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
     {"id": "wait_charge", "op": "await_receipt", ...},
-    {"id": "notify_charge", "op": "raise_event", "reducer": "PaymentSM@1", "event": {"$schema": "ChargeCompleted@1", ...}},
+    {"id": "notify_charge", "op": "raise_event", "reducer": "PaymentSM@1", "event": {...}},
     {"id": "confirm", "op": "emit_effect", "kind": "payment.confirm", ...},
     {"id": "wait_confirm", "op": "await_receipt", ...},
-    {"id": "notify_confirm", "op": "raise_event", "reducer": "PaymentSM@1", "event": {"$schema": "ConfirmationCompleted@1", ...}},
+    {"id": "notify_confirm", "op": "raise_event", "reducer": "PaymentSM@1", "event": {...}},
     {"id": "done", "op": "end"}
   ]
 }
@@ -481,6 +480,16 @@ Plan:
 - More complex to reason about
 
 ## Complex Scenarios
+
+### Runtime Enforcement & Visibility
+
+The runtime now enforces the schema boundaries described in spec/03-air.md at execution time:
+
+- `raise_event` payloads/keys are canonicalized against the reducer's declared schemas, and invalid payloads are rejected before journaling.
+- `await_receipt` and `await_event` references are validated when the manifest is loaded, so orchestration bugs (missing handles, typos in predicates) fail fast.
+- `end` step results are canonicalized against `plan.output`. When a plan returns a value, the kernel appends a `PlanResult` journal record capturing `{plan_name, plan_id, output_schema, value_cbor}` and caches recent results for operators/CLI tooling.
+
+**Operational impact**: governance reviewers and on-call engineers can now rely on the journal alone to answer “what did this plan produce?” without replaying expressions. Shadow runs also surface the same canonical outputs, making approval diffs clearer. If your workflow depends on downstream automation, use the recorded `PlanResult` entries instead of parsing reducer events.
 
 ### Compensations (Saga Pattern)
 
@@ -538,7 +547,7 @@ Plan handles compensation flow, reducer tracks compensating state.
 ```json
 // In plan
 {"from": "wait_reserve", "to": "notify_compensation", "when": "failure"},
-{"id": "notify_compensation", "op": "raise_event", "event": {"$schema": "CompensationStarted@1"}},
+{"id": "notify_compensation", "op": "raise_event", "event": {}},
 {"from": "notify_compensation", "to": "refund"}
 ```
 

@@ -17,12 +17,12 @@
     "EffectKind": {
       "title": "Built-in effect kinds (v1)",
       "type": "string",
-      "enum": ["http.request", "fs.blob.put", "fs.blob.get", "timer.set", "llm.generate"]
+      "enum": ["http.request", "blob.put", "blob.get", "timer.set", "llm.generate"]
     },
     "CapType": {
       "title": "Capability types (v1)",
       "type": "string",
-      "enum": ["http.out", "fs.blob", "timer", "llm.basic"]
+      "enum": ["http.out", "blob", "timer", "llm.basic"]
     },
     "VarName": {
       "type": "string",
@@ -148,6 +148,13 @@
       ]
     },
 
+    "ExprOrValue": {
+      "description": "Convenience union: either a full Expr tree or a plain Value literal interpreted by surrounding schema.",
+      "anyOf": [
+        { "$ref": "#/$defs/Expr" },
+        { "$ref": "#/$defs/Value" }
+      ]
+    },
     "Expr": {
       "description": "Side-effect-free expression used in guards, bindings, and parameter construction",
       "type": "object",
@@ -270,6 +277,18 @@
       "additionalProperties": false
     },
 
+    "Value": {
+      "description": "Canonical value conforming to some schema; unrestricted JSON structure validated elsewhere.",
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/Value" } },
+        { "type": "object", "additionalProperties": { "$ref": "#/$defs/Value" } }
+      ]
+    },
+
     "CapGrant": {
       "type": "object",
       "description": "Capability grant instance. References a defcap and provides concrete parameter values (allowlists/ceilings) and optional budgets.",
@@ -283,7 +302,7 @@
           "description": "defcap name this grant instantiates"
         },
         "params": {
-          "$ref": "#/$defs/Expr",
+          "$ref": "#/$defs/Value",
           "description": "Concrete parameter values conforming to the defcap's schema. Enforced at enqueue."
         },
         "expiry_ns": {
@@ -293,7 +312,7 @@
         },
         "budget": {
           "type": "object",
-          "description": "Optional spending/usage limits. Pre-checked conservatively for variable-cost effects (llm.generate max_tokens, fs.blob.put size); settled on receipt.",
+          "description": "Optional spending/usage limits. Pre-checked conservatively for variable-cost effects (llm.generate max_tokens, blob.put size); settled on receipt.",
           "properties": {
             "tokens": {
               "type": "integer",

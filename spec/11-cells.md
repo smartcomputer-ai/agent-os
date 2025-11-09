@@ -32,7 +32,7 @@ Reducers export a single function; the kernel passes an envelope that includes o
   - `ctx.cell_mode=true` (v1.1): `state` is this cell’s substate (or null if first event); `ctx.key` must be present.
 - Output (canonical CBOR): `{ state: bytes|null, domain_events?: [ { schema: Name, value: bytes } ], effects?: [ ReducerEffect ], ann?: bytes }`
   - In cell mode, returning `state=null` signals delete/GC this cell.
-  - Effects from reducers remain micro‑effects only (e.g., fs.blob.put, timer.set); external orchestration belongs to plans.
+  - Effects from reducers remain micro‑effects only (e.g., blob.put, timer.set); external orchestration belongs to plans.
 
 ReducerEffect shape: `{ kind: EffectKind, params: bytes (CBOR), cap_slot?: text }`
 
@@ -112,7 +112,7 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 - Trigger with correlation:
   - `{ "event": "com.acme/ChargeRequested@1", "plan": "com.acme/charge_flow@3", "correlate_by": "key" }`
 - Plan step targeting a cell:
-  - `{ "id":"apply", "op":"raise_event", "reducer":"com.acme/OrderSM@2", "key": { "ref":"@plan.input.key" }, "event": { "record": { "$schema":"com.acme/PaymentApplied@1", "order_id": { "ref":"@plan.input.order_id" } } } }`
+  - `{ "id":"apply", "op":"raise_event", "reducer":"com.acme/OrderSM@2", "key": { "ref":"@plan.input.key" }, "event": { "record": { "order_id": { "ref":"@plan.input.order_id" } } } }`
 
 ## Non‑Goals (v1.1)
 
@@ -123,4 +123,3 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 ## Summary
 
 Cells elevate reducer instances to first‑class objects: per‑key state, mailboxes, scheduling, storage, and observability, all while preserving a single, stable reducer ABI. Start with v1’s map‑in‑state; when scale demands, switch to v1.1 keyed reducers simply by enabling cell_mode in the kernel and adjusting routing—no binary churn, no semantic drift, and deterministic replay throughout.
-

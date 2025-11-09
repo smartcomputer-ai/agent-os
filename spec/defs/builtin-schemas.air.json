@@ -1,0 +1,184 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "sys/TimerSetParams@1",
+    "type": {
+      "record": {
+        "deliver_at_ns": { "nat": {} },
+        "key": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/TimerSetReceipt@1",
+    "type": {
+      "record": {
+        "delivered_at_ns": { "nat": {} },
+        "key": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobPutParams@1",
+    "type": {
+      "record": {
+        "namespace": { "text": {} },
+        "blob_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobPutReceipt@1",
+    "type": {
+      "record": {
+        "blob_ref": { "hash": {} },
+        "size": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobGetParams@1",
+    "type": {
+      "record": {
+        "namespace": { "text": {} },
+        "key": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobGetReceipt@1",
+    "type": {
+      "record": {
+        "blob_ref": { "hash": {} },
+        "size": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/TimerFired@1",
+    "type": {
+      "record": {
+        "intent_hash": { "hash": {} },
+        "reducer": { "text": {} },
+        "effect_kind": { "text": {} },
+        "adapter_id": { "text": {} },
+        "status": { "text": {} },
+        "requested": { "ref": "sys/TimerSetParams@1" },
+        "receipt": { "ref": "sys/TimerSetReceipt@1" },
+        "cost_cents": { "nat": {} },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobPutResult@1",
+    "type": {
+      "record": {
+        "intent_hash": { "hash": {} },
+        "reducer": { "text": {} },
+        "effect_kind": { "text": {} },
+        "adapter_id": { "text": {} },
+        "status": { "text": {} },
+        "requested": { "ref": "sys/BlobPutParams@1" },
+        "receipt": { "ref": "sys/BlobPutReceipt@1" },
+        "cost_cents": { "nat": {} },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobGetResult@1",
+    "type": {
+      "record": {
+        "intent_hash": { "hash": {} },
+        "reducer": { "text": {} },
+        "effect_kind": { "text": {} },
+        "adapter_id": { "text": {} },
+        "status": { "text": {} },
+        "requested": { "ref": "sys/BlobGetParams@1" },
+        "receipt": { "ref": "sys/BlobGetReceipt@1" },
+        "cost_cents": { "nat": {} },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HttpRequestParams@1",
+    "type": {
+      "record": {
+        "method": { "text": {} },
+        "url": { "text": {} },
+        "headers": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "text": {} }
+          }
+        },
+        "body_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HttpRequestReceipt@1",
+    "type": {
+      "record": {
+        "status": { "int": {} },
+        "headers": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "text": {} }
+          }
+        },
+        "body_ref": { "option": { "hash": {} } },
+        "timings": {
+          "record": {
+            "start_ns": { "nat": {} },
+            "end_ns": { "nat": {} }
+          }
+        },
+        "adapter_id": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmGenerateParams@1",
+    "type": {
+      "record": {
+        "provider": { "text": {} },
+        "model": { "text": {} },
+        "temperature": { "dec128": {} },
+        "max_tokens": { "nat": {} },
+        "input_ref": { "hash": {} },
+        "tools": { "option": { "list": { "text": {} } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmGenerateReceipt@1",
+    "type": {
+      "record": {
+        "output_ref": { "hash": {} },
+        "token_usage": {
+          "record": {
+            "prompt": { "nat": {} },
+            "completion": { "nat": {} }
+          }
+        },
+        "cost_cents": { "nat": {} },
+        "provider_id": { "text": {} }
+      }
+    }
+  }
+]

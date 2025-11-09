@@ -2,6 +2,8 @@
 
 Reducers are deterministic, WASM-compiled state machines that own application/domain state and business invariants. They consume events, update state, and may emit domain intents (events) and a constrained set of micro-effects. Complex, multi-step external orchestration is handled by AIR plans; reducers remain focused on domain evolution.
 
+**Note on examples**: Plan examples in this chapter use AIR v1's authoring sugar (plain JSON values) for readability. You may also use canonical JSON (tagged) or full `Expr` trees where `ExprOrValue` is accepted. See `spec/03-air.md` §3 for details on JSON lenses and canonicalization. Reducer WASM ABI boundaries always use canonical CBOR regardless of authoring format.
+
 ## Scope Note (v1.0)
 
 This chapter describes reducers for v1.0, where a reducer has a single state value. If you need many parallel instances of the same FSM, model them as a `map<key, substate>` inside this state (see "Coding Pattern" and "ReceiptEvent And Correlation").
@@ -14,7 +16,7 @@ Reducers are the **single source of state changes**. They advance only when they
 
 **Business logic lives here**: validation, transitions, invariants, and shaping domain intents.
 
-**Effects policy**: Reducers may emit only micro-effects (e.g., `fs.blob.put`, `timer.set`) under explicit capability slots. High-risk or multi-hop external effects (email/HTTP to third parties, LLM, payments) must be orchestrated by plans.
+**Effects policy**: Reducers may emit only micro-effects (e.g., `blob.put`, `timer.set`) under explicit capability slots. High-risk or multi-hop external effects (email/HTTP to third parties, LLM, payments) must be orchestrated by plans.
 
 **Orchestration handoff**: Reducers emit DomainIntent events (e.g., `ChargeRequested`, `NotifyCustomer`), which trigger plans via manifest triggers. Plans perform effects, await receipts, and raise result events back.
 
@@ -86,7 +88,7 @@ Reducers should be written as explicit **typestate machines**: a `pc` (program c
 ## Effect Emission (Micro-Effects)
 
 - Allowed from reducers: small, low-risk effects such as:
-  - `fs.blob.put/get` (content-addressed)
+- `blob.put/get` (content-addressed)
   - `timer.set` (for backoff, deadlines)
 - Disallowed from reducers (must go through plans):
   - `http.request` to third-party hosts, `llm.generate`, `email.send`, payments, provider SDK calls, etc.
@@ -159,11 +161,13 @@ fn step_impl(input: StepInput<OrderState, Event>) -> StepOutput<OrderState, serd
             s.order_id = order_id.clone();
             s.pc = Pc::PendingPayment;
             // Emit a DomainIntent to trigger a plan (no external effect here)
-            domain_events.push(cbor!({
-                "$schema": "com.acme/ChargeRequested@1",
-                "order_id": order_id,
-                "amount_cents": amount_cents
-            }));
+            domain_events.push(DomainEvent {
+                schema: "com.acme/ChargeRequested@1".into(),
+                value: cbor!({
+                    "order_id": order_id,
+                    "amount_cents": amount_cents
+                })
+            });
         }
         Event::PaymentResult { order_id: _, ok, txn_id: _ } if matches!(s.pc, Pc::PendingPayment) => {
             if ok { s.pc = Pc::Done; } else { s.pc = Pc::Failed; }
@@ -222,6 +226,8 @@ match (&mut s.pc, input.event) {
 
 ### 3. Plan performs the effect
 
+Note: This example uses v1 authoring sugar. The `params` and `event` fields accept `ExprOrValue`, so you can provide plain record/variant values (as shown) or full `Expr` trees when dynamic computation is needed.
+
 ```json
 {
   "$kind": "defplan",
@@ -233,10 +239,8 @@ match (&mut s.pc, input.event) {
       "op": "emit_effect",
       "kind": "payment.charge",
       "params": {
-        "record": {
-          "order_id": {"ref": "@plan.input.order_id"},
-          "amount_cents": {"ref": "@plan.input.amount_cents"}
-        }
+        "order_id": {"ref": "@plan.input.order_id"},
+        "amount_cents": {"ref": "@plan.input.amount_cents"}
       },
       "cap": "payment_cap",
       "bind": {"effect_id_as": "charge_id"}
@@ -253,13 +257,12 @@ match (&mut s.pc, input.event) {
       "reducer": "com.acme/OrderSM@1",
       "event": {
         "record": {
-          "$schema": {"text": "com.acme/PaymentResult@1"},
           "order_id": {"ref": "@plan.input.order_id"},
           "success": {
             "op": "eq",
             "args": [
               {"ref": "@var:receipt.status"},
-              {"text": "ok"}
+              "ok"
             ]
           },
           "txn_id": {"ref": "@var:receipt.txn_id"}
@@ -307,7 +310,7 @@ This cycle keeps domain logic in reducers and external effects in plans. The pla
 
 ## Micro-Effects Allowlist
 
-- Allowed from reducers in v1: `fs.blob.put`, `fs.blob.get`, `timer.set`.
+- Allowed from reducers in v1: `blob.put`, `blob.get`, `timer.set`.
 - All other effect kinds should be denied by policy when originating from reducers and executed via plans instead.
 
 ## Effect Boundaries and Guardrails
@@ -316,7 +319,7 @@ To maintain clear separation between reducers and plans, the kernel enforces:
 
 ### Reducer Effect Limits (v1)
 - **At most ONE effect per step**: reducers emit zero or one effect per invocation
-- **Only "micro-effects"**: `fs.blob.put`, `fs.blob.get`, `timer.set`
+- **Only "micro-effects"**: `blob.put`, `blob.get`, `timer.set`
 - **NO network effects**: `http.request`, `llm.generate`, `email.send`, `payment.charge` must go through plans
 
 ### Policy Enforcement (v1)

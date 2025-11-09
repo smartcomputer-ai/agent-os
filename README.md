@@ -1,1 +1,52 @@
-# AOS Next
+# AgentOS
+
+**🌞 A deterministic, event-sourced computing substrate for AI agents.**
+
+AgentOS is a runtime where agents can safely propose, simulate, and apply changes to their own code, policies, and workflows, all under governance, with full audit trails. Every external action produces a signed receipt. Every state change is replayable from an event log.
+
+## Why AgentOS
+
+Agents today sit on stacks never designed for self-modification. State sprawls across systems, audits are partial, and governance is bolted on. 
+
+AgentOS makes determinism and governed evolution first-class. Build portable, forkable worlds where agents own their runtime and every change is auditable.
+
+## Our Architecture in Short
+
+- **Deterministic kernel**: Single-threaded worlds with replay-identical state
+- **AIR (Agent Intermediate Representation)**: Typed control plane for modules, plans, schemas, policies, and capabilities (homoiconic in spirit, where agents can read and edit their own runtime)
+- **Capability security**: No ambient authority. All effects are scoped, budgeted, and gated by policy
+- **Full auditability**: Signed receipts for every external action enable complete forensic replay
+- **Safe self-modification**: Governed evolution through a constitutional loop that works as follows:
+  1. **propose**: Draft changes to code, policies, or workflows
+  2. **shadow**: Simulate changes in isolated environment
+  3. **approve**: Policy-gated authorization
+  4. **apply**: Atomically update the world state
+  5. **execute**: Run effects with capability constraints
+  6. **receipt**: Capture signed outcomes
+  7. **audit**: Full provenance from intent to effect
+
+## Documentation
+
+Start here:
+
+1. **[spec/01-overview.md](spec/01-overview.md)** — Core concepts, mental model, why this exists
+2. **[spec/02-architecture.md](spec/02-architecture.md)** — Runtime components, event flow, storage layout
+3. **[spec/03-air.md](spec/03-air.md)** — Complete AIR v1 spec (schemas, modules, plans, capabilities, policies)
+4. **[spec/04-reducers.md](spec/04-reducers.md)** — Reducer semantics, ABI, relationship to plans
+5. **[spec/05-workflows.md](spec/05-workflows.md)** — Coordinating complex workflows (patterns, compensations, retries)
+
+For implementation guidance, project structure, and coding conventions, see **[AGENTS.md](AGENTS.md)**.
+
+## License
+
+[To be determined]
+
+## Current Status
+
+AgentOS is in active development. We're building the architecture in the open and invite feedback and collaboration.
+
+This version of AgentOS replaces our first attempt, which can be [found here](https://github.com/smartcomputer-ai/agent-os/tree/pre-next), and which was quite different in nature but same in philosphy.
+
+## Contributing
+
+Feedback, questions, and contributions are welcome. Open an issue or start a discussion.

@@ -19,7 +19,7 @@ AIR v1 provides one canonical, typed control plane the kernel can load, validate
 
 AIR is **control‑plane only**. It defines schemas, modules, plans, capabilities, policies, and the manifest. Application state lives in reducer state (deterministic WASM), encoded as canonical CBOR.
 
-The policy engine is minimal: ordered allow/deny rules with budgets enforced on receipts. Hooks are reserved for richer policy later. The effects set in v1 is also minimal: `http.request`, `fs.blob.{put,get}`, `timer.set`, `llm.generate`. Migrations are deferred; `defmigration` is reserved.
+The policy engine is minimal: ordered allow/deny rules with budgets enforced on receipts. Hooks are reserved for richer policy later. The effects set in v1 is also minimal: `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`. Migrations are deferred; `defmigration` is reserved.
 
 ## 1) Vocabulary and Identity
 
@@ -58,24 +58,42 @@ See: spec/schemas/common.schema.json and spec/schemas/defschema.schema.json
 
 ## 3) Encoding
 
-AIR nodes exist in two forms: human-readable text and canonical binary.
+AIR nodes exist in two interchangeable JSON lenses plus one canonical binary form. All persisted identity and hashing stays bound to canonical CBOR; the dual JSON lenses exist purely for ergonomics and tooling.
 
-### Text Form
+### 3.1 JSON Lenses (Authoring vs. Canonical)
 
-JSON with explicit `$kind` and, where needed, `$type` tags for unions. Field order is irrelevant in text form.
+**Why**: Humans want concise, schema-directed JSON; agents and tools often need an explicit, lossless overlay. Accepting both lenses at load time keeps authoring pleasant without sacrificing determinism.
 
-### Binary Form
+1. **Authoring sugar (default)** — plain JSON interpreted using the surrounding schema reference. Use natural literals (`true`, `42`, `"text"`, `{field: …}`, arrays) exactly as before.
+2. **Canonical JSON (tagged)** — every literal carries an explicit type tag mirroring `ExprConst` (`{ "nat": 42 }`, `{ "list": [ { "text": "a" } ] }`, `{ "variant": { "tag": "Ok", "value": { "text": "done" } } }`, etc.). This lens is ideal for diffs, automated patches, and inspector output because it round-trips without schema context.
 
-Canonical [CBOR](https://cbor.io/) (RFC 8949) with strict determinism:
-- Deterministic map key ordering (bytewise of encoded keys)
-- Shortest integer form
-- Definite lengths
-- `dec128` encoded as tagged byte string (tag 2000) of 16 bytes
-- `time` and `duration` as int nanoseconds
+The loader **MUST** accept either lens at every typed value position, resolve the schema from context (plan IO, effect params, reducer schemas, capability params, etc.), and convert to a typed value before hashing.
 
-### Node Hash
+### 3.2 Canonicalization Rules (Sugar → Typed → CBOR)
 
-`sha256` over canonical CBOR bytes of the node. Values bound to a schema include the schema_hash in the value node before hashing, which prevents shape collisions.
+Regardless of the JSON lens, the loader applies the same canonicalization before emitting CBOR:
+
+- **Deterministic CBOR**: Canonical [CBOR](https://cbor.io/) (RFC 8949) with deterministic map key ordering (bytewise order of encoded keys), shortest integer encodings, and definite lengths.
+- **Sets**: Deduplicate by typed equality, then sort elements by their canonical CBOR bytes. Encode as CBOR arrays in that order so `["b","a","a"]` and `["a","b"]` hash identically once typed.
+- **Maps**:
+  - `map<text,V>` may be authored as JSON objects; encode as CBOR maps sorted by canonical key bytes.
+  - Maps with non-text keys are authored as `[[key,value], …]` pairs; encode as CBOR maps sorted by the key’s canonical bytes.
+- **Numeric domains**: Accept numbers or string literals (for large ints/decimals); reject out-of-range values and always encode using the shortest CBOR int.
+- **`dec128`**: Author as a decimal string; encode as the dedicated tag (2000) with a 16-byte payload.
+- **`time` / `duration`**: Allow RFC 3339 strings or integer nanoseconds; encode as signed/unsigned nanosecond integers.
+- **`bytes`**: Author as base64 strings; encode as CBOR byte strings.
+- **`hash`**: Author as `"sha256:<64hex>"`; encode as raw 32-byte values.
+- **`uuid`**: Author as RFC 4122 strings; encode as 16-byte values.
+- **`variant`**: Sugar `{ "Tag": <value?> }` expands to a canonical envelope (e.g., `{ "variant": { "tag": "Tag", "value": … } }`) before CBOR.
+- **`option<T>`**: Represent `none` as `null` in sugar or `{ "option": null }` in canonical JSON; `some` wraps the nested value.
+
+These rules make previously implicit loader behavior normative and testable.
+
+### 3.3 Binary Form and Hashing
+
+Canonical CBOR remains the storage and hashing format. The node hash is `sha256(cbor(node))`.
+
+When hashing a typed value (plan IO, cap params, etc.), always bind the **schema hash** alongside the canonical bytes. This prevents two different schemas that serialize to the same JSON shape from colliding and keeps “schema + value” as the identity pair.
 
 ## 4) Manifest
 
@@ -173,20 +191,22 @@ No WASI ambient syscalls, no threads, no clock. All I/O happens via the effect l
 
 See: spec/schemas/defmodule.schema.json
 
-## 7) Effect Catalog (Built‑in v1)
+## 7) Effect Catalog (Built-in v1)
 
-AgentOS ships with four built-in effect types. Each has parameter and receipt schemas defined as built-in defschema.
+AgentOS ships with a small, explicit catalog of effect kinds. Their schema definitions live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same canonical shapes. Keeping them in the repo (instead of prose-only) lets tooling type-check effect params/receipts and keeps adapters honest about wire formats.
+
+Built-in kinds in v1:
 
 **http.request**
 - params: `{ method:text, url:text, headers: map{text→text}, body_ref?:hash }`
 - receipt: `{ status:int, headers: map{text→text}, body_ref?:hash, timings:{start_ns:nat,end_ns:nat}, adapter_id:text }`
 
-**fs.blob.put**
-- params: `{ ns:text, blob_ref:hash }`
-- receipt: `{ stored_ref:hash, size:nat }`
+**blob.put**
+- params: `{ namespace:text, blob_ref:hash }`
+- receipt: `{ blob_ref:hash, size:nat }`
 
-**fs.blob.get**
-- params: `{ ns:text, key:text }`
+**blob.get**
+- params: `{ namespace:text, key:text }`
 - receipt: `{ blob_ref:hash, size:nat }`
 
 **timer.set**
@@ -196,6 +216,20 @@ AgentOS ships with four built-in effect types. Each has parameter and receipt sc
 **llm.generate**
 - params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, input_ref:hash, tools?:list<text> }`
 - receipt: `{ output_ref:hash, token_usage:{prompt:nat,completion:nat}, cost_cents:nat, provider_id:text }`
+
+### Built-in reducer receipt events
+
+Reducers that emit micro-effects rely on the kernel to translate adapter receipts into typed DomainEvents. AIR v1 reserves these `defschema` names so manifests can declare routing and reducers can count on stable payloads:
+
+| Schema | Purpose | Fields |
+| --- | --- | --- |
+| **`sys/TimerFired@1`** | Delivery of a `timer.set` receipt back to the originating reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text` (always `"timer.set"` in v1), `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/TimerSetParams@1`, `receipt:sys/TimerSetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+
+Reducers should add routing entries for these schemas (e.g., `routing.events[].event = sys/TimerFired@1`). Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/budget enforcement can trust the same structures without changing reducer code.
+
+Canonical JSON definitions for these schemas (plus their parameter/receipt companions) live in `spec/defs/builtin-schemas.air.json` so manifests can hash and reference them directly.
 
 ## 8) Effect Intents and Receipts
 
@@ -242,7 +276,7 @@ Capabilities define scoped permissions for effects. A `defcap` declares a capabi
 {
   "$kind": "defcap",
   "name": "namespace/name@version",
-  "cap_type": "http.out" | "fs.blob" | "timer" | "llm.basic",
+  "cap_type": "http.out" | "blob" | "timer" | "llm.basic",
   "schema": <SchemaRef>
 }
 ```
@@ -259,7 +293,7 @@ The schema defines parameter constraints enforced at enqueue time.
 - Schema: `{ providers?: set<text>, models?: set<text>, max_tokens_max?: nat, temperature_max?: dec128, tools_allow?: set<text> }`
 - At enqueue: `provider`/`model` ∈ allowlists if present; `max_tokens ≤ max_tokens_max`; `temperature ≤ temperature_max`; `tools ⊆ tools_allow`.
 
-**sys/fs.blob@1**
+**sys/blob@1**
 - Schema: `{ namespaces?: set<text> }` (minimal in v1)
 
 **sys/timer@1**
@@ -289,7 +323,7 @@ The `params` must conform to the defcap's schema and encode concrete allowlists/
 3. Effect params satisfy grant constraints (hosts, models, max_tokens_max, etc.).
 4. Conservative budget pre-check for variable-cost effects:
    - `llm.generate`: if `max_tokens` declared, check `max_tokens ≤ remaining tokens budget`; deny if insufficient.
-   - `fs.blob.put`: if blob_ref size known from CAS, check `size ≤ remaining bytes budget`; deny if insufficient.
+   - `blob.put`: if blob_ref size known from CAS, check `size ≤ remaining bytes budget`; deny if insufficient.
 5. Policy decision (see defpolicy).
 
 **At receipt, the kernel settles budgets:**
@@ -403,11 +437,12 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 ### Steps (discriminated by `op`)
 
 **raise_event**: Publish an event to a reducer
-- `{ id, op:"raise_event", reducer:Name, key?:Expr, event:Expr }`
+- `{ id, op:"raise_event", reducer:Name, key?:Expr, event:ExprOrValue }`
 - If target reducer is keyed, `key` is required and must typecheck to its key schema
+- The kernel infers the payload schema from the reducer's manifest entry and validates/canonicalizes the event (and optional key) before emitting, so authors should not embed `$schema` fields inside the payload.
 
 **emit_effect**: Request an external effect
-- `{ id, op:"emit_effect", kind:EffectKind, params:Expr, cap:CapGrantName, bind:{effect_id_as:VarName} }`
+- `{ id, op:"emit_effect", kind:EffectKind, params:ExprOrValue, cap:CapGrantName, bind:{effect_id_as:VarName} }`
 
 **await_receipt**: Wait for an effect receipt
 - `{ id, op:"await_receipt", for:Expr /*effect_id*/, bind:{as:VarName} }`
@@ -417,17 +452,28 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 - Waits until a matching DomainEvent appears; `where` is a boolean predicate over the event value
 
 **assign**: Bind a value to a variable
-- `{ id, op:"assign", expr:Expr, bind:{as:VarName} }`
+- `{ id, op:"assign", expr:ExprOrValue, bind:{as:VarName} }`
 
 **end**: Complete the plan
-- `{ id, op:"end", result?:Expr }`
-- Must match output schema if provided
+- `{ id, op:"end", result?:ExprOrValue }`
+- Must match output schema if provided. The runtime canonicalizes/validates this result against `plan.output` before persisting it, and the canonical value is appended to the journal as a `plan_result` record so operators/shadow runs can see exactly what a plan produced.
+
+### Literals vs. Expressions (`ExprOrValue`)
+
+Authoring ergonomic insight: most plan fields already know the target schema (effect params, event payloads, locals, outputs). Requiring verbose `ExprRecord`/`ExprList` wrappers for simple literals made everyday plans noisy. In v1 we therefore allow `ExprOrValue` in four places (`emit_effect.params`, `raise_event.event`, `assign.expr`, `end.result`). Authors may provide:
+
+1. A plain JSON value (in sugar or canonical lens), which the loader interprets via the declared schema.
+2. A fully tagged `Expr` tree when dynamic computation or references are needed.
+
+Loaders may optionally lift literals into constant expressions internally so diagnostics stay consistent. Guards (`edges[].when`), `await_receipt.for`, and other predicate positions remain full `Expr` to keep intent clear: if branching logic or lookups are happening, you must be explicit.
 
 ### Expr and Predicates
 
 **Expr** is side‑effect‑free over a typed Value: constants; refs (`@plan.input`, `@var:name`, `@step:ID.field…`); operators `len|get|has|eq|ne|lt|le|gt|ge|and|or|not|concat|add|sub|mul|div|mod|starts_with|ends_with|contains`.
 
 **Predicates** are boolean Expr. Missing refs are errors (deterministic fail).
+
+**Await/invariant references**: Authoring tools and the kernel validator now statically ensure that `await_receipt.for` references an emitted handle (`@var:<handle>`), that `await_event.where` predicates only reference declared locals/step outputs/plan input, and that plan `invariants[]` never reference `@event` or undeclared symbols. These checks surface manifest issues during validation rather than at runtime.
 
 ### Guards (Edge Predicates)
 
@@ -475,7 +521,7 @@ The kernel validator enforces these semantic checks:
 
 **defmodule**: `wasm_hash` present; referenced schemas exist; `effects_emitted`/`cap_slots` (if present) are well‑formed.
 
-**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `emit_effect.kind` ∈ `allowed_effects`; `emit_effect.cap` ∈ `required_caps` or defaults; `await_receipt.for` references earlier emit; `raise_event.event` must evaluate to a value conforming to a declared schema; if the target reducer is keyed (by routing or by `key_schema`), `raise_event.key` is required and must typecheck to that key schema; if `await_event` present, `event` must be a known schema; `end.result` matches output schema.
+**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `emit_effect.kind` ∈ `allowed_effects`; `emit_effect.cap` ∈ `required_caps` or defaults; `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.event` must evaluate to a value conforming to a declared schema (and keyed reducers require matching keys); invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
 
 **defpolicy**: Rule shapes valid; referenced effect kinds known.
 
@@ -493,6 +539,8 @@ Patches describe changes to the control plane (design-time modifications).
   patches: [<Patch>…]
 }
 ```
+
+`node` and `new_node` accept either JSON lens (authoring sugar or tagged canonical). The loader canonicalizes to CBOR, supplies schema context, and hashes before validation. This ensures diffs/patches generated by agents remain deterministic even if they emit tagged literals.
 
 ### Operations
 
@@ -519,11 +567,14 @@ The journal records both design-time (governance) and runtime (execution) events
 
 ### Plan and Effect Lifecycle (Runtime)
 
-- **PlanStarted** `{ plan_name, instance_id, input_hash }`
-- **EffectQueued** `{ instance_id, intent_hash, origin_kind, origin_name }`
-- **PolicyDecisionRecorded** `{ intent_hash, policy_name, rule_index, decision }`
-- **ReceiptAppended** `{ intent_hash, status, receipt_ref }`
-- **PlanEnded** `{ instance_id, status:"ok"|"error", result_ref? }`
+Runtime journal entries are canonical CBOR enums; the important ones for AIR plans are:
+
+- **DomainEvent** `{ schema, value, key? }` – emitted by reducers or plan raise_event; replay feeds reducers and triggers.
+- **EffectIntent** `{ intent_hash, kind, cap_name, params_cbor, idempotency_key, origin }` – queued effects from reducers and plans.
+- **EffectReceipt** `{ intent_hash, adapter_id, status, payload_cbor, cost_cents?, signature }` – adapters’ signed receipts; replay reproduces plan/resume behavior.
+- **PlanResult** `{ plan_name, plan_id, output_schema, value_cbor }` – appended when an `end` step returns a value; shadow/governance tooling can surface outputs directly from the journal without re-running expressions.
+- **Snapshot** `{ snapshot_ref, height }` – pointer to CAS snapshot blob; enables fast replay.
+- **Governance** – proposal/shadow/approve/apply records (design-time control plane).
 
 ### Budget and Capability (Optional, for Observability)
 
