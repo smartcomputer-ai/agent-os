@@ -41,6 +41,7 @@ pub enum JournalKind {
     Snapshot,
     PolicyDecision,
     Governance,
+    PlanResult,
     Custom,
 }
 
@@ -56,6 +57,7 @@ pub enum JournalRecord {
     PolicyDecision(PolicyDecisionRecord),
     Snapshot(SnapshotRecord),
     Governance(GovernanceRecord),
+    PlanResult(PlanResultRecord),
     Custom(CustomRecord),
 }
 
@@ -68,6 +70,7 @@ impl JournalRecord {
             JournalRecord::PolicyDecision(_) => JournalKind::PolicyDecision,
             JournalRecord::Snapshot(_) => JournalKind::Snapshot,
             JournalRecord::Governance(_) => JournalKind::Governance,
+            JournalRecord::PlanResult(_) => JournalKind::PlanResult,
             JournalRecord::Custom(_) => JournalKind::Custom,
         }
     }
@@ -116,6 +119,15 @@ pub struct EffectReceiptRecord {
     pub cost_cents: Option<u64>,
     #[serde(with = "serde_bytes")]
     pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanResultRecord {
+    pub plan_name: String,
+    pub plan_id: u64,
+    pub output_schema: String,
+    #[serde(with = "serde_bytes")]
+    pub value_cbor: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -3,7 +3,8 @@ use aos_air_types::{
     DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprRecord, PlanBind,
     PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt,
     PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent, ReducerAbi, TypeExpr,
-    TypePrimitive, TypePrimitiveText, TypeRecord, builtins::builtin_schemas,
+    TypePrimitive, TypePrimitiveText, TypeRecord,
+    builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_effects::builtins::{
@@ -11,18 +12,18 @@ use aos_effects::builtins::{
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::error::KernelError;
+use aos_kernel::journal::{JournalKind, mem::MemJournal};
 use aos_testkit::fixtures::{self, START_SCHEMA};
-use aos_testkit::{TestWorld, effect_params_text, fake_hash};
+use aos_testkit::{TestStore, TestWorld, effect_params_text, fake_hash};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use indexmap::IndexMap;
-use serde_json::json;
 use serde_cbor;
+use serde_json::json;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 mod helpers;
-use helpers::{
-    def_text_record_schema, insert_test_schemas, int_type, text_type, timer_manifest,
-};
+use helpers::{def_text_record_schema, insert_test_schemas, int_type, text_type, timer_manifest};
 
 fn builtin_schema_index_with_custom_types() -> SchemaIndex {
     let mut map = HashMap::new();
@@ -118,24 +119,15 @@ fn sugar_literal_plan_executes_http_flow() {
         "allowed_effects": ["http.request"]
     });
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
-    if let Some(step) = plan
-        .steps
-        .iter_mut()
-        .find(|step| step.id == "raise")
-    {
+    if let Some(step) = plan.steps.iter_mut().find(|step| step.id == "raise") {
         if let PlanStepKind::RaiseEvent(raise) = &mut step.kind {
             raise.event = Expr::Record(ExprRecord {
-                record: IndexMap::from([
-                    (
-                        "value".into(),
-                        Expr::Record(ExprRecord {
-                            record: IndexMap::from([(
-                                "message".into(),
-                                fixtures::text_expr("done"),
-                            )]),
-                        }),
-                    ),
-                ]),
+                record: IndexMap::from([(
+                    "value".into(),
+                    Expr::Record(ExprRecord {
+                        record: IndexMap::from([("message".into(), fixtures::text_expr("done"))]),
+                    }),
+                )]),
             })
             .into();
         }
@@ -149,8 +141,10 @@ fn sugar_literal_plan_executes_http_flow() {
     )
     .expect("normalize literals");
 
-    let routing =
-        vec![fixtures::routing_event("com.acme/ResultEvent@1", &result_module.name)];
+    let routing = vec![fixtures::routing_event(
+        "com.acme/ResultEvent@1",
+        &result_module.name,
+    )];
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(plan_name)],
@@ -311,10 +305,7 @@ fn single_plan_orchestration_completes_after_receipt() {
             DefSchema {
                 name: "com.acme/ResultEvent@1".into(),
                 ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([(
-                        "value".into(),
-                        int_type(),
-                    )]),
+                    record: IndexMap::from([("value".into(), int_type())]),
                 }),
             },
         ],
@@ -1028,6 +1019,104 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
     assert_eq!(effect_params_text(&more_effects.remove(0)), "other");
 }
 
+#[test]
+fn plan_outputs_are_journaled_and_replayed() {
+    let store = fixtures::new_mem_store();
+    let plan_name = "com.acme/OutputPlan@1";
+    let output_schema = "com.acme/PlanOut@1";
+
+    let build_manifest = || {
+        let plan = DefPlan {
+            name: plan_name.to_string(),
+            input: fixtures::schema("com.acme/PlanIn@1"),
+            output: Some(fixtures::schema(output_schema)),
+            locals: IndexMap::new(),
+            steps: vec![PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd {
+                    result: Some(
+                        Expr::Record(ExprRecord {
+                            record: IndexMap::from([(
+                                "message".into(),
+                                Expr::Const(ExprConst::Text {
+                                    text: "done".into(),
+                                }),
+                            )]),
+                        })
+                        .into(),
+                    ),
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+
+        let mut loaded = fixtures::build_loaded_manifest(
+            vec![plan],
+            vec![fixtures::start_trigger(plan_name)],
+            vec![],
+            vec![],
+        );
+        insert_test_schemas(
+            &mut loaded,
+            vec![
+                def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+                def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+                DefSchema {
+                    name: output_schema.into(),
+                    ty: TypeExpr::Record(TypeRecord {
+                        record: IndexMap::from([("message".into(), text_type())]),
+                    }),
+                },
+            ],
+        );
+        loaded
+    };
+
+    let manifest = build_manifest();
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+    world.submit_event_value(
+        START_SCHEMA,
+        &fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]),
+    );
+    world.tick_n(2).unwrap();
+
+    let results = world.kernel.recent_plan_results();
+    assert_eq!(results.len(), 1);
+    let entry = &results[0];
+    assert_eq!(entry.plan_name, plan_name);
+    assert_eq!(entry.output_schema, output_schema);
+    let value: ExprValue = serde_cbor::from_slice(&entry.value_cbor).unwrap();
+    assert_eq!(
+        value,
+        ExprValue::Record(IndexMap::from([(
+            "message".into(),
+            ExprValue::Text("done".into()),
+        )]))
+    );
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    assert!(
+        journal_entries
+            .iter()
+            .any(|entry| entry.kind == JournalKind::PlanResult)
+    );
+
+    let replay_manifest = build_manifest();
+    let replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        replay_manifest,
+        Box::new(MemJournal::from_entries(&journal_entries)),
+    )
+    .unwrap();
+    let replay_results = replay_world.kernel.recent_plan_results();
+    assert_eq!(replay_results.len(), 1);
+    let replay_value: ExprValue = serde_cbor::from_slice(&replay_results[0].value_cbor).unwrap();
+    assert_eq!(replay_value, value);
+}
+
 /// Plans that raise events should deliver them to reducers according to manifest routing.
 #[test]
 fn raised_events_are_routed_to_reducers() {
@@ -1100,10 +1189,7 @@ fn raised_events_are_routed_to_reducers() {
             DefSchema {
                 name: "com.acme/Raised@1".into(),
                 ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([(
-                        "value".into(),
-                        int_type(),
-                    )]),
+                    record: IndexMap::from([("value".into(), int_type())]),
                 }),
             },
             DefSchema {

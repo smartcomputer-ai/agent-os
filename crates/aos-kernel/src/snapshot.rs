@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use aos_effects::{EffectIntent, EffectKind as RuntimeEffectKind};
 use serde::{Deserialize, Serialize};
+use serde_bytes;
 
 use crate::journal::JournalSeq;
 use crate::plan::PlanInstanceSnapshot;
@@ -17,6 +18,7 @@ pub struct KernelSnapshot {
     next_plan_id: u64,
     queued_effects: Vec<EffectIntentSnapshot>,
     pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
+    plan_results: Vec<PlanResultSnapshot>,
     height: JournalSeq,
 }
 
@@ -32,6 +34,7 @@ impl KernelSnapshot {
         next_plan_id: u64,
         queued_effects: Vec<EffectIntentSnapshot>,
         pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
+        plan_results: Vec<PlanResultSnapshot>,
     ) -> Self {
         Self {
             reducer_state: reducer_state.into_iter().collect(),
@@ -42,6 +45,7 @@ impl KernelSnapshot {
             next_plan_id,
             queued_effects,
             pending_reducer_receipts,
+            plan_results,
             height,
         }
     }
@@ -84,6 +88,10 @@ impl KernelSnapshot {
 
     pub fn pending_reducer_receipts(&self) -> &[ReducerReceiptSnapshot] {
         &self.pending_reducer_receipts
+    }
+
+    pub fn plan_results(&self) -> &[PlanResultSnapshot] {
+        &self.plan_results
     }
 }
 
@@ -161,4 +169,13 @@ impl ReducerReceiptSnapshot {
     pub fn into_context(self) -> ReducerEffectContext {
         ReducerEffectContext::new(self.reducer, self.effect_kind, self.params_cbor)
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanResultSnapshot {
+    pub plan_name: String,
+    pub plan_id: u64,
+    pub output_schema: String,
+    #[serde(with = "serde_bytes")]
+    pub value_cbor: Vec<u8>,
 }

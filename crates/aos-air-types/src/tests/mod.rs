@@ -1,5 +1,5 @@
 use crate::schemas::COMMON;
-use jsonschema::{paths::JSONPointer, JSONSchema};
+use jsonschema::{JSONSchema, paths::JSONPointer};
 use once_cell::sync::Lazy;
 use serde_json::Value;
 
@@ -18,7 +18,10 @@ pub(crate) fn assert_json_schema(schema_json: &str, instance: &Value) {
     let schema_value: Value =
         serde_json::from_str(schema_json).expect("embedded schema must be valid JSON");
     let mut options = JSONSchema::options();
-    for id in ["common.schema.json", "https://aos.dev/air/v1/common.schema.json"] {
+    for id in [
+        "common.schema.json",
+        "https://aos.dev/air/v1/common.schema.json",
+    ] {
         options.with_document(id.to_string(), COMMON_SCHEMA.clone());
     }
     let compiled = options

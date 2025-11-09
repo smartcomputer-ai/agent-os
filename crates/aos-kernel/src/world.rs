@@ -3,8 +3,7 @@ use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    AirNode, DefModule, Manifest, Name, NamedRef, TypeExpr,
-    builtins,
+    AirNode, DefModule, Manifest, Name, NamedRef, TypeExpr, builtins,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
@@ -23,8 +22,8 @@ use crate::journal::mem::MemJournal;
 use crate::journal::{
     DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, GovernanceRecord,
     IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, JournalSeq,
-    ManifestAppliedRecord, OwnedJournalEntry, ProposalApprovedRecord, ProposalSubmittedRecord,
-    ShadowRunCompletedRecord, SnapshotRecord,
+    ManifestAppliedRecord, OwnedJournalEntry, PlanResultRecord, ProposalApprovedRecord,
+    ProposalSubmittedRecord, ShadowRunCompletedRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
@@ -34,11 +33,12 @@ use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
 use crate::shadow::{ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary};
 use crate::snapshot::{
-    EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, ReducerReceiptSnapshot,
-    receipts_to_vecdeque,
+    EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanResultSnapshot,
+    ReducerReceiptSnapshot, receipts_to_vecdeque,
 };
 
 const RECENT_RECEIPT_CACHE: usize = 512;
+const RECENT_PLAN_RESULT_CACHE: usize = 256;
 
 pub struct Kernel<S: Store> {
     store: Arc<S>,
@@ -56,12 +56,68 @@ pub struct Kernel<S: Store> {
     pending_reducer_receipts: HashMap<[u8; 32], ReducerEffectContext>,
     recent_receipts: VecDeque<[u8; 32]>,
     recent_receipt_index: HashSet<[u8; 32]>,
+    plan_results: VecDeque<PlanResultEntry>,
     scheduler: Scheduler,
     effect_manager: EffectManager,
     reducer_state: HashMap<Name, Vec<u8>>,
     journal: Box<dyn Journal>,
     suppress_journal: bool,
     governance: GovernanceManager,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanResultEntry {
+    pub plan_name: String,
+    pub plan_id: u64,
+    pub output_schema: String,
+    pub value_cbor: Vec<u8>,
+}
+
+impl PlanResultEntry {
+    fn new(plan_name: String, plan_id: u64, output_schema: String, value_cbor: Vec<u8>) -> Self {
+        Self {
+            plan_name,
+            plan_id,
+            output_schema,
+            value_cbor,
+        }
+    }
+
+    fn to_record(&self) -> PlanResultRecord {
+        PlanResultRecord {
+            plan_name: self.plan_name.clone(),
+            plan_id: self.plan_id,
+            output_schema: self.output_schema.clone(),
+            value_cbor: self.value_cbor.clone(),
+        }
+    }
+
+    fn to_snapshot(&self) -> PlanResultSnapshot {
+        PlanResultSnapshot {
+            plan_name: self.plan_name.clone(),
+            plan_id: self.plan_id,
+            output_schema: self.output_schema.clone(),
+            value_cbor: self.value_cbor.clone(),
+        }
+    }
+
+    fn from_record(record: PlanResultRecord) -> Self {
+        Self::new(
+            record.plan_name,
+            record.plan_id,
+            record.output_schema,
+            record.value_cbor,
+        )
+    }
+
+    fn from_snapshot(snapshot: PlanResultSnapshot) -> Self {
+        Self::new(
+            snapshot.plan_name,
+            snapshot.plan_id,
+            snapshot.output_schema,
+            snapshot.value_cbor,
+        )
+    }
 }
 
 pub struct KernelBuilder<S: Store> {
@@ -134,8 +190,10 @@ impl<S: Store + 'static> Kernel<S> {
         )?;
         ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
         ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
-        let reducer_schemas =
-            Arc::new(build_reducer_schemas(&loaded.modules, schema_index.as_ref())?);
+        let reducer_schemas = Arc::new(build_reducer_schemas(
+            &loaded.modules,
+            schema_index.as_ref(),
+        )?);
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
             .defaults
@@ -169,6 +227,7 @@ impl<S: Store + 'static> Kernel<S> {
             pending_reducer_receipts: HashMap::new(),
             recent_receipts: VecDeque::new(),
             recent_receipt_index: HashSet::new(),
+            plan_results: VecDeque::new(),
             scheduler: Scheduler::default(),
             effect_manager: EffectManager::new(capability_resolver, policy_gate),
             reducer_state: HashMap::new(),
@@ -326,6 +385,11 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(|(hash, ctx)| ReducerReceiptSnapshot::from_context(*hash, ctx))
             .collect();
+        let plan_results: Vec<PlanResultSnapshot> = self
+            .plan_results
+            .iter()
+            .map(|entry| entry.to_snapshot())
+            .collect();
         let snapshot = KernelSnapshot::new(
             height,
             reducer_state,
@@ -336,6 +400,7 @@ impl<S: Store + 'static> Kernel<S> {
             self.scheduler.next_plan_id(),
             queued_effects,
             pending_reducer_receipts,
+            plan_results,
         );
         let bytes = serde_cbor::to_vec(&snapshot)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
@@ -405,6 +470,9 @@ impl<S: Store + 'static> Kernel<S> {
             JournalRecord::Governance(record) => {
                 self.governance.apply_record(&record);
             }
+            JournalRecord::PlanResult(record) => {
+                self.restore_plan_result(record);
+            }
             _ => {}
         }
         Ok(())
@@ -469,10 +537,19 @@ impl<S: Store + 'static> Kernel<S> {
                 .collect(),
         );
 
+        self.plan_results.clear();
+        for result_snapshot in snapshot.plan_results().iter().cloned() {
+            self.push_plan_result_entry(PlanResultEntry::from_snapshot(result_snapshot));
+        }
+
         self.scheduler.clear();
         self.scheduler.set_next_plan_id(snapshot.next_plan_id());
 
         Ok(())
+    }
+
+    fn restore_plan_result(&mut self, record: PlanResultRecord) {
+        self.push_plan_result_entry(PlanResultEntry::from_record(record));
     }
 
     fn restore_effect_intent(&mut self, record: EffectIntentRecord) -> Result<(), KernelError> {
@@ -553,6 +630,10 @@ impl<S: Store + 'static> Kernel<S> {
 
     pub fn governance(&self) -> &GovernanceManager {
         &self.governance
+    }
+
+    pub fn recent_plan_results(&self) -> Vec<PlanResultEntry> {
+        self.plan_results.iter().cloned().collect()
     }
 
     pub fn submit_proposal(
@@ -657,8 +738,10 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn swap_manifest(&mut self, patch: &ManifestPatch) -> Result<(), KernelError> {
         let loaded = patch.to_loaded_manifest();
-        let schema_index =
-            Arc::new(build_schema_index_from_loaded(self.store.as_ref(), &loaded)?);
+        let schema_index = Arc::new(build_schema_index_from_loaded(
+            self.store.as_ref(),
+            &loaded,
+        )?);
         let reducer_schemas = Arc::new(build_reducer_schemas(&loaded.modules, &schema_index)?);
 
         self.manifest = loaded.manifest;
@@ -749,6 +832,16 @@ impl<S: Store + 'static> Kernel<S> {
                 self.waiting_events.entry(schema).or_default().push(id);
             }
             if outcome.completed {
+                if !self.suppress_journal {
+                    if let (Some(value_cbor), Some(output_schema)) =
+                        (outcome.result_cbor.clone(), outcome.result_schema.clone())
+                    {
+                        let entry =
+                            PlanResultEntry::new(plan_name.clone(), id, output_schema, value_cbor);
+                        self.record_plan_result(&entry)?;
+                        self.push_plan_result_entry(entry);
+                    }
+                }
                 self.plan_instances.remove(&id);
             } else if outcome.waiting_receipt.is_none() && outcome.waiting_event.is_none() {
                 self.scheduler.push_plan(id);
@@ -851,6 +944,18 @@ impl<S: Store + 'static> Kernel<S> {
         }
         self.recent_receipts.push_back(hash);
         self.recent_receipt_index.insert(hash);
+    }
+
+    fn push_plan_result_entry(&mut self, entry: PlanResultEntry) {
+        if self.plan_results.len() >= RECENT_PLAN_RESULT_CACHE {
+            self.plan_results.pop_front();
+        }
+        self.plan_results.push_back(entry);
+    }
+
+    fn record_plan_result(&mut self, entry: &PlanResultEntry) -> Result<(), KernelError> {
+        let record = entry.to_record();
+        self.append_record(JournalRecord::PlanResult(record))
     }
 
     fn append_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
@@ -983,8 +1088,8 @@ fn extend_module_map_from_store<S: Store>(
 }
 
 fn parse_nonzero_hash(value: &str) -> Result<Option<Hash>, KernelError> {
-    let hash =
-        Hash::from_hex_str(value).map_err(|err| KernelError::Manifest(format!("invalid hash '{value}': {err}")))?;
+    let hash = Hash::from_hex_str(value)
+        .map_err(|err| KernelError::Manifest(format!("invalid hash '{value}': {err}")))?;
     if hash.as_bytes().iter().all(|b| *b == 0) {
         Ok(None)
     } else {
@@ -1024,7 +1129,9 @@ fn build_reducer_schemas(
             let event_schema = schema_index
                 .get(schema_name)
                 .ok_or_else(|| {
-                    KernelError::Manifest(format!("schema '{schema_name}' not found for reducer '{name}'"))
+                    KernelError::Manifest(format!(
+                        "schema '{schema_name}' not found for reducer '{name}'"
+                    ))
                 })?
                 .clone();
             let key_schema = if let Some(key_ref) = &module.key_schema {

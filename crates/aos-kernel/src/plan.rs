@@ -5,13 +5,13 @@ use aos_air_exec::{
     Env as ExprEnv, Value as ExprValue, ValueKey, ValueMap as ExecValueMap,
     ValueSet as ExecValueSet, eval_expr,
 };
+use aos_air_types::plan_literals::{SchemaIndex, canonicalize_literal, validate_literal};
 use aos_air_types::{
     DefPlan, EmptyObject, Expr, ExprOrValue, HashRef, PlanEdge, PlanStep, PlanStepKind, TypeExpr,
-    ValueBool, ValueBytes, ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList,
-    ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText,
-    ValueTimeNs, ValueUuid, ValueVariant,
+    TypePrimitive, TypePrimitiveInt, ValueBool, ValueBytes, ValueDec128, ValueDurationNs,
+    ValueHash, ValueInt, ValueList, ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull,
+    ValueRecord, ValueSet, ValueText, ValueTimeNs, ValueUuid, ValueVariant,
 };
-use aos_air_types::plan_literals::{SchemaIndex, canonicalize_literal, validate_literal};
 use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
 use base64::Engine;
@@ -100,6 +100,8 @@ pub struct PlanTickOutcome {
     pub completed: bool,
     pub intents_enqueued: Vec<EffectIntent>,
     pub result: Option<ExprValue>,
+    pub result_schema: Option<String>,
+    pub result_cbor: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,10 +273,8 @@ impl PlanInstance {
                         return Ok(outcome);
                     }
                     PlanStepKind::RaiseEvent(raise) => {
-                        let metadata = self
-                            .reducer_schemas
-                            .get(&raise.reducer)
-                            .ok_or_else(|| {
+                        let metadata =
+                            self.reducer_schemas.get(&raise.reducer).ok_or_else(|| {
                                 KernelError::Manifest(format!(
                                     "reducer '{}' not found for raise_event",
                                     raise.reducer
@@ -314,8 +314,8 @@ impl PlanInstance {
                                 "plan raise_event value encode error: {err}"
                             ))
                         })?;
-                        let payload_bytes = serde_cbor::to_vec(&canonical_value)
-                            .map_err(|err| {
+                        let payload_bytes =
+                            serde_cbor::to_vec(&canonical_value).map_err(|err| {
                                 KernelError::Manifest(format!(
                                     "plan raise_event encode error: {err}"
                                 ))
@@ -335,16 +335,12 @@ impl PlanInstance {
                                             "plan raise_event key literal error: {err}"
                                         ))
                                     })?;
-                                canonicalize_literal(
-                                    &mut key_literal,
-                                    schema,
-                                    &self.schema_index,
-                                )
-                                .map_err(|err| {
-                                    KernelError::Manifest(format!(
-                                        "plan raise_event key canonicalization error: {err}"
-                                    ))
-                                })?;
+                                canonicalize_literal(&mut key_literal, schema, &self.schema_index)
+                                    .map_err(|err| {
+                                        KernelError::Manifest(format!(
+                                            "plan raise_event key canonicalization error: {err}"
+                                        ))
+                                    })?;
                                 validate_literal(
                                     &key_literal,
                                     schema,
@@ -362,16 +358,13 @@ impl PlanInstance {
                                             "plan raise_event key value error: {err}"
                                         ))
                                     })?;
-                                let canonical_key_bytes =
-                                    serde_cbor::to_vec(&canonical_key).map_err(|err| {
+                                let canonical_key_bytes = serde_cbor::to_vec(&canonical_key)
+                                    .map_err(|err| {
                                         KernelError::Manifest(format!(
                                             "plan raise_event key encode error: {err}"
                                         ))
                                     })?;
-                                (
-                                    Some(canonical_key_bytes),
-                                    Some(canonical_key),
-                                )
+                                (Some(canonical_key_bytes), Some(canonical_key))
                             }
                             (Some(_), None) => {
                                 return Err(KernelError::Manifest(format!(
@@ -388,10 +381,8 @@ impl PlanInstance {
                             (None, None) => (None, None),
                         };
 
-                        let mut event = DomainEvent::new(
-                            metadata.event_schema_name.clone(),
-                            payload_bytes,
-                        );
+                        let mut event =
+                            DomainEvent::new(metadata.event_schema_name.clone(), payload_bytes);
                         if let Some(bytes) = key_bytes {
                             event.key = Some(bytes);
                         }
@@ -425,11 +416,52 @@ impl PlanInstance {
                         }
 
                         if let Some(result_expr) = &end.result {
-                            let value = eval_expr_or_value(
+                            let mut value = eval_expr_or_value(
                                 result_expr,
                                 &self.env,
                                 "plan end result eval error",
                             )?;
+
+                            if let Some(schema_ref) = &self.plan.output {
+                                let schema_name = schema_ref.as_str();
+                                let schema =
+                                    self.schema_index.get(schema_name).ok_or_else(|| {
+                                        KernelError::Manifest(format!(
+                                            "output schema '{schema_name}' not found for plan '{}'",
+                                            self.plan.name
+                                        ))
+                                    })?;
+                                let mut literal = expr_value_to_literal(&value).map_err(|err| {
+                                    KernelError::Manifest(format!(
+                                        "plan end result literal error: {err}"
+                                    ))
+                                })?;
+                                canonicalize_literal(&mut literal, schema, &self.schema_index)
+                                    .map_err(|err| {
+                                        KernelError::Manifest(format!(
+                                            "plan end result canonicalization error: {err}"
+                                        ))
+                                    })?;
+                                validate_literal(&literal, schema, schema_name, &self.schema_index)
+                                    .map_err(|err| {
+                                        KernelError::Manifest(format!(
+                                            "plan end result validation error: {err}"
+                                        ))
+                                    })?;
+                                value = literal_to_value(&literal).map_err(|err| {
+                                    KernelError::Manifest(format!(
+                                        "plan end result decode error: {err}"
+                                    ))
+                                })?;
+                                let payload_bytes = serde_cbor::to_vec(&value).map_err(|err| {
+                                    KernelError::Manifest(format!(
+                                        "plan end result encode error: {err}"
+                                    ))
+                                })?;
+                                outcome.result_schema = Some(schema_name.to_string());
+                                outcome.result_cbor = Some(payload_bytes);
+                            }
+
                             self.record_step_value(&step_id, value.clone());
                             outcome.result = Some(value);
                         } else {
@@ -802,14 +834,14 @@ mod tests {
     use super::*;
     use crate::capability::CapabilityResolver;
     use crate::policy::AllowAllPolicy;
+    use aos_air_types::plan_literals::SchemaIndex;
     use aos_air_types::{
-        CapType, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprRecord, ExprRef, PlanBind,
-        PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
+        CapType, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprRecord, ExprRef,
+        PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
         PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
         SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText, TypeRecord,
         ValueInt, ValueLiteral, ValueRecord, ValueText,
     };
-    use aos_air_types::plan_literals::SchemaIndex;
     use aos_effects::CapabilityGrant;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -867,8 +899,35 @@ mod tests {
         Arc::new(HashMap::new())
     }
 
+    fn schema_index_with_output() -> Arc<SchemaIndex> {
+        let mut map = HashMap::new();
+        map.insert(
+            "test/Out@1".into(),
+            TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
+                int: EmptyObject {},
+            })),
+        );
+        Arc::new(SchemaIndex::new(map))
+    }
+
     fn new_plan_instance(plan: DefPlan) -> PlanInstance {
-        PlanInstance::new(1, plan, default_env(), empty_schema_index(), empty_reducer_schemas())
+        PlanInstance::new(
+            1,
+            plan,
+            default_env(),
+            empty_schema_index(),
+            empty_reducer_schemas(),
+        )
+    }
+
+    fn plan_instance_with_schema(plan: DefPlan, schema_index: Arc<SchemaIndex>) -> PlanInstance {
+        PlanInstance::new(
+            1,
+            plan,
+            default_env(),
+            schema_index,
+            empty_reducer_schemas(),
+        )
     }
 
     fn reducer_schema_map(
@@ -1078,12 +1137,8 @@ mod tests {
         let key_schema = TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
             text: EmptyObject {},
         }));
-        let reducer_schemas = reducer_schema_map(
-            reducer,
-            "com.test/Evt@1",
-            event_schema,
-            Some(key_schema),
-        );
+        let reducer_schemas =
+            reducer_schema_map(reducer, "com.test/Evt@1", event_schema, Some(key_schema));
         let steps = vec![PlanStep {
             id: "raise".into(),
             kind: PlanStepKind::RaiseEvent(aos_air_types::PlanStepRaiseEvent {
@@ -1092,7 +1147,10 @@ mod tests {
                     text: "cell-1".into(),
                 })),
                 event: Expr::Record(aos_air_types::ExprRecord {
-                    record: IndexMap::from([("value".into(), Expr::Const(ExprConst::Int { int: 9 }))]),
+                    record: IndexMap::from([(
+                        "value".into(),
+                        Expr::Const(ExprConst::Int { int: 9 }),
+                    )]),
                 })
                 .into(),
             }),
@@ -1123,17 +1181,9 @@ mod tests {
                 })),
             )]),
         });
-        let reducer_schemas = reducer_schema_map(
-            reducer,
-            "com.test/Literal@1",
-            event_schema,
-            None,
-        );
+        let reducer_schemas = reducer_schema_map(reducer, "com.test/Literal@1", event_schema, None);
         let literal_event = ValueLiteral::Record(ValueRecord {
-            record: IndexMap::from([(
-                "value".into(),
-                ValueLiteral::Int(ValueInt { int: 3 }),
-            )]),
+            record: IndexMap::from([("value".into(), ValueLiteral::Int(ValueInt { int: 3 }))]),
         });
         let steps = vec![PlanStep {
             id: "raise".into(),
@@ -1281,11 +1331,13 @@ mod tests {
         }];
         let mut plan = base_plan(steps);
         plan.output = Some(SchemaRef::new("test/Out@1").unwrap());
-        let mut instance = new_plan_instance(plan);
+        let mut instance = plan_instance_with_schema(plan, schema_index_with_output());
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert!(outcome.completed);
         assert_eq!(outcome.result, Some(ExprValue::Int(7)));
+        assert_eq!(outcome.result_schema, Some("test/Out@1".into()));
+        assert!(outcome.result_cbor.is_some());
     }
 
     #[test]
@@ -1296,7 +1348,7 @@ mod tests {
         }];
         let mut plan = base_plan(steps);
         plan.output = Some(SchemaRef::new("test/Out@1").unwrap());
-        let mut instance = new_plan_instance(plan);
+        let mut instance = plan_instance_with_schema(plan, schema_index_with_output());
         let mut effects = test_effect_manager();
         let err = instance.tick(&mut effects).unwrap_err();
         assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("output schema")));
@@ -1315,6 +1367,27 @@ mod tests {
         let mut effects = test_effect_manager();
         let err = instance.tick(&mut effects).unwrap_err();
         assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("without output schema")));
+    }
+
+    #[test]
+    fn end_step_result_must_match_output_schema_shape() {
+        let steps = vec![PlanStep {
+            id: "end".into(),
+            kind: PlanStepKind::End(PlanStepEnd {
+                result: Some(
+                    Expr::Const(ExprConst::Text {
+                        text: "oops".into(),
+                    })
+                    .into(),
+                ),
+            }),
+        }];
+        let mut plan = base_plan(steps);
+        plan.output = Some(SchemaRef::new("test/Out@1").unwrap());
+        let mut instance = plan_instance_with_schema(plan, schema_index_with_output());
+        let mut effects = test_effect_manager();
+        let err = instance.tick(&mut effects).unwrap_err();
+        assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("validation error")));
     }
 
     #[test]
@@ -1412,12 +1485,8 @@ mod tests {
         let mut hash = first.waiting_receipt.expect("waiting receipt");
         let snapshot = instance.snapshot();
 
-        let mut restored = PlanInstance::from_snapshot(
-            snapshot,
-            plan_def,
-            schema_index,
-            reducer_schemas,
-        );
+        let mut restored =
+            PlanInstance::from_snapshot(snapshot, plan_def, schema_index, reducer_schemas);
         hash[0] ^= 0xAA;
         restored.override_pending_receipt_hash(hash);
         assert_eq!(restored.pending_receipt_hash(), Some(hash));
