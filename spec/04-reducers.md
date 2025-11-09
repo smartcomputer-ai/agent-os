@@ -2,6 +2,8 @@
 
 Reducers are deterministic, WASM-compiled state machines that own application/domain state and business invariants. They consume events, update state, and may emit domain intents (events) and a constrained set of micro-effects. Complex, multi-step external orchestration is handled by AIR plans; reducers remain focused on domain evolution.
 
+**Note on examples**: Plan examples in this chapter use AIR v1's authoring sugar (plain JSON values) for readability. You may also use canonical JSON (tagged) or full `Expr` trees where `ExprOrValue` is accepted. See `spec/03-air.md` §3 for details on JSON lenses and canonicalization. Reducer WASM ABI boundaries always use canonical CBOR regardless of authoring format.
+
 ## Scope Note (v1.0)
 
 This chapter describes reducers for v1.0, where a reducer has a single state value. If you need many parallel instances of the same FSM, model them as a `map<key, substate>` inside this state (see "Coding Pattern" and "ReceiptEvent And Correlation").
@@ -222,6 +224,8 @@ match (&mut s.pc, input.event) {
 
 ### 3. Plan performs the effect
 
+Note: This example uses v1 authoring sugar. The `params` and `event` fields accept `ExprOrValue`, so you can provide plain record/variant values (as shown) or full `Expr` trees when dynamic computation is needed.
+
 ```json
 {
   "$kind": "defplan",
@@ -233,10 +237,8 @@ match (&mut s.pc, input.event) {
       "op": "emit_effect",
       "kind": "payment.charge",
       "params": {
-        "record": {
-          "order_id": {"ref": "@plan.input.order_id"},
-          "amount_cents": {"ref": "@plan.input.amount_cents"}
-        }
+        "order_id": {"ref": "@plan.input.order_id"},
+        "amount_cents": {"ref": "@plan.input.amount_cents"}
       },
       "cap": "payment_cap",
       "bind": {"effect_id_as": "charge_id"}
@@ -252,18 +254,16 @@ match (&mut s.pc, input.event) {
       "op": "raise_event",
       "reducer": "com.acme/OrderSM@1",
       "event": {
-        "record": {
-          "$schema": {"text": "com.acme/PaymentResult@1"},
-          "order_id": {"ref": "@plan.input.order_id"},
-          "success": {
-            "op": "eq",
-            "args": [
-              {"ref": "@var:receipt.status"},
-              {"text": "ok"}
-            ]
-          },
-          "txn_id": {"ref": "@var:receipt.txn_id"}
-        }
+        "$schema": "com.acme/PaymentResult@1",
+        "order_id": {"ref": "@plan.input.order_id"},
+        "success": {
+          "op": "eq",
+          "args": [
+            {"ref": "@var:receipt.status"},
+            "ok"
+          ]
+        },
+        "txn_id": {"ref": "@var:receipt.txn_id"}
       }
     },
     {"id": "done", "op": "end"}

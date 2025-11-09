@@ -2,7 +2,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
-use aos_air_types::{Manifest, Name};
+use aos_air_types::{
+    AirNode, DefModule, Manifest, Name, NamedRef, TypeExpr,
+    builtins,
+    plan_literals::{SchemaIndex, normalize_plan_literals},
+};
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
@@ -543,12 +547,14 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<u64, KernelError> {
         let proposal_id = self.governance.alloc_proposal_id();
 
-        for node in &patch.nodes {
+        let canonical_patch = canonicalize_patch(self.store.as_ref(), patch)?;
+
+        for node in &canonical_patch.nodes {
             self.store.put_node(node)?;
         }
-        self.store.put_node(&patch.manifest)?;
+        self.store.put_node(&canonical_patch.manifest)?;
 
-        let patch_bytes = to_canonical_cbor(&patch)
+        let patch_bytes = to_canonical_cbor(&canonical_patch)
             .map_err(|err| KernelError::Manifest(format!("encode patch: {err}")))?;
         let patch_hash = self.store.put_blob(&patch_bytes)?;
         let record = GovernanceRecord::ProposalSubmitted(ProposalSubmittedRecord {
@@ -866,6 +872,96 @@ impl<S: Store + 'static> Kernel<S> {
             signature: receipt.signature.clone(),
         });
         self.append_record(record)
+    }
+}
+
+fn canonicalize_patch<S: Store>(
+    store: &S,
+    patch: ManifestPatch,
+) -> Result<ManifestPatch, KernelError> {
+    let mut canonical = patch.clone();
+
+    let mut schema_map = HashMap::new();
+    for builtin in builtins::builtin_schemas() {
+        schema_map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
+    }
+    let mut module_map: HashMap<Name, DefModule> = HashMap::new();
+
+    for node in &canonical.nodes {
+        match node {
+            AirNode::Defschema(schema) => {
+                schema_map.insert(schema.name.clone(), schema.ty.clone());
+            }
+            AirNode::Defmodule(module) => {
+                module_map.insert(module.name.clone(), module.clone());
+            }
+            _ => {}
+        }
+    }
+
+    extend_schema_map_from_store(store, &canonical.manifest.schemas, &mut schema_map)?;
+    extend_module_map_from_store(store, &canonical.manifest.modules, &mut module_map)?;
+
+    let schema_index = SchemaIndex::new(schema_map);
+    for node in canonical.nodes.iter_mut() {
+        if let AirNode::Defplan(plan) = node {
+            normalize_plan_literals(plan, &schema_index, &module_map).map_err(|err| {
+                KernelError::Manifest(format!(
+                    "plan '{}' literal normalization failed: {err}",
+                    plan.name
+                ))
+            })?;
+        }
+    }
+
+    Ok(canonical)
+}
+
+fn extend_schema_map_from_store<S: Store>(
+    store: &S,
+    refs: &[NamedRef],
+    schemas: &mut HashMap<String, TypeExpr>,
+) -> Result<(), KernelError> {
+    for reference in refs {
+        if schemas.contains_key(reference.name.as_str()) {
+            continue;
+        }
+        if let Some(hash) = parse_nonzero_hash(reference.hash.as_str())? {
+            let node: AirNode = store.get_node(hash)?;
+            if let AirNode::Defschema(schema) = node {
+                schemas.insert(schema.name.clone(), schema.ty.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn extend_module_map_from_store<S: Store>(
+    store: &S,
+    refs: &[NamedRef],
+    modules: &mut HashMap<Name, DefModule>,
+) -> Result<(), KernelError> {
+    for reference in refs {
+        if modules.contains_key(reference.name.as_str()) {
+            continue;
+        }
+        if let Some(hash) = parse_nonzero_hash(reference.hash.as_str())? {
+            let node: AirNode = store.get_node(hash)?;
+            if let AirNode::Defmodule(module) = node {
+                modules.insert(module.name.clone(), module);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_nonzero_hash(value: &str) -> Result<Option<Hash>, KernelError> {
+    let hash =
+        Hash::from_hex_str(value).map_err(|err| KernelError::Manifest(format!("invalid hash '{value}': {err}")))?;
+    if hash.as_bytes().iter().all(|b| *b == 0) {
+        Ok(None)
+    } else {
+        Ok(Some(hash))
     }
 }
 
