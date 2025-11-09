@@ -1,13 +1,13 @@
 //! Test utilities for exercising the AgentOS kernel with deterministic fixtures.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    CapGrant, CapType, DefCap, DefModule, DefPlan, Expr, ExprConst, ExprRef, HashRef, Manifest,
-    ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef, Routing, RoutingEvent,
-    SchemaRef, Trigger, TypeExpr, TypeRecord, ValueLiteral, ValueRecord,
+    CapGrant, CapType, DefCap, DefModule, DefPlan, DefSchema, Expr, ExprConst, ExprRef, HashRef,
+    Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef, PlanStepKind,
+    Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr, TypeRecord, ValueLiteral, ValueRecord,
 };
 use aos_effects::EffectIntent;
 use aos_kernel::{
@@ -147,14 +147,16 @@ pub mod fixtures {
 
         let caps = attach_test_capabilities(&mut manifest, modules_map.keys());
 
-        LoadedManifest {
+        let mut loaded = LoadedManifest {
             manifest,
             modules: modules_map,
             plans: plans_map,
             caps,
             policies: HashMap::new(),
             schemas: HashMap::new(),
-        }
+        };
+        ensure_placeholder_schemas(&mut loaded);
+        loaded
     }
 
     /// Populates the manifest with default capability grants and module slot bindings so reducers
@@ -185,6 +187,67 @@ pub mod fixtures {
             ("sys/timer@1".into(), timer_defcap()),
             ("sys/blob@1".into(), blob_defcap()),
         ])
+    }
+
+    fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
+        let mut required: HashSet<String> = HashSet::new();
+        required.insert(START_SCHEMA.to_string());
+
+        if let Some(routing) = &loaded.manifest.routing {
+            for event in &routing.events {
+                required.insert(event.event.as_str().to_string());
+            }
+        }
+        for trigger in &loaded.manifest.triggers {
+            required.insert(trigger.event.as_str().to_string());
+        }
+        for plan in loaded.plans.values() {
+            required.insert(plan.input.as_str().to_string());
+            if let Some(output) = &plan.output {
+                required.insert(output.as_str().to_string());
+            }
+            for schema in plan.locals.values() {
+                required.insert(schema.as_str().to_string());
+            }
+            for step in &plan.steps {
+                if let PlanStepKind::AwaitEvent(step) = &step.kind {
+                    required.insert(step.event.as_str().to_string());
+                }
+            }
+        }
+        for module in loaded.modules.values() {
+            if let Some(reducer) = module.abi.reducer.as_ref() {
+                required.insert(reducer.state.as_str().to_string());
+                required.insert(reducer.event.as_str().to_string());
+            }
+            if let Some(key_schema) = &module.key_schema {
+                required.insert(key_schema.as_str().to_string());
+            }
+        }
+
+        for schema_name in required {
+            if loaded.schemas.contains_key(&schema_name) {
+                continue;
+            }
+            let def = DefSchema {
+                name: schema_name.clone(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            };
+            loaded.schemas.insert(schema_name.clone(), def);
+            if !loaded
+                .manifest
+                .schemas
+                .iter()
+                .any(|existing| existing.name == schema_name)
+            {
+                loaded.manifest.schemas.push(NamedRef {
+                    name: schema_name,
+                    hash: zero_hash(),
+                });
+            }
+        }
     }
 
     pub fn cap_http_grant() -> CapGrant {
