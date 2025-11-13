@@ -164,10 +164,13 @@ dependencies = [
  "aos-store",
  "aos-wasm-abi",
  "clap",
+ "hex",
  "indexmap",
  "once_cell",
  "serde",
+ "serde_bytes",
  "serde_cbor",
+ "sha2",
 ]
 
 [[package]]
@@ -338,6 +341,20 @@ name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+
+[[package]]
+name = "blob-echo-reducer"
+version = "0.1.0"
+dependencies = [
+ "aos-air-types",
+ "aos-effects",
+ "aos-wasm-abi",
+ "hex",
+ "serde",
+ "serde_bytes",
+ "serde_cbor",
+ "sha2",
+]
 
 [[package]]
 name = "block-buffer"

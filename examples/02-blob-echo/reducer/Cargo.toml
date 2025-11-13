@@ -1,0 +1,17 @@
+[package]
+name = "blob-echo-reducer"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+aos-air-types = { path = "../../../crates/aos-air-types" }
+aos-effects = { path = "../../../crates/aos-effects" }
+aos-wasm-abi = { path = "../../../crates/aos-wasm-abi" }
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+serde_cbor = "0.11"
+sha2 = "0.10"
+hex = "0.4"

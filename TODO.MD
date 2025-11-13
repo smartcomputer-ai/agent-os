@@ -12,10 +12,7 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 4. **[x] Example 01 — Hello Timer** — Rust manifest builders cover schemas/cap/policy, timer reducer emits `timer.set`, harness drains effects and synthesizes receipts, CLI shows Start → timer receipt → replay hash.
 
-5. **Example 02 — Blob Echo**  
-   - Clone the directory pattern, add blob schemas/caps, and implement the reducer that issues `blob.put` then `blob.get` with state fences and CAS validation.  
-   - Add a blob adapter in the harness that writes payloads to the filesystem store, enforces byte budgets, and feeds receipts back to the reducer.  
-   - Update the CLI to include this example in `--all`, ensuring its journal + replay checks pass using the same FS-backed environment.
+5. **[x] Example 02 — Blob Echo** — Reducer now emits `blob.put`/`blob.get` micro-effects, harness synthesizes Blob receipts via the CAS, CLI command prints put/get logs and replay verifies stored vs retrieved refs.
 
 > Once these three examples are stable, replicate the same structure for the remaining ladder rungs (plans, fan-out, governance, LLM) by adding numbered directories plus scenario implementations under the shared CLI.
 

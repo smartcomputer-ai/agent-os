@@ -16,3 +16,6 @@ indexmap = "2"
 once_cell = "1"
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
+serde_bytes = "0.11"
+sha2 = "0.10"
+hex = "0.4"

@@ -14,5 +14,6 @@ members = [
   "crates/aos-examples",
   "examples/00-counter/reducer",
   "examples/01-hello-timer/reducer",
+  "examples/02-blob-echo/reducer",
 ]
 resolver = "2"

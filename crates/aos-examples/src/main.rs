@@ -58,7 +58,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Blob Echo",
         summary: "Reducer blob.put/get demo",
         dir: "examples/02-blob-echo",
-        runner: blob_placeholder,
+        runner: examples::blob_echo::run,
     },
 ];
 
@@ -141,8 +141,4 @@ static WORKSPACE_ROOT: Lazy<PathBuf> = Lazy::new(|| {
 
 pub(crate) fn workspace_root() -> &'static Path {
     &WORKSPACE_ROOT
-}
-
-fn blob_placeholder(_: &Path) -> Result<()> {
-    Err(anyhow!("blob echo example not implemented yet"))
 }
