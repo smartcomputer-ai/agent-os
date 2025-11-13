@@ -50,11 +50,7 @@ enum CounterEvent {
 
 pub fn run(example_root: &Path) -> Result<()> {
     util::reset_journal(example_root)?;
-    let wasm_bytes = util::ensure_wasm_artifact(
-        "examples/00-counter/reducer/Cargo.toml",
-        "target/wasm32-unknown-unknown/debug/counter_reducer.wasm",
-        "counter",
-    )?;
+    let wasm_bytes = util::compile_reducer("examples/00-counter/reducer")?;
     let store = Arc::new(FsStore::open(example_root).context("open FsStore")?);
     let loaded = build_loaded_manifest(store.clone(), &wasm_bytes).context("build manifest")?;
     let journal = Box::new(FsJournal::open(example_root)?);

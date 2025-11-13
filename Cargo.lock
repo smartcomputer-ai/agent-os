@@ -169,6 +169,8 @@ dependencies = [
  "aos-kernel",
  "aos-store",
  "aos-wasm-abi",
+ "aos-wasm-build",
+ "camino",
  "clap",
  "hex",
  "indexmap",
@@ -490,15 +492,6 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
-
-[[package]]
-name = "counter-reducer"
-version = "0.1.0"
-dependencies = [
- "aos-wasm-abi",
- "serde",
- "serde_cbor",
-]
 
 [[package]]
 name = "cpp_demangle"

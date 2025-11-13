@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, anyhow};
+use aos_wasm_build::{BuildRequest, Builder};
+use camino::Utf8PathBuf;
 
 pub fn reset_journal(example_root: &Path) -> Result<()> {
     let journal_dir = example_root.join(".aos").join("journal");
@@ -42,4 +44,14 @@ fn build_wasm(crate_manifest_rel: &str, label: &str) -> Result<()> {
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(crate::workspace_root())
+}
+
+pub fn compile_reducer(crate_rel: &str) -> Result<Vec<u8>> {
+    let source_path = workspace_root().join(crate_rel);
+    let utf_path = Utf8PathBuf::from_path_buf(source_path.clone())
+        .map_err(|_| anyhow!("path is not utf-8: {}", source_path.display()))?;
+    let mut request = BuildRequest::new(utf_path);
+    request.config.release = false;
+    let artifact = Builder::compile(request).context("compile reducer via aos-wasm-build")?;
+    Ok(artifact.wasm_bytes)
 }

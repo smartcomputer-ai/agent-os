@@ -30,7 +30,7 @@ enum CounterEvent {
     Tick,
 }
 
-#[cfg_attr(target_arch = "wasm32", export_name = "alloc")]
+#[cfg_attr(target_arch = "wasm32", unsafe(export_name = "alloc"))]
 pub extern "C" fn wasm_alloc(len: i32) -> i32 {
     if len <= 0 {
         return 0;
@@ -39,7 +39,7 @@ pub extern "C" fn wasm_alloc(len: i32) -> i32 {
     unsafe { host_alloc(layout) as i32 }
 }
 
-#[cfg_attr(target_arch = "wasm32", export_name = "step")]
+#[cfg_attr(target_arch = "wasm32", unsafe(export_name = "step"))]
 pub extern "C" fn wasm_step(ptr: i32, len: i32) -> (i32, i32) {
     let input_bytes = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
     let input = ReducerInput::decode(input_bytes).expect("valid reducer input");
