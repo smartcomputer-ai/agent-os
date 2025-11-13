@@ -4,25 +4,13 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 ## Implementation Plan — Examples Ladder
 
-1. **Scaffold `examples/` layout + workspace plumbing**  
-   - Create `examples/00-counter`, `examples/01-hello-timer`, `examples/02-blob-echo` directories (placeholder README, `air/`, `reducer/`, `plans/` as needed, and `runner/` cargo bin).  
-   - Add new workspace crate `crates/aos-examples` that hosts a small CLI (`aos-examples`) capable of enumerating example manifests and dispatching to their runners.  
-   - CLI behavior: `cargo run -p aos-examples` (no subcommand) lists numbered examples and short summaries; `cargo run -p aos-examples counter` runs only Counter; `cargo run -p aos-examples hello-timer` runs Hello Timer; `cargo run -p aos-examples blob-echo` runs Blob Echo; `cargo run -p aos-examples all` executes every example sequentially.
+1. **[x] Scaffold `examples/` layout + workspace plumbing** — `examples/0x-*` directories exist with README + subfolders, new `aos-examples` crate registers numbered demos, CLI listing/subcommands/all-mode wired up.
 
-2. **Implement shared example runner + FS-backed harness**  
-   - Within `crates/aos-examples`, build a harness that loads manifests from the real filesystem (no in-memory shortcuts) using `aos-store`, `aos-kernel`, and `aos-testkit` adapters.  
-   - Provide a trait (e.g., `ExampleScenario`) per example to describe its setup inputs, expected receipts, and journal assertions; store metadata (`number`, `slug`, `name`, `summary`, `path`).  
-   - Use `clap` to define subcommands so each example slug becomes its own command (e.g., `counter`, `hello-timer`, `blob-echo`) plus an `all` command that runs every scenario sequentially, stopping on failure; default invocation with no subcommand prints the catalog.
+2. **[x] Implement shared example runner + FS-backed harness** — Harness code now builds manifests via `aos-store`, runs `aos-kernel` with FsStore/FsJournal in `.aos/`, exposes metadata-driven CLI subcommands, and replays after each demo.
 
-3. **Example 00 — CounterSM**  
-   - Author AIR schemas/modules/manifest under `examples/00-counter/air/` per ROADMAP.md (reducer typestate, no effects).  
-   - Implement the reducer WASM crate and a runner that appends domain events, ticks the kernel, and prints state transitions + snapshot hashes to stdout.  
-   - Add harness assertions for replay determinism (record journal, replay, byte-equal snapshot) before marking the example successful.
+3. **[x] Example 00 — CounterSM** — Reducer crate emits `alloc/step`, demo seeds Start/Tick events, prints state transitions, and verifies replay hash.
 
-4. **Example 01 — Hello Timer**  
-   - Port the detailed spec from the existing TODO section into concrete assets inside `examples/01-hello-timer` (schemas, default policy, cap grant, reducer WASM).  
-   - Extend the harness with a timer adapter that records receipts on disk, routed back through `sys/TimerFired@1`, and ensure the policy enforces reducer-only micro-effects.  
-   - Provide CLI output summarizing effect emission, receipt arrival, and final reducer state so the demo “feels alive” when run from a terminal.
+4. **[x] Example 01 — Hello Timer** — Rust manifest builders cover schemas/cap/policy, timer reducer emits `timer.set`, harness drains effects and synthesizes receipts, CLI shows Start → timer receipt → replay hash.
 
 5. **Example 02 — Blob Echo**  
    - Clone the directory pattern, add blob schemas/caps, and implement the reducer that issues `blob.put` then `blob.get` with state fences and CAS validation.  
