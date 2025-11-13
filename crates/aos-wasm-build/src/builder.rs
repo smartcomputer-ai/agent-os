@@ -1,6 +1,6 @@
 use crate::artifact::BuildArtifact;
-use crate::backends::rust::RustBackend;
 use crate::backends::ModuleCompiler;
+use crate::backends::rust::RustBackend;
 use crate::cache;
 use crate::config::BuildConfig;
 use crate::error::BuildError;
@@ -44,12 +44,16 @@ impl Builder {
         if request.use_cache {
             if let Some(bytes) = cache::lookup(&fingerprint).map_err(BuildError::Io)? {
                 let digest = WasmDigest::of_bytes(&bytes);
+                println!("   cache hit for reducer (fingerprint {fingerprint})");
                 return Ok(BuildArtifact {
                     wasm_bytes: bytes,
                     wasm_hash: digest,
                     build_log: Some("cache hit".into()),
                 });
             }
+            println!("   cache miss for reducer (fingerprint {fingerprint})");
+        } else {
+            println!("   cache disabled; building reducer");
         }
         let artifact = match request.backend {
             BackendKind::Rust => RustBackend::new().compile(request)?,
@@ -81,10 +85,7 @@ fn build_fingerprint(request: &BuildRequest) -> Result<String, BuildError> {
     let source_hash = hash_directory(&request.source_dir)?;
     let inputs = vec![
         ("source", source_hash),
-        (
-            "target",
-            request.config.toolchain.target.clone(),
-        ),
+        ("target", request.config.toolchain.target.clone()),
         (
             "profile",
             if request.config.release {
@@ -100,7 +101,10 @@ fn build_fingerprint(request: &BuildRequest) -> Result<String, BuildError> {
 fn hash_directory(path: &Utf8PathBuf) -> Result<String, BuildError> {
     let root = Path::new(path.as_str());
     let mut entries = Vec::new();
-    for entry in WalkDir::new(root).into_iter().filter_entry(|e| !should_skip(e)) {
+    for entry in WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|e| !should_skip(e))
+    {
         let entry = entry.map_err(|e| BuildError::BuildFailed(e.to_string()))?;
         if entry.file_type().is_file() {
             let rel = entry

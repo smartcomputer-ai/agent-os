@@ -9,6 +9,12 @@ use std::process;
 #[derive(Parser, Debug)]
 #[command(name = "aos-examples", version, about = "Run AgentOS ladder demos")]
 struct Cli {
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Force recompilation of reducers, bypassing cache"
+    )]
+    force_build: bool,
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -74,6 +80,7 @@ fn main() {
 
 fn run_cli() -> Result<()> {
     let cli = Cli::parse();
+    crate::examples::util::set_force_build(cli.force_build);
     match cli.command {
         Some(Commands::Counter) => run_single("counter"),
         Some(Commands::HelloTimer) => run_single("hello-timer"),
