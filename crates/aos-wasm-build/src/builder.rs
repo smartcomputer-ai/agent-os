@@ -7,11 +7,11 @@ use crate::error::BuildError;
 use crate::hash::WasmDigest;
 use anyhow::Result;
 use camino::Utf8PathBuf;
+use log::debug;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
-use log::debug;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BackendKind {
@@ -46,8 +46,8 @@ impl Builder {
         let fingerprint = build_fingerprint(&request)?;
         let cache_override = request.cache_dir.clone();
         if request.use_cache {
-            if let Some(bytes) = cache::lookup(&fingerprint, cache_override.as_deref())
-                .map_err(BuildError::Io)?
+            if let Some(bytes) =
+                cache::lookup(&fingerprint, cache_override.as_deref()).map_err(BuildError::Io)?
             {
                 let digest = WasmDigest::of_bytes(&bytes);
                 debug!("cache hit for reducer (fingerprint {fingerprint})");
@@ -64,8 +64,12 @@ impl Builder {
         let artifact = match request.backend {
             BackendKind::Rust => RustBackend::new().compile(request)?,
         };
-        cache::store(&fingerprint, &artifact.wasm_bytes, cache_override.as_deref())
-            .map_err(BuildError::Io)?;
+        cache::store(
+            &fingerprint,
+            &artifact.wasm_bytes,
+            cache_override.as_deref(),
+        )
+        .map_err(BuildError::Io)?;
         Ok(artifact)
     }
 }

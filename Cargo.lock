@@ -163,6 +163,7 @@ name = "aos-examples"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aos-air-exec",
  "aos-air-types",
  "aos-cbor",
  "aos-effects",
@@ -180,7 +181,10 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_cbor",
+ "serde_json",
  "sha2",
+ "tempfile",
+ "walkdir",
 ]
 
 [[package]]

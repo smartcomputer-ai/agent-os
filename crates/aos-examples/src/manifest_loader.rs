@@ -1,0 +1,408 @@
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use anyhow::{Context, Result, bail};
+use aos_air_types::{
+    AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, HashRef, Manifest, Name,
+};
+use aos_kernel::LoadedManifest;
+use aos_store::{Catalog, FsStore, Store, load_manifest_from_bytes};
+use log::warn;
+use walkdir::WalkDir;
+
+/// Attempts to load a manifest for the provided example directory by reading AIR JSON assets
+/// under `air/`, `plans/`, and `defs/`. Returns `Ok(None)` if no manifest is found so callers can
+/// fall back to the legacy Rust-built manifests.
+pub fn load_from_assets(
+    store: Arc<FsStore>,
+    example_root: &Path,
+) -> Result<Option<LoadedManifest>> {
+    let mut manifest: Option<Manifest> = None;
+    let mut schemas: Vec<DefSchema> = Vec::new();
+    let mut modules: Vec<DefModule> = Vec::new();
+    let mut plans: Vec<DefPlan> = Vec::new();
+    let mut caps: Vec<DefCap> = Vec::new();
+    let mut policies: Vec<DefPolicy> = Vec::new();
+
+    for dir in ["defs", "air", "plans"].iter() {
+        let dir_path = example_root.join(dir);
+        if !dir_path.exists() {
+            continue;
+        }
+        for path in collect_json_files(&dir_path)? {
+            let nodes = parse_air_nodes(&path)
+                .with_context(|| format!("parse AIR nodes from {}", path.display()))?;
+            for node in nodes {
+                match node {
+                    AirNode::Manifest(found) => {
+                        if manifest.is_some() {
+                            bail!(
+                                "multiple manifest nodes found (latest at {})",
+                                path.display()
+                            );
+                        }
+                        manifest = Some(found);
+                    }
+                    AirNode::Defschema(schema) => schemas.push(schema),
+                    AirNode::Defmodule(module) => modules.push(module),
+                    AirNode::Defplan(plan) => plans.push(plan),
+                    AirNode::Defcap(cap) => caps.push(cap),
+                    AirNode::Defpolicy(policy) => policies.push(policy),
+                }
+            }
+        }
+    }
+
+    let mut manifest = match manifest {
+        Some(manifest) => manifest,
+        None => return Ok(None),
+    };
+
+    let hashes = write_nodes(&store, schemas, modules, plans, caps, policies)?;
+    patch_manifest_refs(&mut manifest, &hashes)?;
+    let catalog = manifest_catalog(&store, manifest)?;
+    Ok(Some(catalog_to_loaded(catalog)))
+}
+
+fn write_nodes(
+    store: &FsStore,
+    schemas: Vec<DefSchema>,
+    modules: Vec<DefModule>,
+    plans: Vec<DefPlan>,
+    caps: Vec<DefCap>,
+    policies: Vec<DefPolicy>,
+) -> Result<StoredHashes> {
+    ensure_unique_names(&schemas, "defschema")?;
+    ensure_unique_names(&modules, "defmodule")?;
+    ensure_unique_names(&plans, "defplan")?;
+    ensure_unique_names(&caps, "defcap")?;
+    ensure_unique_names(&policies, "defpolicy")?;
+
+    let mut hashes = StoredHashes::default();
+    for schema in schemas {
+        let name = schema.name.clone();
+        let hash = store
+            .put_node(&AirNode::Defschema(schema))
+            .context("store defschema node")?;
+        hashes.schemas.insert(name, HashRef::new(hash.to_hex())?);
+    }
+    for module in modules {
+        let name = module.name.clone();
+        let hash = store
+            .put_node(&AirNode::Defmodule(module))
+            .context("store defmodule node")?;
+        hashes.modules.insert(name, HashRef::new(hash.to_hex())?);
+    }
+    for plan in plans {
+        let name = plan.name.clone();
+        let hash = store
+            .put_node(&AirNode::Defplan(plan))
+            .context("store defplan node")?;
+        hashes.plans.insert(name, HashRef::new(hash.to_hex())?);
+    }
+    for cap in caps {
+        let name = cap.name.clone();
+        let hash = store
+            .put_node(&AirNode::Defcap(cap))
+            .context("store defcap node")?;
+        hashes.caps.insert(name, HashRef::new(hash.to_hex())?);
+    }
+    for policy in policies {
+        let name = policy.name.clone();
+        let hash = store
+            .put_node(&AirNode::Defpolicy(policy))
+            .context("store defpolicy node")?;
+        hashes.policies.insert(name, HashRef::new(hash.to_hex())?);
+    }
+    Ok(hashes)
+}
+
+fn ensure_unique_names<T>(items: &[T], kind: &str) -> Result<()>
+where
+    T: HasName,
+{
+    let mut seen = HashSet::new();
+    for item in items {
+        let name = item.name();
+        if !seen.insert(name.clone()) {
+            bail!("duplicate {kind} '{name}' detected in assets");
+        }
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct StoredHashes {
+    schemas: HashMap<Name, HashRef>,
+    modules: HashMap<Name, HashRef>,
+    plans: HashMap<Name, HashRef>,
+    caps: HashMap<Name, HashRef>,
+    policies: HashMap<Name, HashRef>,
+}
+
+fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result<()> {
+    patch_named_refs("schema", &mut manifest.schemas, &hashes.schemas)?;
+    patch_named_refs("module", &mut manifest.modules, &hashes.modules)?;
+    patch_named_refs("plan", &mut manifest.plans, &hashes.plans)?;
+    patch_named_refs("cap", &mut manifest.caps, &hashes.caps)?;
+    patch_named_refs("policy", &mut manifest.policies, &hashes.policies)?;
+    Ok(())
+}
+
+fn patch_named_refs(
+    kind: &str,
+    refs: &mut [aos_air_types::NamedRef],
+    hashes: &HashMap<Name, HashRef>,
+) -> Result<()> {
+    for reference in refs {
+        let Some(actual) = hashes.get(reference.name.as_str()) else {
+            bail!("manifest references unknown {kind} '{}'", reference.name);
+        };
+        if reference.hash != *actual {
+            if !is_zero_hash(&reference.hash) {
+                warn!(
+                    "manifest hash for {kind} '{}' is stale (saw {}, using {})",
+                    reference.name, reference.hash, actual
+                );
+            }
+            reference.hash = actual.clone();
+        }
+    }
+    Ok(())
+}
+
+fn is_zero_hash(value: &HashRef) -> bool {
+    const ZERO_HEX: &str =
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    value.as_str() == ZERO_HEX
+}
+
+trait HasName {
+    fn name(&self) -> Name;
+}
+
+impl HasName for DefSchema {
+    fn name(&self) -> Name {
+        self.name.clone()
+    }
+}
+
+impl HasName for DefModule {
+    fn name(&self) -> Name {
+        self.name.clone()
+    }
+}
+
+impl HasName for DefPlan {
+    fn name(&self) -> Name {
+        self.name.clone()
+    }
+}
+
+impl HasName for DefCap {
+    fn name(&self) -> Name {
+        self.name.clone()
+    }
+}
+
+impl HasName for DefPolicy {
+    fn name(&self) -> Name {
+        self.name.clone()
+    }
+}
+
+fn manifest_catalog(store: &FsStore, manifest: Manifest) -> Result<Catalog> {
+    let bytes = serde_cbor::to_vec(&manifest).context("serialize manifest to CBOR")?;
+    load_manifest_from_bytes(store, &bytes).context("load manifest catalog")
+}
+
+fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
+    let Catalog { manifest, nodes } = catalog;
+    let mut modules = HashMap::new();
+    let mut plans = HashMap::new();
+    let mut caps = HashMap::new();
+    let mut policies = HashMap::new();
+    let mut schemas = HashMap::new();
+
+    for (_name, entry) in nodes {
+        match entry.node {
+            AirNode::Defmodule(module) => {
+                modules.insert(module.name.clone(), module);
+            }
+            AirNode::Defplan(plan) => {
+                plans.insert(plan.name.clone(), plan);
+            }
+            AirNode::Defcap(cap) => {
+                caps.insert(cap.name.clone(), cap);
+            }
+            AirNode::Defpolicy(policy) => {
+                policies.insert(policy.name.clone(), policy);
+            }
+            AirNode::Defschema(schema) => {
+                schemas.insert(schema.name.clone(), schema);
+            }
+            AirNode::Manifest(_) => {}
+        }
+    }
+
+    LoadedManifest {
+        manifest,
+        modules,
+        plans,
+        caps,
+        policies,
+        schemas,
+    }
+}
+
+fn collect_json_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in WalkDir::new(dir) {
+        let entry = entry.context("walk assets directory")?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.into_path();
+        if matches!(path.extension().and_then(|s| s.to_str()), Some(ext) if ext.eq_ignore_ascii_case("json"))
+        {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
+    let data = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let trimmed = data.trim_start();
+    if trimmed.starts_with('[') {
+        serde_json::from_str(&data).context("parse AIR node array")
+    } else if trimmed.is_empty() {
+        Ok(Vec::new())
+    } else {
+        let node: AirNode = serde_json::from_str(&data).context("parse AIR node")?;
+        Ok(vec![node])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aos_air_types::{
+        HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef, TypeExpr, TypePrimitive,
+        TypePrimitiveNat,
+    };
+    use aos_cbor::Hash;
+    use indexmap::IndexMap;
+    use tempfile::TempDir;
+
+    #[test]
+    fn loads_manifest_from_json_assets() {
+        let tmp = TempDir::new().expect("tmp");
+        let example_root = tmp.path();
+        let air_dir = example_root.join("air");
+        fs::create_dir_all(&air_dir).expect("mkdir air");
+
+        let state_schema = DefSchema {
+            name: "demo/State@1".into(),
+            ty: nat_type(),
+        };
+        let event_schema = DefSchema {
+            name: "demo/Event@1".into(),
+            ty: nat_type(),
+        };
+
+        let module = DefModule {
+            name: "demo/Reducer@1".into(),
+            module_kind: ModuleKind::Reducer,
+            wasm_hash: HashRef::new(Hash::of_bytes(b"wasm").to_hex()).unwrap(),
+            key_schema: None,
+            abi: ModuleAbi {
+                reducer: Some(ReducerAbi {
+                    state: SchemaRef::new(&state_schema.name).unwrap(),
+                    event: SchemaRef::new(&event_schema.name).unwrap(),
+                    annotations: None,
+                    effects_emitted: Vec::new(),
+                    cap_slots: IndexMap::new(),
+                }),
+            },
+        };
+
+        let state_node = AirNode::Defschema(state_schema.clone());
+        let event_node = AirNode::Defschema(event_schema.clone());
+        let module_node = AirNode::Defmodule(module.clone());
+        write_node(
+            &air_dir.join("schemas.air.json"),
+            &[state_node.clone(), event_node.clone()],
+        );
+        write_node(&air_dir.join("module.air.json"), &[module_node.clone()]);
+
+        let manifest = Manifest {
+            schemas: vec![
+                named_ref_from_node(&state_node),
+                named_ref_from_node(&event_node),
+            ],
+            modules: vec![named_ref_from_node(&module_node)],
+            plans: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: Vec::new(),
+        };
+        write_node(
+            &air_dir.join("manifest.air.json"),
+            &[AirNode::Manifest(manifest)],
+        );
+
+        let store = Arc::new(FsStore::open(example_root).expect("store"));
+        let loaded = load_from_assets(store, example_root).expect("load");
+
+        let loaded = loaded.expect("manifest present");
+        assert!(loaded.modules.contains_key("demo/Reducer@1"));
+        assert!(loaded.schemas.contains_key("demo/State@1"));
+        assert!(loaded.schemas.contains_key("demo/Event@1"));
+    }
+
+    #[test]
+    fn returns_none_without_manifest() {
+        let tmp = TempDir::new().expect("tmp");
+        let store = Arc::new(FsStore::open(tmp.path()).expect("store"));
+        let result = load_from_assets(store, tmp.path()).expect("ok");
+        assert!(result.is_none());
+    }
+
+    fn write_node(path: &Path, nodes: &[AirNode]) {
+        let json = if nodes.len() == 1 {
+            serde_json::to_string_pretty(&nodes[0]).unwrap()
+        } else {
+            serde_json::to_string_pretty(nodes).unwrap()
+        };
+        fs::write(path, json).unwrap();
+    }
+
+    fn named_ref_from_node(node: &AirNode) -> aos_air_types::NamedRef {
+        let hash = Hash::of_cbor(node).expect("hash");
+        let name = match node {
+            AirNode::Defschema(schema) => schema.name.clone(),
+            AirNode::Defmodule(module) => module.name.clone(),
+            AirNode::Defplan(plan) => plan.name.clone(),
+            AirNode::Defcap(cap) => cap.name.clone(),
+            AirNode::Defpolicy(policy) => policy.name.clone(),
+            AirNode::Manifest(_) => panic!("cannot build ref for manifest"),
+        };
+        aos_air_types::NamedRef {
+            name,
+            hash: aos_air_types::HashRef::new(hash.to_hex()).unwrap(),
+        }
+    }
+
+    fn nat_type() -> TypeExpr {
+        TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
+            nat: Default::default(),
+        }))
+    }
+}

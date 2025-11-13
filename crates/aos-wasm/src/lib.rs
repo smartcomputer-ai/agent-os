@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use aos_wasm_abi::{ReducerInput, ReducerOutput};
-use sha2::{Digest, Sha256};
 use log::debug;
+use sha2::{Digest, Sha256};
 use wasmtime::{Config, Engine, Linker, Module, Store};
 
 const STEP_EXPORT: &str = "step";
@@ -169,10 +169,7 @@ impl ReducerRuntime {
     }
 
     fn insert_cached_module(&self, key: ModuleKey, module: Arc<Module>) {
-        let mut cache = self
-            .module_cache
-            .lock()
-            .expect("module cache poisoned");
+        let mut cache = self.module_cache.lock().expect("module cache poisoned");
         cache.entry(key).or_insert_with(|| module.clone());
     }
 
@@ -188,9 +185,7 @@ impl ReducerRuntime {
         let bytes = match fs::read(&path) {
             Ok(data) => data,
             Err(_) => {
-                debug!(
-                    "aos-wasm: failed to read serialized module {key_hex}, removing cache file"
-                );
+                debug!("aos-wasm: failed to read serialized module {key_hex}, removing cache file");
                 let _ = fs::remove_file(&path);
                 return Ok(None);
             }
@@ -207,12 +202,7 @@ impl ReducerRuntime {
         }
     }
 
-    fn store_serialized(
-        &self,
-        key: &ModuleKey,
-        key_hex: &str,
-        module: &Arc<Module>,
-    ) -> Result<()> {
+    fn store_serialized(&self, key: &ModuleKey, key_hex: &str, module: &Arc<Module>) -> Result<()> {
         let cache = match &self.disk_cache {
             Some(cache) => cache,
             None => return Ok(()),
@@ -350,7 +340,8 @@ mod tests {
             effects: Vec::new(),
             ann: None,
         };
-        let wasm_bytes = wat::parse_str(&build_stub_module(&expected_output.encode().unwrap())).unwrap();
+        let wasm_bytes =
+            wat::parse_str(&build_stub_module(&expected_output.encode().unwrap())).unwrap();
         let input = ReducerInput {
             version: ABI_VERSION,
             state: None,

@@ -41,12 +41,8 @@ impl<S: Store> ReducerRegistry<S> {
             .runtime
             .cached_module(&bytes)
             .map_err(KernelError::Wasm)?;
-        self.modules.insert(
-            name.to_string(),
-            ReducerModule {
-                module: compiled,
-            },
-        );
+        self.modules
+            .insert(name.to_string(), ReducerModule { module: compiled });
         Ok(())
     }
 

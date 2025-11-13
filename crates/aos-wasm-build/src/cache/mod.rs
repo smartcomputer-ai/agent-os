@@ -45,11 +45,7 @@ pub fn lookup(fingerprint: &str, override_dir: Option<&Path>) -> std::io::Result
     }
 }
 
-pub fn store(
-    fingerprint: &str,
-    bytes: &[u8],
-    override_dir: Option<&Path>,
-) -> std::io::Result<()> {
+pub fn store(fingerprint: &str, bytes: &[u8], override_dir: Option<&Path>) -> std::io::Result<()> {
     let dir = resolve_root(override_dir).join(fingerprint);
     fs::create_dir_all(&dir)?;
     fs::write(dir.join("artifact.wasm"), bytes)?;

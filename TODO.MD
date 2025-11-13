@@ -35,3 +35,10 @@ When done with a todo, mark it as done, and a quick note what you achieved.
     - Acceptance: plan DAG executes parallel HTTP calls, receipts arrive out of order but replay remains byte-identical; JSON defs validated against schemas before execution.
 
 > Once these three examples are stable, replicate the same structure for the remaining ladder rungs (plans, fan-out, governance, LLM) by adding numbered directories plus scenario implementations under the shared CLI.
+
+
+## Open Questions
+- reducer lib (less boiler plate), implement WIT?
+- move and test manifest loader in aos-types
+- how to deal with sha hashes in json? how to make this tractable. which defs SHOULD be as json and which ones can be defined in code? is it overkill now
+- understand HttpHarness in fetch_notify

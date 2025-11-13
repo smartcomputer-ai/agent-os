@@ -1,4 +1,5 @@
 mod examples;
+mod manifest_loader;
 
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
@@ -28,6 +29,8 @@ enum Commands {
     HelloTimer,
     /// Run the Blob Echo micro-effect example
     BlobEcho,
+    /// Run the Fetch & Notify plan example
+    FetchNotify,
     /// Run every available example sequentially
     All,
 }
@@ -67,6 +70,14 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "examples/02-blob-echo",
         runner: examples::blob_echo::run,
     },
+    ExampleMeta {
+        number: "03",
+        slug: "fetch-notify",
+        title: "Fetch & Notify",
+        summary: "Plan-triggered HTTP orchestration",
+        dir: "examples/03-fetch-notify",
+        runner: examples::fetch_notify::run,
+    },
 ];
 
 fn main() {
@@ -83,11 +94,9 @@ fn main() {
 fn init_logging() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let _ = env_logger::Builder::from_env(
-            env_logger::Env::default().default_filter_or("info"),
-        )
-        .format_timestamp_millis()
-        .try_init();
+        let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .format_timestamp_millis()
+            .try_init();
     });
 }
 
@@ -98,6 +107,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::Counter) => run_single("counter"),
         Some(Commands::HelloTimer) => run_single("hello-timer"),
         Some(Commands::BlobEcho) => run_single("blob-echo"),
+        Some(Commands::FetchNotify) => run_single("fetch-notify"),
         Some(Commands::All) => run_all(),
         None => {
             list_examples();

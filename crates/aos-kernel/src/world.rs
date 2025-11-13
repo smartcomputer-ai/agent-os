@@ -801,12 +801,18 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(plan_names) = self.plan_triggers.get(&event.schema) {
             for plan_name in plan_names {
                 if let Some(plan_def) = self.plan_registry.get(plan_name) {
+                    if log::log_enabled!(log::Level::Debug) {
+                        if let Ok(raw) = serde_cbor::from_slice::<serde_cbor::Value>(&event.value) {
+                            log::debug!("plan '{}' trigger input = {:?}", plan_name, raw);
+                        }
+                    }
                     let input: ExprValue = serde_cbor::from_slice(&event.value).map_err(|err| {
                         KernelError::Manifest(format!(
                             "failed to decode plan input for {}: {err}",
                             plan_name
                         ))
                     })?;
+                    log::debug!("plan '{}' decoded input {:?}", plan_name, input);
                     let instance_id = self.scheduler.alloc_plan_id();
                     let instance = PlanInstance::new(
                         instance_id,

@@ -273,6 +273,14 @@ impl PlanInstance {
                         return Ok(outcome);
                     }
                     PlanStepKind::RaiseEvent(raise) => {
+                        let var_names: Vec<_> = self.env.vars.keys().cloned().collect();
+                        let receipt_debug = self.env.vars.get("http_receipt").cloned();
+                        log::debug!(
+                            "plan '{}' raise_event vars: {:?} receipt={:?}",
+                            self.plan.name,
+                            var_names,
+                            receipt_debug
+                        );
                         let metadata =
                             self.reducer_schemas.get(&raise.reducer).ok_or_else(|| {
                                 KernelError::Manifest(format!(
@@ -820,11 +828,27 @@ fn expr_value_to_literal(value: &ExprValue) -> Result<ValueLiteral, String> {
             Ok(ValueLiteral::Map(ValueMap { map: entries }))
         }
         ExprValue::Record(record) => {
-            let mut out = IndexMap::with_capacity(record.len());
-            for (key, val) in record {
-                out.insert(key.clone(), expr_value_to_literal(val)?);
+            if record.len() == 2 && record.contains_key("$tag") && record.contains_key("$value") {
+                let tag = match record.get("$tag").expect("tag present") {
+                    ExprValue::Text(text) => text.clone(),
+                    other => return Err(format!("variant $tag must be text, got {:?}", other)),
+                };
+                let value_literal = match record.get("$value").expect("value present") {
+                    ExprValue::Unit => None,
+                    ExprValue::Null => None,
+                    other => Some(Box::new(expr_value_to_literal(other)?)),
+                };
+                Ok(ValueLiteral::Variant(ValueVariant {
+                    tag,
+                    value: value_literal,
+                }))
+            } else {
+                let mut out = IndexMap::with_capacity(record.len());
+                for (key, val) in record {
+                    out.insert(key.clone(), expr_value_to_literal(val)?);
+                }
+                Ok(ValueLiteral::Record(ValueRecord { record: out }))
             }
-            Ok(ValueLiteral::Record(ValueRecord { record: out }))
         }
     }
 }
