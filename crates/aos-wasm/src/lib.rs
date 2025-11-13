@@ -1,9 +1,11 @@
 //! Deterministic WASM runner that executes reducer modules via the shared ABI.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use aos_wasm_abi::{ReducerInput, ReducerOutput};
+use sha2::{Digest, Sha256};
 use wasmtime::{Config, Engine, Linker, Module, Store};
 
 const STEP_EXPORT: &str = "step";
@@ -13,6 +15,7 @@ const MEMORY_EXPORT: &str = "memory";
 /// Deterministic runtime wrapper around Wasmtime.
 pub struct ReducerRuntime {
     engine: Arc<Engine>,
+    module_cache: Mutex<HashMap<ModuleKey, Arc<Module>>>,
 }
 
 impl ReducerRuntime {
@@ -28,15 +31,20 @@ impl ReducerRuntime {
         let engine = Engine::new(&cfg)?;
         Ok(Self {
             engine: Arc::new(engine),
+            module_cache: Mutex::new(HashMap::new()),
         })
     }
 
-    /// Execute a reducer WASM module with the given ABI envelope.
-    pub fn run(&self, wasm_bytes: &[u8], input: &ReducerInput) -> Result<ReducerOutput> {
-        let module = Module::new(&self.engine, wasm_bytes)?;
+    /// Compile a reducer WASM blob into a reusable Wasmtime module.
+    pub fn compile(&self, wasm_bytes: &[u8]) -> Result<Module> {
+        Module::new(&self.engine, wasm_bytes)
+    }
+
+    /// Execute an already-compiled module with the given ABI envelope.
+    pub fn run_compiled(&self, module: &Module, input: &ReducerInput) -> Result<ReducerOutput> {
         let mut store = Store::new(&self.engine, ());
         let linker = Linker::new(&self.engine);
-        let instance = linker.instantiate(&mut store, &module)?;
+        let instance = linker.instantiate(&mut store, module)?;
         let memory = instance
             .get_memory(&mut store, MEMORY_EXPORT)
             .context("wasm export 'memory' not found")?;
@@ -95,11 +103,50 @@ impl ReducerRuntime {
         let reducer_output = ReducerOutput::decode(&output)?;
         Ok(reducer_output)
     }
+
+    /// Execute a reducer WASM module with the given ABI envelope (compiles each time).
+    pub fn run(&self, wasm_bytes: &[u8], input: &ReducerInput) -> Result<ReducerOutput> {
+        let module = self.module_from_cache(wasm_bytes)?;
+        self.run_compiled(&module, input)
+    }
+
+    fn module_from_cache(&self, wasm_bytes: &[u8]) -> Result<Arc<Module>> {
+        let key = ModuleKey::from_bytes(wasm_bytes);
+        if let Some(existing) = self
+            .module_cache
+            .lock()
+            .expect("module cache poisoned")
+            .get(&key)
+            .cloned()
+        {
+            return Ok(existing);
+        }
+
+        let compiled = Arc::new(self.compile(wasm_bytes)?);
+        let mut cache = self
+            .module_cache
+            .lock()
+            .expect("module cache poisoned");
+        let entry = cache.entry(key).or_insert_with(|| compiled.clone());
+        Ok(entry.clone())
+    }
 }
 
 enum StepImpl {
     Legacy(wasmtime::TypedFunc<(i32, i32), (i32, i32)>),
     Modern(wasmtime::TypedFunc<(i32, i32, i32), ()>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct ModuleKey([u8; 32]);
+
+impl ModuleKey {
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        let digest: [u8; 32] = hasher.finalize().into();
+        Self(digest)
+    }
 }
 
 #[cfg(test)]
@@ -130,6 +177,32 @@ mod tests {
         assert_eq!(output, expected_output);
     }
 
+    #[test]
+    fn run_reuses_compiled_module() {
+        let runtime = ReducerRuntime::new().unwrap();
+        let expected_output = ReducerOutput {
+            state: None,
+            domain_events: vec![DomainEvent::new("demo/Event@1", vec![])],
+            effects: Vec::new(),
+            ann: None,
+        };
+        let expected_bytes = expected_output.encode().unwrap();
+        let wasm_bytes = wat::parse_str(&build_stub_module(&expected_bytes)).unwrap();
+        let input = ReducerInput {
+            version: ABI_VERSION,
+            state: None,
+            event: DomainEvent::new("demo/Event@1", vec![]),
+            ctx: CallContext::new(false, None),
+        };
+
+        runtime.run(&wasm_bytes, &input).unwrap();
+        let first_cache_size = runtime.cached_module_count();
+        runtime.run(&wasm_bytes, &input).unwrap();
+        let second_cache_size = runtime.cached_module_count();
+        assert_eq!(first_cache_size, 1);
+        assert_eq!(second_cache_size, 1);
+    }
+
     fn build_stub_module(output_bytes: &[u8]) -> String {
         let data_literal = output_bytes
             .iter()
@@ -156,5 +229,15 @@ mod tests {
             len = len,
             data = data_literal
         )
+    }
+}
+
+#[cfg(test)]
+impl ReducerRuntime {
+    fn cached_module_count(&self) -> usize {
+        self.module_cache
+            .lock()
+            .expect("module cache poisoned")
+            .len()
     }
 }

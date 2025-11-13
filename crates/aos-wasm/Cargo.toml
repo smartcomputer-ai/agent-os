@@ -8,6 +8,7 @@ publish = false
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 anyhow = "1"
 wasmtime = "36.0.3"
+sha2 = "0.10"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

@@ -16,7 +16,7 @@ pub struct ReducerRegistry<S: Store> {
 }
 
 struct ReducerModule {
-    module: Arc<Vec<u8>>,
+    module: Arc<wasmtime::Module>,
 }
 
 impl<S: Store> ReducerRegistry<S> {
@@ -35,10 +35,14 @@ impl<S: Store> ReducerRegistry<S> {
         let wasm_hash = Hash::from_hex_str(module_def.wasm_hash.as_str())
             .map_err(|err| KernelError::Manifest(err.to_string()))?;
         let bytes: Vec<u8> = self.store.get_blob(wasm_hash)?;
+        let compiled = self
+            .runtime
+            .compile(&bytes)
+            .map_err(KernelError::Wasm)?;
         self.modules.insert(
             name.to_string(),
             ReducerModule {
-                module: Arc::new(bytes),
+                module: Arc::new(compiled),
             },
         );
         Ok(())
@@ -51,7 +55,7 @@ impl<S: Store> ReducerRegistry<S> {
             .ok_or_else(|| KernelError::ReducerNotFound(name.to_string()))?;
         let output = self
             .runtime
-            .run(&module.module, input)
+            .run_compiled(&module.module, input)
             .map_err(KernelError::Wasm)?;
         Ok(output)
     }

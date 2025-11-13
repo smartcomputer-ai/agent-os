@@ -22,6 +22,7 @@ log = "0.4"
 serde_bytes = "0.11"
 hex = "0.4"
 base64 = "0.21"
+wasmtime = "36.0.3"
 
 [dev-dependencies]
 wat = "1"
