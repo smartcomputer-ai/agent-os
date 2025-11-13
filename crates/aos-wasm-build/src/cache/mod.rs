@@ -1,10 +1,17 @@
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const CACHE_DIR: &str = ".aos/cache/modules";
 
 pub fn cache_root() -> PathBuf {
+    resolve_root(None)
+}
+
+fn resolve_root(override_dir: Option<&Path>) -> PathBuf {
+    if let Some(dir) = override_dir {
+        return dir.to_path_buf();
+    }
     if let Ok(dir) = std::env::var("AOS_WASM_CACHE_DIR") {
         return PathBuf::from(dir);
     }
@@ -27,8 +34,10 @@ pub fn fingerprint(inputs: &[(&str, String)]) -> String {
     hex::encode(hasher.finalize())
 }
 
-pub fn lookup(fingerprint: &str) -> std::io::Result<Option<Vec<u8>>> {
-    let path = cache_root().join(fingerprint).join("artifact.wasm");
+pub fn lookup(fingerprint: &str, override_dir: Option<&Path>) -> std::io::Result<Option<Vec<u8>>> {
+    let path = resolve_root(override_dir)
+        .join(fingerprint)
+        .join("artifact.wasm");
     if path.exists() {
         Ok(Some(fs::read(path)?))
     } else {
@@ -36,8 +45,12 @@ pub fn lookup(fingerprint: &str) -> std::io::Result<Option<Vec<u8>>> {
     }
 }
 
-pub fn store(fingerprint: &str, bytes: &[u8]) -> std::io::Result<()> {
-    let dir = cache_root().join(fingerprint);
+pub fn store(
+    fingerprint: &str,
+    bytes: &[u8],
+    override_dir: Option<&Path>,
+) -> std::io::Result<()> {
+    let dir = resolve_root(override_dir).join(fingerprint);
     fs::create_dir_all(&dir)?;
     fs::write(dir.join("artifact.wasm"), bytes)?;
     Ok(())

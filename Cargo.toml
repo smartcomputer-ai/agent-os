@@ -12,8 +12,6 @@ members = [
   "crates/aos-testkit",
   "crates/aos-cli",
   "crates/aos-examples",
-  "crates/aos-wasm-build",
-  "examples/01-hello-timer/reducer",
-  "examples/02-blob-echo/reducer",
+  "crates/aos-wasm-build"
 ]
 resolver = "2"

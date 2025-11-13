@@ -9,7 +9,7 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 #[derive(Clone, Copy, Debug)]
@@ -23,6 +23,7 @@ pub struct BuildRequest {
     pub config: BuildConfig,
     pub backend: BackendKind,
     pub use_cache: bool,
+    pub cache_dir: Option<PathBuf>,
 }
 
 impl BuildRequest {
@@ -32,6 +33,7 @@ impl BuildRequest {
             config: BuildConfig::default(),
             backend: BackendKind::Rust,
             use_cache: true,
+            cache_dir: None,
         }
     }
 }
@@ -41,8 +43,11 @@ pub struct Builder;
 impl Builder {
     pub fn compile(request: BuildRequest) -> Result<BuildArtifact, BuildError> {
         let fingerprint = build_fingerprint(&request)?;
+        let cache_override = request.cache_dir.clone();
         if request.use_cache {
-            if let Some(bytes) = cache::lookup(&fingerprint).map_err(BuildError::Io)? {
+            if let Some(bytes) = cache::lookup(&fingerprint, cache_override.as_deref())
+                .map_err(BuildError::Io)?
+            {
                 let digest = WasmDigest::of_bytes(&bytes);
                 println!("   cache hit for reducer (fingerprint {fingerprint})");
                 return Ok(BuildArtifact {
@@ -58,7 +63,8 @@ impl Builder {
         let artifact = match request.backend {
             BackendKind::Rust => RustBackend::new().compile(request)?,
         };
-        cache::store(&fingerprint, &artifact.wasm_bytes).map_err(BuildError::Io)?;
+        cache::store(&fingerprint, &artifact.wasm_bytes, cache_override.as_deref())
+            .map_err(BuildError::Io)?;
         Ok(artifact)
     }
 }

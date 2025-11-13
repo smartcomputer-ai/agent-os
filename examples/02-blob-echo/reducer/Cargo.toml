@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "blob-echo-reducer"
 version = "0.1.0"

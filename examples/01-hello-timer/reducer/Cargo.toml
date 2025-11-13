@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 name = "hello-timer-reducer"
 version = "0.1.0"
