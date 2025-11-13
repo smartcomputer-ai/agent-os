@@ -1,6 +1,7 @@
 pub mod artifact;
 pub mod backends;
 pub mod builder;
+pub mod cache;
 pub mod config;
 pub mod error;
 pub mod hash;
