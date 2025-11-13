@@ -21,7 +21,7 @@ impl ReducerRuntime {
         let mut cfg = Config::new();
         cfg.wasm_multi_value(true);
         cfg.wasm_threads(false);
-        cfg.wasm_reference_types(false);
+        cfg.wasm_reference_types(true);
         cfg.consume_fuel(false);
         cfg.debug_info(false);
         cfg.cranelift_nan_canonicalization(true);
@@ -44,7 +44,7 @@ impl ReducerRuntime {
             .get_typed_func::<i32, i32>(&mut store, ALLOC_EXPORT)
             .context("wasm export 'alloc' not found")?;
         let step = instance
-            .get_typed_func::<(i32, i32), (i32, i32)>(&mut store, STEP_EXPORT)
+            .get_typed_func::<(i32, i32, i32), ()>(&mut store, STEP_EXPORT)
             .context("wasm export 'step' not found")?;
 
         let input_bytes = input.encode()?;
@@ -53,7 +53,14 @@ impl ReducerRuntime {
         let input_ptr = alloc.call(&mut store, input_len)?;
         memory.write(&mut store, input_ptr as usize, &input_bytes)?;
 
-        let (out_ptr, out_len) = step.call(&mut store, (input_ptr, input_len))?;
+        let result_ptr = alloc.call(&mut store, 8)?;
+        step.call(&mut store, (result_ptr, input_ptr, input_len))?;
+        let mut result_buf = [0u8; 8];
+        memory.read(&mut store, result_ptr as usize, &mut result_buf)?;
+        let out_ptr =
+            i32::from_le_bytes([result_buf[0], result_buf[1], result_buf[2], result_buf[3]]);
+        let out_len =
+            i32::from_le_bytes([result_buf[4], result_buf[5], result_buf[6], result_buf[7]]);
         let output_len = usize::try_from(out_len).context("negative output length")?;
         let mut output = vec![0u8; output_len];
         memory.read(&mut store, out_ptr as usize, &mut output)?;

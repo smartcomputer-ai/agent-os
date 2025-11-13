@@ -31,6 +31,8 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 > Once these three examples are stable, replicate the same structure for the remaining ladder rungs (plans, fan-out, governance, LLM) by adding numbered directories plus scenario implementations under the shared CLI.
 
+- [ ] Cache compiled reducer modules/instances in `aos-wasm` so each reducer tick doesn’t recompile the WASM module (current per-event latency is dominated by fresh instantiation).
+
 # Program Exampels
 
 ## Test App 1 — **Hello Timer** (reducer micro‑effect + receipt back)

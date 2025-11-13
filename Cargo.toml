@@ -10,7 +10,8 @@ members = [
   "crates/aos-kernel",
   "crates/aos-wasm-sdk",
   "crates/aos-testkit",
-  "crates/aos-cli", "crates/aos-examples",
+  "crates/aos-cli",
+  "crates/aos-examples",
+  "examples/00-counter/reducer",
 ]
 resolver = "2"
-

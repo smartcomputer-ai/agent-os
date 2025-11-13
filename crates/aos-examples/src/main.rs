@@ -1,5 +1,9 @@
+mod examples;
+
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
-use std::path::Path;
+use once_cell::sync::Lazy;
+use std::path::{Path, PathBuf};
 use std::process;
 
 #[derive(Parser, Debug)]
@@ -55,8 +59,18 @@ const EXAMPLES: &[ExampleMeta] = &[
 ];
 
 fn main() {
+    if let Err(err) = run_cli() {
+        eprintln!("error: {err}");
+        for cause in err.chain().skip(1) {
+            eprintln!("  caused by: {cause}");
+        }
+        process::exit(1);
+    }
+}
+
+fn run_cli() -> Result<()> {
     let cli = Cli::parse();
-    let result = match cli.command {
+    match cli.command {
         Some(Commands::Counter) => run_single("counter"),
         Some(Commands::HelloTimer) => run_single("hello-timer"),
         Some(Commands::BlobEcho) => run_single("blob-echo"),
@@ -65,11 +79,6 @@ fn main() {
             list_examples();
             Ok(())
         }
-    };
-
-    if let Err(err) = result {
-        eprintln!("error: {err}");
-        process::exit(1);
     }
 }
 
@@ -83,33 +92,54 @@ fn list_examples() {
     }
 }
 
-fn run_single(slug: &str) -> Result<(), String> {
+fn run_single(slug: &str) -> Result<()> {
     let ex = EXAMPLES
         .iter()
         .find(|ex| ex.slug == slug)
-        .ok_or_else(|| format!("unknown example '{slug}'"))?;
+        .ok_or_else(|| anyhow!("unknown example '{slug}'"))?;
+    let abs_dir = example_root(ex);
+    ensure_structure_exists(&abs_dir)?;
     println!(
         "Running example {number} — {title} ({slug})",
         number = ex.number,
         title = ex.title,
         slug = ex.slug
     );
-    ensure_structure_exists(ex)?;
-    println!("  runner: {}/runner", ex.dir);
-    println!("  status: not yet implemented\n");
-    Ok(())
+    match slug {
+        "counter" => examples::counter::run(&abs_dir),
+        "hello-timer" => Err(anyhow!("hello timer example not implemented yet")),
+        "blob-echo" => Err(anyhow!("blob echo example not implemented yet")),
+        other => Err(anyhow!("example '{other}' not wired up")),
+    }
 }
 
-fn run_all() -> Result<(), String> {
+fn run_all() -> Result<()> {
     for ex in EXAMPLES {
         run_single(ex.slug)?;
     }
     Ok(())
 }
 
-fn ensure_structure_exists(ex: &ExampleMeta) -> Result<(), String> {
-    if !Path::new(ex.dir).exists() {
-        return Err(format!("missing directory '{}'", ex.dir));
+fn ensure_structure_exists(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Err(anyhow!("missing directory '{}'", path.display()));
     }
     Ok(())
+}
+
+fn example_root(meta: &ExampleMeta) -> PathBuf {
+    WORKSPACE_ROOT.join(meta.dir)
+}
+
+static WORKSPACE_ROOT: Lazy<PathBuf> = Lazy::new(|| {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("../ from crate")
+        .parent()
+        .expect("workspace root")
+        .to_path_buf()
+});
+
+pub(crate) fn workspace_root() -> &'static Path {
+    &WORKSPACE_ROOT
 }

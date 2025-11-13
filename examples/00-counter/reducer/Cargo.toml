@@ -1,0 +1,12 @@
+[package]
+name = "counter-reducer"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+aos-wasm-abi = { path = "../../../crates/aos-wasm-abi" }
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
