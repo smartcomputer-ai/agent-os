@@ -195,7 +195,7 @@ Modules have no access to time or randomness; all nondeterminism is isolated to 
 
 - world/
   - manifest.air.json (text) and manifest.air.cbor (canonical)
-  - .store/{nodes, blobs}/sha256/<hash>
+  - .aos/store/{nodes, blobs}/sha256/<hash>
   - journal/{00001.log, 00002.log, …}
   - snapshots/snap-<ts>-<height>.cbor
   - modules/<name>@<ver>-<hash>.wasm

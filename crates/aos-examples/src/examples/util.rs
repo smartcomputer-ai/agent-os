@@ -5,7 +5,7 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow};
 
 pub fn reset_journal(example_root: &Path) -> Result<()> {
-    let journal_dir = example_root.join("journal");
+    let journal_dir = example_root.join(".aos").join("journal");
     if journal_dir.exists() {
         fs::remove_dir_all(&journal_dir)
             .with_context(|| format!("remove {}", journal_dir.display()))?;

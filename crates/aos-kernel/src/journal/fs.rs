@@ -6,7 +6,8 @@ use aos_cbor::to_canonical_cbor;
 
 use super::{Journal, JournalEntry, JournalError, JournalKind, JournalSeq, OwnedJournalEntry};
 
-const JOURNAL_DIR: &str = "journal";
+const AOS_DIR: &str = ".aos";
+const JOURNAL_SUBDIR: &str = "journal";
 const JOURNAL_FILE: &str = "journal.log";
 
 /// Filesystem-backed journal that stores length-prefixed canonical CBOR records.
@@ -18,7 +19,7 @@ pub struct FsJournal {
 
 impl FsJournal {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, JournalError> {
-        let journal_dir = root.as_ref().join(JOURNAL_DIR);
+        let journal_dir = root.as_ref().join(AOS_DIR).join(JOURNAL_SUBDIR);
         fs::create_dir_all(&journal_dir)?;
         let path = journal_dir.join(JOURNAL_FILE);
         if !path.exists() {
@@ -147,7 +148,11 @@ mod tests {
                 .unwrap();
         }
 
-        let log_path = tmp.path().join(JOURNAL_DIR).join(JOURNAL_FILE);
+        let log_path = tmp
+            .path()
+            .join(AOS_DIR)
+            .join(JOURNAL_SUBDIR)
+            .join(JOURNAL_FILE);
         let len = std::fs::metadata(&log_path).unwrap().len();
         let file = OpenOptions::new().write(true).open(&log_path).unwrap();
         file.set_len(len - 1).unwrap();
