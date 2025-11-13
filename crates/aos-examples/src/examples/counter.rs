@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -16,6 +14,8 @@ use aos_kernel::{Kernel, LoadedManifest};
 use aos_store::{FsStore, Store};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+
+use crate::examples::util;
 
 const REDUCER_NAME: &str = "demo/CounterSM@1";
 const STATE_SCHEMA: &str = "demo/CounterState@1";
@@ -49,8 +49,12 @@ enum CounterEvent {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    reset_journal(example_root).context("reset journal")?;
-    let wasm_bytes = ensure_reducer_wasm()?;
+    util::reset_journal(example_root)?;
+    let wasm_bytes = util::ensure_wasm_artifact(
+        "examples/00-counter/reducer/Cargo.toml",
+        "target/wasm32-unknown-unknown/debug/counter_reducer.wasm",
+        "counter",
+    )?;
     let store = Arc::new(FsStore::open(example_root).context("open FsStore")?);
     let loaded = build_loaded_manifest(store.clone(), &wasm_bytes).context("build manifest")?;
     let journal = Box::new(FsJournal::open(example_root)?);
@@ -110,33 +114,6 @@ fn current_state_bytes(kernel: &Kernel<FsStore>) -> Result<Vec<u8>> {
         .reducer_state(REDUCER_NAME)
         .cloned()
         .ok_or_else(|| anyhow!("missing state for {REDUCER_NAME}"))
-}
-
-fn ensure_reducer_wasm() -> Result<Vec<u8>> {
-    let wasm_path = reducer_wasm_path();
-    if !wasm_path.exists() {
-        build_reducer_wasm()?;
-    }
-    std::fs::read(&wasm_path).with_context(|| format!("read {}", wasm_path.display()))
-}
-
-fn build_reducer_wasm() -> Result<()> {
-    println!("   compiling reducer (wasm32-unknown-unknown)…");
-    let manifest_path = crate::workspace_root().join("examples/00-counter/reducer/Cargo.toml");
-    let status = Command::new("cargo")
-        .args(["build", "--target", "wasm32-unknown-unknown"])
-        .arg("--manifest-path")
-        .arg(&manifest_path)
-        .status()
-        .with_context(|| format!("spawn cargo build for {}", manifest_path.display()))?;
-    if !status.success() {
-        return Err(anyhow!("cargo build failed for counter reducer"));
-    }
-    Ok(())
-}
-
-fn reducer_wasm_path() -> PathBuf {
-    crate::workspace_root().join("target/wasm32-unknown-unknown/debug/counter_reducer.wasm")
 }
 
 fn build_loaded_manifest(store: Arc<FsStore>, wasm_bytes: &[u8]) -> Result<LoadedManifest> {
@@ -273,13 +250,4 @@ fn named_ref(name: &str, hash: Hash) -> Result<NamedRef> {
 
 fn schema_ref(name: &str) -> Result<SchemaRef> {
     SchemaRef::new(name).map_err(|err| anyhow!("schema ref '{name}' invalid: {err}"))
-}
-
-fn reset_journal(example_root: &Path) -> Result<()> {
-    let journal_dir = example_root.join("journal");
-    if journal_dir.exists() {
-        fs::remove_dir_all(&journal_dir)
-            .with_context(|| format!("remove {}", journal_dir.display()))?;
-    }
-    Ok(())
 }

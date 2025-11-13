@@ -32,6 +32,7 @@ struct ExampleMeta {
     title: &'static str,
     summary: &'static str,
     dir: &'static str,
+    runner: fn(&Path) -> Result<()>,
 }
 
 const EXAMPLES: &[ExampleMeta] = &[
@@ -41,6 +42,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "CounterSM",
         summary: "Reducer typestate without effects",
         dir: "examples/00-counter",
+        runner: examples::counter::run,
     },
     ExampleMeta {
         number: "01",
@@ -48,6 +50,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Hello Timer",
         summary: "Reducer micro-effect timer demo",
         dir: "examples/01-hello-timer",
+        runner: examples::hello_timer::run,
     },
     ExampleMeta {
         number: "02",
@@ -55,6 +58,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Blob Echo",
         summary: "Reducer blob.put/get demo",
         dir: "examples/02-blob-echo",
+        runner: blob_placeholder,
     },
 ];
 
@@ -105,12 +109,7 @@ fn run_single(slug: &str) -> Result<()> {
         title = ex.title,
         slug = ex.slug
     );
-    match slug {
-        "counter" => examples::counter::run(&abs_dir),
-        "hello-timer" => Err(anyhow!("hello timer example not implemented yet")),
-        "blob-echo" => Err(anyhow!("blob echo example not implemented yet")),
-        other => Err(anyhow!("example '{other}' not wired up")),
-    }
+    (ex.runner)(&abs_dir)
 }
 
 fn run_all() -> Result<()> {
@@ -142,4 +141,8 @@ static WORKSPACE_ROOT: Lazy<PathBuf> = Lazy::new(|| {
 
 pub(crate) fn workspace_root() -> &'static Path {
     &WORKSPACE_ROOT
+}
+
+fn blob_placeholder(_: &Path) -> Result<()> {
+    Err(anyhow!("blob echo example not implemented yet"))
 }

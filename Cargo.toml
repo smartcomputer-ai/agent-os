@@ -13,5 +13,6 @@ members = [
   "crates/aos-cli",
   "crates/aos-examples",
   "examples/00-counter/reducer",
+  "examples/01-hello-timer/reducer",
 ]
 resolver = "2"
