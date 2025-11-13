@@ -14,20 +14,24 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 5. **[x] Example 02 — Blob Echo** — Reducer now emits `blob.put`/`blob.get` micro-effects, harness synthesizes Blob receipts via the CAS, CLI command prints put/get logs and replay verifies stored vs retrieved refs.
 
-6. **Upgrade Wasmtime from 17 → 36 (LTS) via staged rollouts**  
-   - **Stage A:** bump to Wasmtime 24.x LTS (first release with component model + WASI 0.2 defaults), update Cargo.lock, clear `.aos/cache`, rerun all WASI integration tests.  
-   - **Stage B:** refactor embedding code for the `wasmtime-wasi` API changes introduced around 30.x (split `WasiView`, stream trait renames), land on Wasmtime 30.x and verify host adapters.  
-   - **Stage C:** upgrade to Wasmtime 36.x (current LTS). Update toolchains to Rust ≥1.87, validate async/component defaults and Cranelift changes, then freeze on 36.x for long-term support before tackling `aos-wasm-build`.
+6. **[x] Upgrade Wasmtime from 17 → 36 (LTS) via staged rollouts** — Bumped embeddings through 24.x → 30.x → 36.0.3, adapted to new `wasmtime-wasi` APIs, refreshed Cargo.lock/toolchains, and revalidated all kernel/testkit/example suites on the final 36.x LTS build.
 
-7. **Design + implement `aos-wasm-build` crate (deterministic reducer compiler)**  
-   - Create `crates/aos-wasm-build/` exposing a library API (`Builder`, `BuildRequest`, `BuildArtifact`) that accepts a reducer workspace path + build options (toolchain, profile, features) and returns `{wasm_bytes, wasm_hash, build_log}`.  
-   - Layout: `src/lib.rs` re-exports; `src/config.rs` for toolchain pinning (Rust toolchain file, target triple), `src/artifact.rs` for hash + metadata, `src/backends/mod.rs` with `rust.rs` implementing the first backend via cargo as a subprocess (deterministic env, `wasm32-unknown-unknown`, release).  
-   - API sketch: `let artifact = Builder::new().backend(Backend::Rust).request(BuildRequest::from_path(path)).compile()?;` returning a struct with `wasm_hash()` and `write_to(dir)` helpers. Later backends (TS, Python) can implement the same `ModuleCompiler` trait inside this crate.
+7. **[x] Design + implement `aos-wasm-build` crate (deterministic reducer compiler)** — New `crates/aos-wasm-build` exposes `Builder`/`BuildRequest`/`BuildArtifact`, Rust backend compiles reducers via `cargo build --target wasm32-unknown-unknown`, and APIs return WASM bytes + SHA-256 hashes for downstream consumers.
 
-8. **Hook builder into caching + workflows**  
-   - Introduce a cache store (e.g., `.aos/cache/modules/<hash>.wasm`) keyed by `(source_digest, toolchain_version)` inside `aos-wasm-build`; `Builder` should check cache before spawning the backend, and materialize hits without re-running cargo.  
-   - Expose cache metadata so `aos-examples`/future CLI can reuse compiled reducers, and add a CLI command (later) that reports cache status / invalidates entries.
+8. **[x] Hook builder into caching + workflows** — Builder now fingerprints reducer sources + target/profile, caches artifacts under each example’s `.aos/cache/modules`, and `aos-examples` consumes the API with a shared `--force-build` flag plus debug logging when `RUST_LOG=debug`. Directory layout matches the runtime cache (`.aos/cache/{modules|wasmtime}`) so every ladder rung has the same structure.
+
+9. **[x] Warm-start reducers + persist Wasmtime modules** — Kernel accepts a `KernelConfig` with module cache directories, eagerly loads every reducer in a manifest, and `ReducerRuntime` serializes compiled Wasmtime modules to `<world>/.aos/cache/wasmtime/<engine>/<wasm-hash>/module.cmod`, falling back gracefully on cache misses.
+
+10. **Example 03 — Fetch & Notify (Plan + HTTP)**  
+    - Create `examples/03-fetch-notify/` mirroring prior layout: `air/` for JSON module/cap/policy definitions, `plans/` for JSON AIR plans, `runner/` for any helper glue. All defs must be canonical JSON assets (no Rust builders).  
+    - Reuse the reducer scaffolding pattern from earlier examples (`examples/0x-*/reducer`) to implement the `FetchRequested` reducer; keep it as a standalone crate built via `aos-wasm-build`.  
+    - Implement the plan engine features outlined in ROADMAP M2: plan executor wiring in `aos-kernel`, HTTP adapter + capability bindings, triggers from reducer intents to plans, and CLI commands/hooks in `aos-examples` to run the demo end-to-end.  
+    - Acceptance: plan + manifests load from JSON, reducer compiled via existing pipeline, HTTP intents mocked via the harness (synthetic receipts) with deterministic replay.
+
+11. **Example 04 — Aggregator (fan-out + join)**  
+    - Add `examples/04-aggregator/` (same folder convention) with all AIR/plans/caps as JSON artifacts; re-use the reducer crate pattern from Example 03 where applicable.  
+    - Extend the plan scheduler per ROADMAP M3 so multiple `emit_effect` steps can run concurrently with deterministic fan-in after `await_receipt`. Provide harness utilities to synthesize multiple HTTP receipts for the aggregator demo.  
+    - Update the CLI metadata (listing + `all` command) and ensure replay verification covers the new plan results. Document how to run the demo and where JSON definitions live.  
+    - Acceptance: plan DAG executes parallel HTTP calls, receipts arrive out of order but replay remains byte-identical; JSON defs validated against schemas before execution.
 
 > Once these three examples are stable, replicate the same structure for the remaining ladder rungs (plans, fan-out, governance, LLM) by adding numbered directories plus scenario implementations under the shared CLI.
-
-- [x] Cache compiled reducer modules/instances in `aos-wasm` so each reducer tick doesn’t recompile the WASM module (current per-event latency is dominated by fresh instantiation). — `ReducerRuntime::run` now hashes the WASM bytes and reuses compiled `wasmtime::Module`s from an in-memory cache, avoiding redundant recompilation within a process.
