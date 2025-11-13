@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
+use aos_kernel::KernelConfig;
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use once_cell::sync::OnceCell;
@@ -53,4 +54,14 @@ pub fn compile_reducer(crate_rel: &str) -> Result<Vec<u8>> {
         artifact.wasm_bytes.len()
     );
     Ok(artifact.wasm_bytes)
+}
+
+pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
+    let cache_dir = example_root.join(".aos").join("cache").join("wasmtime");
+    fs::create_dir_all(&cache_dir)
+        .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
+    Ok(KernelConfig {
+        module_cache_dir: Some(cache_dir),
+        eager_module_load: true,
+    })
 }

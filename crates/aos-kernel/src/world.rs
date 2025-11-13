@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
@@ -39,6 +40,12 @@ use crate::snapshot::{
 
 const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
+
+#[derive(Clone, Debug, Default)]
+pub struct KernelConfig {
+    pub module_cache_dir: Option<PathBuf>,
+    pub eager_module_load: bool,
+}
 
 pub struct Kernel<S: Store> {
     store: Arc<S>,
@@ -123,6 +130,7 @@ impl PlanResultEntry {
 pub struct KernelBuilder<S: Store> {
     store: Arc<S>,
     journal: Box<dyn Journal>,
+    config: KernelConfig,
 }
 
 impl<S: Store + 'static> KernelBuilder<S> {
@@ -130,6 +138,7 @@ impl<S: Store + 'static> KernelBuilder<S> {
         Self {
             store,
             journal: Box::new(MemJournal::new()),
+            config: KernelConfig::default(),
         }
     }
 
@@ -147,12 +156,22 @@ impl<S: Store + 'static> KernelBuilder<S> {
         Ok(self)
     }
 
+    pub fn with_module_cache_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.config.module_cache_dir = Some(dir.into());
+        self
+    }
+
+    pub fn with_eager_module_load(mut self, enable: bool) -> Self {
+        self.config.eager_module_load = enable;
+        self
+    }
+
     pub fn from_manifest_path(
         self,
         path: impl AsRef<std::path::Path>,
     ) -> Result<Kernel<S>, KernelError> {
         let loaded = ManifestLoader::load_from_path(&*self.store, path)?;
-        Kernel::from_loaded_manifest(self.store, loaded, self.journal)
+        Kernel::from_loaded_manifest_with_config(self.store, loaded, self.journal, self.config)
     }
 }
 
@@ -161,6 +180,15 @@ impl<S: Store + 'static> Kernel<S> {
         store: Arc<S>,
         loaded: LoadedManifest,
         journal: Box<dyn Journal>,
+    ) -> Result<Self, KernelError> {
+        Self::from_loaded_manifest_with_config(store, loaded, journal, KernelConfig::default())
+    }
+
+    pub fn from_loaded_manifest_with_config(
+        store: Arc<S>,
+        loaded: LoadedManifest,
+        journal: Box<dyn Journal>,
+        config: KernelConfig,
     ) -> Result<Self, KernelError> {
         let mut router = HashMap::new();
         if let Some(routing) = loaded.manifest.routing.as_ref() {
@@ -217,7 +245,7 @@ impl<S: Store + 'static> Kernel<S> {
             module_defs: loaded.modules,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
-            reducers: ReducerRegistry::new(store)?,
+            reducers: ReducerRegistry::new(store, config.module_cache_dir.clone())?,
             router,
             plan_registry,
             plan_instances: HashMap::new(),
@@ -235,6 +263,11 @@ impl<S: Store + 'static> Kernel<S> {
             suppress_journal: false,
             governance: GovernanceManager::new(),
         };
+        if config.eager_module_load {
+            for (name, module_def) in kernel.module_defs.iter() {
+                kernel.reducers.ensure_loaded(name, module_def)?;
+            }
+        }
         kernel.replay_existing_entries()?;
         Ok(kernel)
     }

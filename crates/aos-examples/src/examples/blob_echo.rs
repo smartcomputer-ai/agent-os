@@ -57,7 +57,13 @@ pub fn run(example_root: &Path) -> Result<()> {
     let store = Arc::new(FsStore::open(example_root).context("open FsStore")?);
     let loaded = build_loaded_manifest(store.clone(), &wasm_bytes).context("build manifest")?;
     let journal = Box::new(FsJournal::open(example_root)?);
-    let mut kernel = Kernel::from_loaded_manifest(store.clone(), loaded, journal)?;
+    let kernel_config = util::kernel_config(example_root)?;
+    let mut kernel = Kernel::from_loaded_manifest_with_config(
+        store.clone(),
+        loaded,
+        journal,
+        kernel_config.clone(),
+    )?;
 
     let input = BlobEchoInput {
         namespace: "demo".into(),
@@ -77,7 +83,12 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     let replay_loaded = build_loaded_manifest(store.clone(), &wasm_bytes)?;
     let replay_journal = Box::new(FsJournal::open(example_root)?);
-    let replay = Kernel::from_loaded_manifest(store, replay_loaded, replay_journal)?;
+    let replay = Kernel::from_loaded_manifest_with_config(
+        store,
+        replay_loaded,
+        replay_journal,
+        kernel_config,
+    )?;
     let replay_state = read_state(&replay).context("read replay state")?;
     if replay_state.stored_blob_ref != final_state.stored_blob_ref
         || replay_state.retrieved_blob_ref != final_state.retrieved_blob_ref

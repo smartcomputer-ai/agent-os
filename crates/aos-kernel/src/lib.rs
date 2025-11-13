@@ -22,4 +22,4 @@ pub use event::{KernelEvent, ReducerEvent};
 pub use manifest::{LoadedManifest, ManifestLoader};
 pub use reducer::ReducerRegistry;
 pub use shadow::{ShadowConfig, ShadowExecutor, ShadowSummary};
-pub use world::{Kernel, KernelBuilder, PlanResultEntry};
+pub use world::{Kernel, KernelBuilder, KernelConfig, PlanResultEntry};

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use aos_air_types::{DefModule, Name};
@@ -20,10 +21,11 @@ struct ReducerModule {
 }
 
 impl<S: Store> ReducerRegistry<S> {
-    pub fn new(store: Arc<S>) -> Result<Self, KernelError> {
+    pub fn new(store: Arc<S>, module_cache_dir: Option<PathBuf>) -> Result<Self, KernelError> {
         Ok(Self {
             store,
-            runtime: ReducerRuntime::new().map_err(KernelError::Wasm)?,
+            runtime: ReducerRuntime::new_with_disk_cache(module_cache_dir)
+                .map_err(KernelError::Wasm)?,
             modules: HashMap::new(),
         })
     }
@@ -37,12 +39,12 @@ impl<S: Store> ReducerRegistry<S> {
         let bytes: Vec<u8> = self.store.get_blob(wasm_hash)?;
         let compiled = self
             .runtime
-            .compile(&bytes)
+            .cached_module(&bytes)
             .map_err(KernelError::Wasm)?;
         self.modules.insert(
             name.to_string(),
             ReducerModule {
-                module: Arc::new(compiled),
+                module: compiled,
             },
         );
         Ok(())
