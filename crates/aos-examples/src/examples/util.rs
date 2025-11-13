@@ -5,6 +5,7 @@ use anyhow::{Context, Result, anyhow};
 use aos_kernel::KernelConfig;
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
+use log::debug;
 use once_cell::sync::OnceCell;
 
 pub fn reset_journal(example_root: &Path) -> Result<()> {
@@ -44,12 +45,12 @@ pub fn compile_reducer(crate_rel: &str) -> Result<Vec<u8>> {
     request.config.release = false;
     request.cache_dir = Some(cache_dir);
     if force_build() {
-        println!("   forcing rebuild for {crate_rel}");
+        debug!("forcing rebuild for {crate_rel}");
         request.use_cache = false;
     }
     let artifact = Builder::compile(request).context("compile reducer via aos-wasm-build")?;
-    println!(
-        "   build result: {} ({} bytes)",
+    debug!(
+        "build result: {} ({} bytes)",
         hex::encode(&artifact.wasm_hash.0),
         artifact.wasm_bytes.len()
     );

@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use aos_wasm_abi::{ReducerInput, ReducerOutput};
 use sha2::{Digest, Sha256};
+use log::debug;
 use wasmtime::{Config, Engine, Linker, Module, Store};
 
 const STEP_EXPORT: &str = "step";
@@ -140,17 +141,21 @@ impl ReducerRuntime {
 
     fn module_from_cache(&self, wasm_bytes: &[u8]) -> Result<Arc<Module>> {
         let key = ModuleKey::from_bytes(wasm_bytes);
+        let key_hex = key.hex();
         if let Some(existing) = self.get_cached_module(&key) {
+            debug!("aos-wasm: memory cache hit for reducer {key_hex}");
             return Ok(existing);
         }
 
-        if let Some(serialized) = self.load_serialized(&key)? {
+        if let Some(serialized) = self.load_serialized(&key, &key_hex)? {
+            debug!("aos-wasm: disk cache hit for reducer {key_hex}");
             self.insert_cached_module(key, serialized.clone());
             return Ok(serialized);
         }
 
+        debug!("aos-wasm: cache miss for reducer {key_hex}; compiling module");
         let compiled = Arc::new(self.compile(wasm_bytes)?);
-        self.store_serialized(&key, &compiled).ok();
+        self.store_serialized(&key, &key_hex, &compiled).ok();
         self.insert_cached_module(key, compiled.clone());
         Ok(compiled)
     }
@@ -171,7 +176,7 @@ impl ReducerRuntime {
         cache.entry(key).or_insert_with(|| module.clone());
     }
 
-    fn load_serialized(&self, key: &ModuleKey) -> Result<Option<Arc<Module>>> {
+    fn load_serialized(&self, key: &ModuleKey, key_hex: &str) -> Result<Option<Arc<Module>>> {
         let cache = match &self.disk_cache {
             Some(cache) => cache,
             None => return Ok(None),
@@ -183,20 +188,31 @@ impl ReducerRuntime {
         let bytes = match fs::read(&path) {
             Ok(data) => data,
             Err(_) => {
+                debug!(
+                    "aos-wasm: failed to read serialized module {key_hex}, removing cache file"
+                );
                 let _ = fs::remove_file(&path);
                 return Ok(None);
             }
         };
         match unsafe { Module::deserialize(&self.engine, &bytes) } {
             Ok(module) => Ok(Some(Arc::new(module))),
-            Err(_) => {
+            Err(err) => {
+                debug!(
+                    "aos-wasm: deserialize failed for cached module {key_hex}: {err}; removing cache file"
+                );
                 let _ = fs::remove_file(&path);
                 Ok(None)
             }
         }
     }
 
-    fn store_serialized(&self, key: &ModuleKey, module: &Arc<Module>) -> Result<()> {
+    fn store_serialized(
+        &self,
+        key: &ModuleKey,
+        key_hex: &str,
+        module: &Arc<Module>,
+    ) -> Result<()> {
         let cache = match &self.disk_cache {
             Some(cache) => cache,
             None => return Ok(()),
@@ -211,6 +227,10 @@ impl ReducerRuntime {
         }
         fs::write(&path, bytes)
             .with_context(|| format!("write serialized module {}", path.display()))?;
+        debug!(
+            "aos-wasm: serialized reducer {key_hex} to {}",
+            path.display()
+        );
         Ok(())
     }
 }

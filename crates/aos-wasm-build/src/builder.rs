@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+use log::debug;
 
 #[derive(Clone, Copy, Debug)]
 pub enum BackendKind {
@@ -49,16 +50,16 @@ impl Builder {
                 .map_err(BuildError::Io)?
             {
                 let digest = WasmDigest::of_bytes(&bytes);
-                println!("   cache hit for reducer (fingerprint {fingerprint})");
+                debug!("cache hit for reducer (fingerprint {fingerprint})");
                 return Ok(BuildArtifact {
                     wasm_bytes: bytes,
                     wasm_hash: digest,
                     build_log: Some("cache hit".into()),
                 });
             }
-            println!("   cache miss for reducer (fingerprint {fingerprint})");
+            debug!("cache miss for reducer (fingerprint {fingerprint})");
         } else {
-            println!("   cache disabled; building reducer");
+            debug!("cache disabled; building reducer");
         }
         let artifact = match request.backend {
             BackendKind::Rust => RustBackend::new().compile(request)?,

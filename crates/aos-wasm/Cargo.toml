@@ -9,6 +9,7 @@ aos-wasm-abi = { path = "../aos-wasm-abi" }
 anyhow = "1"
 sha2 = "0.10"
 wasmtime = { version = "36.0.3", features = ["cache"] }
+log = "0.4"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 use once_cell::sync::Lazy;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::Once;
 
 #[derive(Parser, Debug)]
 #[command(name = "aos-examples", version, about = "Run AgentOS ladder demos")]
@@ -69,6 +70,7 @@ const EXAMPLES: &[ExampleMeta] = &[
 ];
 
 fn main() {
+    init_logging();
     if let Err(err) = run_cli() {
         eprintln!("error: {err}");
         for cause in err.chain().skip(1) {
@@ -76,6 +78,17 @@ fn main() {
         }
         process::exit(1);
     }
+}
+
+fn init_logging() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let _ = env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or("info"),
+        )
+        .format_timestamp_millis()
+        .try_init();
+    });
 }
 
 fn run_cli() -> Result<()> {
