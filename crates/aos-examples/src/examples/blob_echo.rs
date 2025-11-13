@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use aos_air_types::{
     CapGrant, CapType, DefCap, DefModule, DefPolicy, DefSchema, EffectKind as AirEffectKind,
     HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef,
     PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent, SchemaRef,
-    TypeExpr, TypeOption, TypePrimitive, TypePrimitiveBytes, TypePrimitiveText,
-    TypePrimitiveUnit, TypeRecord, TypeRef, TypeVariant, ValueLiteral, ValueRecord, builtins,
+    TypeExpr, TypeOption, TypePrimitive, TypePrimitiveBytes, TypePrimitiveText, TypePrimitiveUnit,
+    TypeRecord, TypeRef, TypeVariant, ValueLiteral, ValueRecord, builtins,
 };
 use aos_cbor::Hash;
 use aos_effects::builtins::{BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt};
