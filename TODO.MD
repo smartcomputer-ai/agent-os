@@ -22,11 +22,7 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 9. **[x] Warm-start reducers + persist Wasmtime modules** — Kernel accepts a `KernelConfig` with module cache directories, eagerly loads every reducer in a manifest, and `ReducerRuntime` serializes compiled Wasmtime modules to `<world>/.aos/cache/wasmtime/<engine>/<wasm-hash>/module.cmod`, falling back gracefully on cache misses.
 
-10. **Example 03 — Fetch & Notify (Plan + HTTP)**  
-    - Create `examples/03-fetch-notify/` mirroring prior layout: `air/` for JSON module/cap/policy definitions, `plans/` for JSON AIR plans, `runner/` for any helper glue. All defs must be canonical JSON assets (no Rust builders).  
-    - Reuse the reducer scaffolding pattern from earlier examples (`examples/0x-*/reducer`) to implement the `FetchRequested` reducer; keep it as a standalone crate built via `aos-wasm-build`.  
-    - Implement the plan engine features outlined in ROADMAP M2: plan executor wiring in `aos-kernel`, HTTP adapter + capability bindings, triggers from reducer intents to plans, and CLI commands/hooks in `aos-examples` to run the demo end-to-end.  
-    - Acceptance: plan + manifests load from JSON, reducer compiled via existing pipeline, HTTP intents mocked via the harness (synthetic receipts) with deterministic replay.
+10. **[x] Example 03 — Fetch & Notify (Plan + HTTP)** — Added `examples/03-fetch-notify/` with canonical JSON AIR assets, reducer crate, and runner; wired plan executor + HTTP adapter + reducer→plan trigger path so the CLI demo runs end-to-end with mocked receipts and deterministic replay.
 
 11. **Example 04 — Aggregator (fan-out + join)**  
     - Add `examples/04-aggregator/` (same folder convention) with all AIR/plans/caps as JSON artifacts; re-use the reducer crate pattern from Example 03 where applicable.  
