@@ -1,6 +1,6 @@
 # AgentOS
 
-**🌞 A deterministic, event-sourced computing substrate for AI agents.**
+**🌞 A runtime for self-evolving agents.**
 
 AgentOS is a runtime where agents can safely propose, simulate, and apply changes to their own code, policies, and workflows, all under governance, with full audit trails. Every external action produces a signed receipt. Every state change is replayable from an event log.
 
