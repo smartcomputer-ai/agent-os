@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
@@ -14,47 +13,43 @@ use crate::examples::http_harness::{HttpHarness, MockHttpResponse};
 use crate::examples::util;
 use crate::manifest_loader;
 
-const REDUCER_NAME: &str = "demo/FetchNotify@1";
-const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
-const MODULE_PATH: &str = "examples/03-fetch-notify/reducer";
+const REDUCER_NAME: &str = "demo/Aggregator@1";
+const EVENT_SCHEMA: &str = "demo/AggregatorEvent@1";
+const MODULE_PATH: &str = "examples/04-aggregator/reducer";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum FetchEventEnvelope {
-    Start { url: String, method: String },
+enum AggregatorEventEnvelope {
+    Start { topic: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct FetchStateView {
-    pc: FetchPcView,
+struct AggregatorStateView {
+    pc: AggregatorPcView,
     next_request_id: u64,
     pending_request: Option<u64>,
-    last_status: Option<i64>,
-    last_body_preview: Option<String>,
+    current_topic: Option<String>,
+    last_statuses: Vec<i64>,
+    last_previews: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum FetchPcView {
+enum AggregatorPcView {
     Idle,
-    Fetching,
+    Running,
     Done,
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
     util::reset_journal(example_root)?;
     let wasm_bytes = util::compile_reducer(MODULE_PATH)?;
-    let store = Arc::new(FsStore::open(example_root).context("open FsStore")?);
+    let store = std::sync::Arc::new(FsStore::open(example_root).context("open FsStore")?);
     let wasm_hash = store
         .put_blob(&wasm_bytes)
         .context("store reducer wasm blob")?;
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash reducer wasm")?;
 
     let mut loaded = manifest_loader::load_from_assets(store.clone(), example_root)?
-        .ok_or_else(|| anyhow!("example 03 must provide AIR JSON assets"))?;
-    if let Some(plan) = loaded.plans.get("demo/fetch_plan@1") {
-        log::debug!("loaded plan steps: {:?}", plan.steps);
-    }
-    if let Some(schema) = loaded.schemas.get("demo/FetchNotifyEvent@1") {
-        log::debug!("event schema ty: {:?}", schema.ty);
-    }
+        .ok_or_else(|| anyhow!("example 04 must provide AIR JSON assets"))?;
     patch_module_hash(&mut loaded, &wasm_hash_ref)?;
 
     let journal = Box::new(FsJournal::open(example_root)?);
@@ -66,49 +61,58 @@ pub fn run(example_root: &Path) -> Result<()> {
         kernel_config.clone(),
     )?;
 
-    println!("→ Fetch & Notify demo");
+    println!("→ Aggregator demo");
     submit_start(
         &mut kernel,
-        FetchEventEnvelope::Start {
-            url: "https://example.com/data.json".into(),
-            method: "GET".into(),
+        AggregatorEventEnvelope::Start {
+            topic: "demo-topic".into(),
         },
     )?;
 
-    let mut http = HttpHarness::new();
-    let requests = http.collect_requests(&mut kernel)?;
-    if requests.len() != 1 {
+    let mut harness = HttpHarness::new();
+    let mut requests = harness.collect_requests(&mut kernel)?;
+    if requests.len() != 3 {
         return Err(anyhow!(
-            "fetch-notify demo expected a single http request, got {}",
+            "aggregator plan expected 3 http intents, got {}",
             requests.len()
         ));
     }
-    let request = requests.into_iter().next().expect("one request");
-    println!(
-        "     http.request {} {}",
-        request.params.method, request.params.url
-    );
-    let body = format!(
-        "{{\"url\":\"{}\",\"method\":\"{}\",\"demo\":true}}",
-        request.params.url, request.params.method
-    );
-    http.respond_with(&mut kernel, request, MockHttpResponse::json(200, body))?;
+    requests.sort_by(|a, b| a.params.url.cmp(&b.params.url));
+    let ctx_a = requests.remove(0);
+    let ctx_b = requests.remove(0);
+    let ctx_c = requests.remove(0);
+
+    println!("     responding out of order (b → c → a)");
+    harness.respond_with(
+        &mut kernel,
+        ctx_b,
+        MockHttpResponse::json(200, "{\"source\":\"beta\"}"),
+    )?;
+    harness.respond_with(
+        &mut kernel,
+        ctx_c,
+        MockHttpResponse::json(201, "{\"source\":\"gamma\"}"),
+    )?;
+    harness.respond_with(
+        &mut kernel,
+        ctx_a,
+        MockHttpResponse::json(202, "{\"source\":\"alpha\"}"),
+    )?;
 
     let final_bytes = kernel
         .reducer_state(REDUCER_NAME)
         .cloned()
         .ok_or_else(|| anyhow!("missing reducer state"))?;
-    let state: FetchStateView = serde_cbor::from_slice(&final_bytes)?;
+    let state: AggregatorStateView = serde_cbor::from_slice(&final_bytes)?;
     println!(
-        "   completed: pc={:?} status={:?} preview={:?}",
-        state.pc, state.last_status, state.last_body_preview
+        "   completed: pc={:?} statuses={:?} previews={:?}",
+        state.pc, state.last_statuses, state.last_previews
     );
 
     drop(kernel);
 
-    // Replay and compare state hashes.
     let mut replay_loaded = manifest_loader::load_from_assets(store.clone(), example_root)?
-        .ok_or_else(|| anyhow!("example 03 must provide AIR JSON assets"))?;
+        .ok_or_else(|| anyhow!("example 04 must provide AIR JSON assets"))?;
     patch_module_hash(&mut replay_loaded, &wasm_hash_ref)?;
     let replay_journal = Box::new(FsJournal::open(example_root)?);
     let mut replay = Kernel::from_loaded_manifest_with_config(
@@ -131,11 +135,12 @@ pub fn run(example_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn submit_start(kernel: &mut Kernel<FsStore>, event: FetchEventEnvelope) -> Result<()> {
-    let (url, method) = match &event {
-        FetchEventEnvelope::Start { url, method } => (url, method),
-    };
-    println!("     start fetch → url={} method={}", url, method);
+fn submit_start(kernel: &mut Kernel<FsStore>, event: AggregatorEventEnvelope) -> Result<()> {
+    match &event {
+        AggregatorEventEnvelope::Start { topic } => {
+            println!("     aggregate start → topic={topic}");
+        }
+    }
     let payload = serde_cbor::to_vec(&event)?;
     kernel.submit_domain_event(EVENT_SCHEMA, payload);
     kernel.tick_until_idle()?;

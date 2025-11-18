@@ -1,0 +1,16 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/Aggregator@1",
+    "module_kind": "reducer",
+    "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "abi": {
+      "reducer": {
+        "state": "demo/AggregatorState@1",
+        "event": "demo/AggregatorEvent@1",
+        "effects_emitted": [],
+        "cap_slots": {}
+      }
+    }
+  }
+]

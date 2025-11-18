@@ -1,0 +1,13 @@
+[
+  {
+    "$kind": "defcap",
+    "name": "demo/http_aggregate_cap@1",
+    "cap_type": "http.out",
+    "schema": {
+      "record": {
+        "hosts": { "set": { "text": {} } },
+        "methods": { "set": { "text": {} } }
+      }
+    }
+  }
+]

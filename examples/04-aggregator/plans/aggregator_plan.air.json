@@ -1,0 +1,208 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demo/aggregator_plan@1",
+    "input": "demo/AggregateRequested@1",
+    "steps": [
+      {
+        "id": "assign_topic",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@input" },
+            { "text": "topic" }
+          ]
+        },
+        "bind": { "var": "agg_topic" }
+      },
+      {
+        "id": "emit_fetch_a",
+        "op": "emit_effect",
+        "kind": "http.request",
+        "params": {
+          "record": {
+            "method": { "text": "GET" },
+            "url": { "text": "https://example.com/api/a" },
+            "headers": { "map": [] },
+            "body_ref": { "variant": { "tag": "None" } }
+          }
+        },
+        "cap": "cap_http_aggregate",
+        "bind": { "effect_id_as": "fetch_a" }
+      },
+      {
+        "id": "emit_fetch_b",
+        "op": "emit_effect",
+        "kind": "http.request",
+        "params": {
+          "record": {
+            "method": { "text": "GET" },
+            "url": { "text": "https://example.com/api/b" },
+            "headers": { "map": [] },
+            "body_ref": { "variant": { "tag": "None" } }
+          }
+        },
+        "cap": "cap_http_aggregate",
+        "bind": { "effect_id_as": "fetch_b" }
+      },
+      {
+        "id": "emit_fetch_c",
+        "op": "emit_effect",
+        "kind": "http.request",
+        "params": {
+          "record": {
+            "method": { "text": "GET" },
+            "url": { "text": "https://example.com/api/c" },
+            "headers": { "map": [] },
+            "body_ref": { "variant": { "tag": "None" } }
+          }
+        },
+        "cap": "cap_http_aggregate",
+        "bind": { "effect_id_as": "fetch_c" }
+      },
+      {
+        "id": "await_fetch_a",
+        "op": "await_receipt",
+        "for": { "ref": "@var:fetch_a" },
+        "bind": { "var": "receipt_a" }
+      },
+      {
+        "id": "await_fetch_b",
+        "op": "await_receipt",
+        "for": { "ref": "@var:fetch_b" },
+        "bind": { "var": "receipt_b" }
+      },
+      {
+        "id": "await_fetch_c",
+        "op": "await_receipt",
+        "for": { "ref": "@var:fetch_c" },
+        "bind": { "var": "receipt_c" }
+      },
+      {
+        "id": "status_a",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:receipt_a" },
+            { "text": "status" }
+          ]
+        },
+        "bind": { "var": "status_a" }
+      },
+      {
+        "id": "status_b",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:receipt_b" },
+            { "text": "status" }
+          ]
+        },
+        "bind": { "var": "status_b" }
+      },
+      {
+        "id": "status_c",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:receipt_c" },
+            { "text": "status" }
+          ]
+        },
+        "bind": { "var": "status_c" }
+      },
+      {
+        "id": "body_a",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:receipt_a" },
+            { "text": "body_preview" }
+          ]
+        },
+        "bind": { "var": "body_a" }
+      },
+      {
+        "id": "body_b",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:receipt_b" },
+            { "text": "body_preview" }
+          ]
+        },
+        "bind": { "var": "body_b" }
+      },
+      {
+        "id": "body_c",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:receipt_c" },
+            { "text": "body_preview" }
+          ]
+        },
+        "bind": { "var": "body_c" }
+      },
+      {
+        "id": "raise_result",
+        "op": "raise_event",
+        "reducer": "demo/Aggregator@1",
+        "event": {
+          "variant": {
+            "tag": "AggregateComplete",
+            "value": {
+              "record": {
+                "request_id": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@input" },
+                    { "text": "request_id" }
+                  ]
+                },
+                "topic": { "ref": "@var:agg_topic" },
+                "status_a": { "ref": "@var:status_a" },
+                "status_b": { "ref": "@var:status_b" },
+                "status_c": { "ref": "@var:status_c" },
+                "body_a": { "ref": "@var:body_a" },
+                "body_b": { "ref": "@var:body_b" },
+                "body_c": { "ref": "@var:body_c" }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "finish",
+        "op": "end"
+      }
+    ],
+    "edges": [
+      { "from": "assign_topic", "to": "emit_fetch_a" },
+      { "from": "assign_topic", "to": "emit_fetch_b" },
+      { "from": "assign_topic", "to": "emit_fetch_c" },
+      { "from": "emit_fetch_a", "to": "await_fetch_a" },
+      { "from": "emit_fetch_b", "to": "await_fetch_b" },
+      { "from": "emit_fetch_c", "to": "await_fetch_c" },
+      { "from": "await_fetch_a", "to": "status_a" },
+      { "from": "await_fetch_b", "to": "status_b" },
+      { "from": "await_fetch_c", "to": "status_c" },
+      { "from": "status_a", "to": "body_a" },
+      { "from": "status_b", "to": "body_b" },
+      { "from": "status_c", "to": "body_c" },
+      { "from": "body_a", "to": "raise_result" },
+      { "from": "body_b", "to": "raise_result" },
+      { "from": "body_c", "to": "raise_result" },
+      { "from": "raise_result", "to": "finish" }
+    ],
+    "required_caps": ["cap_http_aggregate"],
+    "allowed_effects": ["http.request"]
+  }
+]

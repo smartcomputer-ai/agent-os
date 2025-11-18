@@ -31,6 +31,8 @@ enum Commands {
     BlobEcho,
     /// Run the Fetch & Notify plan example
     FetchNotify,
+    /// Run the Aggregator fan-out example
+    Aggregator,
     /// Run every available example sequentially
     All,
 }
@@ -78,6 +80,14 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "examples/03-fetch-notify",
         runner: examples::fetch_notify::run,
     },
+    ExampleMeta {
+        number: "04",
+        slug: "aggregator",
+        title: "Aggregator",
+        summary: "Fan-out plan with http receipts",
+        dir: "examples/04-aggregator",
+        runner: examples::aggregator::run,
+    },
 ];
 
 fn main() {
@@ -108,6 +118,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::HelloTimer) => run_single("hello-timer"),
         Some(Commands::BlobEcho) => run_single("blob-echo"),
         Some(Commands::FetchNotify) => run_single("fetch-notify"),
+        Some(Commands::Aggregator) => run_single("aggregator"),
         Some(Commands::All) => run_all(),
         None => {
             list_examples();
