@@ -173,6 +173,11 @@ fn plan_journal_replay_resumes_waiting_receipt() {
         waits[0].0, recorded_plan_id,
         "plan id should match recorded value"
     );
+    assert_eq!(
+        waits[0].1,
+        vec![recorded_intent_hash],
+        "pending hash should match journal"
+    );
 
     let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
     let receipt = EffectReceipt {

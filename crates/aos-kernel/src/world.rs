@@ -612,7 +612,7 @@ impl<S: Store + 'static> Kernel<S> {
         let matching_instance_id = self
             .plan_instances
             .iter()
-            .find(|(_, instance)| instance.pending_receipt_hash() == Some(intent_hash))
+            .find(|(_, instance)| instance.waiting_on_receipt(intent_hash))
             .map(|(id, _)| *id);
 
         if let Some(current_id) = matching_instance_id {
@@ -650,10 +650,10 @@ impl<S: Store + 'static> Kernel<S> {
         self.plan_instances.contains_key(&id)
     }
 
-    pub fn debug_plan_waits(&self) -> Vec<(u64, Option<[u8; 32]>)> {
+    pub fn debug_plan_waits(&self) -> Vec<(u64, Vec<[u8; 32]>)> {
         self.plan_instances
             .iter()
-            .map(|(id, instance)| (*id, instance.pending_receipt_hash()))
+            .map(|(id, instance)| (*id, instance.pending_receipt_hashes()))
             .collect()
     }
 
@@ -864,8 +864,8 @@ impl<S: Store + 'static> Kernel<S> {
                     },
                 )?;
             }
-            if let Some(hash) = outcome.waiting_receipt {
-                self.pending_receipts.insert(hash, id);
+            for hash in &outcome.waiting_receipts {
+                self.pending_receipts.insert(*hash, id);
             }
             if let Some(schema) = outcome.waiting_event.clone() {
                 self.waiting_events.entry(schema).or_default().push(id);
@@ -882,7 +882,7 @@ impl<S: Store + 'static> Kernel<S> {
                     }
                 }
                 self.plan_instances.remove(&id);
-            } else if outcome.waiting_receipt.is_none() && outcome.waiting_event.is_none() {
+            } else if outcome.waiting_receipts.is_empty() && outcome.waiting_event.is_none() {
                 self.scheduler.push_plan(id);
             }
         }

@@ -1,0 +1,46 @@
+{
+  "$kind": "manifest",
+  "schemas": [
+    { "name": "demo/AggregatorPc@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/AggregatorState@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/AggregatorEvent@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/AggregateRequested@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "modules": [
+    { "name": "demo/Aggregator@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "plans": [
+    { "name": "demo/aggregator_plan@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "caps": [
+    { "name": "demo/http_aggregate_cap@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "policies": [
+    { "name": "demo/http-aggregate-policy@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "defaults": {
+    "policy": "demo/http-aggregate-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_http_aggregate",
+        "cap": "demo/http_aggregate_cap@1",
+        "params": {
+          "record": {
+            "hosts": { "set": [ { "text": "example.com" } ] },
+            "methods": { "set": [ { "text": "GET" } ] }
+          }
+        }
+      }
+    ]
+  },
+  "module_bindings": {},
+  "routing": {
+    "events": [
+      { "event": "demo/AggregatorEvent@1", "reducer": "demo/Aggregator@1" }
+    ],
+    "inboxes": []
+  },
+  "triggers": [
+    { "event": "demo/AggregateRequested@1", "plan": "demo/aggregator_plan@1", "correlate_by": "request_id" }
+  ]
+}
