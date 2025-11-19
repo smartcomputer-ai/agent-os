@@ -10,11 +10,11 @@
         "expr": {
           "op": "get",
           "args": [
-            { "ref": "@input" },
+            { "ref": "@plan.input" },
             { "text": "topic" }
           ]
         },
-        "bind": { "var": "agg_topic" }
+        "bind": { "as": "agg_topic" }
       },
       {
         "id": "emit_fetch_a",
@@ -65,19 +65,19 @@
         "id": "await_fetch_a",
         "op": "await_receipt",
         "for": { "ref": "@var:fetch_a" },
-        "bind": { "var": "receipt_a" }
+        "bind": { "as": "receipt_a" }
       },
       {
         "id": "await_fetch_b",
         "op": "await_receipt",
         "for": { "ref": "@var:fetch_b" },
-        "bind": { "var": "receipt_b" }
+        "bind": { "as": "receipt_b" }
       },
       {
         "id": "await_fetch_c",
         "op": "await_receipt",
         "for": { "ref": "@var:fetch_c" },
-        "bind": { "var": "receipt_c" }
+        "bind": { "as": "receipt_c" }
       },
       {
         "id": "status_a",
@@ -89,7 +89,7 @@
             { "text": "status" }
           ]
         },
-        "bind": { "var": "status_a" }
+        "bind": { "as": "status_a" }
       },
       {
         "id": "status_b",
@@ -101,7 +101,7 @@
             { "text": "status" }
           ]
         },
-        "bind": { "var": "status_b" }
+        "bind": { "as": "status_b" }
       },
       {
         "id": "status_c",
@@ -113,7 +113,7 @@
             { "text": "status" }
           ]
         },
-        "bind": { "var": "status_c" }
+        "bind": { "as": "status_c" }
       },
       {
         "id": "body_a",
@@ -125,7 +125,7 @@
             { "text": "body_preview" }
           ]
         },
-        "bind": { "var": "body_a" }
+        "bind": { "as": "body_a" }
       },
       {
         "id": "body_b",
@@ -137,7 +137,7 @@
             { "text": "body_preview" }
           ]
         },
-        "bind": { "var": "body_b" }
+        "bind": { "as": "body_b" }
       },
       {
         "id": "body_c",
@@ -149,7 +149,7 @@
             { "text": "body_preview" }
           ]
         },
-        "bind": { "var": "body_c" }
+        "bind": { "as": "body_c" }
       },
       {
         "id": "raise_result",
@@ -163,7 +163,7 @@
                 "request_id": {
                   "op": "get",
                   "args": [
-                    { "ref": "@input" },
+                    { "ref": "@plan.input" },
                     { "text": "request_id" }
                   ]
                 },

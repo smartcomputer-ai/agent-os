@@ -2,6 +2,7 @@
 
 use aos_air_exec::Value;
 use aos_wasm_abi::{DomainEvent, ReducerInput, ReducerOutput};
+use indexmap::IndexMap;
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use std::alloc::{alloc as host_alloc, Layout};
@@ -146,43 +147,46 @@ fn handle_complete(
 }
 
 fn decode_event(bytes: &[u8]) -> Result<AggregatorEvent, serde_cbor::Error> {
-    match serde_cbor::from_slice::<AggregatorEvent>(bytes) {
-        Ok(event) => Ok(event),
-        Err(_) => {
-            let value: serde_cbor::Value = serde_cbor::from_slice(bytes)?;
-            if let serde_cbor::Value::Map(mut map) = value {
-                let tag_key = serde_cbor::Value::Text("$tag".into());
-                let value_key = serde_cbor::Value::Text("$value".into());
-                if let (Some(tag), Some(body)) = (map.remove(&tag_key), map.remove(&value_key)) {
-                    if let serde_cbor::Value::Text(name) = tag {
-                        if name == "AggregateComplete" {
-                            return parse_complete(body);
-                        }
-                    }
-                }
+    if let Ok(event) = serde_cbor::from_slice::<AggregatorEvent>(bytes) {
+        return Ok(event);
+    }
+    let value: Value = serde_cbor::from_slice(bytes)?;
+    match value {
+        Value::Record(mut record) => {
+            if let (Some(Value::Text(tag)), Some(body)) = (record.swap_remove("$tag"), record.swap_remove("$value")) {
+                return parse_variant(tag, body);
             }
-            Err(serde_cbor::Error::custom("unsupported event variant"))
         }
+        _ => {}
+    }
+    Err(serde_cbor::Error::custom("unsupported event variant"))
+}
+
+fn parse_variant(tag: String, body: Value) -> Result<AggregatorEvent, serde_cbor::Error> {
+    match tag.as_str() {
+        "Start" => {
+            if let Value::Record(mut record) = body {
+                let topic = extract_text_value(&mut record, "topic");
+                Ok(AggregatorEvent::Start { topic })
+            } else {
+                Err(serde_cbor::Error::custom("Start body must be record"))
+            }
+        }
+        "AggregateComplete" => parse_complete_value(body),
+        other => Err(serde_cbor::Error::custom(format!("unknown event tag {other}"))),
     }
 }
 
-fn parse_complete(body: serde_cbor::Value) -> Result<AggregatorEvent, serde_cbor::Error> {
-    if let serde_cbor::Value::Map(mut map) = body {
-        let request_id = match map.remove(&serde_cbor::Value::Text("request_id".into())) {
-            Some(serde_cbor::Value::Integer(i)) => i as u64,
-            Some(serde_cbor::Value::Unsigned(u)) => u,
-            _ => 0,
-        };
-        let topic = match map.remove(&serde_cbor::Value::Text("topic".into())) {
-            Some(serde_cbor::Value::Text(text)) => text,
-            _ => String::new(),
-        };
-        let status_a = extract_int(&mut map, "status_a");
-        let status_b = extract_int(&mut map, "status_b");
-        let status_c = extract_int(&mut map, "status_c");
-        let body_a = extract_text(&mut map, "body_a");
-        let body_b = extract_text(&mut map, "body_b");
-        let body_c = extract_text(&mut map, "body_c");
+fn parse_complete_value(body: Value) -> Result<AggregatorEvent, serde_cbor::Error> {
+    if let Value::Record(mut record) = body {
+        let request_id = extract_nat_value(&mut record, "request_id");
+        let topic = extract_text_value(&mut record, "topic");
+        let status_a = extract_int_value(&mut record, "status_a");
+        let status_b = extract_int_value(&mut record, "status_b");
+        let status_c = extract_int_value(&mut record, "status_c");
+        let body_a = extract_text_value(&mut record, "body_a");
+        let body_b = extract_text_value(&mut record, "body_b");
+        let body_c = extract_text_value(&mut record, "body_c");
         return Ok(AggregatorEvent::AggregateComplete {
             request_id,
             topic,
@@ -197,17 +201,25 @@ fn parse_complete(body: serde_cbor::Value) -> Result<AggregatorEvent, serde_cbor
     Err(serde_cbor::Error::custom("invalid AggregateComplete body"))
 }
 
-fn extract_int(map: &mut serde_cbor::Map<serde_cbor::Value, serde_cbor::Value>, key: &str) -> i64 {
-    match map.remove(&serde_cbor::Value::Text(key.into())) {
-        Some(serde_cbor::Value::Integer(i)) => i,
-        Some(serde_cbor::Value::Unsigned(u)) => u as i64,
+fn extract_int_value(record: &mut IndexMap<String, Value>, key: &str) -> i64 {
+    match record.swap_remove(key) {
+        Some(Value::Int(v)) => v,
+        Some(Value::Nat(v)) => v as i64,
         _ => 0,
     }
 }
 
-fn extract_text(map: &mut serde_cbor::Map<serde_cbor::Value, serde_cbor::Value>, key: &str) -> String {
-    match map.remove(&serde_cbor::Value::Text(key.into())) {
-        Some(serde_cbor::Value::Text(text)) => text,
+fn extract_nat_value(record: &mut IndexMap<String, Value>, key: &str) -> u64 {
+    match record.swap_remove(key) {
+        Some(Value::Nat(v)) => v,
+        Some(Value::Int(v)) if v >= 0 => v as u64,
+        _ => 0,
+    }
+}
+
+fn extract_text_value(record: &mut IndexMap<String, Value>, key: &str) -> String {
+    match record.swap_remove(key) {
+        Some(Value::Text(text)) => text,
         _ => String::new(),
     }
 }
