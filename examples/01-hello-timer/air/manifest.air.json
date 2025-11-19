@@ -1,22 +1,22 @@
 {
   "$kind": "manifest",
   "schemas": [
-    { "name": "demo/TimerPc@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
-    { "name": "demo/TimerState@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
-    { "name": "demo/TimerEvent@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
-    { "name": "sys/TimerSetParams@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
-    { "name": "sys/TimerSetReceipt@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
-    { "name": "sys/TimerFired@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    { "name": "demo/TimerPc@1" },
+    { "name": "demo/TimerState@1" },
+    { "name": "demo/TimerEvent@1" },
+    { "name": "sys/TimerSetParams@1" },
+    { "name": "sys/TimerSetReceipt@1" },
+    { "name": "sys/TimerFired@1" }
   ],
   "modules": [
-    { "name": "demo/TimerSM@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    { "name": "demo/TimerSM@1" }
   ],
   "plans": [],
   "caps": [
-    { "name": "sys/timer@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    { "name": "sys/timer@1" }
   ],
   "policies": [
-    { "name": "demo/default_policy@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    { "name": "demo/default_policy@1" }
   ],
   "defaults": {
     "policy": "demo/default_policy@1",
