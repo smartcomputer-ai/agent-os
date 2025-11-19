@@ -63,6 +63,16 @@ pub enum KernelError {
     SnapshotDecode(String),
     #[error("proposal {0} not found")]
     ProposalNotFound(u64),
+    #[error("proposal {proposal_id} is in state {state:?}, expected {required}")]
+    ProposalStateInvalid {
+        proposal_id: u64,
+        state: crate::governance::ProposalState,
+        required: &'static str,
+    },
+    #[error("proposal {0} already applied")]
+    ProposalAlreadyApplied(u64),
+    #[error("shadow patch hash mismatch: expected {expected}, got {actual}")]
+    ShadowPatchMismatch { expected: String, actual: String },
 }
 
 impl From<crate::journal::JournalError> for KernelError {

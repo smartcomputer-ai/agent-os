@@ -35,6 +35,8 @@ enum Commands {
     Aggregator,
     /// Run the Chain + Compensation example
     ChainComp,
+    /// Run the governance safe-upgrade example
+    SafeUpgrade,
     /// Run every available example sequentially
     All,
 }
@@ -98,6 +100,14 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "examples/05-chain-comp",
         runner: examples::chain_comp::run,
     },
+    ExampleMeta {
+        number: "06",
+        slug: "safe-upgrade",
+        title: "Safe Upgrade",
+        summary: "Governance shadow/apply demo",
+        dir: "examples/06-safe-upgrade",
+        runner: examples::safe_upgrade::run,
+    },
 ];
 
 fn main() {
@@ -130,6 +140,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::FetchNotify) => run_single("fetch-notify"),
         Some(Commands::Aggregator) => run_single("aggregator"),
         Some(Commands::ChainComp) => run_single("chain-comp"),
+        Some(Commands::SafeUpgrade) => run_single("safe-upgrade"),
         Some(Commands::All) => run_all(),
         None => {
             list_examples();
