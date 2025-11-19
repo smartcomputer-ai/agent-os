@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "aos-air-exec",
  "aos-wasm-abi",
+ "indexmap",
  "serde",
  "serde_cbor",
 ]

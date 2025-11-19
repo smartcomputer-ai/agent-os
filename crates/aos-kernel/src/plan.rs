@@ -181,6 +181,16 @@ impl PlanInstance {
         loop {
             let ready_steps = self.ready_steps()?;
             if ready_steps.is_empty() {
+                if !self.receipt_waits.is_empty() {
+                    outcome
+                        .waiting_receipts
+                        .extend(self.receipt_waits.keys().copied());
+                    return Ok(outcome);
+                }
+                if let Some(wait) = &self.event_wait {
+                    outcome.waiting_event = Some(wait.schema.clone());
+                    return Ok(outcome);
+                }
                 if self.all_steps_completed() {
                     self.completed = true;
                     outcome.completed = true;
@@ -507,6 +517,13 @@ impl PlanInstance {
             }
 
             if waiting_registered {
+                return Ok(outcome);
+            }
+
+            if !self.receipt_waits.is_empty() {
+                outcome
+                    .waiting_receipts
+                    .extend(self.receipt_waits.keys().copied());
                 return Ok(outcome);
             }
 
