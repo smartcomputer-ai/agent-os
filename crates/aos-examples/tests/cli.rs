@@ -2,22 +2,61 @@ use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::process::Command;
 
+const CLI_SMOKE_TESTS: &[&str] = &[
+    "counter",
+    "hello-timer",
+    "blob-echo",
+    "fetch-notify",
+    "aggregator",
+    "chain-comp",
+];
+
 #[test]
-fn fetch_notify_cli_runs() {
-    if !wasm_target_installed() {
-        eprintln!("skipping fetch-notify CLI test (missing wasm target)");
-        return;
-    }
-    run_cli_example("fetch-notify", "Fetch & Notify demo");
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn counter_cli_runs() {
+    run_cli_smoke("counter");
 }
 
 #[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn hello_timer_cli_runs() {
+    run_cli_smoke("hello-timer");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn blob_echo_cli_runs() {
+    run_cli_smoke("blob-echo");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn fetch_notify_cli_runs() {
+    run_cli_smoke("fetch-notify");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
 fn aggregator_cli_runs() {
+    run_cli_smoke("aggregator");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn chain_comp_cli_runs() {
+    run_cli_smoke("chain-comp");
+}
+
+fn run_cli_smoke(subcommand: &str) {
     if !wasm_target_installed() {
-        eprintln!("skipping aggregator CLI test (missing wasm target)");
+        eprintln!("skipping {subcommand} CLI test (missing wasm target)");
         return;
     }
-    run_cli_example("aggregator", "Aggregator demo");
+    assert!(
+        CLI_SMOKE_TESTS.contains(&subcommand),
+        "unknown CLI example '{subcommand}'"
+    );
+    run_cli_example(subcommand, &format!("({subcommand})"));
 }
 
 fn run_cli_example(subcommand: &str, expected_snippet: &str) {
