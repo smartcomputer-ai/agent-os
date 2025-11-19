@@ -1,0 +1,88 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demo/charge_plan@1",
+    "input": "demo/ChargeRequested@1",
+    "steps": [
+      {
+        "id": "emit_charge",
+        "op": "emit_effect",
+        "kind": "http.request",
+        "params": {
+          "record": {
+            "method": {
+              "op": "get",
+              "args": [
+                { "ref": "@plan.input.target" },
+                { "text": "method" }
+              ]
+            },
+            "url": {
+              "op": "get",
+              "args": [
+                { "ref": "@plan.input.target" },
+                { "text": "url" }
+              ]
+            },
+            "headers": { "map": [] },
+            "body_ref": { "variant": { "tag": "None" } }
+          }
+        },
+        "cap": "cap_http_chain",
+        "bind": { "effect_id_as": "charge_req" }
+      },
+      {
+        "id": "await_charge",
+        "op": "await_receipt",
+        "for": { "ref": "@var:charge_req" },
+        "bind": { "as": "charge_receipt" }
+      },
+      {
+        "id": "raise_result",
+        "op": "raise_event",
+        "reducer": "demo/ChainComp@1",
+        "event": {
+          "variant": {
+            "tag": "ChargeCompleted",
+            "value": {
+              "record": {
+                "request_id": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "request_id" }
+                  ]
+                },
+                "status": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@var:charge_receipt" },
+                    { "text": "status" }
+                  ]
+                },
+                "body_preview": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@var:charge_receipt" },
+                    { "text": "body_preview" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "finish",
+        "op": "end"
+      }
+    ],
+    "edges": [
+      { "from": "emit_charge", "to": "await_charge" },
+      { "from": "await_charge", "to": "raise_result" },
+      { "from": "raise_result", "to": "finish" }
+    ],
+    "required_caps": ["cap_http_chain"],
+    "allowed_effects": ["http.request"]
+  }
+]

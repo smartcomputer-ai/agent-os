@@ -1,0 +1,13 @@
+[workspace]
+
+[package]
+name = "hello-timer-reducer"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+aos-wasm-sdk = { path = "../../../crates/aos-wasm-sdk" }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

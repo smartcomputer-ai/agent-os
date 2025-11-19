@@ -1,0 +1,46 @@
+{
+  "$kind": "manifest",
+  "schemas": [
+    { "name": "demo/FetchNotifyPc@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/FetchNotifyState@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/FetchNotifyEvent@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/FetchRequest@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "modules": [
+    { "name": "demo/FetchNotify@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "plans": [
+    { "name": "demo/fetch_plan@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "caps": [
+    { "name": "demo/http_fetch_cap@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "policies": [
+    { "name": "demo/http-policy@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "defaults": {
+    "policy": "demo/http-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_http_fetch",
+        "cap": "demo/http_fetch_cap@1",
+        "params": {
+          "record": {
+            "hosts": { "set": [ { "text": "example.com" } ] },
+            "methods": { "set": [ { "text": "GET" } ] }
+          }
+        }
+      }
+    ]
+  },
+  "module_bindings": {},
+  "routing": {
+    "events": [
+      { "event": "demo/FetchNotifyEvent@1", "reducer": "demo/FetchNotify@1" }
+    ],
+    "inboxes": []
+  },
+  "triggers": [
+    { "event": "demo/FetchRequest@1", "plan": "demo/fetch_plan@1", "correlate_by": "request_id" }
+  ]
+}

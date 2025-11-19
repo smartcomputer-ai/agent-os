@@ -597,9 +597,9 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 ## 18) On‑Disk Expectations
 
-- **Store nodes**: `.store/nodes/sha256/<hash>` (canonical CBOR bytes of AIR nodes)
+- **Store nodes**: `.aos/store/nodes/sha256/<hash>` (canonical CBOR bytes of AIR nodes)
 - **Modules (WASM)**: `modules/<name>@<ver>-<hash>.wasm` (`wasm_hash` = content hash)
-- **Blobs**: `.store/blobs/sha256/<hash>`
+- **Blobs**: `.aos/store/blobs/sha256/<hash>`
 - **Manifest roots**: `manifest.air.cbor` (binary) and `manifest.air.json` (text)
 
 ## 19) Security Model

@@ -1,0 +1,150 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demo/reserve_plan@1",
+    "input": "demo/ReserveRequested@1",
+    "steps": [
+      {
+        "id": "emit_reserve",
+        "op": "emit_effect",
+        "kind": "http.request",
+        "params": {
+          "record": {
+            "method": {
+              "op": "get",
+              "args": [
+                { "ref": "@plan.input.target" },
+                { "text": "method" }
+              ]
+            },
+            "url": {
+              "op": "get",
+              "args": [
+                { "ref": "@plan.input.target" },
+                { "text": "url" }
+              ]
+            },
+            "headers": { "map": [] },
+            "body_ref": { "variant": { "tag": "None" } }
+          }
+        },
+        "cap": "cap_http_chain",
+        "bind": { "effect_id_as": "reserve_req" }
+      },
+      {
+        "id": "await_reserve",
+        "op": "await_receipt",
+        "for": { "ref": "@var:reserve_req" },
+        "bind": { "as": "reserve_receipt" }
+      },
+      {
+        "id": "capture_status",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:reserve_receipt" },
+            { "text": "status" }
+          ]
+        },
+        "bind": { "as": "reserve_status" }
+      },
+      {
+        "id": "raise_success",
+        "op": "raise_event",
+        "reducer": "demo/ChainComp@1",
+        "event": {
+          "variant": {
+            "tag": "ReserveCompleted",
+            "value": {
+              "record": {
+                "request_id": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "request_id" }
+                  ]
+                },
+                "status": { "ref": "@var:reserve_status" },
+                "body_preview": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@var:reserve_receipt" },
+                    { "text": "body_preview" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "raise_failure",
+        "op": "raise_event",
+        "reducer": "demo/ChainComp@1",
+        "event": {
+          "variant": {
+            "tag": "ReserveFailed",
+            "value": {
+              "record": {
+                "request_id": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "request_id" }
+                  ]
+                },
+                "status": { "ref": "@var:reserve_status" },
+                "body_preview": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@var:reserve_receipt" },
+                    { "text": "body_preview" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "finish_success",
+        "op": "end"
+      },
+      {
+        "id": "finish_failure",
+        "op": "end"
+      }
+    ],
+    "edges": [
+      { "from": "emit_reserve", "to": "await_reserve" },
+      { "from": "await_reserve", "to": "capture_status" },
+      {
+        "from": "capture_status",
+        "to": "raise_success",
+        "when": {
+          "op": "lt",
+          "args": [
+            { "ref": "@var:reserve_status" },
+            { "int": 400 }
+          ]
+        }
+      },
+      {
+        "from": "capture_status",
+        "to": "raise_failure",
+        "when": {
+          "op": "ge",
+          "args": [
+            { "ref": "@var:reserve_status" },
+            { "int": 400 }
+          ]
+        }
+      },
+      { "from": "raise_success", "to": "finish_success" },
+      { "from": "raise_failure", "to": "finish_failure" }
+    ],
+    "required_caps": ["cap_http_chain"],
+    "allowed_effects": ["http.request"]
+  }
+]

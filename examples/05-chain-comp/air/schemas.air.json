@@ -1,0 +1,163 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainPhase@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Charging": { "unit": {} },
+        "Reserving": { "unit": {} },
+        "Notifying": { "unit": {} },
+        "Refunding": { "unit": {} },
+        "Completed": { "unit": {} },
+        "Refunded": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainHttpTarget@1",
+    "type": {
+      "record": {
+        "name": { "text": {} },
+        "method": { "text": {} },
+        "url": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainSagaState@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "order_id": { "text": {} },
+        "customer_id": { "text": {} },
+        "amount_cents": { "nat": {} },
+        "reserve_sku": { "text": {} },
+        "charge_status": { "option": { "int": {} } },
+        "reserve_status": { "option": { "int": {} } },
+        "notify_status": { "option": { "int": {} } },
+        "refund_status": { "option": { "int": {} } },
+        "last_error": { "option": { "text": {} } },
+        "charge_target": { "ref": "demo/ChainHttpTarget@1" },
+        "reserve_target": { "ref": "demo/ChainHttpTarget@1" },
+        "notify_target": { "ref": "demo/ChainHttpTarget@1" },
+        "refund_target": { "ref": "demo/ChainHttpTarget@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainState@1",
+    "type": {
+      "record": {
+        "phase": { "ref": "demo/ChainPhase@1" },
+        "next_request_id": { "nat": {} },
+        "current_saga": { "option": { "ref": "demo/ChainSagaState@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainEvent@1",
+    "type": {
+      "variant": {
+        "Start": {
+          "record": {
+            "order_id": { "text": {} },
+            "customer_id": { "text": {} },
+            "amount_cents": { "nat": {} },
+            "reserve_sku": { "text": {} },
+            "charge": { "ref": "demo/ChainHttpTarget@1" },
+            "reserve": { "ref": "demo/ChainHttpTarget@1" },
+            "notify": { "ref": "demo/ChainHttpTarget@1" },
+            "refund": { "ref": "demo/ChainHttpTarget@1" }
+          }
+        },
+        "ChargeCompleted": {
+          "record": {
+            "request_id": { "nat": {} },
+            "status": { "int": {} },
+            "body_preview": { "text": {} }
+          }
+        },
+        "ReserveCompleted": {
+          "record": {
+            "request_id": { "nat": {} },
+            "status": { "int": {} },
+            "body_preview": { "text": {} }
+          }
+        },
+        "ReserveFailed": {
+          "record": {
+            "request_id": { "nat": {} },
+            "status": { "int": {} },
+            "body_preview": { "text": {} }
+          }
+        },
+        "NotifyCompleted": {
+          "record": {
+            "request_id": { "nat": {} },
+            "status": { "int": {} }
+          }
+        },
+        "RefundCompleted": {
+          "record": {
+            "request_id": { "nat": {} },
+            "status": { "int": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChargeRequested@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "order_id": { "text": {} },
+        "amount_cents": { "nat": {} },
+        "customer_id": { "text": {} },
+        "target": { "ref": "demo/ChainHttpTarget@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ReserveRequested@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "order_id": { "text": {} },
+        "sku": { "text": {} },
+        "target": { "ref": "demo/ChainHttpTarget@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/NotifyRequested@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "order_id": { "text": {} },
+        "status_text": { "text": {} },
+        "target": { "ref": "demo/ChainHttpTarget@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/RefundRequested@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "order_id": { "text": {} },
+        "amount_cents": { "nat": {} },
+        "target": { "ref": "demo/ChainHttpTarget@1" }
+      }
+    }
+  }
+]

@@ -1,0 +1,87 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/AggregatorPc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Running": { "unit": {} },
+        "Done": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/AggregatorState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/AggregatorPc@1" },
+        "next_request_id": { "nat": {} },
+        "pending_request": { "option": { "nat": {} } },
+        "current_topic": { "option": { "text": {} } },
+        "pending_targets": { "list": { "text": {} } },
+        "last_responses": { "list": { "ref": "demo/AggregateResponse@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/AggregationTarget@1",
+    "type": {
+      "record": {
+        "name": { "text": {} },
+        "url": { "text": {} },
+        "method": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/AggregateResponse@1",
+    "type": {
+      "record": {
+        "source": { "text": {} },
+        "status": { "int": {} },
+        "body_preview": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/AggregatorEvent@1",
+    "type": {
+      "variant": {
+        "Start": {
+          "record": {
+            "topic": { "text": {} },
+            "primary": { "ref": "demo/AggregationTarget@1" },
+            "secondary": { "ref": "demo/AggregationTarget@1" },
+            "tertiary": { "ref": "demo/AggregationTarget@1" }
+          }
+        },
+        "AggregateComplete": {
+          "record": {
+            "request_id": { "nat": {} },
+            "topic": { "text": {} },
+            "primary": { "ref": "demo/AggregateResponse@1" },
+            "secondary": { "ref": "demo/AggregateResponse@1" },
+            "tertiary": { "ref": "demo/AggregateResponse@1" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/AggregateRequested@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "topic": { "text": {} },
+        "primary": { "ref": "demo/AggregationTarget@1" },
+        "secondary": { "ref": "demo/AggregationTarget@1" },
+        "tertiary": { "ref": "demo/AggregationTarget@1" }
+      }
+    }
+  }
+]

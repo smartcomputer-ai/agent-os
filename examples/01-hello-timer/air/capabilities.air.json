@@ -1,0 +1,8 @@
+[
+  {
+    "$kind": "defcap",
+    "name": "sys/timer@1",
+    "cap_type": "timer",
+    "schema": { "record": {} }
+  }
+]

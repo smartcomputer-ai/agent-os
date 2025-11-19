@@ -7,7 +7,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Filesystem-backed store rooted at `<root>/.store`.
+const AOS_DIR: &str = ".aos";
+const STORE_DIR: &str = "store";
+const HASH_SCHEME: &str = "sha256";
+
+/// Filesystem-backed store rooted at `<root>/.aos/store`.
 #[derive(Clone)]
 pub struct FsStore {
     nodes_dir: PathBuf,
@@ -26,9 +30,9 @@ impl fmt::Debug for FsStore {
 impl FsStore {
     pub fn open(root: impl AsRef<Path>) -> StoreResult<Self> {
         let root = root.as_ref();
-        let store_root = root.join(".store");
-        let nodes_dir = store_root.join("nodes").join("sha256");
-        let blobs_dir = store_root.join("blobs").join("sha256");
+        let store_root = root.join(AOS_DIR).join(STORE_DIR);
+        let nodes_dir = store_root.join("nodes").join(HASH_SCHEME);
+        let blobs_dir = store_root.join("blobs").join(HASH_SCHEME);
         fs::create_dir_all(&nodes_dir).map_err(|e| io_error(&nodes_dir, e))?;
         fs::create_dir_all(&blobs_dir).map_err(|e| io_error(&blobs_dir, e))?;
         Ok(Self {

@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use aos_air_exec::Value as ExprValue;
+use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
     AirNode, DefModule, Manifest, Name, NamedRef, TypeExpr, builtins,
     plan_literals::{SchemaIndex, normalize_plan_literals},
@@ -40,6 +41,12 @@ use crate::snapshot::{
 const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
 
+#[derive(Clone, Debug, Default)]
+pub struct KernelConfig {
+    pub module_cache_dir: Option<PathBuf>,
+    pub eager_module_load: bool,
+}
+
 pub struct Kernel<S: Store> {
     store: Arc<S>,
     manifest: Manifest,
@@ -50,7 +57,7 @@ pub struct Kernel<S: Store> {
     schema_index: Arc<SchemaIndex>,
     reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
     plan_instances: HashMap<u64, PlanInstance>,
-    plan_triggers: HashMap<String, Vec<String>>,
+    plan_triggers: HashMap<String, Vec<PlanTriggerBinding>>,
     waiting_events: HashMap<String, Vec<u64>>,
     pending_receipts: HashMap<[u8; 32], u64>,
     pending_reducer_receipts: HashMap<[u8; 32], ReducerEffectContext>,
@@ -71,6 +78,12 @@ pub struct PlanResultEntry {
     pub plan_id: u64,
     pub output_schema: String,
     pub value_cbor: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+struct PlanTriggerBinding {
+    plan: String,
+    correlate_by: Option<String>,
 }
 
 impl PlanResultEntry {
@@ -123,6 +136,7 @@ impl PlanResultEntry {
 pub struct KernelBuilder<S: Store> {
     store: Arc<S>,
     journal: Box<dyn Journal>,
+    config: KernelConfig,
 }
 
 impl<S: Store + 'static> KernelBuilder<S> {
@@ -130,6 +144,7 @@ impl<S: Store + 'static> KernelBuilder<S> {
         Self {
             store,
             journal: Box::new(MemJournal::new()),
+            config: KernelConfig::default(),
         }
     }
 
@@ -147,12 +162,22 @@ impl<S: Store + 'static> KernelBuilder<S> {
         Ok(self)
     }
 
+    pub fn with_module_cache_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.config.module_cache_dir = Some(dir.into());
+        self
+    }
+
+    pub fn with_eager_module_load(mut self, enable: bool) -> Self {
+        self.config.eager_module_load = enable;
+        self
+    }
+
     pub fn from_manifest_path(
         self,
         path: impl AsRef<std::path::Path>,
     ) -> Result<Kernel<S>, KernelError> {
         let loaded = ManifestLoader::load_from_path(&*self.store, path)?;
-        Kernel::from_loaded_manifest(self.store, loaded, self.journal)
+        Kernel::from_loaded_manifest_with_config(self.store, loaded, self.journal, self.config)
     }
 }
 
@@ -161,6 +186,15 @@ impl<S: Store + 'static> Kernel<S> {
         store: Arc<S>,
         loaded: LoadedManifest,
         journal: Box<dyn Journal>,
+    ) -> Result<Self, KernelError> {
+        Self::from_loaded_manifest_with_config(store, loaded, journal, KernelConfig::default())
+    }
+
+    pub fn from_loaded_manifest_with_config(
+        store: Arc<S>,
+        loaded: LoadedManifest,
+        journal: Box<dyn Journal>,
+        config: KernelConfig,
     ) -> Result<Self, KernelError> {
         let mut router = HashMap::new();
         if let Some(routing) = loaded.manifest.routing.as_ref() {
@@ -180,7 +214,13 @@ impl<S: Store + 'static> Kernel<S> {
             plan_triggers
                 .entry(trigger.event.as_str().to_string())
                 .or_insert_with(Vec::new)
-                .push(trigger.plan.clone());
+                .push(PlanTriggerBinding {
+                    plan: trigger.plan.clone(),
+                    correlate_by: trigger.correlate_by.clone(),
+                });
+        }
+        for bindings in plan_triggers.values_mut() {
+            bindings.sort_by(|a, b| a.plan.cmp(&b.plan));
         }
         let schema_index = Arc::new(build_schema_index_from_loaded(store.as_ref(), &loaded)?);
         let capability_resolver = CapabilityResolver::from_manifest(
@@ -217,7 +257,7 @@ impl<S: Store + 'static> Kernel<S> {
             module_defs: loaded.modules,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
-            reducers: ReducerRegistry::new(store)?,
+            reducers: ReducerRegistry::new(store, config.module_cache_dir.clone())?,
             router,
             plan_registry,
             plan_instances: HashMap::new(),
@@ -235,6 +275,11 @@ impl<S: Store + 'static> Kernel<S> {
             suppress_journal: false,
             governance: GovernanceManager::new(),
         };
+        if config.eager_module_load {
+            for (name, module_def) in kernel.module_defs.iter() {
+                kernel.reducers.ensure_loaded(name, module_def)?;
+            }
+        }
         kernel.replay_existing_entries()?;
         Ok(kernel)
     }
@@ -579,7 +624,7 @@ impl<S: Store + 'static> Kernel<S> {
         let matching_instance_id = self
             .plan_instances
             .iter()
-            .find(|(_, instance)| instance.pending_receipt_hash() == Some(intent_hash))
+            .find(|(_, instance)| instance.waiting_on_receipt(intent_hash))
             .map(|(id, _)| *id);
 
         if let Some(current_id) = matching_instance_id {
@@ -617,10 +662,10 @@ impl<S: Store + 'static> Kernel<S> {
         self.plan_instances.contains_key(&id)
     }
 
-    pub fn debug_plan_waits(&self) -> Vec<(u64, Option<[u8; 32]>)> {
+    pub fn debug_plan_waits(&self) -> Vec<(u64, Vec<[u8; 32]>)> {
         self.plan_instances
             .iter()
-            .map(|(id, instance)| (*id, instance.pending_receipt_hash()))
+            .map(|(id, instance)| (*id, instance.pending_receipt_hashes()))
             .collect()
     }
 
@@ -765,15 +810,17 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
-        if let Some(plan_names) = self.plan_triggers.get(&event.schema) {
-            for plan_name in plan_names {
-                if let Some(plan_def) = self.plan_registry.get(plan_name) {
+        if let Some(plan_bindings) = self.plan_triggers.get(&event.schema) {
+            for binding in plan_bindings {
+                if let Some(plan_def) = self.plan_registry.get(&binding.plan) {
                     let input: ExprValue = serde_cbor::from_slice(&event.value).map_err(|err| {
                         KernelError::Manifest(format!(
                             "failed to decode plan input for {}: {err}",
-                            plan_name
+                            binding.plan
                         ))
                     })?;
+                    let correlation =
+                        determine_correlation_value(binding, &input, event.key.as_ref());
                     let instance_id = self.scheduler.alloc_plan_id();
                     let instance = PlanInstance::new(
                         instance_id,
@@ -781,6 +828,7 @@ impl<S: Store + 'static> Kernel<S> {
                         input,
                         self.schema_index.clone(),
                         self.reducer_schemas.clone(),
+                        correlation,
                     );
                     self.plan_instances.insert(instance_id, instance);
                     self.scheduler.push_plan(instance_id);
@@ -800,14 +848,15 @@ impl<S: Store + 'static> Kernel<S> {
             self.remove_plan_from_waiting_events_for_schema(id, &schema);
         }
         if self.plan_instances.contains_key(&id) {
-            let (plan_name, outcome) = {
+            let (plan_name, outcome, step_states) = {
                 let instance = self
                     .plan_instances
                     .get_mut(&id)
                     .expect("instance must exist");
                 let name = instance.name.clone();
+                let snapshot = instance.snapshot();
                 let outcome = instance.tick(&mut self.effect_manager)?;
-                (name, outcome)
+                (name, outcome, snapshot.step_states)
             };
             for event in &outcome.raised_events {
                 self.record_domain_event(event)?;
@@ -825,8 +874,8 @@ impl<S: Store + 'static> Kernel<S> {
                     },
                 )?;
             }
-            if let Some(hash) = outcome.waiting_receipt {
-                self.pending_receipts.insert(hash, id);
+            for hash in &outcome.waiting_receipts {
+                self.pending_receipts.insert(*hash, id);
             }
             if let Some(schema) = outcome.waiting_event.clone() {
                 self.waiting_events.entry(schema).or_default().push(id);
@@ -843,7 +892,7 @@ impl<S: Store + 'static> Kernel<S> {
                     }
                 }
                 self.plan_instances.remove(&id);
-            } else if outcome.waiting_receipt.is_none() && outcome.waiting_event.is_none() {
+            } else if outcome.waiting_receipts.is_empty() && outcome.waiting_event.is_none() {
                 self.scheduler.push_plan(id);
             }
         }
@@ -1004,6 +1053,44 @@ impl<S: Store + 'static> Kernel<S> {
             signature: receipt.signature.clone(),
         });
         self.append_record(record)
+    }
+}
+
+fn determine_correlation_value(
+    binding: &PlanTriggerBinding,
+    input: &ExprValue,
+    event_key: Option<&Vec<u8>>,
+) -> Option<(Vec<u8>, ExprValue)> {
+    if let Some(field) = &binding.correlate_by {
+        if let Some(value) = extract_correlation_value(input, field) {
+            let bytes = encode_correlation_bytes(&value);
+            return Some((bytes, value));
+        }
+    }
+    event_key.map(|key| (key.clone(), ExprValue::Bytes(key.clone())))
+}
+
+fn extract_correlation_value(value: &ExprValue, path: &str) -> Option<ExprValue> {
+    let mut current = value;
+    for segment in path.split('.') {
+        if segment.is_empty() {
+            continue;
+        }
+        current = match current {
+            ExprValue::Record(map) => map.get(segment)?,
+            ExprValue::Map(map) => map.get(&ValueKey::Text(segment.to_string()))?,
+            _ => return None,
+        };
+    }
+    Some(current.clone())
+}
+
+fn encode_correlation_bytes(value: &ExprValue) -> Vec<u8> {
+    match value {
+        ExprValue::Text(text) => text.as_bytes().to_vec(),
+        ExprValue::Nat(n) => n.to_be_bytes().to_vec(),
+        ExprValue::Int(i) => i.to_be_bytes().to_vec(),
+        other => serde_cbor::to_vec(other).unwrap_or_default(),
     }
 }
 

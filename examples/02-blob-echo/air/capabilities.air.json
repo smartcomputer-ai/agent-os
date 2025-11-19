@@ -1,0 +1,8 @@
+[
+  {
+    "$kind": "defcap",
+    "name": "sys/blob@1",
+    "cap_type": "blob",
+    "schema": { "record": {} }
+  }
+]

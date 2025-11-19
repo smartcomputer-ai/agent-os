@@ -1,0 +1,42 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/BlobEchoPc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Putting": { "unit": {} },
+        "Getting": { "unit": {} },
+        "Done": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/BlobEchoState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/BlobEchoPc@1" },
+        "namespace": { "option": { "text": {} } },
+        "key": { "option": { "text": {} } },
+        "stored_blob_ref": { "option": { "text": {} } },
+        "retrieved_blob_ref": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/BlobEchoEvent@1",
+    "type": {
+      "variant": {
+        "Start": {
+          "record": {
+            "namespace": { "text": {} },
+            "key": { "text": {} },
+            "data": { "bytes": {} }
+          }
+        }
+      }
+    }
+  }
+]
