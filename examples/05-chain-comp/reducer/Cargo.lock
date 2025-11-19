@@ -50,6 +50,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aos-wasm-sdk"
+version = "0.1.0"
+dependencies = [
+ "aos-wasm-abi",
+ "serde",
+ "serde_bytes",
+ "serde_cbor",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -75,7 +85,7 @@ name = "chain-comp-reducer"
 version = "0.1.0"
 dependencies = [
  "aos-air-exec",
- "aos-wasm-abi",
+ "aos-wasm-sdk",
  "indexmap",
  "serde",
  "serde_cbor",

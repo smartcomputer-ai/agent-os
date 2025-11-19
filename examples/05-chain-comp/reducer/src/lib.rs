@@ -1,12 +1,19 @@
 #![allow(improper_ctypes_definitions)]
+#![no_std]
 
+extern crate alloc;
+
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 use aos_air_exec::{Value, ValueKey};
-use aos_wasm_abi::{DomainEvent, ReducerInput, ReducerOutput};
+use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, Value as CborValue};
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
-use std::alloc::{alloc as host_alloc, Layout};
-use std::collections::BTreeMap;
-use std::slice;
 
 const EVENT_SCHEMA: &str = "demo/ChainEvent@1";
 const CHARGE_REQUEST_SCHEMA: &str = "demo/ChargeRequested@1";
@@ -100,28 +107,22 @@ enum ChainEvent {
     },
 }
 
-#[cfg_attr(target_arch = "wasm32", unsafe(export_name = "alloc"))]
-pub extern "C" fn wasm_alloc(len: i32) -> i32 {
-    if len <= 0 {
-        return 0;
-    }
-    let layout = Layout::from_size_align(len as usize, 8).expect("layout");
-    unsafe { host_alloc(layout) as i32 }
-}
+aos_reducer!(ChainCompSm);
 
-#[cfg_attr(target_arch = "wasm32", unsafe(export_name = "step"))]
-pub extern "C" fn wasm_step(ptr: i32, len: i32) -> (i32, i32) {
-    let input_bytes = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
-    let input = ReducerInput::decode(input_bytes).expect("valid reducer input");
+#[derive(Default)]
+struct ChainCompSm;
 
-    let mut state = input
-        .state
-        .map(|bytes| serde_cbor::from_slice::<ChainState>(&bytes).expect("state"))
-        .unwrap_or_default();
+impl Reducer for ChainCompSm {
+    type State = ChainState;
+    type Event = CborValue;
+    type Ann = Value;
 
-    let mut domain_events = Vec::new();
-    if input.event.schema == EVENT_SCHEMA {
-        if let Ok(event) = decode_event(&input.event.value) {
+    fn reduce(
+        &mut self,
+        event_value: Self::Event,
+        ctx: &mut ReducerCtx<Self::State, Self::Ann>,
+    ) -> Result<(), ReduceError> {
+        if let Some(event) = decode_event(event_value) {
             match event {
                 ChainEvent::Start {
                     order_id,
@@ -133,7 +134,7 @@ pub extern "C" fn wasm_step(ptr: i32, len: i32) -> (i32, i32) {
                     notify,
                     refund,
                 } => handle_start(
-                    &mut state,
+                    ctx,
                     order_id,
                     customer_id,
                     amount_cents,
@@ -142,64 +143,36 @@ pub extern "C" fn wasm_step(ptr: i32, len: i32) -> (i32, i32) {
                     reserve,
                     notify,
                     refund,
-                    &mut domain_events,
                 ),
                 ChainEvent::ChargeCompleted {
                     request_id,
                     status,
                     body_preview,
-                } => handle_charge_completed(
-                    &mut state,
-                    request_id,
-                    status,
-                    body_preview,
-                    &mut domain_events,
-                ),
+                } => handle_charge_completed(ctx, request_id, status, body_preview),
                 ChainEvent::ReserveCompleted {
                     request_id,
                     status,
                     body_preview,
-                } => handle_reserve_completed(
-                    &mut state,
-                    request_id,
-                    status,
-                    body_preview,
-                    &mut domain_events,
-                ),
+                } => handle_reserve_completed(ctx, request_id, status, body_preview),
                 ChainEvent::ReserveFailed {
                     request_id,
                     status,
                     body_preview,
-                } => handle_reserve_failed(
-                    &mut state,
-                    request_id,
-                    status,
-                    body_preview,
-                    &mut domain_events,
-                ),
+                } => handle_reserve_failed(ctx, request_id, status, body_preview),
                 ChainEvent::NotifyCompleted { request_id, status } => {
-                    handle_notify_completed(&mut state, request_id, status)
+                    handle_notify_completed(ctx, request_id, status)
                 }
                 ChainEvent::RefundCompleted { request_id, status } => {
-                    handle_refund_completed(&mut state, request_id, status)
+                    handle_refund_completed(ctx, request_id, status)
                 }
             }
         }
+        Ok(())
     }
-
-    let state_bytes = serde_cbor::to_vec(&state).expect("encode state");
-    let output = ReducerOutput {
-        state: Some(state_bytes),
-        domain_events,
-        effects: Vec::new(),
-        ann: None,
-    };
-    let output_bytes = output.encode().expect("encode output");
-    write_back(&output_bytes)
 }
 
 fn handle_start(
-    state: &mut ChainState,
+    ctx: &mut ReducerCtx<ChainState, Value>,
     order_id: String,
     customer_id: String,
     amount_cents: u64,
@@ -208,16 +181,15 @@ fn handle_start(
     reserve: ChainHttpTarget,
     notify: ChainHttpTarget,
     refund: ChainHttpTarget,
-    domain_events: &mut Vec<DomainEvent>,
 ) {
-    match state.phase {
+    match ctx.state.phase {
         ChainPhase::Idle | ChainPhase::Completed | ChainPhase::Refunded => {}
         _ => return,
     }
-    let request_id = state.next_request_id;
-    state.next_request_id = state.next_request_id.saturating_add(1);
-    state.phase = ChainPhase::Charging;
-    state.current_saga = Some(SagaState {
+    let request_id = ctx.state.next_request_id;
+    ctx.state.next_request_id = ctx.state.next_request_id.saturating_add(1);
+    ctx.state.phase = ChainPhase::Charging;
+    ctx.state.current_saga = Some(SagaState {
         request_id,
         order_id,
         customer_id,
@@ -233,17 +205,16 @@ fn handle_start(
         notify_target: notify,
         refund_target: refund,
     });
-    emit_charge_intent(state, domain_events);
+    emit_charge_intent(ctx);
 }
 
 fn handle_charge_completed(
-    state: &mut ChainState,
+    ctx: &mut ReducerCtx<ChainState, Value>,
     request_id: u64,
     status: i64,
     body_preview: String,
-    domain_events: &mut Vec<DomainEvent>,
 ) {
-    let Some(saga) = state.current_saga.as_mut() else {
+    let Some(saga) = ctx.state.current_saga.as_mut() else {
         return;
     };
     if saga.request_id != request_id {
@@ -251,18 +222,17 @@ fn handle_charge_completed(
     }
     saga.charge_status = Some(status);
     saga.last_error = None;
-    state.phase = ChainPhase::Reserving;
-    emit_reserve_intent(state, &body_preview, domain_events);
+    ctx.state.phase = ChainPhase::Reserving;
+    emit_reserve_intent(ctx, &body_preview);
 }
 
 fn handle_reserve_completed(
-    state: &mut ChainState,
+    ctx: &mut ReducerCtx<ChainState, Value>,
     request_id: u64,
     status: i64,
     body_preview: String,
-    domain_events: &mut Vec<DomainEvent>,
 ) {
-    let Some(saga) = state.current_saga.as_mut() else {
+    let Some(saga) = ctx.state.current_saga.as_mut() else {
         return;
     };
     if saga.request_id != request_id {
@@ -270,119 +240,128 @@ fn handle_reserve_completed(
     }
     saga.reserve_status = Some(status);
     saga.last_error = None;
-    state.phase = ChainPhase::Notifying;
-    emit_notify_intent(state, format!("reserved: {body_preview}"), domain_events);
+    ctx.state.phase = ChainPhase::Notifying;
+    emit_notify_intent(ctx, format!("reserved: {body_preview}"));
 }
 
 fn handle_reserve_failed(
-    state: &mut ChainState,
+    ctx: &mut ReducerCtx<ChainState, Value>,
     request_id: u64,
     status: i64,
     body_preview: String,
-    domain_events: &mut Vec<DomainEvent>,
 ) {
-    let Some(saga) = state.current_saga.as_mut() else {
+    let Some(saga) = ctx.state.current_saga.as_mut() else {
         return;
     };
     if saga.request_id != request_id {
         return;
     }
     saga.reserve_status = Some(status);
-    saga.last_error = Some(body_preview.clone());
-    state.phase = ChainPhase::Refunding;
-    emit_refund_intent(state, domain_events);
+    saga.last_error = Some(body_preview);
+    ctx.state.phase = ChainPhase::Refunding;
+    emit_refund_intent(ctx);
 }
 
-fn handle_notify_completed(state: &mut ChainState, request_id: u64, status: i64) {
-    let Some(saga) = state.current_saga.as_mut() else {
+fn handle_notify_completed(
+    ctx: &mut ReducerCtx<ChainState, Value>,
+    request_id: u64,
+    status: i64,
+) {
+    let Some(saga) = ctx.state.current_saga.as_mut() else {
         return;
     };
     if saga.request_id != request_id {
         return;
     }
     saga.notify_status = Some(status);
-    state.phase = ChainPhase::Completed;
+    ctx.state.phase = ChainPhase::Completed;
 }
 
-fn handle_refund_completed(state: &mut ChainState, request_id: u64, status: i64) {
-    let Some(saga) = state.current_saga.as_mut() else {
+fn handle_refund_completed(
+    ctx: &mut ReducerCtx<ChainState, Value>,
+    request_id: u64,
+    status: i64,
+) {
+    let Some(saga) = ctx.state.current_saga.as_mut() else {
         return;
     };
     if saga.request_id != request_id {
         return;
     }
     saga.refund_status = Some(status);
-    state.phase = ChainPhase::Refunded;
+    ctx.state.phase = ChainPhase::Refunded;
 }
 
-fn emit_charge_intent(state: &ChainState, domain_events: &mut Vec<DomainEvent>) {
-    let Some(saga) = state.current_saga.as_ref() else {
+fn emit_charge_intent(ctx: &mut ReducerCtx<ChainState, Value>) {
+    let Some(saga) = ctx.state.current_saga.as_ref() else {
         return;
     };
-    let value = Value::record([
+    let payload = Value::record([
         ("request_id", Value::Nat(saga.request_id)),
         ("order_id", Value::Text(saga.order_id.clone())),
         ("amount_cents", Value::Nat(saga.amount_cents)),
         ("customer_id", Value::Text(saga.customer_id.clone())),
         ("target", target_to_value(&saga.charge_target)),
     ]);
-    domain_events.push(into_intent(CHARGE_REQUEST_SCHEMA, saga.request_id, value));
+    let key = saga.request_id.to_be_bytes();
+    ctx.intent(CHARGE_REQUEST_SCHEMA)
+        .key_bytes(&key)
+        .payload(&payload)
+        .send();
 }
 
-fn emit_reserve_intent(
-    state: &ChainState,
-    reserve_summary: &str,
-    domain_events: &mut Vec<DomainEvent>,
-) {
-    let Some(saga) = state.current_saga.as_ref() else {
+fn emit_reserve_intent(ctx: &mut ReducerCtx<ChainState, Value>, body_preview: &str) {
+    let Some(saga) = ctx.state.current_saga.as_ref() else {
         return;
     };
-    let value = Value::record([
+    let payload = Value::record([
         ("request_id", Value::Nat(saga.request_id)),
         ("order_id", Value::Text(saga.order_id.clone())),
-        (
-            "sku",
-            Value::Text(format!("{}:{reserve_summary}", saga.reserve_sku)),
-        ),
+        ("reserve_sku", Value::Text(saga.reserve_sku.clone())),
         ("target", target_to_value(&saga.reserve_target)),
+        ("source_preview", Value::Text(body_preview.to_string())),
     ]);
-    domain_events.push(into_intent(RESERVE_REQUEST_SCHEMA, saga.request_id, value));
+    let key = saga.request_id.to_be_bytes();
+    ctx.intent(RESERVE_REQUEST_SCHEMA)
+        .key_bytes(&key)
+        .payload(&payload)
+        .send();
 }
 
-fn emit_notify_intent(
-    state: &ChainState,
-    status_text: String,
-    domain_events: &mut Vec<DomainEvent>,
-) {
-    let Some(saga) = state.current_saga.as_ref() else {
+fn emit_notify_intent(ctx: &mut ReducerCtx<ChainState, Value>, body_preview: String) {
+    let Some(saga) = ctx.state.current_saga.as_ref() else {
         return;
     };
-    let value = Value::record([
-        ("request_id", Value::Nat(saga.request_id)),
-        ("order_id", Value::Text(saga.order_id.clone())),
-        ("status_text", Value::Text(status_text)),
-        ("target", target_to_value(&saga.notify_target)),
-    ]);
-    domain_events.push(into_intent(NOTIFY_REQUEST_SCHEMA, saga.request_id, value));
-}
-
-fn emit_refund_intent(state: &ChainState, domain_events: &mut Vec<DomainEvent>) {
-    let Some(saga) = state.current_saga.as_ref() else {
-        return;
-    };
-    let value = Value::record([
+    let payload = Value::record([
         ("request_id", Value::Nat(saga.request_id)),
         ("order_id", Value::Text(saga.order_id.clone())),
         ("amount_cents", Value::Nat(saga.amount_cents)),
-        ("target", target_to_value(&saga.refund_target)),
+        ("target", target_to_value(&saga.notify_target)),
+        ("source_preview", Value::Text(body_preview)),
     ]);
-    domain_events.push(into_intent(REFUND_REQUEST_SCHEMA, saga.request_id, value));
+    let key = saga.request_id.to_be_bytes();
+    ctx.intent(NOTIFY_REQUEST_SCHEMA)
+        .key_bytes(&key)
+        .payload(&payload)
+        .send();
 }
 
-fn into_intent(schema: &str, request_id: u64, value: Value) -> DomainEvent {
-    let payload = serde_cbor::to_vec(&value).expect("intent value");
-    let key = request_id.to_be_bytes().to_vec();
-    DomainEvent::with_key(schema, payload, key)
+fn emit_refund_intent(ctx: &mut ReducerCtx<ChainState, Value>) {
+    let Some(saga) = ctx.state.current_saga.as_ref() else {
+        return;
+    };
+    let payload = Value::record([
+        ("request_id", Value::Nat(saga.request_id)),
+        ("order_id", Value::Text(saga.order_id.clone())),
+        ("amount_cents", Value::Nat(saga.amount_cents)),
+        ("customer_id", Value::Text(saga.customer_id.clone())),
+        ("target", target_to_value(&saga.refund_target)),
+    ]);
+    let key = saga.request_id.to_be_bytes();
+    ctx.intent(REFUND_REQUEST_SCHEMA)
+        .key_bytes(&key)
+        .payload(&payload)
+        .send();
 }
 
 fn target_to_value(target: &ChainHttpTarget) -> Value {
@@ -393,17 +372,21 @@ fn target_to_value(target: &ChainHttpTarget) -> Value {
     ])
 }
 
-fn decode_event(bytes: &[u8]) -> Result<ChainEvent, serde_cbor::Error> {
+fn decode_event(value: CborValue) -> Option<ChainEvent> {
+    let bytes = serde_cbor::to_vec(&value).ok()?;
+    decode_event_bytes(&bytes).ok()
+}
+
+fn decode_event_bytes(bytes: &[u8]) -> Result<ChainEvent, serde_cbor::Error> {
     if let Ok(event) = serde_cbor::from_slice::<ChainEvent>(bytes) {
         return Ok(event);
     }
     let value: Value = serde_cbor::from_slice(bytes)?;
     match value {
         Value::Record(mut record) => {
-            if let (Some(Value::Text(tag)), Some(body)) = (
-                record.swap_remove("$tag"),
-                record.swap_remove("$value"),
-            ) {
+            if let (Some(Value::Text(tag)), Some(body)) =
+                (record.swap_remove("$tag"), record.swap_remove("$value"))
+            {
                 return parse_variant(tag, body);
             }
         }
@@ -417,9 +400,8 @@ fn parse_variant(tag: String, body: Value) -> Result<ChainEvent, serde_cbor::Err
     let mut map = BTreeMap::new();
     map.insert(serde_cbor::Value::Text(tag.clone()), cbor_body);
     let wrapped = serde_cbor::Value::Map(map);
-    serde_cbor::value::from_value(wrapped).map_err(|err| {
-        serde_cbor::Error::custom(format!("{tag} variant decode error: {err}"))
-    })
+    serde_cbor::value::from_value(wrapped)
+        .map_err(|err| serde_cbor::Error::custom(format!("{tag} variant decode error: {err}")))
 }
 
 fn value_to_cbor_value(value: Value) -> Result<serde_cbor::Value, serde_cbor::Error> {
@@ -433,7 +415,7 @@ fn value_to_cbor_value(value: Value) -> Result<serde_cbor::Value, serde_cbor::Er
         Value::Text(text) => serde_cbor::Value::Text(text),
         Value::TimeNs(value) => serde_cbor::Value::Integer(value as i128),
         Value::DurationNs(value) => serde_cbor::Value::Integer(value as i128),
-        Value::Hash(hash) => serde_cbor::Value::Text(hash.as_str().to_owned()),
+        Value::Hash(hash) => serde_cbor::Value::Text(hash.as_str().to_string()),
         Value::Uuid(uuid) => serde_cbor::Value::Text(uuid),
         Value::List(values) => serde_cbor::Value::Array(
             values
@@ -476,16 +458,6 @@ fn key_to_cbor_value(key: ValueKey) -> Result<serde_cbor::Value, serde_cbor::Err
     })
 }
 
-fn write_back(bytes: &[u8]) -> (i32, i32) {
-    let len = bytes.len() as i32;
-    let ptr = wasm_alloc(len);
-    unsafe {
-        let dst = slice::from_raw_parts_mut(ptr as *mut u8, len as usize);
-        dst.copy_from_slice(bytes);
-    }
-    (ptr, len)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,7 +480,7 @@ mod tests {
                 assert_eq!(status, 201);
                 assert_eq!(body_preview, "ok");
             }
-            other => panic!("unexpected event parsed: {other:?}"),
+            other => panic!("unexpected event parsed: {:?}", other),
         }
     }
 }

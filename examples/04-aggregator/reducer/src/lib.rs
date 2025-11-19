@@ -157,25 +157,21 @@ fn handle_complete(
 
 fn decode_event(value: CborValue) -> Option<AggregatorEvent> {
     let bytes = serde_cbor::to_vec(&value).ok()?;
-    decode_event_bytes(&bytes).ok()
-}
-
-fn decode_event_bytes(bytes: &[u8]) -> Result<AggregatorEvent, serde_cbor::Error> {
-    if let Ok(event) = serde_cbor::from_slice::<AggregatorEvent>(bytes) {
-        return Ok(event);
+    if let Ok(event) = serde_cbor::from_slice::<AggregatorEvent>(&bytes) {
+        return Some(event);
     }
-    let value: Value = serde_cbor::from_slice(bytes)?;
-    match value {
+    let value_air: Value = serde_cbor::from_slice(&bytes).ok()?;
+    match value_air {
         Value::Record(mut record) => {
             if let (Some(Value::Text(tag)), Some(body)) =
                 (record.swap_remove("$tag"), record.swap_remove("$value"))
             {
-                return parse_variant(tag, body);
+                return parse_variant(tag, body).ok();
             }
         }
         _ => {}
     }
-    Err(serde_cbor::Error::custom("unsupported event variant"))
+    None
 }
 
 fn parse_variant(tag: String, body: Value) -> Result<AggregatorEvent, serde_cbor::Error> {
