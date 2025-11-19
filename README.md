@@ -39,15 +39,15 @@ Start here:
 
 For implementation guidance, project structure, and coding conventions, see **[AGENTS.md](AGENTS.md)**.
 
+## Running the Examples
 
-## License
+All ladder demos live under `examples/` and share the `aos-examples` CLI.
 
-AgentOS is open-source software licensed under the **Apache License 2.0**.
-The runtime, kernel, adapters, and SDKs are available for free use and modification under that license, with an explicit grant of patent rights.
-
-The AIR specification and schema documents are published under the **Creative Commons Attribution 4.0 International (CC BY 4.0)** license with a royalty-free patent non-assert, so anyone can build compatible implementations.
-
-See [`LICENSE`](./LICENSE) and [`LICENSE-SPEC`](./LICENSE-SPEC) for full terms.
+- List demos: `cargo run -p aos-examples --`
+- Run a single demo (e.g., counter): `cargo run -p aos-examples -- counter`
+- Run them sequentially: `cargo run -p aos-examples -- all`
+- Force a rebuild of reducer WASM/artifacts: add `--force-build`, e.g. `cargo run -p aos-examples -- --force-build counter`
+- Increase logging by exporting `RUST_LOG=debug` before invoking the CLI if you need cache/build insight
 
 
 ## Current Status
@@ -59,3 +59,13 @@ This version of AgentOS replaces our first attempt, which can be [found here](ht
 ## Contributing
 
 Feedback, questions, and contributions are welcome. Open an issue or start a discussion.
+
+## License
+
+AgentOS is open-source software licensed under the **Apache License 2.0**.
+The runtime, kernel, adapters, and SDKs are available for free use and modification under that license, with an explicit grant of patent rights.
+
+The AIR specification and schema documents are published under the **Creative Commons Attribution 4.0 International (CC BY 4.0)** license with a royalty-free patent non-assert, so anyone can build compatible implementations.
+
+See [`LICENSE`](./LICENSE) and [`LICENSE-SPEC`](./LICENSE-SPEC) for full terms.
+
