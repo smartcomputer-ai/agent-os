@@ -1,12 +1,14 @@
 #![allow(improper_ctypes_definitions)]
+#![no_std]
 
+extern crate alloc;
+
+use alloc::{format, string::String, vec, vec::Vec};
 use aos_air_exec::Value;
-use aos_wasm_abi::{DomainEvent, ReducerInput, ReducerOutput};
+use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, Value as CborValue};
 use indexmap::IndexMap;
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
-use std::alloc::{alloc as host_alloc, Layout};
-use std::slice;
 
 const EVENT_SCHEMA: &str = "demo/AggregatorEvent@1";
 const AGGREGATE_REQUEST_SCHEMA: &str = "demo/AggregateRequested@1";
@@ -65,91 +67,63 @@ enum AggregatorEvent {
     },
 }
 
-#[cfg_attr(target_arch = "wasm32", unsafe(export_name = "alloc"))]
-pub extern "C" fn wasm_alloc(len: i32) -> i32 {
-    if len <= 0 {
-        return 0;
-    }
-    let layout = Layout::from_size_align(len as usize, 8).expect("layout");
-    unsafe { host_alloc(layout) as i32 }
-}
+aos_reducer!(AggregatorSm);
 
-#[cfg_attr(target_arch = "wasm32", unsafe(export_name = "step"))]
-pub extern "C" fn wasm_step(ptr: i32, len: i32) -> (i32, i32) {
-    let input_bytes = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
-    let input = ReducerInput::decode(input_bytes).expect("valid reducer input");
+#[derive(Default)]
+struct AggregatorSm;
 
-    let mut state = input
-        .state
-        .map(|bytes| serde_cbor::from_slice::<AggregatorState>(&bytes).expect("state"))
-        .unwrap_or_default();
+impl Reducer for AggregatorSm {
+    type State = AggregatorState;
+    type Event = CborValue;
+    type Ann = Value;
 
-    let mut domain_events = Vec::new();
-    if input.event.schema == EVENT_SCHEMA {
-        if let Ok(event) = decode_event(&input.event.value) {
+    fn reduce(
+        &mut self,
+        event_value: Self::Event,
+        ctx: &mut ReducerCtx<Self::State, Self::Ann>,
+    ) -> Result<(), ReduceError> {
+        if let Some(event) = decode_event(event_value) {
             match event {
                 AggregatorEvent::Start {
                     topic,
                     primary,
                     secondary,
                     tertiary,
-                } => handle_start(
-                    &mut state,
-                    topic,
-                    primary,
-                    secondary,
-                    tertiary,
-                    &mut domain_events,
-                ),
+                } => handle_start(ctx, topic, primary, secondary, tertiary),
                 AggregatorEvent::AggregateComplete {
                     request_id,
                     topic,
                     primary,
                     secondary,
                     tertiary,
-                } => handle_complete(
-                    &mut state,
-                    request_id,
-                    topic,
-                    [primary, secondary, tertiary],
-                ),
+                } => handle_complete(ctx, request_id, topic, [primary, secondary, tertiary]),
             }
         }
+        Ok(())
     }
-
-    let state_bytes = serde_cbor::to_vec(&state).expect("encode state");
-    let output = ReducerOutput {
-        state: Some(state_bytes),
-        domain_events,
-        effects: Vec::new(),
-        ann: None,
-    };
-    let output_bytes = output.encode().expect("encode output");
-    write_back(&output_bytes)
 }
 
 fn handle_start(
-    state: &mut AggregatorState,
+    ctx: &mut ReducerCtx<AggregatorState, Value>,
     topic: String,
     primary: AggregationTarget,
     secondary: AggregationTarget,
     tertiary: AggregationTarget,
-    domain_events: &mut Vec<DomainEvent>,
 ) {
-    if matches!(state.pc, AggregatorPc::Running) {
+    if matches!(ctx.state.pc, AggregatorPc::Running) {
         return;
     }
-    let request_id = state.next_request_id;
-    state.next_request_id = state.next_request_id.saturating_add(1);
-    state.pending_request = Some(request_id);
-    state.current_topic = Some(topic.clone());
-    state.pc = AggregatorPc::Running;
-    state.pending_targets = vec![
+    let request_id = ctx.state.next_request_id;
+    ctx.state.next_request_id = ctx.state.next_request_id.saturating_add(1);
+    ctx.state.pending_request = Some(request_id);
+    ctx.state.current_topic = Some(topic.clone());
+    ctx.state.pc = AggregatorPc::Running;
+    ctx.state.pending_targets = vec![
         primary.name.clone(),
         secondary.name.clone(),
         tertiary.name.clone(),
     ];
-    state.last_responses.clear();
+    ctx.state.last_responses.clear();
 
     let intent_value = Value::record([
         ("request_id", Value::Nat(request_id)),
@@ -158,39 +132,44 @@ fn handle_start(
         ("secondary", target_to_value(&secondary)),
         ("tertiary", target_to_value(&tertiary)),
     ]);
-    let value = serde_cbor::to_vec(&intent_value).expect("intent");
-    let key = request_id.to_be_bytes().to_vec();
-    domain_events.push(DomainEvent::with_key(
-        AGGREGATE_REQUEST_SCHEMA,
-        value,
-        key,
-    ));
+    let key = request_id.to_be_bytes();
+    ctx.intent(AGGREGATE_REQUEST_SCHEMA)
+        .key_bytes(&key)
+        .payload(&intent_value)
+        .send();
 }
 
 fn handle_complete(
-    state: &mut AggregatorState,
+    ctx: &mut ReducerCtx<AggregatorState, Value>,
     request_id: u64,
     topic: String,
     responses: [AggregateResponse; 3],
 ) {
-    if !matches!(state.pending_request, Some(id) if id == request_id) {
+    if !matches!(ctx.state.pending_request, Some(id) if id == request_id) {
         return;
     }
-    state.pending_request = None;
-    state.pc = AggregatorPc::Done;
-    state.current_topic = Some(topic);
-    state.pending_targets.clear();
-    state.last_responses = responses.to_vec();
+    ctx.state.pending_request = None;
+    ctx.state.pc = AggregatorPc::Done;
+    ctx.state.current_topic = Some(topic);
+    ctx.state.pending_targets.clear();
+    ctx.state.last_responses = responses.to_vec();
 }
 
-fn decode_event(bytes: &[u8]) -> Result<AggregatorEvent, serde_cbor::Error> {
+fn decode_event(value: CborValue) -> Option<AggregatorEvent> {
+    let bytes = serde_cbor::to_vec(&value).ok()?;
+    decode_event_bytes(&bytes).ok()
+}
+
+fn decode_event_bytes(bytes: &[u8]) -> Result<AggregatorEvent, serde_cbor::Error> {
     if let Ok(event) = serde_cbor::from_slice::<AggregatorEvent>(bytes) {
         return Ok(event);
     }
     let value: Value = serde_cbor::from_slice(bytes)?;
     match value {
         Value::Record(mut record) => {
-            if let (Some(Value::Text(tag)), Some(body)) = (record.swap_remove("$tag"), record.swap_remove("$value")) {
+            if let (Some(Value::Text(tag)), Some(body)) =
+                (record.swap_remove("$tag"), record.swap_remove("$value"))
+            {
                 return parse_variant(tag, body);
             }
         }
@@ -249,10 +228,7 @@ fn target_to_value(target: &AggregationTarget) -> Value {
     ])
 }
 
-fn extract_target_value(
-    record: &mut IndexMap<String, Value>,
-    key: &str,
-) -> AggregationTarget {
+fn extract_target_value(record: &mut IndexMap<String, Value>, key: &str) -> AggregationTarget {
     if let Some(Value::Record(mut target)) = record.swap_remove(key) {
         return AggregationTarget {
             name: extract_text_value(&mut target, "name"),
@@ -267,10 +243,7 @@ fn extract_target_value(
     }
 }
 
-fn extract_response_value(
-    record: &mut IndexMap<String, Value>,
-    key: &str,
-) -> AggregateResponse {
+fn extract_response_value(record: &mut IndexMap<String, Value>, key: &str) -> AggregateResponse {
     if let Some(Value::Record(mut response)) = record.swap_remove(key) {
         return AggregateResponse {
             source: extract_text_value(&mut response, "source"),
@@ -306,14 +279,4 @@ fn extract_text_value(record: &mut IndexMap<String, Value>, key: &str) -> String
         Some(Value::Text(text)) => text,
         _ => String::new(),
     }
-}
-
-fn write_back(bytes: &[u8]) -> (i32, i32) {
-    let len = bytes.len() as i32;
-    let ptr = wasm_alloc(len);
-    unsafe {
-        let out = slice::from_raw_parts_mut(ptr as *mut u8, len as usize);
-        out.copy_from_slice(bytes);
-    }
-    (ptr, len)
 }

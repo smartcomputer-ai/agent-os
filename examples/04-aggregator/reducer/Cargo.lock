@@ -7,7 +7,7 @@ name = "aggregator-reducer"
 version = "0.1.0"
 dependencies = [
  "aos-air-exec",
- "aos-wasm-abi",
+ "aos-wasm-sdk",
  "indexmap",
  "serde",
  "serde_cbor",
@@ -58,6 +58,16 @@ dependencies = [
  "serde_bytes",
  "serde_cbor",
  "thiserror",
+]
+
+[[package]]
+name = "aos-wasm-sdk"
+version = "0.1.0"
+dependencies = [
+ "aos-wasm-abi",
+ "serde",
+ "serde_bytes",
+ "serde_cbor",
 ]
 
 [[package]]
