@@ -1,0 +1,50 @@
+{
+  "$kind": "manifest",
+  "schemas": [
+    { "name": "demo/BlobEchoPc@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/BlobEchoState@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/BlobEchoEvent@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "sys/BlobPutParams@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "sys/BlobPutReceipt@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "sys/BlobGetParams@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "sys/BlobGetReceipt@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "sys/BlobPutResult@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "sys/BlobGetResult@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "modules": [
+    { "name": "demo/BlobEchoSM@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "plans": [],
+  "caps": [
+    { "name": "sys/blob@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "policies": [
+    { "name": "demo/blob_policy@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "defaults": {
+    "policy": "demo/blob_policy@1",
+    "cap_grants": [
+      {
+        "name": "blob_grant",
+        "cap": "sys/blob@1",
+        "params": { "record": {} }
+      }
+    ]
+  },
+  "module_bindings": {
+    "demo/BlobEchoSM@1": {
+      "slots": {
+        "blob": "blob_grant"
+      }
+    }
+  },
+  "routing": {
+    "events": [
+      { "event": "demo/BlobEchoEvent@1", "reducer": "demo/BlobEchoSM@1" },
+      { "event": "sys/BlobPutResult@1", "reducer": "demo/BlobEchoSM@1" },
+      { "event": "sys/BlobGetResult@1", "reducer": "demo/BlobEchoSM@1" }
+    ],
+    "inboxes": []
+  },
+  "triggers": []
+}
