@@ -1,22 +1,22 @@
 {
   "$kind": "manifest",
   "schemas": [
-    { "name": "demo/FetchNotifyPc@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
-    { "name": "demo/FetchNotifyState@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
-    { "name": "demo/FetchNotifyEvent@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
-    { "name": "demo/FetchRequest@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    { "name": "demo/FetchNotifyPc@1" },
+    { "name": "demo/FetchNotifyState@1" },
+    { "name": "demo/FetchNotifyEvent@1" },
+    { "name": "demo/FetchRequest@1" }
   ],
   "modules": [
-    { "name": "demo/FetchNotify@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    { "name": "demo/FetchNotify@1" }
   ],
   "plans": [
-    { "name": "demo/fetch_plan@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    { "name": "demo/fetch_plan@1" }
   ],
   "caps": [
-    { "name": "demo/http_fetch_cap@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    { "name": "demo/http_fetch_cap@1" }
   ],
   "policies": [
-    { "name": "demo/http-policy@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    { "name": "demo/http-policy@1" }
   ],
   "defaults": {
     "policy": "demo/http-policy@1",
