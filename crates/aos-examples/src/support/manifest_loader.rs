@@ -11,7 +11,11 @@ use aos_air_types::{
 use aos_kernel::LoadedManifest;
 use aos_store::{Catalog, FsStore, Store, load_manifest_from_bytes};
 use log::warn;
+use serde_json::Value;
 use walkdir::WalkDir;
+
+const ZERO_HASH_SENTINEL: &str =
+    "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Attempts to load a manifest for the provided example directory by reading AIR JSON assets
 /// under `air/`, `plans/`, and `defs/`. Returns `Ok(None)` if no manifest is found so callers can
@@ -181,9 +185,76 @@ fn patch_named_refs(
 }
 
 fn is_zero_hash(value: &HashRef) -> bool {
-    const ZERO_HEX: &str =
-        "sha256:0000000000000000000000000000000000000000000000000000000000000000";
-    value.as_str() == ZERO_HEX
+    value.as_str() == ZERO_HASH_SENTINEL
+}
+
+fn normalize_authoring_hashes(value: &mut Value) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                normalize_authoring_hashes(item);
+            }
+        }
+        Value::Object(map) => {
+            if let Some(Value::String(kind)) = map.get("$kind") {
+                match kind.as_str() {
+                    "manifest" => normalize_manifest_authoring(map),
+                    "defmodule" => ensure_hash_field(map, "wasm_hash"),
+                    _ => {}
+                }
+            }
+            for entry in map.values_mut() {
+                normalize_authoring_hashes(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
+    for key in ["schemas", "modules", "plans", "caps", "policies"] {
+        if let Some(Value::Array(entries)) = map.get_mut(key) {
+            for entry in entries {
+                if let Value::Object(obj) = entry {
+                    normalize_named_ref_authoring(obj);
+                }
+            }
+        }
+    }
+}
+
+fn normalize_named_ref_authoring(map: &mut serde_json::Map<String, Value>) {
+    if !matches!(map.get("name"), Some(Value::String(_))) {
+        return;
+    }
+    ensure_hash_field(map, "hash");
+}
+
+fn ensure_hash_field(map: &mut serde_json::Map<String, Value>, key: &str) {
+    let mut needs_insert = false;
+    match map.get_mut(key) {
+        Some(Value::String(current)) => {
+            let trimmed = current.trim();
+            if trimmed.is_empty()
+                || trimmed.eq_ignore_ascii_case("sha256")
+                || trimmed.eq_ignore_ascii_case("sha256:")
+            {
+                *current = ZERO_HASH_SENTINEL.to_string();
+            }
+        }
+        Some(value @ Value::Null) => {
+            *value = Value::String(ZERO_HASH_SENTINEL.to_string());
+        }
+        Some(_) => {}
+        None => needs_insert = true,
+    }
+
+    if needs_insert {
+        map.insert(
+            key.to_string(),
+            Value::String(ZERO_HASH_SENTINEL.to_string()),
+        );
+    }
 }
 
 trait HasName {
@@ -285,11 +356,15 @@ fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
     let data = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let trimmed = data.trim_start();
     if trimmed.starts_with('[') {
-        serde_json::from_str(&data).context("parse AIR node array")
+        let mut value: Value = serde_json::from_str(&data).context("parse AIR node array")?;
+        normalize_authoring_hashes(&mut value);
+        serde_json::from_value(value).context("deserialize AIR node array")
     } else if trimmed.is_empty() {
         Ok(Vec::new())
     } else {
-        let node: AirNode = serde_json::from_str(&data).context("parse AIR node")?;
+        let mut value: Value = serde_json::from_str(&data).context("parse AIR node")?;
+        normalize_authoring_hashes(&mut value);
+        let node: AirNode = serde_json::from_value(value).context("deserialize AIR node")?;
         Ok(vec![node])
     }
 }
@@ -304,6 +379,61 @@ mod tests {
     use aos_cbor::Hash;
     use indexmap::IndexMap;
     use tempfile::TempDir;
+
+    #[test]
+    fn manifest_named_refs_allow_authoring_placeholders() {
+        let json = r#"{
+            "$kind": "manifest",
+            "schemas": [
+                { "name": "demo/State@1", "hash": "" },
+                { "name": "demo/Event@1" },
+                { "name": "demo/Zero@1", "hash": "sha256" }
+            ],
+            "modules": [],
+            "plans": [],
+            "caps": [],
+            "policies": [],
+            "module_bindings": {},
+            "triggers": []
+        }"#;
+
+        let mut value: Value = serde_json::from_str(json).expect("json");
+        normalize_authoring_hashes(&mut value);
+        let node: AirNode = serde_json::from_value(value).expect("deserialize manifest");
+        let manifest = match node {
+            AirNode::Manifest(manifest) => manifest,
+            _ => panic!("expected manifest"),
+        };
+
+        for reference in manifest.schemas {
+            assert_eq!(reference.hash.as_str(), ZERO_HASH_SENTINEL);
+        }
+    }
+
+    #[test]
+    fn defmodule_allows_missing_wasm_hash() {
+        let json = r#"{
+            "$kind": "defmodule",
+            "name": "demo/Reducer@1",
+            "module_kind": "reducer",
+            "abi": {
+                "reducer": {
+                    "state": "demo/State@1",
+                    "event": "demo/Event@1"
+                }
+            }
+        }"#;
+
+        let mut value: Value = serde_json::from_str(json).expect("json");
+        normalize_authoring_hashes(&mut value);
+        let node: AirNode = serde_json::from_value(value).expect("deserialize module");
+        let module = match node {
+            AirNode::Defmodule(module) => module,
+            _ => panic!("expected defmodule"),
+        };
+
+        assert_eq!(module.wasm_hash.as_str(), ZERO_HASH_SENTINEL);
+    }
 
     #[test]
     fn loads_manifest_from_json_assets() {

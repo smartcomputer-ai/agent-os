@@ -1511,7 +1511,8 @@ mod tests {
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.raised_events.len(), 1);
         assert_eq!(outcome.raised_events[0].schema, "com.test/Evt@1");
-        let expected_key = serde_cbor::to_vec(&ExprValue::Text("cell-1".into())).unwrap();
+        let expected_key =
+            serde_cbor::to_vec(&CborValue::Text("cell-1".into())).expect("encode key");
         assert_eq!(outcome.raised_events[0].key.as_ref(), Some(&expected_key));
     }
 

@@ -3,7 +3,6 @@
     "$kind": "defmodule",
     "name": "demo/FetchNotify@1",
     "module_kind": "reducer",
-    "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
     "abi": {
       "reducer": {
         "state": "demo/FetchNotifyState@1",
