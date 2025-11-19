@@ -5,11 +5,9 @@ extern crate alloc;
 
 use alloc::string::String;
 use aos_air_exec::Value as AirValue;
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, Value};
-use serde::de::Error as _;
+use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx};
 use serde::{Deserialize, Serialize};
 
-const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
 const FETCH_REQUEST_SCHEMA: &str = "demo/FetchRequest@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -47,27 +45,25 @@ struct FetchNotifySm;
 
 impl Reducer for FetchNotifySm {
     type State = FetchState;
-    type Event = Value;
-    type Ann = Value;
+    type Event = FetchEvent;
+    type Ann = ();
 
     fn reduce(
         &mut self,
-        event_value: Self::Event,
-        ctx: &mut ReducerCtx<Self::State>,
+        event: Self::Event,
+        ctx: &mut ReducerCtx<Self::State, ()>,
     ) -> Result<(), ReduceError> {
-        if let Some(event) = decode_event(event_value) {
-            match event {
-                FetchEvent::Start { url, method } => handle_start(ctx, url, method),
-                FetchEvent::NotifyComplete { status, body_preview } => {
-                    handle_notify(ctx, status, body_preview)
-                }
+        match event {
+            FetchEvent::Start { url, method } => handle_start(ctx, url, method),
+            FetchEvent::NotifyComplete { status, body_preview } => {
+                handle_notify(ctx, status, body_preview)
             }
         }
         Ok(())
     }
 }
 
-fn handle_start(ctx: &mut ReducerCtx<FetchState>, url: String, method: String) {
+fn handle_start(ctx: &mut ReducerCtx<FetchState, ()>, url: String, method: String) {
     if matches!(ctx.state.pc, FetchPc::Fetching) {
         return;
     }
@@ -90,7 +86,7 @@ fn handle_start(ctx: &mut ReducerCtx<FetchState>, url: String, method: String) {
         .send();
 }
 
-fn handle_notify(ctx: &mut ReducerCtx<FetchState>, status: i64, body_preview: String) {
+fn handle_notify(ctx: &mut ReducerCtx<FetchState, ()>, status: i64, body_preview: String) {
     if ctx.state.pending_request.is_none() {
         return;
     }
@@ -98,53 +94,4 @@ fn handle_notify(ctx: &mut ReducerCtx<FetchState>, status: i64, body_preview: St
     ctx.state.pc = FetchPc::Done;
     ctx.state.last_status = Some(status);
     ctx.state.last_body_preview = Some(body_preview);
-}
-
-fn decode_event(value: Value) -> Option<FetchEvent> {
-    let bytes = serde_cbor::to_vec(&value).ok()?;
-    decode_event_bytes(&bytes).ok()
-}
-
-fn decode_event_bytes(bytes: &[u8]) -> Result<FetchEvent, serde_cbor::Error> {
-    match serde_cbor::from_slice::<FetchEvent>(bytes) {
-        Ok(event) => Ok(event),
-        Err(_) => {
-            let value: serde_cbor::Value = serde_cbor::from_slice(bytes)?;
-            if let serde_cbor::Value::Map(mut map) = value {
-                if let (Some(tag), Some(body)) = (
-                    map.remove(&serde_cbor::Value::Text("$tag".into())),
-                    map.remove(&serde_cbor::Value::Text("$value".into())),
-                ) {
-                    if let serde_cbor::Value::Text(name) = tag {
-                        match name.as_str() {
-                            "NotifyComplete" => {
-                                if let serde_cbor::Value::Map(mut inner) = body {
-                                    let status = match inner.remove(
-                                        &serde_cbor::Value::Text("status".into()),
-                                    ) {
-                                        Some(serde_cbor::Value::Integer(i)) => {
-                                            i64::try_from(i).unwrap_or_default()
-                                        }
-                                        _ => 0,
-                                    };
-                                    let preview = match inner.remove(
-                                        &serde_cbor::Value::Text("body_preview".into()),
-                                    ) {
-                                        Some(serde_cbor::Value::Text(text)) => text,
-                                        _ => String::new(),
-                                    };
-                                    return Ok(FetchEvent::NotifyComplete {
-                                        status,
-                                        body_preview: preview,
-                                    });
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            Err(serde_cbor::Error::custom("unsupported event variant"))
-        }
-    }
 }

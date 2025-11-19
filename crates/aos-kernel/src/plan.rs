@@ -18,7 +18,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use serde_cbor;
+use serde_cbor::{self, Value as CborValue};
 
 use crate::effects::EffectManager;
 use crate::error::KernelError;
@@ -352,12 +352,10 @@ impl PlanInstance {
                                 "plan raise_event value encode error: {err}"
                             ))
                         })?;
-                        let payload_bytes =
-                            serde_cbor::to_vec(&canonical_value).map_err(|err| {
-                                KernelError::Manifest(format!(
-                                    "plan raise_event encode error: {err}"
-                                ))
-                            })?;
+                        let payload_cbor = expr_value_to_cbor_value(&canonical_value);
+                        let payload_bytes = serde_cbor::to_vec(&payload_cbor).map_err(|err| {
+                            KernelError::Manifest(format!("plan raise_event encode error: {err}"))
+                        })?;
 
                         let (key_bytes, key_record_value) = match (&metadata.key_schema, &raise.key)
                         {
@@ -396,12 +394,13 @@ impl PlanInstance {
                                             "plan raise_event key value error: {err}"
                                         ))
                                     })?;
-                                let canonical_key_bytes = serde_cbor::to_vec(&canonical_key)
+                                let canonical_key_cbor = expr_value_to_cbor_value(&canonical_key);
+                                let canonical_key_bytes = serde_cbor::to_vec(&canonical_key_cbor)
                                     .map_err(|err| {
-                                        KernelError::Manifest(format!(
-                                            "plan raise_event key encode error: {err}"
-                                        ))
-                                    })?;
+                                    KernelError::Manifest(format!(
+                                        "plan raise_event key encode error: {err}"
+                                    ))
+                                })?;
                                 (Some(canonical_key_bytes), Some(canonical_key))
                             }
                             (Some(_), None) => {
@@ -872,6 +871,82 @@ fn literal_to_value_key(literal: &ValueLiteral) -> Result<ValueKey, String> {
             "map/set key must be int|nat|text|uuid|hash, got {:?}",
             other
         )),
+    }
+}
+
+fn expr_value_to_cbor_value(value: &ExprValue) -> CborValue {
+    match value {
+        ExprValue::Unit | ExprValue::Null => CborValue::Null,
+        ExprValue::Bool(v) => CborValue::Bool(*v),
+        ExprValue::Int(v) => CborValue::Integer(*v as i128),
+        ExprValue::Nat(v) => CborValue::Integer(*v as i128),
+        ExprValue::Dec128(v) => CborValue::Text(v.clone()),
+        ExprValue::Bytes(bytes) => CborValue::Bytes(bytes.clone()),
+        ExprValue::Text(text) => CborValue::Text(text.clone()),
+        ExprValue::TimeNs(v) => CborValue::Integer(*v as i128),
+        ExprValue::DurationNs(v) => CborValue::Integer(*v as i128),
+        ExprValue::Hash(hash) => CborValue::Text(hash.as_str().to_string()),
+        ExprValue::Uuid(uuid) => CborValue::Text(uuid.clone()),
+        ExprValue::List(list) => CborValue::Array(
+            list.iter()
+                .map(expr_value_to_cbor_value)
+                .collect::<Vec<_>>(),
+        ),
+        ExprValue::Set(set) => CborValue::Array(
+            set.iter()
+                .map(expr_value_key_to_cbor_value)
+                .collect::<Vec<_>>(),
+        ),
+        ExprValue::Map(map) => {
+            let mut out = BTreeMap::new();
+            for (key, value) in map {
+                out.insert(
+                    expr_value_key_to_cbor_value(key),
+                    expr_value_to_cbor_value(value),
+                );
+            }
+            CborValue::Map(out)
+        }
+        ExprValue::Record(record) => {
+            if let Some(tagged) = try_convert_variant_record(record) {
+                return tagged;
+            }
+            let mut out = BTreeMap::new();
+            for (key, value) in record {
+                out.insert(
+                    CborValue::Text(key.clone()),
+                    expr_value_to_cbor_value(value),
+                );
+            }
+            CborValue::Map(out)
+        }
+    }
+}
+
+fn try_convert_variant_record(record: &IndexMap<String, ExprValue>) -> Option<CborValue> {
+    if record.len() != 2 {
+        return None;
+    }
+    let tag = match record.get("$tag") {
+        Some(ExprValue::Text(tag)) => tag.clone(),
+        _ => return None,
+    };
+    let value = record
+        .get("$value")
+        .map(expr_value_to_cbor_value)
+        .unwrap_or(CborValue::Null);
+    let mut out = BTreeMap::new();
+    out.insert(CborValue::Text(tag), value);
+    Some(CborValue::Map(out))
+}
+
+fn expr_value_key_to_cbor_value(key: &ValueKey) -> CborValue {
+    match key {
+        ValueKey::Int(v) => CborValue::Integer(*v as i128),
+        ValueKey::Nat(v) => CborValue::Integer(*v as i128),
+        ValueKey::Text(text) => CborValue::Text(text.clone()),
+        ValueKey::Hash(hash) => CborValue::Text(hash.clone()),
+        ValueKey::Uuid(uuid) => CborValue::Text(uuid.clone()),
     }
 }
 
