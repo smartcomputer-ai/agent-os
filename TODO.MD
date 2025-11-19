@@ -26,26 +26,7 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 11. **[x] Example 04 — Aggregator (fan-out + join)** — Plan + reducer demo now lives under `examples/04-aggregator` with canonical AIR assets, shared HTTP harness, kernel fan-out scheduling, runner, docs, and replay/integration tests proving three parallel HTTP calls join deterministically.
 
-12. **[x] Example 05 — Chain + Compensation (M4 multi-plan choreography)** — Added `examples/05-chain-comp` with four plans, reducer, CLI runner, and kernel regression tests for the refund choreography.
-    - **Scope:** reuse the existing HTTP harness to simulate `charge`, `reserve`, and `notify` effects while the reducer emits intents with a `request_id` correlation key. Reducer tracks saga state and issues a `refund_plan` intent if `reserve_plan` fails.
-    - **Assets:** author canonical JSON for four plans (`charge_plan@1`, `reserve_plan@1`, `notify_plan@1`, `refund_plan@1`), per-plan schemas, capabilities, and a manifest wiring triggers via `correlate_by`. Add reducer WASM crate + runner to seed `EventA/B/C` and inspect recorded DomainEvents/results.
-    - **Kernel/tests:** extend plan-trigger routing to ensure multiple ready plans are deterministically ordered, write regression tests in `crates/aos-kernel` that feed a failure receipt into `reserve_plan` and assert the reducer emits the compensation intent with no orphaned events, and update `aos-examples` CLI metadata/docs so the new demo is runnable.
+12. **[x] Example 05 — Chain + Compensation (M4 multi-plan choreography)** — Four-plan saga with HTTP harness, reducer emits compensation intent on reserved failure, canonical AIR assets + runner + kernel regression tests prove deterministic ordering and refund path.
 
-13. **[ ] Governance Loop + Safe Upgrade Example (M5 core)** — Build the entire governance path *inside the runtime + example harness before any CLI work*.
-    - **Kernel/runtime:** add proposal, shadow, approval, and apply event types to the journal; wire state transitions so proposals enqueue manifests/caps/policies, `shadow` replays the candidate manifest deterministically to emit `{effects_predicted, diffs, budget_deltas}`, and `apply` atomically swaps the manifest root only after an approval record exists. Harden capability/policy ledgers so pending manifests cannot leak until apply time, and ensure replay reproduces the same predictions.
-        - Note: `crates/aos-kernel/src/shadow/` already includes a minimal `ShadowExecutor` + config/summary structs; extend this skeleton instead of rewriting it so the new governance logs plug cleanly into the existing harness.
-    - **Shadow executor:** implement a deterministic runner that boots a mirror world using the proposed manifest, drains all ready plans/effects with mocked receipts, and returns structured predictions (effect counts, capability deltas, PlanResult previews) without mutating primary state. Guard it behind manifest hashes so re-running produces identical outputs and the resulting receipts/diagnostics are journaled for audit.
-    - **Example assets/tests:** add `examples/06-safe-upgrade` with canonical AIR for `fetch_plan@1` and `fetch_plan@2`. Author reducer + plan pairs plus fixtures that (a) propose v2, (b) shadow to capture predicted HTTP delta, (c) approve/apply, and (d) rerun the world to show receipts now include the second HTTP call while replay stays byte-identical. Cover the flow with integration tests in `aos-examples`/`aos-kernel` proving no orphaned events, manifest roots change only via apply, and governance logs remain deterministic even under failure injections.
-        - Reuse patterns from at least two existing demos (e.g., `examples/03-fetch-notify`, `examples/05-chain-comp`) plus their corresponding `aos-examples` runners/tests so the safe-upgrade scenario feels consistent with the ladder.
-
-14. **[ ] Governance CLI plumbing** — Once the example + runtime path exist, extend the user-facing tooling to drive it.
-    - Provide `aos-examples` (or minimal `aos-cli`) subcommands for `world propose`, `world shadow`, `world approve`, and `world apply`, including human-readable dumps of predictions/budget deltas, plus journaling inspectors so the safe-upgrade scenario is runnable without bespoke scripts.
-
-> Once these three examples are stable, replicate the same structure for the remaining ladder rungs (plans, fan-out, governance, LLM) by adding numbered directories plus scenario implementations under the shared CLI.
-
-
-## Open Questions
-- reducer lib (less boiler plate), implement WIT?
-- move and test manifest loader in aos-types
-- how to deal with sha hashes in json? how to make this tractable. which defs SHOULD be as json and which ones can be defined in code? is it overkill now
-- understand HttpHarness in fetch_notify
+13. **[x] Governance Loop + Safe Upgrade Example (M5 core)** — Kernel now supports proposal/shadow/approve/apply with deterministic replay, capability/policy ledgers diffed via `compute_ledger_deltas`, and manifest hashes guarded through shadow → apply. Added `examples/06-safe-upgrade` with v1→v2 plan swap, new cap/policy, shadow prediction of HTTP intents + ledger deltas, and approval/apply flow exercised in the `aos-examples` runner and integration tests.
+        - Reused harness patterns from fetch-notify and chain-comp; replay stays byte-identical after upgrade.
