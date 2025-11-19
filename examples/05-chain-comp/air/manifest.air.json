@@ -1,0 +1,57 @@
+{
+  "$kind": "manifest",
+  "schemas": [
+    { "name": "demo/ChainPhase@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/ChainHttpTarget@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/ChainSagaState@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/ChainState@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/ChainEvent@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/ChargeRequested@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/ReserveRequested@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/NotifyRequested@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/RefundRequested@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "modules": [
+    { "name": "demo/ChainComp@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "plans": [
+    { "name": "demo/charge_plan@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/reserve_plan@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/notify_plan@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/refund_plan@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "caps": [
+    { "name": "demo/http_chain_cap@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "policies": [
+    { "name": "demo/http-chain-policy@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "defaults": {
+    "policy": "demo/http-chain-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_http_chain",
+        "cap": "demo/http_chain_cap@1",
+        "params": {
+          "record": {
+            "hosts": { "set": [ { "text": "example.com" } ] },
+            "methods": { "set": [ { "text": "POST" }, { "text": "PUT" } ] }
+          }
+        }
+      }
+    ]
+  },
+  "module_bindings": {},
+  "routing": {
+    "events": [
+      { "event": "demo/ChainEvent@1", "reducer": "demo/ChainComp@1" }
+    ],
+    "inboxes": []
+  },
+  "triggers": [
+    { "event": "demo/ChargeRequested@1", "plan": "demo/charge_plan@1", "correlate_by": "request_id" },
+    { "event": "demo/ReserveRequested@1", "plan": "demo/reserve_plan@1", "correlate_by": "request_id" },
+    { "event": "demo/NotifyRequested@1", "plan": "demo/notify_plan@1", "correlate_by": "request_id" },
+    { "event": "demo/RefundRequested@1", "plan": "demo/refund_plan@1", "correlate_by": "request_id" }
+  ]
+}

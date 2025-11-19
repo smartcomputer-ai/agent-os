@@ -26,7 +26,7 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 11. **[x] Example 04 — Aggregator (fan-out + join)** — Plan + reducer demo now lives under `examples/04-aggregator` with canonical AIR assets, shared HTTP harness, kernel fan-out scheduling, runner, docs, and replay/integration tests proving three parallel HTTP calls join deterministically.
 
-12. **[ ] Example 05 — Chain + Compensation (M4 multi-plan choreography)** — Build `examples/05-chain-comp` plus supporting kernel/tests to showcase reducer-driven sagas across three sequential plans and a compensating path.
+12. **[x] Example 05 — Chain + Compensation (M4 multi-plan choreography)** — Added `examples/05-chain-comp` with four plans, reducer, CLI runner, and kernel regression tests for the refund choreography.
     - **Scope:** reuse the existing HTTP harness to simulate `charge`, `reserve`, and `notify` effects while the reducer emits intents with a `request_id` correlation key. Reducer tracks saga state and issues a `refund_plan` intent if `reserve_plan` fails.
     - **Assets:** author canonical JSON for four plans (`charge_plan@1`, `reserve_plan@1`, `notify_plan@1`, `refund_plan@1`), per-plan schemas, capabilities, and a manifest wiring triggers via `correlate_by`. Add reducer WASM crate + runner to seed `EventA/B/C` and inspect recorded DomainEvents/results.
     - **Kernel/tests:** extend plan-trigger routing to ensure multiple ready plans are deterministically ordered, write regression tests in `crates/aos-kernel` that feed a failure receipt into `reserve_plan` and assert the reducer emits the compensation intent with no orphaned events, and update `aos-examples` CLI metadata/docs so the new demo is runnable.

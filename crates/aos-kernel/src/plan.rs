@@ -70,6 +70,7 @@ pub struct PlanInstance {
     receipt_values: HashMap<String, ExprValue>,
     event_wait: Option<EventWait>,
     event_value: Option<ExprValue>,
+    correlation_id: Option<Vec<u8>>,
     step_map: HashMap<String, PlanStep>,
     step_order: Vec<String>,
     predecessors: HashMap<String, Vec<Dependency>>,
@@ -115,6 +116,7 @@ pub struct PlanInstanceSnapshot {
     pub receipt_values: Vec<(String, ExprValue)>,
     pub event_wait: Option<EventWait>,
     pub event_value: Option<ExprValue>,
+    pub correlation_id: Option<Vec<u8>>,
     pub step_states: Vec<(String, StepState)>,
 }
 
@@ -125,6 +127,7 @@ impl PlanInstance {
         input: ExprValue,
         schema_index: Arc<SchemaIndex>,
         reducer_schemas: Arc<HashMap<String, ReducerSchema>>,
+        correlation: Option<(Vec<u8>, ExprValue)>,
     ) -> Self {
         let mut step_map = HashMap::new();
         let mut step_order = Vec::new();
@@ -146,22 +149,29 @@ impl PlanInstance {
         for id in &step_order {
             step_states.insert(id.clone(), StepState::Pending);
         }
+        let mut env = ExprEnv {
+            plan_input: input,
+            vars: IndexMap::new(),
+            steps: IndexMap::new(),
+            current_event: None,
+        };
+        let mut correlation_id = None;
+        if let Some((bytes, value)) = correlation {
+            env.vars.insert("correlation_id".into(), value);
+            correlation_id = Some(bytes);
+        }
         Self {
             id,
             name: plan.name.clone(),
             plan,
-            env: ExprEnv {
-                plan_input: input,
-                vars: IndexMap::new(),
-                steps: IndexMap::new(),
-                current_event: None,
-            },
+            env,
             completed: false,
             effect_handles: HashMap::new(),
             receipt_waits: BTreeMap::new(),
             receipt_values: HashMap::new(),
             event_wait: None,
             event_value: None,
+            correlation_id,
             step_map,
             step_order,
             predecessors,
@@ -301,14 +311,6 @@ impl PlanInstance {
                         return Ok(outcome);
                     }
                     PlanStepKind::RaiseEvent(raise) => {
-                        let var_names: Vec<_> = self.env.vars.keys().cloned().collect();
-                        let receipt_debug = self.env.vars.get("http_receipt").cloned();
-                        log::debug!(
-                            "plan '{}' raise_event vars: {:?} receipt={:?}",
-                            self.plan.name,
-                            var_names,
-                            receipt_debug
-                        );
                         let metadata =
                             self.reducer_schemas.get(&raise.reducer).ok_or_else(|| {
                                 KernelError::Manifest(format!(
@@ -555,6 +557,7 @@ impl PlanInstance {
                 .collect(),
             event_wait: self.event_wait.clone(),
             event_value: self.event_value.clone(),
+            correlation_id: self.correlation_id.clone(),
             step_states: self
                 .step_states
                 .iter()
@@ -575,6 +578,7 @@ impl PlanInstance {
             snapshot.env.plan_input.clone(),
             schema_index,
             reducer_schemas,
+            None,
         );
         instance.env = snapshot.env;
         instance.completed = snapshot.completed;
@@ -587,6 +591,7 @@ impl PlanInstance {
         instance.receipt_values = snapshot.receipt_values.into_iter().collect();
         instance.event_wait = snapshot.event_wait;
         instance.event_value = snapshot.event_value;
+        instance.correlation_id = snapshot.correlation_id;
         instance.step_states = snapshot.step_states.into_iter().collect();
         instance
     }
@@ -1039,6 +1044,7 @@ mod tests {
             default_env(),
             empty_schema_index(),
             empty_reducer_schemas(),
+            None,
         )
     }
 
@@ -1049,6 +1055,7 @@ mod tests {
             default_env(),
             schema_index,
             empty_reducer_schemas(),
+            None,
         )
     }
 
@@ -1423,6 +1430,7 @@ mod tests {
             default_env(),
             empty_schema_index(),
             reducer_schemas,
+            None,
         );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
@@ -1461,6 +1469,7 @@ mod tests {
             default_env(),
             empty_schema_index(),
             reducer_schemas,
+            None,
         );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
@@ -1741,6 +1750,7 @@ mod tests {
             default_env(),
             schema_index.clone(),
             reducer_schemas.clone(),
+            None,
         );
         let mut effects = test_effect_manager();
         let first = instance.tick(&mut effects).unwrap();

@@ -1,0 +1,78 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demo/refund_plan@1",
+    "input": "demo/RefundRequested@1",
+    "steps": [
+      {
+        "id": "emit_refund",
+        "op": "emit_effect",
+        "kind": "http.request",
+        "params": {
+          "record": {
+            "method": {
+              "op": "get",
+              "args": [
+                { "ref": "@plan.input.target" },
+                { "text": "method" }
+              ]
+            },
+            "url": {
+              "op": "get",
+              "args": [
+                { "ref": "@plan.input.target" },
+                { "text": "url" }
+              ]
+            },
+            "headers": { "map": [] },
+            "body_ref": { "variant": { "tag": "None" } }
+          }
+        },
+        "cap": "cap_http_chain",
+        "bind": { "effect_id_as": "refund_req" }
+      },
+      {
+        "id": "await_refund",
+        "op": "await_receipt",
+        "for": { "ref": "@var:refund_req" },
+        "bind": { "as": "refund_receipt" }
+      },
+      {
+        "id": "raise_result",
+        "op": "raise_event",
+        "reducer": "demo/ChainComp@1",
+        "event": {
+          "variant": {
+            "tag": "RefundCompleted",
+            "value": {
+              "record": {
+                "request_id": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "request_id" }
+                  ]
+                },
+                "status": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@var:refund_receipt" },
+                    { "text": "status" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      { "id": "finish", "op": "end" }
+    ],
+    "edges": [
+      { "from": "emit_refund", "to": "await_refund" },
+      { "from": "await_refund", "to": "raise_result" },
+      { "from": "raise_result", "to": "finish" }
+    ],
+    "required_caps": ["cap_http_chain"],
+    "allowed_effects": ["http.request"]
+  }
+]

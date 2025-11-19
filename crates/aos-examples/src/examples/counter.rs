@@ -1,3 +1,9 @@
+//! Counter demo with a fully code-wired manifest.
+//!
+//! Unlike the later examples, `examples/00-counter` does not yet ship AIR JSON assets.
+//! We intentionally build the manifest in Rust here so users can see how to handcraft
+//! schemas/modules for tiny reducers before graduating to the asset pipeline.
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;

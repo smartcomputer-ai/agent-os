@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use aos_air_exec::Value as ExprValue;
+use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
     AirNode, DefModule, Manifest, Name, NamedRef, TypeExpr, builtins,
     plan_literals::{SchemaIndex, normalize_plan_literals},
@@ -57,7 +57,7 @@ pub struct Kernel<S: Store> {
     schema_index: Arc<SchemaIndex>,
     reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
     plan_instances: HashMap<u64, PlanInstance>,
-    plan_triggers: HashMap<String, Vec<String>>,
+    plan_triggers: HashMap<String, Vec<PlanTriggerBinding>>,
     waiting_events: HashMap<String, Vec<u64>>,
     pending_receipts: HashMap<[u8; 32], u64>,
     pending_reducer_receipts: HashMap<[u8; 32], ReducerEffectContext>,
@@ -78,6 +78,12 @@ pub struct PlanResultEntry {
     pub plan_id: u64,
     pub output_schema: String,
     pub value_cbor: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+struct PlanTriggerBinding {
+    plan: String,
+    correlate_by: Option<String>,
 }
 
 impl PlanResultEntry {
@@ -208,7 +214,13 @@ impl<S: Store + 'static> Kernel<S> {
             plan_triggers
                 .entry(trigger.event.as_str().to_string())
                 .or_insert_with(Vec::new)
-                .push(trigger.plan.clone());
+                .push(PlanTriggerBinding {
+                    plan: trigger.plan.clone(),
+                    correlate_by: trigger.correlate_by.clone(),
+                });
+        }
+        for bindings in plan_triggers.values_mut() {
+            bindings.sort_by(|a, b| a.plan.cmp(&b.plan));
         }
         let schema_index = Arc::new(build_schema_index_from_loaded(store.as_ref(), &loaded)?);
         let capability_resolver = CapabilityResolver::from_manifest(
@@ -798,21 +810,17 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
-        if let Some(plan_names) = self.plan_triggers.get(&event.schema) {
-            for plan_name in plan_names {
-                if let Some(plan_def) = self.plan_registry.get(plan_name) {
-                    if log::log_enabled!(log::Level::Debug) {
-                        if let Ok(raw) = serde_cbor::from_slice::<serde_cbor::Value>(&event.value) {
-                            log::debug!("plan '{}' trigger input = {:?}", plan_name, raw);
-                        }
-                    }
+        if let Some(plan_bindings) = self.plan_triggers.get(&event.schema) {
+            for binding in plan_bindings {
+                if let Some(plan_def) = self.plan_registry.get(&binding.plan) {
                     let input: ExprValue = serde_cbor::from_slice(&event.value).map_err(|err| {
                         KernelError::Manifest(format!(
                             "failed to decode plan input for {}: {err}",
-                            plan_name
+                            binding.plan
                         ))
                     })?;
-                    log::debug!("plan '{}' decoded input {:?}", plan_name, input);
+                    let correlation =
+                        determine_correlation_value(binding, &input, event.key.as_ref());
                     let instance_id = self.scheduler.alloc_plan_id();
                     let instance = PlanInstance::new(
                         instance_id,
@@ -820,6 +828,7 @@ impl<S: Store + 'static> Kernel<S> {
                         input,
                         self.schema_index.clone(),
                         self.reducer_schemas.clone(),
+                        correlation,
                     );
                     self.plan_instances.insert(instance_id, instance);
                     self.scheduler.push_plan(instance_id);
@@ -839,14 +848,15 @@ impl<S: Store + 'static> Kernel<S> {
             self.remove_plan_from_waiting_events_for_schema(id, &schema);
         }
         if self.plan_instances.contains_key(&id) {
-            let (plan_name, outcome) = {
+            let (plan_name, outcome, step_states) = {
                 let instance = self
                     .plan_instances
                     .get_mut(&id)
                     .expect("instance must exist");
                 let name = instance.name.clone();
+                let snapshot = instance.snapshot();
                 let outcome = instance.tick(&mut self.effect_manager)?;
-                (name, outcome)
+                (name, outcome, snapshot.step_states)
             };
             for event in &outcome.raised_events {
                 self.record_domain_event(event)?;
@@ -1043,6 +1053,44 @@ impl<S: Store + 'static> Kernel<S> {
             signature: receipt.signature.clone(),
         });
         self.append_record(record)
+    }
+}
+
+fn determine_correlation_value(
+    binding: &PlanTriggerBinding,
+    input: &ExprValue,
+    event_key: Option<&Vec<u8>>,
+) -> Option<(Vec<u8>, ExprValue)> {
+    if let Some(field) = &binding.correlate_by {
+        if let Some(value) = extract_correlation_value(input, field) {
+            let bytes = encode_correlation_bytes(&value);
+            return Some((bytes, value));
+        }
+    }
+    event_key.map(|key| (key.clone(), ExprValue::Bytes(key.clone())))
+}
+
+fn extract_correlation_value(value: &ExprValue, path: &str) -> Option<ExprValue> {
+    let mut current = value;
+    for segment in path.split('.') {
+        if segment.is_empty() {
+            continue;
+        }
+        current = match current {
+            ExprValue::Record(map) => map.get(segment)?,
+            ExprValue::Map(map) => map.get(&ValueKey::Text(segment.to_string()))?,
+            _ => return None,
+        };
+    }
+    Some(current.clone())
+}
+
+fn encode_correlation_bytes(value: &ExprValue) -> Vec<u8> {
+    match value {
+        ExprValue::Text(text) => text.as_bytes().to_vec(),
+        ExprValue::Nat(n) => n.to_be_bytes().to_vec(),
+        ExprValue::Int(i) => i.to_be_bytes().to_vec(),
+        other => serde_cbor::to_vec(other).unwrap_or_default(),
     }
 }
 

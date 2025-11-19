@@ -27,6 +27,9 @@ wasmtime = "36.0.3"
 [dev-dependencies]
 wat = "1"
 tempfile = "3"
+aos-wasm-build = { path = "../aos-wasm-build" }
+camino = "1"
+walkdir = "2"
 
 [lints.rust]
 unused_imports = "allow"

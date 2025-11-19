@@ -9,5 +9,6 @@ Each numbered directory hosts a self-contained demo (schemas, reducer WASM, opti
 | 02  | blob-echo   | Reducer blob round-trip   |
 | 03  | fetch-notify | Plan-triggered HTTP demo  |
 | 04  | aggregator  | Fan-out plan join demo     |
+| 05  | chain-comp  | Multi-plan saga + refund  |
 
 Use the `aos-examples` CLI to list or run demos.

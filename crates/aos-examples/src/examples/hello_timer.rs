@@ -1,3 +1,9 @@
+//! Hello Timer demo with an inline manifest.
+//!
+//! This example predates the AIR JSON asset flow, so we continue to construct the
+//! manifest directly in Rust to illustrate how reducers, capabilities, and policies
+//! can be stitched together without external files.
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;

@@ -201,7 +201,9 @@ dependencies = [
  "aos-store",
  "aos-wasm",
  "aos-wasm-abi",
+ "aos-wasm-build",
  "base64 0.21.7",
+ "camino",
  "hex",
  "indexmap",
  "log",
@@ -211,6 +213,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "walkdir",
  "wasmtime",
  "wat",
 ]
