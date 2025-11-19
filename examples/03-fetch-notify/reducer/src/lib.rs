@@ -1,11 +1,13 @@
 #![allow(improper_ctypes_definitions)]
+#![no_std]
 
-use aos_air_exec::Value;
-use aos_wasm_abi::{DomainEvent, ReducerInput, ReducerOutput};
+extern crate alloc;
+
+use alloc::string::String;
+use aos_air_exec::Value as AirValue;
+use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, Value};
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
-use std::alloc::{alloc as host_alloc, Layout};
-use std::slice;
 
 const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
 const FETCH_REQUEST_SCHEMA: &str = "demo/FetchRequest@1";
@@ -38,106 +40,96 @@ enum FetchEvent {
     NotifyComplete { status: i64, body_preview: String },
 }
 
-#[cfg_attr(target_arch = "wasm32", unsafe(export_name = "alloc"))]
-pub extern "C" fn wasm_alloc(len: i32) -> i32 {
-    if len <= 0 {
-        return 0;
-    }
-    let layout = Layout::from_size_align(len as usize, 8).expect("layout");
-    unsafe { host_alloc(layout) as i32 }
-}
+aos_reducer!(FetchNotifySm);
 
-#[cfg_attr(target_arch = "wasm32", unsafe(export_name = "step"))]
-pub extern "C" fn wasm_step(ptr: i32, len: i32) -> (i32, i32) {
-    let input_bytes = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
-    let input = ReducerInput::decode(input_bytes).expect("valid reducer input");
+#[derive(Default)]
+struct FetchNotifySm;
 
-    let mut state = input
-        .state
-        .map(|bytes| serde_cbor::from_slice::<FetchState>(&bytes).expect("state"))
-        .unwrap_or_default();
+impl Reducer for FetchNotifySm {
+    type State = FetchState;
+    type Event = Value;
+    type Ann = Value;
 
-    let mut domain_events = Vec::new();
-    if input.event.schema == EVENT_SCHEMA {
-        if let Ok(event) = decode_event(&input.event.value) {
+    fn reduce(
+        &mut self,
+        event_value: Self::Event,
+        ctx: &mut ReducerCtx<Self::State>,
+    ) -> Result<(), ReduceError> {
+        if let Some(event) = decode_event(event_value) {
             match event {
-                FetchEvent::Start { url, method } => {
-                    handle_start(&mut state, url, method, &mut domain_events)
-                }
+                FetchEvent::Start { url, method } => handle_start(ctx, url, method),
                 FetchEvent::NotifyComplete { status, body_preview } => {
-                    handle_notify(&mut state, status, body_preview)
+                    handle_notify(ctx, status, body_preview)
                 }
             }
         }
+        Ok(())
     }
-
-    let state_bytes = serde_cbor::to_vec(&state).expect("encode state");
-    let output = ReducerOutput {
-        state: Some(state_bytes),
-        domain_events,
-        effects: Vec::new(),
-        ann: None,
-    };
-    let output_bytes = output.encode().expect("encode output");
-    write_back(&output_bytes)
 }
 
-fn handle_start(
-    state: &mut FetchState,
-    url: String,
-    method: String,
-    domain_events: &mut Vec<DomainEvent>,
-) {
-    if matches!(state.pc, FetchPc::Fetching) {
+fn handle_start(ctx: &mut ReducerCtx<FetchState>, url: String, method: String) {
+    if matches!(ctx.state.pc, FetchPc::Fetching) {
         return;
     }
-    let request_id = state.next_request_id;
-    state.next_request_id = state.next_request_id.saturating_add(1);
-    state.pending_request = Some(request_id);
-    state.pc = FetchPc::Fetching;
-    state.last_status = None;
-    state.last_body_preview = None;
+    let request_id = ctx.state.next_request_id;
+    ctx.state.next_request_id = ctx.state.next_request_id.saturating_add(1);
+    ctx.state.pending_request = Some(request_id);
+    ctx.state.pc = FetchPc::Fetching;
+    ctx.state.last_status = None;
+    ctx.state.last_body_preview = None;
 
-    let intent_value = Value::record([
-        ("request_id", Value::Nat(request_id)),
-        ("url", Value::Text(url)),
-        ("method", Value::Text(method)),
+    let intent_value = AirValue::record([
+        ("request_id", AirValue::Nat(request_id)),
+        ("url", AirValue::Text(url)),
+        ("method", AirValue::Text(method)),
     ]);
-    let value = serde_cbor::to_vec(&intent_value).expect("intent");
-    let key = request_id.to_be_bytes().to_vec();
-    domain_events.push(DomainEvent::with_key(
-        FETCH_REQUEST_SCHEMA,
-        value,
-        key,
-    ));
+    let key = request_id.to_be_bytes();
+    ctx.intent(FETCH_REQUEST_SCHEMA)
+        .key_bytes(&key)
+        .payload(&intent_value)
+        .send();
 }
 
-fn handle_notify(state: &mut FetchState, status: i64, body_preview: String) {
-    if state.pending_request.is_none() {
+fn handle_notify(ctx: &mut ReducerCtx<FetchState>, status: i64, body_preview: String) {
+    if ctx.state.pending_request.is_none() {
         return;
     }
-    state.pending_request = None;
-    state.pc = FetchPc::Done;
-    state.last_status = Some(status);
-    state.last_body_preview = Some(body_preview);
+    ctx.state.pending_request = None;
+    ctx.state.pc = FetchPc::Done;
+    ctx.state.last_status = Some(status);
+    ctx.state.last_body_preview = Some(body_preview);
 }
 
-fn decode_event(bytes: &[u8]) -> Result<FetchEvent, serde_cbor::Error> {
+fn decode_event(value: Value) -> Option<FetchEvent> {
+    let bytes = serde_cbor::to_vec(&value).ok()?;
+    decode_event_bytes(&bytes).ok()
+}
+
+fn decode_event_bytes(bytes: &[u8]) -> Result<FetchEvent, serde_cbor::Error> {
     match serde_cbor::from_slice::<FetchEvent>(bytes) {
         Ok(event) => Ok(event),
         Err(_) => {
             let value: serde_cbor::Value = serde_cbor::from_slice(bytes)?;
             if let serde_cbor::Value::Map(mut map) = value {
-                if let (Some(tag), Some(body)) = (map.remove(&serde_cbor::Value::Text("$tag".into())), map.remove(&serde_cbor::Value::Text("$value".into()))) {
+                if let (Some(tag), Some(body)) = (
+                    map.remove(&serde_cbor::Value::Text("$tag".into())),
+                    map.remove(&serde_cbor::Value::Text("$value".into())),
+                ) {
                     if let serde_cbor::Value::Text(name) = tag {
                         match name.as_str() {
                             "NotifyComplete" => {
                                 if let serde_cbor::Value::Map(mut inner) = body {
-                                    let status = match inner.remove(&serde_cbor::Value::Text("status".into())) {
-                                        Some(serde_cbor::Value::Integer(i)) => i as i64,
+                                    let status = match inner.remove(
+                                        &serde_cbor::Value::Text("status".into()),
+                                    ) {
+                                        Some(serde_cbor::Value::Integer(i)) => {
+                                            i64::try_from(i).unwrap_or_default()
+                                        }
                                         _ => 0,
                                     };
-                                    let preview = match inner.remove(&serde_cbor::Value::Text("body_preview".into())) {
+                                    let preview = match inner.remove(
+                                        &serde_cbor::Value::Text("body_preview".into()),
+                                    ) {
                                         Some(serde_cbor::Value::Text(text)) => text,
                                         _ => String::new(),
                                     };
@@ -155,14 +147,4 @@ fn decode_event(bytes: &[u8]) -> Result<FetchEvent, serde_cbor::Error> {
             Err(serde_cbor::Error::custom("unsupported event variant"))
         }
     }
-}
-
-fn write_back(bytes: &[u8]) -> (i32, i32) {
-    let len = bytes.len() as i32;
-    let ptr = wasm_alloc(len);
-    unsafe {
-        let out = slice::from_raw_parts_mut(ptr as *mut u8, len as usize);
-        out.copy_from_slice(bytes);
-    }
-    (ptr, len)
 }
