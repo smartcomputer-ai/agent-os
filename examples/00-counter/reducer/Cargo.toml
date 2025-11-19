@@ -9,6 +9,5 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-aos-wasm-abi = { path = "../../../crates/aos-wasm-abi" }
+aos-wasm-sdk = { path = "../../../crates/aos-wasm-sdk" }
 serde = { version = "1", features = ["derive"] }
-serde_cbor = "0.11"

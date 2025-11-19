@@ -4,8 +4,15 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[features]
+default = []
+std = []
+
 [dependencies]
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
+serde_bytes = "0.11"
 
+[dev-dependencies]
+serde_json = "1"
