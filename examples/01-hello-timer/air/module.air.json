@@ -1,0 +1,18 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/TimerSM@1",
+    "module_kind": "reducer",
+    "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "abi": {
+      "reducer": {
+        "state": "demo/TimerState@1",
+        "event": "demo/TimerEvent@1",
+        "effects_emitted": ["timer.set"],
+        "cap_slots": {
+          "timer": "timer"
+        }
+      }
+    }
+  }
+]

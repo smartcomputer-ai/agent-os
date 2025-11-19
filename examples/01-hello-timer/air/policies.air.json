@@ -1,0 +1,15 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/default_policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "timer.set",
+          "origin_kind": "reducer"
+        },
+        "decision": "allow"
+      }
+    ]
+  }
+]

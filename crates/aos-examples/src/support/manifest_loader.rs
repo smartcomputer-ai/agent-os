@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, HashRef, Manifest, Name,
+    self as air_types, AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, HashRef,
+    Manifest, Name,
 };
 use aos_kernel::LoadedManifest;
 use aos_store::{Catalog, FsStore, Store, load_manifest_from_bytes};
@@ -157,17 +158,23 @@ fn patch_named_refs(
     hashes: &HashMap<Name, HashRef>,
 ) -> Result<()> {
     for reference in refs {
-        let Some(actual) = hashes.get(reference.name.as_str()) else {
+        let actual = if let Some(found) = hashes.get(reference.name.as_str()) {
+            found.clone()
+        } else if let Some(builtin) =
+            air_types::builtins::find_builtin_schema(reference.name.as_str())
+        {
+            builtin.hash_ref.clone()
+        } else {
             bail!("manifest references unknown {kind} '{}'", reference.name);
         };
-        if reference.hash != *actual {
+        if reference.hash != actual {
             if !is_zero_hash(&reference.hash) {
                 warn!(
                     "manifest hash for {kind} '{}' is stale (saw {}, using {})",
                     reference.name, reference.hash, actual
                 );
             }
-            reference.hash = actual.clone();
+            reference.hash = actual;
         }
     }
     Ok(())

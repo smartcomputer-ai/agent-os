@@ -1,0 +1,41 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/TimerPc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Awaiting": { "unit": {} },
+        "Done": { "unit": {} },
+        "TimedOut": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/TimerState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/TimerPc@1" },
+        "key": { "option": { "text": {} } },
+        "deadline_ns": { "option": { "nat": {} } },
+        "fired_key": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/TimerEvent@1",
+    "type": {
+      "variant": {
+        "Start": {
+          "record": {
+            "deliver_at_ns": { "nat": {} },
+            "key": { "text": {} }
+          }
+        },
+        "Fired": { "ref": "sys/TimerFired@1" }
+      }
+    }
+  }
+]

@@ -1,0 +1,46 @@
+{
+  "$kind": "manifest",
+  "schemas": [
+    { "name": "demo/TimerPc@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/TimerState@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "demo/TimerEvent@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "sys/TimerSetParams@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "sys/TimerSetReceipt@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "sys/TimerFired@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "modules": [
+    { "name": "demo/TimerSM@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "plans": [],
+  "caps": [
+    { "name": "sys/timer@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "policies": [
+    { "name": "demo/default_policy@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "defaults": {
+    "policy": "demo/default_policy@1",
+    "cap_grants": [
+      {
+        "name": "timer_grant",
+        "cap": "sys/timer@1",
+        "params": { "record": {} }
+      }
+    ]
+  },
+  "module_bindings": {
+    "demo/TimerSM@1": {
+      "slots": {
+        "timer": "timer_grant"
+      }
+    }
+  },
+  "routing": {
+    "events": [
+      { "event": "demo/TimerEvent@1", "reducer": "demo/TimerSM@1" },
+      { "event": "sys/TimerFired@1", "reducer": "demo/TimerSM@1" }
+    ],
+    "inboxes": []
+  },
+  "triggers": []
+}
