@@ -20,7 +20,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::examples::util;
+use crate::support::util;
 
 const REDUCER_NAME: &str = "demo/BlobEchoSM@1";
 const STATE_SCHEMA: &str = "demo/BlobEchoState@1";

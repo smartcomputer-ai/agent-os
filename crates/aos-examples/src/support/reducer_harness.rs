@@ -9,8 +9,8 @@ use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_store::{FsStore, Store};
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::examples::util;
-use crate::manifest_loader;
+use crate::support::manifest_loader;
+use crate::support::util;
 
 pub struct HarnessConfig<'a> {
     pub example_root: &'a Path,

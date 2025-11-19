@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::examples::http_harness::{HttpHarness, MockHttpResponse};
-use crate::examples::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::support::http_harness::{HttpHarness, MockHttpResponse};
+use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/Aggregator@1";
 const EVENT_SCHEMA: &str = "demo/AggregatorEvent@1";

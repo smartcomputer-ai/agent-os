@@ -1,5 +1,5 @@
 mod examples;
-mod manifest_loader;
+mod support;
 
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
@@ -112,7 +112,7 @@ fn init_logging() {
 
 fn run_cli() -> Result<()> {
     let cli = Cli::parse();
-    crate::examples::util::set_force_build(cli.force_build);
+    crate::support::util::set_force_build(cli.force_build);
     match cli.command {
         Some(Commands::Counter) => run_single("counter"),
         Some(Commands::HelloTimer) => run_single("hello-timer"),

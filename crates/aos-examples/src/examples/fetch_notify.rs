@@ -10,9 +10,9 @@ use aos_store::{FsStore, Store};
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
-use crate::examples::http_harness::{HttpHarness, MockHttpResponse};
-use crate::examples::util;
-use crate::manifest_loader;
+use crate::support::http_harness::{HttpHarness, MockHttpResponse};
+use crate::support::manifest_loader;
+use crate::support::util;
 
 const REDUCER_NAME: &str = "demo/FetchNotify@1";
 const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";

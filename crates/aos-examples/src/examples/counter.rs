@@ -15,7 +15,7 @@ use aos_store::{FsStore, Store};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::examples::util;
+use crate::support::util;
 
 const REDUCER_NAME: &str = "demo/CounterSM@1";
 const STATE_SCHEMA: &str = "demo/CounterState@1";
