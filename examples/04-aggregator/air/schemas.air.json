@@ -19,8 +19,30 @@
         "next_request_id": { "nat": {} },
         "pending_request": { "option": { "nat": {} } },
         "current_topic": { "option": { "text": {} } },
-        "last_statuses": { "list": { "int": {} } },
-        "last_previews": { "list": { "text": {} } }
+        "pending_targets": { "list": { "text": {} } },
+        "last_responses": { "list": { "ref": "demo/AggregateResponse@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/AggregationTarget@1",
+    "type": {
+      "record": {
+        "name": { "text": {} },
+        "url": { "text": {} },
+        "method": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/AggregateResponse@1",
+    "type": {
+      "record": {
+        "source": { "text": {} },
+        "status": { "int": {} },
+        "body_preview": { "text": {} }
       }
     }
   },
@@ -31,19 +53,19 @@
       "variant": {
         "Start": {
           "record": {
-            "topic": { "text": {} }
+            "topic": { "text": {} },
+            "primary": { "ref": "demo/AggregationTarget@1" },
+            "secondary": { "ref": "demo/AggregationTarget@1" },
+            "tertiary": { "ref": "demo/AggregationTarget@1" }
           }
         },
         "AggregateComplete": {
           "record": {
             "request_id": { "nat": {} },
             "topic": { "text": {} },
-            "status_a": { "int": {} },
-            "status_b": { "int": {} },
-            "status_c": { "int": {} },
-            "body_a": { "text": {} },
-            "body_b": { "text": {} },
-            "body_c": { "text": {} }
+            "primary": { "ref": "demo/AggregateResponse@1" },
+            "secondary": { "ref": "demo/AggregateResponse@1" },
+            "tertiary": { "ref": "demo/AggregateResponse@1" }
           }
         }
       }
@@ -55,7 +77,10 @@
     "type": {
       "record": {
         "request_id": { "nat": {} },
-        "topic": { "text": {} }
+        "topic": { "text": {} },
+        "primary": { "ref": "demo/AggregationTarget@1" },
+        "secondary": { "ref": "demo/AggregationTarget@1" },
+        "tertiary": { "ref": "demo/AggregationTarget@1" }
       }
     }
   }

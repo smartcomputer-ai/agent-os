@@ -19,7 +19,19 @@ const MODULE_PATH: &str = "examples/04-aggregator/reducer";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum AggregatorEventEnvelope {
-    Start { topic: String },
+    Start {
+        topic: String,
+        primary: AggregationTargetEnvelope,
+        secondary: AggregationTargetEnvelope,
+        tertiary: AggregationTargetEnvelope,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AggregationTargetEnvelope {
+    name: String,
+    url: String,
+    method: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,8 +40,15 @@ struct AggregatorStateView {
     next_request_id: u64,
     pending_request: Option<u64>,
     current_topic: Option<String>,
-    last_statuses: Vec<i64>,
-    last_previews: Vec<String>,
+    pending_targets: Vec<String>,
+    last_responses: Vec<AggregateResponseView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AggregateResponseView {
+    source: String,
+    status: i64,
+    body_preview: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +85,21 @@ pub fn run(example_root: &Path) -> Result<()> {
         &mut kernel,
         AggregatorEventEnvelope::Start {
             topic: "demo-topic".into(),
+            primary: AggregationTargetEnvelope {
+                name: "alpha".into(),
+                url: "https://example.com/api/a".into(),
+                method: "GET".into(),
+            },
+            secondary: AggregationTargetEnvelope {
+                name: "beta".into(),
+                url: "https://example.com/api/b".into(),
+                method: "GET".into(),
+            },
+            tertiary: AggregationTargetEnvelope {
+                name: "gamma".into(),
+                url: "https://example.com/api/c".into(),
+                method: "GET".into(),
+            },
         },
     )?;
 
@@ -104,9 +138,30 @@ pub fn run(example_root: &Path) -> Result<()> {
         .cloned()
         .ok_or_else(|| anyhow!("missing reducer state"))?;
     let state: AggregatorStateView = serde_cbor::from_slice(&final_bytes)?;
+    if !state.pending_targets.is_empty() {
+        return Err(anyhow!(
+            "fan-out should clear pending targets, found {:?}",
+            state.pending_targets
+        ));
+    }
+    if state.last_responses.len() != 3 {
+        return Err(anyhow!(
+            "expected 3 aggregated responses, got {}",
+            state.last_responses.len()
+        ));
+    }
+    let expected_sources = ["alpha", "beta", "gamma"];
+    for (resp, expected) in state.last_responses.iter().zip(expected_sources) {
+        if resp.source != expected {
+            return Err(anyhow!(
+                "response order mismatch: {:?}",
+                state.last_responses
+            ));
+        }
+    }
     println!(
-        "   completed: pc={:?} statuses={:?} previews={:?}",
-        state.pc, state.last_statuses, state.last_previews
+        "   completed: pc={:?} responses={:?}",
+        state.pc, state.last_responses
     );
 
     drop(kernel);
@@ -137,7 +192,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
 fn submit_start(kernel: &mut Kernel<FsStore>, event: AggregatorEventEnvelope) -> Result<()> {
     match &event {
-        AggregatorEventEnvelope::Start { topic } => {
+        AggregatorEventEnvelope::Start { topic, .. } => {
             println!("     aggregate start → topic={topic}");
         }
     }

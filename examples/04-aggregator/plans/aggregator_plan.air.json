@@ -22,8 +22,32 @@
         "kind": "http.request",
         "params": {
           "record": {
-            "method": { "text": "GET" },
-            "url": { "text": "https://example.com/api/a" },
+            "method": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "primary" }
+                  ]
+                },
+                { "text": "method" }
+              ]
+            },
+            "url": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "primary" }
+                  ]
+                },
+                { "text": "url" }
+              ]
+            },
             "headers": { "map": [] },
             "body_ref": { "variant": { "tag": "None" } }
           }
@@ -37,8 +61,32 @@
         "kind": "http.request",
         "params": {
           "record": {
-            "method": { "text": "GET" },
-            "url": { "text": "https://example.com/api/b" },
+            "method": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "secondary" }
+                  ]
+                },
+                { "text": "method" }
+              ]
+            },
+            "url": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "secondary" }
+                  ]
+                },
+                { "text": "url" }
+              ]
+            },
             "headers": { "map": [] },
             "body_ref": { "variant": { "tag": "None" } }
           }
@@ -52,8 +100,32 @@
         "kind": "http.request",
         "params": {
           "record": {
-            "method": { "text": "GET" },
-            "url": { "text": "https://example.com/api/c" },
+            "method": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "tertiary" }
+                  ]
+                },
+                { "text": "method" }
+              ]
+            },
+            "url": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "tertiary" }
+                  ]
+                },
+                { "text": "url" }
+              ]
+            },
             "headers": { "map": [] },
             "body_ref": { "variant": { "tag": "None" } }
           }
@@ -80,76 +152,112 @@
         "bind": { "as": "receipt_c" }
       },
       {
-        "id": "status_a",
+        "id": "response_a",
         "op": "assign",
         "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:receipt_a" },
-            { "text": "status" }
-          ]
+          "record": {
+            "source": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "primary" }
+                  ]
+                },
+                { "text": "name" }
+              ]
+            },
+            "status": {
+              "op": "get",
+              "args": [
+                { "ref": "@var:receipt_a" },
+                { "text": "status" }
+              ]
+            },
+            "body_preview": {
+              "op": "get",
+              "args": [
+                { "ref": "@var:receipt_a" },
+                { "text": "body_preview" }
+              ]
+            }
+          }
         },
-        "bind": { "as": "status_a" }
+        "bind": { "as": "response_a" }
       },
       {
-        "id": "status_b",
+        "id": "response_b",
         "op": "assign",
         "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:receipt_b" },
-            { "text": "status" }
-          ]
+          "record": {
+            "source": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "secondary" }
+                  ]
+                },
+                { "text": "name" }
+              ]
+            },
+            "status": {
+              "op": "get",
+              "args": [
+                { "ref": "@var:receipt_b" },
+                { "text": "status" }
+              ]
+            },
+            "body_preview": {
+              "op": "get",
+              "args": [
+                { "ref": "@var:receipt_b" },
+                { "text": "body_preview" }
+              ]
+            }
+          }
         },
-        "bind": { "as": "status_b" }
+        "bind": { "as": "response_b" }
       },
       {
-        "id": "status_c",
+        "id": "response_c",
         "op": "assign",
         "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:receipt_c" },
-            { "text": "status" }
-          ]
+          "record": {
+            "source": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input" },
+                    { "text": "tertiary" }
+                  ]
+                },
+                { "text": "name" }
+              ]
+            },
+            "status": {
+              "op": "get",
+              "args": [
+                { "ref": "@var:receipt_c" },
+                { "text": "status" }
+              ]
+            },
+            "body_preview": {
+              "op": "get",
+              "args": [
+                { "ref": "@var:receipt_c" },
+                { "text": "body_preview" }
+              ]
+            }
+          }
         },
-        "bind": { "as": "status_c" }
-      },
-      {
-        "id": "body_a",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:receipt_a" },
-            { "text": "body_preview" }
-          ]
-        },
-        "bind": { "as": "body_a" }
-      },
-      {
-        "id": "body_b",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:receipt_b" },
-            { "text": "body_preview" }
-          ]
-        },
-        "bind": { "as": "body_b" }
-      },
-      {
-        "id": "body_c",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:receipt_c" },
-            { "text": "body_preview" }
-          ]
-        },
-        "bind": { "as": "body_c" }
+        "bind": { "as": "response_c" }
       },
       {
         "id": "raise_result",
@@ -168,12 +276,9 @@
                   ]
                 },
                 "topic": { "ref": "@var:agg_topic" },
-                "status_a": { "ref": "@var:status_a" },
-                "status_b": { "ref": "@var:status_b" },
-                "status_c": { "ref": "@var:status_c" },
-                "body_a": { "ref": "@var:body_a" },
-                "body_b": { "ref": "@var:body_b" },
-                "body_c": { "ref": "@var:body_c" }
+                "primary": { "ref": "@var:response_a" },
+                "secondary": { "ref": "@var:response_b" },
+                "tertiary": { "ref": "@var:response_c" }
               }
             }
           }
@@ -191,15 +296,12 @@
       { "from": "emit_fetch_a", "to": "await_fetch_a" },
       { "from": "emit_fetch_b", "to": "await_fetch_b" },
       { "from": "emit_fetch_c", "to": "await_fetch_c" },
-      { "from": "await_fetch_a", "to": "status_a" },
-      { "from": "await_fetch_b", "to": "status_b" },
-      { "from": "await_fetch_c", "to": "status_c" },
-      { "from": "status_a", "to": "body_a" },
-      { "from": "status_b", "to": "body_b" },
-      { "from": "status_c", "to": "body_c" },
-      { "from": "body_a", "to": "raise_result" },
-      { "from": "body_b", "to": "raise_result" },
-      { "from": "body_c", "to": "raise_result" },
+      { "from": "await_fetch_a", "to": "response_a" },
+      { "from": "await_fetch_b", "to": "response_b" },
+      { "from": "await_fetch_c", "to": "response_c" },
+      { "from": "response_a", "to": "raise_result" },
+      { "from": "response_b", "to": "raise_result" },
+      { "from": "response_c", "to": "raise_result" },
       { "from": "raise_result", "to": "finish" }
     ],
     "required_caps": ["cap_http_aggregate"],
