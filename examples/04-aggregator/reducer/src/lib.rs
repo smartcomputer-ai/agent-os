@@ -17,8 +17,8 @@ struct AggregatorState {
     next_request_id: u64,
     pending_request: Option<u64>,
     current_topic: Option<String>,
-    last_statuses: Vec<i64>,
-    last_previews: Vec<String>,
+    pending_targets: Vec<String>,
+    last_responses: Vec<AggregateResponse>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,17 +35,33 @@ impl Default for AggregatorPc {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct AggregationTarget {
+    name: String,
+    url: String,
+    method: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AggregateResponse {
+    source: String,
+    status: i64,
+    body_preview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 enum AggregatorEvent {
-    Start { topic: String },
+    Start {
+        topic: String,
+        primary: AggregationTarget,
+        secondary: AggregationTarget,
+        tertiary: AggregationTarget,
+    },
     AggregateComplete {
         request_id: u64,
         topic: String,
-        status_a: i64,
-        status_b: i64,
-        status_c: i64,
-        body_a: String,
-        body_b: String,
-        body_c: String,
+        primary: AggregateResponse,
+        secondary: AggregateResponse,
+        tertiary: AggregateResponse,
     },
 }
 
@@ -72,22 +88,30 @@ pub extern "C" fn wasm_step(ptr: i32, len: i32) -> (i32, i32) {
     if input.event.schema == EVENT_SCHEMA {
         if let Ok(event) = decode_event(&input.event.value) {
             match event {
-                AggregatorEvent::Start { topic } => handle_start(&mut state, topic, &mut domain_events),
+                AggregatorEvent::Start {
+                    topic,
+                    primary,
+                    secondary,
+                    tertiary,
+                } => handle_start(
+                    &mut state,
+                    topic,
+                    primary,
+                    secondary,
+                    tertiary,
+                    &mut domain_events,
+                ),
                 AggregatorEvent::AggregateComplete {
                     request_id,
                     topic,
-                    status_a,
-                    status_b,
-                    status_c,
-                    body_a,
-                    body_b,
-                    body_c,
+                    primary,
+                    secondary,
+                    tertiary,
                 } => handle_complete(
                     &mut state,
                     request_id,
                     topic,
-                    [status_a, status_b, status_c],
-                    [body_a, body_b, body_c],
+                    [primary, secondary, tertiary],
                 ),
             }
         }
@@ -104,7 +128,14 @@ pub extern "C" fn wasm_step(ptr: i32, len: i32) -> (i32, i32) {
     write_back(&output_bytes)
 }
 
-fn handle_start(state: &mut AggregatorState, topic: String, domain_events: &mut Vec<DomainEvent>) {
+fn handle_start(
+    state: &mut AggregatorState,
+    topic: String,
+    primary: AggregationTarget,
+    secondary: AggregationTarget,
+    tertiary: AggregationTarget,
+    domain_events: &mut Vec<DomainEvent>,
+) {
     if matches!(state.pc, AggregatorPc::Running) {
         return;
     }
@@ -113,12 +144,19 @@ fn handle_start(state: &mut AggregatorState, topic: String, domain_events: &mut 
     state.pending_request = Some(request_id);
     state.current_topic = Some(topic.clone());
     state.pc = AggregatorPc::Running;
-    state.last_statuses.clear();
-    state.last_previews.clear();
+    state.pending_targets = vec![
+        primary.name.clone(),
+        secondary.name.clone(),
+        tertiary.name.clone(),
+    ];
+    state.last_responses.clear();
 
     let intent_value = Value::record([
         ("request_id", Value::Nat(request_id)),
         ("topic", Value::Text(topic)),
+        ("primary", target_to_value(&primary)),
+        ("secondary", target_to_value(&secondary)),
+        ("tertiary", target_to_value(&tertiary)),
     ]);
     let value = serde_cbor::to_vec(&intent_value).expect("intent");
     let key = request_id.to_be_bytes().to_vec();
@@ -133,8 +171,7 @@ fn handle_complete(
     state: &mut AggregatorState,
     request_id: u64,
     topic: String,
-    statuses: [i64; 3],
-    bodies: [String; 3],
+    responses: [AggregateResponse; 3],
 ) {
     if !matches!(state.pending_request, Some(id) if id == request_id) {
         return;
@@ -142,8 +179,8 @@ fn handle_complete(
     state.pending_request = None;
     state.pc = AggregatorPc::Done;
     state.current_topic = Some(topic);
-    state.last_statuses = statuses.to_vec();
-    state.last_previews = bodies.into();
+    state.pending_targets.clear();
+    state.last_responses = responses.to_vec();
 }
 
 fn decode_event(bytes: &[u8]) -> Result<AggregatorEvent, serde_cbor::Error> {
@@ -164,41 +201,88 @@ fn decode_event(bytes: &[u8]) -> Result<AggregatorEvent, serde_cbor::Error> {
 
 fn parse_variant(tag: String, body: Value) -> Result<AggregatorEvent, serde_cbor::Error> {
     match tag.as_str() {
-        "Start" => {
-            if let Value::Record(mut record) = body {
-                let topic = extract_text_value(&mut record, "topic");
-                Ok(AggregatorEvent::Start { topic })
-            } else {
-                Err(serde_cbor::Error::custom("Start body must be record"))
-            }
-        }
+        "Start" => parse_start_value(body),
         "AggregateComplete" => parse_complete_value(body),
         other => Err(serde_cbor::Error::custom(format!("unknown event tag {other}"))),
     }
+}
+
+fn parse_start_value(body: Value) -> Result<AggregatorEvent, serde_cbor::Error> {
+    if let Value::Record(mut record) = body {
+        let topic = extract_text_value(&mut record, "topic");
+        let primary = extract_target_value(&mut record, "primary");
+        let secondary = extract_target_value(&mut record, "secondary");
+        let tertiary = extract_target_value(&mut record, "tertiary");
+        return Ok(AggregatorEvent::Start {
+            topic,
+            primary,
+            secondary,
+            tertiary,
+        });
+    }
+    Err(serde_cbor::Error::custom("Start body must be record"))
 }
 
 fn parse_complete_value(body: Value) -> Result<AggregatorEvent, serde_cbor::Error> {
     if let Value::Record(mut record) = body {
         let request_id = extract_nat_value(&mut record, "request_id");
         let topic = extract_text_value(&mut record, "topic");
-        let status_a = extract_int_value(&mut record, "status_a");
-        let status_b = extract_int_value(&mut record, "status_b");
-        let status_c = extract_int_value(&mut record, "status_c");
-        let body_a = extract_text_value(&mut record, "body_a");
-        let body_b = extract_text_value(&mut record, "body_b");
-        let body_c = extract_text_value(&mut record, "body_c");
+        let primary = extract_response_value(&mut record, "primary");
+        let secondary = extract_response_value(&mut record, "secondary");
+        let tertiary = extract_response_value(&mut record, "tertiary");
         return Ok(AggregatorEvent::AggregateComplete {
             request_id,
             topic,
-            status_a,
-            status_b,
-            status_c,
-            body_a,
-            body_b,
-            body_c,
+            primary,
+            secondary,
+            tertiary,
         });
     }
     Err(serde_cbor::Error::custom("invalid AggregateComplete body"))
+}
+
+fn target_to_value(target: &AggregationTarget) -> Value {
+    Value::record([
+        ("name", Value::Text(target.name.clone())),
+        ("url", Value::Text(target.url.clone())),
+        ("method", Value::Text(target.method.clone())),
+    ])
+}
+
+fn extract_target_value(
+    record: &mut IndexMap<String, Value>,
+    key: &str,
+) -> AggregationTarget {
+    if let Some(Value::Record(mut target)) = record.swap_remove(key) {
+        return AggregationTarget {
+            name: extract_text_value(&mut target, "name"),
+            url: extract_text_value(&mut target, "url"),
+            method: extract_text_value(&mut target, "method"),
+        };
+    }
+    AggregationTarget {
+        name: String::new(),
+        url: String::new(),
+        method: String::new(),
+    }
+}
+
+fn extract_response_value(
+    record: &mut IndexMap<String, Value>,
+    key: &str,
+) -> AggregateResponse {
+    if let Some(Value::Record(mut response)) = record.swap_remove(key) {
+        return AggregateResponse {
+            source: extract_text_value(&mut response, "source"),
+            status: extract_int_value(&mut response, "status"),
+            body_preview: extract_text_value(&mut response, "body_preview"),
+        };
+    }
+    AggregateResponse {
+        source: String::new(),
+        status: 0,
+        body_preview: String::new(),
+    }
 }
 
 fn extract_int_value(record: &mut IndexMap<String, Value>, key: &str) -> i64 {
