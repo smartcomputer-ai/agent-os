@@ -1,17 +1,10 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, anyhow};
-use aos_air_types::HashRef;
-use aos_cbor::Hash;
-use aos_kernel::journal::fs::FsJournal;
-use aos_kernel::{Kernel, LoadedManifest};
-use aos_store::{FsStore, Store};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use serde_cbor;
 
 use crate::examples::http_harness::{HttpHarness, MockHttpResponse};
-use crate::examples::util;
-use crate::manifest_loader;
+use crate::examples::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/Aggregator@1";
 const EVENT_SCHEMA: &str = "demo/AggregatorEvent@1";
@@ -59,52 +52,39 @@ enum AggregatorPcView {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    util::reset_journal(example_root)?;
-    let wasm_bytes = util::compile_reducer(MODULE_PATH)?;
-    let store = std::sync::Arc::new(FsStore::open(example_root).context("open FsStore")?);
-    let wasm_hash = store
-        .put_blob(&wasm_bytes)
-        .context("store reducer wasm blob")?;
-    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash reducer wasm")?;
-
-    let mut loaded = manifest_loader::load_from_assets(store.clone(), example_root)?
-        .ok_or_else(|| anyhow!("example 04 must provide AIR JSON assets"))?;
-    patch_module_hash(&mut loaded, &wasm_hash_ref)?;
-
-    let journal = Box::new(FsJournal::open(example_root)?);
-    let kernel_config = util::kernel_config(example_root)?;
-    let mut kernel = Kernel::from_loaded_manifest_with_config(
-        store.clone(),
-        loaded,
-        journal,
-        kernel_config.clone(),
-    )?;
+    let harness = ExampleReducerHarness::prepare(HarnessConfig {
+        example_root,
+        reducer_name: REDUCER_NAME,
+        event_schema: EVENT_SCHEMA,
+        module_crate: MODULE_PATH,
+    })?;
+    let mut run = harness.start()?;
 
     println!("→ Aggregator demo");
-    submit_start(
-        &mut kernel,
-        AggregatorEventEnvelope::Start {
-            topic: "demo-topic".into(),
-            primary: AggregationTargetEnvelope {
-                name: "alpha".into(),
-                url: "https://example.com/api/a".into(),
-                method: "GET".into(),
-            },
-            secondary: AggregationTargetEnvelope {
-                name: "beta".into(),
-                url: "https://example.com/api/b".into(),
-                method: "GET".into(),
-            },
-            tertiary: AggregationTargetEnvelope {
-                name: "gamma".into(),
-                url: "https://example.com/api/c".into(),
-                method: "GET".into(),
-            },
+    let start_event = AggregatorEventEnvelope::Start {
+        topic: "demo-topic".into(),
+        primary: AggregationTargetEnvelope {
+            name: "alpha".into(),
+            url: "https://example.com/api/a".into(),
+            method: "GET".into(),
         },
-    )?;
+        secondary: AggregationTargetEnvelope {
+            name: "beta".into(),
+            url: "https://example.com/api/b".into(),
+            method: "GET".into(),
+        },
+        tertiary: AggregationTargetEnvelope {
+            name: "gamma".into(),
+            url: "https://example.com/api/c".into(),
+            method: "GET".into(),
+        },
+    };
+    let AggregatorEventEnvelope::Start { topic, .. } = &start_event;
+    println!("     aggregate start → topic={topic}");
+    run.submit_event(&start_event)?;
 
     let mut harness = HttpHarness::new();
-    let mut requests = harness.collect_requests(&mut kernel)?;
+    let mut requests = harness.collect_requests(run.kernel_mut())?;
     if requests.len() != 3 {
         return Err(anyhow!(
             "aggregator plan expected 3 http intents, got {}",
@@ -118,26 +98,22 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     println!("     responding out of order (b → c → a)");
     harness.respond_with(
-        &mut kernel,
+        run.kernel_mut(),
         ctx_b,
         MockHttpResponse::json(200, "{\"source\":\"beta\"}"),
     )?;
     harness.respond_with(
-        &mut kernel,
+        run.kernel_mut(),
         ctx_c,
         MockHttpResponse::json(201, "{\"source\":\"gamma\"}"),
     )?;
     harness.respond_with(
-        &mut kernel,
+        run.kernel_mut(),
         ctx_a,
         MockHttpResponse::json(202, "{\"source\":\"alpha\"}"),
     )?;
 
-    let final_bytes = kernel
-        .reducer_state(REDUCER_NAME)
-        .cloned()
-        .ok_or_else(|| anyhow!("missing reducer state"))?;
-    let state: AggregatorStateView = serde_cbor::from_slice(&final_bytes)?;
+    let state: AggregatorStateView = run.read_state()?;
     if !state.pending_targets.is_empty() {
         return Err(anyhow!(
             "fan-out should clear pending targets, found {:?}",
@@ -164,49 +140,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         state.pc, state.last_responses
     );
 
-    drop(kernel);
+    run.finish()?.verify_replay()?;
 
-    let mut replay_loaded = manifest_loader::load_from_assets(store.clone(), example_root)?
-        .ok_or_else(|| anyhow!("example 04 must provide AIR JSON assets"))?;
-    patch_module_hash(&mut replay_loaded, &wasm_hash_ref)?;
-    let replay_journal = Box::new(FsJournal::open(example_root)?);
-    let mut replay = Kernel::from_loaded_manifest_with_config(
-        store.clone(),
-        replay_loaded,
-        replay_journal,
-        kernel_config,
-    )?;
-    replay.tick_until_idle()?;
-    let replay_bytes = replay
-        .reducer_state(REDUCER_NAME)
-        .cloned()
-        .ok_or_else(|| anyhow!("missing replay state"))?;
-    if replay_bytes != final_bytes {
-        return Err(anyhow!("replay mismatch: reducer state diverged"));
-    }
-    let state_hash = Hash::of_bytes(&final_bytes).to_hex();
-    println!("   replay check: OK (state hash {state_hash})\n");
-
-    Ok(())
-}
-
-fn submit_start(kernel: &mut Kernel<FsStore>, event: AggregatorEventEnvelope) -> Result<()> {
-    match &event {
-        AggregatorEventEnvelope::Start { topic, .. } => {
-            println!("     aggregate start → topic={topic}");
-        }
-    }
-    let payload = serde_cbor::to_vec(&event)?;
-    kernel.submit_domain_event(EVENT_SCHEMA, payload);
-    kernel.tick_until_idle()?;
-    Ok(())
-}
-
-fn patch_module_hash(loaded: &mut LoadedManifest, wasm_hash: &HashRef) -> Result<()> {
-    let module = loaded
-        .modules
-        .get_mut(REDUCER_NAME)
-        .ok_or_else(|| anyhow!("module '{REDUCER_NAME}' missing from manifest"))?;
-    module.wasm_hash = wasm_hash.clone();
     Ok(())
 }
