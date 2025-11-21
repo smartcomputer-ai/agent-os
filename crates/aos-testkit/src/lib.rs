@@ -21,6 +21,9 @@ use serde::Serialize;
 use serde_cbor;
 use wat::parse_str;
 
+mod llm_harness;
+pub use llm_harness::{LlmRequestContext, MockLlmHarness};
+
 /// In-memory store alias used across fixtures.
 pub type TestStore = MemStore;
 

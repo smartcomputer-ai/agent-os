@@ -169,6 +169,7 @@ dependencies = [
  "aos-effects",
  "aos-kernel",
  "aos-store",
+ "aos-testkit",
  "aos-wasm-abi",
  "aos-wasm-build",
  "assert_cmd",
@@ -237,17 +238,21 @@ dependencies = [
 name = "aos-testkit"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "aos-air-exec",
  "aos-air-types",
+ "aos-cbor",
  "aos-effects",
  "aos-kernel",
  "aos-store",
  "aos-wasm-abi",
+ "hex",
  "indexmap",
  "rand",
  "serde",
  "serde_cbor",
  "serde_json",
+ "sha2",
  "tempfile",
  "wat",
 ]

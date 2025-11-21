@@ -1,0 +1,69 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/LlmSummarizerPc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Summarizing": { "unit": {} },
+        "Done": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/LlmSummarizerState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/LlmSummarizerPc@1" },
+        "next_request_id": { "nat": {} },
+        "pending_request": { "option": { "nat": {} } },
+        "last_summary": { "option": { "text": {} } },
+        "last_tokens_prompt": { "option": { "nat": {} } },
+        "last_tokens_completion": { "option": { "nat": {} } },
+        "last_cost_millis": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/LlmSummarizerEvent@1",
+    "type": {
+      "variant": {
+        "Start": { "record": { "url": { "text": {} } } },
+        "SummaryReady": {
+          "record": {
+            "request_id": { "nat": {} },
+            "summary": { "text": {} },
+            "tokens_prompt": { "nat": {} },
+            "tokens_completion": { "nat": {} },
+            "cost_millis": { "nat": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/SummarizeRequest@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "url": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/SummarizeResult@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "summary": { "text": {} },
+        "tokens_prompt": { "nat": {} },
+        "tokens_completion": { "nat": {} },
+        "cost_millis": { "nat": {} }
+      }
+    }
+  }
+]

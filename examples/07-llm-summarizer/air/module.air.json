@@ -1,0 +1,15 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/LlmSummarizer@1",
+    "module_kind": "reducer",
+    "abi": {
+      "reducer": {
+        "state": "demo/LlmSummarizerState@1",
+        "event": "demo/LlmSummarizerEvent@1",
+        "effects_emitted": [],
+        "cap_slots": {}
+      }
+    }
+  }
+]
