@@ -65,6 +65,22 @@ pub enum StoreError {
         #[source]
         source: aos_air_types::plan_literals::PlanLiteralError,
     },
+    #[error("manifest declares duplicate secret {alias}@{version}")]
+    DuplicateSecret { alias: String, version: u64 },
+    #[error("secret {alias}@{version} missing binding_id")]
+    SecretMissingBinding { alias: String, version: u64 },
+    #[error("secret {alias}@{version} not declared (context: {context})")]
+    UnknownSecret {
+        alias: String,
+        version: u64,
+        context: String,
+    },
+    #[error("secret {alias}@{version} not permitted for {context}")]
+    SecretPolicyViolation {
+        alias: String,
+        version: u64,
+        context: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

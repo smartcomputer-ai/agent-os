@@ -100,3 +100,33 @@ fn module_binding_requires_slots_schema() {
         "schema should require slots object inside module binding"
     );
 }
+
+#[test]
+fn manifest_with_secrets_round_trip() {
+    let manifest_json = json!({
+        "$kind": "manifest",
+        "schemas": [],
+        "modules": [],
+        "plans": [],
+        "caps": [],
+        "policies": [],
+        "secrets": [{
+            "alias": "payments/stripe",
+            "version": 1,
+            "binding_id": "stripe:prod",
+            "expected_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "policy": {
+                "allowed_caps": ["stripe_cap"],
+                "allowed_plans": ["com.acme/Plan@1"]
+            }
+        }]
+    });
+    assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
+    let manifest: Manifest = serde_json::from_value(manifest_json.clone()).expect("manifest json");
+    assert_eq!(manifest.secrets.len(), 1);
+    let round = serde_json::to_value(manifest).expect("serialize");
+    assert_eq!(
+        round["secrets"][0]["alias"],
+        manifest_json["secrets"][0]["alias"]
+    );
+}

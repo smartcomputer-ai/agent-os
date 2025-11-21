@@ -158,6 +158,7 @@ fn build_loaded_manifest(store: Arc<FsStore>, wasm_bytes: &[u8]) -> Result<Loade
         plans: Vec::new(),
         caps: Vec::new(),
         policies: Vec::new(),
+        secrets: Vec::new(),
         defaults: None,
         module_bindings: IndexMap::new(),
         routing: Some(Routing {

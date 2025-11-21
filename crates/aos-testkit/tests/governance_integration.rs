@@ -218,8 +218,8 @@ fn sample_plan_json() -> serde_json::Value {
                 "kind": "http.request",
                 "params": {
                     "headers": {
-                        "content-type": "application/json",
-                        "accept": "*/*"
+                        "content-type": {"text": "application/json"},
+                        "accept": {"text": "*/*"}
                     },
                     "method": "POST",
                     "url": "https://example.com",
@@ -256,6 +256,7 @@ fn plan_patch(plan: DefPlan) -> ManifestPatch {
             }],
             caps: vec![],
             policies: vec![],
+            secrets: vec![],
             defaults: None,
             module_bindings: Default::default(),
             routing: None,

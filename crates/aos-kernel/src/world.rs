@@ -1373,6 +1373,7 @@ mod tests {
             plans: vec![],
             caps: vec![],
             policies: vec![],
+            secrets: vec![],
             defaults: None,
             module_bindings: Default::default(),
             routing: None,
