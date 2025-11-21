@@ -17,12 +17,22 @@
     "EffectKind": {
       "title": "Built-in effect kinds (v1)",
       "type": "string",
-      "enum": ["http.request", "blob.put", "blob.get", "timer.set", "llm.generate"]
+      "enum": [
+        "http.request",
+        "blob.put",
+        "blob.get",
+        "timer.set",
+        "llm.generate",
+        "secret.get",
+        "vault.get",
+        "vault.put",
+        "vault.rotate"
+      ]
     },
     "CapType": {
       "title": "Capability types (v1)",
       "type": "string",
-      "enum": ["http.out", "blob", "timer", "llm.basic"]
+      "enum": ["http.out", "blob", "timer", "llm.basic", "secret", "vault"]
     },
     "VarName": {
       "type": "string",
@@ -35,6 +45,42 @@
     "CapGrantName": {
       "type": "string",
       "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,63}$"
+    },
+    "SecretAlias": {
+      "type": "string",
+      "description": "Logical name for a secret, scoped per manifest (e.g., payments/stripe)",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.-/]{0,63}$"
+    },
+    "SecretVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "SecretBindingId": {
+      "type": "string",
+      "description": "Opaque binding id resolved by environment-specific secret resolver",
+      "pattern": "^[A-Za-z0-9_.:-]{1,96}$"
+    },
+    "SecretRef": {
+      "type": "object",
+      "description": "Reference to a secret by alias and pinned version.",
+      "properties": {
+        "alias": { "$ref": "#/$defs/SecretAlias" },
+        "version": { "$ref": "#/$defs/SecretVersion" }
+      },
+      "required": ["alias", "version"],
+      "additionalProperties": false
+    },
+    "TextOrSecretRef": {
+      "oneOf": [
+        { "type": "string" },
+        { "$ref": "#/$defs/SecretRef" }
+      ]
+    },
+    "BytesOrSecretRef": {
+      "oneOf": [
+        { "$ref": "#/$defs/BytesB64" },
+        { "$ref": "#/$defs/SecretRef" }
+      ]
     },
     "BytesB64": {
       "type": "string",

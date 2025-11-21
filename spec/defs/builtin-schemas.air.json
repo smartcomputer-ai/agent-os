@@ -120,7 +120,12 @@
         "headers": {
           "map": {
             "key": { "text": {} },
-            "value": { "text": {} }
+            "value": {
+              "variant": {
+                "text": { "text": {} },
+                "secret": { "ref": "sys/SecretRef@1" }
+              }
+            }
           }
         },
         "body_ref": { "option": { "hash": {} } }
@@ -160,7 +165,15 @@
         "temperature": { "dec128": {} },
         "max_tokens": { "nat": {} },
         "input_ref": { "hash": {} },
-        "tools": { "option": { "list": { "text": {} } } }
+        "tools": { "option": { "list": { "text": {} } } },
+        "api_key": {
+          "option": {
+            "variant": {
+              "text": { "text": {} },
+              "secret": { "ref": "sys/SecretRef@1" }
+            }
+          }
+        }
       }
     }
   },
@@ -178,6 +191,66 @@
         },
         "cost_cents": { "nat": {} },
         "provider_id": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/SecretRef@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/SecretGetParams@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/SecretGetReceipt@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} },
+        "digest": { "hash": {} },
+        "size": { "nat": {} },
+        "storage_kind": { "text": {} },
+        "dek_wrapped_with": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/VaultPutParams@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} },
+        "scope": { "option": { "text": {} } },
+        "ciphertext_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/VaultPutReceipt@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} },
+        "ciphertext_ref": { "hash": {} },
+        "digest": { "hash": {} },
+        "storage_kind": { "text": {} },
+        "dek_wrapped_with": { "option": { "text": {} } }
       }
     }
   }

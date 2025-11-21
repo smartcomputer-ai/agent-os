@@ -30,3 +30,39 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 13. **[x] Governance Loop + Safe Upgrade Example (M5 core)** — Kernel now supports proposal/shadow/approve/apply with deterministic replay, capability/policy ledgers diffed via `compute_ledger_deltas`, and manifest hashes guarded through shadow → apply. Added `examples/06-safe-upgrade` with v1→v2 plan swap, new cap/policy, shadow prediction of HTTP intents + ledger deltas, and approval/apply flow exercised in the `aos-examples` runner and integration tests.
         - Reused harness patterns from fetch-notify and chain-comp; replay stays byte-identical after upgrade.
+
+## Secrets — Implementation Tasks (see spec/17-secrets.md)
+
+1. Secret types into AIR & enums (validation surface)
+   - Add `SecretDecl` + `secrets` to `aos-air-types::Manifest` (alias, version, binding_id, expected_digest?, policy).
+   - Extend `EffectKind`/`CapType` enums for `secret.get` and `vault.{get,put,rotate}` and update serde renames.
+   - Wire new kinds into `aos-effects` (kinds.rs, capability.rs) and AIR ↔ runtime conversions.
+   - Tests: air-types round-trip JSON for manifests with secrets; enum serde tests; ensure existing manifests still pass.
+
+2. Schema & manifest validation
+   - Enforce unique (alias, version) and binding_id presence; validate expected_digest hash shape.
+   - Validate that every SecretRef in plans/modules/caps resolves to a declared secret; enforce allowed_caps/plans policy on secrets.
+   - Files: `crates/aos-store/src/manifest.rs`, `crates/aos-air-types/src/tests/manifest.rs`.
+   - Tests: failing cases for unknown alias/version, duplicate binding, missing binding_id, disallowed plan/cap; passing case with secrets + triggers.
+
+3. Secret resolver plumbing in kernel
+   - Introduce `SecretResolver` trait + default map-backed impl (binding_id → backend) with digest check.
+   - Add to `KernelConfig`, thread into `Kernel`/`EffectManager`; fail closed on missing resolver or digest mismatch.
+   - Files: new `crates/aos-kernel/src/secret.rs`, touch `world.rs`, `effects.rs`.
+   - Tests: unit tests for resolver (success, missing binding, digest mismatch); kernel config uses resolver; shadow uses placeholder when resolver unavailable.
+
+4. Effect parameter injection & redaction
+   - Detect `SecretRef` in plan/reducer effect params (HTTP headers, LLM api_key, secret.get micro-effect).
+   - Resolve via `SecretResolver`, inject plaintext before dispatch, attach `secret_meta` (alias/version/binding_id/digest) to intents/receipts; redact plaintext from receipts/journal.
+   - Files: `crates/aos-kernel/src/plan.rs` (preserve SecretRef literals), `effects.rs`, `journal/` snapshots as needed, `aos-effects` intent/receipt structs.
+   - Tests: integration—HTTP effect with SecretRef resolves and injects; journal contains only meta; replay deterministic; failure on digest mismatch.
+
+5. Policy gate & capability wiring
+   - Map new cap types to allowed effect kinds in `CapabilityResolver`; extend policy matching to inspect secret_meta (alias/binding_id).
+   - Files: `crates/aos-kernel/src/capability.rs`, `policy.rs`.
+   - Tests: deny when cap not allowlisted for secret’s policy; allow on match; policy unit tests.
+
+6. Examples & docs
+   - Add a minimal example manifest using secrets, plus resolver config sample; document rotation flow.
+   - Update `spec/17-secrets.md` cross-links if needed; short README snippet in examples.
+   - Tests: example runs with stub resolver in CI; golden receipt shows redaction.

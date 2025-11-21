@@ -25,6 +25,35 @@
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
+    "secrets": {
+      "type": "array",
+      "description": "Declared secrets available to the manifest; binding is resolved per-environment via binding_id.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "alias": { "$ref": "common.schema.json#/$defs/SecretAlias" },
+          "version": { "$ref": "common.schema.json#/$defs/SecretVersion" },
+          "binding_id": { "$ref": "common.schema.json#/$defs/SecretBindingId" },
+          "expected_digest": { "$ref": "common.schema.json#/$defs/Hash" },
+          "policy": {
+            "type": "object",
+            "properties": {
+              "allowed_caps": {
+                "type": "array",
+                "items": { "$ref": "common.schema.json#/$defs/CapGrantName" }
+              },
+              "allowed_plans": {
+                "type": "array",
+                "items": { "$ref": "common.schema.json#/$defs/Name" }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["alias", "version", "binding_id"],
+        "additionalProperties": false
+      }
+    },
     "defaults": {
       "type": "object",
       "properties": {
