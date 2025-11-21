@@ -14,7 +14,7 @@ This file provides guidance to coding agents when working with code in this repo
 4. **spec/04-reducers.md** — Reducer ABI/semantics; micro-effect rules.
 5. **spec/05-workflows.md** — Workflow patterns; see also **spec/07-workflow-patterns.md**.
 
-Reference shelves: **spec/schemas/** (JSON Schemas), **spec/defs/** (built-ins: Timer/Blob/HTTP/LLM), **spec/patch.md** (historical notes). Future/experimental material lives in 10+ (e.g., 11-cells, 12-plans-v1.1, 13-parallelism, 14-example-reducer-harness, 15-reducer-sdk).
+Reference shelves: **spec/schemas/** (JSON Schemas), **spec/defs/** (built-ins: Timer/Blob/HTTP/LLM), **spec/patch.md** (historical notes). Future/experimental material lives in 10+ (e.g., 11-cells, 12-plans-v1.1, 13-parallelism, 14-example-reducer-harness, 15-reducer-sdk, 16-query-interfaces, 17-secrets).
 
 
 ## Core Architecture (TL;DR)
