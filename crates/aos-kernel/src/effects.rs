@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use aos_air_types::EffectKind;
 use aos_effects::{EffectIntent, EffectKind as RuntimeEffectKind, EffectSource};
 use aos_wasm_abi::ReducerEffect;
@@ -5,6 +7,7 @@ use aos_wasm_abi::ReducerEffect;
 use crate::capability::CapabilityResolver;
 use crate::error::KernelError;
 use crate::policy::PolicyGate;
+use crate::secret::SecretResolver;
 
 #[derive(Default)]
 pub struct EffectQueue {
@@ -33,14 +36,20 @@ pub struct EffectManager {
     queue: EffectQueue,
     capability_gate: CapabilityResolver,
     policy_gate: Box<dyn PolicyGate>,
+    secret_resolver: Option<Arc<dyn SecretResolver>>,
 }
 
 impl EffectManager {
-    pub fn new(capability_gate: CapabilityResolver, policy_gate: Box<dyn PolicyGate>) -> Self {
+    pub fn new(
+        capability_gate: CapabilityResolver,
+        policy_gate: Box<dyn PolicyGate>,
+        secret_resolver: Option<Arc<dyn SecretResolver>>,
+    ) -> Self {
         Self {
             queue: EffectQueue::default(),
             capability_gate,
             policy_gate,
+            secret_resolver,
         }
     }
 
@@ -110,6 +119,10 @@ impl EffectManager {
 
     pub fn restore_queue(&mut self, intents: Vec<EffectIntent>) {
         self.queue.set(intents);
+    }
+
+    pub fn secret_resolver(&self) -> Option<Arc<dyn SecretResolver>> {
+        self.secret_resolver.clone()
     }
 }
 

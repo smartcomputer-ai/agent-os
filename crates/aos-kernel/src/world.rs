@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -32,6 +33,7 @@ use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
+use crate::secret::{PlaceholderSecretResolver, SharedSecretResolver};
 use crate::shadow::{
     DeltaKind, LedgerDelta, LedgerKind, ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary,
 };
@@ -43,10 +45,26 @@ use crate::snapshot::{
 const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct KernelConfig {
     pub module_cache_dir: Option<PathBuf>,
     pub eager_module_load: bool,
+    pub secret_resolver: Option<SharedSecretResolver>,
+    pub allow_placeholder_secrets: bool,
+}
+
+impl fmt::Debug for KernelConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KernelConfig")
+            .field("module_cache_dir", &self.module_cache_dir)
+            .field("eager_module_load", &self.eager_module_load)
+            .field(
+                "secret_resolver",
+                &self.secret_resolver.as_ref().map(|_| "<resolver>"),
+            )
+            .field("allow_placeholder_secrets", &self.allow_placeholder_secrets)
+            .finish()
+    }
 }
 
 pub struct Kernel<S: Store> {
@@ -72,6 +90,8 @@ pub struct Kernel<S: Store> {
     journal: Box<dyn Journal>,
     suppress_journal: bool,
     governance: GovernanceManager,
+    secret_resolver: Option<SharedSecretResolver>,
+    allow_placeholder_secrets: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -174,6 +194,16 @@ impl<S: Store + 'static> KernelBuilder<S> {
         self
     }
 
+    pub fn with_secret_resolver(mut self, resolver: SharedSecretResolver) -> Self {
+        self.config.secret_resolver = Some(resolver);
+        self
+    }
+
+    pub fn allow_placeholder_secrets(mut self, enable: bool) -> Self {
+        self.config.allow_placeholder_secrets = enable;
+        self
+    }
+
     pub fn from_manifest_path(
         self,
         path: impl AsRef<std::path::Path>,
@@ -198,6 +228,7 @@ impl<S: Store + 'static> Kernel<S> {
         journal: Box<dyn Journal>,
         config: KernelConfig,
     ) -> Result<Self, KernelError> {
+        let secret_resolver = select_secret_resolver(&loaded.manifest, &config)?;
         let mut router = HashMap::new();
         if let Some(routing) = loaded.manifest.routing.as_ref() {
             for route in &routing.events {
@@ -271,11 +302,17 @@ impl<S: Store + 'static> Kernel<S> {
             recent_receipt_index: HashSet::new(),
             plan_results: VecDeque::new(),
             scheduler: Scheduler::default(),
-            effect_manager: EffectManager::new(capability_resolver, policy_gate),
+            effect_manager: EffectManager::new(
+                capability_resolver,
+                policy_gate,
+                secret_resolver.clone(),
+            ),
             reducer_state: HashMap::new(),
             journal,
             suppress_journal: false,
             governance: GovernanceManager::new(),
+            secret_resolver: secret_resolver.clone(),
+            allow_placeholder_secrets: config.allow_placeholder_secrets,
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
@@ -892,7 +929,16 @@ impl<S: Store + 'static> Kernel<S> {
 
         self.schema_index = schema_index;
         self.reducer_schemas = reducer_schemas;
-        self.effect_manager = EffectManager::new(capability_resolver, policy_gate);
+        self.secret_resolver = ensure_secret_resolver(
+            &self.manifest,
+            self.secret_resolver.clone(),
+            self.allow_placeholder_secrets,
+        )?;
+        self.effect_manager = EffectManager::new(
+            capability_resolver,
+            policy_gate,
+            self.secret_resolver.clone(),
+        );
         Ok(())
     }
 
@@ -925,6 +971,10 @@ impl<S: Store + 'static> Kernel<S> {
             ))
         });
         deltas
+    }
+
+    fn secret_resolver(&self) -> Option<SharedSecretResolver> {
+        self.secret_resolver.clone()
     }
 
     fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
@@ -1175,6 +1225,34 @@ impl<S: Store + 'static> Kernel<S> {
     }
 }
 
+fn select_secret_resolver(
+    manifest: &Manifest,
+    config: &KernelConfig,
+) -> Result<Option<SharedSecretResolver>, KernelError> {
+    ensure_secret_resolver(
+        manifest,
+        config.secret_resolver.clone(),
+        config.allow_placeholder_secrets,
+    )
+}
+
+fn ensure_secret_resolver(
+    manifest: &Manifest,
+    provided: Option<SharedSecretResolver>,
+    allow_placeholder: bool,
+) -> Result<Option<SharedSecretResolver>, KernelError> {
+    if manifest.secrets.is_empty() {
+        return Ok(None);
+    }
+    if let Some(resolver) = provided {
+        return Ok(Some(resolver));
+    }
+    if allow_placeholder {
+        return Ok(Some(Arc::new(PlaceholderSecretResolver)));
+    }
+    Err(KernelError::SecretResolverMissing)
+}
+
 fn determine_correlation_value(
     binding: &PlanTriggerBinding,
     input: &ExprValue,
@@ -1351,7 +1429,8 @@ fn diff_named_refs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_air_types::HashRef;
+    use crate::journal::mem::MemJournal;
+    use aos_air_types::{HashRef, SecretDecl};
     use aos_store::MemStore;
 
     fn named_ref(name: &str, hash: &str) -> NamedRef {
@@ -1428,6 +1507,31 @@ mod tests {
             name: "policy/new@1".to_string(),
             change: DeltaKind::Added,
         }));
+    }
+
+    #[test]
+    fn kernel_requires_secret_resolver_for_secretful_manifest() {
+        let store = Arc::new(MemStore::new());
+        let mut manifest = empty_manifest();
+        manifest.secrets.push(SecretDecl {
+            alias: "payments/stripe".into(),
+            version: 1,
+            binding_id: "stripe:prod".into(),
+            expected_digest: None,
+            policy: None,
+        });
+        let loaded = LoadedManifest {
+            manifest,
+            modules: HashMap::new(),
+            plans: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::new(),
+        };
+
+        let result = Kernel::from_loaded_manifest(store, loaded, Box::new(MemJournal::new()));
+
+        assert!(matches!(result, Err(KernelError::SecretResolverMissing)));
     }
 }
 

@@ -5,7 +5,7 @@ use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_store::Store;
 
 use crate::journal::mem::MemJournal;
-use crate::world::Kernel;
+use crate::world::{Kernel, KernelConfig};
 use crate::{
     error::KernelError,
     shadow::{PendingPlanReceipt, PlanResultPreview, PredictedEffect, ShadowConfig, ShadowSummary},
@@ -32,8 +32,15 @@ impl ShadowExecutor {
         }
 
         let loaded = config.patch.to_loaded_manifest();
-        let mut kernel =
-            Kernel::from_loaded_manifest(store.clone(), loaded, Box::new(MemJournal::new()))?;
+        let mut kernel = Kernel::from_loaded_manifest_with_config(
+            store.clone(),
+            loaded,
+            Box::new(MemJournal::new()),
+            KernelConfig {
+                allow_placeholder_secrets: true,
+                ..KernelConfig::default()
+            },
+        )?;
 
         if let Some(harness) = &config.harness {
             for (schema, bytes) in &harness.seed_events {
@@ -104,7 +111,7 @@ impl ShadowExecutor {
 mod tests {
     use super::*;
     use crate::governance::ManifestPatch;
-    use aos_air_types::{HashRef, Manifest, NamedRef};
+    use aos_air_types::{HashRef, Manifest, NamedRef, SecretDecl};
     use aos_store::MemStore;
 
     fn empty_manifest() -> Manifest {
@@ -176,6 +183,38 @@ mod tests {
             },
         )
         .expect("shadow run");
+
+        assert_eq!(summary.manifest_hash, patch_hash);
+    }
+
+    #[test]
+    fn shadow_executor_uses_placeholder_when_secrets_present() {
+        let store = Arc::new(MemStore::new());
+        let patch = ManifestPatch {
+            manifest: Manifest {
+                secrets: vec![SecretDecl {
+                    alias: "payments/stripe".into(),
+                    version: 1,
+                    binding_id: "stripe:prod".into(),
+                    expected_digest: None,
+                    policy: None,
+                }],
+                ..empty_manifest()
+            },
+            nodes: vec![],
+        };
+        let patch_hash = hash_of_patch(&patch);
+
+        let summary = ShadowExecutor::run(
+            store,
+            &ShadowConfig {
+                proposal_id: 1,
+                patch,
+                patch_hash: patch_hash.clone(),
+                harness: None,
+            },
+        )
+        .expect("shadow should allow placeholder secrets");
 
         assert_eq!(summary.manifest_hash, patch_hash);
     }
