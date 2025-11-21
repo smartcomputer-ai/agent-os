@@ -101,6 +101,48 @@
         "required": ["event","plan"],
         "additionalProperties": false
       }
+    },
+    "secrets": {
+      "description": "Logical secrets known to this world (alias/version/binding, no values).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "alias": {
+            "type": "string",
+            "description": "Logical secret name, unique per manifest (e.g. \"payments/stripe\")."
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Monotonically increasing version for this alias."
+          },
+          "binding_id": {
+            "type": "string",
+            "description": "Opaque id resolved to a backend in node-local config."
+          },
+          "expected_digest": {
+            "$ref": "common.schema.json#/$defs/Hash",
+            "description": "Optional digest of the plaintext value for drift detection."
+          },
+          "policy": {
+            "type": "object",
+            "properties": {
+              "allowed_caps": {
+                "type": "array",
+                "items": { "$ref": "common.schema.json#/$defs/CapGrantName" }
+              },
+              "allowed_plans": {
+                "type": "array",
+                "items": { "$ref": "common.schema.json#/$defs/Name" }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["alias","version","binding_id"],
+        "additionalProperties": false
+      }
     }
   },
   "required": ["$kind","schemas","modules","plans","caps","policies"],
