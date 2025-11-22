@@ -100,13 +100,22 @@ fn reducer_effect_params_canonicalize_noop() {
         "manager should store canonical params bytes"
     );
 
-    // Idempotency: running through normalizer again yields same bytes.
+    // Idempotency: running through normalizer again yields same bytes and hash.
     let roundtrip = aos_effects::normalize_effect_params(
         &aos_effects::EffectKind::new(aos_effects::EffectKind::TIMER_SET),
         &intent.params_cbor,
     )
     .expect("normalize again");
     assert_eq!(intent.params_cbor, roundtrip, "canonical form is stable");
+
+    let rehashed = aos_effects::EffectIntent::from_raw_params(
+        intent.kind.clone(),
+        intent.cap_name.clone(),
+        intent.params_cbor.clone(),
+        intent.idempotency_key,
+    )
+    .expect("rehash");
+    assert_eq!(intent.intent_hash, rehashed.intent_hash, "hash must be stable");
 }
 
 fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
