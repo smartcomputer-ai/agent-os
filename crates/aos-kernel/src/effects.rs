@@ -98,9 +98,18 @@ impl EffectManager {
         runtime_kind: RuntimeEffectKind,
         params_cbor: Vec<u8>,
     ) -> Result<EffectIntent, KernelError> {
+        let original_params = params_cbor.clone();
         let grant = self
             .capability_gate
             .resolve(cap_name, runtime_kind.as_str())?;
+        if let Some(catalog) = &self.secret_catalog {
+            crate::secret::enforce_secret_policy(
+                &original_params,
+                catalog,
+                &source,
+                cap_name,
+            )?;
+        }
         let params_cbor = if let (Some(catalog), Some(resolver)) =
             (self.secret_catalog.as_ref(), self.secret_resolver.as_ref())
         {
@@ -109,14 +118,6 @@ impl EffectManager {
         } else {
             params_cbor
         };
-        if let Some(catalog) = &self.secret_catalog {
-            crate::secret::enforce_secret_policy(
-                &params_cbor,
-                catalog,
-                &source,
-                cap_name,
-            )?;
-        }
         let intent = EffectIntent::from_raw_params(
             runtime_kind.clone(),
             cap_name.to_string(),
