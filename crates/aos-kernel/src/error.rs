@@ -79,6 +79,12 @@ pub enum KernelError {
     SecretResolver(String),
     #[error("secret validation failed: {0}")]
     SecretResolution(String),
+    #[error("secret policy denied for {alias}@{version}: {reason}")]
+    SecretPolicyDenied {
+        alias: String,
+        version: u64,
+        reason: String,
+    },
 }
 
 impl From<crate::journal::JournalError> for KernelError {

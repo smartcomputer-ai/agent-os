@@ -109,6 +109,14 @@ impl EffectManager {
         } else {
             params_cbor
         };
+        if let Some(catalog) = &self.secret_catalog {
+            crate::secret::enforce_secret_policy(
+                &params_cbor,
+                catalog,
+                &source,
+                cap_name,
+            )?;
+        }
         let intent = EffectIntent::from_raw_params(
             runtime_kind.clone(),
             cap_name.to_string(),

@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use aos_air_types::{HashRef, SecretDecl};
 use aos_cbor::Hash;
 use thiserror::Error;
+use aos_effects::EffectSource;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedSecret {
@@ -166,6 +167,55 @@ fn inject_in_value(
             }
         }
         _ => {}
+    }
+    Ok(())
+}
+
+/// Collect all SecretRef occurrences from params CBOR.
+pub fn collect_secret_refs(params_cbor: &[u8]) -> Result<Vec<(String, u64)>, SecretResolverError> {
+    let value: serde_cbor::Value =
+        serde_cbor::from_slice(params_cbor).map_err(|err| SecretResolverError::InvalidParams {
+            reason: err.to_string(),
+        })?;
+    let mut refs = Vec::new();
+    collect_secret_refs_value(&value, &mut refs);
+    Ok(refs)
+}
+
+/// Enforce per-secret policy (allowed_caps / allowed_plans) against collected secret refs.
+pub fn enforce_secret_policy(
+    params_cbor: &[u8],
+    catalog: &SecretCatalog,
+    origin: &EffectSource,
+    cap_name: &str,
+) -> Result<(), crate::error::KernelError> {
+    let refs =
+        collect_secret_refs(params_cbor).map_err(|e| crate::error::KernelError::SecretResolution(
+            e.to_string(),
+        ))?;
+    for (alias, version) in refs {
+        if let Some(decl) = catalog.lookup(&alias, version) {
+            if let Some(policy) = &decl.policy {
+                if !policy.allowed_caps.is_empty()
+                    && !policy.allowed_caps.contains(&cap_name.to_string())
+                {
+                    return Err(crate::error::KernelError::SecretPolicyDenied {
+                        alias: alias.clone(),
+                        version,
+                        reason: format!("cap grant '{cap_name}' not allowed"),
+                    });
+                }
+                if let EffectSource::Plan { name } = origin {
+                    if !policy.allowed_plans.is_empty() && !policy.allowed_plans.contains(name) {
+                        return Err(crate::error::KernelError::SecretPolicyDenied {
+                            alias: alias.clone(),
+                            version,
+                            reason: format!("plan '{name}' not allowed"),
+                        });
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
