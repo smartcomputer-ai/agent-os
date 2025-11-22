@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::env;
 
 use anyhow::{Context, Result, anyhow};
 use aos_kernel::KernelConfig;
@@ -66,30 +65,19 @@ pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
     fs::create_dir_all(&cache_dir)
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
     let secret_resolver = load_secret_resolver();
-    log::info!(
-        "LLM_API_KEY {}",
-        if secret_resolver.is_some() {
-            "found in environment"
-        } else {
-            "not set (using placeholder secret)"
-        }
-    );
     Ok(KernelConfig {
         module_cache_dir: Some(cache_dir),
         eager_module_load: true,
         secret_resolver: secret_resolver.clone(),
-        allow_placeholder_secrets: secret_resolver.is_none(),
+        allow_placeholder_secrets: false,
     })
 }
 
 fn load_secret_resolver() -> Option<Arc<dyn SecretResolver>> {
-    let mut map = HashMap::new();
-    if let Ok(val) = env::var("LLM_API_KEY") {
-        map.insert("env:LLM_API_KEY".to_string(), val.into_bytes());
-    }
-    if map.is_empty() {
-        None
-    } else {
-        Some(Arc::new(MapSecretResolver::new(map)))
-    }
+    const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
+    let map: HashMap<String, Vec<u8>> = HashMap::from([(
+        "env:LLM_API_KEY".to_string(),
+        DEMO_LLM_API_KEY.as_bytes().to_vec(),
+    )]);
+    Some(Arc::new(MapSecretResolver::new(map)))
 }

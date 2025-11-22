@@ -10,6 +10,7 @@ use aos_testkit::MockLlmHarness;
 const REDUCER_NAME: &str = "demo/LlmSummarizer@1";
 const EVENT_SCHEMA: &str = "demo/LlmSummarizerEvent@1";
 const MODULE_PATH: &str = "examples/07-llm-summarizer/reducer";
+const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum LlmSummarizerEventEnvelope {
@@ -69,7 +70,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         MockHttpResponse::json(200, document.clone()),
     )?;
 
-    let mut llm = MockLlmHarness::new(store);
+    let mut llm = MockLlmHarness::new(store.clone()).with_expected_api_key(DEMO_LLM_API_KEY);
     let llm_requests = llm.collect_requests(run.kernel_mut())?;
     if llm_requests.len() != 1 {
         return Err(anyhow!(

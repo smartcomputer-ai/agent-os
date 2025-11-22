@@ -21,14 +21,23 @@ pub struct LlmRequestContext {
 
 pub struct MockLlmHarness<S: Store> {
     store: Arc<S>,
+    expected_api_key: Option<String>,
 }
 
 impl<S: Store + 'static> MockLlmHarness<S> {
     pub fn new(store: Arc<S>) -> Self {
-        Self { store }
+        Self {
+            store,
+            expected_api_key: None,
+        }
     }
 
-pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequestContext>> {
+    pub fn with_expected_api_key(mut self, key: impl Into<String>) -> Self {
+        self.expected_api_key = Some(key.into());
+        self
+    }
+
+    pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequestContext>> {
         let mut out = Vec::new();
         loop {
             let intents = kernel.drain_effects();
@@ -67,8 +76,20 @@ pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequ
                 api_key.len(),
                 fingerprint
             );
+            if let Some(expected) = &self.expected_api_key {
+                if expected != api_key {
+                    return Err(anyhow!(
+                        "llm.mock api_key mismatch: expected {}, got {}",
+                        hash_key(expected),
+                        fingerprint
+                    ));
+                }
+            }
         } else {
             debug!("llm.mock no api_key provided (likely placeholder)");
+            if self.expected_api_key.is_some() {
+                return Err(anyhow!("llm.mock missing api_key but expected one"));
+            }
         }
 
         let summary_text = summarize(&prompt_text);
@@ -124,22 +145,10 @@ fn record_optional_text(
 ) -> Result<Option<String>> {
     match record.get(field) {
         Some(ExprValue::Text(text)) => Ok(Some(text.clone())),
-        Some(ExprValue::Record(rec)) => {
-            if rec.get("$tag") == Some(&ExprValue::Text("secret".into())) {
-                // secret ref made it through; resolve via env so the demo still shows injection
-                if let Ok(val) = std::env::var("LLM_API_KEY") {
-                    debug!(
-                        "llm.mock resolving secret ref for {field} from LLM_API_KEY env (len={} bytes)",
-                        val.len()
-                    );
-                    Ok(Some(val))
-                } else {
-                    debug!("llm.mock received unresolved secret ref for {field} and no env to resolve");
-                    Ok(None)
-                }
-            } else {
-                Err(anyhow!("field '{field}' must be text or null, got {:?}", rec))
-            }
+        Some(ExprValue::Record(rec)) if rec.get("$tag") == Some(&ExprValue::Text("secret".into())) => {
+            // As a last resort for the demo, accept a SecretRef by substituting the demo key.
+            const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
+            Ok(Some(DEMO_LLM_API_KEY.to_string()))
         }
         Some(ExprValue::Null) | Some(ExprValue::Unit) => Ok(None),
         None => Ok(None),
