@@ -120,12 +120,7 @@
         "headers": {
           "map": {
             "key": { "text": {} },
-            "value": {
-              "variant": {
-                "text": { "text": {} },
-                "secret": { "ref": "sys/SecretRef@1" }
-              }
-            }
+            "value": { "text": {} }
           }
         },
         "body_ref": { "option": { "hash": {} } }
@@ -165,15 +160,7 @@
         "temperature": { "dec128": {} },
         "max_tokens": { "nat": {} },
         "input_ref": { "hash": {} },
-        "tools": { "option": { "list": { "text": {} } } },
-        "api_key": {
-          "option": {
-            "variant": {
-              "text": { "text": {} },
-              "secret": { "ref": "sys/SecretRef@1" }
-            }
-          }
-        }
+        "tools": { "option": { "list": { "text": {} } } }
       }
     }
   },
@@ -206,25 +193,21 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/SecretGetParams@1",
+    "name": "sys/TextOrSecretRef@1",
     "type": {
-      "record": {
-        "alias": { "text": {} },
-        "version": { "nat": {} }
+      "variant": {
+        "literal": { "text": {} },
+        "secret": { "ref": "sys/SecretRef@1" }
       }
     }
   },
   {
     "$kind": "defschema",
-    "name": "sys/SecretGetReceipt@1",
+    "name": "sys/BytesOrSecretRef@1",
     "type": {
-      "record": {
-        "alias": { "text": {} },
-        "version": { "nat": {} },
-        "digest": { "hash": {} },
-        "size": { "nat": {} },
-        "storage_kind": { "text": {} },
-        "dek_wrapped_with": { "option": { "text": {} } }
+      "variant": {
+        "literal": { "bytes": {} },
+        "secret": { "ref": "sys/SecretRef@1" }
       }
     }
   },
@@ -234,9 +217,9 @@
     "type": {
       "record": {
         "alias": { "text": {} },
-        "version": { "nat": {} },
-        "scope": { "option": { "text": {} } },
-        "ciphertext_ref": { "hash": {} }
+        "binding_id": { "text": {} },
+        "value_ref": { "hash": {} },
+        "expected_digest": { "hash": {} }
       }
     }
   },
@@ -247,10 +230,52 @@
       "record": {
         "alias": { "text": {} },
         "version": { "nat": {} },
-        "ciphertext_ref": { "hash": {} },
-        "digest": { "hash": {} },
-        "storage_kind": { "text": {} },
-        "dek_wrapped_with": { "option": { "text": {} } }
+        "binding_id": { "text": {} },
+        "digest": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/VaultRotateParams@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} },
+        "binding_id": { "text": {} },
+        "expected_digest": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/VaultRotateReceipt@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} },
+        "binding_id": { "text": {} },
+        "digest": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/secret@1",
+    "cap_type": "secret",
+    "schema": {
+      "record": {
+        "aliases": { "set": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/vault.admin@1",
+    "cap_type": "secret",
+    "schema": {
+      "record": {
+        "aliases": { "set": { "text": {} } }
       }
     }
   }

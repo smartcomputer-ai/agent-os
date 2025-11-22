@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aos.dev/air/v1/defcap.schema.json",
   "title": "AIR v1 defcap",
-  "description": "Capability type definition. Defines parameter constraints enforced at enqueue time. Standard v1 types: sys/http.out@1, sys/llm.basic@1, sys/blob@1, sys/timer@1, plus secret/vault capabilities (secret.get, vault.{get,put,rotate}).",
+  "description": "Capability type definition. Defines parameter constraints enforced at enqueue time. Standard v1 types: sys/http.out@1, sys/llm.basic@1, sys/blob@1, sys/timer@1.",
   "type": "object",
   "properties": {
     "$kind": { "const": "defcap" },
     "name": { "$ref": "common.schema.json#/$defs/Name" },
     "cap_type": {
       "$ref": "common.schema.json#/$defs/CapType",
-      "description": "Built-in capability type: http.out, blob, timer, llm.basic, secret, vault"
+      "description": "Built-in capability type: http.out, blob, timer, llm.basic"
     },
     "schema": {
       "$ref": "common.schema.json#/$defs/TypeExpr",
