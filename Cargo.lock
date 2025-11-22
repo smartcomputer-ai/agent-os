@@ -249,6 +249,7 @@ dependencies = [
  "aos-wasm-abi",
  "hex",
  "indexmap",
+ "log",
  "rand",
  "serde",
  "serde_cbor",

@@ -75,7 +75,7 @@ fn collect_secret_refs_value(value: &serde_cbor::Value, refs: &mut Vec<(String, 
             }
         }
         serde_cbor::Value::Map(map) => {
-            // Look for variant arm {"secret": {"alias": "...", "version": N}}
+            // Look for variant arm {"secret": {"alias": "...", "version": N}} or canonical {"$tag":"secret","$value": {...}}
             if map.len() == 1 {
                 if let Some((serde_cbor::Value::Text(tag), serde_cbor::Value::Map(inner))) =
                     map.iter().next()
@@ -90,6 +90,26 @@ fn collect_secret_refs_value(value: &serde_cbor::Value, refs: &mut Vec<(String, 
                             {
                                 refs.push((alias.clone(), *v as u64));
                             }
+                        }
+                    }
+                }
+            }
+            if map.len() == 2
+                && map
+                    .get(&serde_cbor::Value::Text("$tag".into()))
+                    == Some(&serde_cbor::Value::Text("secret".into()))
+            {
+                if let Some(serde_cbor::Value::Map(inner)) =
+                    map.get(&serde_cbor::Value::Text("$value".into()))
+                {
+                    if let (Some(alias_val), Some(version_val)) = (
+                        inner.get(&serde_cbor::Value::Text("alias".into())),
+                        inner.get(&serde_cbor::Value::Text("version".into())),
+                    ) {
+                        if let (serde_cbor::Value::Text(alias), serde_cbor::Value::Integer(v)) =
+                            (alias_val, version_val)
+                        {
+                            refs.push((alias.clone(), *v as u64));
                         }
                     }
                 }
@@ -131,12 +151,13 @@ fn inject_in_value(
             }
         }
         serde_cbor::Value::Map(map) => {
-            // Detect variant {"secret": {"alias": "...", "version": n}}
+            // Detect variant {"secret": {...}} or {"$tag":"secret","$value":{...}}
             if map.len() == 1 {
                 if let Some((serde_cbor::Value::Text(tag), serde_cbor::Value::Map(inner))) =
                     map.iter_mut().next()
                 {
                     if tag == "secret" {
+                        log::debug!("injecting secret variant (sugar) {:?}", inner);
                         if let (Some(alias_val), Some(version_val)) = (
                             inner.get(&serde_cbor::Value::Text("alias".into())),
                             inner.get(&serde_cbor::Value::Text("version".into())),
@@ -158,6 +179,38 @@ fn inject_in_value(
                                 }
                                 return Ok(());
                             }
+                        }
+                    }
+                }
+            }
+            if map.len() == 2
+                && map
+                    .get(&serde_cbor::Value::Text("$tag".into()))
+                    == Some(&serde_cbor::Value::Text("secret".into()))
+            {
+                if let Some(serde_cbor::Value::Map(inner)) =
+                    map.get(&serde_cbor::Value::Text("$value".into()))
+                {
+                    log::debug!("injecting secret variant (canonical) {:?}", inner);
+                    if let (Some(alias_val), Some(version_val)) = (
+                        inner.get(&serde_cbor::Value::Text("alias".into())),
+                        inner.get(&serde_cbor::Value::Text("version".into())),
+                    ) {
+                        if let (serde_cbor::Value::Text(alias), serde_cbor::Value::Integer(v)) =
+                            (alias_val, version_val)
+                        {
+                            let version = *v as u64;
+                            let decl = catalog
+                                .lookup(alias, version)
+                                .ok_or_else(|| SecretResolverError::NotFound(format!("{alias}@{version}")))?;
+                            let resolved = resolver
+                                .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
+                            if let Ok(text) = std::str::from_utf8(&resolved.value) {
+                                *value = serde_cbor::Value::Text(text.to_string());
+                            } else {
+                                *value = serde_cbor::Value::Bytes(resolved.value);
+                            }
+                            return Ok(());
                         }
                     }
                 }

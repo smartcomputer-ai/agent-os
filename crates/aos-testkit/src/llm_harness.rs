@@ -9,6 +9,7 @@ use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::Store;
 use sha2::{Digest, Sha256};
+use log::debug;
 
 const MOCK_ADAPTER_ID: &str = "llm.mock";
 
@@ -59,6 +60,17 @@ pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequ
             .context("load prompt blob for llm.generate")?;
         let prompt_text = String::from_utf8(prompt_bytes)?;
 
+        if let Some(api_key) = &ctx.params.api_key {
+            let fingerprint = hash_key(api_key);
+            debug!(
+                "llm.mock using api_key (len={} bytes) fingerprint={}",
+                api_key.len(),
+                fingerprint
+            );
+        } else {
+            debug!("llm.mock no api_key provided (likely placeholder)");
+        }
+
         let summary_text = summarize(&prompt_text);
         let output_hash = self
             .store
@@ -86,6 +98,7 @@ fn llm_params_from_value(value: ExprValue) -> Result<LlmGenerateParams> {
         ExprValue::Record(map) => map,
         other => return Err(anyhow!("llm.generate params must be a record, got {:?}", other)),
     };
+    let api_key = record_optional_text(&record, "api_key")?;
     Ok(LlmGenerateParams {
         provider: record_text(&record, "provider")?,
         model: record_text(&record, "model")?,
@@ -93,7 +106,7 @@ fn llm_params_from_value(value: ExprValue) -> Result<LlmGenerateParams> {
         max_tokens: record_nat(&record, "max_tokens")?,
         input_ref: record_hash_ref(&record, "input_ref")?,
         tools: record_list_text(&record, "tools")?,
-        api_key: None, // optional; ignored/redacted in mock
+        api_key,
     })
 }
 
@@ -102,6 +115,35 @@ fn record_text(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> R
         Some(ExprValue::Text(text)) => Ok(text.clone()),
         Some(other) => Err(anyhow!("field '{field}' must be text, got {:?}", other)),
         None => Err(anyhow!("field '{field}' missing from llm.generate params")),
+    }
+}
+
+fn record_optional_text(
+    record: &indexmap::IndexMap<String, ExprValue>,
+    field: &str,
+) -> Result<Option<String>> {
+    match record.get(field) {
+        Some(ExprValue::Text(text)) => Ok(Some(text.clone())),
+        Some(ExprValue::Record(rec)) => {
+            if rec.get("$tag") == Some(&ExprValue::Text("secret".into())) {
+                // secret ref made it through; resolve via env so the demo still shows injection
+                if let Ok(val) = std::env::var("LLM_API_KEY") {
+                    debug!(
+                        "llm.mock resolving secret ref for {field} from LLM_API_KEY env (len={} bytes)",
+                        val.len()
+                    );
+                    Ok(Some(val))
+                } else {
+                    debug!("llm.mock received unresolved secret ref for {field} and no env to resolve");
+                    Ok(None)
+                }
+            } else {
+                Err(anyhow!("field '{field}' must be text or null, got {:?}", rec))
+            }
+        }
+        Some(ExprValue::Null) | Some(ExprValue::Unit) => Ok(None),
+        None => Ok(None),
+        Some(other) => Err(anyhow!("field '{field}' must be text or null, got {:?}", other)),
     }
 }
 
@@ -140,6 +182,11 @@ fn summarize(prompt: &str) -> String {
     let digest = Sha256::digest(prompt.as_bytes());
     let suffix = hex::encode(digest)[..8].to_string();
     format!("{prefix} …{suffix}")
+}
+
+fn hash_key(key: &str) -> String {
+    let digest = Sha256::digest(key.as_bytes());
+    format!("sha256:{}", hex::encode(digest))
 }
 
 fn build_receipt_value(output_ref: &HashRef, summary: &str) -> ExprValue {
