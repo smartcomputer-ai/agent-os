@@ -3,72 +3,62 @@
 ## Goals
 - Keep reducers deterministic and keep plaintext out of journals/snapshots.
 - Make secret usage auditable via aliases and versions; values never appear in logs or receipts.
-- Support injection of secrets into effects by default; allow reducer read access only when explicitly granted.
+- Support injection of secrets into effects by default; no reducer read access in v1.
 - Enable rotation of secrets and the master key without changing reducers/plans.
 - Preserve offline determinism for shadow and replay, with clear handling of ephemeral inputs.
 
 ## Core primitives
 - **Alias**: logical name unique per manifest (e.g. `payments/stripe`).
-- **Version**: monotonically increasing integer for a given alias. All references must pin a version to stay deterministic.
-- **SecretRef**: `{ alias: string, version: int, scope: "persistent" | "ephemeral" }`. Used anywhere an auth value is accepted.
-- **StorageKind** (per alias):
-  - `hybrid` (recommended): ciphertext blob in CAS, DEK wrapped by external vault/KMS KEK.
-  - `cas_encrypted`: ciphertext blob in CAS; KEK provided by node-local config.
-  - `vault`: value stored and served by external vault/KMS adapter (no CAS payload).
-  - `env`: ephemeral; pulled from env/.env at runtime; non-reproducible unless provided.
+- **Version**: monotonically increasing integer for a given alias. References pin a version for deterministic replay.
+- **BindingId**: stable opaque id that maps to a backend at runtime (in node-local resolver config, not in the manifest).
+- **SecretRef**: `{ alias: string, version: int }`. Used anywhere an auth value is accepted.
+- **Expected digest (optional)**: `Hash` (`sha256:…`) of the *plaintext* secret bytes (canonical form). Used to catch backend drift and keep master-key rotations manifest-stable even if ciphertext/KEK changes.
 
 ## Schema surface (AIR)
 - `common.schema.json`
-  - Add `SecretRef` and helper unions `TextOrSecretRef`, `BytesOrSecretRef`.
-- Effect def schemas (`spec/defs/http.json`, `spec/defs/llm.json`, any auth-bearing defs)
-  - Auth fields become `oneOf [string, SecretRef]` (headers, bearer tokens, API keys, provider creds, etc.).
+  - Adds effect kinds `vault.put`, `vault.rotate`.
+- Built-in schemas (`spec/defs/builtin-schemas.air.json`)
+  - Adds `sys/SecretRef@1`, plus ergonomic variants `sys/TextOrSecretRef@1` and `sys/BytesOrSecretRef@1` using normal `variant` types (no special unions).
+  - HTTP/LLM and any auth-bearing schemas should use these variants for tokens/keys instead of bespoke fields.
 - Manifest (`manifest.schema.json`)
-  - New `secrets` array of entries `{ alias, version, scope, storage: { kind, handle, dek_wrapped_with? }, policy: { allowed_caps? } }`.
-  - Validation: every `SecretRef` alias/version must exist in `secrets`; caps/plans must be allowlisted by policy.
+  - `secrets` array entries: `{ alias, version, binding_id, expected_digest?, policy: { allowed_caps?, allowed_plans? } }`.
+  - Validation: (alias,version) pairs are unique; every `SecretRef` in plans/modules/caps resolves to a manifest entry; `allowed_caps`/`allowed_plans` names must exist. Secret ACL check runs after normal cap/policy allow/deny.
 - Capability types
-  - Add `secret.get` micro-effect for reducers and `vault.get/put/rotate` effect kinds for plans/adapters.
+  - `vault.put`, `vault.rotate`; executor uses resolver map keyed by `binding_id`.
 
 ## Roles
-- **Reducers**: default path uses `SecretRef` in emitted intents; no plaintext. When granted `secret.get`, a reducer may synchronously fetch a pinned alias+version; response is deterministic and redacted from journal (receipt contains alias+hash only).
+- **Reducers**: use `SecretRef` in emitted intents; no plaintext. Reducers do **not** fetch secret bytes in v1.
 - **Plans**: orchestration only; see aliases, not values. May call `vault.*` to create/rotate secrets.
-- **Executor/Effect manager**: resolves `SecretRef` just before dispatch; injects plaintext into adapter request; scrubs value from receipts/logs.
+- **Executor/Effect manager**: resolves `SecretRef` just before dispatch; injects plaintext into adapter request; scrubs value from receipts/logs. After standard cap/policy gates, enforce per-secret ACL (`allowed_caps`/`allowed_plans`).
 - **Adapters**: enforce per-field redaction and ensure returned receipts never echo secret bytes.
 
-## Storage and key hierarchy
-- Each secret uses a per-secret DEK; payload stored encrypted.
-- KEK (master key) lives outside the manifest: OS keyring, KMS, or sealed file configured per node.
-- Hybrid flow: ciphertext + wrapped DEK stored in CAS; executor fetches blob, unwraps DEK via vault/KMS KEK, decrypts, injects, and discards plaintext after use.
-- CAS-only flow: same as hybrid but unwrap/unwrap happens locally with node KEK (larger blast radius; dev only).
-- Vault-only flow: adapter fetches value directly; receipts carry alias+version digest only.
+## Storage and resolver model
+- Single logical interface; backends are chosen per environment in a **resolver map** (node-local config): `binding_id → { backend, handle, kms_key?/kek?, cache? }`.
+- Backends can be env/local file/KMS/vault; the manifest never embeds backend details. Changing backends only touches the resolver config.
+- Each secret has a per-secret DEK; ciphertext may live in CAS or inside the backend. KEK/KMS details stay outside the manifest.
 
 ## Access flows
 1) **Default (injection into effects)**
    - Reducer emits intent referencing a cap; plan step includes `SecretRef` in auth fields.
-   - Executor validates alias/version against manifest, resolves secret, injects, redacts receipts.
-2) **Reducer direct access (opt-in)**
-   - Reducer declares a slot bound to a `secret.get` cap grant pinned to alias+version.
-   - Kernel issues micro-effect `secret.get`, returns bytes to reducer; receipt contains alias+hash; deterministic because version is fixed.
-   - Use only when business logic truly needs the value inside the reducer; default remains effect injection.
+   - Executor validates alias/version, resolves via resolver map (by binding_id), injects, redacts receipts.
 
-## Ephemeral secrets (env/.env)
-- Manifest `scope: "ephemeral"`, `storage.kind: "env"`, `storage.handle: ENV_VAR_NAME`.
-- Executor reads env at runtime; shadow/replay use placeholder `<secret:alias@version>` unless env is supplied.
-- Policy should disallow env secrets in production; allowed in dev/test for convenience.
+## Ephemeral backends
+- Optional; if a resolver maps a binding to `env`, executor reads the env var. Determinism can be enforced by providing `expected_digest`; otherwise shadow uses placeholders. Avoid in production unless explicitly allowed; fail closed on missing resolver.
 
 ## Rotation
-- **Secret rotation**: plan calls `vault.put` (or encrypted `blob.put`) with new plaintext; new version recorded in manifest `secrets`; consumers reference the new version. Old versions remain readable until revoked.
-- **Master key rotation**: generate new KEK; rewrap stored DEKs (no payload re-encrypt needed). If KEK is compromised, regenerate DEKs and re-encrypt payloads.
+- **Secret rotation (design-time plan)**: a governance plan calls `vault.put` to store new plaintext, receives `{alias, version, digest}`, and emits a manifest patch that adds/bumps `{alias, version, expected_digest: digest, binding_id}`. Patch flows through proposal → shadow → approve → apply; runtime plans cannot mutate the manifest.
+- **Master key rotation**: backend-specific; rewrap DEKs with new KEK/KMS key. Manifest unaffected unless expected_digest changes.
 
 ## Audit and redaction
-- Receipts and journal entries record alias, version, storage kind, and a digest of ciphertext; never plaintext.
+- Receipts/journal record alias, version, binding_id, and resolved digest; never plaintext. Adapters redact any fields that carried secrets.
 - Effect adapters must redact headers/bodies that carried secrets before receipt emission.
 
 ## Shadow/predict/replay behavior
-- Secret resolution in shadow uses deterministic placeholders; predicted receipts include alias+version digest only.
-- Replay is deterministic because alias+version and ciphertext hashes are stable; vault-backed paths require vault availability or preloaded stubs.
+- Injection-only paths are fully replayable from journal+receipts; no secret bytes are needed.
+- Shadow uses deterministic placeholders unless resolver is available; if expected_digest is set, predictions include it.
+- Replay is deterministic when expected_digest is pinned and resolver available.
 
 ## Operational guidance
-- Enforce policies tying aliases to caps/plans; deny at enqueue if alias is not allowlisted.
-- Cache decrypted secrets in-memory per step; never persist.
-- Fail closed when vault/KMS unavailable unless manifest marks alias as `allow_shadow_stub: true` for offline testing.
-
+- Enforce policies tying aliases/binding_ids to caps/plans; deny if resolver missing (unless stub-allowed for shadow).
+- Cache decrypted secrets per step only; never persist.
+- Fail closed on digest mismatch versus expected_digest.

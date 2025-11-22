@@ -12,6 +12,7 @@ pub mod policy;
 pub mod receipts;
 pub mod reducer;
 pub mod scheduler;
+pub mod secret;
 pub mod shadow;
 pub mod snapshot;
 pub mod world;
@@ -21,5 +22,9 @@ pub use error::KernelError;
 pub use event::{KernelEvent, ReducerEvent};
 pub use manifest::{LoadedManifest, ManifestLoader};
 pub use reducer::ReducerRegistry;
+pub use secret::{
+    MapSecretResolver, PlaceholderSecretResolver, ResolvedSecret, SecretResolver,
+    SecretResolverError, SharedSecretResolver,
+};
 pub use shadow::{ShadowConfig, ShadowExecutor, ShadowSummary};
 pub use world::{Kernel, KernelBuilder, KernelConfig, PlanResultEntry};

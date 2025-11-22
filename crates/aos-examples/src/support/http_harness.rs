@@ -162,7 +162,10 @@ fn build_http_receipt_value(
 ) -> Result<ExprValue> {
     let mut record = indexmap::IndexMap::new();
     record.insert("status".into(), ExprValue::Int(status));
-    record.insert("headers".into(), headers_to_value(headers));
+    record.insert(
+        "headers".into(),
+        headers_to_value(&redact_headers(headers)),
+    );
     record.insert("body_preview".into(), ExprValue::Text(body.clone()));
     if let Some(store) = store {
         let hash = store
@@ -184,4 +187,20 @@ fn headers_to_value(headers: &HeaderMap) -> ExprValue {
         map.insert(ValueKey::Text(key.clone()), ExprValue::Text(value.clone()));
     }
     ExprValue::Map(map)
+}
+
+fn redact_headers(headers: &HeaderMap) -> HeaderMap {
+    let mut redacted = HeaderMap::new();
+    for (k, v) in headers {
+        let lower = k.to_ascii_lowercase();
+        if matches!(
+            lower.as_str(),
+            "authorization" | "proxy-authorization" | "x-api-key" | "api-key"
+        ) {
+            redacted.insert(k.clone(), "<redacted>".into());
+        } else {
+            redacted.insert(k.clone(), v.clone());
+        }
+    }
+    redacted
 }

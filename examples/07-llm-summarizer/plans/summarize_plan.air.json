@@ -48,7 +48,18 @@
             "temperature": { "text": "0" },
             "max_tokens": { "nat": 512 },
             "input_ref": { "ref": "@var:body_ref" },
-            "tools": { "list": [] }
+            "tools": { "list": [] },
+            "api_key": {
+              "variant": {
+                "tag": "secret",
+                "value": {
+                  "record": {
+                    "alias": { "text": "llm/api" },
+                    "version": { "nat": 1 }
+                  }
+                }
+              }
+            }
           }
         },
         "cap": "cap_llm",

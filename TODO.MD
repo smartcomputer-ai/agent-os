@@ -30,3 +30,31 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 13. **[x] Governance Loop + Safe Upgrade Example (M5 core)** — Kernel now supports proposal/shadow/approve/apply with deterministic replay, capability/policy ledgers diffed via `compute_ledger_deltas`, and manifest hashes guarded through shadow → apply. Added `examples/06-safe-upgrade` with v1→v2 plan swap, new cap/policy, shadow prediction of HTTP intents + ledger deltas, and approval/apply flow exercised in the `aos-examples` runner and integration tests.
         - Reused harness patterns from fetch-notify and chain-comp; replay stays byte-identical after upgrade.
+
+## Secrets — Implementation Tasks (see spec/17-secrets.md)
+
+1. ✅ Secret types into AIR & enums (validation surface)
+   - `SecretDecl` + `secrets` in manifest; `EffectKind`/`CapType` extended for `vault.put`/`vault.rotate`; no `secret.get`.
+   - Wired through aos-air-types, aos-effects, kernel; serde/round-trip tests updated.
+
+2. ✅ Schema & manifest validation
+   - Unique (alias, version), binding_id required, expected_digest hash shape.
+   - SecretRef resolution + per-secret ACL validation after normal cap/policy gates; tests added in store/air-types.
+
+3. ✅ Secret resolver plumbing in kernel
+   - `SecretResolver` trait with map and placeholder impls; threaded via KernelConfig into EffectManager; fail-closed when missing/digest mismatch; shadow can stub.
+
+4. ✅ Effect parameter injection
+   - Detects SecretRef (canonical/sugar variant), resolves via resolver, injects plaintext before dispatch; intent hash uses injected params.
+   - Policy enforcement runs on original params; receipts left to adapters for redaction.
+   - Integration tests in aos-testkit cover injection, binary secrets, digest mismatch, policy deny cases.
+
+5. ✅ Policy gate & capability wiring
+   - CapType mapping updated; per-secret ACL enforced pre-enqueue; tests added.
+
+6. ✅ Examples & docs (secrets demo)
+   - LLM summarizer uses a SecretRef for api_key; manifest declares `llm/api` secret; resolver in examples supplies a demo key; HTTP/LLM harnesses redact and enforce keys; README/example run works.
+
+Next (optional)
+   - Adapter-level secret redaction/meta propagation.
+   - Design-time rotation example with `vault.put`/manifest patch flow.

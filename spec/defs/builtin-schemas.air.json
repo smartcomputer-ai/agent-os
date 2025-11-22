@@ -160,7 +160,8 @@
         "temperature": { "dec128": {} },
         "max_tokens": { "nat": {} },
         "input_ref": { "hash": {} },
-        "tools": { "option": { "list": { "text": {} } } }
+        "tools": { "option": { "list": { "text": {} } } },
+        "api_key": { "option": { "ref": "sys/TextOrSecretRef@1" } }
       }
     }
   },
@@ -178,6 +179,84 @@
         },
         "cost_cents": { "nat": {} },
         "provider_id": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/SecretRef@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/TextOrSecretRef@1",
+    "type": {
+      "variant": {
+        "literal": { "text": {} },
+        "secret": { "ref": "sys/SecretRef@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BytesOrSecretRef@1",
+    "type": {
+      "variant": {
+        "literal": { "bytes": {} },
+        "secret": { "ref": "sys/SecretRef@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/VaultPutParams@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "binding_id": { "text": {} },
+        "value_ref": { "hash": {} },
+        "expected_digest": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/VaultPutReceipt@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} },
+        "binding_id": { "text": {} },
+        "digest": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/VaultRotateParams@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} },
+        "binding_id": { "text": {} },
+        "expected_digest": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/VaultRotateReceipt@1",
+    "type": {
+      "record": {
+        "alias": { "text": {} },
+        "version": { "nat": {} },
+        "binding_id": { "text": {} },
+        "digest": { "hash": {} }
       }
     }
   }

@@ -635,6 +635,8 @@ fn effect_params_schema(kind: &EffectKind) -> Option<&'static str> {
         EffectKind::BlobGet => Some("sys/BlobGetParams@1"),
         EffectKind::TimerSet => Some("sys/TimerSetParams@1"),
         EffectKind::LlmGenerate => Some("sys/LlmGenerateParams@1"),
+        EffectKind::VaultPut => Some("sys/VaultPutParams@1"),
+        EffectKind::VaultRotate => Some("sys/VaultRotateParams@1"),
     }
 }
 
@@ -770,7 +772,8 @@ mod tests {
                         "temperature": "0.5",
                         "max_tokens": 128,
                         "input_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                        "tools": ["function.call"]
+                        "tools": ["function.call"],
+                        "api_key": null
                     })),
                     cap: "cap_llm".into(),
                     bind: crate::PlanBindEffect {

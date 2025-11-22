@@ -9,6 +9,7 @@ use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::Store;
 use sha2::{Digest, Sha256};
+use log::debug;
 
 const MOCK_ADAPTER_ID: &str = "llm.mock";
 
@@ -20,11 +21,20 @@ pub struct LlmRequestContext {
 
 pub struct MockLlmHarness<S: Store> {
     store: Arc<S>,
+    expected_api_key: Option<String>,
 }
 
 impl<S: Store + 'static> MockLlmHarness<S> {
     pub fn new(store: Arc<S>) -> Self {
-        Self { store }
+        Self {
+            store,
+            expected_api_key: None,
+        }
+    }
+
+    pub fn with_expected_api_key(mut self, key: impl Into<String>) -> Self {
+        self.expected_api_key = Some(key.into());
+        self
     }
 
     pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequestContext>> {
@@ -59,6 +69,29 @@ impl<S: Store + 'static> MockLlmHarness<S> {
             .context("load prompt blob for llm.generate")?;
         let prompt_text = String::from_utf8(prompt_bytes)?;
 
+        if let Some(api_key) = &ctx.params.api_key {
+            let fingerprint = hash_key(api_key);
+            debug!(
+                "llm.mock using api_key (len={} bytes) fingerprint={}",
+                api_key.len(),
+                fingerprint
+            );
+            if let Some(expected) = &self.expected_api_key {
+                if expected != api_key {
+                    return Err(anyhow!(
+                        "llm.mock api_key mismatch: expected {}, got {}",
+                        hash_key(expected),
+                        fingerprint
+                    ));
+                }
+            }
+        } else {
+            debug!("llm.mock no api_key provided (likely placeholder)");
+            if self.expected_api_key.is_some() {
+                return Err(anyhow!("llm.mock missing api_key but expected one"));
+            }
+        }
+
         let summary_text = summarize(&prompt_text);
         let output_hash = self
             .store
@@ -86,6 +119,7 @@ fn llm_params_from_value(value: ExprValue) -> Result<LlmGenerateParams> {
         ExprValue::Record(map) => map,
         other => return Err(anyhow!("llm.generate params must be a record, got {:?}", other)),
     };
+    let api_key = record_optional_text(&record, "api_key")?;
     Ok(LlmGenerateParams {
         provider: record_text(&record, "provider")?,
         model: record_text(&record, "model")?,
@@ -93,6 +127,7 @@ fn llm_params_from_value(value: ExprValue) -> Result<LlmGenerateParams> {
         max_tokens: record_nat(&record, "max_tokens")?,
         input_ref: record_hash_ref(&record, "input_ref")?,
         tools: record_list_text(&record, "tools")?,
+        api_key,
     })
 }
 
@@ -101,6 +136,23 @@ fn record_text(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> R
         Some(ExprValue::Text(text)) => Ok(text.clone()),
         Some(other) => Err(anyhow!("field '{field}' must be text, got {:?}", other)),
         None => Err(anyhow!("field '{field}' missing from llm.generate params")),
+    }
+}
+
+fn record_optional_text(
+    record: &indexmap::IndexMap<String, ExprValue>,
+    field: &str,
+) -> Result<Option<String>> {
+    match record.get(field) {
+        Some(ExprValue::Text(text)) => Ok(Some(text.clone())),
+        Some(ExprValue::Record(rec)) if rec.get("$tag") == Some(&ExprValue::Text("secret".into())) => {
+            // As a last resort for the demo, accept a SecretRef by substituting the demo key.
+            const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
+            Ok(Some(DEMO_LLM_API_KEY.to_string()))
+        }
+        Some(ExprValue::Null) | Some(ExprValue::Unit) => Ok(None),
+        None => Ok(None),
+        Some(other) => Err(anyhow!("field '{field}' must be text or null, got {:?}", other)),
     }
 }
 
@@ -139,6 +191,11 @@ fn summarize(prompt: &str) -> String {
     let digest = Sha256::digest(prompt.as_bytes());
     let suffix = hex::encode(digest)[..8].to_string();
     format!("{prefix} …{suffix}")
+}
+
+fn hash_key(key: &str) -> String {
+    let digest = Sha256::digest(key.as_bytes());
+    format!("sha256:{}", hex::encode(digest))
 }
 
 fn build_receipt_value(output_ref: &HashRef, summary: &str) -> ExprValue {

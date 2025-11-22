@@ -503,6 +503,7 @@ mod tests {
             plans: Vec::new(),
             caps: Vec::new(),
             policies: Vec::new(),
+            secrets: Vec::new(),
             defaults: None,
             module_bindings: IndexMap::new(),
             routing: None,

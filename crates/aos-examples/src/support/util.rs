@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use aos_kernel::KernelConfig;
+use aos_kernel::secret::{MapSecretResolver, SecretResolver};
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use log::debug;
@@ -61,8 +64,20 @@ pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
     let cache_dir = example_root.join(".aos").join("cache").join("wasmtime");
     fs::create_dir_all(&cache_dir)
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
+    let secret_resolver = load_secret_resolver();
     Ok(KernelConfig {
         module_cache_dir: Some(cache_dir),
         eager_module_load: true,
+        secret_resolver: secret_resolver.clone(),
+        allow_placeholder_secrets: false,
     })
+}
+
+fn load_secret_resolver() -> Option<Arc<dyn SecretResolver>> {
+    const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
+    let map: HashMap<String, Vec<u8>> = HashMap::from([(
+        "env:LLM_API_KEY".to_string(),
+        DEMO_LLM_API_KEY.as_bytes().to_vec(),
+    )]);
+    Some(Arc::new(MapSecretResolver::new(map)))
 }

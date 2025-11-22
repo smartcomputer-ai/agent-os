@@ -73,10 +73,28 @@ pub enum KernelError {
     ProposalAlreadyApplied(u64),
     #[error("shadow patch hash mismatch: expected {expected}, got {actual}")]
     ShadowPatchMismatch { expected: String, actual: String },
+    #[error("secret resolver missing for manifest containing secrets")]
+    SecretResolverMissing,
+    #[error("secret resolve error: {0}")]
+    SecretResolver(String),
+    #[error("secret validation failed: {0}")]
+    SecretResolution(String),
+    #[error("secret policy denied for {alias}@{version}: {reason}")]
+    SecretPolicyDenied {
+        alias: String,
+        version: u64,
+        reason: String,
+    },
 }
 
 impl From<crate::journal::JournalError> for KernelError {
     fn from(err: crate::journal::JournalError) -> Self {
         KernelError::Journal(err.to_string())
+    }
+}
+
+impl From<crate::secret::SecretResolverError> for KernelError {
+    fn from(err: crate::secret::SecretResolverError) -> Self {
+        KernelError::SecretResolver(err.to_string())
     }
 }
