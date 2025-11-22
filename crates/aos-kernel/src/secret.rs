@@ -149,7 +149,7 @@ pub fn inject_secrets_in_params(
             reason: err.to_string(),
         })?;
     inject_in_value(&mut value, catalog, resolver)?;
-    serde_cbor::to_vec(&value).map_err(|err| SecretResolverError::InvalidParams {
+    aos_cbor::to_canonical_cbor(&value).map_err(|err| SecretResolverError::InvalidParams {
         reason: err.to_string(),
     })
 }

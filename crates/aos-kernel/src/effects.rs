@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use aos_air_types::EffectKind;
-use aos_effects::{EffectIntent, EffectKind as RuntimeEffectKind, EffectSource};
+use aos_effects::{normalize_effect_params, EffectIntent, EffectKind as RuntimeEffectKind, EffectSource};
 use aos_wasm_abi::ReducerEffect;
 
 use crate::capability::CapabilityResolver;
@@ -118,10 +118,13 @@ impl EffectManager {
         } else {
             params_cbor
         };
+        let canonical_params = normalize_effect_params(&runtime_kind, &params_cbor)
+            .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+
         let intent = EffectIntent::from_raw_params(
             runtime_kind.clone(),
             cap_name.to_string(),
-            params_cbor,
+            canonical_params,
             [0u8; 32],
         )
         .map_err(|err| KernelError::EffectManager(err.to_string()))?;
