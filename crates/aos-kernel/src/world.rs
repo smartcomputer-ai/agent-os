@@ -286,7 +286,7 @@ impl<S: Store + 'static> Kernel<S> {
 
         let mut kernel = Self {
             store: store.clone(),
-            manifest: loaded.manifest,
+            manifest: loaded.manifest.clone(),
             module_defs: loaded.modules,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
@@ -305,6 +305,11 @@ impl<S: Store + 'static> Kernel<S> {
             effect_manager: EffectManager::new(
                 capability_resolver,
                 policy_gate,
+                if loaded.manifest.secrets.is_empty() {
+                    None
+                } else {
+                    Some(crate::secret::SecretCatalog::new(&loaded.manifest.secrets))
+                },
                 secret_resolver.clone(),
             ),
             reducer_state: HashMap::new(),
@@ -934,9 +939,15 @@ impl<S: Store + 'static> Kernel<S> {
             self.secret_resolver.clone(),
             self.allow_placeholder_secrets,
         )?;
+        let secret_catalog = if self.manifest.secrets.is_empty() {
+            None
+        } else {
+            Some(crate::secret::SecretCatalog::new(&self.manifest.secrets))
+        };
         self.effect_manager = EffectManager::new(
             capability_resolver,
             policy_gate,
+            secret_catalog,
             self.secret_resolver.clone(),
         );
         Ok(())

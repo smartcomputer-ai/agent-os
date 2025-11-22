@@ -36,6 +36,7 @@ pub struct EffectManager {
     queue: EffectQueue,
     capability_gate: CapabilityResolver,
     policy_gate: Box<dyn PolicyGate>,
+    secret_catalog: Option<crate::secret::SecretCatalog>,
     secret_resolver: Option<Arc<dyn SecretResolver>>,
 }
 
@@ -43,12 +44,14 @@ impl EffectManager {
     pub fn new(
         capability_gate: CapabilityResolver,
         policy_gate: Box<dyn PolicyGate>,
+        secret_catalog: Option<crate::secret::SecretCatalog>,
         secret_resolver: Option<Arc<dyn SecretResolver>>,
     ) -> Self {
         Self {
             queue: EffectQueue::default(),
             capability_gate,
             policy_gate,
+            secret_catalog,
             secret_resolver,
         }
     }
@@ -98,6 +101,14 @@ impl EffectManager {
         let grant = self
             .capability_gate
             .resolve(cap_name, runtime_kind.as_str())?;
+        let params_cbor = if let (Some(catalog), Some(resolver)) =
+            (self.secret_catalog.as_ref(), self.secret_resolver.as_ref())
+        {
+            crate::secret::inject_secrets_in_params(&params_cbor, catalog, resolver.as_ref())
+                .map_err(|err| KernelError::SecretResolution(err.to_string()))?
+        } else {
+            params_cbor
+        };
         let intent = EffectIntent::from_raw_params(
             runtime_kind.clone(),
             cap_name.to_string(),

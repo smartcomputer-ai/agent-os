@@ -1096,7 +1096,7 @@ mod tests {
             ),
         ];
         let resolver = CapabilityResolver::from_runtime_grants(grants);
-        EffectManager::new(resolver, Box::new(AllowAllPolicy), None)
+        EffectManager::new(resolver, Box::new(AllowAllPolicy), None, None)
     }
 
     fn empty_schema_index() -> Arc<SchemaIndex> {

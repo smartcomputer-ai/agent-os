@@ -77,6 +77,8 @@ pub enum KernelError {
     SecretResolverMissing,
     #[error("secret resolve error: {0}")]
     SecretResolver(String),
+    #[error("secret validation failed: {0}")]
+    SecretResolution(String),
 }
 
 impl From<crate::journal::JournalError> for KernelError {

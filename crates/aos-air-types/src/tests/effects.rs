@@ -1,6 +1,6 @@
 use crate::{
     EmptyObject, HashRef, ValueList, ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull,
-    ValueRecord, ValueText, ValueVariant, builtins::find_builtin_schema, validate_value_literal,
+    ValueRecord, ValueText, builtins::find_builtin_schema, validate_value_literal,
 };
 
 fn text(value: &str) -> ValueLiteral {
