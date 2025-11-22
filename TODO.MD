@@ -33,36 +33,28 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 ## Secrets — Implementation Tasks (see spec/17-secrets.md)
 
-1. Secret types into AIR & enums (validation surface)
-   - Add `SecretDecl` + `secrets` to `aos-air-types::Manifest` (alias, version, binding_id, expected_digest?, policy).
-   - Extend `EffectKind`/`CapType` enums for `vault.put` and `vault.rotate`; drop `secret.get` for v1.
-   - Wire new kinds into `aos-effects` (kinds.rs, capability.rs) and AIR ↔ runtime conversions.
-   - Tests: air-types round-trip JSON for manifests with secrets; enum serde tests; ensure existing manifests still pass.
+1. ✅ Secret types into AIR & enums (validation surface)
+   - `SecretDecl` + `secrets` in manifest; `EffectKind`/`CapType` extended for `vault.put`/`vault.rotate`; no `secret.get`.
+   - Wired through aos-air-types, aos-effects, kernel; serde/round-trip tests updated.
 
-2. Schema & manifest validation
-   - Enforce unique (alias, version) and binding_id presence; validate expected_digest hash shape.
-   - Validate that every SecretRef in plans/modules/caps resolves to a declared secret; enforce allowed_caps/plans policy on secrets after normal cap/policy gates.
-   - Files: `crates/aos-store/src/manifest.rs`, `crates/aos-air-types/src/tests/manifest.rs`.
-   - Tests: failing cases for unknown alias/version, duplicate binding, missing binding_id, disallowed plan/cap; passing case with secrets + triggers.
+2. ✅ Schema & manifest validation
+   - Unique (alias, version), binding_id required, expected_digest hash shape.
+   - SecretRef resolution + per-secret ACL validation after normal cap/policy gates; tests added in store/air-types.
 
-3. Secret resolver plumbing in kernel
-   - Introduce `SecretResolver` trait + default map-backed impl (binding_id → backend) with digest check.
-   - Add to `KernelConfig`, thread into `Kernel`/`EffectManager`; fail closed on missing resolver or digest mismatch; shadow can stub when resolver absent.
-   - Files: new `crates/aos-kernel/src/secret.rs`, touch `world.rs`, `effects.rs`.
-   - Tests: unit tests for resolver (success, missing binding, digest mismatch); kernel config uses resolver; shadow placeholder behavior covered.
+3. ✅ Secret resolver plumbing in kernel
+   - `SecretResolver` trait with map and placeholder impls; threaded via KernelConfig into EffectManager; fail-closed when missing/digest mismatch; shadow can stub.
 
-4. Effect parameter injection & redaction
-   - Detect `SecretRef` in plan/reducer effect params (e.g., HTTP headers, LLM api_key).
-   - Resolve via `SecretResolver`, inject plaintext before dispatch, attach `secret_meta` (alias/version/binding_id/digest) to intents/receipts; redact plaintext from receipts/journal.
-   - Files: `crates/aos-kernel/src/plan.rs` (preserve SecretRef literals), `effects.rs`, `journal/` snapshots as needed, `aos-effects` intent/receipt structs.
-   - Tests: integration—HTTP effect with SecretRef resolves and injects; journal contains only meta; replay deterministic; failure on digest mismatch.
+4. ✅ Effect parameter injection
+   - Detects SecretRef (canonical/sugar variant), resolves via resolver, injects plaintext before dispatch; intent hash uses injected params.
+   - Policy enforcement runs on original params; receipts left to adapters for redaction.
+   - Integration tests in aos-testkit cover injection, binary secrets, digest mismatch, policy deny cases.
 
-5. Policy gate & capability wiring
-   - Map new cap types to allowed effect kinds in `CapabilityResolver`; enforce per-secret ACL (`allowed_caps`/`allowed_plans`) after standard policy match.
-   - Files: `crates/aos-kernel/src/capability.rs`, `policy.rs`.
-   - Tests: deny when cap not allowlisted for secret’s policy; allow on match; policy unit tests.
+5. ✅ Policy gate & capability wiring
+   - CapType mapping updated; per-secret ACL enforced pre-enqueue; tests added.
 
-6. Examples & docs
-   - Add a minimal example manifest using secrets, plus resolver config sample; document design-time rotation flow using `vault.put`/`vault.rotate`.
-   - Update `spec/17-secrets.md` cross-links if needed; short README snippet in examples.
-   - Tests: example runs with stub resolver in CI; golden receipt shows redaction.
+6. ✅ Examples & docs (secrets demo)
+   - LLM summarizer uses a SecretRef for api_key; manifest declares `llm/api` secret; resolver in examples supplies a demo key; HTTP/LLM harnesses redact and enforce keys; README/example run works.
+
+Next (optional)
+   - Adapter-level secret redaction/meta propagation.
+   - Design-time rotation example with `vault.put`/manifest patch flow.
