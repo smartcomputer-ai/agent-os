@@ -10,6 +10,7 @@ use crate::{
     error::KernelError,
     shadow::{PendingPlanReceipt, PlanResultPreview, PredictedEffect, ShadowConfig, ShadowSummary},
 };
+use serde_json::Value as JsonValue;
 use hex;
 
 pub struct ShadowExecutor;
@@ -63,6 +64,7 @@ impl ShadowExecutor {
                     kind: intent.kind.as_str().to_string(),
                     cap: intent.cap_name.clone(),
                     intent_hash: hex::encode(intent.intent_hash),
+                    params_json: params_to_json(&intent.params_cbor),
                 });
 
                 let receipt = EffectReceipt {
@@ -105,6 +107,11 @@ impl ShadowExecutor {
             ledger_deltas: Vec::new(),
         })
     }
+}
+
+fn params_to_json(params_cbor: &[u8]) -> Option<JsonValue> {
+    let cbor_value: serde_cbor::Value = serde_cbor::from_slice(params_cbor).ok()?;
+    serde_json::to_value(&cbor_value).ok()
 }
 
 #[cfg(test)]

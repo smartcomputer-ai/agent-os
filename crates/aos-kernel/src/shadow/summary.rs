@@ -18,6 +18,8 @@ pub struct PredictedEffect {
     pub kind: String,
     pub cap: String,
     pub intent_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params_json: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
