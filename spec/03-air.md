@@ -249,6 +249,8 @@ An intent is a request to perform an external effect:
 
 The `intent_hash` = `sha256(cbor(kind, params, cap, idempotency_key))` is computed by the kernel; adapters verify it.
 
+**Canonical params**: Before hashing or enqueue, the kernel **decodes → schema‑checks → canonicalizes → re‑encodes** `params` using the effect kind's parameter schema (same AIR canonical rules as the loader: `$tag/$value` variants, canonical map/set/option shapes, numeric normalization). The canonical CBOR bytes become `params_cbor` and are the **only** form stored, hashed, and dispatched; non‑conforming params are rejected. This path runs for *every* origin (plans, reducers, injected tooling) so authoring sugar or reducer ABI quirks cannot change intent identity.
+
 ### Receipt
 
 A receipt is the signed result of executing an effect:

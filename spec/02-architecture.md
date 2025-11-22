@@ -142,7 +142,7 @@ Deterministic routing hooks trigger reducers or plans based on event kinds and m
 
 ### Effect Manager
 
-The Effect Manager maintains an outbox of effect intents; each intent is typed and references a capability handle. It dispatches to adapters with idempotency keys and deadlines, retrying with backoff for transient failures. The final status is captured in a receipt.
+The Effect Manager maintains an outbox of effect intents; each intent is typed and references a capability handle. **Before hashing/enqueueing**, it decodes effect params CBOR using the effect kind's param schema, canonicalizes to the AIR `$tag/$value` form, and re-encodes; the canonical bytes are stored, hashed, and passed to adapters. Non-conforming params are rejected early. Plans, reducers, and internal tooling all traverse this same normalizer so authoring sugar cannot perturb intent identity or policy decisions. The Effect Manager dispatches to adapters with idempotency keys and deadlines, retrying with backoff for transient failures. The final status is captured in a receipt.
 
 ### Adapters (v1)
 
