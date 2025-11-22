@@ -1,11 +1,12 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPolicy, EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch, PolicyRule,
+    DefPolicy, EffectKind as AirEffectKind, EmptyObject, ExprOrValue, OriginKind, PolicyDecision,
+    PolicyMatch, PolicyRule, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
 };
 use aos_effects::builtins::HttpRequestParams;
 use aos_kernel::error::KernelError;
 use aos_testkit::TestWorld;
-use aos_testkit::fixtures;
+use aos_testkit::fixtures::{self, zero_hash};
 use aos_wasm_abi::ReducerEffect;
 use indexmap::IndexMap;
 
@@ -13,11 +14,13 @@ mod helpers;
 use helpers::attach_default_policy;
 
 fn http_reducer_output() -> aos_wasm_abi::ReducerOutput {
+    let mut headers = IndexMap::new();
+    headers.insert("x-test".into(), "1".into());
     let params = HttpRequestParams {
         method: "POST".into(),
         url: "https://example.com".into(),
-        headers: Default::default(),
-        body_ref: None,
+        headers,
+        body_ref: Some(zero_hash()),
     };
     aos_wasm_abi::ReducerOutput {
         state: None,
@@ -62,7 +65,10 @@ fn reducer_http_effect_is_denied() {
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world.submit_event_value(fixtures::START_SCHEMA, &fixtures::plan_input_record(vec![]));
     let err = world.kernel.tick().unwrap_err();
-    assert!(matches!(err, KernelError::PolicyDenied { .. }));
+    assert!(
+        matches!(err, KernelError::PolicyDenied { .. }),
+        "unexpected error: {err:?}"
+    );
 }
 
 #[test]
@@ -78,7 +84,7 @@ fn plan_effect_allowed_by_policy() {
             id: "emit".into(),
             kind: aos_air_types::PlanStepKind::EmitEffect(aos_air_types::PlanStepEmitEffect {
                 kind: AirEffectKind::HttpRequest,
-                params: fixtures::text_expr("body").into(),
+                params: http_params_literal("https://example.com"),
                 cap: "cap_http".into(),
                 bind: aos_air_types::PlanBindEffect {
                     effect_id_as: "req".into(),
@@ -116,4 +122,20 @@ fn plan_effect_allowed_by_policy() {
     world.submit_event_value(fixtures::START_SCHEMA, &input);
     world.tick_n(2).unwrap();
     assert_eq!(world.drain_effects().len(), 1);
+}
+
+fn http_params_literal(url: &str) -> ExprOrValue {
+    ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+        record: indexmap::IndexMap::from([
+            ("method".into(), ValueLiteral::Text(ValueText { text: "GET".into() })),
+            ("url".into(), ValueLiteral::Text(ValueText { text: url.into() })),
+            ("headers".into(), ValueLiteral::Map(ValueMap { map: vec![] })),
+            (
+                "body_ref".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+        ]),
+    }))
 }

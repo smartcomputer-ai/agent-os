@@ -2,12 +2,12 @@ use std::{collections::HashMap, sync::Arc};
 
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    AirNode, CapGrant, CapType, DefCap, DefPlan, EffectKind, Expr, ExprConst, ExprRecord, ExprRef,
-    Manifest, ManifestDefaults, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, ReducerAbi, TypeExpr,
-    TypeRecord, ValueLiteral, ValueRecord,
-    builtins::builtin_schemas,
-    plan_literals::{SchemaIndex, normalize_plan_literals},
+    AirNode, CapGrant, CapType, DefCap, DefPlan, EffectKind, EmptyObject, Expr, ExprConst,
+    ExprOrValue, ExprRecord, ExprRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
+    PlanBindEffect, PlanEdge, PlanStep, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
+    PlanStepKind, ReducerAbi, TypeExpr, TypeRecord, ValueLiteral, ValueMap, ValueNull, ValueRecord,
+    ValueText, builtins::builtin_schemas,
+    plan_literals::{normalize_plan_literals, SchemaIndex},
 };
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
@@ -402,7 +402,7 @@ fn upgrade_plan_v1(name: &str) -> DefPlan {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("v1").into(),
+                    params: http_params_literal("v1"),
                     cap: "cap_http_primary".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -450,7 +450,7 @@ fn upgrade_plan_v2(name: &str) -> DefPlan {
             id: "emit_followup".into(),
             kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                 kind: EffectKind::HttpRequest,
-                params: fixtures::text_expr("v2").into(),
+                params: http_params_literal("v2"),
                 cap: "cap_http_followup".into(),
                 bind: PlanBindEffect {
                     effect_id_as: "req_follow".into(),
@@ -525,10 +525,7 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: Expr::Const(ExprConst::Text {
-                        text: "shadow".into(),
-                    })
-                    .into(),
+                    params: http_params_literal("shadow"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -594,4 +591,25 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
     );
 
     loaded
+}
+
+fn http_params_literal(tag: &str) -> ExprOrValue {
+    ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+        record: IndexMap::from([
+            ("method".into(), ValueLiteral::Text(ValueText { text: "GET".into() })),
+            (
+                "url".into(),
+                ValueLiteral::Text(ValueText {
+                    text: format!("https://example.com/{tag}"),
+                }),
+            ),
+            (
+                "headers".into(),
+                ValueLiteral::Map(ValueMap {
+                    map: vec![], // empty header map is allowed
+                }),
+            ),
+            ("body_ref".into(), ValueLiteral::Null(ValueNull { null: EmptyObject {} })),
+        ]),
+    }))
 }

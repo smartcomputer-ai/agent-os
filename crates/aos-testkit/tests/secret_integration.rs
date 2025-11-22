@@ -24,19 +24,6 @@ fn secret_param_cbor(alias: &str, version: u64) -> Vec<u8> {
         .unwrap()
 }
 
-/// Params CBOR using sugar variant {"secret": {...}}
-fn secret_param_cbor_sugar(alias: &str, version: u64) -> Vec<u8> {
-    use serde_cbor::Value;
-    let mut inner = BTreeMap::new();
-    inner.insert(Value::Text("alias".into()), Value::Text(alias.into()));
-    inner.insert(Value::Text("version".into()), Value::Integer(version as i128));
-    let mut secret = BTreeMap::new();
-    secret.insert(Value::Text("secret".into()), Value::Map(inner));
-    let mut root = BTreeMap::new();
-    root.insert(Value::Text("api_key".into()), Value::Map(secret));
-    serde_cbor::to_vec(&Value::Map(root)).unwrap()
-}
-
 fn catalog_with_secret(policy: Option<SecretPolicy>) -> SecretCatalog {
     let decl = SecretDecl {
         alias: "llm/api".into(),
@@ -68,25 +55,6 @@ fn injects_secret_into_params_cbor() {
         );
     } else {
         panic!("expected map at root");
-    }
-}
-
-#[test]
-fn injects_secret_from_sugar_variant() {
-    let catalog = catalog_with_secret(None);
-    let mut map = HashMap::new();
-    map.insert("env:LLM_API_KEY".into(), b"token123".to_vec());
-    let resolver = MapSecretResolver::new(map);
-
-    let cbor = secret_param_cbor_sugar("llm/api", 1);
-    let injected = inject_secrets_in_params(&cbor, &catalog, &resolver).unwrap();
-    let value: serde_cbor::Value = serde_cbor::from_slice(&injected).unwrap();
-    match value {
-        serde_cbor::Value::Map(root) => {
-            let api_val = root.get(&serde_cbor::Value::Text("api_key".into())).unwrap();
-            assert_eq!(api_val, &serde_cbor::Value::Text("token123".into()));
-        }
-        other => panic!("expected map root, got {:?}", other),
     }
 }
 

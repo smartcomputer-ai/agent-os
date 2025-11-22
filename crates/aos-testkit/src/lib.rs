@@ -416,9 +416,17 @@ pub struct TestWorld {
 /// Decodes an effect intent's parameter payload as UTF-8 text, panicking if the payload is not a
 /// text literal. Helpful for keeping test assertions concise.
 pub fn effect_params_text(intent: &EffectIntent) -> String {
+    // Prefer url field from canonical http params if present.
+    if let Ok(serde_cbor::Value::Map(map)) = serde_cbor::from_slice::<serde_cbor::Value>(&intent.params_cbor) {
+        if let Some(serde_cbor::Value::Text(url)) =
+            map.get(&serde_cbor::Value::Text("url".into()))
+        {
+            return url.clone();
+        }
+    }
     match serde_cbor::from_slice::<ExprValue>(&intent.params_cbor).expect("decode effect params") {
         ExprValue::Text(text) => text,
-        other => panic!("expected text params, got {:?}", other),
+        other => panic!("expected text params or http url, got {:?}", other),
     }
 }
 
