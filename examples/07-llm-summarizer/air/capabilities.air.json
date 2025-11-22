@@ -1,0 +1,24 @@
+[
+  {
+    "$kind": "defcap",
+    "name": "demo/http_fetch_cap@1",
+    "cap_type": "http.out",
+    "schema": {
+      "record": {
+        "hosts": { "set": { "text": {} } },
+        "methods": { "set": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defcap",
+    "name": "demo/llm_summarize_cap@1",
+    "cap_type": "llm.basic",
+    "schema": {
+      "record": {
+        "models": { "set": { "text": {} } },
+        "max_tokens": { "nat": {} }
+      }
+    }
+  }
+]

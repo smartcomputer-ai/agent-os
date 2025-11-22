@@ -7,11 +7,15 @@ publish = false
 [dependencies]
 aos-store = { path = "../aos-store" }
 aos-effects = { path = "../aos-effects" }
+aos-cbor = { path = "../aos-cbor" }
 aos-kernel = { path = "../aos-kernel" }
 aos-air-types = { path = "../aos-air-types" }
 aos-air-exec = { path = "../aos-air-exec" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 indexmap = "2"
+anyhow = "1"
+sha2 = "0.10"
+hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
 wat = "1"
