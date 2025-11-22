@@ -1,10 +1,11 @@
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
+use indexmap::IndexMap;
 use thiserror::Error;
 
 use crate::{
     TypeExpr, TypeList, TypeMap, TypeMapKey, TypeOption, TypePrimitive, TypeRecord, TypeSet,
-    TypeVariant, ValueLiteral, ValueMapEntry, ValueVariant,
+    TypeVariant, ValueLiteral, ValueMapEntry, ValueNat, ValueText, ValueVariant,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -77,12 +78,12 @@ fn validate_primitive(
 }
 
 fn validate_record(value: &ValueLiteral, record: &TypeRecord) -> Result<(), ValueTypeError> {
-    let fields = match value {
-        ValueLiteral::Record(record_value) => &record_value.record,
-        other => {
+    let fields = match record_fields(value) {
+        Some(fields) => fields,
+        None => {
             return Err(ValueTypeError::TypeMismatch {
                 expected: "record",
-                found: value_kind(other),
+                found: value_kind(value),
             });
         }
     };
@@ -249,6 +250,30 @@ fn value_kind(value: &ValueLiteral) -> &'static str {
         ValueLiteral::Map(_) => "map",
         ValueLiteral::Record(_) => "record",
         ValueLiteral::Variant(_) => "variant",
+        ValueLiteral::SecretRef(_) => "secret_ref",
+    }
+}
+
+fn record_fields<'a>(value: &'a ValueLiteral) -> Option<Cow<'a, IndexMap<String, ValueLiteral>>> {
+    match value {
+        ValueLiteral::Record(record_value) => Some(Cow::Borrowed(&record_value.record)),
+        ValueLiteral::SecretRef(secret) => {
+            let mut fields = IndexMap::new();
+            fields.insert(
+                "alias".to_string(),
+                ValueLiteral::Text(ValueText {
+                    text: secret.alias.clone(),
+                }),
+            );
+            fields.insert(
+                "version".to_string(),
+                ValueLiteral::Nat(ValueNat {
+                    nat: secret.version,
+                }),
+            );
+            Some(Cow::Owned(fields))
+        }
+        _ => None,
     }
 }
 

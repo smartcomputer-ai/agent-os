@@ -35,6 +35,10 @@ enum Commands {
     Aggregator,
     /// Run the Chain + Compensation example
     ChainComp,
+    /// Run the governance safe-upgrade example
+    SafeUpgrade,
+    /// Run the LLM summarizer example
+    LlmSummarizer,
     /// Run every available example sequentially
     All,
 }
@@ -98,6 +102,22 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "examples/05-chain-comp",
         runner: examples::chain_comp::run,
     },
+    ExampleMeta {
+        number: "06",
+        slug: "safe-upgrade",
+        title: "Safe Upgrade",
+        summary: "Governance shadow/apply demo",
+        dir: "examples/06-safe-upgrade",
+        runner: examples::safe_upgrade::run,
+    },
+    ExampleMeta {
+        number: "07",
+        slug: "llm-summarizer",
+        title: "LLM Summarizer",
+        summary: "HTTP + LLM with mocked receipt",
+        dir: "examples/07-llm-summarizer",
+        runner: examples::llm_summarizer::run,
+    },
 ];
 
 fn main() {
@@ -130,6 +150,8 @@ fn run_cli() -> Result<()> {
         Some(Commands::FetchNotify) => run_single("fetch-notify"),
         Some(Commands::Aggregator) => run_single("aggregator"),
         Some(Commands::ChainComp) => run_single("chain-comp"),
+        Some(Commands::SafeUpgrade) => run_single("safe-upgrade"),
+        Some(Commands::LlmSummarizer) => run_single("llm-summarizer"),
         Some(Commands::All) => run_all(),
         None => {
             list_examples();

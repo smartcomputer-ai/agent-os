@@ -74,6 +74,18 @@ impl ExampleReducerHarness {
         })
     }
 
+    pub fn store(&self) -> Arc<FsStore> {
+        self.store.clone()
+    }
+
+    pub fn wasm_hash(&self) -> &HashRef {
+        &self.wasm_hash
+    }
+
+    pub fn patch_module_hash(&self, loaded: &mut LoadedManifest) -> Result<()> {
+        patch_module_hash(loaded, self.reducer_name(), &self.wasm_hash)
+    }
+
     fn load_manifest(&self) -> Result<LoadedManifest> {
         let mut loaded = manifest_loader::load_from_assets(self.store.clone(), &self.example_root)?
             .ok_or_else(|| {
@@ -96,10 +108,6 @@ impl ExampleReducerHarness {
 
     fn example_root(&self) -> &Path {
         &self.example_root
-    }
-
-    fn store(&self) -> Arc<FsStore> {
-        self.store.clone()
     }
 
     fn kernel_config(&self) -> KernelConfig {

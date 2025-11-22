@@ -6,6 +6,7 @@ use crate::governance::ManifestPatch;
 pub struct ShadowConfig {
     pub proposal_id: u64,
     pub patch: ManifestPatch,
+    pub patch_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<ShadowHarness>,
 }

@@ -26,20 +26,35 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 11. **[x] Example 04 — Aggregator (fan-out + join)** — Plan + reducer demo now lives under `examples/04-aggregator` with canonical AIR assets, shared HTTP harness, kernel fan-out scheduling, runner, docs, and replay/integration tests proving three parallel HTTP calls join deterministically.
 
-12. **[x] Example 05 — Chain + Compensation (M4 multi-plan choreography)** — Added `examples/05-chain-comp` with four plans, reducer, CLI runner, and kernel regression tests for the refund choreography.
-    - **Scope:** reuse the existing HTTP harness to simulate `charge`, `reserve`, and `notify` effects while the reducer emits intents with a `request_id` correlation key. Reducer tracks saga state and issues a `refund_plan` intent if `reserve_plan` fails.
-    - **Assets:** author canonical JSON for four plans (`charge_plan@1`, `reserve_plan@1`, `notify_plan@1`, `refund_plan@1`), per-plan schemas, capabilities, and a manifest wiring triggers via `correlate_by`. Add reducer WASM crate + runner to seed `EventA/B/C` and inspect recorded DomainEvents/results.
-    - **Kernel/tests:** extend plan-trigger routing to ensure multiple ready plans are deterministically ordered, write regression tests in `crates/aos-kernel` that feed a failure receipt into `reserve_plan` and assert the reducer emits the compensation intent with no orphaned events, and update `aos-examples` CLI metadata/docs so the new demo is runnable.
+12. **[x] Example 05 — Chain + Compensation (M4 multi-plan choreography)** — Four-plan saga with HTTP harness, reducer emits compensation intent on reserved failure, canonical AIR assets + runner + kernel regression tests prove deterministic ordering and refund path.
 
-13. **[ ] Governance Loop + Shadow Run (M5)** — Implement proposal→shadow→approval→apply flow in the kernel plus a demo showing a safe plan upgrade.
-    - **Runtime:** introduce journaled governance events, shadow executor that replays manifest changes to predict `{effects_predicted, diffs, budget deltas}`, and policy/cap ledger hooks so applied manifests swap atomically. Provide CLI plumbing (`aos-examples` or minimal `aos-cli`) to submit proposals and approve them.
-    - **Demo assets:** add `examples/06-safe-upgrade` with the original `fetch_plan@1`, a proposed `fetch_plan@2` (extra assign + HTTP call), and scripts/tests proving (a) shadow produces predictions, (b) approval updates the manifest root, and (c) rerunning the world executes the new plan with recorded receipts and replay-identical state.
+13. **[x] Governance Loop + Safe Upgrade Example (M5 core)** — Kernel now supports proposal/shadow/approve/apply with deterministic replay, capability/policy ledgers diffed via `compute_ledger_deltas`, and manifest hashes guarded through shadow → apply. Added `examples/06-safe-upgrade` with v1→v2 plan swap, new cap/policy, shadow prediction of HTTP intents + ledger deltas, and approval/apply flow exercised in the `aos-examples` runner and integration tests.
+        - Reused harness patterns from fetch-notify and chain-comp; replay stays byte-identical after upgrade.
 
-> Once these three examples are stable, replicate the same structure for the remaining ladder rungs (plans, fan-out, governance, LLM) by adding numbered directories plus scenario implementations under the shared CLI.
+## Secrets — Implementation Tasks (see spec/17-secrets.md)
 
+1. ✅ Secret types into AIR & enums (validation surface)
+   - `SecretDecl` + `secrets` in manifest; `EffectKind`/`CapType` extended for `vault.put`/`vault.rotate`; no `secret.get`.
+   - Wired through aos-air-types, aos-effects, kernel; serde/round-trip tests updated.
 
-## Open Questions
-- reducer lib (less boiler plate), implement WIT?
-- move and test manifest loader in aos-types
-- how to deal with sha hashes in json? how to make this tractable. which defs SHOULD be as json and which ones can be defined in code? is it overkill now
-- understand HttpHarness in fetch_notify
+2. ✅ Schema & manifest validation
+   - Unique (alias, version), binding_id required, expected_digest hash shape.
+   - SecretRef resolution + per-secret ACL validation after normal cap/policy gates; tests added in store/air-types.
+
+3. ✅ Secret resolver plumbing in kernel
+   - `SecretResolver` trait with map and placeholder impls; threaded via KernelConfig into EffectManager; fail-closed when missing/digest mismatch; shadow can stub.
+
+4. ✅ Effect parameter injection
+   - Detects SecretRef (canonical/sugar variant), resolves via resolver, injects plaintext before dispatch; intent hash uses injected params.
+   - Policy enforcement runs on original params; receipts left to adapters for redaction.
+   - Integration tests in aos-testkit cover injection, binary secrets, digest mismatch, policy deny cases.
+
+5. ✅ Policy gate & capability wiring
+   - CapType mapping updated; per-secret ACL enforced pre-enqueue; tests added.
+
+6. ✅ Examples & docs (secrets demo)
+   - LLM summarizer uses a SecretRef for api_key; manifest declares `llm/api` secret; resolver in examples supplies a demo key; HTTP/LLM harnesses redact and enforce keys; README/example run works.
+
+Next (optional)
+   - Adapter-level secret redaction/meta propagation.
+   - Design-time rotation example with `vault.put`/manifest patch flow.

@@ -840,6 +840,12 @@ fn literal_to_value(literal: &ValueLiteral) -> Result<ExprValue, String> {
             }
             Ok(ExprValue::Map(out))
         }
+        ValueLiteral::SecretRef(secret) => {
+            let mut record = IndexMap::with_capacity(2);
+            record.insert("alias".into(), ExprValue::Text(secret.alias.clone()));
+            record.insert("version".into(), ExprValue::Nat(secret.version));
+            Ok(ExprValue::Record(record))
+        }
         ValueLiteral::Record(record) => {
             let mut out = IndexMap::with_capacity(record.record.len());
             for (key, value) in &record.record {
@@ -1090,7 +1096,7 @@ mod tests {
             ),
         ];
         let resolver = CapabilityResolver::from_runtime_grants(grants);
-        EffectManager::new(resolver, Box::new(AllowAllPolicy))
+        EffectManager::new(resolver, Box::new(AllowAllPolicy), None, None)
     }
 
     fn empty_schema_index() -> Arc<SchemaIndex> {

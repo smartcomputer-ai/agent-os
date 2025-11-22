@@ -1,0 +1,111 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demo/fetch_plan@2",
+    "input": "demo/UpgradeFetchRequest@1",
+    "output": "demo/SafeUpgradeResult@1",
+    "steps": [
+      {
+        "id": "emit_primary",
+        "op": "emit_effect",
+        "kind": "http.request",
+        "params": {
+          "record": {
+            "method": { "text": "GET" },
+            "url": { "text": "https://example.com/data.json" },
+            "idempotency_key": { "text": "safe-upgrade-v2-primary" },
+            "headers": { "map": [] },
+            "body_ref": { "variant": { "tag": "None" } }
+          }
+        },
+        "cap": "cap_http_fetch",
+        "bind": { "effect_id_as": "primary_req" }
+      },
+      {
+        "id": "await_primary",
+        "op": "await_receipt",
+        "for": { "ref": "@var:primary_req" },
+        "bind": { "as": "primary_receipt" }
+      },
+      {
+        "id": "capture_primary_status",
+        "op": "assign",
+        "expr": { "int": 200 },
+        "bind": { "as": "primary_status" }
+      },
+      {
+        "id": "assign_follow_url",
+        "op": "assign",
+        "expr": { "text": "https://example.com/follow.json" },
+        "bind": { "as": "follow_url" }
+      },
+      {
+        "id": "emit_followup",
+        "op": "emit_effect",
+        "kind": "http.request",
+        "params": {
+          "record": {
+            "method": { "text": "GET" },
+            "url": { "ref": "@var:follow_url" },
+            "idempotency_key": { "text": "safe-upgrade-v2-follow" },
+            "headers": { "map": [] },
+            "body_ref": { "variant": { "tag": "None" } }
+          }
+        },
+        "cap": "cap_http_followup",
+        "bind": { "effect_id_as": "follow_req" }
+      },
+      {
+        "id": "await_followup",
+        "op": "await_receipt",
+        "for": { "ref": "@var:follow_req" },
+        "bind": { "as": "follow_receipt" }
+      },
+      {
+        "id": "capture_follow_status",
+        "op": "assign",
+        "expr": { "int": 202 },
+        "bind": { "as": "follow_status" }
+      },
+      {
+        "id": "raise_complete",
+        "op": "raise_event",
+        "reducer": "demo/SafeUpgrade@1",
+        "event": {
+          "variant": {
+            "tag": "NotifyComplete",
+            "value": {
+              "record": {
+                "primary_status": { "ref": "@var:primary_status" },
+                "follow_status": { "ref": "@var:follow_status" },
+                "request_count": { "nat": 2 }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "finish",
+        "op": "end",
+        "result": {
+          "record": {
+            "primary_status": { "ref": "@var:primary_status" },
+            "follow_status": { "ref": "@var:follow_status" }
+          }
+        }
+      }
+    ],
+    "edges": [
+      { "from": "emit_primary", "to": "await_primary" },
+      { "from": "await_primary", "to": "capture_primary_status" },
+      { "from": "capture_primary_status", "to": "assign_follow_url" },
+      { "from": "assign_follow_url", "to": "emit_followup" },
+      { "from": "emit_followup", "to": "await_followup" },
+      { "from": "await_followup", "to": "capture_follow_status" },
+      { "from": "capture_follow_status", "to": "raise_complete" },
+      { "from": "raise_complete", "to": "finish" }
+    ],
+    "required_caps": ["cap_http_fetch", "cap_http_followup"],
+    "allowed_effects": ["http.request"]
+  }
+]

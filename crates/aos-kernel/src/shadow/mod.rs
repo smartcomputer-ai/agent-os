@@ -4,4 +4,7 @@ mod summary;
 
 pub use config::{ShadowConfig, ShadowHarness};
 pub use runner::ShadowExecutor;
-pub use summary::ShadowSummary;
+pub use summary::{
+    DeltaKind, LedgerDelta, LedgerKind, PendingPlanReceipt, PlanResultPreview, PredictedEffect,
+    ShadowSummary,
+};

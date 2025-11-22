@@ -17,12 +17,20 @@
     "EffectKind": {
       "title": "Built-in effect kinds (v1)",
       "type": "string",
-      "enum": ["http.request", "blob.put", "blob.get", "timer.set", "llm.generate"]
+      "enum": [
+        "http.request",
+        "blob.put",
+        "blob.get",
+        "timer.set",
+        "llm.generate",
+        "vault.put",
+        "vault.rotate"
+      ]
     },
     "CapType": {
       "title": "Capability types (v1)",
       "type": "string",
-      "enum": ["http.out", "blob", "timer", "llm.basic"]
+      "enum": ["http.out", "blob", "timer", "llm.basic", "secret"]
     },
     "VarName": {
       "type": "string",

@@ -7,6 +7,7 @@ pub type Name = String;
 pub type VarName = String;
 pub type StepId = String;
 pub type CapGrantName = String;
+pub type SecretAlias = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -27,6 +28,7 @@ pub enum ValueLiteral {
     Map(ValueMap),
     Record(ValueRecord),
     Variant(ValueVariant),
+    SecretRef(SecretRef),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +117,13 @@ pub struct ValueVariant {
     pub tag: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Box<ValueLiteral>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(deny_unknown_fields)]
+pub struct SecretRef {
+    pub alias: SecretAlias,
+    pub version: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -561,6 +570,8 @@ pub enum CapType {
     Timer,
     #[serde(rename = "llm.basic")]
     LlmBasic,
+    #[serde(rename = "secret")]
+    Secret,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -612,6 +623,8 @@ pub struct Manifest {
     pub plans: Vec<NamedRef>,
     pub caps: Vec<NamedRef>,
     pub policies: Vec<NamedRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secrets: Vec<SecretDecl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defaults: Option<ManifestDefaults>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -634,6 +647,25 @@ pub struct ManifestDefaults {
     pub policy: Option<Name>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cap_grants: Vec<CapGrant>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretDecl {
+    pub alias: SecretAlias,
+    pub version: u64,
+    pub binding_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_digest: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<SecretPolicy>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SecretPolicy {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_caps: Vec<CapGrantName>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_plans: Vec<Name>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -705,6 +737,10 @@ pub enum EffectKind {
     TimerSet,
     #[serde(rename = "llm.generate")]
     LlmGenerate,
+    #[serde(rename = "vault.put")]
+    VaultPut,
+    #[serde(rename = "vault.rotate")]
+    VaultRotate,
 }
 
 #[cfg(test)]

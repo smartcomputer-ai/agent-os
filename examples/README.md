@@ -10,5 +10,7 @@ Each numbered directory hosts a self-contained demo (schemas, reducer WASM, opti
 | 03  | fetch-notify | Plan-triggered HTTP demo  |
 | 04  | aggregator  | Fan-out plan join demo     |
 | 05  | chain-comp  | Multi-plan saga + refund  |
+| 06  | safe-upgrade | Governance shadow/apply demo |
+| 07  | llm-summarizer | HTTP + LLM summarization demo |
 
 Use the `aos-examples` CLI to list or run demos.

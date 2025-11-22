@@ -9,6 +9,8 @@ const CLI_SMOKE_TESTS: &[&str] = &[
     "fetch-notify",
     "aggregator",
     "chain-comp",
+    "safe-upgrade",
+    "llm-summarizer",
 ];
 
 #[test]
@@ -45,6 +47,18 @@ fn aggregator_cli_runs() {
 #[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
 fn chain_comp_cli_runs() {
     run_cli_smoke("chain-comp");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn safe_upgrade_cli_runs() {
+    run_cli_smoke("safe-upgrade");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn llm_summarizer_cli_runs() {
+    run_cli_smoke("llm-summarizer");
 }
 
 fn run_cli_smoke(subcommand: &str) {

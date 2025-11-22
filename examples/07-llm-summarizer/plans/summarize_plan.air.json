@@ -1,0 +1,158 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demo/summarize_plan@1",
+    "input": "demo/SummarizeRequest@1",
+    "steps": [
+      {
+        "id": "emit_http",
+        "op": "emit_effect",
+        "kind": "http.request",
+        "params": {
+          "record": {
+            "method": { "text": "GET" },
+            "url": { "ref": "@plan.input.url" },
+            "headers": { "map": [] },
+            "body_ref": { "variant": { "tag": "None" } }
+          }
+        },
+        "cap": "cap_http_fetch",
+        "bind": { "effect_id_as": "http_req" }
+      },
+      {
+        "id": "await_http",
+        "op": "await_receipt",
+        "for": { "ref": "@var:http_req" },
+        "bind": { "as": "http_receipt" }
+      },
+      {
+        "id": "assign_body_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:http_receipt" },
+            { "text": "body_ref" }
+          ]
+        },
+        "bind": { "as": "body_ref" }
+      },
+      {
+        "id": "emit_llm",
+        "op": "emit_effect",
+        "kind": "llm.generate",
+        "params": {
+          "record": {
+            "provider": { "text": "mock" },
+            "model": { "text": "mock-summarizer" },
+            "temperature": { "text": "0" },
+            "max_tokens": { "nat": 512 },
+            "input_ref": { "ref": "@var:body_ref" },
+            "tools": { "list": [] },
+            "api_key": {
+              "variant": {
+                "tag": "secret",
+                "value": {
+                  "record": {
+                    "alias": { "text": "llm/api" },
+                    "version": { "nat": 1 }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "cap": "cap_llm",
+        "bind": { "effect_id_as": "llm_req" }
+      },
+      {
+        "id": "await_llm",
+        "op": "await_receipt",
+        "for": { "ref": "@var:llm_req" },
+        "bind": { "as": "llm_receipt" }
+      },
+      {
+        "id": "assign_summary",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:llm_receipt" },
+            { "text": "summary_preview" }
+          ]
+        },
+        "bind": { "as": "summary" }
+      },
+      {
+        "id": "assign_tokens_prompt",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:llm_receipt" },
+            { "text": "tokens_prompt" }
+          ]
+        },
+        "bind": { "as": "tokens_prompt" }
+      },
+      {
+        "id": "assign_tokens_completion",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:llm_receipt" },
+            { "text": "tokens_completion" }
+          ]
+        },
+        "bind": { "as": "tokens_completion" }
+      },
+      {
+        "id": "assign_cost_millis",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:llm_receipt" },
+            { "text": "cost_millis" }
+          ]
+        },
+        "bind": { "as": "cost_millis" }
+      },
+      {
+        "id": "raise_result",
+        "op": "raise_event",
+        "reducer": "demo/LlmSummarizer@1",
+        "event": {
+          "variant": {
+            "tag": "SummaryReady",
+            "value": {
+              "record": {
+                "request_id": { "ref": "@plan.input.request_id" },
+                "summary": { "ref": "@var:summary" },
+                "tokens_prompt": { "ref": "@var:tokens_prompt" },
+                "tokens_completion": { "ref": "@var:tokens_completion" },
+                "cost_millis": { "ref": "@var:cost_millis" }
+              }
+            }
+          }
+        }
+      },
+      { "id": "finish", "op": "end" }
+    ],
+    "edges": [
+      { "from": "emit_http", "to": "await_http" },
+      { "from": "await_http", "to": "assign_body_ref" },
+      { "from": "assign_body_ref", "to": "emit_llm" },
+      { "from": "emit_llm", "to": "await_llm" },
+      { "from": "await_llm", "to": "assign_summary" },
+      { "from": "assign_summary", "to": "assign_tokens_prompt" },
+      { "from": "assign_tokens_prompt", "to": "assign_tokens_completion" },
+      { "from": "assign_tokens_completion", "to": "assign_cost_millis" },
+      { "from": "assign_cost_millis", "to": "raise_result" },
+      { "from": "raise_result", "to": "finish" }
+    ],
+    "required_caps": ["cap_http_fetch", "cap_llm"],
+    "allowed_effects": ["http.request", "llm.generate"]
+  }
+]

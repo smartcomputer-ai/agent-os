@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ use crate::capability::CapabilityResolver;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::event::{KernelEvent, ReducerEvent};
-use crate::governance::{GovernanceManager, ManifestPatch};
+use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
@@ -32,7 +33,10 @@ use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
-use crate::shadow::{ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary};
+use crate::secret::{PlaceholderSecretResolver, SharedSecretResolver};
+use crate::shadow::{
+    DeltaKind, LedgerDelta, LedgerKind, ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary,
+};
 use crate::snapshot::{
     EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanResultSnapshot,
     ReducerReceiptSnapshot, receipts_to_vecdeque,
@@ -41,10 +45,26 @@ use crate::snapshot::{
 const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct KernelConfig {
     pub module_cache_dir: Option<PathBuf>,
     pub eager_module_load: bool,
+    pub secret_resolver: Option<SharedSecretResolver>,
+    pub allow_placeholder_secrets: bool,
+}
+
+impl fmt::Debug for KernelConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KernelConfig")
+            .field("module_cache_dir", &self.module_cache_dir)
+            .field("eager_module_load", &self.eager_module_load)
+            .field(
+                "secret_resolver",
+                &self.secret_resolver.as_ref().map(|_| "<resolver>"),
+            )
+            .field("allow_placeholder_secrets", &self.allow_placeholder_secrets)
+            .finish()
+    }
 }
 
 pub struct Kernel<S: Store> {
@@ -70,6 +90,8 @@ pub struct Kernel<S: Store> {
     journal: Box<dyn Journal>,
     suppress_journal: bool,
     governance: GovernanceManager,
+    secret_resolver: Option<SharedSecretResolver>,
+    allow_placeholder_secrets: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -172,6 +194,16 @@ impl<S: Store + 'static> KernelBuilder<S> {
         self
     }
 
+    pub fn with_secret_resolver(mut self, resolver: SharedSecretResolver) -> Self {
+        self.config.secret_resolver = Some(resolver);
+        self
+    }
+
+    pub fn allow_placeholder_secrets(mut self, enable: bool) -> Self {
+        self.config.allow_placeholder_secrets = enable;
+        self
+    }
+
     pub fn from_manifest_path(
         self,
         path: impl AsRef<std::path::Path>,
@@ -196,6 +228,7 @@ impl<S: Store + 'static> Kernel<S> {
         journal: Box<dyn Journal>,
         config: KernelConfig,
     ) -> Result<Self, KernelError> {
+        let secret_resolver = select_secret_resolver(&loaded.manifest, &config)?;
         let mut router = HashMap::new();
         if let Some(routing) = loaded.manifest.routing.as_ref() {
             for route in &routing.events {
@@ -253,7 +286,7 @@ impl<S: Store + 'static> Kernel<S> {
 
         let mut kernel = Self {
             store: store.clone(),
-            manifest: loaded.manifest,
+            manifest: loaded.manifest.clone(),
             module_defs: loaded.modules,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
@@ -269,11 +302,22 @@ impl<S: Store + 'static> Kernel<S> {
             recent_receipt_index: HashSet::new(),
             plan_results: VecDeque::new(),
             scheduler: Scheduler::default(),
-            effect_manager: EffectManager::new(capability_resolver, policy_gate),
+            effect_manager: EffectManager::new(
+                capability_resolver,
+                policy_gate,
+                if loaded.manifest.secrets.is_empty() {
+                    None
+                } else {
+                    Some(crate::secret::SecretCatalog::new(&loaded.manifest.secrets))
+                },
+                secret_resolver.clone(),
+            ),
             reducer_state: HashMap::new(),
             journal,
             suppress_journal: false,
             governance: GovernanceManager::new(),
+            secret_resolver: secret_resolver.clone(),
+            allow_placeholder_secrets: config.allow_placeholder_secrets,
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
@@ -669,6 +713,12 @@ impl<S: Store + 'static> Kernel<S> {
             .collect()
     }
 
+    pub fn plan_name_for_instance(&self, id: u64) -> Option<&str> {
+        self.plan_instances
+            .get(&id)
+            .map(|instance| instance.plan.name.as_str())
+    }
+
     pub fn dump_journal(&self) -> Result<Vec<OwnedJournalEntry>, KernelError> {
         Ok(self.journal.load_from(0)?)
     }
@@ -719,13 +769,19 @@ impl<S: Store + 'static> Kernel<S> {
             .get(&proposal_id)
             .ok_or(KernelError::ProposalNotFound(proposal_id))?
             .clone();
+        match proposal.state {
+            ProposalState::Applied => return Err(KernelError::ProposalAlreadyApplied(proposal_id)),
+            ProposalState::Submitted | ProposalState::Shadowed | ProposalState::Approved => {}
+        }
         let patch = self.load_manifest_patch(&proposal.patch_hash)?;
         let config = ShadowConfig {
             proposal_id,
             patch,
+            patch_hash: proposal.patch_hash.clone(),
             harness,
         };
-        let summary = ShadowExecutor::run(self.store.clone(), &config)?;
+        let mut summary = ShadowExecutor::run(self.store.clone(), &config)?;
+        summary.ledger_deltas = Self::compute_ledger_deltas(&self.manifest, &config.patch.manifest);
         let summary_bytes = serde_cbor::to_vec(&summary)
             .map_err(|err| KernelError::Manifest(format!("encode summary: {err}")))?;
         let record = GovernanceRecord::ShadowRunCompleted(ShadowRunCompletedRecord {
@@ -742,8 +798,24 @@ impl<S: Store + 'static> Kernel<S> {
         proposal_id: u64,
         approver: impl Into<String>,
     ) -> Result<(), KernelError> {
-        if !self.governance.proposals().contains_key(&proposal_id) {
-            return Err(KernelError::ProposalNotFound(proposal_id));
+        let proposal = self
+            .governance
+            .proposals()
+            .get(&proposal_id)
+            .ok_or(KernelError::ProposalNotFound(proposal_id))?
+            .clone();
+        if matches!(proposal.state, ProposalState::Applied) {
+            return Err(KernelError::ProposalAlreadyApplied(proposal_id));
+        }
+        if !matches!(
+            proposal.state,
+            ProposalState::Shadowed | ProposalState::Approved
+        ) {
+            return Err(KernelError::ProposalStateInvalid {
+                proposal_id,
+                state: proposal.state,
+                required: "shadowed",
+            });
         }
         let record = GovernanceRecord::ProposalApproved(ProposalApprovedRecord {
             proposal_id,
@@ -761,6 +833,16 @@ impl<S: Store + 'static> Kernel<S> {
             .get(&proposal_id)
             .ok_or(KernelError::ProposalNotFound(proposal_id))?
             .clone();
+        if matches!(proposal.state, ProposalState::Applied) {
+            return Err(KernelError::ProposalAlreadyApplied(proposal_id));
+        }
+        if !matches!(proposal.state, ProposalState::Approved) {
+            return Err(KernelError::ProposalStateInvalid {
+                proposal_id,
+                state: proposal.state,
+                required: "approved",
+            });
+        }
         let patch = self.load_manifest_patch(&proposal.patch_hash)?;
         self.swap_manifest(&patch)?;
         let record = GovernanceRecord::ManifestApplied(ManifestAppliedRecord {
@@ -788,6 +870,27 @@ impl<S: Store + 'static> Kernel<S> {
             &loaded,
         )?);
         let reducer_schemas = Arc::new(build_reducer_schemas(&loaded.modules, &schema_index)?);
+        let capability_resolver = CapabilityResolver::from_manifest(
+            &loaded.manifest,
+            &loaded.caps,
+            schema_index.as_ref(),
+        )?;
+        let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
+            .manifest
+            .defaults
+            .as_ref()
+            .and_then(|defaults| defaults.policy.clone())
+        {
+            Some(policy_name) => {
+                let def = loaded.policies.get(&policy_name).ok_or_else(|| {
+                    KernelError::Manifest(format!(
+                        "policy '{policy_name}' referenced by manifest defaults was not found"
+                    ))
+                })?;
+                Box::new(RulePolicy::from_def(def))
+            }
+            None => Box::new(AllowAllPolicy),
+        };
 
         self.manifest = loaded.manifest;
         self.module_defs = loaded.modules;
@@ -795,6 +898,7 @@ impl<S: Store + 'static> Kernel<S> {
         for plan in loaded.plans.values() {
             self.plan_registry.register(plan.clone());
         }
+
         self.router.clear();
         if let Some(routing) = self.manifest.routing.as_ref() {
             for route in &routing.events {
@@ -804,9 +908,84 @@ impl<S: Store + 'static> Kernel<S> {
                     .push(route.reducer.clone());
             }
         }
+
+        let mut plan_triggers = HashMap::new();
+        for trigger in &self.manifest.triggers {
+            plan_triggers
+                .entry(trigger.event.as_str().to_string())
+                .or_insert_with(Vec::new)
+                .push(PlanTriggerBinding {
+                    plan: trigger.plan.clone(),
+                    correlate_by: trigger.correlate_by.clone(),
+                });
+        }
+        for bindings in plan_triggers.values_mut() {
+            bindings.sort_by(|a, b| a.plan.cmp(&b.plan));
+        }
+        self.plan_triggers = plan_triggers;
+
+        self.plan_instances.clear();
+        self.waiting_events.clear();
+        self.pending_receipts.clear();
+        self.pending_reducer_receipts.clear();
+        self.recent_receipts.clear();
+        self.recent_receipt_index.clear();
+        self.plan_results.clear();
+
         self.schema_index = schema_index;
         self.reducer_schemas = reducer_schemas;
+        self.secret_resolver = ensure_secret_resolver(
+            &self.manifest,
+            self.secret_resolver.clone(),
+            self.allow_placeholder_secrets,
+        )?;
+        let secret_catalog = if self.manifest.secrets.is_empty() {
+            None
+        } else {
+            Some(crate::secret::SecretCatalog::new(&self.manifest.secrets))
+        };
+        self.effect_manager = EffectManager::new(
+            capability_resolver,
+            policy_gate,
+            secret_catalog,
+            self.secret_resolver.clone(),
+        );
         Ok(())
+    }
+
+    fn compute_ledger_deltas(current: &Manifest, candidate: &Manifest) -> Vec<LedgerDelta> {
+        let mut deltas = Vec::new();
+        deltas.extend(diff_named_refs(
+            &current.caps,
+            &candidate.caps,
+            LedgerKind::Capability,
+        ));
+        deltas.extend(diff_named_refs(
+            &current.policies,
+            &candidate.policies,
+            LedgerKind::Policy,
+        ));
+
+        deltas.sort_by(|a, b| {
+            let ledger_a = match a.ledger {
+                LedgerKind::Capability => 0,
+                LedgerKind::Policy => 1,
+            };
+            let ledger_b = match b.ledger {
+                LedgerKind::Capability => 0,
+                LedgerKind::Policy => 1,
+            };
+            (ledger_a, &a.name, format!("{:?}", a.change)).cmp(&(
+                ledger_b,
+                &b.name,
+                format!("{:?}", b.change),
+            ))
+        });
+        deltas
+    }
+
+    fn secret_resolver(&self) -> Option<SharedSecretResolver> {
+        self.secret_resolver.clone()
     }
 
     fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
@@ -903,13 +1082,6 @@ impl<S: Store + 'static> Kernel<S> {
         &mut self,
         receipt: aos_effects::EffectReceipt,
     ) -> Result<(), KernelError> {
-        if self.recent_receipt_index.contains(&receipt.intent_hash) {
-            log::warn!(
-                "late receipt {} ignored (already applied)",
-                format_intent_hash(&receipt.intent_hash)
-            );
-            return Ok(());
-        }
         if let Some(plan_id) = self.pending_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
             if let Some(instance) = self.plan_instances.get_mut(&plan_id) {
@@ -927,6 +1099,14 @@ impl<S: Store + 'static> Kernel<S> {
                 self.remember_receipt(receipt.intent_hash);
                 return Ok(());
             }
+        }
+
+        if self.recent_receipt_index.contains(&receipt.intent_hash) {
+            log::warn!(
+                "late receipt {} ignored (already applied)",
+                format_intent_hash(&receipt.intent_hash)
+            );
+            return Ok(());
         }
 
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
@@ -1056,6 +1236,34 @@ impl<S: Store + 'static> Kernel<S> {
     }
 }
 
+fn select_secret_resolver(
+    manifest: &Manifest,
+    config: &KernelConfig,
+) -> Result<Option<SharedSecretResolver>, KernelError> {
+    ensure_secret_resolver(
+        manifest,
+        config.secret_resolver.clone(),
+        config.allow_placeholder_secrets,
+    )
+}
+
+fn ensure_secret_resolver(
+    manifest: &Manifest,
+    provided: Option<SharedSecretResolver>,
+    allow_placeholder: bool,
+) -> Result<Option<SharedSecretResolver>, KernelError> {
+    if manifest.secrets.is_empty() {
+        return Ok(None);
+    }
+    if let Some(resolver) = provided {
+        return Ok(Some(resolver));
+    }
+    if allow_placeholder {
+        return Ok(Some(Arc::new(PlaceholderSecretResolver)));
+    }
+    Err(KernelError::SecretResolverMissing)
+}
+
 fn determine_correlation_value(
     binding: &PlanTriggerBinding,
     input: &ExprValue,
@@ -1181,6 +1389,160 @@ fn parse_nonzero_hash(value: &str) -> Result<Option<Hash>, KernelError> {
         Ok(None)
     } else {
         Ok(Some(hash))
+    }
+}
+
+fn diff_named_refs(
+    current: &[NamedRef],
+    candidate: &[NamedRef],
+    ledger: LedgerKind,
+) -> Vec<LedgerDelta> {
+    let mut deltas = Vec::new();
+    let current_map: HashMap<&str, &NamedRef> = current
+        .iter()
+        .map(|reference| (reference.name.as_str(), reference))
+        .collect();
+    let next_map: HashMap<&str, &NamedRef> = candidate
+        .iter()
+        .map(|reference| (reference.name.as_str(), reference))
+        .collect();
+
+    for (name, reference) in next_map.iter() {
+        match current_map.get(name) {
+            None => deltas.push(LedgerDelta {
+                ledger,
+                name: reference.name.as_str().to_string(),
+                change: DeltaKind::Added,
+            }),
+            Some(current_ref) if current_ref.hash.as_str() != reference.hash.as_str() => deltas
+                .push(LedgerDelta {
+                    ledger,
+                    name: reference.name.as_str().to_string(),
+                    change: DeltaKind::Changed,
+                }),
+            _ => {}
+        }
+    }
+
+    for (name, reference) in current_map.iter() {
+        if !next_map.contains_key(name) {
+            deltas.push(LedgerDelta {
+                ledger,
+                name: reference.name.as_str().to_string(),
+                change: DeltaKind::Removed,
+            })
+        }
+    }
+
+    deltas
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::journal::mem::MemJournal;
+    use aos_air_types::{HashRef, SecretDecl};
+    use aos_store::MemStore;
+
+    fn named_ref(name: &str, hash: &str) -> NamedRef {
+        NamedRef {
+            name: name.into(),
+            hash: HashRef::new(hash).unwrap(),
+        }
+    }
+
+    fn hash(num: u64) -> String {
+        // Produce a valid sha256: prefixed hex string for tests
+        format!("sha256:{num:064x}")
+    }
+
+    fn empty_manifest() -> Manifest {
+        Manifest {
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: None,
+            triggers: vec![],
+        }
+    }
+
+    #[test]
+    fn ledger_deltas_capture_added_changed_and_removed() {
+        let current = Manifest {
+            caps: vec![
+                named_ref("cap/a@1", &hash(1)),
+                named_ref("cap/b@1", &hash(2)),
+            ],
+            policies: vec![named_ref("policy/old@1", &hash(3))],
+            ..empty_manifest()
+        };
+        let candidate = Manifest {
+            caps: vec![
+                named_ref("cap/a@1", &hash(99)),
+                named_ref("cap/c@1", &hash(4)),
+            ],
+            policies: vec![named_ref("policy/new@1", &hash(5))],
+            ..empty_manifest()
+        };
+
+        let deltas = Kernel::<MemStore>::compute_ledger_deltas(&current, &candidate);
+
+        assert_eq!(deltas.len(), 5);
+        assert!(deltas.contains(&LedgerDelta {
+            ledger: LedgerKind::Capability,
+            name: "cap/a@1".to_string(),
+            change: DeltaKind::Changed,
+        }));
+        assert!(deltas.contains(&LedgerDelta {
+            ledger: LedgerKind::Capability,
+            name: "cap/c@1".to_string(),
+            change: DeltaKind::Added,
+        }));
+        assert!(deltas.contains(&LedgerDelta {
+            ledger: LedgerKind::Capability,
+            name: "cap/b@1".to_string(),
+            change: DeltaKind::Removed,
+        }));
+        assert!(deltas.contains(&LedgerDelta {
+            ledger: LedgerKind::Policy,
+            name: "policy/old@1".to_string(),
+            change: DeltaKind::Removed,
+        }));
+        assert!(deltas.contains(&LedgerDelta {
+            ledger: LedgerKind::Policy,
+            name: "policy/new@1".to_string(),
+            change: DeltaKind::Added,
+        }));
+    }
+
+    #[test]
+    fn kernel_requires_secret_resolver_for_secretful_manifest() {
+        let store = Arc::new(MemStore::new());
+        let mut manifest = empty_manifest();
+        manifest.secrets.push(SecretDecl {
+            alias: "payments/stripe".into(),
+            version: 1,
+            binding_id: "stripe:prod".into(),
+            expected_digest: None,
+            policy: None,
+        });
+        let loaded = LoadedManifest {
+            manifest,
+            modules: HashMap::new(),
+            plans: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::new(),
+        };
+
+        let result = Kernel::from_loaded_manifest(store, loaded, Box::new(MemJournal::new()));
+
+        assert!(matches!(result, Err(KernelError::SecretResolverMissing)));
     }
 }
 

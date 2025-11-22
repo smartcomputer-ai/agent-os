@@ -1,0 +1,28 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/llm-policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "http.request",
+          "origin_kind": "plan",
+          "origin_name": "demo/summarize_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "llm.generate",
+          "origin_kind": "plan",
+          "origin_name": "demo/summarize_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {},
+        "decision": "deny"
+      }
+    ]
+  }
+]

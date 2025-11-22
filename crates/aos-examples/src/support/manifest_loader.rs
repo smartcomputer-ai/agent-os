@@ -8,7 +8,7 @@ use aos_air_types::{
     self as air_types, AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, HashRef,
     Manifest, Name,
 };
-use aos_kernel::LoadedManifest;
+use aos_kernel::{LoadedManifest, governance::ManifestPatch};
 use aos_store::{Catalog, FsStore, Store, load_manifest_from_bytes};
 use log::warn;
 use serde_json::Value;
@@ -69,6 +69,24 @@ pub fn load_from_assets(
     patch_manifest_refs(&mut manifest, &hashes)?;
     let catalog = manifest_catalog(&store, manifest)?;
     Ok(Some(catalog_to_loaded(catalog)))
+}
+
+pub fn manifest_patch_from_loaded(loaded: &LoadedManifest) -> ManifestPatch {
+    let mut nodes: Vec<AirNode> = loaded
+        .modules
+        .values()
+        .cloned()
+        .map(AirNode::Defmodule)
+        .collect();
+    nodes.extend(loaded.schemas.values().cloned().map(AirNode::Defschema));
+    nodes.extend(loaded.caps.values().cloned().map(AirNode::Defcap));
+    nodes.extend(loaded.policies.values().cloned().map(AirNode::Defpolicy));
+    nodes.extend(loaded.plans.values().cloned().map(AirNode::Defplan));
+
+    ManifestPatch {
+        manifest: loaded.manifest.clone(),
+        nodes,
+    }
 }
 
 fn write_nodes(
@@ -485,6 +503,7 @@ mod tests {
             plans: Vec::new(),
             caps: Vec::new(),
             policies: Vec::new(),
+            secrets: Vec::new(),
             defaults: None,
             module_bindings: IndexMap::new(),
             routing: None,

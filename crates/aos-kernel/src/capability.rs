@@ -134,6 +134,9 @@ fn expected_cap_type(effect_kind: &str) -> Result<CapType, KernelError> {
         aos_effects::EffectKind::BLOB_PUT | aos_effects::EffectKind::BLOB_GET => Ok(CapType::Blob),
         aos_effects::EffectKind::TIMER_SET => Ok(CapType::Timer),
         aos_effects::EffectKind::LLM_GENERATE => Ok(CapType::LlmBasic),
+        aos_effects::EffectKind::VAULT_PUT | aos_effects::EffectKind::VAULT_ROTATE => {
+            Ok(CapType::Secret)
+        }
         other => Err(KernelError::UnsupportedEffectKind(other.to_string())),
     }
 }
@@ -144,6 +147,7 @@ fn cap_type_as_str(cap_type: &CapType) -> &'static str {
         CapType::Blob => "blob",
         CapType::Timer => "timer",
         CapType::LlmBasic => "llm.basic",
+        CapType::Secret => "secret",
     }
 }
 
@@ -235,6 +239,7 @@ mod tests {
             plans: vec![],
             caps: vec![],
             policies: vec![],
+            secrets: vec![],
             defaults: Some(ManifestDefaults {
                 policy: None,
                 cap_grants: vec![CapGrant {

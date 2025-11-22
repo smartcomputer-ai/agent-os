@@ -1,0 +1,70 @@
+{
+  "$kind": "manifest",
+  "schemas": [
+    { "name": "demo/LlmSummarizerPc@1" },
+    { "name": "demo/LlmSummarizerState@1" },
+    { "name": "demo/LlmSummarizerEvent@1" },
+    { "name": "demo/SummarizeRequest@1" },
+    { "name": "demo/SummarizeResult@1" }
+  ],
+  "modules": [
+    { "name": "demo/LlmSummarizer@1" }
+  ],
+  "plans": [
+    { "name": "demo/summarize_plan@1" }
+  ],
+  "caps": [
+    { "name": "demo/http_fetch_cap@1" },
+    { "name": "demo/llm_summarize_cap@1" }
+  ],
+  "policies": [
+    { "name": "demo/llm-policy@1" }
+  ],
+  "secrets": [
+    {
+      "alias": "llm/api",
+      "version": 1,
+      "binding_id": "env:LLM_API_KEY",
+      "expected_digest": null,
+      "policy": {
+        "allowed_caps": [ "cap_llm" ],
+        "allowed_plans": [ "demo/summarize_plan@1" ]
+      }
+    }
+  ],
+  "defaults": {
+    "policy": "demo/llm-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_http_fetch",
+        "cap": "demo/http_fetch_cap@1",
+        "params": {
+          "record": {
+            "hosts": { "set": [ { "text": "example.com" } ] },
+            "methods": { "set": [ { "text": "GET" } ] }
+          }
+        }
+      },
+      {
+        "name": "cap_llm",
+        "cap": "demo/llm_summarize_cap@1",
+        "params": {
+          "record": {
+            "models": { "set": [ { "text": "mock-summarizer" } ] },
+            "max_tokens": { "nat": 2048 }
+          }
+        }
+      }
+    ]
+  },
+  "module_bindings": {},
+  "routing": {
+    "events": [
+      { "event": "demo/LlmSummarizerEvent@1", "reducer": "demo/LlmSummarizer@1" }
+    ],
+    "inboxes": []
+  },
+  "triggers": [
+    { "event": "demo/SummarizeRequest@1", "plan": "demo/summarize_plan@1", "correlate_by": "request_id" }
+  ]
+}
