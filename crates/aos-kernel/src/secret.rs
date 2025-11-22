@@ -76,6 +76,7 @@ fn collect_secret_refs_value(value: &serde_cbor::Value, refs: &mut Vec<(String, 
         }
         serde_cbor::Value::Map(map) => {
             // Look for variant arm {"secret": {"alias": "...", "version": N}} or canonical {"$tag":"secret","$value": {...}}
+            // or schema literal form {"variant": {"tag":"secret","value": {...}}}
             if map.len() == 1 {
                 if let Some((serde_cbor::Value::Text(tag), serde_cbor::Value::Map(inner))) =
                     map.iter().next()
@@ -89,6 +90,20 @@ fn collect_secret_refs_value(value: &serde_cbor::Value, refs: &mut Vec<(String, 
                                 (alias_val, version_val)
                             {
                                 refs.push((alias.clone(), *v as u64));
+                            }
+                        }
+                    }
+                    if tag == "variant" {
+                        if let (Some(serde_cbor::Value::Text(tag_val)), Some(serde_cbor::Value::Map(val_map))) =
+                            (inner.get(&serde_cbor::Value::Text("tag".into())), inner.get(&serde_cbor::Value::Text("value".into())))
+                        {
+                            if tag_val == "secret" {
+                                if let (Some(serde_cbor::Value::Text(alias)), Some(serde_cbor::Value::Integer(v))) = (
+                                    val_map.get(&serde_cbor::Value::Text("alias".into())),
+                                    val_map.get(&serde_cbor::Value::Text("version".into())),
+                                ) {
+                                    refs.push((alias.clone(), *v as u64));
+                                }
                             }
                         }
                     }
@@ -151,7 +166,7 @@ fn inject_in_value(
             }
         }
         serde_cbor::Value::Map(map) => {
-            // Detect variant {"secret": {...}} or {"$tag":"secret","$value":{...}}
+            // Detect variant {"secret": {...}} or {"$tag":"secret","$value":{...}} or {"variant": {"tag":"secret","value": {...}}}
             if map.len() == 1 {
                 if let Some((serde_cbor::Value::Text(tag), serde_cbor::Value::Map(inner))) =
                     map.iter_mut().next()
@@ -178,6 +193,36 @@ fn inject_in_value(
                                     *value = serde_cbor::Value::Bytes(resolved.value);
                                 }
                                 return Ok(());
+                            }
+                        }
+                    }
+                    if tag == "variant" {
+                        if let (Some(serde_cbor::Value::Text(tag_val)), Some(serde_cbor::Value::Map(val_map))) = (
+                            inner.get(&serde_cbor::Value::Text("tag".into())),
+                            inner.get(&serde_cbor::Value::Text("value".into())),
+                        ) {
+                            if tag_val == "secret" {
+                                if let (Some(alias_val), Some(version_val)) = (
+                                    val_map.get(&serde_cbor::Value::Text("alias".into())),
+                                    val_map.get(&serde_cbor::Value::Text("version".into())),
+                                ) {
+                                    if let (serde_cbor::Value::Text(alias), serde_cbor::Value::Integer(v)) =
+                                        (alias_val, version_val)
+                                    {
+                                        let version = *v as u64;
+                                        let decl = catalog
+                                            .lookup(alias, version)
+                                            .ok_or_else(|| SecretResolverError::NotFound(format!("{alias}@{version}")))?;
+                                        let resolved = resolver
+                                            .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
+                                        if let Ok(text) = std::str::from_utf8(&resolved.value) {
+                                            *value = serde_cbor::Value::Text(text.to_string());
+                                        } else {
+                                            *value = serde_cbor::Value::Bytes(resolved.value);
+                                        }
+                                        return Ok(());
+                                    }
+                                }
                             }
                         }
                     }
