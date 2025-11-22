@@ -27,7 +27,7 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         Self { store }
     }
 
-    pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequestContext>> {
+pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequestContext>> {
         let mut out = Vec::new();
         loop {
             let intents = kernel.drain_effects();
@@ -93,6 +93,7 @@ fn llm_params_from_value(value: ExprValue) -> Result<LlmGenerateParams> {
         max_tokens: record_nat(&record, "max_tokens")?,
         input_ref: record_hash_ref(&record, "input_ref")?,
         tools: record_list_text(&record, "tools")?,
+        api_key: None, // optional; ignored/redacted in mock
     })
 }
 

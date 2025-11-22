@@ -65,6 +65,6 @@ pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
         module_cache_dir: Some(cache_dir),
         eager_module_load: true,
         secret_resolver: None,
-        allow_placeholder_secrets: false,
+        allow_placeholder_secrets: true,
     })
 }

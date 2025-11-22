@@ -104,6 +104,7 @@ fn llm_generate_params_literal_matches_builtin_schema() {
             hash("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         ),
         ("tools", list(vec![text("function.call")])),
+        ("api_key", null()),
     ]);
     validate_value_literal(&literal, &schema.schema.ty).expect("literal matches schema");
 }
