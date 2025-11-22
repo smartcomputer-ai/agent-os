@@ -43,13 +43,6 @@ fn map(entries: Vec<(ValueLiteral, ValueLiteral)>) -> ValueLiteral {
     })
 }
 
-fn variant(tag: &str, value: Option<ValueLiteral>) -> ValueLiteral {
-    ValueLiteral::Variant(ValueVariant {
-        tag: tag.to_string(),
-        value: value.map(Box::new),
-    })
-}
-
 fn list(items: Vec<ValueLiteral>) -> ValueLiteral {
     ValueLiteral::List(ValueList { list: items })
 }
@@ -65,7 +58,7 @@ fn http_request_params_literal_matches_builtin_schema() {
             map(vec![
                 (
                     text("content-type"),
-                    variant("text", Some(text("application/json"))),
+                    text("application/json"),
                 ),
             ]),
         ),
@@ -111,7 +104,6 @@ fn llm_generate_params_literal_matches_builtin_schema() {
             hash("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         ),
         ("tools", list(vec![text("function.call")])),
-        ("api_key", null()),
     ]);
     validate_value_literal(&literal, &schema.schema.ty).expect("literal matches schema");
 }

@@ -572,7 +572,6 @@ pub enum CapType {
     LlmBasic,
     #[serde(rename = "secret")]
     Secret,
-    Vault,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -738,10 +737,6 @@ pub enum EffectKind {
     TimerSet,
     #[serde(rename = "llm.generate")]
     LlmGenerate,
-    #[serde(rename = "secret.get")]
-    SecretGet,
-    #[serde(rename = "vault.get")]
-    VaultGet,
     #[serde(rename = "vault.put")]
     VaultPut,
     #[serde(rename = "vault.rotate")]

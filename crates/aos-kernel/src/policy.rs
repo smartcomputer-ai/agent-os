@@ -123,8 +123,6 @@ fn effect_kind_matches(matcher: &AirEffectKind, actual: &str) -> bool {
         AirEffectKind::BlobGet => actual == aos_effects::EffectKind::BLOB_GET,
         AirEffectKind::TimerSet => actual == aos_effects::EffectKind::TIMER_SET,
         AirEffectKind::LlmGenerate => actual == aos_effects::EffectKind::LLM_GENERATE,
-        AirEffectKind::SecretGet => actual == aos_effects::EffectKind::SECRET_GET,
-        AirEffectKind::VaultGet => actual == aos_effects::EffectKind::VAULT_GET,
         AirEffectKind::VaultPut => actual == aos_effects::EffectKind::VAULT_PUT,
         AirEffectKind::VaultRotate => actual == aos_effects::EffectKind::VAULT_ROTATE,
     }

@@ -218,8 +218,8 @@ fn sample_plan_json() -> serde_json::Value {
                 "kind": "http.request",
                 "params": {
                     "headers": {
-                        "content-type": {"text": "application/json"},
-                        "accept": {"text": "*/*"}
+                        "content-type": "application/json",
+                        "accept": "*/*"
                     },
                     "method": "POST",
                     "url": "https://example.com",

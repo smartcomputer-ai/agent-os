@@ -258,25 +258,5 @@
         "digest": { "hash": {} }
       }
     }
-  },
-  {
-    "$kind": "defcap",
-    "name": "sys/secret@1",
-    "cap_type": "secret",
-    "schema": {
-      "record": {
-        "aliases": { "set": { "text": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defcap",
-    "name": "sys/vault.admin@1",
-    "cap_type": "secret",
-    "schema": {
-      "record": {
-        "aliases": { "set": { "text": {} } }
-      }
-    }
   }
 ]

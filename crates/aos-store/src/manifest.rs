@@ -448,11 +448,11 @@ mod tests {
     use super::*;
     use crate::MemStore;
     use aos_air_types::{
-        AirNode, CapGrant, DefPlan, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode,
-        ExprRef, HashRef, Manifest, ManifestDefaults, NamedRef, PlanBind, PlanBindEffect, PlanEdge,
-        PlanStep, PlanStepAssign, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
-        PlanStepKind, Routing, RoutingEvent, SchemaRef, SecretDecl, SecretPolicy, SecretRef,
-        TypeExpr, TypePrimitive, TypePrimitiveText, ValueLiteral,
+        AirNode, CapGrant, CapType, DefCap, DefPlan, EffectKind, EmptyObject, Expr, ExprConst,
+        ExprOp, ExprOpCode, ExprRef, HashRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
+        PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitReceipt, PlanStepEmitEffect,
+        PlanStepEnd, PlanStepKind, Routing, RoutingEvent, SchemaRef, SecretDecl, SecretPolicy,
+        SecretRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRef, ValueLiteral,
     };
     use indexmap::IndexMap;
 
@@ -637,59 +637,57 @@ mod tests {
         ));
     }
 
-    fn secret_plan_with_secret_get() -> DefPlan {
-        let secret_literal = ValueLiteral::SecretRef(SecretRef {
-            alias: "payments/stripe".into(),
-            version: 1,
-        });
-        DefPlan {
-            name: "com.acme/secret-plan@1".into(),
-            input: SchemaRef::new("com.acme/Input@1").unwrap(),
-            output: None,
-            locals: IndexMap::new(),
-            steps: vec![PlanStep {
-                id: "secret".into(),
-                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::SecretGet,
-                    params: secret_literal.clone().into(),
-                    cap: "secret_cap".into(),
-                    bind: PlanBindEffect {
-                        effect_id_as: "s1".into(),
-                    },
-                }),
-            }],
-            edges: vec![],
-            required_caps: vec![],
-            allowed_effects: vec![],
-            invariants: vec![],
-        }
-    }
-
     #[test]
     fn rejects_unknown_secret_reference() {
         let store = MemStore::default();
-        let plan = secret_plan_with_secret_get();
-        let plan_hash = store
-            .put_node(&AirNode::Defplan(plan.clone()))
-            .expect("store plan");
+        let defcap = DefCap {
+            name: "com.acme/secret-cap@1".into(),
+            cap_type: CapType::Secret,
+            schema: TypeExpr::Ref(TypeRef {
+                reference: SchemaRef::new("sys/SecretRef@1").unwrap(),
+            }),
+        };
+        let defcap_hash = store
+            .put_node(&AirNode::Defcap(defcap.clone()))
+            .expect("store defcap");
+        let cap_grant = CapGrant {
+            name: "secret_cap".into(),
+            cap: defcap.name.clone(),
+            params: ValueLiteral::SecretRef(SecretRef {
+                alias: "payments/stripe".into(),
+                version: 1,
+            }),
+            expiry_ns: None,
+            budget: None,
+        };
+        let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
         let manifest = Manifest {
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![NamedRef {
-                name: plan.name.clone(),
-                hash: HashRef::new(plan_hash.to_hex()).unwrap(),
+            schemas: vec![NamedRef {
+                name: secret_schema.schema.name.clone(),
+                hash: secret_schema.hash_ref.clone(),
             }],
-            caps: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![NamedRef {
+                name: defcap.name.clone(),
+                hash: HashRef::new(defcap_hash.to_hex()).unwrap(),
+            }],
             policies: vec![],
             secrets: vec![],
-            defaults: None,
+            defaults: Some(ManifestDefaults {
+                policy: None,
+                cap_grants: vec![cap_grant],
+            }),
             module_bindings: IndexMap::new(),
             routing: None,
             triggers: vec![],
         };
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
-        assert!(matches!(err, StoreError::UnknownSecret { .. }));
+        assert!(
+            matches!(err, StoreError::UnknownSecret { .. }),
+            "expected UnknownSecret, got {err:?}"
+        );
     }
 
     #[test]
@@ -751,42 +749,6 @@ mod tests {
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::SecretMissingBinding { .. }));
-    }
-
-    #[test]
-    fn rejects_secret_policy_for_plan() {
-        let store = MemStore::default();
-        let plan = secret_plan_with_secret_get();
-        let plan_hash = store
-            .put_node(&AirNode::Defplan(plan.clone()))
-            .expect("store plan");
-        let manifest = Manifest {
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![NamedRef {
-                name: plan.name.clone(),
-                hash: HashRef::new(plan_hash.to_hex()).unwrap(),
-            }],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![SecretDecl {
-                alias: "payments/stripe".into(),
-                version: 1,
-                binding_id: "stripe:prod".into(),
-                expected_digest: None,
-                policy: Some(SecretPolicy {
-                    allowed_caps: vec![],
-                    allowed_plans: vec!["com.acme/other@1".into()],
-                }),
-            }],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
-        let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
-        assert!(matches!(err, StoreError::SecretPolicyViolation { .. }));
     }
 
     #[test]

@@ -12,8 +12,6 @@ impl EffectKind {
     pub const BLOB_GET: &'static str = "blob.get";
     pub const TIMER_SET: &'static str = "timer.set";
     pub const LLM_GENERATE: &'static str = "llm.generate";
-    pub const SECRET_GET: &'static str = "secret.get";
-    pub const VAULT_GET: &'static str = "vault.get";
     pub const VAULT_PUT: &'static str = "vault.put";
     pub const VAULT_ROTATE: &'static str = "vault.rotate";
 
@@ -60,8 +58,6 @@ impl EffectKind {
             aos_air_types::EffectKind::BlobGet => EffectKind::new(Self::BLOB_GET),
             aos_air_types::EffectKind::TimerSet => EffectKind::new(Self::TIMER_SET),
             aos_air_types::EffectKind::LlmGenerate => EffectKind::new(Self::LLM_GENERATE),
-            aos_air_types::EffectKind::SecretGet => EffectKind::new(Self::SECRET_GET),
-            aos_air_types::EffectKind::VaultGet => EffectKind::new(Self::VAULT_GET),
             aos_air_types::EffectKind::VaultPut => EffectKind::new(Self::VAULT_PUT),
             aos_air_types::EffectKind::VaultRotate => EffectKind::new(Self::VAULT_ROTATE),
         }

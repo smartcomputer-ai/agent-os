@@ -85,7 +85,7 @@ fn sugar_literal_plan_executes_http_flow() {
                 "params": {
                     "method": "POST",
                     "url": "https://example.com",
-                    "headers": { "content-type": {"text": "application/json"} },
+                    "headers": { "content-type": "application/json" },
                     "body_ref": null
                 },
                 "cap": "cap_http",

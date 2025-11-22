@@ -64,7 +64,7 @@ fn rejects_grant_with_wrong_shape() {
 
 #[test]
 fn supports_all_cap_types() {
-    for cap_type in ["http.out", "blob", "timer", "llm.basic", "secret", "vault"] {
+    for cap_type in ["http.out", "blob", "timer", "llm.basic", "secret"] {
         let cap_json = json!({
             "$kind": "defcap",
             "name": format!("com.acme/{cap_type}@1"),
