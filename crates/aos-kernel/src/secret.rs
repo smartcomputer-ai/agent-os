@@ -2,8 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{HashRef, SecretDecl};
 use aos_cbor::Hash;
-use thiserror::Error;
 use aos_effects::EffectSource;
+use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedSecret {
@@ -77,8 +77,7 @@ fn collect_secret_refs_value(value: &serde_cbor::Value, refs: &mut Vec<(String, 
         serde_cbor::Value::Map(map) => {
             // Look only for canonical variant {"$tag":"secret","$value": {...}}
             if map.len() == 2
-                && map
-                    .get(&serde_cbor::Value::Text("$tag".into()))
+                && map.get(&serde_cbor::Value::Text("$tag".into()))
                     == Some(&serde_cbor::Value::Text("secret".into()))
             {
                 if let Some(serde_cbor::Value::Map(inner)) =
@@ -134,8 +133,7 @@ fn inject_in_value(
         }
         serde_cbor::Value::Map(map) => {
             if map.len() == 2
-                && map
-                    .get(&serde_cbor::Value::Text("$tag".into()))
+                && map.get(&serde_cbor::Value::Text("$tag".into()))
                     == Some(&serde_cbor::Value::Text("secret".into()))
             {
                 if let Some(serde_cbor::Value::Map(inner)) =
@@ -150,9 +148,9 @@ fn inject_in_value(
                             (alias_val, version_val)
                         {
                             let version = *v as u64;
-                            let decl = catalog
-                                .lookup(alias, version)
-                                .ok_or_else(|| SecretResolverError::NotFound(format!("{alias}@{version}")))?;
+                            let decl = catalog.lookup(alias, version).ok_or_else(|| {
+                                SecretResolverError::NotFound(format!("{alias}@{version}"))
+                            })?;
                             let resolved = resolver
                                 .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
                             if let Ok(text) = std::str::from_utf8(&resolved.value) {
@@ -192,10 +190,8 @@ pub fn enforce_secret_policy(
     origin: &EffectSource,
     cap_name: &str,
 ) -> Result<(), crate::error::KernelError> {
-    let refs =
-        collect_secret_refs(params_cbor).map_err(|e| crate::error::KernelError::SecretResolution(
-            e.to_string(),
-        ))?;
+    let refs = collect_secret_refs(params_cbor)
+        .map_err(|e| crate::error::KernelError::SecretResolution(e.to_string()))?;
     for (alias, version) in refs {
         if let Some(decl) = catalog.lookup(&alias, version) {
             if let Some(policy) = &decl.policy {
@@ -419,8 +415,7 @@ mod tests {
             serde_cbor::Value::Text("headers".into()),
             serde_cbor::Value::Map(headers_map),
         );
-        let params = serde_cbor::to_vec(&serde_cbor::Value::Map(root_map))
-            .unwrap();
+        let params = serde_cbor::to_vec(&serde_cbor::Value::Map(root_map)).unwrap();
 
         let injected =
             inject_secrets_in_params(&params, &catalog, &resolver).expect("inject secrets");

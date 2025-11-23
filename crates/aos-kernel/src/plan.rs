@@ -225,10 +225,9 @@ impl PlanInstance {
                 {
                     let params_value =
                         eval_expr_or_value(&emit.params, &self.env, "plan effect eval error")?;
-                    let params_cbor = aos_cbor::to_canonical_cbor(&expr_value_to_cbor_value(
-                        &params_value,
-                    ))
-                    .map_err(|err| KernelError::Manifest(err.to_string()))?;
+                    let params_cbor =
+                        aos_cbor::to_canonical_cbor(&expr_value_to_cbor_value(&params_value))
+                            .map_err(|err| KernelError::Manifest(err.to_string()))?;
                     let intent = effects.enqueue_plan_effect(
                         &self.name,
                         &emit.kind,
@@ -1134,14 +1133,20 @@ mod tests {
     fn http_params_value_literal(tag: &str) -> ValueLiteral {
         ValueLiteral::Record(ValueRecord {
             record: IndexMap::from([
-                ("method".into(), ValueLiteral::Text(ValueText { text: "GET".into() })),
+                (
+                    "method".into(),
+                    ValueLiteral::Text(ValueText { text: "GET".into() }),
+                ),
                 (
                     "url".into(),
                     ValueLiteral::Text(ValueText {
                         text: format!("https://example.com/{tag}"),
                     }),
                 ),
-                ("headers".into(), ValueLiteral::Map(ValueMap { map: vec![] })),
+                (
+                    "headers".into(),
+                    ValueLiteral::Map(ValueMap { map: vec![] }),
+                ),
                 (
                     "body_ref".into(),
                     ValueLiteral::Null(ValueNull {
@@ -1251,21 +1256,28 @@ mod tests {
     #[test]
     fn emit_effect_accepts_literal_params() {
         let params_literal = ValueLiteral::Record(ValueRecord {
-            record: IndexMap::from([(
-                "url".into(),
-                ValueLiteral::Text(ValueText {
-                    text: "https://example.com/literal".into(),
-                }),
-            ),(
-                "method".into(),
-                ValueLiteral::Text(ValueText { text: "GET".into() }),
-            ),(
-                "headers".into(),
-                ValueLiteral::Map(ValueMap { map: vec![] }),
-            ),(
-                "body_ref".into(),
-                ValueLiteral::Null(ValueNull { null: EmptyObject::default() }),
-            )]),
+            record: IndexMap::from([
+                (
+                    "url".into(),
+                    ValueLiteral::Text(ValueText {
+                        text: "https://example.com/literal".into(),
+                    }),
+                ),
+                (
+                    "method".into(),
+                    ValueLiteral::Text(ValueText { text: "GET".into() }),
+                ),
+                (
+                    "headers".into(),
+                    ValueLiteral::Map(ValueMap { map: vec![] }),
+                ),
+                (
+                    "body_ref".into(),
+                    ValueLiteral::Null(ValueNull {
+                        null: EmptyObject::default(),
+                    }),
+                ),
+            ]),
         });
         let steps = vec![PlanStep {
             id: "emit".into(),

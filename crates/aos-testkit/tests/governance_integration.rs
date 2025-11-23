@@ -6,8 +6,9 @@ use aos_air_types::{
     ExprOrValue, ExprRecord, ExprRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
     PlanBindEffect, PlanEdge, PlanStep, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
     PlanStepKind, ReducerAbi, TypeExpr, TypeRecord, ValueLiteral, ValueMap, ValueNull, ValueRecord,
-    ValueText, builtins::builtin_schemas,
-    plan_literals::{normalize_plan_literals, SchemaIndex},
+    ValueText,
+    builtins::builtin_schemas,
+    plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
@@ -596,7 +597,10 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
 fn http_params_literal(tag: &str) -> ExprOrValue {
     ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
         record: IndexMap::from([
-            ("method".into(), ValueLiteral::Text(ValueText { text: "GET".into() })),
+            (
+                "method".into(),
+                ValueLiteral::Text(ValueText { text: "GET".into() }),
+            ),
             (
                 "url".into(),
                 ValueLiteral::Text(ValueText {
@@ -609,7 +613,12 @@ fn http_params_literal(tag: &str) -> ExprOrValue {
                     map: vec![], // empty header map is allowed
                 }),
             ),
-            ("body_ref".into(), ValueLiteral::Null(ValueNull { null: EmptyObject {} })),
+            (
+                "body_ref".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject {},
+                }),
+            ),
         ]),
     }))
 }

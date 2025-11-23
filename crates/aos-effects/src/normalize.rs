@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use aos_air_types::{
-    builtins::builtin_schemas, plan_literals::SchemaIndex, TypeExpr, TypeMapKey, TypePrimitive,
+    TypeExpr, TypeMapKey, TypePrimitive, builtins::builtin_schemas, plan_literals::SchemaIndex,
 };
 use aos_cbor::to_canonical_cbor;
 use once_cell::sync::Lazy;
@@ -36,9 +36,8 @@ pub fn normalize_effect_params(
     kind: &EffectKind,
     params_cbor: &[u8],
 ) -> Result<Vec<u8>, NormalizeError> {
-    let schema_name = params_schema_name(kind).ok_or_else(|| {
-        NormalizeError::UnknownEffect(kind.as_str().to_string())
-    })?;
+    let schema_name = params_schema_name(kind)
+        .ok_or_else(|| NormalizeError::UnknownEffect(kind.as_str().to_string()))?;
     let schema = SCHEMA_INDEX
         .get(schema_name)
         .ok_or_else(|| NormalizeError::SchemaNotFound(schema_name.to_string()))?;
@@ -73,7 +72,9 @@ fn resolve_schema<'a>(
         TypeExpr::Ref(reference) => schemas
             .get(reference.reference.as_str())
             .cloned()
-            .ok_or_else(|| NormalizeError::SchemaNotFound(reference.reference.as_str().to_string())),
+            .ok_or_else(|| {
+                NormalizeError::SchemaNotFound(reference.reference.as_str().to_string())
+            }),
         _ => Ok(schema.clone()),
     }
 }
@@ -92,11 +93,9 @@ fn canonicalize_value(
             };
             let mut canon_map: BTreeMap<CborValue, CborValue> = BTreeMap::new();
             for (field, ty) in record.record.iter() {
-                let raw = map
-                    .remove(&CborValue::Text(field.clone()))
-                    .ok_or_else(|| {
-                        NormalizeError::Invalid(format!("record missing field '{field}'"))
-                    })?;
+                let raw = map.remove(&CborValue::Text(field.clone())).ok_or_else(|| {
+                    NormalizeError::Invalid(format!("record missing field '{field}'"))
+                })?;
                 let field_schema = resolve_schema(ty, schemas)?;
                 let canon = canonicalize_value(raw, &field_schema, schemas)?;
                 canon_map.insert(CborValue::Text(field.clone()), canon);
@@ -112,12 +111,15 @@ fn canonicalize_value(
         }
         TypeExpr::Variant(variant) => {
             let (tag, inner) = decode_variant(value)?;
-            let inner_schema = variant.variant.get(&tag).ok_or_else(|| {
-                NormalizeError::Invalid(format!("unknown variant tag '{tag}'"))
-            })?;
+            let inner_schema = variant
+                .variant
+                .get(&tag)
+                .ok_or_else(|| NormalizeError::Invalid(format!("unknown variant tag '{tag}'")))?;
             let canonical_inner = if let Some(raw_inner) = inner {
                 let resolved = resolve_schema(inner_schema, schemas)?;
-                Some(Box::new(canonicalize_value(*raw_inner, &resolved, schemas)?))
+                Some(Box::new(canonicalize_value(
+                    *raw_inner, &resolved, schemas,
+                )?))
             } else {
                 None
             };
@@ -167,8 +169,7 @@ fn canonicalize_value(
                 TypeMapKey::Hash(inner) => TypePrimitive::Hash(inner.clone()),
             });
             let value_schema = resolve_schema(&map_type.map.value, schemas)?;
-            let mut canon_entries: Vec<(CborValue, CborValue)> =
-                Vec::with_capacity(entries.len());
+            let mut canon_entries: Vec<(CborValue, CborValue)> = Vec::with_capacity(entries.len());
             for (k, v) in entries {
                 let canon_key = canonicalize_value(k, &key_schema, schemas)?;
                 let canon_val = canonicalize_value(v, &value_schema, schemas)?;
@@ -349,21 +350,15 @@ mod tests {
 
     #[test]
     fn normalizes_header_map_order() {
-        let params_a = serde_cbor::to_vec(&header_params(vec![("a", "1"), ("b", "2")]))
-            .unwrap();
-        let params_b = serde_cbor::to_vec(&header_params(vec![("b", "2"), ("a", "1")]))
-            .unwrap();
+        let params_a = serde_cbor::to_vec(&header_params(vec![("a", "1"), ("b", "2")])).unwrap();
+        let params_b = serde_cbor::to_vec(&header_params(vec![("b", "2"), ("a", "1")])).unwrap();
 
-        let norm_a = normalize_effect_params(
-            &EffectKind::new(crate::EffectKind::HTTP_REQUEST),
-            &params_a,
-        )
-        .unwrap();
-        let norm_b = normalize_effect_params(
-            &EffectKind::new(crate::EffectKind::HTTP_REQUEST),
-            &params_b,
-        )
-        .unwrap();
+        let norm_a =
+            normalize_effect_params(&EffectKind::new(crate::EffectKind::HTTP_REQUEST), &params_a)
+                .unwrap();
+        let norm_b =
+            normalize_effect_params(&EffectKind::new(crate::EffectKind::HTTP_REQUEST), &params_b)
+                .unwrap();
 
         assert_eq!(norm_a, norm_b, "header ordering must canonicalize");
     }
@@ -377,12 +372,9 @@ mod tests {
         );
         let value = CborValue::Map(map);
         let bytes = serde_cbor::to_vec(&value).unwrap();
-        let err = normalize_effect_params(
-            &EffectKind::new(crate::EffectKind::HTTP_REQUEST),
-            &bytes,
-        )
-        .unwrap_err();
+        let err =
+            normalize_effect_params(&EffectKind::new(crate::EffectKind::HTTP_REQUEST), &bytes)
+                .unwrap_err();
         assert!(format!("{err}").contains("missing field"));
     }
-
 }

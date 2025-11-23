@@ -10,8 +10,8 @@ use crate::{
     error::KernelError,
     shadow::{PendingPlanReceipt, PlanResultPreview, PredictedEffect, ShadowConfig, ShadowSummary},
 };
-use serde_json::Value as JsonValue;
 use hex;
+use serde_json::Value as JsonValue;
 
 pub struct ShadowExecutor;
 

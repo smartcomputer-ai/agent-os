@@ -1,10 +1,10 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOrValue, ExprRecord, PlanBind,
-    PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt,
-    PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent, ReducerAbi, TypeExpr,
-    TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueMap, ValueNull, ValueRecord,
-    ValueText,
+    DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOrValue, ExprRecord,
+    PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
+    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+    ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueMap,
+    ValueNull, ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
@@ -51,14 +51,20 @@ fn builtin_schema_index_with_custom_types() -> SchemaIndex {
 fn http_params_literal(tag: &str) -> ExprOrValue {
     ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
         record: IndexMap::from([
-            ("method".into(), ValueLiteral::Text(ValueText { text: "GET".into() })),
+            (
+                "method".into(),
+                ValueLiteral::Text(ValueText { text: "GET".into() }),
+            ),
             (
                 "url".into(),
                 ValueLiteral::Text(ValueText {
                     text: format!("https://example.com/{tag}"),
                 }),
             ),
-            ("headers".into(), ValueLiteral::Map(ValueMap { map: vec![] })),
+            (
+                "headers".into(),
+                ValueLiteral::Map(ValueMap { map: vec![] }),
+            ),
             (
                 "body_ref".into(),
                 ValueLiteral::Null(ValueNull {

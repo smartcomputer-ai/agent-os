@@ -14,5 +14,5 @@ pub use capability::{
 };
 pub use intent::{EffectIntent, EffectSource, IdempotencyKey, IntentBuilder, IntentEncodeError};
 pub use kinds::EffectKind;
+pub use normalize::{NormalizeError, normalize_effect_params};
 pub use receipt::{EffectReceipt, ReceiptDecodeError, ReceiptStatus};
-pub use normalize::{normalize_effect_params, NormalizeError};

@@ -111,10 +111,7 @@ fn build_http_receipt_value(
 ) -> Result<ExprValue> {
     let mut record = indexmap::IndexMap::new();
     record.insert("status".into(), ExprValue::Int(status));
-    record.insert(
-        "headers".into(),
-        headers_to_value(&redact_headers(headers)),
-    );
+    record.insert("headers".into(), headers_to_value(&redact_headers(headers)));
     record.insert("body_preview".into(), ExprValue::Text(body.clone()));
     if let Some(store) = store {
         let hash = store

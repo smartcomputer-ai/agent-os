@@ -2,12 +2,12 @@ use aos_air_types::EffectKind;
 use aos_effects::CapabilityGrant;
 use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
+use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
+use aos_testkit::fixtures;
 use aos_wasm_abi::ReducerEffect;
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
-use aos_testkit::fixtures;
-use aos_kernel::journal::mem::MemJournal;
 
 /// Plan-origin effects with semantically identical params but different CBOR shapes
 /// must canonicalize to the same params bytes and intent hash.
@@ -17,10 +17,8 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let grant = CapabilityGrant::builder("cap_llm", "sys/llm.basic@1", &serde_json::json!({}))
         .build()
         .expect("grant");
-    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
-        grant,
-        aos_air_types::CapType::LlmBasic,
-    )]);
+    let cap_gate =
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::LlmBasic)]);
     let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
 
     // Params variant A: temperature as float
@@ -63,10 +61,8 @@ fn reducer_effect_params_canonicalize_noop() {
     let grant = CapabilityGrant::builder("cap_timer", "sys/timer@1", &serde_json::json!({}))
         .build()
         .expect("grant");
-    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
-        grant,
-        aos_air_types::CapType::Timer,
-    )]);
+    let cap_gate =
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::Timer)]);
     let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
 
     // Params with out-of-order fields (key optional) to ensure canonicalization sorts.
@@ -117,7 +113,10 @@ fn reducer_effect_params_canonicalize_noop() {
         intent.idempotency_key,
     )
     .expect("rehash");
-    assert_eq!(intent.intent_hash, rehashed.intent_hash, "hash must be stable");
+    assert_eq!(
+        intent.intent_hash, rehashed.intent_hash,
+        "hash must be stable"
+    );
 }
 
 /// Different authoring sugars for the same HTTP params must normalize to identical params bytes,
@@ -127,10 +126,8 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
         .build()
         .expect("grant");
-    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
-        grant,
-        aos_air_types::CapType::HttpOut,
-    )]);
+    let cap_gate =
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::HttpOut)]);
     let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
 
     // Sugar A: body_ref null, headers absent
@@ -248,8 +245,14 @@ fn reducer_params_round_trip_journal_replay() {
         .next()
         .expect("effect in replay");
 
-    assert_eq!(intent.params_cbor, replay_intent.params_cbor, "params bytes stable across journal/replay");
-    assert_eq!(intent.intent_hash, replay_intent.intent_hash, "intent hash stable across journal/replay");
+    assert_eq!(
+        intent.params_cbor, replay_intent.params_cbor,
+        "params bytes stable across journal/replay"
+    );
+    assert_eq!(
+        intent.intent_hash, replay_intent.intent_hash,
+        "intent hash stable across journal/replay"
+    );
 }
 
 fn timer_params_cbor(deliver_at: u64, key: Option<String>) -> Vec<u8> {

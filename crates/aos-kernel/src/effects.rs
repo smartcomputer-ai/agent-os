@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use aos_air_types::EffectKind;
-use aos_effects::{normalize_effect_params, EffectIntent, EffectKind as RuntimeEffectKind, EffectSource};
+use aos_effects::{
+    EffectIntent, EffectKind as RuntimeEffectKind, EffectSource, normalize_effect_params,
+};
 use aos_wasm_abi::ReducerEffect;
 
 use crate::capability::CapabilityResolver;
@@ -103,12 +105,7 @@ impl EffectManager {
             .capability_gate
             .resolve(cap_name, runtime_kind.as_str())?;
         if let Some(catalog) = &self.secret_catalog {
-            crate::secret::enforce_secret_policy(
-                &original_params,
-                catalog,
-                &source,
-                cap_name,
-            )?;
+            crate::secret::enforce_secret_policy(&original_params, catalog, &source, cap_name)?;
         }
         let params_cbor = if let (Some(catalog), Some(resolver)) =
             (self.secret_catalog.as_ref(), self.secret_resolver.as_ref())

@@ -450,9 +450,10 @@ mod tests {
     use aos_air_types::{
         AirNode, CapGrant, CapType, DefCap, DefPlan, EffectKind, EmptyObject, Expr, ExprConst,
         ExprOp, ExprOpCode, ExprRef, HashRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
-        PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitReceipt, PlanStepEmitEffect,
-        PlanStepEnd, PlanStepKind, Routing, RoutingEvent, SchemaRef, SecretDecl, SecretPolicy,
-        SecretRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRef, ValueLiteral,
+        PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitReceipt,
+        PlanStepEmitEffect, PlanStepEnd, PlanStepKind, Routing, RoutingEvent, SchemaRef,
+        SecretDecl, SecretPolicy, SecretRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRef,
+        ValueLiteral,
     };
     use indexmap::IndexMap;
 

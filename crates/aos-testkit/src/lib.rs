@@ -417,9 +417,10 @@ pub struct TestWorld {
 /// text literal. Helpful for keeping test assertions concise.
 pub fn effect_params_text(intent: &EffectIntent) -> String {
     // Prefer url field from canonical http params if present.
-    if let Ok(serde_cbor::Value::Map(map)) = serde_cbor::from_slice::<serde_cbor::Value>(&intent.params_cbor) {
-        if let Some(serde_cbor::Value::Text(url)) =
-            map.get(&serde_cbor::Value::Text("url".into()))
+    if let Ok(serde_cbor::Value::Map(map)) =
+        serde_cbor::from_slice::<serde_cbor::Value>(&intent.params_cbor)
+    {
+        if let Some(serde_cbor::Value::Text(url)) = map.get(&serde_cbor::Value::Text("url".into()))
         {
             return url.clone();
         }

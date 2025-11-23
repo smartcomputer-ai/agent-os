@@ -8,8 +8,8 @@ use aos_effects::builtins::LlmGenerateParams;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::Store;
-use sha2::{Digest, Sha256};
 use log::debug;
+use sha2::{Digest, Sha256};
 
 const MOCK_ADAPTER_ID: &str = "llm.mock";
 
@@ -47,8 +47,9 @@ impl<S: Store + 'static> MockLlmHarness<S> {
             for intent in intents {
                 match intent.kind.as_str() {
                     EffectKind::LLM_GENERATE => {
-                        let params_value: ExprValue = serde_cbor::from_slice(&intent.params_cbor)
-                            .context("decode llm.generate params value")?;
+                        let params_value: ExprValue =
+                            serde_cbor::from_slice(&intent.params_cbor)
+                                .context("decode llm.generate params value")?;
                         let params = llm_params_from_value(params_value)?;
                         out.push(LlmRequestContext { intent, params });
                     }
@@ -117,7 +118,12 @@ impl<S: Store + 'static> MockLlmHarness<S> {
 fn llm_params_from_value(value: ExprValue) -> Result<LlmGenerateParams> {
     let record = match value {
         ExprValue::Record(map) => map,
-        other => return Err(anyhow!("llm.generate params must be a record, got {:?}", other)),
+        other => {
+            return Err(anyhow!(
+                "llm.generate params must be a record, got {:?}",
+                other
+            ));
+        }
     };
     let api_key = record_optional_text(&record, "api_key")?;
     Ok(LlmGenerateParams {
@@ -145,14 +151,19 @@ fn record_optional_text(
 ) -> Result<Option<String>> {
     match record.get(field) {
         Some(ExprValue::Text(text)) => Ok(Some(text.clone())),
-        Some(ExprValue::Record(rec)) if rec.get("$tag") == Some(&ExprValue::Text("secret".into())) => {
+        Some(ExprValue::Record(rec))
+            if rec.get("$tag") == Some(&ExprValue::Text("secret".into())) =>
+        {
             // As a last resort for the demo, accept a SecretRef by substituting the demo key.
             const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
             Ok(Some(DEMO_LLM_API_KEY.to_string()))
         }
         Some(ExprValue::Null) | Some(ExprValue::Unit) => Ok(None),
         None => Ok(None),
-        Some(other) => Err(anyhow!("field '{field}' must be text or null, got {:?}", other)),
+        Some(other) => Err(anyhow!(
+            "field '{field}' must be text or null, got {:?}",
+            other
+        )),
     }
 }
 
@@ -167,12 +178,18 @@ fn record_nat(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> Re
 fn record_hash_ref(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> Result<HashRef> {
     match record.get(field) {
         Some(ExprValue::Text(text)) => HashRef::new(text.clone()).context("parse hash ref"),
-        Some(other) => Err(anyhow!("field '{field}' must be text hash ref, got {:?}", other)),
+        Some(other) => Err(anyhow!(
+            "field '{field}' must be text hash ref, got {:?}",
+            other
+        )),
         None => Err(anyhow!("field '{field}' missing from llm.generate params")),
     }
 }
 
-fn record_list_text(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> Result<Vec<String>> {
+fn record_list_text(
+    record: &indexmap::IndexMap<String, ExprValue>,
+    field: &str,
+) -> Result<Vec<String>> {
     match record.get(field) {
         Some(ExprValue::List(values)) => values
             .iter()

@@ -127,9 +127,18 @@ fn plan_effect_allowed_by_policy() {
 fn http_params_literal(url: &str) -> ExprOrValue {
     ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
         record: indexmap::IndexMap::from([
-            ("method".into(), ValueLiteral::Text(ValueText { text: "GET".into() })),
-            ("url".into(), ValueLiteral::Text(ValueText { text: url.into() })),
-            ("headers".into(), ValueLiteral::Map(ValueMap { map: vec![] })),
+            (
+                "method".into(),
+                ValueLiteral::Text(ValueText { text: "GET".into() }),
+            ),
+            (
+                "url".into(),
+                ValueLiteral::Text(ValueText { text: url.into() }),
+            ),
+            (
+                "headers".into(),
+                ValueLiteral::Map(ValueMap { map: vec![] }),
+            ),
             (
                 "body_ref".into(),
                 ValueLiteral::Null(ValueNull {
