@@ -2,17 +2,17 @@ use std::collections::HashMap;
 
 use aos_cbor::to_canonical_cbor;
 use indexmap::IndexMap;
-use serde_json::Value as JsonValue;
+use serde_json::{Map, Value as JsonValue};
 use thiserror::Error;
 
-use crate::typecheck::validate_value_literal;
 use crate::{
     DefModule, DefPlan, EffectKind, ExprOrValue, HashRef, TypeExpr, TypeList, TypeMap,
     TypeMapEntry, TypeMapKey, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant,
-    ValueBytes, ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList, ValueLiteral,
-    ValueMap, ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText, ValueTimeNs,
-    ValueUuid, ValueVariant,
+    ValueBool, ValueBytes, ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList,
+    ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText,
+    ValueTimeNs, ValueUuid, ValueVariant,
 };
+use crate::{Expr, ExprConst, typecheck::validate_value_literal};
 
 #[derive(Debug, Default, Clone)]
 pub struct SchemaIndex {
@@ -136,12 +136,26 @@ fn normalize_expr_or_value(
     context: &'static str,
 ) -> Result<(), PlanLiteralError> {
     match value {
-        ExprOrValue::Expr(_) => Ok(()),
+        ExprOrValue::Expr(expr) => {
+            normalize_parsed_expr(expr.clone(), value, schema, schema_name, schemas)
+        }
         ExprOrValue::Literal(literal) => {
             canonicalize_literal(literal, schema, schemas)?;
             validate_literal(literal, schema, schema_name, schemas)
         }
         ExprOrValue::Json(json) => {
+            // First, attempt to interpret the JSON as an expression. If it matches the Expr
+            // shape, keep it as an Expr so dynamic params/values are allowed.
+            if let Ok(expr) = serde_json::from_value::<Expr>(json.clone()) {
+                return normalize_parsed_expr(expr, value, schema, schema_name, schemas);
+            }
+            let desugared = desugar_const_wrappers(json);
+            if desugared != *json {
+                if let Ok(expr) = serde_json::from_value::<Expr>(desugared) {
+                    return normalize_parsed_expr(expr, value, schema, schema_name, schemas);
+                }
+            }
+
             let mut literal = parse_json_literal(json, schema, schemas)?;
             canonicalize_literal(&mut literal, schema, schemas)?;
             validate_literal(&literal, schema, schema_name, schemas)?;
@@ -155,6 +169,113 @@ fn normalize_expr_or_value(
         }
         other => other,
     })
+}
+
+fn normalize_parsed_expr(
+    expr: Expr,
+    slot: &mut ExprOrValue,
+    schema: &TypeExpr,
+    schema_name: &str,
+    schemas: &SchemaIndex,
+) -> Result<(), PlanLiteralError> {
+    if let Some(mut literal) = const_expr_to_literal(&expr) {
+        canonicalize_literal(&mut literal, schema, schemas)?;
+        validate_literal(&literal, schema, schema_name, schemas)?;
+        *slot = ExprOrValue::Literal(literal);
+    } else {
+        *slot = ExprOrValue::Expr(expr);
+    }
+    Ok(())
+}
+
+fn const_expr_to_literal(expr: &Expr) -> Option<ValueLiteral> {
+    match expr {
+        Expr::Const(c) => Some(expr_const_to_literal(c)),
+        Expr::Record(record) => {
+            let mut out = IndexMap::with_capacity(record.record.len());
+            for (key, value) in &record.record {
+                out.insert(key.clone(), const_expr_to_literal(value)?);
+            }
+            Some(ValueLiteral::Record(ValueRecord { record: out }))
+        }
+        Expr::List(list) => {
+            let mut out = Vec::with_capacity(list.list.len());
+            for item in &list.list {
+                out.push(const_expr_to_literal(item)?);
+            }
+            Some(ValueLiteral::List(ValueList { list: out }))
+        }
+        Expr::Set(set) => {
+            let mut out = Vec::with_capacity(set.set.len());
+            for item in &set.set {
+                out.push(const_expr_to_literal(item)?);
+            }
+            Some(ValueLiteral::Set(ValueSet { set: out }))
+        }
+        Expr::Map(map) => {
+            let mut out = Vec::with_capacity(map.map.len());
+            for entry in &map.map {
+                let key = const_expr_to_literal(&entry.key)?;
+                let value = const_expr_to_literal(&entry.value)?;
+                out.push(ValueMapEntry { key, value });
+            }
+            Some(ValueLiteral::Map(ValueMap { map: out }))
+        }
+        Expr::Variant(variant) => {
+            let value = match &variant.variant.value {
+                Some(inner) => Some(Box::new(const_expr_to_literal(inner)?)),
+                None => None,
+            };
+            Some(ValueLiteral::Variant(ValueVariant {
+                tag: variant.variant.tag.clone(),
+                value,
+            }))
+        }
+        Expr::Ref(_) | Expr::Op(_) => None,
+    }
+}
+
+fn expr_const_to_literal(constant: &ExprConst) -> ValueLiteral {
+    match constant {
+        ExprConst::Null { .. } => ValueLiteral::Null(ValueNull {
+            null: crate::EmptyObject::default(),
+        }),
+        ExprConst::Bool { bool } => ValueLiteral::Bool(ValueBool { bool: *bool }),
+        ExprConst::Int { int } => ValueLiteral::Int(ValueInt { int: *int }),
+        ExprConst::Nat { nat } => ValueLiteral::Nat(ValueNat { nat: *nat }),
+        ExprConst::Dec128 { dec128 } => ValueLiteral::Dec128(ValueDec128 {
+            dec128: dec128.clone(),
+        }),
+        ExprConst::Text { text } => ValueLiteral::Text(ValueText { text: text.clone() }),
+        ExprConst::Bytes { bytes_b64 } => ValueLiteral::Bytes(ValueBytes {
+            bytes_b64: bytes_b64.clone(),
+        }),
+        ExprConst::Time { time_ns } => ValueLiteral::TimeNs(ValueTimeNs { time_ns: *time_ns }),
+        ExprConst::Duration { duration_ns } => ValueLiteral::DurationNs(ValueDurationNs {
+            duration_ns: *duration_ns,
+        }),
+        ExprConst::Hash { hash } => ValueLiteral::Hash(ValueHash { hash: hash.clone() }),
+        ExprConst::Uuid { uuid } => ValueLiteral::Uuid(ValueUuid { uuid: uuid.clone() }),
+    }
+}
+
+fn desugar_const_wrappers(json: &JsonValue) -> JsonValue {
+    match json {
+        JsonValue::Object(obj) if obj.len() == 1 && obj.contains_key("const") => {
+            desugar_const_wrappers(&obj["const"])
+        }
+        JsonValue::Object(obj) => {
+            let mut out = Map::with_capacity(obj.len());
+            for (k, v) in obj {
+                out.insert(k.clone(), desugar_const_wrappers(v));
+            }
+            JsonValue::Object(out)
+        }
+        JsonValue::Array(items) => {
+            JsonValue::Array(items.iter().map(desugar_const_wrappers).collect())
+        }
+        other => other.clone(),
+    }
 }
 
 pub fn validate_literal(
@@ -857,6 +978,103 @@ mod tests {
 
         let err = normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).unwrap_err();
         assert!(matches!(err, PlanLiteralError::ReducerNotFound { .. }));
+    }
+
+    #[test]
+    fn emit_effect_params_json_expr_is_kept_as_expr() {
+        let mut plan = DefPlan {
+            name: "com.acme/Plan@1".into(),
+            input: crate::SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![crate::PlanStep {
+                id: "emit".into(),
+                kind: crate::PlanStepKind::EmitEffect(crate::PlanStepEmitEffect {
+                    kind: EffectKind::HttpRequest,
+                    params: ExprOrValue::Json(json!({
+                        "record": {
+                            "method": { "const": { "text": "GET" } },
+                            "url": { "op": "get", "args": [ { "ref": "@plan.input" }, { "text": "url" } ] },
+                            "headers": { "map": [] },
+                            "body_ref": { "const": { "null": {} } }
+                        }
+                    })),
+                    cap: "cap".into(),
+                    bind: crate::PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec!["cap".into()],
+            allowed_effects: vec![EffectKind::HttpRequest],
+            invariants: vec![],
+        };
+
+        let mut schemas = schema_index();
+        schemas.insert(
+            "com.acme/Input@1".into(),
+            TypeExpr::Record(TypeRecord {
+                record: IndexMap::from([(
+                    "url".into(),
+                    TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                        text: crate::EmptyObject::default(),
+                    })),
+                )]),
+            }),
+        );
+
+        normalize_plan_literals(&mut plan, &schemas, &HashMap::new()).expect("normalize");
+        if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
+            assert!(
+                matches!(step.params, ExprOrValue::Expr(_)),
+                "params should remain expression"
+            );
+        } else {
+            panic!("expected emit_effect step");
+        }
+    }
+
+    #[test]
+    fn constant_expr_is_folded_to_literal() {
+        let mut plan = DefPlan {
+            name: "com.acme/Plan@1".into(),
+            input: crate::SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![crate::PlanStep {
+                id: "emit".into(),
+                kind: crate::PlanStepKind::EmitEffect(crate::PlanStepEmitEffect {
+                    kind: EffectKind::HttpRequest,
+                    params: ExprOrValue::Json(json!({
+                        "record": {
+                            "method": { "const": { "text": "POST" } },
+                            "url": { "const": { "text": "https://example.com" } },
+                            "headers": { "const": { "map": [] } },
+                            "body_ref": { "const": { "null": {} } }
+                        }
+                    })),
+                    cap: "cap".into(),
+                    bind: crate::PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec!["cap".into()],
+            allowed_effects: vec![EffectKind::HttpRequest],
+            invariants: vec![],
+        };
+
+        normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).expect("normalize");
+        if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
+            assert!(
+                matches!(step.params, ExprOrValue::Literal(_)),
+                "constant expression should be folded into literal for load-time validation"
+            );
+        } else {
+            panic!("expected emit_effect step");
+        }
     }
 
     fn assert_sugar_and_tagged_equal(schema: TypeExpr, sugar: Value, tagged: Value) {

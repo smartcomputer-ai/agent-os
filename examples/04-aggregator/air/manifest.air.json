@@ -29,7 +29,7 @@
         "params": {
           "record": {
             "hosts": { "set": [ { "text": "example.com" } ] },
-            "methods": { "set": [ { "text": "GET" } ] }
+            "verbs": { "set": [ { "text": "GET" } ] }
           }
         }
       }

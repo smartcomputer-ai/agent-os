@@ -102,6 +102,7 @@ pub fn eval_expr(expr: &Expr, env: &Env) -> EvalResult {
 
 fn eval_const(constant: &ExprConst) -> EvalResult {
     Ok(match constant {
+        ExprConst::Null { .. } => Value::Null,
         ExprConst::Bool { bool } => Value::Bool(*bool),
         ExprConst::Int { int } => Value::Int(*int),
         ExprConst::Nat { nat } => Value::Nat(*nat),
