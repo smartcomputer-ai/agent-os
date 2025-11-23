@@ -15,7 +15,7 @@
             "url": { "text": "https://example.com/data.json" },
             "idempotency_key": { "text": "safe-upgrade-v1-primary" },
             "headers": { "map": [] },
-            "body_ref": { "variant": { "tag": "None" } }
+            "body_ref": { "const": { "null": {} } }
           }
         },
         "cap": "cap_http_fetch",

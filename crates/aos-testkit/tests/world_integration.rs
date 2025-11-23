@@ -149,12 +149,7 @@ fn sugar_literal_plan_executes_http_flow() {
     if let Some(step) = plan.steps.iter_mut().find(|step| step.id == "raise") {
         if let PlanStepKind::RaiseEvent(raise) = &mut step.kind {
             raise.event = Expr::Record(ExprRecord {
-                record: IndexMap::from([(
-                    "value".into(),
-                    Expr::Record(ExprRecord {
-                        record: IndexMap::from([("message".into(), fixtures::text_expr("done"))]),
-                    }),
-                )]),
+                record: IndexMap::from([("message".into(), fixtures::text_expr("done"))]),
             })
             .into();
         }
@@ -184,17 +179,7 @@ fn sugar_literal_plan_executes_http_flow() {
             def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
             def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
             def_text_record_schema("com.acme/Result@1", vec![("message", text_type())]),
-            DefSchema {
-                name: "com.acme/ResultEvent@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([(
-                        "value".into(),
-                        TypeExpr::Record(TypeRecord {
-                            record: IndexMap::from([("message".into(), text_type())]),
-                        }),
-                    )]),
-                }),
-            },
+            def_text_record_schema("com.acme/ResultEvent@1", vec![("message", text_type())]),
         ],
     );
 
