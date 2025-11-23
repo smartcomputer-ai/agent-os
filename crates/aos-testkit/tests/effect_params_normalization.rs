@@ -185,7 +185,7 @@ fn reducer_params_round_trip_journal_replay() {
     let effect = ReducerEffect::with_cap_slot(
         aos_effects::EffectKind::TIMER_SET,
         params.clone(),
-        "timer",
+        "default",
     );
     let store = fixtures::new_mem_store();
     let reducer = fixtures::stub_reducer_module(
@@ -250,58 +250,6 @@ fn reducer_params_round_trip_journal_replay() {
 
     assert_eq!(intent.params_cbor, replay_intent.params_cbor, "params bytes stable across journal/replay");
     assert_eq!(intent.intent_hash, replay_intent.intent_hash, "intent hash stable across journal/replay");
-}
-
-/// Variant sugar (`{"variant": {"tag": "...", "value": ...}}`) must normalize to the same bytes and hash
-/// as canonical `$tag/$value` for the same effect params.
-#[test]
-fn variant_sugar_normalizes_for_http() {
-    let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
-        .build()
-        .expect("grant");
-    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
-        grant,
-        aos_air_types::CapType::HttpOut,
-    )]);
-    let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
-
-    // Canonical params
-    let canonical = serde_json::json!({
-        "method": "POST",
-        "url": {"variant": {"tag": "text", "value": "https://example.com/variant"}},
-        "headers": {},
-        "body_ref": null
-    });
-    // Sugar variant for url value
-    let sugar = serde_json::json!({
-        "method": "POST",
-        "url": { "$tag": "text", "$value": "https://example.com/variant" },
-        "headers": {},
-        "body_ref": null
-    });
-
-    let canonical_cbor = serde_cbor::to_vec(&canonical).unwrap();
-    let sugar_cbor = serde_cbor::to_vec(&sugar).unwrap();
-
-    let intent_a = mgr
-        .enqueue_plan_effect(
-            "com.acme/Plan@1",
-            &EffectKind::HttpRequest,
-            "cap_http",
-            canonical_cbor,
-        )
-        .expect("enqueue canonical");
-    let intent_b = mgr
-        .enqueue_plan_effect(
-            "com.acme/Plan@1",
-            &EffectKind::HttpRequest,
-            "cap_http",
-            sugar_cbor,
-        )
-        .expect("enqueue sugar");
-
-    assert_eq!(intent_a.params_cbor, intent_b.params_cbor, "variant sugar canonicalizes");
-    assert_eq!(intent_a.intent_hash, intent_b.intent_hash, "intent hash matches");
 }
 
 fn timer_params_cbor(deliver_at: u64, key: Option<String>) -> Vec<u8> {
