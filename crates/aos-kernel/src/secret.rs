@@ -268,6 +268,54 @@ pub fn enforce_secret_policy(
     Ok(())
 }
 
+/// Normalizes secret variant sugar to the canonical `$tag/$value` form so hashing/policy see one shape.
+pub fn normalize_secret_variants(params_cbor: &[u8]) -> Result<Vec<u8>, SecretResolverError> {
+    let mut value: serde_cbor::Value =
+        serde_cbor::from_slice(params_cbor).map_err(|err| SecretResolverError::InvalidParams {
+            reason: err.to_string(),
+        })?;
+    normalize_secret_variants_in_value(&mut value);
+    aos_cbor::to_canonical_cbor(&value).map_err(|err| SecretResolverError::InvalidParams {
+        reason: err.to_string(),
+    })
+}
+
+fn normalize_secret_variants_in_value(value: &mut serde_cbor::Value) {
+    match value {
+        serde_cbor::Value::Array(items) => {
+            for item in items {
+                normalize_secret_variants_in_value(item);
+            }
+        }
+        serde_cbor::Value::Map(map) => {
+            // Normalize single-entry sugar {"secret": {alias,version}} to canonical variant
+            if map.len() == 1 {
+                if let Some((serde_cbor::Value::Text(tag), inner_val)) = map.iter().next() {
+                    if tag == "secret" {
+                        if let serde_cbor::Value::Map(inner) = inner_val {
+                            let mut variant = std::collections::BTreeMap::new();
+                            variant.insert(
+                                serde_cbor::Value::Text("$tag".into()),
+                                serde_cbor::Value::Text("secret".into()),
+                            );
+                            variant.insert(
+                                serde_cbor::Value::Text("$value".into()),
+                                serde_cbor::Value::Map(inner.clone()),
+                            );
+                            *value = serde_cbor::Value::Map(variant);
+                            return;
+                        }
+                    }
+                }
+            }
+            for (_k, v) in map.iter_mut() {
+                normalize_secret_variants_in_value(v);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SecretResolverError {
     #[error("secret binding '{0}' not found")]
@@ -490,6 +538,68 @@ mod tests {
             }
         } else {
             panic!("root not a map");
+        }
+    }
+
+    #[test]
+    fn normalize_and_inject_split() {
+        use serde_cbor::Value;
+        // Sugar form {"api_key": {"secret": {alias, version}}}
+        let mut inner = std::collections::BTreeMap::new();
+        inner.insert(Value::Text("alias".into()), Value::Text("auth/api".into()));
+        inner.insert(Value::Text("version".into()), Value::Integer(1));
+        let mut sugar = std::collections::BTreeMap::new();
+        sugar.insert(Value::Text("secret".into()), Value::Map(inner));
+        let mut root = std::collections::BTreeMap::new();
+        root.insert(Value::Text("api_key".into()), Value::Map(sugar));
+        let sugar_cbor = serde_cbor::to_vec(&Value::Map(root)).unwrap();
+
+        let normalized = normalize_secret_variants(&sugar_cbor).expect("normalize");
+        let val: Value = serde_cbor::from_slice(&normalized).unwrap();
+        assert!(
+            contains_secret(&val),
+            "normalized params should retain SecretRef variant"
+        );
+
+        let catalog = SecretCatalog::new(&[SecretDecl {
+            alias: "auth/api".into(),
+            version: 1,
+            binding_id: "binding".into(),
+            expected_digest: None,
+            policy: None,
+        }]);
+        let resolver =
+            MapSecretResolver::new(HashMap::from([("binding".into(), b"token123".to_vec())]));
+        let injected =
+            inject_secrets_in_params(&normalized, &catalog, &resolver).expect("inject secrets");
+        let injected_val: Value = serde_cbor::from_slice(&injected).unwrap();
+        assert!(
+            !contains_secret(&injected_val),
+            "injected params should be literal"
+        );
+        if let Value::Map(map) = injected_val {
+            assert_eq!(
+                map.get(&Value::Text("api_key".into())),
+                Some(&Value::Text("token123".into()))
+            );
+        } else {
+            panic!("expected map root after injection");
+        }
+    }
+
+    fn contains_secret(value: &serde_cbor::Value) -> bool {
+        match value {
+            serde_cbor::Value::Array(items) => items.iter().any(contains_secret),
+            serde_cbor::Value::Map(map) => {
+                if map.len() == 2
+                    && map.get(&serde_cbor::Value::Text("$tag".into()))
+                        == Some(&serde_cbor::Value::Text("secret".into()))
+                {
+                    return true;
+                }
+                map.values().any(contains_secret)
+            }
+            _ => false,
         }
     }
 }
