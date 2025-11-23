@@ -9,12 +9,10 @@
         "op": "emit_effect",
         "kind": "http.request",
         "params": {
-          "record": {
-            "method": { "text": "GET" },
-            "url": { "text": "https://example.com/data.json" },
-            "headers": { "map": [] },
-            "body_ref": { "variant": { "tag": "None" } }
-          }
+          "method": "GET",
+          "url": "https://example.com/data.json",
+          "headers": {},
+          "body_ref": null
         },
         "cap": "cap_http_fetch",
         "bind": { "effect_id_as": "http_req" }

@@ -58,10 +58,8 @@ impl HttpHarness {
             for intent in intents {
                 match intent.kind.as_str() {
                     EffectKind::HTTP_REQUEST => {
-                        let params_value: ExprValue =
-                            serde_cbor::from_slice(&intent.params_cbor)
-                                .context("decode http request params value")?;
-                        let params = http_params_from_value(params_value)?;
+                        let params: HttpRequestParams = serde_cbor::from_slice(&intent.params_cbor)
+                            .context("decode http request params")?;
                         out.push(HttpRequestContext { intent, params });
                     }
                     other => {
@@ -105,55 +103,6 @@ impl HttpHarness {
     }
 }
 
-fn http_params_from_value(value: ExprValue) -> Result<HttpRequestParams> {
-    let record = match value {
-        ExprValue::Record(map) => map,
-        other => return Err(anyhow!("http params must be a record, got {:?}", other)),
-    };
-    let method = record_text(&record, "method")?;
-    let url = record_text(&record, "url")?;
-    let headers = match record.get("headers") {
-        Some(value) => value_to_headers(value)?,
-        None => HeaderMap::new(),
-    };
-    Ok(HttpRequestParams {
-        method,
-        url,
-        headers,
-        body_ref: None,
-    })
-}
-
-fn record_text(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> Result<String> {
-    match record.get(field) {
-        Some(ExprValue::Text(text)) => Ok(text.clone()),
-        Some(other) => Err(anyhow!("field '{field}' must be text, got {:?}", other)),
-        None => Err(anyhow!("field '{field}' missing from http params")),
-    }
-}
-
-fn value_to_headers(value: &ExprValue) -> Result<HeaderMap> {
-    match value {
-        ExprValue::Map(map) => {
-            let mut headers = HeaderMap::new();
-            for (key, entry) in map {
-                let name = match key {
-                    ValueKey::Text(text) => text.clone(),
-                    other => return Err(anyhow!("header key must be text, got {:?}", other)),
-                };
-                let val = match entry {
-                    ExprValue::Text(text) => text.clone(),
-                    other => return Err(anyhow!("header value must be text, got {:?}", other)),
-                };
-                headers.insert(name, val);
-            }
-            Ok(headers)
-        }
-        ExprValue::Null | ExprValue::Unit => Ok(HeaderMap::new()),
-        other => Err(anyhow!("headers must be a map, got {:?}", other)),
-    }
-}
-
 fn build_http_receipt_value(
     status: i64,
     headers: &HeaderMap,
@@ -162,10 +111,7 @@ fn build_http_receipt_value(
 ) -> Result<ExprValue> {
     let mut record = indexmap::IndexMap::new();
     record.insert("status".into(), ExprValue::Int(status));
-    record.insert(
-        "headers".into(),
-        headers_to_value(&redact_headers(headers)),
-    );
+    record.insert("headers".into(), headers_to_value(&redact_headers(headers)));
     record.insert("body_preview".into(), ExprValue::Text(body.clone()));
     if let Some(store) = store {
         let hash = store

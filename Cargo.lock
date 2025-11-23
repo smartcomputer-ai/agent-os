@@ -151,6 +151,7 @@ dependencies = [
  "aos-cbor",
  "hex",
  "indexmap",
+ "once_cell",
  "serde",
  "serde_bytes",
  "serde_cbor",

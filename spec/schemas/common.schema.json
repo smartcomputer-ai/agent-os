@@ -192,6 +192,7 @@
     "ExprConst": {
       "type": "object",
       "oneOf": [
+        { "properties": { "null": { "type": "object", "additionalProperties": false } }, "required": ["null"], "additionalProperties": false },
         { "properties": { "bool": { "type": "boolean" } }, "required": ["bool"], "additionalProperties": false },
         { "properties": { "int": { "type": "integer" } }, "required": ["int"], "additionalProperties": false },
         { "properties": { "nat": { "type": "integer", "minimum": 0 } }, "required": ["nat"], "additionalProperties": false },

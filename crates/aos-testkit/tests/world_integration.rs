@@ -1,9 +1,10 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprRecord, PlanBind,
-    PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt,
-    PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent, ReducerAbi, TypeExpr,
-    TypePrimitive, TypePrimitiveText, TypeRecord,
+    DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOrValue, ExprRecord,
+    PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
+    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+    ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueMap,
+    ValueNull, ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
@@ -45,6 +46,33 @@ fn builtin_schema_index_with_custom_types() -> SchemaIndex {
         }),
     );
     SchemaIndex::new(map)
+}
+
+fn http_params_literal(tag: &str) -> ExprOrValue {
+    ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+        record: IndexMap::from([
+            (
+                "method".into(),
+                ValueLiteral::Text(ValueText { text: "GET".into() }),
+            ),
+            (
+                "url".into(),
+                ValueLiteral::Text(ValueText {
+                    text: format!("https://example.com/{tag}"),
+                }),
+            ),
+            (
+                "headers".into(),
+                ValueLiteral::Map(ValueMap { map: vec![] }),
+            ),
+            (
+                "body_ref".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+        ]),
+    }))
 }
 
 /// Happy-path end-to-end: reducer emits an intent, plan does work, receipt feeds a result event
@@ -121,12 +149,7 @@ fn sugar_literal_plan_executes_http_flow() {
     if let Some(step) = plan.steps.iter_mut().find(|step| step.id == "raise") {
         if let PlanStepKind::RaiseEvent(raise) = &mut step.kind {
             raise.event = Expr::Record(ExprRecord {
-                record: IndexMap::from([(
-                    "value".into(),
-                    Expr::Record(ExprRecord {
-                        record: IndexMap::from([("message".into(), fixtures::text_expr("done"))]),
-                    }),
-                )]),
+                record: IndexMap::from([("message".into(), fixtures::text_expr("done"))]),
             })
             .into();
         }
@@ -156,17 +179,7 @@ fn sugar_literal_plan_executes_http_flow() {
             def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
             def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
             def_text_record_schema("com.acme/Result@1", vec![("message", text_type())]),
-            DefSchema {
-                name: "com.acme/ResultEvent@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([(
-                        "value".into(),
-                        TypeExpr::Record(TypeRecord {
-                            record: IndexMap::from([("message".into(), text_type())]),
-                        }),
-                    )]),
-                }),
-            },
+            def_text_record_schema("com.acme/ResultEvent@1", vec![("message", text_type())]),
         ],
     );
 
@@ -230,7 +243,7 @@ fn single_plan_orchestration_completes_after_receipt() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("body").into(),
+                    params: http_params_literal("body"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -369,7 +382,7 @@ fn reducer_and_plan_effects_are_enqueued() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("plan").into(),
+                    params: http_params_literal("plan"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -502,7 +515,7 @@ fn guarded_plan_branches_control_effects() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("do it").into(),
+                    params: http_params_literal("do-it"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -738,7 +751,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("first").into(),
+                    params: http_params_literal("first"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -756,7 +769,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                 id: "after_receipt".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("after_receipt").into(),
+                    params: http_params_literal("after-receipt"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "second".into(),
@@ -775,7 +788,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                 id: "after_event".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("after_event").into(),
+                    params: http_params_literal("after-event"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "third".into(),
@@ -852,16 +865,20 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
     let mut after_receipt_effects = world.drain_effects();
     assert_eq!(after_receipt_effects.len(), 1);
     let second_intent = after_receipt_effects.remove(0);
-    assert_eq!(effect_params_text(&second_intent), "after_receipt");
+    assert!(
+        effect_params_text(&second_intent).ends_with("after-receipt"),
+        "unexpected params: {}",
+        effect_params_text(&second_intent)
+    );
 
     world.submit_event_value("com.acme/PulseNext@1", &fixtures::plan_input_record(vec![]));
     world.kernel.tick_until_idle().unwrap();
 
     let mut after_event_effects = world.drain_effects();
     assert_eq!(after_event_effects.len(), 1);
-    assert_eq!(
-        effect_params_text(&after_event_effects.remove(0)),
-        "after_event"
+    assert!(
+        effect_params_text(&after_event_effects.remove(0)).ends_with("after-event"),
+        "unexpected params"
     );
 }
 
@@ -888,7 +905,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("ready").into(),
+                    params: http_params_literal("ready"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -935,7 +952,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: fixtures::text_expr("other").into(),
+                    params: http_params_literal("other"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -1006,7 +1023,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
     world.kernel.tick_until_idle().unwrap();
     let mut effects = world.drain_effects();
     assert_eq!(effects.len(), 1);
-    assert_eq!(effect_params_text(&effects.remove(0)), "ready");
+    assert!(effect_params_text(&effects.remove(0)).ends_with("ready"));
 
     world.submit_event_value(
         "com.acme/TriggerOther@1",
@@ -1015,7 +1032,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
     world.kernel.tick_until_idle().unwrap();
     let mut more_effects = world.drain_effects();
     assert_eq!(more_effects.len(), 1);
-    assert_eq!(effect_params_text(&more_effects.remove(0)), "other");
+    assert!(effect_params_text(&more_effects.remove(0)).ends_with("other"));
 }
 
 #[test]

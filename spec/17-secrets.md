@@ -23,6 +23,7 @@
 - Manifest (`manifest.schema.json`)
   - `secrets` array entries: `{ alias, version, binding_id, expected_digest?, policy: { allowed_caps?, allowed_plans? } }`.
   - Validation: (alias,version) pairs are unique; every `SecretRef` in plans/modules/caps resolves to a manifest entry; `allowed_caps`/`allowed_plans` names must exist. Secret ACL check runs after normal cap/policy allow/deny.
+- **Canonical value form**: SecretRefs in canonical JSON/CBOR are always the variant `{"$tag":"secret","$value":{"alias":<text>,"version":<int>}}`. Authoring sugar like `{"secret": {...}}` must be normalized to that shape before hashing.
 - Capability types
   - `vault.put`, `vault.rotate`; executor uses resolver map keyed by `binding_id`.
 

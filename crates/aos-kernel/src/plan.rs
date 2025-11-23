@@ -225,8 +225,9 @@ impl PlanInstance {
                 {
                     let params_value =
                         eval_expr_or_value(&emit.params, &self.env, "plan effect eval error")?;
-                    let params_cbor = serde_cbor::to_vec(&params_value)
-                        .map_err(|err| KernelError::Manifest(err.to_string()))?;
+                    let params_cbor =
+                        aos_cbor::to_canonical_cbor(&expr_value_to_cbor_value(&params_value))
+                            .map_err(|err| KernelError::Manifest(err.to_string()))?;
                     let intent = effects.enqueue_plan_effect(
                         &self.name,
                         &emit.kind,
@@ -1129,6 +1130,37 @@ mod tests {
         )
     }
 
+    fn http_params_value_literal(tag: &str) -> ValueLiteral {
+        ValueLiteral::Record(ValueRecord {
+            record: IndexMap::from([
+                (
+                    "method".into(),
+                    ValueLiteral::Text(ValueText { text: "GET".into() }),
+                ),
+                (
+                    "url".into(),
+                    ValueLiteral::Text(ValueText {
+                        text: format!("https://example.com/{tag}"),
+                    }),
+                ),
+                (
+                    "headers".into(),
+                    ValueLiteral::Map(ValueMap { map: vec![] }),
+                ),
+                (
+                    "body_ref".into(),
+                    ValueLiteral::Null(ValueNull {
+                        null: EmptyObject::default(),
+                    }),
+                ),
+            ]),
+        })
+    }
+
+    fn http_params_literal(tag: &str) -> ExprOrValue {
+        ExprOrValue::Literal(http_params_value_literal(tag))
+    }
+
     fn plan_instance_with_schema(plan: DefPlan, schema_index: Arc<SchemaIndex>) -> PlanInstance {
         PlanInstance::new(
             1,
@@ -1206,10 +1238,7 @@ mod tests {
             id: "emit".into(),
             kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                 kind: EffectKind::HttpRequest,
-                params: Expr::Const(ExprConst::Text {
-                    text: "data".into(),
-                })
-                .into(),
+                params: http_params_literal("data"),
                 cap: "cap".into(),
                 bind: PlanBindEffect {
                     effect_id_as: "req".into(),
@@ -1227,12 +1256,28 @@ mod tests {
     #[test]
     fn emit_effect_accepts_literal_params() {
         let params_literal = ValueLiteral::Record(ValueRecord {
-            record: IndexMap::from([(
-                "body".into(),
-                ValueLiteral::Text(ValueText {
-                    text: "literal".into(),
-                }),
-            )]),
+            record: IndexMap::from([
+                (
+                    "url".into(),
+                    ValueLiteral::Text(ValueText {
+                        text: "https://example.com/literal".into(),
+                    }),
+                ),
+                (
+                    "method".into(),
+                    ValueLiteral::Text(ValueText { text: "GET".into() }),
+                ),
+                (
+                    "headers".into(),
+                    ValueLiteral::Map(ValueMap { map: vec![] }),
+                ),
+                (
+                    "body_ref".into(),
+                    ValueLiteral::Null(ValueNull {
+                        null: EmptyObject::default(),
+                    }),
+                ),
+            ]),
         });
         let steps = vec![PlanStep {
             id: "emit".into(),
@@ -1260,10 +1305,7 @@ mod tests {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: Expr::Const(ExprConst::Text {
-                        text: "data".into(),
-                    })
-                    .into(),
+                    params: http_params_literal("data"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
@@ -1296,10 +1338,7 @@ mod tests {
                 id: "emit_a".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: Expr::Const(ExprConst::Text {
-                        text: "alpha".into(),
-                    })
-                    .into(),
+                    params: http_params_literal("alpha"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "handle_a".into(),
@@ -1310,10 +1349,7 @@ mod tests {
                 id: "emit_b".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: Expr::Const(ExprConst::Text {
-                        text: "beta".into(),
-                    })
-                    .into(),
+                    params: http_params_literal("beta"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "handle_b".into(),
@@ -1324,10 +1360,7 @@ mod tests {
                 id: "emit_c".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: Expr::Const(ExprConst::Text {
-                        text: "gamma".into(),
-                    })
-                    .into(),
+                    params: http_params_literal("gamma"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "handle_c".into(),
@@ -1789,10 +1822,7 @@ mod tests {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                     kind: EffectKind::HttpRequest,
-                    params: Expr::Const(ExprConst::Text {
-                        text: "payload".into(),
-                    })
-                    .into(),
+                    params: http_params_literal("payload"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),

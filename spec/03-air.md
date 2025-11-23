@@ -65,7 +65,7 @@ AIR nodes exist in two interchangeable JSON lenses plus one canonical binary for
 **Why**: Humans want concise, schema-directed JSON; agents and tools often need an explicit, lossless overlay. Accepting both lenses at load time keeps authoring pleasant without sacrificing determinism.
 
 1. **Authoring sugar (default)** — plain JSON interpreted using the surrounding schema reference. Use natural literals (`true`, `42`, `"text"`, `{field: …}`, arrays) exactly as before.
-2. **Canonical JSON (tagged)** — every literal carries an explicit type tag mirroring `ExprConst` (`{ "nat": 42 }`, `{ "list": [ { "text": "a" } ] }`, `{ "variant": { "tag": "Ok", "value": { "text": "done" } } }`, etc.). This lens is ideal for diffs, automated patches, and inspector output because it round-trips without schema context.
+2. **Canonical JSON (tagged)** — every literal carries an explicit type tag mirroring `ExprConst` (`{ "nat": 42 }`, `{ "list": [ { "text": "a" } ] }`, `{ "variant": { "tag": "Ok", "value": { "text": "done" } } }`, `{ "const": { "null": {} } }`, etc.). This lens is ideal for diffs, automated patches, and inspector output because it round-trips without schema context.
 
 The loader **MUST** accept either lens at every typed value position, resolve the schema from context (plan IO, effect params, reducer schemas, capability params, etc.), and convert to a typed value before hashing.
 
@@ -86,6 +86,8 @@ Regardless of the JSON lens, the loader applies the same canonicalization before
 - **`uuid`**: Author as RFC 4122 strings; encode as 16-byte values.
 - **`variant`**: Sugar `{ "Tag": <value?> }` expands to a canonical envelope (e.g., `{ "variant": { "tag": "Tag", "value": … } }`) before CBOR.
 - **`option<T>`**: Represent `none` as `null` in sugar or `{ "option": null }` in canonical JSON; `some` wraps the nested value.
+
+**Nulls in Expr vs Value**: When an `ExprOrValue` slot is authored as a literal Value, `null` still denotes `none` for `option<T>`. When authored as an expression, use `{ "const": { "null": {} } }` to produce a `null`/`none` value; raw JSON `null` is only valid on the literal path and is not parsed as an `ExprConst`.
 
 These rules make previously implicit loader behavior normative and testable.
 
@@ -248,6 +250,8 @@ An intent is a request to perform an external effect:
 ```
 
 The `intent_hash` = `sha256(cbor(kind, params, cap, idempotency_key))` is computed by the kernel; adapters verify it.
+
+**Canonical params**: Before hashing or enqueue, the kernel **decodes → schema‑checks → canonicalizes → re‑encodes** `params` using the effect kind's parameter schema (same AIR canonical rules as the loader: `$tag/$value` variants, canonical map/set/option shapes, numeric normalization). The canonical CBOR bytes become `params_cbor` and are the **only** form stored, hashed, and dispatched; non‑conforming params are rejected. This path runs for *every* origin (plans, reducers, injected tooling) so authoring sugar or reducer ABI quirks cannot change intent identity.
 
 ### Receipt
 

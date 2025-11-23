@@ -319,6 +319,7 @@ pub struct ExprRef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ExprConst {
+    Null { null: EmptyObject },
     Bool { bool: bool },
     Int { int: i64 },
     Nat { nat: u64 },

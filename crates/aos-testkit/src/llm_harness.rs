@@ -8,8 +8,8 @@ use aos_effects::builtins::LlmGenerateParams;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::Store;
-use sha2::{Digest, Sha256};
 use log::debug;
+use sha2::{Digest, Sha256};
 
 const MOCK_ADAPTER_ID: &str = "llm.mock";
 
@@ -47,9 +47,9 @@ impl<S: Store + 'static> MockLlmHarness<S> {
             for intent in intents {
                 match intent.kind.as_str() {
                     EffectKind::LLM_GENERATE => {
-                        let params_value: ExprValue = serde_cbor::from_slice(&intent.params_cbor)
+                        let raw: serde_cbor::Value = serde_cbor::from_slice(&intent.params_cbor)
                             .context("decode llm.generate params value")?;
-                        let params = llm_params_from_value(params_value)?;
+                        let params = llm_params_from_cbor(raw)?;
                         out.push(LlmRequestContext { intent, params });
                     }
                     other => {
@@ -114,83 +114,126 @@ impl<S: Store + 'static> MockLlmHarness<S> {
     }
 }
 
-fn llm_params_from_value(value: ExprValue) -> Result<LlmGenerateParams> {
-    let record = match value {
-        ExprValue::Record(map) => map,
-        other => return Err(anyhow!("llm.generate params must be a record, got {:?}", other)),
-    };
-    let api_key = record_optional_text(&record, "api_key")?;
-    Ok(LlmGenerateParams {
-        provider: record_text(&record, "provider")?,
-        model: record_text(&record, "model")?,
-        temperature: record_text(&record, "temperature")?,
-        max_tokens: record_nat(&record, "max_tokens")?,
-        input_ref: record_hash_ref(&record, "input_ref")?,
-        tools: record_list_text(&record, "tools")?,
-        api_key,
-    })
-}
-
-fn record_text(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> Result<String> {
-    match record.get(field) {
-        Some(ExprValue::Text(text)) => Ok(text.clone()),
-        Some(other) => Err(anyhow!("field '{field}' must be text, got {:?}", other)),
-        None => Err(anyhow!("field '{field}' missing from llm.generate params")),
-    }
-}
-
-fn record_optional_text(
-    record: &indexmap::IndexMap<String, ExprValue>,
-    field: &str,
-) -> Result<Option<String>> {
-    match record.get(field) {
-        Some(ExprValue::Text(text)) => Ok(Some(text.clone())),
-        Some(ExprValue::Record(rec)) if rec.get("$tag") == Some(&ExprValue::Text("secret".into())) => {
-            // As a last resort for the demo, accept a SecretRef by substituting the demo key.
-            const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
-            Ok(Some(DEMO_LLM_API_KEY.to_string()))
-        }
-        Some(ExprValue::Null) | Some(ExprValue::Unit) => Ok(None),
-        None => Ok(None),
-        Some(other) => Err(anyhow!("field '{field}' must be text or null, got {:?}", other)),
-    }
-}
-
-fn record_nat(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> Result<u64> {
-    match record.get(field) {
-        Some(ExprValue::Nat(n)) => Ok(*n),
-        Some(other) => Err(anyhow!("field '{field}' must be nat, got {:?}", other)),
-        None => Err(anyhow!("field '{field}' missing from llm.generate params")),
-    }
-}
-
-fn record_hash_ref(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> Result<HashRef> {
-    match record.get(field) {
-        Some(ExprValue::Text(text)) => HashRef::new(text.clone()).context("parse hash ref"),
-        Some(other) => Err(anyhow!("field '{field}' must be text hash ref, got {:?}", other)),
-        None => Err(anyhow!("field '{field}' missing from llm.generate params")),
-    }
-}
-
-fn record_list_text(record: &indexmap::IndexMap<String, ExprValue>, field: &str) -> Result<Vec<String>> {
-    match record.get(field) {
-        Some(ExprValue::List(values)) => values
-            .iter()
-            .map(|value| match value {
-                ExprValue::Text(text) => Ok(text.clone()),
-                other => Err(anyhow!("tools entries must be text, got {:?}", other)),
-            })
-            .collect(),
-        Some(ExprValue::Null) | None => Ok(Vec::new()),
-        Some(other) => Err(anyhow!("field '{field}' must be a list, got {:?}", other)),
-    }
-}
-
 fn summarize(prompt: &str) -> String {
     let prefix: String = prompt.chars().take(120).collect();
     let digest = Sha256::digest(prompt.as_bytes());
     let suffix = hex::encode(digest)[..8].to_string();
     format!("{prefix} …{suffix}")
+}
+
+fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
+    let map = match value {
+        serde_cbor::Value::Map(m) => m,
+        other => {
+            return Err(anyhow!(
+                "llm.generate params must be a map, got {:?}",
+                other
+            ));
+        }
+    };
+    let text = |field: &str| -> Result<String> {
+        match map.get(&serde_cbor::Value::Text(field.into())) {
+            Some(serde_cbor::Value::Text(t)) => Ok(t.clone()),
+            Some(other) => Err(anyhow!("field '{field}' must be text, got {:?}", other)),
+            None => Err(anyhow!("field '{field}' missing from llm.generate params")),
+        }
+    };
+    let nat = |field: &str| -> Result<u64> {
+        match map.get(&serde_cbor::Value::Text(field.into())) {
+            Some(serde_cbor::Value::Integer(n)) if *n >= 0 => Ok(*n as u64),
+            Some(other) => Err(anyhow!("field '{field}' must be nat, got {:?}", other)),
+            None => Err(anyhow!("field '{field}' missing from llm.generate params")),
+        }
+    };
+    let input_ref = match map.get(&serde_cbor::Value::Text("input_ref".into())) {
+        Some(serde_cbor::Value::Text(t)) => HashRef::new(t.clone()).context("parse hash ref")?,
+        Some(other) => {
+            return Err(anyhow!(
+                "field 'input_ref' must be text hash ref, got {:?}",
+                other
+            ));
+        }
+        None => {
+            return Err(anyhow!(
+                "field 'input_ref' missing from llm.generate params"
+            ));
+        }
+    };
+    let tools = match map.get(&serde_cbor::Value::Text("tools".into())) {
+        Some(serde_cbor::Value::Array(items)) => items
+            .iter()
+            .map(|v| match v {
+                serde_cbor::Value::Text(t) => Ok(t.clone()),
+                other => Err(anyhow!("tools entries must be text, got {:?}", other)),
+            })
+            .collect::<Result<Vec<_>>>()?,
+        Some(serde_cbor::Value::Null) | None => Vec::new(),
+        Some(other) => {
+            return Err(anyhow!(
+                "field 'tools' must be list<text> or null, got {:?}",
+                other
+            ));
+        }
+    };
+    let api_key = decode_api_key(map.get(&serde_cbor::Value::Text("api_key".into())))?;
+
+    Ok(LlmGenerateParams {
+        provider: text("provider")?,
+        model: text("model")?,
+        temperature: text("temperature")?,
+        max_tokens: nat("max_tokens")?,
+        input_ref,
+        tools,
+        api_key,
+    })
+}
+
+fn decode_api_key(value: Option<&serde_cbor::Value>) -> Result<Option<String>> {
+    match value {
+        None => Ok(None),
+        Some(serde_cbor::Value::Null) => Ok(None),
+        Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
+        Some(serde_cbor::Value::Map(m))
+            if m.get(&serde_cbor::Value::Text("$tag".into()))
+                == Some(&serde_cbor::Value::Text("secret".into())) =>
+        {
+            Ok(Some("demo-llm-api-key".into()))
+        }
+        Some(serde_cbor::Value::Map(m))
+            if m.get(&serde_cbor::Value::Text("$tag".into()))
+                == Some(&serde_cbor::Value::Text("literal".into())) =>
+        {
+            match m.get(&serde_cbor::Value::Text("$value".into())) {
+                Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
+                Some(serde_cbor::Value::Bytes(b)) => Ok(Some(
+                    std::str::from_utf8(b)
+                        .map_err(|e| anyhow!("api_key bytes not utf8: {e}"))?
+                        .to_string(),
+                )),
+                _ => Ok(None),
+            }
+        }
+        Some(serde_cbor::Value::Map(m)) if m.len() == 1 => {
+            if let Some((serde_cbor::Value::Text(tag), val)) = m.iter().next() {
+                if tag == "literal" {
+                    return match val {
+                        serde_cbor::Value::Text(t) => Ok(Some(t.clone())),
+                        serde_cbor::Value::Bytes(b) => Ok(Some(
+                            std::str::from_utf8(b)
+                                .map_err(|e| anyhow!("api_key bytes not utf8: {e}"))?
+                                .to_string(),
+                        )),
+                        _ => Ok(None),
+                    };
+                }
+            }
+            Ok(None)
+        }
+        Some(other) => Err(anyhow!(
+            "field 'api_key' must be text/secret/null, got {:?}",
+            other
+        )),
+    }
 }
 
 fn hash_key(key: &str) -> String {

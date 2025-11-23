@@ -25,7 +25,7 @@
               ]
             },
             "headers": { "map": [] },
-            "body_ref": { "variant": { "tag": "None" } }
+            "body_ref": { "const": { "null": {} } }
           }
         },
         "cap": "cap_http_chain",

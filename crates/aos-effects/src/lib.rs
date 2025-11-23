@@ -1,6 +1,7 @@
 //! Shared effect intent/receipt/capability types and helpers.
 
 pub mod builtins;
+pub mod normalize;
 
 mod capability;
 mod intent;
@@ -13,4 +14,5 @@ pub use capability::{
 };
 pub use intent::{EffectIntent, EffectSource, IdempotencyKey, IntentBuilder, IntentEncodeError};
 pub use kinds::EffectKind;
+pub use normalize::{NormalizeError, normalize_effect_params};
 pub use receipt::{EffectReceipt, ReceiptDecodeError, ReceiptStatus};

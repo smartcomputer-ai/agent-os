@@ -2,8 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{HashRef, SecretDecl};
 use aos_cbor::Hash;
-use thiserror::Error;
 use aos_effects::EffectSource;
+use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedSecret {
@@ -75,43 +75,9 @@ fn collect_secret_refs_value(value: &serde_cbor::Value, refs: &mut Vec<(String, 
             }
         }
         serde_cbor::Value::Map(map) => {
-            // Look for variant arm {"secret": {"alias": "...", "version": N}} or canonical {"$tag":"secret","$value": {...}}
-            // or schema literal form {"variant": {"tag":"secret","value": {...}}}
-            if map.len() == 1 {
-                if let Some((serde_cbor::Value::Text(tag), serde_cbor::Value::Map(inner))) =
-                    map.iter().next()
-                {
-                    if tag == "secret" {
-                        if let (Some(alias_val), Some(version_val)) = (
-                            inner.get(&serde_cbor::Value::Text("alias".into())),
-                            inner.get(&serde_cbor::Value::Text("version".into())),
-                        ) {
-                            if let (serde_cbor::Value::Text(alias), serde_cbor::Value::Integer(v)) =
-                                (alias_val, version_val)
-                            {
-                                refs.push((alias.clone(), *v as u64));
-                            }
-                        }
-                    }
-                    if tag == "variant" {
-                        if let (Some(serde_cbor::Value::Text(tag_val)), Some(serde_cbor::Value::Map(val_map))) =
-                            (inner.get(&serde_cbor::Value::Text("tag".into())), inner.get(&serde_cbor::Value::Text("value".into())))
-                        {
-                            if tag_val == "secret" {
-                                if let (Some(serde_cbor::Value::Text(alias)), Some(serde_cbor::Value::Integer(v))) = (
-                                    val_map.get(&serde_cbor::Value::Text("alias".into())),
-                                    val_map.get(&serde_cbor::Value::Text("version".into())),
-                                ) {
-                                    refs.push((alias.clone(), *v as u64));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            // Canonical variant {"$tag":"secret","$value": {...}}
             if map.len() == 2
-                && map
-                    .get(&serde_cbor::Value::Text("$tag".into()))
+                && map.get(&serde_cbor::Value::Text("$tag".into()))
                     == Some(&serde_cbor::Value::Text("secret".into()))
             {
                 if let Some(serde_cbor::Value::Map(inner)) =
@@ -125,6 +91,27 @@ fn collect_secret_refs_value(value: &serde_cbor::Value, refs: &mut Vec<(String, 
                             (alias_val, version_val)
                         {
                             refs.push((alias.clone(), *v as u64));
+                        }
+                    }
+                }
+            }
+            // Single-entry variant map {"secret": {alias,version}}
+            if map.len() == 1 {
+                if let Some((serde_cbor::Value::Text(tag), inner_val)) = map.iter().next() {
+                    if tag == "secret" {
+                        if let serde_cbor::Value::Map(inner) = inner_val {
+                            if let (Some(alias_val), Some(version_val)) = (
+                                inner.get(&serde_cbor::Value::Text("alias".into())),
+                                inner.get(&serde_cbor::Value::Text("version".into())),
+                            ) {
+                                if let (
+                                    serde_cbor::Value::Text(alias),
+                                    serde_cbor::Value::Integer(v),
+                                ) = (alias_val, version_val)
+                                {
+                                    refs.push((alias.clone(), *v as u64));
+                                }
+                            }
                         }
                     }
                 }
@@ -149,7 +136,7 @@ pub fn inject_secrets_in_params(
             reason: err.to_string(),
         })?;
     inject_in_value(&mut value, catalog, resolver)?;
-    serde_cbor::to_vec(&value).map_err(|err| SecretResolverError::InvalidParams {
+    aos_cbor::to_canonical_cbor(&value).map_err(|err| SecretResolverError::InvalidParams {
         reason: err.to_string(),
     })
 }
@@ -166,71 +153,8 @@ fn inject_in_value(
             }
         }
         serde_cbor::Value::Map(map) => {
-            // Detect variant {"secret": {...}} or {"$tag":"secret","$value":{...}} or {"variant": {"tag":"secret","value": {...}}}
-            if map.len() == 1 {
-                if let Some((serde_cbor::Value::Text(tag), serde_cbor::Value::Map(inner))) =
-                    map.iter_mut().next()
-                {
-                    if tag == "secret" {
-                        log::debug!("injecting secret variant (sugar) {:?}", inner);
-                        if let (Some(alias_val), Some(version_val)) = (
-                            inner.get(&serde_cbor::Value::Text("alias".into())),
-                            inner.get(&serde_cbor::Value::Text("version".into())),
-                        ) {
-                            if let (serde_cbor::Value::Text(alias), serde_cbor::Value::Integer(v)) =
-                                (alias_val, version_val)
-                            {
-                                let version = *v as u64;
-                                let decl = catalog
-                                    .lookup(alias, version)
-                                    .ok_or_else(|| SecretResolverError::NotFound(format!("{alias}@{version}")))?;
-                                let resolved = resolver
-                                    .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
-                                // Replace with text if utf-8, else bytes
-                                if let Ok(text) = std::str::from_utf8(&resolved.value) {
-                                    *value = serde_cbor::Value::Text(text.to_string());
-                                } else {
-                                    *value = serde_cbor::Value::Bytes(resolved.value);
-                                }
-                                return Ok(());
-                            }
-                        }
-                    }
-                    if tag == "variant" {
-                        if let (Some(serde_cbor::Value::Text(tag_val)), Some(serde_cbor::Value::Map(val_map))) = (
-                            inner.get(&serde_cbor::Value::Text("tag".into())),
-                            inner.get(&serde_cbor::Value::Text("value".into())),
-                        ) {
-                            if tag_val == "secret" {
-                                if let (Some(alias_val), Some(version_val)) = (
-                                    val_map.get(&serde_cbor::Value::Text("alias".into())),
-                                    val_map.get(&serde_cbor::Value::Text("version".into())),
-                                ) {
-                                    if let (serde_cbor::Value::Text(alias), serde_cbor::Value::Integer(v)) =
-                                        (alias_val, version_val)
-                                    {
-                                        let version = *v as u64;
-                                        let decl = catalog
-                                            .lookup(alias, version)
-                                            .ok_or_else(|| SecretResolverError::NotFound(format!("{alias}@{version}")))?;
-                                        let resolved = resolver
-                                            .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
-                                        if let Ok(text) = std::str::from_utf8(&resolved.value) {
-                                            *value = serde_cbor::Value::Text(text.to_string());
-                                        } else {
-                                            *value = serde_cbor::Value::Bytes(resolved.value);
-                                        }
-                                        return Ok(());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
             if map.len() == 2
-                && map
-                    .get(&serde_cbor::Value::Text("$tag".into()))
+                && map.get(&serde_cbor::Value::Text("$tag".into()))
                     == Some(&serde_cbor::Value::Text("secret".into()))
             {
                 if let Some(serde_cbor::Value::Map(inner)) =
@@ -245,9 +169,9 @@ fn inject_in_value(
                             (alias_val, version_val)
                         {
                             let version = *v as u64;
-                            let decl = catalog
-                                .lookup(alias, version)
-                                .ok_or_else(|| SecretResolverError::NotFound(format!("{alias}@{version}")))?;
+                            let decl = catalog.lookup(alias, version).ok_or_else(|| {
+                                SecretResolverError::NotFound(format!("{alias}@{version}"))
+                            })?;
                             let resolved = resolver
                                 .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
                             if let Ok(text) = std::str::from_utf8(&resolved.value) {
@@ -256,6 +180,34 @@ fn inject_in_value(
                                 *value = serde_cbor::Value::Bytes(resolved.value);
                             }
                             return Ok(());
+                        }
+                    }
+                }
+            }
+            // Single-entry variant map {"secret": {alias,version}}
+            if map.len() == 1 {
+                if let Some((serde_cbor::Value::Text(tag), inner_val)) = map.iter_mut().next() {
+                    if tag == "secret" {
+                        if let serde_cbor::Value::Map(inner) = inner_val {
+                            if let (Some(alias_val), Some(version_val)) = (
+                                inner.get(&serde_cbor::Value::Text("alias".into())),
+                                inner.get(&serde_cbor::Value::Text("version".into())),
+                            ) {
+                                if let (
+                                    serde_cbor::Value::Text(alias),
+                                    serde_cbor::Value::Integer(v),
+                                ) = (alias_val, version_val)
+                                {
+                                    let version = *v as u64;
+                                    let decl = catalog.lookup(alias, version).ok_or_else(|| {
+                                        SecretResolverError::NotFound(format!("{alias}@{version}"))
+                                    })?;
+                                    let resolved = resolver
+                                        .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
+                                    *value = injected_literal_variant(resolved.value);
+                                    return Ok(());
+                                }
+                            }
                         }
                     }
                 }
@@ -287,10 +239,8 @@ pub fn enforce_secret_policy(
     origin: &EffectSource,
     cap_name: &str,
 ) -> Result<(), crate::error::KernelError> {
-    let refs =
-        collect_secret_refs(params_cbor).map_err(|e| crate::error::KernelError::SecretResolution(
-            e.to_string(),
-        ))?;
+    let refs = collect_secret_refs(params_cbor)
+        .map_err(|e| crate::error::KernelError::SecretResolution(e.to_string()))?;
     for (alias, version) in refs {
         if let Some(decl) = catalog.lookup(&alias, version) {
             if let Some(policy) = &decl.policy {
@@ -316,6 +266,54 @@ pub fn enforce_secret_policy(
         }
     }
     Ok(())
+}
+
+/// Normalizes secret variant sugar to the canonical `$tag/$value` form so hashing/policy see one shape.
+pub fn normalize_secret_variants(params_cbor: &[u8]) -> Result<Vec<u8>, SecretResolverError> {
+    let mut value: serde_cbor::Value =
+        serde_cbor::from_slice(params_cbor).map_err(|err| SecretResolverError::InvalidParams {
+            reason: err.to_string(),
+        })?;
+    normalize_secret_variants_in_value(&mut value);
+    aos_cbor::to_canonical_cbor(&value).map_err(|err| SecretResolverError::InvalidParams {
+        reason: err.to_string(),
+    })
+}
+
+fn normalize_secret_variants_in_value(value: &mut serde_cbor::Value) {
+    match value {
+        serde_cbor::Value::Array(items) => {
+            for item in items {
+                normalize_secret_variants_in_value(item);
+            }
+        }
+        serde_cbor::Value::Map(map) => {
+            // Normalize single-entry sugar {"secret": {alias,version}} to canonical variant
+            if map.len() == 1 {
+                if let Some((serde_cbor::Value::Text(tag), inner_val)) = map.iter().next() {
+                    if tag == "secret" {
+                        if let serde_cbor::Value::Map(inner) = inner_val {
+                            let mut variant = std::collections::BTreeMap::new();
+                            variant.insert(
+                                serde_cbor::Value::Text("$tag".into()),
+                                serde_cbor::Value::Text("secret".into()),
+                            );
+                            variant.insert(
+                                serde_cbor::Value::Text("$value".into()),
+                                serde_cbor::Value::Map(inner.clone()),
+                            );
+                            *value = serde_cbor::Value::Map(variant);
+                            return;
+                        }
+                    }
+                }
+            }
+            for (_k, v) in map.iter_mut() {
+                normalize_secret_variants_in_value(v);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -497,7 +495,11 @@ mod tests {
         );
         let mut auth_map = BTreeMap::new();
         auth_map.insert(
+            serde_cbor::Value::Text("$tag".into()),
             serde_cbor::Value::Text("secret".into()),
+        );
+        auth_map.insert(
+            serde_cbor::Value::Text("$value".into()),
             serde_cbor::Value::Map(secret_map),
         );
         let mut headers_map = BTreeMap::new();
@@ -510,8 +512,7 @@ mod tests {
             serde_cbor::Value::Text("headers".into()),
             serde_cbor::Value::Map(headers_map),
         );
-        let params = serde_cbor::to_vec(&serde_cbor::Value::Map(root_map))
-            .unwrap();
+        let params = serde_cbor::to_vec(&serde_cbor::Value::Map(root_map)).unwrap();
 
         let injected =
             inject_secrets_in_params(&params, &catalog, &resolver).expect("inject secrets");
@@ -539,4 +540,82 @@ mod tests {
             panic!("root not a map");
         }
     }
+
+    #[test]
+    fn normalize_and_inject_split() {
+        use serde_cbor::Value;
+        // Sugar form {"api_key": {"secret": {alias, version}}}
+        let mut inner = std::collections::BTreeMap::new();
+        inner.insert(Value::Text("alias".into()), Value::Text("auth/api".into()));
+        inner.insert(Value::Text("version".into()), Value::Integer(1));
+        let mut sugar = std::collections::BTreeMap::new();
+        sugar.insert(Value::Text("secret".into()), Value::Map(inner));
+        let mut root = std::collections::BTreeMap::new();
+        root.insert(Value::Text("api_key".into()), Value::Map(sugar));
+        let sugar_cbor = serde_cbor::to_vec(&Value::Map(root)).unwrap();
+
+        let normalized = normalize_secret_variants(&sugar_cbor).expect("normalize");
+        let val: Value = serde_cbor::from_slice(&normalized).unwrap();
+        assert!(
+            contains_secret(&val),
+            "normalized params should retain SecretRef variant"
+        );
+
+        let catalog = SecretCatalog::new(&[SecretDecl {
+            alias: "auth/api".into(),
+            version: 1,
+            binding_id: "binding".into(),
+            expected_digest: None,
+            policy: None,
+        }]);
+        let resolver =
+            MapSecretResolver::new(HashMap::from([("binding".into(), b"token123".to_vec())]));
+        let injected =
+            inject_secrets_in_params(&normalized, &catalog, &resolver).expect("inject secrets");
+        let injected_val: Value = serde_cbor::from_slice(&injected).unwrap();
+        assert!(
+            !contains_secret(&injected_val),
+            "injected params should be literal"
+        );
+        if let Value::Map(map) = injected_val {
+            assert_eq!(
+                map.get(&Value::Text("api_key".into())),
+                Some(&Value::Text("token123".into()))
+            );
+        } else {
+            panic!("expected map root after injection");
+        }
+    }
+
+    fn contains_secret(value: &serde_cbor::Value) -> bool {
+        match value {
+            serde_cbor::Value::Array(items) => items.iter().any(contains_secret),
+            serde_cbor::Value::Map(map) => {
+                if map.len() == 2
+                    && map.get(&serde_cbor::Value::Text("$tag".into()))
+                        == Some(&serde_cbor::Value::Text("secret".into()))
+                {
+                    return true;
+                }
+                map.values().any(contains_secret)
+            }
+            _ => false,
+        }
+    }
+}
+
+fn injected_literal_variant(bytes: Vec<u8>) -> serde_cbor::Value {
+    let (key, val) = match std::str::from_utf8(&bytes) {
+        Ok(text) => (
+            serde_cbor::Value::Text("literal".into()),
+            serde_cbor::Value::Text(text.to_string()),
+        ),
+        Err(_) => (
+            serde_cbor::Value::Text("literal".into()),
+            serde_cbor::Value::Bytes(bytes),
+        ),
+    };
+    let mut map = std::collections::BTreeMap::new();
+    map.insert(key, val);
+    serde_cbor::Value::Map(map)
 }

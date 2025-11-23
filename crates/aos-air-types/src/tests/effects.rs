@@ -55,12 +55,7 @@ fn http_request_params_literal_matches_builtin_schema() {
         ("url", text("https://example.com")),
         (
             "headers",
-            map(vec![
-                (
-                    text("content-type"),
-                    text("application/json"),
-                ),
-            ]),
+            map(vec![(text("content-type"), text("application/json"))]),
         ),
         (
             "body_ref",

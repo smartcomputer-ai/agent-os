@@ -450,9 +450,10 @@ mod tests {
     use aos_air_types::{
         AirNode, CapGrant, CapType, DefCap, DefPlan, EffectKind, EmptyObject, Expr, ExprConst,
         ExprOp, ExprOpCode, ExprRef, HashRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
-        PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitReceipt, PlanStepEmitEffect,
-        PlanStepEnd, PlanStepKind, Routing, RoutingEvent, SchemaRef, SecretDecl, SecretPolicy,
-        SecretRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRef, ValueLiteral,
+        PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitReceipt,
+        PlanStepEmitEffect, PlanStepEnd, PlanStepKind, Routing, RoutingEvent, SchemaRef,
+        SecretDecl, SecretPolicy, SecretRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRef,
+        ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
     };
     use indexmap::IndexMap;
 
@@ -460,6 +461,31 @@ mod tests {
         let expr = Expr::Const(ExprConst::Text {
             text: "payload".into(),
         });
+        let http_params = ValueLiteral::Record(ValueRecord {
+            record: IndexMap::from([
+                (
+                    "method".into(),
+                    ValueLiteral::Text(ValueText { text: "GET".into() }),
+                ),
+                (
+                    "url".into(),
+                    ValueLiteral::Text(ValueText {
+                        text: "https://example.com".into(),
+                    }),
+                ),
+                (
+                    "headers".into(),
+                    ValueLiteral::Map(ValueMap { map: vec![] }),
+                ),
+                (
+                    "body_ref".into(),
+                    ValueLiteral::Null(ValueNull {
+                        null: EmptyObject::default(),
+                    }),
+                ),
+            ]),
+        });
+
         DefPlan {
             name: "com.acme/plan@1".into(),
             input: SchemaRef::new("com.acme/Input@1").unwrap(),
@@ -470,7 +496,7 @@ mod tests {
                     id: "emit".into(),
                     kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
                         kind: EffectKind::HttpRequest,
-                        params: expr.clone().into(),
+                        params: http_params.clone().into(),
                         cap: "http_cap".into(),
                         bind: PlanBindEffect {
                             effect_id_as: "req".into(),
