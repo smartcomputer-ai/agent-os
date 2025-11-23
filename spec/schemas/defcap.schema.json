@@ -9,7 +9,7 @@
     "name": { "$ref": "common.schema.json#/$defs/Name" },
     "cap_type": {
       "$ref": "common.schema.json#/$defs/CapType",
-      "description": "Built-in capability type: http.out, blob, timer, llm.basic"
+      "description": "Capability type identifier (namespaced string). Built-in v1 types: http.out, blob, timer, llm.basic, secret. Adapters may introduce additional types when supported by the runtime."
     },
     "schema": {
       "$ref": "common.schema.json#/$defs/TypeExpr",

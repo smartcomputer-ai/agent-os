@@ -4,6 +4,11 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 
 ## Next Steps
 
+- [x] Simplify `common.schema.json` so `EffectKind`/`CapType` are open namespaced strings (pattern), and refresh spec text to point to the v1 built-in catalog instead of schema enums.
+- [ ] Add a small `builtin.catalog.schema.json` (or similar) that enumerates the current built-ins for tools that still want strict validation/autocomplete without polluting the core schema.
+- [ ] Convert `EffectKind`/`CapType` in `aos-air-types` and downstream crates from closed enums to string newtypes, and thread the change through adapters, policy matching, and validation.
+- [ ] Refactor effect param/receipt normalization to resolve schemas via a catalog (e.g., `spec/defs/builtin-schemas.air.json`) instead of hard-coded enum matches; extend tests to cover unknown/custom kinds.
+- [ ] Audit specs and examples for assumptions of a closed effect/cap set; tighten language where needed and add a short “adding new effect kinds” note to the workflows doc.
 
 ## Context
 
@@ -192,4 +197,3 @@ If your goal is “clean long‑term foundation”:
 3. Optionally, introduce a **separate** schema file like `builtin.catalog.schema.json` that has enums of the current built‑ins for tools that want the strict list, without polluting the core foundation.
 
 That keeps v1 fully working, but it stops `common.schema.json` from pretending that “the set of effects in the universe is {http.request, …}”.
-

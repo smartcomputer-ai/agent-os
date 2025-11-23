@@ -75,6 +75,8 @@ Semantic contract from reducer to kernel:
 - `kind`: must be in reducer's declared `effects_emitted` allowlist
 - `cap_slot` (optional): abstract slot to bind a concrete CapGrant via `manifest.module_bindings`
 
+`EffectKind` is a namespaced string. The v1 kernel ships the built-in catalog listed in spec/03-air.md §7; adapter-defined kinds require runtime support to map to capabilities and receipts.
+
 ## Events Seen By Reducers
 
 Reducers consume two kinds of events:
