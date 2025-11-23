@@ -10,13 +10,10 @@
         "op": "emit_effect",
         "kind": "http.request",
         "params": {
-          "record": {
-            "method": { "text": "GET" },
-            "url": { "text": "https://example.com/data.json" },
-            "idempotency_key": { "text": "safe-upgrade-v2-primary" },
-            "headers": { "map": [] },
-            "body_ref": { "const": { "null": {} } }
-          }
+          "method": "GET",
+          "url": "https://example.com/data.json",
+          "headers": { "x-idempotency-key": "safe-upgrade-v2-primary" },
+          "body_ref": null
         },
         "cap": "cap_http_fetch",
         "bind": { "effect_id_as": "primary_req" }
@@ -45,10 +42,16 @@
         "kind": "http.request",
         "params": {
           "record": {
-            "method": { "text": "GET" },
+            "method": { "const": { "text": "GET" } },
             "url": { "ref": "@var:follow_url" },
-            "idempotency_key": { "text": "safe-upgrade-v2-follow" },
-            "headers": { "map": [] },
+            "headers": {
+              "map": [
+                {
+                  "key": { "const": { "text": "x-idempotency-key" } },
+                  "value": { "const": { "text": "safe-upgrade-v2-follow" } }
+                }
+              ]
+            },
             "body_ref": { "const": { "null": {} } }
           }
         },
