@@ -75,7 +75,7 @@ fn collect_secret_refs_value(value: &serde_cbor::Value, refs: &mut Vec<(String, 
             }
         }
         serde_cbor::Value::Map(map) => {
-            // Look only for canonical variant {"$tag":"secret","$value": {...}}
+            // Canonical variant {"$tag":"secret","$value": {...}}
             if map.len() == 2
                 && map.get(&serde_cbor::Value::Text("$tag".into()))
                     == Some(&serde_cbor::Value::Text("secret".into()))
@@ -91,6 +91,27 @@ fn collect_secret_refs_value(value: &serde_cbor::Value, refs: &mut Vec<(String, 
                             (alias_val, version_val)
                         {
                             refs.push((alias.clone(), *v as u64));
+                        }
+                    }
+                }
+            }
+            // Single-entry variant map {"secret": {alias,version}}
+            if map.len() == 1 {
+                if let Some((serde_cbor::Value::Text(tag), inner_val)) = map.iter().next() {
+                    if tag == "secret" {
+                        if let serde_cbor::Value::Map(inner) = inner_val {
+                            if let (Some(alias_val), Some(version_val)) = (
+                                inner.get(&serde_cbor::Value::Text("alias".into())),
+                                inner.get(&serde_cbor::Value::Text("version".into())),
+                            ) {
+                                if let (
+                                    serde_cbor::Value::Text(alias),
+                                    serde_cbor::Value::Integer(v),
+                                ) = (alias_val, version_val)
+                                {
+                                    refs.push((alias.clone(), *v as u64));
+                                }
+                            }
                         }
                     }
                 }
@@ -159,6 +180,34 @@ fn inject_in_value(
                                 *value = serde_cbor::Value::Bytes(resolved.value);
                             }
                             return Ok(());
+                        }
+                    }
+                }
+            }
+            // Single-entry variant map {"secret": {alias,version}}
+            if map.len() == 1 {
+                if let Some((serde_cbor::Value::Text(tag), inner_val)) = map.iter_mut().next() {
+                    if tag == "secret" {
+                        if let serde_cbor::Value::Map(inner) = inner_val {
+                            if let (Some(alias_val), Some(version_val)) = (
+                                inner.get(&serde_cbor::Value::Text("alias".into())),
+                                inner.get(&serde_cbor::Value::Text("version".into())),
+                            ) {
+                                if let (
+                                    serde_cbor::Value::Text(alias),
+                                    serde_cbor::Value::Integer(v),
+                                ) = (alias_val, version_val)
+                                {
+                                    let version = *v as u64;
+                                    let decl = catalog.lookup(alias, version).ok_or_else(|| {
+                                        SecretResolverError::NotFound(format!("{alias}@{version}"))
+                                    })?;
+                                    let resolved = resolver
+                                        .resolve(&decl.binding_id, decl.expected_digest.as_ref())?;
+                                    *value = injected_literal_variant(resolved.value);
+                                    return Ok(());
+                                }
+                            }
                         }
                     }
                 }
@@ -443,4 +492,20 @@ mod tests {
             panic!("root not a map");
         }
     }
+}
+
+fn injected_literal_variant(bytes: Vec<u8>) -> serde_cbor::Value {
+    let (key, val) = match std::str::from_utf8(&bytes) {
+        Ok(text) => (
+            serde_cbor::Value::Text("literal".into()),
+            serde_cbor::Value::Text(text.to_string()),
+        ),
+        Err(_) => (
+            serde_cbor::Value::Text("literal".into()),
+            serde_cbor::Value::Bytes(bytes),
+        ),
+    };
+    let mut map = std::collections::BTreeMap::new();
+    map.insert(key, val);
+    serde_cbor::Value::Map(map)
 }
