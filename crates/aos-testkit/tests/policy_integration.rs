@@ -54,7 +54,7 @@ fn reducer_http_effect_is_denied() {
         name: "com.acme/policy@1".into(),
         rules: vec![PolicyRule {
             when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::HttpRequest),
+                effect_kind: Some(AirEffectKind::http_request()),
                 origin_kind: Some(OriginKind::Reducer),
                 ..Default::default()
             },
@@ -84,7 +84,7 @@ fn plan_effect_allowed_by_policy() {
         steps: vec![aos_air_types::PlanStep {
             id: "emit".into(),
             kind: aos_air_types::PlanStepKind::EmitEffect(aos_air_types::PlanStepEmitEffect {
-                kind: AirEffectKind::HttpRequest,
+                kind: AirEffectKind::http_request(),
                 params: http_params_literal("https://example.com"),
                 cap: "cap_http".into(),
                 bind: aos_air_types::PlanBindEffect {
@@ -94,7 +94,7 @@ fn plan_effect_allowed_by_policy() {
         }],
         edges: vec![],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![AirEffectKind::HttpRequest],
+        allowed_effects: vec![AirEffectKind::http_request()],
         invariants: vec![],
     };
 
@@ -109,7 +109,7 @@ fn plan_effect_allowed_by_policy() {
         name: "com.acme/plan-policy@1".into(),
         rules: vec![PolicyRule {
             when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::HttpRequest),
+                effect_kind: Some(AirEffectKind::http_request()),
                 origin_kind: Some(OriginKind::Plan),
                 ..Default::default()
             },
@@ -159,7 +159,7 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
             aos_air_types::PlanStep {
                 id: "emit".into(),
                 kind: aos_air_types::PlanStepKind::EmitEffect(aos_air_types::PlanStepEmitEffect {
-                    kind: AirEffectKind::HttpRequest,
+                    kind: AirEffectKind::http_request(),
                     params: ExprOrValue::Expr(params_expr),
                     cap: "cap_http".into(),
                     bind: aos_air_types::PlanBindEffect {
@@ -178,7 +178,7 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
             when: None,
         }],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![AirEffectKind::HttpRequest],
+        allowed_effects: vec![AirEffectKind::http_request()],
         invariants: vec![],
     };
 
@@ -193,7 +193,7 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
         name: "com.acme/plan-policy@1".into(),
         rules: vec![PolicyRule {
             when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::HttpRequest),
+                effect_kind: Some(AirEffectKind::http_request()),
                 origin_kind: Some(OriginKind::Plan),
                 ..Default::default()
             },

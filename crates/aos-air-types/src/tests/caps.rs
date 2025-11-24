@@ -1,5 +1,4 @@
 use serde_json::json;
-use std::panic::{self, AssertUnwindSafe};
 
 use super::assert_json_schema;
 use crate::{
@@ -36,7 +35,7 @@ fn parses_cap_definition_and_grant() {
     });
     assert_json_schema(crate::schemas::DEFCAP, &cap_json);
     let cap: DefCap = serde_json::from_value(cap_json).expect("cap json");
-    assert_eq!(cap.cap_type, crate::CapType::HttpOut);
+    assert_eq!(cap.cap_type, crate::CapType::http_out());
 
     let grant_json = json!({
         "name": "cap_http",
@@ -78,20 +77,16 @@ fn supports_all_cap_types() {
 }
 
 #[test]
-fn rejects_unknown_cap_type_via_schema() {
+fn accepts_custom_cap_type_strings() {
     let cap_json = json!({
         "$kind": "defcap",
         "name": "com.acme/unknown@1",
-        "cap_type": "email",
+        "cap_type": "email.outbound",
         "schema": {"record": {}}
     });
-    assert!(
-        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
-            crate::schemas::DEFCAP,
-            &cap_json
-        )))
-        .is_err()
-    );
+    assert_json_schema(crate::schemas::DEFCAP, &cap_json);
+    let def: DefCap = serde_json::from_value(cap_json).expect("cap json");
+    assert_eq!(def.cap_type.as_str(), "email.outbound");
 }
 
 #[test]

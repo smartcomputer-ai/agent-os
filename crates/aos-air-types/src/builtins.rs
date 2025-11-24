@@ -8,6 +8,7 @@ use crate::{DefSchema, HashRef};
 
 static BUILTIN_SCHEMAS_RAW: &str = include_str!("../../../spec/defs/builtin-schemas.air.json");
 
+#[derive(Debug)]
 pub struct BuiltinSchema {
     pub schema: DefSchema,
     pub hash: Hash,

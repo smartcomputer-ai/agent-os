@@ -288,7 +288,7 @@ pub mod fixtures {
     pub fn http_defcap() -> DefCap {
         DefCap {
             name: "sys/http.out@1".into(),
-            cap_type: CapType::HttpOut,
+            cap_type: CapType::http_out(),
             schema: TypeExpr::Record(TypeRecord {
                 record: IndexMap::new(),
             }),
@@ -299,7 +299,7 @@ pub mod fixtures {
     pub fn timer_defcap() -> DefCap {
         DefCap {
             name: "sys/timer@1".into(),
-            cap_type: CapType::Timer,
+            cap_type: CapType::timer(),
             schema: TypeExpr::Record(TypeRecord {
                 record: IndexMap::new(),
             }),
@@ -309,7 +309,7 @@ pub mod fixtures {
     pub fn blob_defcap() -> DefCap {
         DefCap {
             name: "sys/blob@1".into(),
-            cap_type: CapType::Blob,
+            cap_type: CapType::blob(),
             schema: TypeExpr::Record(TypeRecord {
                 record: IndexMap::new(),
             }),

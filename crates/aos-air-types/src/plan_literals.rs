@@ -750,15 +750,7 @@ fn canonical_bytes(value: &ValueLiteral) -> Result<Vec<u8>, PlanLiteralError> {
 }
 
 fn effect_params_schema(kind: &EffectKind) -> Option<&'static str> {
-    match kind {
-        EffectKind::HttpRequest => Some("sys/HttpRequestParams@1"),
-        EffectKind::BlobPut => Some("sys/BlobPutParams@1"),
-        EffectKind::BlobGet => Some("sys/BlobGetParams@1"),
-        EffectKind::TimerSet => Some("sys/TimerSetParams@1"),
-        EffectKind::LlmGenerate => Some("sys/LlmGenerateParams@1"),
-        EffectKind::VaultPut => Some("sys/VaultPutParams@1"),
-        EffectKind::VaultRotate => Some("sys/VaultRotateParams@1"),
-    }
+    crate::catalog::effect_params_schema(kind).map(|schema| schema.schema.name.as_str())
 }
 
 fn normalize_raise_event_literal(
@@ -850,7 +842,7 @@ mod tests {
             steps: vec![crate::PlanStep {
                 id: "emit".into(),
                 kind: crate::PlanStepKind::EmitEffect(crate::PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: ExprOrValue::Json(json!({
                         "method": "GET",
                         "url": "https://example.com",
@@ -865,7 +857,7 @@ mod tests {
             }],
             edges: vec![],
             required_caps: vec!["cap".into()],
-            allowed_effects: vec![EffectKind::HttpRequest],
+            allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         };
         normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).unwrap();
@@ -886,7 +878,7 @@ mod tests {
             steps: vec![crate::PlanStep {
                 id: "emit".into(),
                 kind: crate::PlanStepKind::EmitEffect(crate::PlanStepEmitEffect {
-                    kind: EffectKind::LlmGenerate,
+                    kind: EffectKind::llm_generate(),
                     params: ExprOrValue::Json(json!({
                         "provider": "openai",
                         "model": "gpt-4",
@@ -904,7 +896,7 @@ mod tests {
             }],
             edges: vec![],
             required_caps: vec!["cap_llm".into()],
-            allowed_effects: vec![EffectKind::LlmGenerate],
+            allowed_effects: vec![EffectKind::llm_generate()],
             invariants: vec![],
         };
         normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).unwrap();
@@ -990,7 +982,7 @@ mod tests {
             steps: vec![crate::PlanStep {
                 id: "emit".into(),
                 kind: crate::PlanStepKind::EmitEffect(crate::PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: ExprOrValue::Json(json!({
                         "record": {
                             "method": { "const": { "text": "GET" } },
@@ -1007,7 +999,7 @@ mod tests {
             }],
             edges: vec![],
             required_caps: vec!["cap".into()],
-            allowed_effects: vec![EffectKind::HttpRequest],
+            allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         };
 
@@ -1045,7 +1037,7 @@ mod tests {
             steps: vec![crate::PlanStep {
                 id: "emit".into(),
                 kind: crate::PlanStepKind::EmitEffect(crate::PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: ExprOrValue::Json(json!({
                         "record": {
                             "method": { "const": { "text": "POST" } },
@@ -1062,7 +1054,7 @@ mod tests {
             }],
             edges: vec![],
             required_caps: vec!["cap".into()],
-            allowed_effects: vec![EffectKind::HttpRequest],
+            allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         };
 

@@ -402,7 +402,7 @@ fn upgrade_plan_v1(name: &str) -> DefPlan {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("v1"),
                     cap: "cap_http_primary".into(),
                     bind: PlanBindEffect {
@@ -437,7 +437,7 @@ fn upgrade_plan_v1(name: &str) -> DefPlan {
             },
         ],
         required_caps: vec!["cap_http_primary".into()],
-        allowed_effects: vec![EffectKind::HttpRequest],
+        allowed_effects: vec![EffectKind::http_request()],
         invariants: vec![],
     }
 }
@@ -450,7 +450,7 @@ fn upgrade_plan_v2(name: &str) -> DefPlan {
         PlanStep {
             id: "emit_followup".into(),
             kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::HttpRequest,
+                kind: EffectKind::http_request(),
                 params: http_params_literal("v2"),
                 cap: "cap_http_followup".into(),
                 bind: PlanBindEffect {
@@ -500,7 +500,7 @@ fn upgrade_plan_v2(name: &str) -> DefPlan {
 fn test_http_cap(name: &str) -> DefCap {
     DefCap {
         name: name.to_string(),
-        cap_type: CapType::HttpOut,
+        cap_type: CapType::http_out(),
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
         }),
@@ -525,7 +525,7 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("shadow"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -572,7 +572,7 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
             },
         ],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::HttpRequest],
+        allowed_effects: vec![EffectKind::http_request()],
         invariants: vec![],
     };
 

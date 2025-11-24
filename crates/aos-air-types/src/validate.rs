@@ -361,7 +361,7 @@ mod tests {
         let emit = PlanStep {
             id: "emit".into(),
             kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::HttpRequest,
+                kind: EffectKind::http_request(),
                 params: Expr::Record(ExprRecord {
                     record: IndexMap::new(),
                 })
@@ -388,7 +388,7 @@ mod tests {
                 when: None,
             }],
             required_caps: vec!["http_cap".into()],
-            allowed_effects: vec![EffectKind::HttpRequest],
+            allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         }
     }
@@ -490,10 +490,10 @@ mod tests {
     #[test]
     fn disallowed_effect_detected() {
         let mut plan = sample_plan();
-        plan.allowed_effects = vec![EffectKind::TimerSet];
+        plan.allowed_effects = vec![EffectKind::timer_set()];
         let err = validate_plan(&plan).unwrap_err();
         assert!(
-            matches!(err, ValidationError::EffectNotAllowed { kind, .. } if kind == EffectKind::HttpRequest)
+            matches!(err, ValidationError::EffectNotAllowed { kind, .. } if kind == EffectKind::http_request())
         );
     }
 
@@ -511,7 +511,7 @@ mod tests {
         let duplicate_emit = PlanStep {
             id: "emit2".into(),
             kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::HttpRequest,
+                kind: EffectKind::http_request(),
                 params: Expr::Record(ExprRecord {
                     record: IndexMap::new(),
                 })

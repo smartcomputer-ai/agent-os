@@ -117,15 +117,7 @@ impl RuntimeRule {
 }
 
 fn effect_kind_matches(matcher: &AirEffectKind, actual: &str) -> bool {
-    match matcher {
-        AirEffectKind::HttpRequest => actual == aos_effects::EffectKind::HTTP_REQUEST,
-        AirEffectKind::BlobPut => actual == aos_effects::EffectKind::BLOB_PUT,
-        AirEffectKind::BlobGet => actual == aos_effects::EffectKind::BLOB_GET,
-        AirEffectKind::TimerSet => actual == aos_effects::EffectKind::TIMER_SET,
-        AirEffectKind::LlmGenerate => actual == aos_effects::EffectKind::LLM_GENERATE,
-        AirEffectKind::VaultPut => actual == aos_effects::EffectKind::VAULT_PUT,
-        AirEffectKind::VaultRotate => actual == aos_effects::EffectKind::VAULT_ROTATE,
-    }
+    matcher.as_str() == actual
 }
 
 fn origin_kind_matches(expected: &OriginKind, source: &EffectSource) -> bool {
@@ -175,7 +167,7 @@ mod tests {
             name: "com.acme/policy@1".into(),
             rules: vec![PolicyRule {
                 when: PolicyMatch {
-                    effect_kind: Some(AirEffectKind::HttpRequest),
+                    effect_kind: Some(AirEffectKind::new(AirEffectKind::HTTP_REQUEST)),
                     origin_kind: Some(OriginKind::Reducer),
                     ..Default::default()
                 },
@@ -199,7 +191,7 @@ mod tests {
             name: "com.acme/policy@2".into(),
             rules: vec![PolicyRule {
                 when: PolicyMatch {
-                    effect_kind: Some(AirEffectKind::HttpRequest),
+                    effect_kind: Some(AirEffectKind::new(AirEffectKind::HTTP_REQUEST)),
                     origin_kind: Some(OriginKind::Plan),
                     ..Default::default()
                 },

@@ -33,7 +33,7 @@ fn rule_without_decision_errors() {
 #[test]
 fn policy_match_serializes_round_trip() {
     let r#match = PolicyMatch {
-        effect_kind: Some(crate::EffectKind::HttpRequest),
+        effect_kind: Some(crate::EffectKind::http_request()),
         cap_name: None,
         host: Some("example.com".into()),
         method: Some("GET".into()),

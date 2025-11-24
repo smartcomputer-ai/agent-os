@@ -197,7 +197,7 @@ See: spec/schemas/defmodule.schema.json
 
 ## 7) Effect Catalog (Built-in v1)
 
-`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The runtime currently ships a **built-in catalog** enumerated here. Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions.
+`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The runtime currently ships a **built-in catalog** enumerated here. Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions. For strict enum validation/autocomplete, see `spec/schemas/builtin.catalog.schema.json`.
 
 Built-in kinds in v1:
 

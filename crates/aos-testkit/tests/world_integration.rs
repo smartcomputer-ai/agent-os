@@ -242,7 +242,7 @@ fn single_plan_orchestration_completes_after_receipt() {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("body"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -294,7 +294,7 @@ fn single_plan_orchestration_completes_after_receipt() {
             },
         ],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::HttpRequest],
+        allowed_effects: vec![EffectKind::http_request()],
         invariants: vec![],
     };
 
@@ -381,7 +381,7 @@ fn reducer_and_plan_effects_are_enqueued() {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("plan"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -400,7 +400,7 @@ fn reducer_and_plan_effects_are_enqueued() {
             when: None,
         }],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::HttpRequest],
+        allowed_effects: vec![EffectKind::http_request()],
         invariants: vec![],
     };
 
@@ -514,7 +514,7 @@ fn guarded_plan_branches_control_effects() {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("do-it"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -540,7 +540,7 @@ fn guarded_plan_branches_control_effects() {
             },
         ],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::HttpRequest],
+        allowed_effects: vec![EffectKind::http_request()],
         invariants: vec![],
     };
 
@@ -750,7 +750,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("first"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -768,7 +768,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
             PlanStep {
                 id: "after_receipt".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("after-receipt"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -787,7 +787,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
             PlanStep {
                 id: "after_event".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("after-event"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -828,7 +828,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
             },
         ],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::HttpRequest],
+        allowed_effects: vec![EffectKind::http_request()],
         invariants: vec![],
     };
 
@@ -904,7 +904,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("ready"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -930,7 +930,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
             },
         ],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::HttpRequest],
+        allowed_effects: vec![EffectKind::http_request()],
         invariants: vec![],
     };
 
@@ -951,7 +951,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("other"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -977,7 +977,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
             },
         ],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::HttpRequest],
+        allowed_effects: vec![EffectKind::http_request()],
         invariants: vec![],
     };
 

@@ -5,14 +5,13 @@ pub mod normalize;
 
 mod capability;
 mod intent;
-mod kinds;
 mod receipt;
 pub mod traits;
 
+pub use aos_air_types::EffectKind;
 pub use capability::{
     CapabilityBudget, CapabilityEncodeError, CapabilityGrant, CapabilityGrantBuilder,
 };
 pub use intent::{EffectIntent, EffectSource, IdempotencyKey, IntentBuilder, IntentEncodeError};
-pub use kinds::EffectKind;
 pub use normalize::{NormalizeError, normalize_effect_params};
 pub use receipt::{EffectReceipt, ReceiptDecodeError, ReceiptStatus};

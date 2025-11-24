@@ -88,7 +88,7 @@ fn reducer_modules() -> HashMap<String, DefModule> {
                     state: SchemaRef::new("com.acme/Text@1").unwrap(),
                     event: SchemaRef::new("sys/TimerFired@1").unwrap(),
                     annotations: None,
-                    effects_emitted: vec![EffectKind::HttpRequest],
+                    effects_emitted: vec![EffectKind::http_request()],
                     cap_slots: indexmap::IndexMap::new(),
                 }),
             },

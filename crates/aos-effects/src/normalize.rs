@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use aos_air_types::{
-    TypeExpr, TypeMapKey, TypePrimitive, builtins::builtin_schemas, plan_literals::SchemaIndex,
+    TypeExpr, TypeMapKey, TypePrimitive, builtins::builtin_schemas, catalog,
+    plan_literals::SchemaIndex,
 };
 use aos_cbor::to_canonical_cbor;
 use once_cell::sync::Lazy;
@@ -52,16 +53,7 @@ pub fn normalize_effect_params(
 }
 
 fn params_schema_name(kind: &EffectKind) -> Option<&'static str> {
-    match kind.as_str() {
-        crate::EffectKind::HTTP_REQUEST => Some("sys/HttpRequestParams@1"),
-        crate::EffectKind::BLOB_PUT => Some("sys/BlobPutParams@1"),
-        crate::EffectKind::BLOB_GET => Some("sys/BlobGetParams@1"),
-        crate::EffectKind::TIMER_SET => Some("sys/TimerSetParams@1"),
-        crate::EffectKind::LLM_GENERATE => Some("sys/LlmGenerateParams@1"),
-        crate::EffectKind::VAULT_PUT => Some("sys/VaultPutParams@1"),
-        crate::EffectKind::VAULT_ROTATE => Some("sys/VaultRotateParams@1"),
-        _ => None,
-    }
+    catalog::effect_params_schema(kind).map(|schema| schema.schema.name.as_str())
 }
 
 fn resolve_schema<'a>(
@@ -376,5 +368,15 @@ mod tests {
             normalize_effect_params(&EffectKind::new(crate::EffectKind::HTTP_REQUEST), &bytes)
                 .unwrap_err();
         assert!(format!("{err}").contains("missing field"));
+    }
+
+    #[test]
+    fn unknown_effect_kind_returns_error() {
+        let params = serde_cbor::to_vec(&CborValue::Map(BTreeMap::new())).unwrap();
+        let err = normalize_effect_params(&EffectKind::new("custom.effect"), &params).unwrap_err();
+        assert!(matches!(
+            err,
+            NormalizeError::UnknownEffect(kind) if kind == "custom.effect".to_string()
+        ));
     }
 }

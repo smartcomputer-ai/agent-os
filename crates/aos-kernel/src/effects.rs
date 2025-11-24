@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use aos_air_types::EffectKind;
-use aos_effects::{
-    EffectIntent, EffectKind as RuntimeEffectKind, EffectSource, normalize_effect_params,
-};
+use aos_effects::{EffectIntent, EffectKind, EffectSource, normalize_effect_params};
 use aos_wasm_abi::ReducerEffect;
 
 use crate::capability::CapabilityResolver;
@@ -67,7 +64,7 @@ impl EffectManager {
         let source = EffectSource::Reducer {
             name: reducer_name.to_string(),
         };
-        let runtime_kind = RuntimeEffectKind::new(effect.kind.clone());
+        let runtime_kind = EffectKind::new(effect.kind.clone());
         self.enqueue_effect(source, cap_name, runtime_kind, effect.params_cbor.clone())
     }
 
@@ -85,7 +82,7 @@ impl EffectManager {
         let source = EffectSource::Plan {
             name: plan_name.to_string(),
         };
-        let runtime_kind = RuntimeEffectKind::from_air(kind.clone());
+        let runtime_kind = kind.clone();
         self.enqueue_effect(source, cap_name, runtime_kind, params_cbor)
     }
 
@@ -93,7 +90,7 @@ impl EffectManager {
         &mut self,
         source: EffectSource,
         cap_name: &str,
-        runtime_kind: RuntimeEffectKind,
+        runtime_kind: EffectKind,
         params_cbor: Vec<u8>,
     ) -> Result<EffectIntent, KernelError> {
         let canonical_params = normalize_effect_params(&runtime_kind, &params_cbor)

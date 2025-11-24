@@ -129,26 +129,14 @@ fn encode_value_literal(value: &ValueLiteral) -> Result<Vec<u8>, KernelError> {
 }
 
 fn expected_cap_type(effect_kind: &str) -> Result<CapType, KernelError> {
-    match effect_kind {
-        aos_effects::EffectKind::HTTP_REQUEST => Ok(CapType::HttpOut),
-        aos_effects::EffectKind::BLOB_PUT | aos_effects::EffectKind::BLOB_GET => Ok(CapType::Blob),
-        aos_effects::EffectKind::TIMER_SET => Ok(CapType::Timer),
-        aos_effects::EffectKind::LLM_GENERATE => Ok(CapType::LlmBasic),
-        aos_effects::EffectKind::VAULT_PUT | aos_effects::EffectKind::VAULT_ROTATE => {
-            Ok(CapType::Secret)
-        }
-        other => Err(KernelError::UnsupportedEffectKind(other.to_string())),
-    }
+    let effect_kind = aos_air_types::EffectKind::new(effect_kind.to_string());
+    aos_air_types::catalog::find_effect(&effect_kind)
+        .map(|entry| entry.cap_type.clone())
+        .ok_or_else(|| KernelError::UnsupportedEffectKind(effect_kind.to_string()))
 }
 
-fn cap_type_as_str(cap_type: &CapType) -> &'static str {
-    match cap_type {
-        CapType::HttpOut => "http.out",
-        CapType::Blob => "blob",
-        CapType::Timer => "timer",
-        CapType::LlmBasic => "llm.basic",
-        CapType::Secret => "secret",
-    }
+fn cap_type_as_str(cap_type: &CapType) -> &str {
+    cap_type.as_str()
 }
 
 fn expand_cap_schema(
@@ -259,7 +247,7 @@ mod tests {
     fn defcap() -> DefCap {
         DefCap {
             name: "sys/http.out@1".into(),
-            cap_type: CapType::HttpOut,
+            cap_type: CapType::http_out(),
             schema: hosts_schema(),
         }
     }
@@ -304,7 +292,7 @@ mod tests {
         let ref_schema = hosts_schema();
         let cap_with_ref = DefCap {
             name: "sys/http.out@1".into(),
-            cap_type: CapType::HttpOut,
+            cap_type: CapType::http_out(),
             schema: TypeExpr::Ref(TypeRef {
                 reference: SchemaRef::new(referenced_schema).expect("schema ref"),
             }),
