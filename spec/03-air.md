@@ -388,6 +388,8 @@ Policies define ordered rules that allow or deny effects based on their characte
 
 **First match wins** at enqueue time; if no rule matches, the default is **deny**. The kernel populates `origin_kind` and `origin_name` on each EffectIntent from context (plan instance or reducer invocation). Policy is evaluated **after** capability constraint checks; both must pass for dispatch.
 
+Policy matching works over open strings: custom effect kinds are allowed as long as the runtime has a catalog entry mapping that kind to a capability type and schemas. Unknown effect kinds (not in the built-in catalog or a registered adapter catalog) are rejected during validation/dispatch before policy evaluation.
+
 Decisions are journaled: `PolicyDecisionRecorded { intent_hash, policy_name, rule_index, decision }`.
 
 ### Recommended Default Policy

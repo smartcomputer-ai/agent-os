@@ -8,7 +8,7 @@ When done with a todo, mark it as done, and a quick note what you achieved.
 - [x] Add a small `builtin.catalog.schema.json` (or similar) that enumerates the current built-ins for tools that still want strict validation/autocomplete without polluting the core schema. Done: added `spec/schemas/builtin.catalog.schema.json` with enums for the v1 effect kinds and capability types.
 - [x] Convert `EffectKind`/`CapType` in `aos-air-types` and downstream crates from closed enums to string newtypes, and thread the change through adapters, policy matching, and validation. Done: replaced enums with transparent string newtypes, added helpers/constants, and updated kernel/policy/capability handling to operate on namespaced strings.
 - [x] Refactor effect param/receipt normalization to resolve schemas via a catalog (e.g., `spec/defs/builtin-schemas.air.json`) instead of hard-coded enum matches; extend tests to cover unknown/custom kinds. Done: introduced a built-in effect catalog keyed by kind names, routed plan literal and runtime normalization through it, and added coverage for unknown/custom kinds.
-- [ ] Audit specs and examples for assumptions of a closed effect/cap set; tighten language where needed and add a short “adding new effect kinds” note to the workflows doc.
+- [x] Audit specs and examples for assumptions of a closed effect/cap set; tighten language where needed and add a short “adding new effect kinds” note to the workflows doc. Done: clarified open catalogs in architecture/policy docs, noted adapter-defined kinds, refreshed policy schema description, and added an “adding new effect kinds” checklist to spec/05-workflows.md.
 
 ## Context
 

@@ -792,6 +792,15 @@ Use reducers + timer.set for long-running state.
 
 Reducers persist state; kernel ensures deterministic replay.
 
+## Adding New Effect Kinds (when extending the catalog)
+
+Effect kinds and capability types are open strings. To introduce a new kind:
+- Create or register an adapter that knows how to execute it and return a signed receipt, and map the kind to a capability type.
+- Add canonical param/receipt schemas (for first-class/built-in kinds, place them in `spec/defs/builtin-schemas.air.json` and refresh `spec/schemas/builtin.catalog.schema.json` for strict tooling). Adapter-scoped kinds can ship their own schemas alongside the adapter.
+- Define a `defcap` for the capability type that enforces host/model/etc. constraints; bind grants in manifests and list the new kind in `allowed_effects` where used.
+- Update policy to allow/deny the new kind explicitly; default-deny will block unknown names until policy and capability wiring exist.
+- Add tests or shadow scenarios that exercise the new kind to ensure params/receipts canonicalize and replay correctly.
+
 ## Decision Matrix
 
 | Scenario | Recommended Pattern | Why |
