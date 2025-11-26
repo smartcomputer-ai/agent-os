@@ -181,7 +181,7 @@ mod tests {
             ),
             (
                 "spec/schemas/defpolicy.schema.json",
-                "sha256:09cf32297a6273c6213534825aaf1f94fd27fd10bfe570a316c36ed9a638c7d7",
+                "sha256:c8146b00718449e9d49ddfa70589d848202bd5bde695b656a088c8f39481d843",
             ),
             (
                 "spec/schemas/manifest.schema.json",
