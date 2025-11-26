@@ -15,22 +15,16 @@
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "EffectKind": {
-      "title": "Built-in effect kinds (v1)",
+      "title": "Effect kind (namespaced string)",
+      "description": "Open-ended effect kind identifier. Built-in catalog is documented in spec/03-air.md and backed by canonical schemas in spec/defs/builtin-schemas.air.json.",
       "type": "string",
-      "enum": [
-        "http.request",
-        "blob.put",
-        "blob.get",
-        "timer.set",
-        "llm.generate",
-        "vault.put",
-        "vault.rotate"
-      ]
+      "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
     },
     "CapType": {
-      "title": "Capability types (v1)",
+      "title": "Capability type (namespaced string)",
+      "description": "Open-ended capability type identifier. Built-in types shipped in v1 are documented in spec/03-air.md.",
       "type": "string",
-      "enum": ["http.out", "blob", "timer", "llm.basic", "secret"]
+      "pattern": "^[a-z][a-z0-9_.-]*(\\.[a-z0-9_.-]+)*$"
     },
     "VarName": {
       "type": "string",

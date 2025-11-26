@@ -495,7 +495,7 @@ mod tests {
                 PlanStep {
                     id: "emit".into(),
                     kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                        kind: EffectKind::HttpRequest,
+                        kind: EffectKind::http_request(),
                         params: http_params.clone().into(),
                         cap: "http_cap".into(),
                         bind: PlanBindEffect {
@@ -551,7 +551,7 @@ mod tests {
                 },
             ],
             required_caps: vec!["http_cap".into()],
-            allowed_effects: vec![EffectKind::HttpRequest],
+            allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         }
     }
@@ -668,7 +668,7 @@ mod tests {
         let store = MemStore::default();
         let defcap = DefCap {
             name: "com.acme/secret-cap@1".into(),
-            cap_type: CapType::Secret,
+            cap_type: CapType::secret(),
             schema: TypeExpr::Ref(TypeRef {
                 reference: SchemaRef::new("sys/SecretRef@1").unwrap(),
             }),

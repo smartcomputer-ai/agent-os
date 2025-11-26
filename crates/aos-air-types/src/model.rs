@@ -562,17 +562,69 @@ pub struct DefCap {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum CapType {
-    #[serde(rename = "http.out")]
-    HttpOut,
-    #[serde(rename = "blob")]
-    Blob,
-    Timer,
-    #[serde(rename = "llm.basic")]
-    LlmBasic,
-    #[serde(rename = "secret")]
-    Secret,
+#[serde(transparent)]
+pub struct CapType(String);
+
+impl CapType {
+    pub const HTTP_OUT: &'static str = "http.out";
+    pub const BLOB: &'static str = "blob";
+    pub const TIMER: &'static str = "timer";
+    pub const LLM_BASIC: &'static str = "llm.basic";
+    pub const SECRET: &'static str = "secret";
+
+    pub fn new(cap_type: impl Into<String>) -> Self {
+        Self(cap_type.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn http_out() -> Self {
+        Self::new(Self::HTTP_OUT)
+    }
+
+    pub fn blob() -> Self {
+        Self::new(Self::BLOB)
+    }
+
+    pub fn timer() -> Self {
+        Self::new(Self::TIMER)
+    }
+
+    pub fn llm_basic() -> Self {
+        Self::new(Self::LLM_BASIC)
+    }
+
+    pub fn secret() -> Self {
+        Self::new(Self::SECRET)
+    }
+}
+
+impl<S: Into<String>> From<S> for CapType {
+    fn from(value: S) -> Self {
+        CapType::new(value)
+    }
+}
+
+impl std::fmt::Display for CapType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for CapType {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(s.to_owned()))
+    }
+}
+
+impl AsRef<str> for CapType {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -727,21 +779,79 @@ pub struct CapGrantBudget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum EffectKind {
-    #[serde(rename = "http.request")]
-    HttpRequest,
-    #[serde(rename = "blob.put")]
-    BlobPut,
-    #[serde(rename = "blob.get")]
-    BlobGet,
-    #[serde(rename = "timer.set")]
-    TimerSet,
-    #[serde(rename = "llm.generate")]
-    LlmGenerate,
-    #[serde(rename = "vault.put")]
-    VaultPut,
-    #[serde(rename = "vault.rotate")]
-    VaultRotate,
+#[serde(transparent)]
+pub struct EffectKind(String);
+
+impl EffectKind {
+    pub const HTTP_REQUEST: &'static str = "http.request";
+    pub const BLOB_PUT: &'static str = "blob.put";
+    pub const BLOB_GET: &'static str = "blob.get";
+    pub const TIMER_SET: &'static str = "timer.set";
+    pub const LLM_GENERATE: &'static str = "llm.generate";
+    pub const VAULT_PUT: &'static str = "vault.put";
+    pub const VAULT_ROTATE: &'static str = "vault.rotate";
+
+    pub fn new(kind: impl Into<String>) -> Self {
+        Self(kind.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn http_request() -> Self {
+        Self::new(Self::HTTP_REQUEST)
+    }
+
+    pub fn blob_put() -> Self {
+        Self::new(Self::BLOB_PUT)
+    }
+
+    pub fn blob_get() -> Self {
+        Self::new(Self::BLOB_GET)
+    }
+
+    pub fn timer_set() -> Self {
+        Self::new(Self::TIMER_SET)
+    }
+
+    pub fn llm_generate() -> Self {
+        Self::new(Self::LLM_GENERATE)
+    }
+
+    pub fn vault_put() -> Self {
+        Self::new(Self::VAULT_PUT)
+    }
+
+    pub fn vault_rotate() -> Self {
+        Self::new(Self::VAULT_ROTATE)
+    }
+}
+
+impl<S: Into<String>> From<S> for EffectKind {
+    fn from(value: S) -> Self {
+        EffectKind::new(value)
+    }
+}
+
+impl std::fmt::Display for EffectKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for EffectKind {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(s.to_owned()))
+    }
+}
+
+impl AsRef<str> for EffectKind {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
 }
 
 #[cfg(test)]

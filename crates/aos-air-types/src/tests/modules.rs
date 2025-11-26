@@ -49,7 +49,7 @@ fn reducer_abi_struct_round_trip() {
             state: SchemaRef::new("com.acme/State@1").unwrap(),
             event: SchemaRef::new("com.acme/Event@1").unwrap(),
             annotations: None,
-            effects_emitted: vec![crate::EffectKind::HttpRequest],
+            effects_emitted: vec![crate::EffectKind::http_request()],
             cap_slots: indexmap::IndexMap::new(),
         }),
     };

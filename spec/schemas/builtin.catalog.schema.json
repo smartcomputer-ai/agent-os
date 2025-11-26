@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v1/builtin.catalog.schema.json",
+  "title": "AIR v1 built-in catalog",
+  "description": "Enumerates the built-in effect kinds and capability types shipped in AIR v1. Use alongside common.schema.json when tooling wants strict enums without constraining the core schema.",
+  "type": "object",
+  "properties": {
+    "effect_kinds": {
+      "title": "Built-in effect kinds (v1)",
+      "type": "array",
+      "items": { "$ref": "#/$defs/EffectKindBuiltin" }
+    },
+    "cap_types": {
+      "title": "Built-in capability types (v1)",
+      "type": "array",
+      "items": { "$ref": "#/$defs/CapTypeBuiltin" }
+    }
+  },
+  "required": ["effect_kinds", "cap_types"],
+  "additionalProperties": false,
+  "default": {
+    "effect_kinds": [
+      "http.request",
+      "blob.put",
+      "blob.get",
+      "timer.set",
+      "llm.generate",
+      "vault.put",
+      "vault.rotate"
+    ],
+    "cap_types": [
+      "http.out",
+      "blob",
+      "timer",
+      "llm.basic",
+      "secret"
+    ]
+  },
+  "$defs": {
+    "EffectKindBuiltin": {
+      "type": "string",
+      "enum": [
+        "http.request",
+        "blob.put",
+        "blob.get",
+        "timer.set",
+        "llm.generate",
+        "vault.put",
+        "vault.rotate"
+      ]
+    },
+    "CapTypeBuiltin": {
+      "type": "string",
+      "enum": [
+        "http.out",
+        "blob",
+        "timer",
+        "llm.basic",
+        "secret"
+      ]
+    }
+  }
+}

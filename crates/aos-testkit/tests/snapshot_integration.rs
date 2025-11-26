@@ -27,7 +27,7 @@ fn deny_plan_http_policy() -> DefPolicy {
         name: "com.acme/deny-plan-http@1".into(),
         rules: vec![PolicyRule {
             when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::HttpRequest),
+                effect_kind: Some(AirEffectKind::http_request()),
                 origin_kind: Some(OriginKind::Plan),
                 ..Default::default()
             },

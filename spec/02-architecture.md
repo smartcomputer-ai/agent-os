@@ -26,7 +26,7 @@ Application logic runs inside sandboxed WASM modules (reducers and pure componen
 - Policy Gate: declarative allow/deny/require‑approval rules over effects and plans; budgets settle on receipts.
 - WASM Runtime: deterministic sandbox (Wasmtime profile) for reducers and pure components.
 - Effect Manager: queues effect intents, dispatches to adapters, ingests receipts, enforces idempotency.
-- Adapters: host‑side executors for effect kinds (HTTP, Blob/FS, Timer, LLM in v1) with signing.
+- Adapters: host‑side executors for effect kinds (HTTP, Blob/FS, Timer, LLM ship in v1; custom adapters can register additional kinds/cap types) with signing.
 - CLI/Tooling: world lifecycle commands, shadow/diff, approvals, module build/register, and inspection.
 - Observability: provenance (“why graph”), journal tailing, receipt viewers, and minimal metrics.
 
@@ -154,6 +154,8 @@ Four adapters ship in v1:
 - **LLM**: `llm.generate(model, params, input_ref) → receipt(output_ref, token_usage, cost, provider_id)`
 
 Each adapter signs receipts (ed25519/HMAC) including intent_hash, inputs/outputs hashes, timings, and cost.
+
+The effect catalog is **not closed**: the core schemas leave `EffectKind` and `CapType` open. V1 ships the above built-ins plus their capability types (`http.out`, `blob`, `timer`, `llm.basic`, `secret`), but additional adapters can register new kinds/cap types as soon as the runtime knows how to map them to schemas and receipts.
 
 Version 1.2 will add **WASM-based adapters**: custom effect implementations that run as WASM modules with a non-deterministic profile, including WASI and other host capabilities. These enable extensible effect types while maintaining the receipt-based audit boundary—adapters can be deployed, upgraded, and sandboxed like any other module, but they operate outside the deterministic replay guarantees of reducers.
 

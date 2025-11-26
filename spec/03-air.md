@@ -172,9 +172,11 @@ Registers a WASM module with its interface contract.
       "cap_slots"?: {slot_name: <CapType>}
     }
   },
-  "key_schema"?: <SchemaRef>
+"key_schema"?: <SchemaRef>
 }
 ```
+
+`EffectKind` and `CapType` are namespaced strings. The schema no longer hardcodes an enum; v1 ships a built-in catalog listed in §7, and adapters can introduce additional kinds as runtime support lands.
 
 The `key_schema` field (v1.1 addendum) documents the key type when this reducer is routed as keyed. The ABI remains a single `step` export; the kernel provides an envelope with optional key.
 
@@ -195,7 +197,7 @@ See: spec/schemas/defmodule.schema.json
 
 ## 7) Effect Catalog (Built-in v1)
 
-AgentOS ships with a small, explicit catalog of effect kinds. Their schema definitions live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same canonical shapes. Keeping them in the repo (instead of prose-only) lets tooling type-check effect params/receipts and keeps adapters honest about wire formats.
+`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The runtime currently ships a **built-in catalog** enumerated here. Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions. For strict enum validation/autocomplete, see `spec/schemas/builtin.catalog.schema.json`.
 
 Built-in kinds in v1:
 
@@ -218,6 +220,16 @@ Built-in kinds in v1:
 **llm.generate**
 - params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, input_ref:hash, tools?:list<text> }`
 - receipt: `{ output_ref:hash, token_usage:{prompt:nat,completion:nat}, cost_cents:nat, provider_id:text }`
+
+**vault.put**
+- params: `{ alias:text, binding_id:text, value_ref:hash, expected_digest:hash }`
+- receipt: `{ alias:text, version:nat, binding_id:text, digest:hash }`
+
+**vault.rotate**
+- params: `{ alias:text, version:nat, binding_id:text, expected_digest:hash }`
+- receipt: `{ alias:text, version:nat, binding_id:text, digest:hash }`
+
+Built-in capability types paired with these effects (v1): `http.out`, `blob`, `timer`, `llm.basic`, and `secret`. The schema stays open to future types even though the kernel ships this curated set today.
 
 ### Built-in reducer receipt events
 
@@ -361,7 +373,7 @@ Policies define ordered rules that allow or deny effects based on their characte
 
 ### Match Fields (v1)
 
-- `effect_kind?: EffectKind` – which effect kind (http.request, llm.generate, etc.)
+- `effect_kind?: EffectKind` – namespaced effect kind (http.request, llm.generate, etc.)
 - `cap_name?: text` – which CapGrant name
 - `host?: text` – host suffix or glob (prefer using CapGrant.hosts instead)
 - `method?: text` – HTTP method
@@ -375,6 +387,8 @@ Policies define ordered rules that allow or deny effects based on their characte
 ### Semantics
 
 **First match wins** at enqueue time; if no rule matches, the default is **deny**. The kernel populates `origin_kind` and `origin_name` on each EffectIntent from context (plan instance or reducer invocation). Policy is evaluated **after** capability constraint checks; both must pass for dispatch.
+
+Policy matching works over open strings: custom effect kinds are allowed as long as the runtime has a catalog entry mapping that kind to a capability type and schemas. Unknown effect kinds (not in the built-in catalog or a registered adapter catalog) are rejected during validation/dispatch before policy evaluation.
 
 Decisions are journaled: `PolicyDecisionRecorded { intent_hash, policy_name, rule_index, decision }`.
 

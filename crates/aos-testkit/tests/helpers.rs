@@ -53,7 +53,7 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("https://example.com"),
                     cap: "cap_http".into(),
                     bind: PlanBindEffect {
@@ -105,7 +105,7 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
             },
         ],
         required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::HttpRequest],
+        allowed_effects: vec![EffectKind::http_request()],
         invariants: vec![],
     };
 

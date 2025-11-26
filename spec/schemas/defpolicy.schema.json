@@ -34,7 +34,7 @@
       "properties": {
         "effect_kind": {
           "$ref": "common.schema.json#/$defs/EffectKind",
-          "description": "Match effect kind (http.request, llm.generate, etc.)"
+          "description": "Match effect kind (namespaced string; built-in catalog documented in spec/03-air.md, custom kinds allowed when registered by adapters)"
         },
         "cap_name": {
           "$ref": "common.schema.json#/$defs/CapGrantName",

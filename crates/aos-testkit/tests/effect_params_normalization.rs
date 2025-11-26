@@ -18,7 +18,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
         .build()
         .expect("grant");
     let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::LlmBasic)]);
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::llm_basic())]);
     let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
 
     // Params variant A: temperature as float
@@ -29,7 +29,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let intent_a = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::LlmGenerate,
+            &EffectKind::llm_generate(),
             "cap_llm",
             params_a.clone(),
         )
@@ -37,7 +37,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let intent_b = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::LlmGenerate,
+            &EffectKind::llm_generate(),
             "cap_llm",
             params_b.clone(),
         )
@@ -62,7 +62,7 @@ fn reducer_effect_params_canonicalize_noop() {
         .build()
         .expect("grant");
     let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::Timer)]);
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::timer())]);
     let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
 
     // Params with out-of-order fields (key optional) to ensure canonicalization sorts.
@@ -127,7 +127,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
         .build()
         .expect("grant");
     let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::HttpOut)]);
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::http_out())]);
     let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
 
     // Sugar A: body_ref null, headers absent
@@ -151,7 +151,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let intent_a = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::HttpRequest,
+            &EffectKind::http_request(),
             "cap_http",
             params_a.clone(),
         )
@@ -159,7 +159,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let intent_b = mgr
         .enqueue_plan_effect(
             "com.acme/Plan@1",
-            &EffectKind::HttpRequest,
+            &EffectKind::http_request(),
             "cap_http",
             params_b.clone(),
         )

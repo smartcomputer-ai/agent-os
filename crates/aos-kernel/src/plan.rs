@@ -1064,7 +1064,7 @@ mod tests {
             steps,
             edges: vec![],
             required_caps: vec!["cap".into()],
-            allowed_effects: vec![EffectKind::HttpRequest],
+            allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         }
     }
@@ -1083,7 +1083,7 @@ mod tests {
                     expiry_ns: None,
                     budget: None,
                 },
-                CapType::HttpOut,
+                CapType::http_out(),
             ),
             (
                 CapabilityGrant {
@@ -1093,7 +1093,7 @@ mod tests {
                     expiry_ns: None,
                     budget: None,
                 },
-                CapType::HttpOut,
+                CapType::http_out(),
             ),
         ];
         let resolver = CapabilityResolver::from_runtime_grants(grants);
@@ -1237,7 +1237,7 @@ mod tests {
         let steps = vec![PlanStep {
             id: "emit".into(),
             kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::HttpRequest,
+                kind: EffectKind::http_request(),
                 params: http_params_literal("data"),
                 cap: "cap".into(),
                 bind: PlanBindEffect {
@@ -1282,7 +1282,7 @@ mod tests {
         let steps = vec![PlanStep {
             id: "emit".into(),
             kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::HttpRequest,
+                kind: EffectKind::http_request(),
                 params: params_literal.into(),
                 cap: "cap".into(),
                 bind: PlanBindEffect {
@@ -1304,7 +1304,7 @@ mod tests {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("data"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
@@ -1337,7 +1337,7 @@ mod tests {
             PlanStep {
                 id: "emit_a".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("alpha"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
@@ -1348,7 +1348,7 @@ mod tests {
             PlanStep {
                 id: "emit_b".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("beta"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
@@ -1359,7 +1359,7 @@ mod tests {
             PlanStep {
                 id: "emit_c".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("gamma"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
@@ -1821,7 +1821,7 @@ mod tests {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::HttpRequest,
+                    kind: EffectKind::http_request(),
                     params: http_params_literal("payload"),
                     cap: "cap".into(),
                     bind: PlanBindEffect {
