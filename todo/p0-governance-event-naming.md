@@ -68,9 +68,11 @@ Proposed {
 ShadowReport {
   proposal_id: u64,
   patch_hash: Hash,
+  manifest_hash: Hash,          // candidate manifest root
   effects_predicted: [EffectKind],
-  diffs: Hash,          // reference to diff summary or embedded summary
-  summary_cbor?: bytes  // optional opaque ShadowSummary (current code stores this)
+  pending_receipts?: [PendingPlanReceipt],
+  plan_results?: [PlanResultPreview],
+  ledger_deltas?: [LedgerDelta]
 }
 
 Approved {
@@ -89,9 +91,9 @@ Applied {
 
 Notes:
 - Dual-key keeps current code paths intact while enabling hash-based audit/search.
-- `ShadowReport` can either flatten fields or keep `summary_cbor`; we should pick one, but for compatibility list both.
-- `Approved` adds `decision` to support rejection (code currently approve-only).
-- `Applied` must record the new manifest root (bug in code currently uses patch hash).
+- `ShadowReport` is flattened (no `summary_cbor`) and includes the candidate manifest root.
+- `Approved` adds `decision` to support rejection.
+- `Applied` must record the new manifest root (not the patch hash).
 
 ## Implementation Plan
 
@@ -104,7 +106,7 @@ Notes:
 ### Step 2: Align `spec/03-air.md`
 
 - Mirror the dual-key shapes and naming.
-- Decide and document `ShadowReport` shape: flatten predicted effects/diffs or keep `summary_cbor`; if keeping opaque summary, describe its contents (predicted_effects, pending_receipts, plan_results, ledger_deltas, manifest_hash).
+- Document flattened `ShadowReport` fields (no `summary_cbor`), including manifest_hash and optional lists.
 - Add `decision` to `Approved` (or explicitly defer and note approve-only).
 
 ### Step 3: Update Rust code
@@ -112,7 +114,6 @@ Notes:
 - Rename enums/records to the shorter names.
 - Add `patch_hash` to Shadow/Approved/Applied records; ensure governance manager carries both keys.
 - Fix `Applied` to record `manifest_hash_new` (actual manifest root) alongside ids.
-- If we keep `summary_cbor`, ensure serde tags match the spec wording.
 
 ### Step 4: Update examples/tests
 
@@ -121,8 +122,8 @@ Notes:
 
 ## Acceptance Criteria
 
-- [ ] `spec/02-architecture.md` uses `Proposed/ShadowReport/Approved/Applied` with dual-key fields and manifest root in `Applied`.
-- [ ] `spec/03-air.md` matches naming and fields; `ShadowReport` shape documented; `Approved` decision field resolved (implemented or explicitly deferred).
-- [ ] Rust enums/records in `aos-kernel` renamed and carry both `proposal_id` and `patch_hash`; `Applied` stores the new manifest root.
-- [ ] No references to old names remain in codebase.
-- [ ] Governance examples/tests cover dual-key semantics and manifest root correctness.
+- [x] `spec/02-architecture.md` uses `Proposed/ShadowReport/Approved/Applied` with dual-key fields and manifest root in `Applied`.
+- [x] `spec/03-air.md` matches naming and fields; `ShadowReport` shape documented; `Approved` decision field resolved (implemented or explicitly deferred).
+- [x] Rust enums/records in `aos-kernel` renamed and carry both `proposal_id` and `patch_hash`; `Applied` stores the new manifest root.
+- [x] No references to old names remain in codebase (only this todo retains the before/after table for context).
+- [x] Governance examples/tests cover dual-key semantics and manifest root correctness.

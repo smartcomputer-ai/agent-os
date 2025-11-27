@@ -99,8 +99,12 @@ impl ShadowExecutor {
             })
             .collect::<Vec<_>>();
 
+        let manifest_bytes = to_canonical_cbor(&config.patch.manifest)
+            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
+        let manifest_hash = Hash::of_bytes(&manifest_bytes).to_hex();
+
         Ok(ShadowSummary {
-            manifest_hash: config.patch_hash.clone(),
+            manifest_hash,
             predicted_effects,
             pending_receipts,
             plan_results,
@@ -138,6 +142,11 @@ mod tests {
 
     fn hash_of_patch(patch: &ManifestPatch) -> String {
         let bytes = to_canonical_cbor(patch).expect("canonical patch bytes");
+        Hash::of_bytes(&bytes).to_hex()
+    }
+
+    fn hash_of_manifest(patch: &ManifestPatch) -> String {
+        let bytes = to_canonical_cbor(&patch.manifest).expect("canonical manifest bytes");
         Hash::of_bytes(&bytes).to_hex()
     }
 
@@ -180,6 +189,7 @@ mod tests {
             nodes: vec![],
         };
         let patch_hash = hash_of_patch(&patch);
+        let manifest_hash = hash_of_manifest(&patch);
         let summary = ShadowExecutor::run(
             store,
             &ShadowConfig {
@@ -191,7 +201,7 @@ mod tests {
         )
         .expect("shadow run");
 
-        assert_eq!(summary.manifest_hash, patch_hash);
+        assert_eq!(summary.manifest_hash, manifest_hash);
     }
 
     #[test]
@@ -211,6 +221,7 @@ mod tests {
             nodes: vec![],
         };
         let patch_hash = hash_of_patch(&patch);
+        let manifest_hash = hash_of_manifest(&patch);
 
         let summary = ShadowExecutor::run(
             store,
@@ -223,6 +234,6 @@ mod tests {
         )
         .expect("shadow should allow placeholder secrets");
 
-        assert_eq!(summary.manifest_hash, patch_hash);
+        assert_eq!(summary.manifest_hash, manifest_hash);
     }
 }

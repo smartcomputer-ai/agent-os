@@ -789,12 +789,14 @@ impl<S: Store + 'static> Kernel<S> {
         };
         let mut summary = ShadowExecutor::run(self.store.clone(), &config)?;
         summary.ledger_deltas = Self::compute_ledger_deltas(&self.manifest, &config.patch.manifest);
-        let summary_bytes = serde_cbor::to_vec(&summary)
-            .map_err(|err| KernelError::Manifest(format!("encode summary: {err}")))?;
         let record = GovernanceRecord::ShadowReport(ShadowReportRecord {
             proposal_id,
             patch_hash: proposal.patch_hash.clone(),
-            summary_cbor: Some(summary_bytes),
+            manifest_hash: summary.manifest_hash.clone(),
+            effects_predicted: summary.predicted_effects.clone(),
+            pending_receipts: summary.pending_receipts.clone(),
+            plan_results: summary.plan_results.clone(),
+            ledger_deltas: summary.ledger_deltas.clone(),
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);

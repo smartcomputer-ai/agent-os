@@ -172,8 +172,15 @@ pub struct ProposedRecord {
 pub struct ShadowReportRecord {
     pub proposal_id: u64,
     pub patch_hash: String,
-    #[serde(with = "serde_bytes_opt", default, skip_serializing_if = "Option::is_none")]
-    pub summary_cbor: Option<Vec<u8>>,
+    pub manifest_hash: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects_predicted: Vec<crate::shadow::PredictedEffect>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_receipts: Vec<crate::shadow::PendingPlanReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plan_results: Vec<crate::shadow::PlanResultPreview>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ledger_deltas: Vec<crate::shadow::LedgerDelta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

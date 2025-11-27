@@ -8,6 +8,7 @@ use crate::journal::{
     AppliedRecord, ApprovedRecord, ApprovalDecisionRecord, GovernanceRecord, ProposedRecord,
     ShadowReportRecord,
 };
+use crate::shadow::ShadowSummary;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ProposalState {
@@ -24,7 +25,7 @@ pub struct Proposal {
     pub description: Option<String>,
     pub patch_hash: String,
     pub state: ProposalState,
-    pub shadow_summary: Option<Vec<u8>>,
+    pub shadow_summary: Option<ShadowSummary>,
     pub approver: Option<String>,
 }
 
@@ -78,7 +79,13 @@ impl GovernanceManager {
             GovernanceRecord::ShadowReport(shadow) => {
                 if let Some(proposal) = self.proposals.get_mut(&shadow.proposal_id) {
                     proposal.state = ProposalState::Shadowed;
-                    proposal.shadow_summary = shadow.summary_cbor.clone();
+                    proposal.shadow_summary = Some(ShadowSummary {
+                        manifest_hash: shadow.manifest_hash.clone(),
+                        predicted_effects: shadow.effects_predicted.clone(),
+                        pending_receipts: shadow.pending_receipts.clone(),
+                        plan_results: shadow.plan_results.clone(),
+                        ledger_deltas: shadow.ledger_deltas.clone(),
+                    });
                 }
             }
             GovernanceRecord::Approved(approved) => {

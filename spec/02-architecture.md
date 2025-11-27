@@ -42,7 +42,7 @@ The kernel handles several categories of events. The first four are **design-tim
 
 **Design-time events (dual-keyed):**
 - **Proposed** {proposal_id, patch_hash, author, manifest_base, description?}
-- **ShadowReport** {proposal_id, patch_hash, effects_predicted, diffs, summary_cbor?}
+- **ShadowReport** {proposal_id, patch_hash, manifest_hash, effects_predicted, pending_receipts?, plan_results?, ledger_deltas?}
 - **Approved** {proposal_id, patch_hash, approver, decision:"approve"|"reject"}
 - **Applied** {proposal_id, patch_hash, manifest_hash_new}
 

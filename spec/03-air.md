@@ -579,13 +579,13 @@ The journal records both design-time (governance) and runtime (execution) events
 ### Governance and Control Plane (Design Time)
 
 - **Proposed** `{ proposal_id:u64, patch_hash, author, manifest_base, description? }`
-- **ShadowReport** `{ proposal_id:u64, patch_hash, effects_predicted:[EffectKind…], diffs:[typed summary], summary_cbor?:bytes }`
+- **ShadowReport** `{ proposal_id:u64, patch_hash, manifest_hash, effects_predicted:[EffectKind…], pending_receipts?:[PendingPlanReceipt], plan_results?:[PlanResultPreview], ledger_deltas?:[LedgerDelta] }`
 - **Approved** `{ proposal_id:u64, patch_hash, approver, decision:"approve"|"reject" }`
 - **Applied** `{ proposal_id:u64, patch_hash, manifest_hash_new }`
 
 Notes:
 - `proposal_id` is the world-local correlation key; `patch_hash` is the content key and may repeat if the same patch is resubmitted.
-- `summary_cbor` is an optional opaque ShadowSummary used by the current kernel; if present it contains predicted_effects, pending_receipts, plan_results, ledger_deltas, and manifest_hash.
+- `ShadowReport.manifest_hash` is the candidate manifest root produced by applying the patch (not the patch hash).
 - `Applied.manifest_hash_new` is the new manifest root after apply (not the patch hash).
 - Apply is only valid after an `Approved` record whose `decision` is `approve`; a `reject` decision halts the proposal.
 
