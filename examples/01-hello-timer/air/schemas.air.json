@@ -31,7 +31,7 @@
         "Start": {
           "record": {
             "deliver_at_ns": { "nat": {} },
-            "key": { "text": {} }
+            "key": { "option": { "text": {} } }
           }
         },
         "Fired": { "ref": "sys/TimerFired@1" }

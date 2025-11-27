@@ -17,7 +17,6 @@ use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 const REDUCER_NAME: &str = "demo/TimerSM@1";
 const EVENT_SCHEMA: &str = "demo/TimerEvent@1";
 const ADAPTER_ID: &str = "adapter.timer.fake";
-const START_KEY: &str = "demo-key";
 const DELIVER_AT_NS: u64 = 1_000_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -45,19 +44,21 @@ impl Default for TimerPc {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartEvent {
     deliver_at_ns: u64,
-    key: String,
+    key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TimerSetParams {
     deliver_at_ns: u64,
-    key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TimerSetReceipt {
     delivered_at_ns: u64,
-    key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
@@ -70,10 +71,10 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut run = harness.start()?;
 
     println!("→ Hello Timer demo");
-    println!("     start key={START_KEY} deliver_ns={DELIVER_AT_NS}");
+    println!("     start key=? deliver_ns={DELIVER_AT_NS}");
     let start = StartEvent {
         deliver_at_ns: DELIVER_AT_NS,
-        key: START_KEY.into(),
+        key: None,
     };
     run.submit_event(&start)?;
     synthesize_timer_receipts(run.kernel_mut())?;
@@ -102,7 +103,7 @@ fn synthesize_timer_receipts(kernel: &mut Kernel<FsStore>) -> Result<()> {
             );
             let params: TimerSetParams = serde_cbor::from_slice(&intent.params_cbor)?;
             println!(
-                "     timer.set -> key={} deliver_ns={}",
+                "     timer.set -> key={:?} deliver_ns={}",
                 params.key, params.deliver_at_ns
             );
             let receipt_payload = TimerSetReceipt {

@@ -107,8 +107,8 @@ Fixing this now is cheap. Fixing it after adoption is expensive.
 
 ## Acceptance Criteria
 
-- [ ] Every field in `builtin-schemas.air.json` matches `03-air.md` §7 exactly
-- [ ] Prose and schema agree on required vs optional for all fields
-- [ ] Golden hash tests pass with updated schemas
-- [ ] Example 01-hello-timer works with optional key
-- [ ] Adapters correctly handle optional cost_cents
+- [x] Every field in `builtin-schemas.air.json` matches `03-air.md` §7 exactly
+- [x] Prose and schema agree on required vs optional for all fields
+- [x] Golden hash tests pass with updated schemas
+- [x] Example 01-hello-timer works with optional key
+- [x] Adapters correctly handle optional cost_cents

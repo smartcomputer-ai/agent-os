@@ -85,10 +85,16 @@ fn canonicalize_value(
             };
             let mut canon_map: BTreeMap<CborValue, CborValue> = BTreeMap::new();
             for (field, ty) in record.record.iter() {
-                let raw = map.remove(&CborValue::Text(field.clone())).ok_or_else(|| {
-                    NormalizeError::Invalid(format!("record missing field '{field}'"))
-                })?;
                 let field_schema = resolve_schema(ty, schemas)?;
+                let raw = match map.remove(&CborValue::Text(field.clone())) {
+                    Some(value) => value,
+                    None if is_optional_type(&field_schema) => CborValue::Null,
+                    None => {
+                        return Err(NormalizeError::Invalid(format!(
+                            "record missing field '{field}'"
+                        )));
+                    }
+                };
                 let canon = canonicalize_value(raw, &field_schema, schemas)?;
                 canon_map.insert(CborValue::Text(field.clone()), canon);
             }
@@ -181,6 +187,10 @@ fn canonicalize_value(
         },
         TypeExpr::Ref(_) => unreachable!("refs should be resolved before canonicalize"),
     }
+}
+
+fn is_optional_type(schema: &TypeExpr) -> bool {
+    matches!(schema, TypeExpr::Option(_))
 }
 
 fn canonicalize_primitive(

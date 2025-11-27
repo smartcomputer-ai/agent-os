@@ -87,7 +87,8 @@ pub struct LlmGenerateParams {
 pub struct LlmGenerateReceipt {
     pub output_ref: HashRef,
     pub token_usage: TokenUsage,
-    pub cost_cents: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_cents: Option<u64>,
     pub provider_id: String,
 }
 
