@@ -25,7 +25,7 @@
               ]
             },
             "headers": { "map": [] },
-            "body_ref": { "const": { "null": {} } }
+            "body_ref": { "null": {} }
           }
         },
         "cap": "cap_http_chain",

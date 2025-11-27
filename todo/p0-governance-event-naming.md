@@ -47,81 +47,82 @@ Applied {manifest_hash_new}
 
 Also note field name differences (`proposal_id` vs `patch_hash`, etc.)
 
-## Recommendation
+## Recommendation (updated)
 
-Use the **shorter names** (`Proposed`, `ShadowReport`, `Approved`, `Applied`) everywhere:
+Use the **shorter names** (`Proposed`, `ShadowReport`, `Approved`, `Applied`) everywhere **and carry both IDs**:
 
-1. They're more concise
-2. They match the conceptual verbs (propose/shadow/approve/apply)
-3. Journal enums should be short since they appear frequently
+- `proposal_id`: primary correlation key (u64, monotonic per world) — used by the kernel/governance manager.
+- `patch_hash`: content-addressed key — enables cross-world tooling and audit; not guaranteed unique (retries can reuse a patch).
 
-### Canonical Journal Entry Shapes
+### Canonical Journal Entry Shapes (dual-key)
 
 ```
 Proposed {
+  proposal_id: u64,
   patch_hash: Hash,
   author: text,
-  manifest_base: Hash
+  manifest_base: Hash,
+  description?: text
 }
 
 ShadowReport {
+  proposal_id: u64,
   patch_hash: Hash,
   effects_predicted: [EffectKind],
-  diffs: Hash  // reference to diff summary
+  diffs: Hash,          // reference to diff summary or embedded summary
+  summary_cbor?: bytes  // optional opaque ShadowSummary (current code stores this)
 }
 
 Approved {
+  proposal_id: u64,
   patch_hash: Hash,
   approver: text,
   decision: "approve" | "reject"
 }
 
 Applied {
-  manifest_hash: Hash
+  proposal_id: u64,
+  patch_hash: Hash,
+  manifest_hash_new: Hash  // actual manifest root after apply (not the patch hash)
 }
 ```
+
+Notes:
+- Dual-key keeps current code paths intact while enabling hash-based audit/search.
+- `ShadowReport` can either flatten fields or keep `summary_cbor`; we should pick one, but for compatibility list both.
+- `Approved` adds `decision` to support rejection (code currently approve-only).
+- `Applied` must record the new manifest root (bug in code currently uses patch hash).
 
 ## Implementation Plan
 
 ### Step 1: Update `spec/02-architecture.md`
 
-Replace the event kinds section:
+- Rename to `Proposed/ShadowReport/Approved/Applied`.
+- Include both `proposal_id` and `patch_hash` fields; state that `proposal_id` is the correlation key, `patch_hash` is content key and may repeat.
+- Clarify that `Applied.manifest_hash_new` is the manifest root after apply.
 
-```diff
-- **ProposalSubmitted** {patches, proposer}
-- **ShadowRunCompleted** {proposal_id, predicted_effects, diffs}
-- **ApprovalRecorded** {proposal_id, approver, decision}
-- **PlanApplied** {manifest_root, plan_id}
-+ **Proposed** {patch_hash, author, manifest_base}
-+ **ShadowReport** {patch_hash, effects_predicted, diffs}
-+ **Approved** {patch_hash, approver, decision}
-+ **Applied** {manifest_hash}
-```
+### Step 2: Align `spec/03-air.md`
 
-Add a note: "These names correspond to the conceptual governance steps: propose → shadow → approve → apply."
-
-### Step 2: Verify `spec/03-air.md` matches
-
-Ensure the Journal Entries section uses the same names and field shapes.
+- Mirror the dual-key shapes and naming.
+- Decide and document `ShadowReport` shape: flatten predicted effects/diffs or keep `summary_cbor`; if keeping opaque summary, describe its contents (predicted_effects, pending_receipts, plan_results, ledger_deltas, manifest_hash).
+- Add `decision` to `Approved` (or explicitly defer and note approve-only).
 
 ### Step 3: Update Rust code
 
-Search for any enum variants or struct names that use the old longer names:
+- Rename enums/records to the shorter names.
+- Add `patch_hash` to Shadow/Approved/Applied records; ensure governance manager carries both keys.
+- Fix `Applied` to record `manifest_hash_new` (actual manifest root) alongside ids.
+- If we keep `summary_cbor`, ensure serde tags match the spec wording.
 
-```bash
-grep -r "ProposalSubmitted\|ShadowRunCompleted\|ApprovalRecorded\|PlanApplied" crates/
-```
+### Step 4: Update examples/tests
 
-Update to match the canonical names.
-
-### Step 4: Update any examples/tests
-
-Search examples for governance event references and update.
+- Example 06-safe-upgrade and governance integration tests: assert dual-key presence and correct manifest hash on apply.
+- Add regression: two proposals with identical `patch_hash` must not collide (distinct `proposal_id`).
 
 ## Acceptance Criteria
 
-- [ ] `spec/02-architecture.md` uses `Proposed/ShadowReport/Approved/Applied`
-- [ ] `spec/03-air.md` uses the same names with matching field shapes
-- [ ] Rust enums in `aos-kernel` match the spec names
-- [ ] No references to old names remain in codebase
-- [ ] Example 06-safe-upgrade uses correct event names
+- [ ] `spec/02-architecture.md` uses `Proposed/ShadowReport/Approved/Applied` with dual-key fields and manifest root in `Applied`.
+- [ ] `spec/03-air.md` matches naming and fields; `ShadowReport` shape documented; `Approved` decision field resolved (implemented or explicitly deferred).
+- [ ] Rust enums/records in `aos-kernel` renamed and carry both `proposal_id` and `patch_hash`; `Applied` stores the new manifest root.
+- [ ] No references to old names remain in codebase.
+- [ ] Governance examples/tests cover dual-key semantics and manifest root correctness.

@@ -332,6 +332,14 @@ fn resolve_secret<'a>(
     plan_name: Option<&str>,
     cap_name: Option<&str>,
 ) -> StoreResult<&'a SecretDecl> {
+    if reference.version < 1 {
+        return Err(StoreError::InvalidSecretVersion {
+            alias: reference.alias.clone(),
+            version: reference.version,
+            context: context.to_string(),
+        });
+    }
+
     let Some(decl) = declarations.get(&(reference.alias.clone(), reference.version)) else {
         return Err(StoreError::UnknownSecret {
             alias: reference.alias.clone(),
@@ -714,6 +722,56 @@ mod tests {
             matches!(err, StoreError::UnknownSecret { .. }),
             "expected UnknownSecret, got {err:?}"
         );
+    }
+
+    #[test]
+    fn rejects_secret_version_zero() {
+        let store = MemStore::default();
+        let defcap = DefCap {
+            name: "com.acme/secret-cap@1".into(),
+            cap_type: CapType::secret(),
+            schema: TypeExpr::Ref(TypeRef {
+                reference: SchemaRef::new("sys/SecretRef@1").unwrap(),
+            }),
+        };
+        let defcap_hash = store
+            .put_node(&AirNode::Defcap(defcap.clone()))
+            .expect("store defcap");
+        let cap_grant = CapGrant {
+            name: "secret_cap".into(),
+            cap: defcap.name.clone(),
+            params: ValueLiteral::SecretRef(SecretRef {
+                alias: "payments/stripe".into(),
+                version: 0,
+            }),
+            expiry_ns: None,
+            budget: None,
+        };
+        let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
+        let manifest = Manifest {
+            schemas: vec![NamedRef {
+                name: secret_schema.schema.name.clone(),
+                hash: secret_schema.hash_ref.clone(),
+            }],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![NamedRef {
+                name: defcap.name.clone(),
+                hash: HashRef::new(defcap_hash.to_hex()).unwrap(),
+            }],
+            policies: vec![],
+            secrets: vec![],
+            defaults: Some(ManifestDefaults {
+                policy: None,
+                cap_grants: vec![cap_grant],
+            }),
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
+        let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
+        assert!(matches!(err, StoreError::InvalidSecretVersion { .. }));
     }
 
     #[test]

@@ -102,7 +102,7 @@ Add a test that deserializes `{"null": {}}` as `ExprConst::Null` and rejects `{"
 
 ## Acceptance Criteria
 
-- [ ] Spec prose updated to show `{"null": {}}` (not `{"const": {"null": {}}}`)
-- [ ] No examples use the wrong form
-- [ ] Test confirms correct parsing of null expressions
-- [ ] CLAUDE.md or a FAQ note explains the Value vs Expr distinction if needed
+- [x] Spec prose updated to show `{"null": {}}` (not `{"const": {"null": {}}}`)
+- [x] No examples use the wrong form
+- [x] Test confirms correct parsing of null expressions
+

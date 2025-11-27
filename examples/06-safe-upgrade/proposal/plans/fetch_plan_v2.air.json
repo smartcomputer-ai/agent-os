@@ -42,17 +42,17 @@
         "kind": "http.request",
         "params": {
           "record": {
-            "method": { "const": { "text": "GET" } },
+            "method": { "text": "GET" },
             "url": { "ref": "@var:follow_url" },
             "headers": {
               "map": [
                 {
-                  "key": { "const": { "text": "x-idempotency-key" } },
-                  "value": { "const": { "text": "safe-upgrade-v2-follow" } }
+                  "key": { "text": "x-idempotency-key" },
+                  "value": { "text": "safe-upgrade-v2-follow" }
                 }
               ]
             },
-            "body_ref": { "const": { "null": {} } }
+            "body_ref": { "null": {} }
           }
         },
         "cap": "cap_http_followup",

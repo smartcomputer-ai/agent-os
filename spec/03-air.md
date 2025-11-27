@@ -65,7 +65,7 @@ AIR nodes exist in two interchangeable JSON lenses plus one canonical binary for
 **Why**: Humans want concise, schema-directed JSON; agents and tools often need an explicit, lossless overlay. Accepting both lenses at load time keeps authoring pleasant without sacrificing determinism.
 
 1. **Authoring sugar (default)** — plain JSON interpreted using the surrounding schema reference. Use natural literals (`true`, `42`, `"text"`, `{field: …}`, arrays) exactly as before.
-2. **Canonical JSON (tagged)** — every literal carries an explicit type tag mirroring `ExprConst` (`{ "nat": 42 }`, `{ "list": [ { "text": "a" } ] }`, `{ "variant": { "tag": "Ok", "value": { "text": "done" } } }`, `{ "const": { "null": {} } }`, etc.). This lens is ideal for diffs, automated patches, and inspector output because it round-trips without schema context.
+2. **Canonical JSON (tagged)** — every literal carries an explicit type tag mirroring `ExprConst` (`{ "nat": 42 }`, `{ "list": [ { "text": "a" } ] }`, `{ "variant": { "tag": "Ok", "value": { "text": "done" } } }`, `{ "null": {} }`, etc.). This lens is ideal for diffs, automated patches, and inspector output because it round-trips without schema context.
 
 The loader **MUST** accept either lens at every typed value position, resolve the schema from context (plan IO, effect params, reducer schemas, capability params, etc.), and convert to a typed value before hashing.
 
@@ -87,7 +87,7 @@ Regardless of the JSON lens, the loader applies the same canonicalization before
 - **`variant`**: Sugar `{ "Tag": <value?> }` expands to a canonical envelope (e.g., `{ "variant": { "tag": "Tag", "value": … } }`) before CBOR.
 - **`option<T>`**: Represent `none` as `null` in sugar or `{ "option": null }` in canonical JSON; `some` wraps the nested value.
 
-**Nulls in Expr vs Value**: When an `ExprOrValue` slot is authored as a literal Value, `null` still denotes `none` for `option<T>`. When authored as an expression, use `{ "const": { "null": {} } }` to produce a `null`/`none` value; raw JSON `null` is only valid on the literal path and is not parsed as an `ExprConst`.
+**Nulls in Expr vs Value**: When an `ExprOrValue` slot is authored as a literal Value, raw JSON `null` denotes `none` for `option<T>`. When authored as an expression, use `{ "null": {} }` to produce a `null`/`none` value. Raw JSON `null` is **not** valid in expression ASTs and is only accepted on the literal path.
 
 These rules make previously implicit loader behavior normative and testable.
 
@@ -218,7 +218,7 @@ Built-in kinds in v1:
 - receipt: `{ delivered_at_ns:nat, key?:text }`
 
 **llm.generate**
-- params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, input_ref:hash, tools?:list<text> }`
+- params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, input_ref:hash, tools?:list<text>, api_key?:TextOrSecretRef }`
 - receipt: `{ output_ref:hash, token_usage:{prompt:nat,completion:nat}, cost_cents:nat, provider_id:text }`
 
 **vault.put**
@@ -237,9 +237,9 @@ Reducers that emit micro-effects rely on the kernel to translate adapter receipt
 
 | Schema | Purpose | Fields |
 | --- | --- | --- |
-| **`sys/TimerFired@1`** | Delivery of a `timer.set` receipt back to the originating reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text` (always `"timer.set"` in v1), `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/TimerSetParams@1`, `receipt:sys/TimerSetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
-| **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
-| **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/TimerFired@1`** | Delivery of a `timer.set` receipt back to the originating reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text` (always `"timer.set"` in v1), `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/TimerSetParams@1`, `receipt:sys/TimerSetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 
 Reducers should add routing entries for these schemas (e.g., `routing.events[].event = sys/TimerFired@1`). Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/budget enforcement can trust the same structures without changing reducer code.
 
