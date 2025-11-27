@@ -169,8 +169,8 @@ The constitutional loop governs **design-time** changes: how the system proposes
 
 1. **Propose**: Submit AIR patches forming a proposal; the kernel validates and records **Proposed**, storing both the monotonic `proposal_id` (correlation key) and the content-addressed `patch_hash`.
 2. **Shadow**: The kernel clones state and runs a shadow simulation with stubbed receipts; it records **ShadowReport** with predicted effects/costs and diffs (optionally as an opaque summary blob for compatibility).
-3. **Approve**: Humans or policy record **Approved** with a `decision` (approve/reject) plus approver identity; reject may terminate the proposal without apply.
-4. **Apply**: The kernel commits the new manifest root (**Applied**), recording `manifest_hash_new` alongside the ids for auditability; routing tables and capability bindings update atomically.
+3. **Approve/Reject**: Humans or policy record **Approved** with a `decision` (approve/reject) plus approver identity. A rejected proposal cannot be applied.
+4. **Apply**: The kernel commits the new manifest root (**Applied**), recording `manifest_hash_new` alongside the ids for auditability; routing tables and capability bindings update atomically. Apply is only permitted after an approve decision.
 5. **Execute**: Normal event flow resumes; new plans and modules are active under policy; effects produce receipts; audit trails accumulate.
 
 ### Shadow Runs

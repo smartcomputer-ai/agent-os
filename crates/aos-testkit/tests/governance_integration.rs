@@ -196,6 +196,50 @@ fn proposals_with_same_patch_hash_do_not_collide() {
 }
 
 #[test]
+fn reject_prevents_apply_and_records_decision() {
+    let store = fixtures::new_mem_store();
+    let manifest = simple_state_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let patch_loaded = manifest_with_reducer(&store, "com.acme/Reject@1", 0xEE);
+    let patch = manifest_patch_from_loaded(&patch_loaded);
+    let proposal_id = world
+        .kernel
+        .submit_proposal(patch, Some("reject-me".into()))
+        .unwrap();
+
+    world
+        .kernel
+        .run_shadow(proposal_id, Some(ShadowHarness::default()))
+        .unwrap();
+    world
+        .kernel
+        .reject_proposal(proposal_id, "approver")
+        .unwrap();
+
+    let err = world.kernel.apply_proposal(proposal_id).unwrap_err();
+    assert!(matches!(
+        err,
+        KernelError::ProposalStateInvalid { required, .. } if required == "approved"
+    ));
+
+    let record = world
+        .kernel
+        .dump_journal()
+        .unwrap()
+        .into_iter()
+        .filter(|entry| entry.kind == JournalKind::Governance)
+        .map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).unwrap())
+        .find_map(|record| match record {
+            JournalRecord::Governance(GovernanceRecord::Approved(r)) => Some(r),
+            _ => None,
+        })
+        .expect("approved/rejected record present");
+
+    assert!(matches!(record.decision, aos_kernel::journal::ApprovalDecisionRecord::Reject));
+}
+
+#[test]
 fn applied_records_manifest_root_not_patch_hash() {
     let store = fixtures::new_mem_store();
     let manifest = simple_state_manifest(&store);

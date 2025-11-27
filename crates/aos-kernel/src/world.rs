@@ -806,6 +806,23 @@ impl<S: Store + 'static> Kernel<S> {
         proposal_id: u64,
         approver: impl Into<String>,
     ) -> Result<(), KernelError> {
+        self.decide_proposal(proposal_id, approver, ApprovalDecisionRecord::Approve)
+    }
+
+    pub fn reject_proposal(
+        &mut self,
+        proposal_id: u64,
+        approver: impl Into<String>,
+    ) -> Result<(), KernelError> {
+        self.decide_proposal(proposal_id, approver, ApprovalDecisionRecord::Reject)
+    }
+
+    fn decide_proposal(
+        &mut self,
+        proposal_id: u64,
+        approver: impl Into<String>,
+        decision: ApprovalDecisionRecord,
+    ) -> Result<(), KernelError> {
         let proposal = self
             .governance
             .proposals()
@@ -829,7 +846,7 @@ impl<S: Store + 'static> Kernel<S> {
             proposal_id,
             patch_hash: proposal.patch_hash.clone(),
             approver: approver.into(),
-            decision: ApprovalDecisionRecord::Approve,
+            decision,
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);

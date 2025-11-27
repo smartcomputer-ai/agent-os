@@ -587,6 +587,7 @@ Notes:
 - `proposal_id` is the world-local correlation key; `patch_hash` is the content key and may repeat if the same patch is resubmitted.
 - `summary_cbor` is an optional opaque ShadowSummary used by the current kernel; if present it contains predicted_effects, pending_receipts, plan_results, ledger_deltas, and manifest_hash.
 - `Applied.manifest_hash_new` is the new manifest root after apply (not the patch hash).
+- Apply is only valid after an `Approved` record whose `decision` is `approve`; a `reject` decision halts the proposal.
 
 ### Plan and Effect Lifecycle (Runtime)
 
