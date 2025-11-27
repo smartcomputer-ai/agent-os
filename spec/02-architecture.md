@@ -34,17 +34,17 @@ Application logic runs inside sandboxed WASM modules (reducers and pure componen
 
 ### Deterministic Stepper
 
-The kernel processes exactly one event at a time per world. It applies events to both control‑plane state (AIR manifest, ledger, policies) and data‑plane state (reducer states) in a fixed order. When appropriate, the stepper produces derived events such as PolicyDecisionRecorded, PlanApplied, or SnapshotCreated.
+The kernel processes exactly one event at a time per world. It applies events to both control‑plane state (AIR manifest, ledger, policies) and data‑plane state (reducer states) in a fixed order. When appropriate, the stepper produces derived events such as PolicyDecisionRecorded, Applied, or SnapshotCreated.
 
 ### Event Kinds (v1)
 
 The kernel handles several categories of events. The first four are **design-time** events (control-plane evolution); the rest are **runtime** events (normal operation):
 
-**Design-time events:**
-- **ProposalSubmitted** {patches, proposer}
-- **ShadowRunCompleted** {proposal_id, predicted_effects, diffs}
-- **ApprovalRecorded** {proposal_id, approver, decision}
-- **PlanApplied** {manifest_root, plan_id}
+**Design-time events (dual-keyed):**
+- **Proposed** {proposal_id, patch_hash, author, manifest_base, description?}
+- **ShadowReport** {proposal_id, patch_hash, effects_predicted, diffs, summary_cbor?}
+- **Approved** {proposal_id, patch_hash, approver, decision:"approve"|"reject"}
+- **Applied** {proposal_id, patch_hash, manifest_hash_new}
 
 **Runtime events:**
 - **EffectQueued** {intent_hash, kind, params_ref, cap_ref}
@@ -74,7 +74,7 @@ Nodes (AIR terms, receipts) and blobs (WASM modules, large payloads) are address
 
 ### AIR Manifest
 
-The manifest is read‑only at runtime and serves as the authoritative catalog of defmodule, defplan, defschema, defcap, and defpolicy objects. Updates occur only via approved ProposalSubmitted → PlanApplied events.
+The manifest is read-only at runtime and serves as the authoritative catalog of defmodule, defplan, defschema, defcap, and defpolicy objects. Updates occur only via approved Proposed → Applied events.
 
 ### AIR Loader/Validator
 
@@ -167,10 +167,10 @@ ReceiptAppended events advance plans and reducers waiting on effects. Budgets de
 
 The constitutional loop governs **design-time** changes: how the system proposes, rehearses, approves, and applies modifications to its own control plane:
 
-1. **Propose**: Submit AIR patches forming a proposal; the kernel validates and records ProposalSubmitted.
-2. **Shadow**: The kernel clones state and runs a shadow simulation with stubbed receipts; it records ShadowRunCompleted with diffs and predicted effects/costs.
-3. **Approve**: Humans or policy record ApprovalRecorded; this may include capability grants and budgets.
-4. **Apply**: The kernel commits the new manifest root (PlanApplied); routing tables and capability bindings update atomically.
+1. **Propose**: Submit AIR patches forming a proposal; the kernel validates and records **Proposed**, storing both the monotonic `proposal_id` (correlation key) and the content-addressed `patch_hash`.
+2. **Shadow**: The kernel clones state and runs a shadow simulation with stubbed receipts; it records **ShadowReport** with predicted effects/costs and diffs (optionally as an opaque summary blob for compatibility).
+3. **Approve**: Humans or policy record **Approved** with a `decision` (approve/reject) plus approver identity; reject may terminate the proposal without apply.
+4. **Apply**: The kernel commits the new manifest root (**Applied**), recording `manifest_hash_new` alongside the ids for auditability; routing tables and capability bindings update atomically.
 5. **Execute**: Normal event flow resumes; new plans and modules are active under policy; effects produce receipts; audit trails accumulate.
 
 ### Shadow Runs

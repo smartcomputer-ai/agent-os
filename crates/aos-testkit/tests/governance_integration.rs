@@ -10,8 +10,10 @@ use aos_air_types::{
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
+use aos_cbor::{to_canonical_cbor, Hash};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
+use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
 use aos_kernel::shadow::{LedgerDelta, LedgerKind, ShadowHarness};
 use aos_testkit::fixtures::{self, START_SCHEMA};
 use aos_testkit::{TestStore, TestWorld};
@@ -154,6 +156,97 @@ fn patch_hash_is_identical_for_sugar_and_canonical_plans() {
         .patch_hash
         .clone();
     assert_eq!(hash_sugar, hash_canonical);
+}
+
+#[test]
+fn proposals_with_same_patch_hash_do_not_collide() {
+    let store = fixtures::new_mem_store();
+    let manifest = simple_state_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let loaded = manifest_with_reducer(&store, "com.acme/Collision@1", 0xCD);
+    let patch = manifest_patch_from_loaded(&loaded);
+
+    let first = world
+        .kernel
+        .submit_proposal(patch.clone(), Some("first".into()))
+        .unwrap();
+    let second = world
+        .kernel
+        .submit_proposal(patch, Some("second".into()))
+        .unwrap();
+
+    assert_ne!(first, second);
+    assert_eq!(
+        world
+            .kernel
+            .governance()
+            .proposals()
+            .get(&first)
+            .unwrap()
+            .patch_hash,
+        world
+            .kernel
+            .governance()
+            .proposals()
+            .get(&second)
+            .unwrap()
+            .patch_hash
+    );
+}
+
+#[test]
+fn applied_records_manifest_root_not_patch_hash() {
+    let store = fixtures::new_mem_store();
+    let manifest = simple_state_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let patch_loaded = manifest_with_reducer(&store, "com.acme/AppliedRoot@1", 0xEF);
+    let patch = manifest_patch_from_loaded(&patch_loaded);
+    let proposal_id = world
+        .kernel
+        .submit_proposal(patch.clone(), Some("root".into()))
+        .unwrap();
+
+    world
+        .kernel
+        .run_shadow(proposal_id, Some(ShadowHarness::default()))
+        .unwrap();
+    world
+        .kernel
+        .approve_proposal(proposal_id, "approver")
+        .unwrap();
+    world.kernel.apply_proposal(proposal_id).unwrap();
+
+    let manifest_bytes = to_canonical_cbor(&patch.manifest).expect("manifest cbor");
+    let expected_manifest_hash = Hash::of_bytes(&manifest_bytes).to_hex();
+    let patch_hash = world
+        .kernel
+        .governance()
+        .proposals()
+        .get(&proposal_id)
+        .unwrap()
+        .patch_hash
+        .clone();
+
+    let applied = world
+        .kernel
+        .dump_journal()
+        .unwrap()
+        .into_iter()
+        .filter(|entry| entry.kind == JournalKind::Governance)
+        .map(|entry| {
+            serde_cbor::from_slice::<JournalRecord>(&entry.payload).expect("governance record")
+        })
+        .find_map(|record| match record {
+            JournalRecord::Governance(GovernanceRecord::Applied(r)) => Some(r),
+            _ => None,
+        })
+        .expect("applied record present");
+
+    assert_eq!(applied.manifest_hash_new, expected_manifest_hash);
+    assert_eq!(applied.patch_hash, patch_hash);
+    assert_ne!(applied.manifest_hash_new, applied.patch_hash);
 }
 
 #[test]

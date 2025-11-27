@@ -22,10 +22,10 @@ use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
-    DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, GovernanceRecord,
-    IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, JournalSeq,
-    ManifestAppliedRecord, OwnedJournalEntry, PlanResultRecord, ProposalApprovedRecord,
-    ProposalSubmittedRecord, ShadowRunCompletedRecord, SnapshotRecord,
+    AppliedRecord, ApprovedRecord, ApprovalDecisionRecord, DomainEventRecord,
+    EffectIntentRecord, EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal,
+    JournalEntry, JournalKind, JournalRecord, JournalSeq, OwnedJournalEntry, PlanResultRecord,
+    ProposedRecord, ShadowReportRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
@@ -748,7 +748,7 @@ impl<S: Store + 'static> Kernel<S> {
         let patch_bytes = to_canonical_cbor(&canonical_patch)
             .map_err(|err| KernelError::Manifest(format!("encode patch: {err}")))?;
         let patch_hash = self.store.put_blob(&patch_bytes)?;
-        let record = GovernanceRecord::ProposalSubmitted(ProposalSubmittedRecord {
+        let record = GovernanceRecord::Proposed(ProposedRecord {
             proposal_id,
             description,
             patch_hash: patch_hash.to_hex(),
@@ -772,6 +772,13 @@ impl<S: Store + 'static> Kernel<S> {
         match proposal.state {
             ProposalState::Applied => return Err(KernelError::ProposalAlreadyApplied(proposal_id)),
             ProposalState::Submitted | ProposalState::Shadowed | ProposalState::Approved => {}
+            ProposalState::Rejected => {
+                return Err(KernelError::ProposalStateInvalid {
+                    proposal_id,
+                    state: proposal.state,
+                    required: "not rejected",
+                })
+            }
         }
         let patch = self.load_manifest_patch(&proposal.patch_hash)?;
         let config = ShadowConfig {
@@ -784,9 +791,10 @@ impl<S: Store + 'static> Kernel<S> {
         summary.ledger_deltas = Self::compute_ledger_deltas(&self.manifest, &config.patch.manifest);
         let summary_bytes = serde_cbor::to_vec(&summary)
             .map_err(|err| KernelError::Manifest(format!("encode summary: {err}")))?;
-        let record = GovernanceRecord::ShadowRunCompleted(ShadowRunCompletedRecord {
+        let record = GovernanceRecord::ShadowReport(ShadowReportRecord {
             proposal_id,
-            summary: summary_bytes,
+            patch_hash: proposal.patch_hash.clone(),
+            summary_cbor: Some(summary_bytes),
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);
@@ -817,9 +825,11 @@ impl<S: Store + 'static> Kernel<S> {
                 required: "shadowed",
             });
         }
-        let record = GovernanceRecord::ProposalApproved(ProposalApprovedRecord {
+        let record = GovernanceRecord::Approved(ApprovedRecord {
             proposal_id,
+            patch_hash: proposal.patch_hash.clone(),
             approver: approver.into(),
+            decision: ApprovalDecisionRecord::Approve,
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);
@@ -845,9 +855,15 @@ impl<S: Store + 'static> Kernel<S> {
         }
         let patch = self.load_manifest_patch(&proposal.patch_hash)?;
         self.swap_manifest(&patch)?;
-        let record = GovernanceRecord::ManifestApplied(ManifestAppliedRecord {
+
+        let manifest_bytes = to_canonical_cbor(&patch.manifest)
+            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
+        let manifest_hash_new = Hash::of_bytes(&manifest_bytes).to_hex();
+
+        let record = GovernanceRecord::Applied(AppliedRecord {
             proposal_id,
-            manifest_hash: proposal.patch_hash.clone(),
+            patch_hash: proposal.patch_hash.clone(),
+            manifest_hash_new,
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);

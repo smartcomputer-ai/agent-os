@@ -5,8 +5,8 @@ use aos_air_types::{AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, M
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{
-    GovernanceRecord, ManifestAppliedRecord, ProposalApprovedRecord, ProposalSubmittedRecord,
-    ShadowRunCompletedRecord,
+    AppliedRecord, ApprovedRecord, ApprovalDecisionRecord, GovernanceRecord, ProposedRecord,
+    ShadowReportRecord,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -14,6 +14,7 @@ pub enum ProposalState {
     Submitted,
     Shadowed,
     Approved,
+    Rejected,
     Applied,
 }
 
@@ -28,7 +29,7 @@ pub struct Proposal {
 }
 
 impl Proposal {
-    fn new(record: &ProposalSubmittedRecord) -> Self {
+    fn new(record: &ProposedRecord) -> Self {
         Self {
             id: record.proposal_id,
             description: record.description.clone(),
@@ -68,25 +69,28 @@ impl GovernanceManager {
 
     pub fn apply_record(&mut self, record: &GovernanceRecord) {
         match record {
-            GovernanceRecord::ProposalSubmitted(submitted) => {
+            GovernanceRecord::Proposed(submitted) => {
                 self.observe_proposal_id(submitted.proposal_id);
                 self.proposals
                     .entry(submitted.proposal_id)
                     .or_insert_with(|| Proposal::new(submitted));
             }
-            GovernanceRecord::ShadowRunCompleted(shadow) => {
+            GovernanceRecord::ShadowReport(shadow) => {
                 if let Some(proposal) = self.proposals.get_mut(&shadow.proposal_id) {
                     proposal.state = ProposalState::Shadowed;
-                    proposal.shadow_summary = Some(shadow.summary.clone());
+                    proposal.shadow_summary = shadow.summary_cbor.clone();
                 }
             }
-            GovernanceRecord::ProposalApproved(approved) => {
+            GovernanceRecord::Approved(approved) => {
                 if let Some(proposal) = self.proposals.get_mut(&approved.proposal_id) {
-                    proposal.state = ProposalState::Approved;
+                    proposal.state = match approved.decision {
+                        ApprovalDecisionRecord::Approve => ProposalState::Approved,
+                        ApprovalDecisionRecord::Reject => ProposalState::Rejected,
+                    };
                     proposal.approver = Some(approved.approver.clone());
                 }
             }
-            GovernanceRecord::ManifestApplied(applied) => {
+            GovernanceRecord::Applied(applied) => {
                 self.observe_proposal_id(applied.proposal_id);
                 if let Some(proposal) = self.proposals.get_mut(&applied.proposal_id) {
                     proposal.state = ProposalState::Applied;
@@ -96,7 +100,7 @@ impl GovernanceManager {
                         Proposal {
                             id: applied.proposal_id,
                             description: None,
-                            patch_hash: applied.manifest_hash.clone(),
+                            patch_hash: applied.patch_hash.clone(),
                             state: ProposalState::Applied,
                             shadow_summary: None,
                             approver: None,

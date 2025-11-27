@@ -155,36 +155,54 @@ pub struct SnapshotRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum GovernanceRecord {
-    ProposalSubmitted(ProposalSubmittedRecord),
-    ShadowRunCompleted(ShadowRunCompletedRecord),
-    ProposalApproved(ProposalApprovedRecord),
-    ManifestApplied(ManifestAppliedRecord),
+    Proposed(ProposedRecord),
+    ShadowReport(ShadowReportRecord),
+    Approved(ApprovedRecord),
+    Applied(AppliedRecord),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProposalSubmittedRecord {
+pub struct ProposedRecord {
     pub proposal_id: u64,
     pub description: Option<String>,
     pub patch_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ShadowRunCompletedRecord {
+pub struct ShadowReportRecord {
     pub proposal_id: u64,
-    #[serde(with = "serde_bytes")]
-    pub summary: Vec<u8>,
+    pub patch_hash: String,
+    #[serde(with = "serde_bytes_opt", default, skip_serializing_if = "Option::is_none")]
+    pub summary_cbor: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProposalApprovedRecord {
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecisionRecord {
+    Approve,
+    Reject,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovedRecord {
     pub proposal_id: u64,
+    pub patch_hash: String,
     pub approver: String,
+    #[serde(default = "ApprovalDecisionRecord::default_approve")]
+    pub decision: ApprovalDecisionRecord,
+}
+
+impl ApprovalDecisionRecord {
+    fn default_approve() -> Self {
+        ApprovalDecisionRecord::Approve
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ManifestAppliedRecord {
+pub struct AppliedRecord {
     pub proposal_id: u64,
-    pub manifest_hash: String,
+    pub patch_hash: String,
+    pub manifest_hash_new: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
