@@ -77,7 +77,7 @@ Today the kernel raises `KernelError::PlanInvariantFailed` (no `PlanEnded` recor
 ## Acceptance Criteria
 
 - [x] Invariant failure ends plan with `PlanEnded { status:error, result_ref: PlanError(code="invariant_violation") }`
-- [ ] Invariants are evaluated after every completed step and at plan end (documented)
-- [ ] `spec/03-air.md` describes timing, reference scope, and failure semantics; examples added
-- [ ] Tests cover success and failure cases with PlanEnded behavior
-- [ ] No stray uses of `KernelError::PlanInvariantFailed` remain (or it is mapped to PlanEnded)
+- [x] Invariants are evaluated after every completed step and at plan end (documented)
+- [x] `spec/03-air.md` describes timing, reference scope, and failure semantics; examples added (see also spec/12-plans-v1.1.md examples)
+- [x] Tests cover success and failure cases with PlanEnded behavior
+- [x] No stray uses of `KernelError::PlanInvariantFailed` remain (or it is mapped to PlanEnded)

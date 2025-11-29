@@ -210,12 +210,10 @@ impl PlanInstance {
                 if self.all_steps_completed() {
                     self.completed = true;
                     outcome.completed = true;
-                    if let Err(err) = self.enforce_invariants() {
-                        if matches!(err, KernelError::PlanInvariantFailed { .. }) {
-                            outcome.plan_error = Some(self.invariant_violation_error());
-                            return Ok(outcome);
-                        }
-                        return Err(err);
+                    if let Some(err) = self.enforce_invariants()? {
+                        self.completed = true;
+                        outcome.plan_error = Some(err);
+                        return Ok(outcome);
                     }
                 }
                 return Ok(outcome);
@@ -260,13 +258,14 @@ impl PlanInstance {
                     );
                     record.insert("params".into(), params_value);
                     self.record_step_value(&step_id, ExprValue::Record(record));
-                    if let Err(err) = self.complete_step(&step_id) {
-                        if matches!(err, KernelError::PlanInvariantFailed { .. }) {
+                    match self.complete_step(&step_id)? {
+                        Some(err) => {
                             outcome.completed = true;
-                            outcome.plan_error = Some(self.invariant_violation_error());
+                            self.completed = true;
+                            outcome.plan_error = Some(err);
                             return Ok(outcome);
                         }
-                        return Err(err);
+                        None => {}
                     }
                     progressed = true;
                 }
@@ -283,13 +282,14 @@ impl PlanInstance {
                             eval_expr_or_value(&assign.expr, &self.env, "plan assign eval error")?;
                         self.env.vars.insert(assign.bind.var.clone(), value.clone());
                         self.record_step_value(&step_id, value);
-                        if let Err(err) = self.complete_step(&step_id) {
-                            if matches!(err, KernelError::PlanInvariantFailed { .. }) {
+                        match self.complete_step(&step_id)? {
+                            Some(err) => {
                                 outcome.completed = true;
-                                outcome.plan_error = Some(self.invariant_violation_error());
+                                self.completed = true;
+                                outcome.plan_error = Some(err);
                                 return Ok(outcome);
                             }
-                            return Err(err);
+                            None => {}
                         }
                         progressed = true;
                         break;
@@ -304,13 +304,14 @@ impl PlanInstance {
                                 .vars
                                 .insert(await_step.bind.var.clone(), value.clone());
                             self.record_step_value(&step_id, value);
-                            if let Err(err) = self.complete_step(&step_id) {
-                                if matches!(err, KernelError::PlanInvariantFailed { .. }) {
+                            match self.complete_step(&step_id)? {
+                                Some(err) => {
                                     outcome.completed = true;
-                                    outcome.plan_error = Some(self.invariant_violation_error());
+                                    self.completed = true;
+                                    outcome.plan_error = Some(err);
                                     return Ok(outcome);
                                 }
-                                return Err(err);
+                                None => {}
                             }
                             progressed = true;
                             break;
@@ -335,13 +336,14 @@ impl PlanInstance {
                                 .insert(await_event.bind.var.clone(), value.clone());
                             self.record_step_value(&step_id, value);
                             self.event_wait = None;
-                            if let Err(err) = self.complete_step(&step_id) {
-                                if matches!(err, KernelError::PlanInvariantFailed { .. }) {
+                            match self.complete_step(&step_id)? {
+                                Some(err) => {
                                     outcome.completed = true;
-                                    outcome.plan_error = Some(self.invariant_violation_error());
+                                    self.completed = true;
+                                    outcome.plan_error = Some(err);
                                     return Ok(outcome);
                                 }
-                                return Err(err);
+                                None => {}
                             }
                             progressed = true;
                             break;
@@ -482,13 +484,14 @@ impl PlanInstance {
                             record.insert("key".into(), key_value);
                         }
                         self.record_step_value(&step_id, ExprValue::Record(record));
-                        if let Err(err) = self.complete_step(&step_id) {
-                            if matches!(err, KernelError::PlanInvariantFailed { .. }) {
+                        match self.complete_step(&step_id)? {
+                            Some(err) => {
                                 outcome.completed = true;
-                                outcome.plan_error = Some(self.invariant_violation_error());
+                                self.completed = true;
+                                outcome.plan_error = Some(err);
                                 return Ok(outcome);
                             }
-                            return Err(err);
+                            None => {}
                         }
                     }
                     PlanStepKind::End(end) => {
@@ -561,12 +564,10 @@ impl PlanInstance {
 
                         self.completed = true;
                         outcome.completed = true;
-                        if let Err(err) = self.enforce_invariants() {
-                            if matches!(err, KernelError::PlanInvariantFailed { .. }) {
-                                outcome.plan_error = Some(self.invariant_violation_error());
-                                return Ok(outcome);
-                            }
-                            return Err(err);
+                        if let Some(err) = self.enforce_invariants()? {
+                            self.completed = true;
+                            outcome.plan_error = Some(err);
+                            return Ok(outcome);
                         }
                         return Ok(outcome);
                     }
@@ -763,7 +764,7 @@ impl PlanInstance {
         self.env.steps.insert(step_id.to_string(), value);
     }
 
-    fn complete_step(&mut self, step_id: &str) -> Result<(), KernelError> {
+    fn complete_step(&mut self, step_id: &str) -> Result<Option<PlanError>, KernelError> {
         self.mark_completed(step_id);
         self.enforce_invariants()
     }
@@ -774,19 +775,16 @@ impl PlanInstance {
         }
     }
 
-    fn enforce_invariants(&mut self) -> Result<(), KernelError> {
+    fn enforce_invariants(&mut self) -> Result<Option<PlanError>, KernelError> {
         for (idx, invariant) in self.plan.invariants.iter().enumerate() {
             let value = eval_expr(invariant, &self.env).map_err(|err| {
                 KernelError::Manifest(format!("plan invariant {idx} eval error: {err}"))
             })?;
             if !value_to_bool(value)? {
-                return Err(KernelError::PlanInvariantFailed {
-                    plan: self.name.clone(),
-                    index: idx,
-                });
+                return Ok(Some(self.invariant_violation_error()));
             }
         }
-        Ok(())
+        Ok(None)
     }
 
     fn ready_steps(&self) -> Result<Vec<String>, KernelError> {
