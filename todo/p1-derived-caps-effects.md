@@ -4,13 +4,9 @@
 **Effort**: Medium
 **Risk if deferred**: Medium - manual sync burden, drift bugs, agent authoring friction
 
-## Summary
+## Summary (done)
 
-`defplan` currently requires authors to manually maintain two lists:
-- `required_caps: [CapGrantName]` - capability grants the plan needs
-- `allowed_effects: [EffectKind]` - effect kinds the plan may emit
-
-These are fully derivable from the plan's `emit_effect` steps. Making them derived eliminates a class of synchronization bugs and simplifies plan authoring.
+`defplan` now derives `required_caps` and `allowed_effects` from `emit_effect` steps. Authors may omit the fields; if provided, they must match the derived sets. Normalization fills them and canonical CBOR always includes the sorted, deduped lists.
 
 ## Rationale
 
@@ -43,25 +39,11 @@ If someone adds a step but forgets to update the lists, they get a runtime error
 3. **Better tooling**: `air fmt` can always produce correct, canonical plans
 4. **Clearer validation**: Error messages point to the step, not the list
 
-## Proposed Design
+## Final Behavior
 
-### Semantics
-
-The validator computes:
-- `computed_caps = union of (emit_effect.cap for all emit_effect steps)`
-- `computed_effects = union of (emit_effect.kind for all emit_effect steps)`
-
-### Authoring behavior
-
-1. **If author omits the fields**: Validator/loader fills them with computed values before canonicalization
-2. **If author supplies the fields**: They must exactly match computed values, or validation fails with a clear error
-
-### Canonical form
-
-The canonical CBOR always includes the computed, sorted lists. This ensures:
-- Hashes are stable regardless of authoring style
-- Introspection tools see the full picture
-- Shadow runs can enumerate required capabilities
+- Derivation: `required_caps` = union of `emit_effect.cap`; `allowed_effects` = union of `emit_effect.kind`.
+- Authoring: fields optional; if supplied, must exactly match derived sets (sorted/deduped) or validation fails.
+- Canonicalization: normalization fills missing fields and sorts/dedupes; canonical CBOR always includes the derived lists.
 
 ### Example
 
@@ -93,92 +75,20 @@ Canonical form (after validation):
 }
 ```
 
-## Implementation Plan
+## Implementation & Status
 
-### Step 1: Update validation in `aos-air-types`
-
-In `validate.rs` (or equivalent), add a function:
-
-```rust
-fn derive_plan_caps_and_effects(plan: &DefPlan) -> (Vec<CapGrantName>, Vec<EffectKind>) {
-    let mut caps = BTreeSet::new();
-    let mut effects = BTreeSet::new();
-
-    for step in &plan.steps {
-        if let PlanStepKind::EmitEffect(emit) = &step.kind {
-            caps.insert(emit.cap.clone());
-            effects.insert(emit.kind.clone());
-        }
-    }
-
-    (caps.into_iter().collect(), effects.into_iter().collect())
-}
-```
-
-### Step 2: Update plan validation
-
-```rust
-fn validate_plan(plan: &mut DefPlan) -> Result<(), ValidationError> {
-    let (derived_caps, derived_effects) = derive_plan_caps_and_effects(plan);
-
-    if plan.required_caps.is_empty() {
-        plan.required_caps = derived_caps;
-    } else if plan.required_caps != derived_caps {
-        return Err(ValidationError::CapsEffectsMismatch {
-            field: "required_caps",
-            declared: plan.required_caps.clone(),
-            derived: derived_caps,
-        });
-    }
-
-    // Same for allowed_effects
-    ...
-}
-```
-
-### Step 3: Update spec prose
-
-In `spec/03-air.md` §11 (defplan), update:
-
-> **`required_caps`** and **`allowed_effects`** are **derived fields**. The validator computes them from `emit_effect` steps:
-> - `required_caps` = sorted set of all `emit_effect.cap` values
-> - `allowed_effects` = sorted set of all `emit_effect.kind` values
->
-> Authors may omit these fields (recommended) or supply them explicitly. If supplied, they must exactly match the derived values.
-
-### Step 4: Update JSON Schema
-
-Make both fields optional:
-
-```json
-"required_caps": {
-  "type": "array",
-  "items": { "$ref": "common.schema.json#/$defs/CapGrantName" },
-  "description": "Derived from emit_effect steps. May be omitted in authoring."
-},
-"allowed_effects": {
-  "type": "array",
-  "items": { "$ref": "common.schema.json#/$defs/EffectKind" },
-  "description": "Derived from emit_effect steps. May be omitted in authoring."
-}
-```
-
-### Step 5: Update examples
-
-Remove explicit `required_caps`/`allowed_effects` from example plans to demonstrate the cleaner authoring style.
-
-### Step 6: Add tests
-
-- Test that omitted fields are filled correctly
-- Test that mismatched fields produce clear validation errors
-- Test that canonical hashes are stable regardless of authoring style
+- Code: `aos-air-types/src/validate.rs` derives and validates; `plan_literals.rs` normalization fills/sorts/dedupes.
+- Spec: `spec/03-air.md` updated with derived semantics; `spec/schemas/defplan.schema.json` marks fields optional + uniqueItems + description.
+- Example: `spec/05-workflows.md` fulfillment plan now omits the lists to showcase derivation.
+- Tests: validation coverage for mismatch/omission/sorting; normalization test `normalize_fills_derived_caps_and_effects`; schema hash fixture updated.
+- Hashes: `aos-cbor` canonical hash for defplan schema refreshed.
 
 ## Acceptance Criteria
 
-- [ ] Validator derives `required_caps` from `emit_effect.cap` fields
-- [ ] Validator derives `allowed_effects` from `emit_effect.kind` fields
-- [ ] Omitting the fields results in correct derivation
-- [ ] Supplying wrong values produces a clear validation error
-- [ ] Spec updated to document derived field behavior
-- [ ] Examples updated to use cleaner authoring style
-- [ ] All existing tests pass
+- [x] Validator derives `required_caps` from `emit_effect.cap` fields
+- [x] Validator derives `allowed_effects` from `emit_effect.kind` fields
+- [x] Omitting the fields results in correct derivation
+- [x] Supplying wrong values produces a clear validation error
+- [x] Spec updated to document derived field behavior
+- [x] Examples updated to use cleaner authoring style
+- [x] All existing tests pass (including new coverage)

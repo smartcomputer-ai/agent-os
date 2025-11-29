@@ -194,6 +194,43 @@ fn normalizes_all_expr_or_value_slots() {
 }
 
 #[test]
+fn normalize_fills_derived_caps_and_effects() {
+    let plan_json = json!({
+        "$kind": "defplan",
+        "name": "com.acme/plan-derive@1",
+        "input": "com.acme/Input@1",
+        "steps": [
+            {
+                "id": "emit",
+                "op": "emit_effect",
+                "kind": "http.request",
+                "params": {"ref": "@plan.input"},
+                "cap": "cap_http",
+                "bind": {"effect_id_as": "req"}
+            },
+            { "id": "end", "op": "end" }
+        ],
+        "edges": [ {"from": "emit", "to": "end"} ]
+        // required_caps / allowed_effects intentionally omitted
+    });
+
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
+    let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
+    assert!(plan.required_caps.is_empty() && plan.allowed_effects.is_empty());
+
+    normalize_plan_literals(
+        &mut plan,
+        &schema_index(),
+        &reducer_modules(),
+        &effect_catalog(),
+    )
+    .expect("normalize");
+
+    assert_eq!(plan.required_caps, vec!["cap_http".to_string()]);
+    assert_eq!(plan.allowed_effects, vec![EffectKind::http_request()]);
+}
+
+#[test]
 fn literal_without_local_schema_errors() {
     let plan_json = json!({
         "$kind": "defplan",

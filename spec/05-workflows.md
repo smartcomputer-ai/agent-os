@@ -183,9 +183,7 @@ Plan `fulfillment_plan@1`:
     {"from": "notify", "to": "wait_notify"},
     {"from": "wait_notify", "to": "raise_result"},
     {"from": "raise_result", "to": "done"}
-  ],
-  "required_caps": ["payment_cap", "inventory_cap", "mailer_cap"],
-  "allowed_effects": ["payment.charge", "inventory.reserve", "email.send"]
+  ]
 }
 ```
 

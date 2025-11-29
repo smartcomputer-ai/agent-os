@@ -15,17 +15,21 @@ pub enum ValidationError {
     EdgeReferencesUnknownStep { plan: String, step_id: StepId },
     #[error("plan {plan} contains cycles")]
     CyclicPlan { plan: String },
-    #[error("plan {plan} step {step_id} emits effect {kind:?} which is not in allowed_effects")]
-    EffectNotAllowed {
+    #[error(
+        "plan {plan} declared required_caps {declared:?} but derived {derived:?} from emit_effect steps"
+    )]
+    DeclaredCapsMismatch {
         plan: String,
-        step_id: StepId,
-        kind: EffectKind,
+        declared: Vec<CapGrantName>,
+        derived: Vec<CapGrantName>,
     },
-    #[error("plan {plan} step {step_id} uses cap {cap} which is not listed in required_caps")]
-    CapNotDeclared {
+    #[error(
+        "plan {plan} declared allowed_effects {declared:?} but derived {derived:?} from emit_effect steps"
+    )]
+    DeclaredEffectsMismatch {
         plan: String,
-        step_id: StepId,
-        cap: CapGrantName,
+        declared: Vec<EffectKind>,
+        derived: Vec<EffectKind>,
     },
     #[error("plan {plan} declares duplicate effect handle '{handle}'")]
     DuplicateEffectHandle { plan: String, handle: String },
@@ -53,6 +57,53 @@ pub enum ValidationError {
     },
     #[error("plan {plan} invariant {index} may not reference @event")]
     InvariantEventReference { plan: String, index: usize },
+}
+
+fn sort_and_dedup_caps(mut caps: Vec<CapGrantName>) -> Vec<CapGrantName> {
+    caps.sort();
+    caps.dedup();
+    caps
+}
+
+fn sort_and_dedup_effects(mut effects: Vec<EffectKind>) -> Vec<EffectKind> {
+    effects.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    effects.dedup();
+    effects
+}
+
+pub fn derive_plan_caps_and_effects(plan: &DefPlan) -> (Vec<CapGrantName>, Vec<EffectKind>) {
+    let mut caps: HashSet<CapGrantName> = HashSet::new();
+    let mut effects: HashSet<EffectKind> = HashSet::new();
+
+    for step in &plan.steps {
+        if let PlanStepKind::EmitEffect(emit) = &step.kind {
+            caps.insert(emit.cap.clone());
+            effects.insert(emit.kind.clone());
+        }
+    }
+
+    let mut caps: Vec<_> = caps.into_iter().collect();
+    let mut effects: Vec<_> = effects.into_iter().collect();
+    caps.sort();
+    effects.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    (caps, effects)
+}
+
+/// Fill derived caps/effects when the author omits them and canonicalize order when provided.
+pub fn normalize_plan_caps_and_effects(plan: &mut DefPlan) {
+    let (derived_caps, derived_effects) = derive_plan_caps_and_effects(plan);
+
+    if plan.required_caps.is_empty() {
+        plan.required_caps = derived_caps.clone();
+    } else {
+        plan.required_caps = sort_and_dedup_caps(plan.required_caps.clone());
+    }
+
+    if plan.allowed_effects.is_empty() {
+        plan.allowed_effects = derived_effects.clone();
+    } else {
+        plan.allowed_effects = sort_and_dedup_effects(plan.allowed_effects.clone());
+    }
 }
 
 pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
@@ -97,8 +148,25 @@ pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
         });
     }
 
-    let allowed_effects: HashSet<_> = plan.allowed_effects.iter().collect();
-    let required_caps: HashSet<_> = plan.required_caps.iter().collect();
+    let (derived_caps, derived_effects) = derive_plan_caps_and_effects(plan);
+
+    let declared_caps = sort_and_dedup_caps(plan.required_caps.clone());
+    if !plan.required_caps.is_empty() && declared_caps != derived_caps {
+        return Err(ValidationError::DeclaredCapsMismatch {
+            plan: plan.name.clone(),
+            declared: declared_caps,
+            derived: derived_caps,
+        });
+    }
+
+    let declared_effects = sort_and_dedup_effects(plan.allowed_effects.clone());
+    if !plan.allowed_effects.is_empty() && declared_effects != derived_effects {
+        return Err(ValidationError::DeclaredEffectsMismatch {
+            plan: plan.name.clone(),
+            declared: declared_effects,
+            derived: derived_effects,
+        });
+    }
 
     // "correlation_id" is injected by the kernel when a plan is started via a trigger
     // that specifies `correlate_by`. Allow expressions to reference it even though the
@@ -109,20 +177,6 @@ pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
     for step in &plan.steps {
         match &step.kind {
             PlanStepKind::EmitEffect(emit) => {
-                if !allowed_effects.is_empty() && !allowed_effects.contains(&emit.kind) {
-                    return Err(ValidationError::EffectNotAllowed {
-                        plan: plan.name.clone(),
-                        step_id: step.id.clone(),
-                        kind: emit.kind.clone(),
-                    });
-                }
-                if !required_caps.is_empty() && !required_caps.contains(&emit.cap) {
-                    return Err(ValidationError::CapNotDeclared {
-                        plan: plan.name.clone(),
-                        step_id: step.id.clone(),
-                        cap: emit.cap.clone(),
-                    });
-                }
                 if !effect_handles.insert(emit.bind.effect_id_as.clone()) {
                     return Err(ValidationError::DuplicateEffectHandle {
                         plan: plan.name.clone(),
@@ -496,9 +550,11 @@ mod tests {
         let mut plan = sample_plan();
         plan.allowed_effects = vec![EffectKind::timer_set()];
         let err = validate_plan(&plan).unwrap_err();
-        assert!(
-            matches!(err, ValidationError::EffectNotAllowed { kind, .. } if kind == EffectKind::http_request())
-        );
+        assert!(matches!(
+            err,
+            ValidationError::DeclaredEffectsMismatch { declared, derived, .. }
+            if declared == vec![EffectKind::timer_set()] && derived == vec![EffectKind::http_request()]
+        ));
     }
 
     #[test]
@@ -506,7 +562,11 @@ mod tests {
         let mut plan = sample_plan();
         plan.required_caps = vec!["other".into()];
         let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(err, ValidationError::CapNotDeclared { cap, .. } if cap == "http_cap"));
+        assert!(matches!(
+            err,
+            ValidationError::DeclaredCapsMismatch { declared, derived, .. }
+            if declared == vec!["other".to_string()] && derived == vec!["http_cap".to_string()]
+        ));
     }
 
     #[test]
@@ -529,6 +589,34 @@ mod tests {
         plan.steps.insert(0, duplicate_emit);
         let err = validate_plan(&plan).unwrap_err();
         assert!(matches!(err, ValidationError::DuplicateEffectHandle { .. }));
+    }
+
+    #[test]
+    fn omitted_caps_and_effects_are_derived() {
+        let mut plan = sample_plan();
+        plan.required_caps.clear();
+        plan.allowed_effects.clear();
+        assert!(validate_plan(&plan).is_ok());
+    }
+
+    #[test]
+    fn normalize_plan_caps_and_effects_populates_and_sorts() {
+        let mut plan = sample_plan();
+        // Introduce disorder and duplicates.
+        plan.required_caps = vec!["b".into(), "a".into(), "a".into()];
+        plan.allowed_effects = vec![
+            EffectKind::timer_set(),
+            EffectKind::http_request(),
+            EffectKind::http_request(),
+        ];
+
+        normalize_plan_caps_and_effects(&mut plan);
+
+        assert_eq!(plan.required_caps, vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            plan.allowed_effects,
+            vec![EffectKind::http_request(), EffectKind::timer_set()]
+        );
     }
 
     #[test]

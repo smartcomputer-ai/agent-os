@@ -127,6 +127,9 @@ pub fn normalize_plan_literals(
             _ => {}
         }
     }
+
+    // Ensure derived capability/effect lists are populated and canonicalized.
+    crate::validate::normalize_plan_caps_and_effects(plan);
     Ok(())
 }
 

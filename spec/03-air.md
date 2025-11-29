@@ -488,8 +488,8 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
   "locals"?: {name: <SchemaRef>…},
   "steps": [<Step>…],
   "edges": [{from: StepId, to: StepId, when?: <Expr>}…],
-  "required_caps": [<CapGrantName>…],
-  "allowed_effects": [<EffectKind>…],
+  "required_caps": [<CapGrantName>…],  // derived from emit_effect.cap; optional in authoring
+  "allowed_effects": [<EffectKind>…],  // derived from emit_effect.kind; optional in authoring
   "invariants"?: [<Expr>…]
 }
 ```
@@ -592,7 +592,7 @@ The kernel validator enforces these semantic checks:
 
 **defmodule**: `wasm_hash` present; referenced schemas exist; `effects_emitted`/`cap_slots` (if present) are well‑formed.
 
-**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `emit_effect.kind` ∈ `allowed_effects`; `emit_effect.cap` ∈ `required_caps` or defaults; `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.event` must evaluate to a value conforming to a declared schema (and keyed reducers require matching keys); invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
+**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `required_caps`/`allowed_effects` are derived sets of `emit_effect.{cap,kind}` (if provided they must exactly match the derived values); `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.event` must evaluate to a value conforming to a declared schema (and keyed reducers require matching keys); invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
 
 **defpolicy**: Rule shapes valid; referenced effect kinds known.
 
