@@ -156,10 +156,16 @@ fn sugar_literal_plan_executes_http_flow() {
     }
     let mut modules = HashMap::new();
     modules.insert(result_module.name.clone(), result_module.clone());
+    let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(
+        aos_air_types::builtins::builtin_effects()
+            .iter()
+            .map(|e| e.effect.clone()),
+    );
     normalize_plan_literals(
         &mut plan,
         &builtin_schema_index_with_custom_types(),
         &modules,
+        &effect_catalog,
     )
     .expect("normalize literals");
 

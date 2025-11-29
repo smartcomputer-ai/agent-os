@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    self as air_types, AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, DefSecret,
-    HashRef, Manifest, Name, NamedRef, SecretEntry,
+    self as air_types, AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema,
+    DefSecret, HashRef, Manifest, Name, NamedRef, SecretEntry, catalog::EffectCatalog,
 };
 use aos_kernel::{LoadedManifest, governance::ManifestPatch};
 use aos_store::{Catalog, FsStore, Store, load_manifest_from_bytes};
@@ -31,6 +31,7 @@ pub fn load_from_assets(
     let mut caps: Vec<DefCap> = Vec::new();
     let mut policies: Vec<DefPolicy> = Vec::new();
     let mut secrets: Vec<DefSecret> = Vec::new();
+    let mut effects: Vec<DefEffect> = Vec::new();
 
     for dir in ["defs", "air", "plans"].iter() {
         let dir_path = example_root.join(dir);
@@ -57,6 +58,7 @@ pub fn load_from_assets(
                     AirNode::Defcap(cap) => caps.push(cap),
                     AirNode::Defpolicy(policy) => policies.push(policy),
                     AirNode::Defsecret(secret) => secrets.push(secret),
+                    AirNode::Defeffect(effect) => effects.push(effect),
                 }
             }
         }
@@ -67,7 +69,7 @@ pub fn load_from_assets(
         None => return Ok(None),
     };
 
-    let hashes = write_nodes(&store, schemas, modules, plans, caps, policies, secrets)?;
+    let hashes = write_nodes(&store, schemas, modules, plans, caps, policies, secrets, effects)?;
     patch_manifest_refs(&mut manifest, &hashes)?;
     let catalog = manifest_catalog(&store, manifest)?;
     Ok(Some(catalog_to_loaded(catalog)))
@@ -84,6 +86,7 @@ pub fn manifest_patch_from_loaded(loaded: &LoadedManifest) -> ManifestPatch {
     nodes.extend(loaded.caps.values().cloned().map(AirNode::Defcap));
     nodes.extend(loaded.policies.values().cloned().map(AirNode::Defpolicy));
     nodes.extend(loaded.plans.values().cloned().map(AirNode::Defplan));
+    nodes.extend(loaded.effects.values().cloned().map(AirNode::Defeffect));
 
     ManifestPatch {
         manifest: loaded.manifest.clone(),
@@ -99,6 +102,7 @@ fn write_nodes(
     caps: Vec<DefCap>,
     policies: Vec<DefPolicy>,
     secrets: Vec<DefSecret>,
+    effects: Vec<DefEffect>,
 ) -> Result<StoredHashes> {
     ensure_unique_names(&schemas, "defschema")?;
     ensure_unique_names(&modules, "defmodule")?;
@@ -106,6 +110,7 @@ fn write_nodes(
     ensure_unique_names(&caps, "defcap")?;
     ensure_unique_names(&policies, "defpolicy")?;
     ensure_unique_names(&secrets, "defsecret")?;
+    ensure_unique_names(&effects, "defeffect")?;
 
     let mut hashes = StoredHashes::default();
     for schema in schemas {
@@ -150,6 +155,13 @@ fn write_nodes(
             .context("store defsecret node")?;
         hashes.secrets.insert(name, HashRef::new(hash.to_hex())?);
     }
+    for effect in effects {
+        let name = effect.name.clone();
+        let hash = store
+            .put_node(&AirNode::Defeffect(effect))
+            .context("store defeffect node")?;
+        hashes.effects.insert(name, HashRef::new(hash.to_hex())?);
+    }
     Ok(hashes)
 }
 
@@ -172,6 +184,7 @@ struct StoredHashes {
     schemas: HashMap<Name, HashRef>,
     modules: HashMap<Name, HashRef>,
     plans: HashMap<Name, HashRef>,
+    effects: HashMap<Name, HashRef>,
     caps: HashMap<Name, HashRef>,
     policies: HashMap<Name, HashRef>,
     secrets: HashMap<Name, HashRef>,
@@ -181,6 +194,7 @@ fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result
     patch_named_refs("schema", &mut manifest.schemas, &hashes.schemas)?;
     patch_named_refs("module", &mut manifest.modules, &hashes.modules)?;
     patch_named_refs("plan", &mut manifest.plans, &hashes.plans)?;
+    patch_named_refs("effect", &mut manifest.effects, &hashes.effects)?;
     patch_named_refs("cap", &mut manifest.caps, &hashes.caps)?;
     patch_named_refs("policy", &mut manifest.policies, &hashes.policies)?;
     let mut secret_refs = secrets_as_named_refs(&manifest.secrets)?;
@@ -212,6 +226,12 @@ fn patch_named_refs(
             air_types::builtins::find_builtin_schema(reference.name.as_str())
         {
             builtin.hash_ref.clone()
+        } else if kind == "effect" {
+            if let Some(builtin) = air_types::builtins::find_builtin_effect(reference.name.as_str()) {
+                builtin.hash_ref.clone()
+            } else {
+                bail!("manifest references unknown {kind} '{}'", reference.name);
+            }
         } else {
             bail!("manifest references unknown {kind} '{}'", reference.name);
         };
@@ -323,6 +343,12 @@ impl HasName for DefPlan {
     }
 }
 
+impl HasName for DefEffect {
+    fn name(&self) -> Name {
+        self.name.clone()
+    }
+}
+
 impl HasName for DefCap {
     fn name(&self) -> Name {
         self.name.clone()
@@ -354,6 +380,7 @@ fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
     } = catalog;
     let mut modules = HashMap::new();
     let mut plans = HashMap::new();
+    let mut effects = HashMap::new();
     let mut caps = HashMap::new();
     let mut policies = HashMap::new();
     let mut schemas = HashMap::new();
@@ -372,6 +399,9 @@ fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
             AirNode::Defpolicy(policy) => {
                 policies.insert(policy.name.clone(), policy);
             }
+            AirNode::Defeffect(effect) => {
+                effects.insert(effect.name.clone(), effect);
+            }
             AirNode::Defschema(schema) => {
                 schemas.insert(schema.name.clone(), schema);
             }
@@ -380,14 +410,18 @@ fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
         }
     }
 
+    let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
+
     LoadedManifest {
         manifest,
         secrets: resolved_secrets,
         modules,
         plans,
+        effects,
         caps,
         policies,
         schemas,
+        effect_catalog,
     }
 }
 
@@ -539,6 +573,13 @@ mod tests {
             ],
             modules: vec![named_ref_from_node(&module_node)],
             plans: Vec::new(),
+            effects: aos_air_types::builtins::builtin_effects()
+                .iter()
+                .map(|e| NamedRef {
+                    name: e.effect.name.clone(),
+                    hash: e.hash_ref.clone(),
+                })
+                .collect(),
             caps: Vec::new(),
             policies: Vec::new(),
             secrets: Vec::new(),
@@ -587,6 +628,7 @@ mod tests {
             AirNode::Defcap(cap) => cap.name.clone(),
             AirNode::Defpolicy(policy) => policy.name.clone(),
             AirNode::Defsecret(secret) => secret.name.clone(),
+            AirNode::Defeffect(effect) => effect.name.clone(),
             AirNode::Manifest(_) => panic!("cannot build ref for manifest"),
         };
         aos_air_types::NamedRef {

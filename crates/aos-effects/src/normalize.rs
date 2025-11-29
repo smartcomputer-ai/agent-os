@@ -1,23 +1,13 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use aos_air_types::{
-    TypeExpr, TypeMapKey, TypePrimitive, builtins::builtin_schemas, catalog,
-    plan_literals::SchemaIndex,
+    TypeExpr, TypeMapKey, TypePrimitive, catalog::EffectCatalog, plan_literals::SchemaIndex,
 };
 use aos_cbor::to_canonical_cbor;
-use once_cell::sync::Lazy;
 use serde_cbor::Value as CborValue;
 use thiserror::Error;
 
 use crate::EffectKind;
-
-static SCHEMA_INDEX: Lazy<SchemaIndex> = Lazy::new(|| {
-    let mut map = HashMap::new();
-    for builtin in builtin_schemas() {
-        map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
-    }
-    SchemaIndex::new(map)
-});
 
 #[derive(Debug, Error)]
 pub enum NormalizeError {
@@ -34,26 +24,28 @@ pub enum NormalizeError {
 }
 
 pub fn normalize_effect_params(
+    catalog: &EffectCatalog,
+    schemas: &SchemaIndex,
     kind: &EffectKind,
     params_cbor: &[u8],
 ) -> Result<Vec<u8>, NormalizeError> {
-    let schema_name = params_schema_name(kind)
+    let schema_name = params_schema_name(catalog, kind)
         .ok_or_else(|| NormalizeError::UnknownEffect(kind.as_str().to_string()))?;
-    let schema = SCHEMA_INDEX
+    let schema = schemas
         .get(schema_name)
         .ok_or_else(|| NormalizeError::SchemaNotFound(schema_name.to_string()))?;
 
     let value: CborValue = serde_cbor::from_slice(params_cbor)
         .map_err(|err| NormalizeError::Decode(err.to_string()))?;
 
-    let resolved_schema = resolve_schema(schema, &SCHEMA_INDEX)?;
-    let normalized = canonicalize_value(value, &resolved_schema, &SCHEMA_INDEX)?;
+    let resolved_schema = resolve_schema(schema, schemas)?;
+    let normalized = canonicalize_value(value, &resolved_schema, schemas)?;
 
     to_canonical_cbor(&normalized).map_err(|err| NormalizeError::Encode(err.to_string()))
 }
 
-fn params_schema_name(kind: &EffectKind) -> Option<&'static str> {
-    catalog::effect_params_schema(kind).map(|schema| schema.schema.name.as_str())
+fn params_schema_name<'a>(catalog: &'a EffectCatalog, kind: &EffectKind) -> Option<&'a str> {
+    catalog.params_schema(kind).map(|schema| schema.as_str())
 }
 
 fn resolve_schema<'a>(
@@ -331,6 +323,8 @@ fn cbor_bytes(v: &CborValue) -> Vec<u8> {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    use aos_air_types::{builtins::builtin_effects, builtins::builtin_schemas, catalog::EffectCatalog};
+    use std::collections::HashMap;
     fn header_params(map: Vec<(&str, &str)>) -> CborValue {
         let mut headers = BTreeMap::new();
         for (k, v) in map {
@@ -350,17 +344,35 @@ mod tests {
         CborValue::Map(root)
     }
 
+    fn catalog_and_schemas() -> (EffectCatalog, SchemaIndex) {
+        let catalog = EffectCatalog::from_defs(builtin_effects().iter().map(|e| e.effect.clone()));
+        let mut map = HashMap::new();
+        for builtin in builtin_schemas() {
+            map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
+        }
+        (catalog, SchemaIndex::new(map))
+    }
+
     #[test]
     fn normalizes_header_map_order() {
         let params_a = serde_cbor::to_vec(&header_params(vec![("a", "1"), ("b", "2")])).unwrap();
         let params_b = serde_cbor::to_vec(&header_params(vec![("b", "2"), ("a", "1")])).unwrap();
 
-        let norm_a =
-            normalize_effect_params(&EffectKind::new(crate::EffectKind::HTTP_REQUEST), &params_a)
-                .unwrap();
-        let norm_b =
-            normalize_effect_params(&EffectKind::new(crate::EffectKind::HTTP_REQUEST), &params_b)
-                .unwrap();
+        let (catalog, schemas) = catalog_and_schemas();
+        let norm_a = normalize_effect_params(
+            &catalog,
+            &schemas,
+            &EffectKind::new(crate::EffectKind::HTTP_REQUEST),
+            &params_a,
+        )
+        .unwrap();
+        let norm_b = normalize_effect_params(
+            &catalog,
+            &schemas,
+            &EffectKind::new(crate::EffectKind::HTTP_REQUEST),
+            &params_b,
+        )
+        .unwrap();
 
         assert_eq!(norm_a, norm_b, "header ordering must canonicalize");
     }
@@ -374,16 +386,28 @@ mod tests {
         );
         let value = CborValue::Map(map);
         let bytes = serde_cbor::to_vec(&value).unwrap();
-        let err =
-            normalize_effect_params(&EffectKind::new(crate::EffectKind::HTTP_REQUEST), &bytes)
-                .unwrap_err();
+        let (catalog, schemas) = catalog_and_schemas();
+        let err = normalize_effect_params(
+            &catalog,
+            &schemas,
+            &EffectKind::new(crate::EffectKind::HTTP_REQUEST),
+            &bytes,
+        )
+        .unwrap_err();
         assert!(format!("{err}").contains("missing field"));
     }
 
     #[test]
     fn unknown_effect_kind_returns_error() {
         let params = serde_cbor::to_vec(&CborValue::Map(BTreeMap::new())).unwrap();
-        let err = normalize_effect_params(&EffectKind::new("custom.effect"), &params).unwrap_err();
+        let (catalog, schemas) = catalog_and_schemas();
+        let err = normalize_effect_params(
+            &catalog,
+            &schemas,
+            &EffectKind::new("custom.effect"),
+            &params,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             NormalizeError::UnknownEffect(kind) if kind == "custom.effect".to_string()

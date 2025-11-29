@@ -1,0 +1,65 @@
+[
+  {
+    "$kind": "defeffect",
+    "name": "sys/http.request@1",
+    "kind": "http.request",
+    "params_schema": "sys/HttpRequestParams@1",
+    "receipt_schema": "sys/HttpRequestReceipt@1",
+    "cap_type": "http.out",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/blob.put@1",
+    "kind": "blob.put",
+    "params_schema": "sys/BlobPutParams@1",
+    "receipt_schema": "sys/BlobPutReceipt@1",
+    "cap_type": "blob",
+    "origin_scope": "reducer"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/blob.get@1",
+    "kind": "blob.get",
+    "params_schema": "sys/BlobGetParams@1",
+    "receipt_schema": "sys/BlobGetReceipt@1",
+    "cap_type": "blob",
+    "origin_scope": "reducer"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/timer.set@1",
+    "kind": "timer.set",
+    "params_schema": "sys/TimerSetParams@1",
+    "receipt_schema": "sys/TimerSetReceipt@1",
+    "cap_type": "timer",
+    "origin_scope": "reducer"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/llm.generate@1",
+    "kind": "llm.generate",
+    "params_schema": "sys/LlmGenerateParams@1",
+    "receipt_schema": "sys/LlmGenerateReceipt@1",
+    "cap_type": "llm.basic",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/vault.put@1",
+    "kind": "vault.put",
+    "params_schema": "sys/VaultPutParams@1",
+    "receipt_schema": "sys/VaultPutReceipt@1",
+    "cap_type": "secret",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/vault.rotate@1",
+    "kind": "vault.rotate",
+    "params_schema": "sys/VaultRotateParams@1",
+    "receipt_schema": "sys/VaultRotateReceipt@1",
+    "cap_type": "secret",
+    "origin_scope": "plan"
+  }
+]

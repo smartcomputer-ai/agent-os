@@ -6,6 +6,7 @@ use std::sync::Arc;
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
     AirNode, DefModule, Manifest, Name, NamedRef, SecretDecl, SecretEntry, TypeExpr, builtins,
+    catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
@@ -257,10 +258,12 @@ impl<S: Store + 'static> Kernel<S> {
             bindings.sort_by(|a, b| a.plan.cmp(&b.plan));
         }
         let schema_index = Arc::new(build_schema_index_from_loaded(store.as_ref(), &loaded)?);
+        let effect_catalog = Arc::new(loaded.effect_catalog.clone());
         let capability_resolver = CapabilityResolver::from_manifest(
             &loaded.manifest,
             &loaded.caps,
             schema_index.as_ref(),
+            effect_catalog.clone(),
         )?;
         ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
         ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
@@ -306,6 +309,8 @@ impl<S: Store + 'static> Kernel<S> {
             effect_manager: EffectManager::new(
                 capability_resolver,
                 policy_gate,
+                effect_catalog.clone(),
+                schema_index.clone(),
                 if loaded.secrets.is_empty() {
                     None
                 } else {
@@ -907,10 +912,12 @@ impl<S: Store + 'static> Kernel<S> {
             &loaded,
         )?);
         let reducer_schemas = Arc::new(build_reducer_schemas(&loaded.modules, &schema_index)?);
+        let effect_catalog = Arc::new(loaded.effect_catalog.clone());
         let capability_resolver = CapabilityResolver::from_manifest(
             &loaded.manifest,
             &loaded.caps,
             schema_index.as_ref(),
+            effect_catalog.clone(),
         )?;
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
@@ -969,7 +976,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.recent_receipt_index.clear();
         self.plan_results.clear();
 
-        self.schema_index = schema_index;
+        self.schema_index = schema_index.clone();
         self.reducer_schemas = reducer_schemas;
         self.secret_resolver = ensure_secret_resolver(
             !self.secrets.is_empty(),
@@ -984,6 +991,8 @@ impl<S: Store + 'static> Kernel<S> {
         self.effect_manager = EffectManager::new(
             capability_resolver,
             policy_gate,
+            effect_catalog,
+            schema_index.clone(),
             secret_catalog,
             self.secret_resolver.clone(),
         );
@@ -1350,6 +1359,7 @@ fn canonicalize_patch<S: Store>(
         schema_map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
     }
     let mut module_map: HashMap<Name, DefModule> = HashMap::new();
+    let mut effect_defs = Vec::new();
 
     for node in &canonical.nodes {
         match node {
@@ -1359,6 +1369,9 @@ fn canonicalize_patch<S: Store>(
             AirNode::Defmodule(module) => {
                 module_map.insert(module.name.clone(), module.clone());
             }
+            AirNode::Defeffect(effect) => {
+                effect_defs.push(effect.clone());
+            }
             _ => {}
         }
     }
@@ -1367,9 +1380,18 @@ fn canonicalize_patch<S: Store>(
     extend_module_map_from_store(store, &canonical.manifest.modules, &mut module_map)?;
 
     let schema_index = SchemaIndex::new(schema_map);
+    if effect_defs.is_empty() {
+        effect_defs.extend(
+            builtins::builtin_effects()
+                .iter()
+                .map(|e| e.effect.clone()),
+        );
+    }
+    let effect_catalog = EffectCatalog::from_defs(effect_defs);
     for node in canonical.nodes.iter_mut() {
         if let AirNode::Defplan(plan) = node {
-            normalize_plan_literals(plan, &schema_index, &module_map).map_err(|err| {
+            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog)
+                .map_err(|err| {
                 KernelError::Manifest(format!(
                     "plan '{}' literal normalization failed: {err}",
                     plan.name
@@ -1498,6 +1520,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -1579,9 +1602,11 @@ mod tests {
             }],
             modules: HashMap::new(),
             plans: HashMap::new(),
+            effects: HashMap::new(),
             caps: HashMap::new(),
             policies: HashMap::new(),
             schemas: HashMap::new(),
+            effect_catalog: EffectCatalog::new(),
         };
 
         let result = Kernel::from_loaded_manifest(store, loaded, Box::new(MemJournal::new()));

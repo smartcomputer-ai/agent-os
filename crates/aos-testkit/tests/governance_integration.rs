@@ -120,10 +120,16 @@ fn patch_hash_is_identical_for_sugar_and_canonical_plans() {
     let sugar_plan: DefPlan = serde_json::from_value(sample_plan_json()).expect("plan json");
     let mut canonical_plan: DefPlan =
         serde_json::from_value(sample_plan_json()).expect("plan json");
+    let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(
+        aos_air_types::builtins::builtin_effects()
+            .iter()
+            .map(|e| e.effect.clone()),
+    );
     normalize_plan_literals(
         &mut canonical_plan,
         &builtin_schema_index(),
         &HashMap::new(),
+        &effect_catalog,
     )
     .expect("normalize canonical plan");
 
@@ -392,6 +398,7 @@ fn plan_patch(plan: DefPlan) -> ManifestPatch {
                 name: plan.name.clone(),
                 hash: fixtures::zero_hash(),
             }],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -422,6 +429,7 @@ fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> 
     nodes.extend(loaded.caps.values().cloned().map(AirNode::Defcap));
     nodes.extend(loaded.policies.values().cloned().map(AirNode::Defpolicy));
     nodes.extend(loaded.plans.values().cloned().map(AirNode::Defplan));
+    nodes.extend(loaded.effects.values().cloned().map(AirNode::Defeffect));
     nodes.extend(loaded.schemas.values().cloned().map(AirNode::Defschema));
 
     ManifestPatch {

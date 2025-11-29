@@ -130,6 +130,7 @@ use aos_air_types::{HashRef, Manifest, NamedRef, SecretDecl, SecretEntry};
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![],

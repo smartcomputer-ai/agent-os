@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
-    AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
-    SecretPolicy,
+    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
+    SecretDecl, SecretPolicy, catalog::EffectCatalog,
 };
 use serde::{Deserialize, Serialize};
 
@@ -139,8 +139,10 @@ pub struct ManifestPatch {
 
 impl ManifestPatch {
     pub fn to_loaded_manifest(&self) -> LoadedManifest {
+        let mut manifest = self.manifest.clone();
         let mut modules: HashMap<Name, DefModule> = HashMap::new();
         let mut plans: HashMap<Name, DefPlan> = HashMap::new();
+        let mut effects: HashMap<Name, DefEffect> = HashMap::new();
         let mut caps: HashMap<Name, DefCap> = HashMap::new();
         let mut policies: HashMap<Name, DefPolicy> = HashMap::new();
         let mut schemas: HashMap<Name, DefSchema> = HashMap::new();
@@ -155,6 +157,9 @@ impl ManifestPatch {
                 }
                 AirNode::Defcap(c) => {
                     caps.insert(c.name.clone(), c.clone());
+                }
+                AirNode::Defeffect(e) => {
+                    effects.insert(e.name.clone(), e.clone());
                 }
                 AirNode::Defpolicy(p) => {
                     policies.insert(p.name.clone(), p.clone());
@@ -179,14 +184,40 @@ impl ManifestPatch {
                 _ => {}
             }
         }
+        // Ensure built-in schemas/effects are present so shadow validation has full catalogs.
+        for builtin in aos_air_types::builtins::builtin_schemas() {
+            schemas.entry(builtin.schema.name.clone()).or_insert(builtin.schema.clone());
+            if !manifest.schemas.iter().any(|nr| nr.name == builtin.schema.name) {
+                manifest.schemas.push(aos_air_types::NamedRef {
+                    name: builtin.schema.name.clone(),
+                    hash: builtin.hash_ref.clone(),
+                });
+            }
+        }
+        if effects.is_empty() {
+            for builtin in aos_air_types::builtins::builtin_effects() {
+                effects.insert(builtin.effect.name.clone(), builtin.effect.clone());
+            }
+        }
+        for builtin in aos_air_types::builtins::builtin_effects() {
+            if !manifest.effects.iter().any(|nr| nr.name == builtin.effect.name) {
+                manifest.effects.push(aos_air_types::NamedRef {
+                    name: builtin.effect.name.clone(),
+                    hash: builtin.hash_ref.clone(),
+                });
+            }
+        }
+        let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
         LoadedManifest {
-            manifest: self.manifest.clone(),
+            manifest,
             secrets,
             modules,
             plans,
+            effects,
             caps,
             policies,
             schemas,
+            effect_catalog,
         }
     }
 }

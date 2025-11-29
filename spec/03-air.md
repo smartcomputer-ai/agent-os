@@ -24,7 +24,7 @@ The policy engine is minimal: ordered allow/deny rules with budgets enforced on 
 
 ## 1) Vocabulary and Identity
 
-**Kind**: One of `defschema`, `defmodule`, `defplan`, `defcap`, `defpolicy`, `defsecret`, or `manifest`. (`defmigration` is reserved for future use.)
+**Kind**: One of `defschema`, `defmodule`, `defplan`, `defcap`, `defpolicy`, `defsecret`, `defeffect`, or `manifest`. (`defmigration` is reserved for future use.)
 
 **Name**: A versioned identifier with the format `namespace/name@version`, where version is a positive integer. Example: `com.acme/rss_fetch@1`.
 
@@ -110,6 +110,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
   "schemas": [{name, hash}],
   "modules": [{name, hash}],
   "plans": [{name, hash}],
+  "effects": [{name, hash}],
   "caps": [{name, hash}],
   "policies": [{name, hash}],
   "routing": {
@@ -124,7 +125,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. The `routing.events` field is optional in v1. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input.
+Names must be unique per kind; all hashes must exist in the store. The `routing.events` field is optional in v1. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. The runtime auto-includes the built-in `defeffect` bundle if omitted so manifests may stay terse.
 
 See: spec/schemas/manifest.schema.json
 
@@ -198,7 +199,9 @@ See: spec/schemas/defmodule.schema.json
 
 ## 7) Effect Catalog (Built-in v1)
 
-`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The runtime currently ships a **built-in catalog** enumerated here. Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions. For strict enum validation/autocomplete, see `spec/schemas/builtin.catalog.schema.json`.
+`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions. For strict enum validation/autocomplete, see `spec/schemas/builtin.catalog.schema.json`.
+
+`origin_scope` on each `defeffect` gates who may emit it: reducers only for `reducer/both`, plans only for `plan/both`. The built-in reducer micro-effects are `blob.put`, `blob.get`, and `timer.set`; others are plan-only in v1.
 
 Built-in kinds in v1:
 
@@ -349,7 +352,45 @@ The `params` must conform to the defcap's schema and encode concrete allowlists/
 
 See: spec/schemas/defcap.schema.json
 
-## 10) defpolicy (Rule Pack)
+## 10) defeffect (Effect Catalog Entries)
+
+`defeffect` declares an effect kind, its parameter/receipt schemas, the capability type that guards it, and which emitters may use it.
+
+### Shape
+
+```json
+{
+  "$kind": "defeffect",
+  "name": "sys/http.request@1",
+  "kind": "http.request",
+  "params_schema": "sys/HttpRequestParams@1",
+  "receipt_schema": "sys/HttpRequestReceipt@1",
+  "cap_type": "http.out",
+  "origin_scope": "plan",
+  "description": "Optional human text"
+}
+```
+
+### Fields
+
+- `name`: Versioned Name of the effect definition (namespace/name@version)
+- `kind`: EffectKind string referenced by plans/reducers (e.g., `http.request`)
+- `params_schema`: SchemaRef for effect parameters
+- `receipt_schema`: SchemaRef for effect receipts
+- `cap_type`: Capability type that must guard this effect
+- `origin_scope`: `"reducer" | "plan" | "both"`; reducers may emit only reducer/both, plans may emit plan/both
+- `description?`: Optional prose
+
+### Notes
+
+- Built-in v1 effects are shipped in `spec/defs/builtin-effects.air.json`; the runtime auto-includes them even if `manifest.effects` is empty.
+- Unknown effect kinds (not declared in the manifest or built-ins) are rejected during plan normalization/dispatch.
+- Reducer receipt translation remains limited to effects whose `origin_scope` allows reducers.
+- (Future) Adapter binding stays out of `defeffect`; a manifest-level `effect_bindings` table can later map kinds to adapters without changing the defkind.
+
+See: spec/schemas/defeffect.schema.json
+
+## 11) defpolicy (Rule Pack)
 
 Policies define ordered rules that allow or deny effects based on their characteristics and origin.
 
@@ -406,7 +447,7 @@ Decisions are journaled: `PolicyDecisionRecorded { intent_hash, policy_name, rul
 
 See: spec/schemas/defpolicy.schema.json
 
-## 11) defplan (Orchestration DAG)
+## 12) defplan (Orchestration DAG)
 
 Plans are finite DAGs of steps that orchestrate effects, wait for receipts, and coordinate with reducers via events. They have a typed environment, optional guard predicates on edges, and a deterministic scheduler.
 
@@ -528,7 +569,7 @@ The plan completes at `end` or when the graph has no outgoing edges (error if ou
 
 See: spec/schemas/defplan.schema.json (steps/Expr defined there)
 
-## 12) StartPlan (Runtime API and Triggers)
+## 13) StartPlan (Runtime API and Triggers)
 
 Plans can start in two ways:
 
@@ -538,7 +579,7 @@ Plans can start in two ways:
 
 The kernel pins the manifest hash for the instance, checks input/locals against schemas, and executes under the current policy/cap ledger. Effects always check live grants at enqueue time.
 
-## 13) Validation Rules (Semantic)
+## 14) Validation Rules (Semantic)
 
 The kernel validator enforces these semantic checks:
 
@@ -552,7 +593,7 @@ The kernel validator enforces these semantic checks:
 
 **defcap**: `cap_type` in built‑ins; parameter schema compatible.
 
-## 14) Patch Format (AIR Changes)
+## 15) Patch Format (AIR Changes)
 
 Patches describe changes to the control plane (design-time modifications).
 
@@ -579,7 +620,7 @@ Patches describe changes to the control plane (design-time modifications).
 
 Patches are applied transactionally to yield a new manifest; full re‑validation is required. The governance system turns patches into journal entries: Proposed → (Shadow) → Approved → Applied.
 
-## 15) Journal Entries (AIR‑Related)
+## 16) Journal Entries (AIR‑Related)
 
 The journal records both design-time (governance) and runtime (execution) events.
 
@@ -612,13 +653,13 @@ Runtime journal entries are canonical CBOR enums; the important ones for AIR pla
 - **BudgetExceeded** `{ grant_name, dimension:"tokens"|"bytes"|"cents", delta:nat, new_balance:int }`
   - Appended when a receipt settlement drives a budget dimension negative; grant marked exhausted
 
-## 16) Determinism and Replay
+## 17) Determinism and Replay
 
 Deterministic plan execution, reducer invocations, and expression evaluation guarantee that same manifest + journal + receipts ⇒ identical state.
 
 Effects occur only at the boundary; receipts bind non‑determinism. Replay reuses recorded receipts; shadow‑runs stub effects and report predicted intents/paths up to the first await.
 
-## 17) Error Handling (v1)
+## 18) Error Handling (v1)
 
 **Validation**: Reject patch; journal Proposed → Rejected with reasons.
 
@@ -626,14 +667,14 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 **Budgets**: Decrement on receipts; over‑budget → policy denial at enqueue.
 
-## 18) On‑Disk Expectations
+## 19) On‑Disk Expectations
 
 - **Store nodes**: `.aos/store/nodes/sha256/<hash>` (canonical CBOR bytes of AIR nodes)
 - **Modules (WASM)**: `modules/<name>@<ver>-<hash>.wasm` (`wasm_hash` = content hash)
 - **Blobs**: `.aos/store/blobs/sha256/<hash>`
 - **Manifest roots**: `manifest.air.cbor` (binary) and `manifest.air.json` (text)
 
-## 19) Security Model
+## 20) Security Model
 
 **Object‑capabilities**: Effects require a CapGrant by name; grants live in kernel state and can be referenced in manifest defaults or `plan.required_caps`.
 

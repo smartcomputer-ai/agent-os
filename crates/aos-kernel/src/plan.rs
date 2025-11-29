@@ -11,6 +11,7 @@ use aos_air_types::{
     TypePrimitive, TypePrimitiveInt, ValueBool, ValueBytes, ValueDec128, ValueDurationNs,
     ValueHash, ValueInt, ValueList, ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull,
     ValueRecord, ValueSet, ValueText, ValueTimeNs, ValueUuid, ValueVariant,
+    catalog::EffectCatalog,
 };
 use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
@@ -1103,11 +1104,31 @@ mod tests {
             ),
         ];
         let resolver = CapabilityResolver::from_runtime_grants(grants);
-        EffectManager::new(resolver, Box::new(AllowAllPolicy), None, None)
+        let effect_catalog = Arc::new(EffectCatalog::from_defs(
+            aos_air_types::builtins::builtin_effects()
+                .iter()
+                .map(|b| b.effect.clone()),
+        ));
+        EffectManager::new(
+            resolver,
+            Box::new(AllowAllPolicy),
+            effect_catalog,
+            builtin_schema_index(),
+            None,
+            None,
+        )
     }
 
     fn empty_schema_index() -> Arc<SchemaIndex> {
         Arc::new(SchemaIndex::new(HashMap::new()))
+    }
+
+    fn builtin_schema_index() -> Arc<SchemaIndex> {
+        let mut map = HashMap::new();
+        for builtin in aos_air_types::builtins::builtin_schemas() {
+            map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
+        }
+        Arc::new(SchemaIndex::new(map))
     }
 
     fn empty_reducer_schemas() -> Arc<HashMap<String, ReducerSchema>> {

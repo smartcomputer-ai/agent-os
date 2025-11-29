@@ -423,6 +423,7 @@ pub enum AirNode {
     Defcap(DefCap),
     Defpolicy(DefPolicy),
     Defsecret(DefSecret),
+    Defeffect(DefEffect),
     Manifest(Manifest),
 }
 
@@ -574,6 +575,34 @@ pub struct DefCap {
     pub schema: TypeExpr,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OriginScope {
+    Reducer,
+    Plan,
+    Both,
+}
+
+impl OriginScope {
+    pub fn allows_plans(self) -> bool {
+        matches!(self, OriginScope::Plan | OriginScope::Both)
+    }
+
+    pub fn allows_reducers(self) -> bool {
+        matches!(self, OriginScope::Reducer | OriginScope::Both)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefEffect {
+    pub name: Name,
+    pub kind: EffectKind,
+    pub params_schema: SchemaRef,
+    pub receipt_schema: SchemaRef,
+    pub cap_type: CapType,
+    pub origin_scope: OriginScope,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 pub struct CapType(String);
@@ -687,6 +716,8 @@ pub struct Manifest {
     pub schemas: Vec<NamedRef>,
     pub modules: Vec<NamedRef>,
     pub plans: Vec<NamedRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<NamedRef>,
     pub caps: Vec<NamedRef>,
     pub policies: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

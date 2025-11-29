@@ -1,102 +1,74 @@
 use indexmap::IndexMap;
-use once_cell::sync::Lazy;
 
-use crate::{
-    CapType, EffectKind,
-    builtins::{BuiltinSchema, find_builtin_schema},
-};
+use crate::{CapType, DefEffect, EffectKind, OriginScope, SchemaRef};
 
 #[derive(Debug, Clone)]
 pub struct EffectCatalogEntry {
     pub kind: EffectKind,
     pub cap_type: CapType,
-    pub params_schema: Option<&'static BuiltinSchema>,
-    pub receipt_schema: Option<&'static BuiltinSchema>,
+    pub params_schema: SchemaRef,
+    pub receipt_schema: SchemaRef,
+    pub origin_scope: OriginScope,
 }
 
-static EFFECT_CATALOG: Lazy<IndexMap<String, EffectCatalogEntry>> = Lazy::new(|| {
-    let entries = vec![
-        (
-            EffectKind::HTTP_REQUEST,
-            CapType::HTTP_OUT,
-            Some("sys/HttpRequestParams@1"),
-            Some("sys/HttpRequestReceipt@1"),
-        ),
-        (
-            EffectKind::BLOB_PUT,
-            CapType::BLOB,
-            Some("sys/BlobPutParams@1"),
-            Some("sys/BlobPutReceipt@1"),
-        ),
-        (
-            EffectKind::BLOB_GET,
-            CapType::BLOB,
-            Some("sys/BlobGetParams@1"),
-            Some("sys/BlobGetReceipt@1"),
-        ),
-        (
-            EffectKind::TIMER_SET,
-            CapType::TIMER,
-            Some("sys/TimerSetParams@1"),
-            Some("sys/TimerSetReceipt@1"),
-        ),
-        (
-            EffectKind::LLM_GENERATE,
-            CapType::LLM_BASIC,
-            Some("sys/LlmGenerateParams@1"),
-            Some("sys/LlmGenerateReceipt@1"),
-        ),
-        (
-            EffectKind::VAULT_PUT,
-            CapType::SECRET,
-            Some("sys/VaultPutParams@1"),
-            Some("sys/VaultPutReceipt@1"),
-        ),
-        (
-            EffectKind::VAULT_ROTATE,
-            CapType::SECRET,
-            Some("sys/VaultRotateParams@1"),
-            Some("sys/VaultRotateReceipt@1"),
-        ),
-    ];
+#[derive(Debug, Clone, Default)]
+pub struct EffectCatalog {
+    by_kind: IndexMap<String, EffectCatalogEntry>,
+}
 
-    entries
-        .into_iter()
-        .map(|(kind, cap_type, params_schema, receipt_schema)| {
-            let params_schema = params_schema.map(|name| {
-                find_builtin_schema(name)
-                    .unwrap_or_else(|| panic!("builtin schema '{name}' must exist"))
-            });
-            let receipt_schema = receipt_schema.map(|name| {
-                find_builtin_schema(name)
-                    .unwrap_or_else(|| panic!("builtin schema '{name}' must exist"))
-            });
+impl EffectCatalog {
+    pub fn new() -> Self {
+        Self {
+            by_kind: IndexMap::new(),
+        }
+    }
 
-            (
-                kind.to_string(),
+    /// Builds a catalog from a list of `defeffect` nodes. Duplicate kinds keep the first definition.
+    pub fn from_defs<I>(defs: I) -> Self
+    where
+        I: IntoIterator<Item = DefEffect>,
+    {
+        let mut catalog = EffectCatalog::new();
+        for def in defs {
+            let key = def.kind.as_str().to_string();
+            if catalog.by_kind.contains_key(&key) {
+                continue;
+            }
+            catalog.by_kind.insert(
+                key,
                 EffectCatalogEntry {
-                    kind: EffectKind::new(kind),
-                    cap_type: CapType::new(cap_type),
-                    params_schema,
-                    receipt_schema,
+                    kind: def.kind.clone(),
+                    cap_type: def.cap_type.clone(),
+                    params_schema: def.params_schema.clone(),
+                    receipt_schema: def.receipt_schema.clone(),
+                    origin_scope: def.origin_scope,
                 },
-            )
-        })
-        .collect()
-});
+            );
+        }
+        catalog
+    }
 
-pub fn effect_catalog() -> &'static IndexMap<String, EffectCatalogEntry> {
-    &EFFECT_CATALOG
-}
+    pub fn get(&self, kind: &EffectKind) -> Option<&EffectCatalogEntry> {
+        self.by_kind.get(kind.as_str())
+    }
 
-pub fn find_effect(kind: &EffectKind) -> Option<&'static EffectCatalogEntry> {
-    EFFECT_CATALOG.get(kind.as_str())
-}
+    pub fn params_schema(&self, kind: &EffectKind) -> Option<&SchemaRef> {
+        self.get(kind).map(|e| &e.params_schema)
+    }
 
-pub fn effect_params_schema(kind: &EffectKind) -> Option<&'static BuiltinSchema> {
-    find_effect(kind)?.params_schema
-}
+    pub fn receipt_schema(&self, kind: &EffectKind) -> Option<&SchemaRef> {
+        self.get(kind).map(|e| &e.receipt_schema)
+    }
 
-pub fn effect_receipt_schema(kind: &EffectKind) -> Option<&'static BuiltinSchema> {
-    find_effect(kind)?.receipt_schema
+    pub fn cap_type(&self, kind: &EffectKind) -> Option<&CapType> {
+        self.get(kind).map(|e| &e.cap_type)
+    }
+
+    pub fn origin_scope(&self, kind: &EffectKind) -> Option<OriginScope> {
+        self.get(kind).map(|e| e.origin_scope)
+    }
+
+    pub fn kinds(&self) -> impl Iterator<Item = &EffectKind> {
+        self.by_kind.values().map(|e| &e.kind)
+    }
 }

@@ -5,9 +5,10 @@ use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    CapGrant, CapType, DefCap, DefModule, DefPlan, DefSchema, Expr, ExprConst, ExprRef, HashRef,
-    Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef, PlanStepKind,
-    Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr, TypeRecord, ValueLiteral, ValueRecord,
+    CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, Expr, ExprConst, ExprRef,
+    HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef,
+    PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr, TypeRecord, ValueLiteral,
+    ValueRecord, catalog::EffectCatalog,
 };
 use aos_effects::EffectIntent;
 use aos_kernel::{
@@ -131,6 +132,13 @@ pub mod fixtures {
             schemas: vec![],
             modules: module_refs,
             plans: plan_refs,
+            effects: aos_air_types::builtins::builtin_effects()
+                .iter()
+                .map(|e| NamedRef {
+                    name: e.effect.name.clone(),
+                    hash: e.hash_ref.clone(),
+                })
+                .collect(),
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -149,6 +157,12 @@ pub mod fixtures {
             .map(|plan| (plan.name.clone(), plan))
             .collect();
 
+        let effects_map: HashMap<Name, DefEffect> = aos_air_types::builtins::builtin_effects()
+            .iter()
+            .map(|e| (e.effect.name.clone(), e.effect.clone()))
+            .collect();
+        let effect_catalog = EffectCatalog::from_defs(effects_map.values().cloned());
+
         let caps = attach_test_capabilities(&mut manifest, modules_map.keys());
 
         let mut loaded = LoadedManifest {
@@ -156,9 +170,11 @@ pub mod fixtures {
             secrets: Vec::new(),
             modules: modules_map,
             plans: plans_map,
+            effects: effects_map,
             caps,
             policies: HashMap::new(),
             schemas: HashMap::new(),
+            effect_catalog,
         };
         ensure_placeholder_schemas(&mut loaded);
         loaded

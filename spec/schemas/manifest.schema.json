@@ -17,6 +17,10 @@
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
+    "effects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NamedRef" }
+    },
     "caps": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
@@ -107,7 +111,7 @@
       }
     }
   },
-  "required": ["$kind","schemas","modules","plans","caps","policies"],
+  "required": ["$kind","schemas","modules","plans","effects","caps","policies"],
   "additionalProperties": false,
   "$defs": {
     "NamedRef": {

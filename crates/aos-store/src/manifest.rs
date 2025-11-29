@@ -31,6 +31,7 @@ enum NodeKind {
     Schema,
     Module,
     Plan,
+    Effect,
     Cap,
     Policy,
     Secret,
@@ -42,6 +43,7 @@ impl NodeKind {
             NodeKind::Schema => "defschema",
             NodeKind::Module => "defmodule",
             NodeKind::Plan => "defplan",
+            NodeKind::Effect => "defeffect",
             NodeKind::Cap => "defcap",
             NodeKind::Policy => "defpolicy",
             NodeKind::Secret => "defsecret",
@@ -54,6 +56,7 @@ impl NodeKind {
             (NodeKind::Schema, AirNode::Defschema(_))
                 | (NodeKind::Module, AirNode::Defmodule(_))
                 | (NodeKind::Plan, AirNode::Defplan(_))
+                | (NodeKind::Effect, AirNode::Defeffect(_))
                 | (NodeKind::Cap, AirNode::Defcap(_))
                 | (NodeKind::Policy, AirNode::Defpolicy(_))
                 | (NodeKind::Secret, AirNode::Defsecret(_))
@@ -73,11 +76,13 @@ pub fn load_manifest_from_path<S: Store>(
 pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResult<Catalog> {
     let mut manifest: Manifest = serde_cbor::from_slice(bytes)?;
     ensure_builtin_schema_refs(&mut manifest)?;
+    ensure_builtin_effect_refs(&mut manifest)?;
     let mut nodes = HashMap::new();
 
     load_refs(store, &manifest.schemas, NodeKind::Schema, &mut nodes)?;
     load_refs(store, &manifest.modules, NodeKind::Module, &mut nodes)?;
     load_refs(store, &manifest.plans, NodeKind::Plan, &mut nodes)?;
+    load_refs(store, &manifest.effects, NodeKind::Effect, &mut nodes)?;
     load_refs(store, &manifest.caps, NodeKind::Cap, &mut nodes)?;
     load_refs(store, &manifest.policies, NodeKind::Policy, &mut nodes)?;
     load_secret_refs(store, &manifest.secrets, &mut nodes)?;
@@ -109,6 +114,19 @@ fn load_refs<S: Store>(
                     CatalogEntry {
                         hash: builtin.hash,
                         node: AirNode::Defschema(builtin.schema.clone()),
+                    },
+                );
+                continue;
+            }
+        }
+        if kind == NodeKind::Effect {
+            if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
+                ensure_builtin_effect_hash(reference, builtin)?;
+                nodes.insert(
+                    reference.name.clone(),
+                    CatalogEntry {
+                        hash: builtin.hash,
+                        node: AirNode::Defeffect(builtin.effect.clone()),
                     },
                 );
                 continue;
@@ -149,6 +167,7 @@ fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreRe
 
     let mut schema_map = HashMap::new();
     let mut module_map = HashMap::new();
+    let mut effect_defs = Vec::new();
     for entry in nodes.values() {
         match &entry.node {
             AirNode::Defschema(schema) => {
@@ -157,6 +176,7 @@ fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreRe
             AirNode::Defmodule(module) => {
                 module_map.insert(module.name.clone(), module.clone());
             }
+            AirNode::Defeffect(effect) => effect_defs.push(effect.clone()),
             _ => {}
         }
     }
@@ -166,9 +186,11 @@ fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreRe
             .or_insert(builtin.schema.ty.clone());
     }
     let schema_index = SchemaIndex::new(schema_map);
+    let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(effect_defs);
     for (name, entry) in nodes.iter_mut() {
         if let AirNode::Defplan(plan) = &mut entry.node {
-            normalize_plan_literals(plan, &schema_index, &module_map).map_err(|source| {
+            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog)
+                .map_err(|source| {
                 StoreError::PlanNormalization {
                     name: name.clone(),
                     source,
@@ -233,6 +255,28 @@ fn ensure_builtin_schema_refs(manifest: &mut Manifest) -> StoreResult<()> {
     Ok(())
 }
 
+fn ensure_builtin_effect_refs(manifest: &mut Manifest) -> StoreResult<()> {
+    let mut present: HashSet<String> = HashSet::new();
+    for reference in &manifest.effects {
+        if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
+            ensure_builtin_effect_hash(reference, builtin)?;
+            present.insert(reference.name.clone());
+        }
+    }
+
+    // Always include all built-in effects so plans can rely on them even if omitted.
+    for builtin in builtins::builtin_effects() {
+        if !present.contains(&builtin.effect.name) {
+            manifest.effects.push(NamedRef {
+                name: builtin.effect.name.clone(),
+                hash: builtin.hash_ref.clone(),
+            });
+            present.insert(builtin.effect.name.clone());
+        }
+    }
+    Ok(())
+}
+
 fn referenced_builtin_schema_names(manifest: &Manifest) -> HashSet<String> {
     let mut names = HashSet::new();
     if let Some(routing) = manifest.routing.as_ref() {
@@ -253,6 +297,21 @@ fn maybe_add_builtin_name(schema: &str, names: &mut HashSet<String>) {
 }
 
 fn ensure_builtin_hash(reference: &NamedRef, builtin: &builtins::BuiltinSchema) -> StoreResult<()> {
+    let actual = parse_hash_str(reference.hash.as_str())?;
+    if actual != builtin.hash {
+        return Err(StoreError::HashMismatch {
+            kind: EntryKind::Node,
+            expected: builtin.hash,
+            actual,
+        });
+    }
+    Ok(())
+}
+
+fn ensure_builtin_effect_hash(
+    reference: &NamedRef,
+    builtin: &builtins::BuiltinEffect,
+) -> StoreResult<()> {
     let actual = parse_hash_str(reference.hash.as_str())?;
     if actual != builtin.hash {
         return Err(StoreError::HashMismatch {
@@ -657,6 +716,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![plan_ref],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -726,6 +786,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -790,6 +851,7 @@ mod tests {
             }],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![NamedRef {
                 name: defcap.name.clone(),
                 hash: HashRef::new(defcap_hash.to_hex()).unwrap(),
@@ -843,6 +905,7 @@ mod tests {
             }],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![NamedRef {
                 name: defcap.name.clone(),
                 hash: HashRef::new(defcap_hash.to_hex()).unwrap(),
@@ -869,6 +932,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![
@@ -904,6 +968,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![SecretEntry::Decl(SecretDecl {
@@ -930,6 +995,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![SecretEntry::Decl(SecretDecl {
@@ -980,6 +1046,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![
@@ -1017,6 +1084,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![SecretEntry::Ref(NamedRef {
@@ -1048,6 +1116,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![SecretEntry::Ref(NamedRef {
@@ -1081,6 +1150,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![SecretEntry::Ref(NamedRef {

@@ -55,12 +55,13 @@ pub fn normalize_plan_literals(
     plan: &mut DefPlan,
     schemas: &SchemaIndex,
     modules: &HashMap<String, DefModule>,
+    effects: &crate::catalog::EffectCatalog,
 ) -> Result<(), PlanLiteralError> {
     for step in &mut plan.steps {
         match &mut step.kind {
             crate::PlanStepKind::EmitEffect(step) => {
-                let schema_name =
-                    effect_params_schema(&step.kind).ok_or(PlanLiteralError::UnknownEffect {
+                let schema_name = effect_params_schema(&step.kind, effects)
+                    .ok_or(PlanLiteralError::UnknownEffect {
                         kind: step.kind.clone(),
                     })?;
                 let schema =
@@ -724,8 +725,11 @@ fn canonical_bytes(value: &ValueLiteral) -> Result<Vec<u8>, PlanLiteralError> {
     to_canonical_cbor(value).map_err(|err| PlanLiteralError::InvalidJson(err.to_string()))
 }
 
-fn effect_params_schema(kind: &EffectKind) -> Option<&'static str> {
-    crate::catalog::effect_params_schema(kind).map(|schema| schema.schema.name.as_str())
+fn effect_params_schema<'a>(
+    kind: &EffectKind,
+    effects: &'a crate::catalog::EffectCatalog,
+) -> Option<&'a str> {
+    effects.params_schema(kind).map(|schema| schema.as_str())
 }
 
 fn normalize_raise_event_literal(
@@ -779,6 +783,14 @@ mod tests {
             map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
         }
         SchemaIndex::new(map)
+    }
+
+    fn effect_catalog() -> crate::catalog::EffectCatalog {
+        crate::catalog::EffectCatalog::from_defs(
+            crate::builtins::builtin_effects()
+                .iter()
+                .map(|e| e.effect.clone()),
+        )
     }
 
     fn reducer_modules() -> HashMap<String, DefModule> {
@@ -841,7 +853,13 @@ mod tests {
             allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         };
-        normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).unwrap();
+        normalize_plan_literals(
+            &mut plan,
+            &schema_index(),
+            &HashMap::new(),
+            &effect_catalog(),
+        )
+        .unwrap();
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(matches!(step.params, ExprOrValue::Literal(_)));
         } else {
@@ -878,8 +896,13 @@ mod tests {
             invariants: vec![],
         };
 
-        let err = normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new())
-            .expect_err("should reject const wrapper in expr");
+        let err = normalize_plan_literals(
+            &mut plan,
+            &schema_index(),
+            &HashMap::new(),
+            &effect_catalog(),
+        )
+        .expect_err("should reject const wrapper in expr");
         assert!(matches!(err, PlanLiteralError::InvalidJson(_)));
     }
 
@@ -914,7 +937,13 @@ mod tests {
             allowed_effects: vec![EffectKind::llm_generate()],
             invariants: vec![],
         };
-        normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).unwrap();
+        normalize_plan_literals(
+            &mut plan,
+            &schema_index(),
+            &HashMap::new(),
+            &effect_catalog(),
+        )
+        .unwrap();
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(matches!(step.params, ExprOrValue::Literal(_)));
         } else {
@@ -953,7 +982,13 @@ mod tests {
             invariants: vec![],
         };
 
-        normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).unwrap();
+        normalize_plan_literals(
+            &mut plan,
+            &schema_index(),
+            &reducer_modules(),
+            &effect_catalog(),
+        )
+        .unwrap();
 
         if let crate::PlanStepKind::RaiseEvent(step) = &plan.steps[0].kind {
             assert!(matches!(step.event, ExprOrValue::Literal(_)));
@@ -983,7 +1018,13 @@ mod tests {
             invariants: vec![],
         };
 
-        let err = normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).unwrap_err();
+        let err = normalize_plan_literals(
+            &mut plan,
+            &schema_index(),
+            &HashMap::new(),
+            &effect_catalog(),
+        )
+        .unwrap_err();
         assert!(matches!(err, PlanLiteralError::ReducerNotFound { .. }));
     }
 
@@ -1031,7 +1072,13 @@ mod tests {
             }),
         );
 
-        normalize_plan_literals(&mut plan, &schemas, &HashMap::new()).expect("normalize");
+        normalize_plan_literals(
+            &mut plan,
+            &schemas,
+            &HashMap::new(),
+            &effect_catalog(),
+        )
+        .expect("normalize");
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(
                 matches!(step.params, ExprOrValue::Expr(_)),
@@ -1073,7 +1120,13 @@ mod tests {
             invariants: vec![],
         };
 
-        normalize_plan_literals(&mut plan, &schema_index(), &HashMap::new()).expect("normalize");
+        normalize_plan_literals(
+            &mut plan,
+            &schema_index(),
+            &HashMap::new(),
+            &effect_catalog(),
+        )
+        .expect("normalize");
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(
                 matches!(step.params, ExprOrValue::Literal(_)),

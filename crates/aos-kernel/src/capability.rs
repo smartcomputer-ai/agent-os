@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{
     CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, TypeExpr, TypeList, TypeMap,
     TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral,
-    plan_literals::SchemaIndex, validate_value_literal,
+    builtins, catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
 };
 use aos_cbor::to_canonical_cbor;
 use aos_effects::{CapabilityBudget, CapabilityGrant};
@@ -18,6 +18,7 @@ pub trait CapabilityGate {
 #[derive(Clone)]
 pub struct CapabilityResolver {
     grants: HashMap<String, ResolvedGrant>,
+    effect_catalog: Arc<EffectCatalog>,
 }
 
 #[derive(Clone)]
@@ -27,8 +28,11 @@ struct ResolvedGrant {
 }
 
 impl CapabilityResolver {
-    fn new(grants: HashMap<String, ResolvedGrant>) -> Self {
-        Self { grants }
+    fn new(grants: HashMap<String, ResolvedGrant>, effect_catalog: Arc<EffectCatalog>) -> Self {
+        Self {
+            grants,
+            effect_catalog,
+        }
     }
 
     pub fn from_runtime_grants<I>(grants: I) -> Self
@@ -39,7 +43,12 @@ impl CapabilityResolver {
             .into_iter()
             .map(|(grant, cap_type)| (grant.name.clone(), ResolvedGrant { grant, cap_type }))
             .collect();
-        Self::new(map)
+        let catalog = EffectCatalog::from_defs(
+            builtins::builtin_effects()
+                .iter()
+                .map(|e| e.effect.clone()),
+        );
+        Self::new(map, Arc::new(catalog))
     }
 
     pub fn has_grant(&self, name: &str) -> bool {
@@ -55,7 +64,7 @@ impl CapabilityResolver {
             .grants
             .get(cap_name)
             .ok_or_else(|| KernelError::CapabilityGrantNotFound(cap_name.to_string()))?;
-        let expected = expected_cap_type(effect_kind)?;
+        let expected = expected_cap_type(&self.effect_catalog, effect_kind)?;
         if resolved.cap_type != expected {
             return Err(KernelError::CapabilityTypeMismatch {
                 grant: cap_name.to_string(),
@@ -71,6 +80,7 @@ impl CapabilityResolver {
         manifest: &Manifest,
         caps: &HashMap<Name, DefCap>,
         schema_index: &SchemaIndex,
+        effect_catalog: Arc<EffectCatalog>,
     ) -> Result<Self, KernelError> {
         let mut grants = HashMap::new();
         if let Some(defaults) = manifest.defaults.as_ref() {
@@ -82,7 +92,7 @@ impl CapabilityResolver {
                 grants.insert(grant.name.clone(), resolved);
             }
         }
-        Ok(Self::new(grants))
+        Ok(Self::new(grants, effect_catalog))
     }
 }
 
@@ -128,10 +138,11 @@ fn encode_value_literal(value: &ValueLiteral) -> Result<Vec<u8>, KernelError> {
     to_canonical_cbor(value).map_err(|err| KernelError::CapabilityEncoding(err.to_string()))
 }
 
-fn expected_cap_type(effect_kind: &str) -> Result<CapType, KernelError> {
+fn expected_cap_type(catalog: &EffectCatalog, effect_kind: &str) -> Result<CapType, KernelError> {
     let effect_kind = aos_air_types::EffectKind::new(effect_kind.to_string());
-    aos_air_types::catalog::find_effect(&effect_kind)
-        .map(|entry| entry.cap_type.clone())
+    catalog
+        .cap_type(&effect_kind)
+        .cloned()
         .ok_or_else(|| KernelError::UnsupportedEffectKind(effect_kind.to_string()))
 }
 
@@ -225,6 +236,7 @@ mod tests {
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -256,6 +268,10 @@ mod tests {
         SchemaIndex::new(HashMap::new())
     }
 
+    fn empty_effect_catalog() -> Arc<EffectCatalog> {
+        Arc::new(EffectCatalog::new())
+    }
+
     #[test]
     fn capability_params_must_match_schema() {
         let mut record = IndexMap::new();
@@ -267,7 +283,13 @@ mod tests {
         );
         let manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord { record }));
         let caps = HashMap::from([("sys/http.out@1".into(), defcap())]);
-        assert!(CapabilityResolver::from_manifest(&manifest, &caps, &empty_schema_index()).is_ok());
+        assert!(CapabilityResolver::from_manifest(
+            &manifest,
+            &caps,
+            &empty_schema_index(),
+            empty_effect_catalog(),
+        )
+        .is_ok());
     }
 
     #[test]
@@ -276,7 +298,12 @@ mod tests {
             record: IndexMap::new(),
         }));
         let caps = HashMap::from([("sys/http.out@1".into(), defcap())]);
-        let err = match CapabilityResolver::from_manifest(&manifest, &caps, &empty_schema_index()) {
+        let err = match CapabilityResolver::from_manifest(
+            &manifest,
+            &caps,
+            &empty_schema_index(),
+            empty_effect_catalog(),
+        ) {
             Ok(_) => panic!("expected validation error"),
             Err(err) => err,
         };
@@ -309,12 +336,23 @@ mod tests {
         );
         let manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord { record }));
         let caps = HashMap::from([("sys/http.out@1".into(), cap_with_ref.clone())]);
-        assert!(CapabilityResolver::from_manifest(&manifest, &caps, &schema_index).is_ok());
+        assert!(CapabilityResolver::from_manifest(
+            &manifest,
+            &caps,
+            &schema_index,
+            empty_effect_catalog(),
+        )
+        .is_ok());
 
         let invalid_manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord {
             record: IndexMap::new(),
         }));
-        let err = match CapabilityResolver::from_manifest(&invalid_manifest, &caps, &schema_index) {
+        let err = match CapabilityResolver::from_manifest(
+            &invalid_manifest,
+            &caps,
+            &schema_index,
+            empty_effect_catalog(),
+        ) {
             Ok(_) => panic!("schema refs should enforce fields"),
             Err(err) => err,
         };

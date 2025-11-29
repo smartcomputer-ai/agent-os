@@ -1,4 +1,3 @@
-use aos_air_types::EffectKind;
 use aos_effects::CapabilityGrant;
 use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
@@ -7,7 +6,15 @@ use aos_kernel::policy::AllowAllPolicy;
 use aos_testkit::fixtures;
 use aos_wasm_abi::ReducerEffect;
 use serde_cbor::Value as CborValue;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+
+use aos_air_types::{
+    EffectKind,
+    builtins,
+    catalog::EffectCatalog,
+    plan_literals::SchemaIndex,
+};
 
 /// Plan-origin effects with semantically identical params but different CBOR shapes
 /// must canonicalize to the same params bytes and intent hash.
@@ -19,7 +26,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
         .expect("grant");
     let cap_gate =
         CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::llm_basic())]);
-    let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
+    let mut mgr = mgr_with_cap(cap_gate);
 
     // Params variant A: temperature as float
     let params_a = llm_params_cbor(CborValue::Float(0.5));
@@ -63,7 +70,7 @@ fn reducer_effect_params_canonicalize_noop() {
         .expect("grant");
     let cap_gate =
         CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::timer())]);
-    let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
+    let mut mgr = mgr_with_cap(cap_gate);
 
     // Params with out-of-order fields (key optional) to ensure canonicalization sorts.
     let mut params = BTreeMap::new();
@@ -86,8 +93,12 @@ fn reducer_effect_params_canonicalize_noop() {
         .enqueue_reducer_effect("com.acme/Timer", "cap_timer", &effect)
         .expect("enqueue reducer effect");
 
+    let (effects, schemas) = builtin_effect_context();
+
     // Should canonicalize field order but remain semantically identical.
     let canonical_again = aos_effects::normalize_effect_params(
+        &effects,
+        &schemas,
         &aos_effects::EffectKind::new(aos_effects::EffectKind::TIMER_SET),
         &params_cbor,
     )
@@ -100,6 +111,8 @@ fn reducer_effect_params_canonicalize_noop() {
 
     // Idempotency: running through normalizer again yields same bytes and hash.
     let roundtrip = aos_effects::normalize_effect_params(
+        &effects,
+        &schemas,
         &aos_effects::EffectKind::new(aos_effects::EffectKind::TIMER_SET),
         &intent.params_cbor,
     )
@@ -128,7 +141,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
         .expect("grant");
     let cap_gate =
         CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::http_out())]);
-    let mut mgr = EffectManager::new(cap_gate, Box::new(AllowAllPolicy), None, None);
+    let mut mgr = mgr_with_cap(cap_gate);
 
     // Sugar A: body_ref null, headers absent
     let sugar_a = serde_json::json!({
@@ -253,6 +266,24 @@ fn reducer_params_round_trip_journal_replay() {
         intent.intent_hash, replay_intent.intent_hash,
         "intent hash stable across journal/replay"
     );
+}
+
+fn builtin_effect_context() -> (Arc<EffectCatalog>, Arc<SchemaIndex>) {
+    let catalog = EffectCatalog::from_defs(
+        builtins::builtin_effects()
+            .iter()
+            .map(|e| e.effect.clone()),
+    );
+    let mut schemas = HashMap::new();
+    for builtin in builtins::builtin_schemas() {
+        schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
+    }
+    (Arc::new(catalog), Arc::new(SchemaIndex::new(schemas)))
+}
+
+fn mgr_with_cap(cap_gate: CapabilityResolver) -> EffectManager {
+    let (effects, schemas) = builtin_effect_context();
+    EffectManager::new(cap_gate, Box::new(AllowAllPolicy), effects, schemas, None, None)
 }
 
 fn timer_params_cbor(deliver_at: u64, key: Option<String>) -> Vec<u8> {
