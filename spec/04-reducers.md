@@ -85,6 +85,8 @@ Reducers consume two kinds of events:
 
 **ReceiptEvent**: Adapter receipts converted to events by the kernel for micro-effects (e.g., `TimerFired` for `timer.set`). For complex external work, plans raise result DomainEvents instead of relying on raw receipts. Correlate using stable fields in your events/effect params (e.g., a key like `order_id` or an idempotency key). In v1.1 Cells, this key becomes a first-class route; see spec/05-cells.md.
 
+**Important**: Do not embed `$schema` fields inside reducer event payloads. The kernel determines schemas from manifest routing and capability bindings; self-describing payloads are rejected.
+
 Reducers should be written as explicit **typestate machines**: a `pc` (program counter) enum plus fences/idempotency to handle duplicates and retries. This makes continuations data-driven and deterministic.
 
 ## Effect Emission (Micro-Effects)

@@ -65,7 +65,7 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {} },
+        "reducer": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
@@ -82,7 +82,7 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {} },
+        "reducer": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
@@ -99,7 +99,7 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {} },
+        "reducer": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
