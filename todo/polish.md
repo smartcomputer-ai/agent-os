@@ -168,5 +168,5 @@ if output.effects.len() > 1 {
 - [x] 6. Enforce one effect per reducer step
 - [x] 7. Document pure modules as reserved
 - [x] 8. Add test vectors
-- [ ] 9. Add retry-backoff example
+- [x] 9. Add retry-backoff example
 - [x] 10. Clarify ExprOrValue parsing order

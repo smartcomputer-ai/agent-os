@@ -39,6 +39,8 @@ enum Commands {
     SafeUpgrade,
     /// Run the LLM summarizer example
     LlmSummarizer,
+    /// Run the reducer-driven retry with backoff example
+    RetryBackoff,
     /// Run every available example sequentially
     All,
 }
@@ -118,6 +120,14 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "examples/07-llm-summarizer",
         runner: examples::llm_summarizer::run,
     },
+    ExampleMeta {
+        number: "08",
+        slug: "retry-backoff",
+        title: "Retry Backoff",
+        summary: "Reducer-driven retries w/ timer.set",
+        dir: "examples/08-retry-backoff",
+        runner: examples::retry_backoff::run,
+    },
 ];
 
 fn main() {
@@ -152,6 +162,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::ChainComp) => run_single("chain-comp"),
         Some(Commands::SafeUpgrade) => run_single("safe-upgrade"),
         Some(Commands::LlmSummarizer) => run_single("llm-summarizer"),
+        Some(Commands::RetryBackoff) => run_single("retry-backoff"),
         Some(Commands::All) => run_all(),
         None => {
             list_examples();

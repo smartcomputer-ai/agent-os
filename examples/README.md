@@ -21,5 +21,6 @@ What the ladder proves (in order):
 | 05  | chain-comp    | Multi-plan saga + refund         |
 | 06  | safe-upgrade  | Governance shadow/apply demo     |
 | 07  | llm-summarizer | HTTP + LLM summarization demo    |
+| 08  | retry-backoff | Reducer-driven retry with timer  |
 
 Use the `aos-examples` CLI to list or run demos. Run them in order—the ladder is deliberate, and later steps assume the earlier capabilities and policies are already in place.
