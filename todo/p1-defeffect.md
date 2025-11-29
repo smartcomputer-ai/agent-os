@@ -74,6 +74,7 @@ Fields:
 - **params_schema**: Reference to the defschema for effect parameters
 - **receipt_schema**: Reference to the defschema for effect receipts
 - **cap_type**: The capability type that guards this effect
+- **origin_scope**: Which emitters are allowed in v1 — `"reducer"`, `"plan"`, or `"both"` (used to keep reducer receipts constrained to the curated micro-effect set)
 - **description**: Optional human-readable description
 
 ### Updated manifest
@@ -101,61 +102,68 @@ Ship a `spec/defs/builtin-effects.air.json` that defines all v1 effects:
 ```json
 [
   {
-    "$kind": "defeffect",
-    "name": "sys/http.request@1",
-    "kind": "http.request",
-    "params_schema": "sys/HttpRequestParams@1",
-    "receipt_schema": "sys/HttpRequestReceipt@1",
-    "cap_type": "http.out"
-  },
-  {
-    "$kind": "defeffect",
-    "name": "sys/blob.put@1",
-    "kind": "blob.put",
-    "params_schema": "sys/BlobPutParams@1",
-    "receipt_schema": "sys/BlobPutReceipt@1",
-    "cap_type": "blob"
-  },
-  {
-    "$kind": "defeffect",
-    "name": "sys/blob.get@1",
-    "kind": "blob.get",
-    "params_schema": "sys/BlobGetParams@1",
-    "receipt_schema": "sys/BlobGetReceipt@1",
-    "cap_type": "blob"
-  },
-  {
-    "$kind": "defeffect",
-    "name": "sys/timer.set@1",
-    "kind": "timer.set",
-    "params_schema": "sys/TimerSetParams@1",
-    "receipt_schema": "sys/TimerSetReceipt@1",
-    "cap_type": "timer"
-  },
-  {
-    "$kind": "defeffect",
-    "name": "sys/llm.generate@1",
-    "kind": "llm.generate",
-    "params_schema": "sys/LlmGenerateParams@1",
-    "receipt_schema": "sys/LlmGenerateReceipt@1",
-    "cap_type": "llm.basic"
-  },
-  {
-    "$kind": "defeffect",
-    "name": "sys/vault.put@1",
-    "kind": "vault.put",
-    "params_schema": "sys/VaultPutParams@1",
-    "receipt_schema": "sys/VaultPutReceipt@1",
-    "cap_type": "secret"
-  },
-  {
-    "$kind": "defeffect",
-    "name": "sys/vault.rotate@1",
-    "kind": "vault.rotate",
-    "params_schema": "sys/VaultRotateParams@1",
-    "receipt_schema": "sys/VaultRotateReceipt@1",
-    "cap_type": "secret"
-  }
+  "$kind": "defeffect",
+  "name": "sys/http.request@1",
+  "kind": "http.request",
+  "params_schema": "sys/HttpRequestParams@1",
+  "receipt_schema": "sys/HttpRequestReceipt@1",
+  "cap_type": "http.out",
+  "origin_scope": "plan"
+},
+{
+  "$kind": "defeffect",
+  "name": "sys/blob.put@1",
+  "kind": "blob.put",
+  "params_schema": "sys/BlobPutParams@1",
+  "receipt_schema": "sys/BlobPutReceipt@1",
+  "cap_type": "blob",
+  "origin_scope": "reducer"
+},
+{
+  "$kind": "defeffect",
+  "name": "sys/blob.get@1",
+  "kind": "blob.get",
+  "params_schema": "sys/BlobGetParams@1",
+  "receipt_schema": "sys/BlobGetReceipt@1",
+  "cap_type": "blob",
+  "origin_scope": "reducer"
+},
+{
+  "$kind": "defeffect",
+  "name": "sys/timer.set@1",
+  "kind": "timer.set",
+  "params_schema": "sys/TimerSetParams@1",
+  "receipt_schema": "sys/TimerSetReceipt@1",
+  "cap_type": "timer",
+  "origin_scope": "reducer"
+},
+{
+  "$kind": "defeffect",
+  "name": "sys/llm.generate@1",
+  "kind": "llm.generate",
+  "params_schema": "sys/LlmGenerateParams@1",
+  "receipt_schema": "sys/LlmGenerateReceipt@1",
+  "cap_type": "llm.basic",
+  "origin_scope": "plan"
+},
+{
+  "$kind": "defeffect",
+  "name": "sys/vault.put@1",
+  "kind": "vault.put",
+  "params_schema": "sys/VaultPutParams@1",
+  "receipt_schema": "sys/VaultPutReceipt@1",
+  "cap_type": "secret",
+  "origin_scope": "plan"
+},
+{
+  "$kind": "defeffect",
+  "name": "sys/vault.rotate@1",
+  "kind": "vault.rotate",
+  "params_schema": "sys/VaultRotateParams@1",
+  "receipt_schema": "sys/VaultRotateReceipt@1",
+  "cap_type": "secret",
+  "origin_scope": "plan"
+}
 ]
 ```
 
@@ -167,6 +175,20 @@ Ship a `spec/defs/builtin-effects.air.json` that defines all v1 effects:
 
 This is similar to how programming languages have built-in types that are also representable in the type system.
 
+### Adapter binding (optional stub)
+
+We keep adapter binding out of `defeffect`. If we want an early landing spot for swapping adapters, add an **optional** manifest field `effect_bindings`:
+
+```json
+"effect_bindings": [
+  { "kind": "http.request", "adapter_id": "builtin.http", "priority": 10, "config": {} }
+]
+```
+
+- If absent, built-in kinds are routed to their built-in adapters; custom kinds error until a binding exists.
+- Enables future WASI/native adapters without coupling them to `defeffect`.
+- The field can be added later; for v1 it is nice-to-have, not required.
+
 ### Validation changes
 
 When validating a plan's `emit_effect` step:
@@ -176,6 +198,14 @@ fn validate_emit_effect(step: &PlanStepEmitEffect, manifest: &Manifest) -> Resul
     // Look up the defeffect by kind
     let effect_def = manifest.lookup_effect_by_kind(&step.kind)
         .ok_or(ValidationError::UnknownEffectKind(step.kind.clone()))?;
+
+    // Enforce origin_scope: plans may emit plan/both; reducers checked elsewhere
+    if !effect_def.origin_scope.allows_plans() {
+        return Err(ValidationError::EffectOriginScopeMismatch {
+            effect_kind: step.kind.clone(),
+            origin: "plan".into(),
+        });
+    }
 
     // Validate params against the effect's param schema
     validate_value_against_schema(&step.params, &effect_def.params_schema)?;
@@ -227,12 +257,17 @@ Create `spec/schemas/defeffect.schema.json`:
       "$ref": "common.schema.json#/$defs/CapType",
       "description": "Capability type that guards this effect"
     },
+    "origin_scope": {
+      "type": "string",
+      "enum": ["reducer", "plan", "both"],
+      "description": "Which emitters may use this effect in v1"
+    },
     "description": {
       "type": "string",
       "description": "Optional human-readable description"
     }
   },
-  "required": ["$kind", "name", "kind", "params_schema", "receipt_schema", "cap_type"],
+  "required": ["$kind", "name", "kind", "params_schema", "receipt_schema", "cap_type", "origin_scope"],
   "additionalProperties": false
 }
 ```
@@ -269,6 +304,7 @@ pub struct DefEffect {
     pub params_schema: SchemaRef,
     pub receipt_schema: SchemaRef,
     pub cap_type: CapType,
+    pub origin_scope: OriginScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
@@ -291,16 +327,19 @@ pub enum AirNode {
 - Load `effects` entries by hash
 - Build an effect catalog indexed by `kind`
 - Merge built-in effects with manifest-declared effects
+- Expose helper to check `origin_scope` for plan vs reducer emitters
 
 ### Step 6: Update validation
 
 - Plan validator looks up effect definitions by kind
+- Plan validator enforces `origin_scope` for plan emitters
 - Validates params against `params_schema`
 - Verifies capability type matches
 
 ### Step 7: Update effect manager
 
 - Receipt validation uses `receipt_schema` from defeffect
+- Reducer-origin effects only accepted when `origin_scope` allows reducers
 - Error messages reference the effect definition
 
 ### Step 8: Update spec prose
@@ -318,11 +357,13 @@ Ensure all examples include the built-in effects in their manifests (or document
 - [ ] `defeffect.schema.json` added with correct shape
 - [ ] `manifest.schema.json` includes `effects` array
 - [ ] `builtin-effects.air.json` defines all v1 effects
+- [ ] `origin_scope` enforced (plans only emit plan/both; reducers only reducer/both)
 - [ ] Rust `DefEffect` type implemented
 - [ ] `AirNode` enum includes `Defeffect` variant
 - [ ] Manifest loader handles effect definitions
 - [ ] Plan validator uses defeffect for param schema lookup
 - [ ] Effect manager uses defeffect for receipt schema lookup
+- [ ] (Optional) Manifest supports `effect_bindings` table for adapter routing
 - [ ] Spec prose updated
 - [ ] All examples work with new model
 - [ ] All tests pass
