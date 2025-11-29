@@ -51,14 +51,6 @@ This folder contains work items that should be completed before AgentOS v1 ships
 - `p0-schema-prose-alignment` should be done before `p1-derived-caps-effects` (cleaner baseline)
 - All P0 items are independent and can be done in parallel
 
-## How to Claim Work
-
-1. Add your name/initials to the file header when you start
-2. Create a branch: `git checkout -b todo/p0-schema-prose-alignment`
-3. Make the changes described in the file
-4. Check off acceptance criteria
-5. PR and merge
-
 ## Questions?
 
 If anything is unclear, discuss in the relevant todo file or create an issue.
