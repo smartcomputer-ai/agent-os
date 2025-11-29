@@ -42,6 +42,7 @@ pub enum JournalKind {
     PolicyDecision,
     Governance,
     PlanResult,
+    PlanEnded,
     Custom,
 }
 
@@ -58,6 +59,7 @@ pub enum JournalRecord {
     Snapshot(SnapshotRecord),
     Governance(GovernanceRecord),
     PlanResult(PlanResultRecord),
+    PlanEnded(PlanEndedRecord),
     Custom(CustomRecord),
 }
 
@@ -71,9 +73,26 @@ impl JournalRecord {
             JournalRecord::Snapshot(_) => JournalKind::Snapshot,
             JournalRecord::Governance(_) => JournalKind::Governance,
             JournalRecord::PlanResult(_) => JournalKind::PlanResult,
+            JournalRecord::PlanEnded(_) => JournalKind::PlanEnded,
             JournalRecord::Custom(_) => JournalKind::Custom,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanEndStatus {
+    Ok,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanEndedRecord {
+    pub plan_name: String,
+    pub plan_id: u64,
+    pub status: PlanEndStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

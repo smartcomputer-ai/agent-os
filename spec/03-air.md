@@ -520,6 +520,11 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 **assign**: Bind a value to a variable
 - `{ id, op:"assign", expr:ExprOrValue, bind:{as:VarName} }`
 
+**Invariants (v1)**:
+- Evaluated after each step completes and once more when the plan finishes.
+- May reference plan input, locals, completed step outputs, and `@var:correlation_id`; must not reference `@event`.
+- On first failure, the kernel ends the plan and records `PlanEnded { status:"error", error_code:"invariant_violation" }`; no further steps run.
+
 **end**: Complete the plan
 - `{ id, op:"end", result?:ExprOrValue }`
 - Must match output schema if provided. The runtime canonicalizes/validates this result against `plan.output` before persisting it, and the canonical value is appended to the journal as a `plan_result` record so operators/shadow runs can see exactly what a plan produced.

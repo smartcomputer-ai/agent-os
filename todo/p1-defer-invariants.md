@@ -1,17 +1,12 @@
-# P1: Defer Plan Invariants to v1.1
+# P1: Finish Plan Invariants for v1
 
 **Priority**: P1 (recommended for v1)
 **Effort**: Small
-**Risk if deferred**: Low (we're deferring, not implementing)
+**Risk if deferred**: Medium (runtime already enforces them; semantics need to be explicit)
 
 ## Summary
 
-`defplan` currently includes an `invariants?: [Expr]` field, but:
-1. No examples use it
-2. The evaluation semantics are underspecified
-3. Failure behavior is unclear
-
-Rather than ship half-baked semantics, we should defer invariants to v1.1 where they can be properly designed and tested.
+`defplan` includes `invariants?: [Expr]` and the kernel already evaluates them after each completed step and at plan completion. They work, but the semantics and docs are fuzzy. Instead of removing the field, we will keep invariants in v1 and finish the semantics/docs to match the v1.1 design.
 
 ## Rationale
 
@@ -35,12 +30,11 @@ The spec mentions invariants but leaves key questions unanswered:
 
 ### Why defer?
 
-- **No examples use invariants** - feature is untested in practice
-- **Complexity budget** - v1 should be minimal and solid
-- **Forward compatibility** - easier to add well-designed invariants later than fix broken ones
-- **spec/12-plans-v1.1.md already designs this** - we have a good plan for v1.1
+- **They are already implemented** in code and tests; removing would create churn.
+- **We have a clear design in spec/12**; we should align the runtime/spec with it.
+- **Minimal surface area**: keeping them with clarified semantics is safer than a breaking removal.
 
-### What v1.1 would specify (from spec/12):
+### Target semantics (from spec/12, to adopt in v1):
 
 > **When invariants run:**
 > - After every step completes (at tick boundary)
@@ -48,99 +42,42 @@ The spec mentions invariants but leaves key questions unanswered:
 >
 > **Failure semantics:**
 > - On the **first failing invariant**:
->   1. Kernel immediately ends plan instance
->   2. Appends `PlanEnded { status: "error", result_ref: <PlanError with code="invariant_violation"> }`
+>   1. Kernel immediately ends the plan instance
+>   2. Appends `PlanEnded { status: "error", result_ref: <PlanError code="invariant_violation"> }`
 >   3. No further steps execute
 
-This is the right design, but it needs implementation and testing.
+Today the kernel raises `KernelError::PlanInvariantFailed` (no `PlanEnded` record). We need to switch to the planned `PlanEnded` error outcome.
 
-## Proposed Change
+## Proposed Change: Keep and Finish
 
-### Option A: Remove from schema (recommended)
+### Implementation Plan
 
-Remove `invariants` from the v1 schema entirely:
+1. **Runtime semantics**  
+   - Change invariant failure to emit `PlanEnded { status:error, result_ref: PlanError(code="invariant_violation") }` instead of surfacing a kernel error.  
+   - Ensure the tick loop stops scheduling further steps after the first failure.
 
-```diff
-// defplan.schema.json
-- "invariants": {
--   "type": "array",
--   "items": { "$ref": "common.schema.json#/$defs/Expr" }
-- },
-```
+2. **Docs**  
+   - Update `spec/03-air.md` to state timing (after each completed step and at plan end) and failure semantics (PlanEnded error with code).  
+   - Call out the reference rules (no `@event`, only declared locals/steps/plan input, `@var:correlation_id` allowed).
 
-**Pros**: Clean v1 surface, no confusion
-**Cons**: Breaking change if anyone somehow used it
+3. **Examples**  
+   - Add one positive example (invariant stays true) and one negative example (fails) in `spec/12-plans-v1.1.md` or a short snippet in `spec/03-air.md`.
 
-### Option B: Keep in schema but ignore
+4. **Tests**  
+   - Kernel plan tests: assert invariant failure yields `PlanEnded{status:error, ...code="invariant_violation"}` and no further steps run.  
+   - Happy-path test that invariants are evaluated after each step (e.g., failing on second step).
 
-Keep the field but document it as reserved:
+5. **Telemetry/Errors**  
+   - Map legacy `KernelError::PlanInvariantFailed` to the new PlanEnded error path or remove that error variant once nothing else throws it.
 
-```json
-"invariants": {
-  "type": "array",
-  "items": { "$ref": "common.schema.json#/$defs/Expr" },
-  "description": "RESERVED for v1.1. Ignored in v1.0."
-}
-```
-
-**Pros**: Forward compatible, existing plans with invariants won't fail to parse
-**Cons**: Confusing - field exists but does nothing
-
-### Recommendation: Option A
-
-Since no examples use invariants, there's no migration burden. A clean removal is better than a confusing "ignored" field.
-
-## Implementation Plan
-
-### Step 1: Remove from JSON Schema
-
-```diff
-// spec/schemas/defplan.schema.json
-  "properties": {
-    ...
--   "invariants": {
--     "type": "array",
--     "items": { "$ref": "common.schema.json#/$defs/Expr" }
--   }
-  },
-```
-
-### Step 2: Remove from Rust types
-
-```diff
-// aos-air-types/src/model.rs
-pub struct DefPlan {
-    pub name: Name,
-    pub input: SchemaRef,
-    pub output: Option<SchemaRef>,
-    pub locals: IndexMap<VarName, SchemaRef>,
-    pub steps: Vec<PlanStep>,
-    pub edges: Vec<PlanEdge>,
-    pub required_caps: Vec<CapGrantName>,
-    pub allowed_effects: Vec<EffectKind>,
--   pub invariants: Vec<Expr>,
-}
-```
-
-### Step 3: Update spec prose
-
-In `spec/03-air.md` §11, remove the `invariants` field from the shape and add a note:
-
-> **Note**: Plan invariants are deferred to v1.1. See `spec/12-plans-v1.1.md` for the planned design.
-
-### Step 4: Remove any validation code
-
-If there's any code that attempts to validate invariants, remove it.
-
-### Step 5: Update tests
-
-Remove any tests that reference plan invariants.
+6. **Schema/Validator**  
+   - Keep the field in `defplan.schema.json`.  
+   - Validator rules are already present; verify they still pass after runtime change.
 
 ## Acceptance Criteria
 
-- [ ] `invariants` field removed from `defplan.schema.json`
-- [ ] `invariants` field removed from Rust `DefPlan` struct
-- [ ] Spec prose updated to note deferral to v1.1
-- [ ] No runtime code references plan invariants
-- [ ] All tests pass
-- [ ] spec/12-plans-v1.1.md remains as the design doc for future work
+- [x] Invariant failure ends plan with `PlanEnded { status:error, result_ref: PlanError(code="invariant_violation") }`
+- [ ] Invariants are evaluated after every completed step and at plan end (documented)
+- [ ] `spec/03-air.md` describes timing, reference scope, and failure semantics; examples added
+- [ ] Tests cover success and failure cases with PlanEnded behavior
+- [ ] No stray uses of `KernelError::PlanInvariantFailed` remain (or it is mapped to PlanEnded)

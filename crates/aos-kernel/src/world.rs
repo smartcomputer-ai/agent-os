@@ -23,9 +23,9 @@ use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
-    AppliedRecord, ApprovedRecord, ApprovalDecisionRecord, DomainEventRecord,
-    EffectIntentRecord, EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal,
-    JournalEntry, JournalKind, JournalRecord, JournalSeq, OwnedJournalEntry, PlanResultRecord,
+    AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, DomainEventRecord, EffectIntentRecord,
+    EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry, JournalKind,
+    JournalRecord, JournalSeq, OwnedJournalEntry, PlanEndStatus, PlanEndedRecord, PlanResultRecord,
     ProposedRecord, ShadowReportRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
@@ -569,6 +569,9 @@ impl<S: Store + 'static> Kernel<S> {
             JournalRecord::PlanResult(record) => {
                 self.restore_plan_result(record);
             }
+            JournalRecord::PlanEnded(_) => {
+                // No runtime side effects to restore; plan instances are not replayed from journal.
+            }
             _ => {}
         }
         Ok(())
@@ -784,7 +787,7 @@ impl<S: Store + 'static> Kernel<S> {
                     proposal_id,
                     state: proposal.state,
                     required: "not rejected",
-                })
+                });
             }
         }
         let patch = self.load_manifest_patch(&proposal.patch_hash)?;
@@ -1107,13 +1110,31 @@ impl<S: Store + 'static> Kernel<S> {
             }
             if outcome.completed {
                 if !self.suppress_journal {
-                    if let (Some(value_cbor), Some(output_schema)) =
-                        (outcome.result_cbor.clone(), outcome.result_schema.clone())
-                    {
-                        let entry =
-                            PlanResultEntry::new(plan_name.clone(), id, output_schema, value_cbor);
-                        self.record_plan_result(&entry)?;
-                        self.push_plan_result_entry(entry);
+                    let status = if outcome.plan_error.is_some() {
+                        PlanEndStatus::Error
+                    } else {
+                        PlanEndStatus::Ok
+                    };
+                    let ended = PlanEndedRecord {
+                        plan_name: plan_name.clone(),
+                        plan_id: id,
+                        status: status.clone(),
+                        error_code: outcome.plan_error.as_ref().map(|err| err.code.clone()),
+                    };
+                    self.record_plan_ended(ended)?;
+                    if status == PlanEndStatus::Ok {
+                        if let (Some(value_cbor), Some(output_schema)) =
+                            (outcome.result_cbor.clone(), outcome.result_schema.clone())
+                        {
+                            let entry = PlanResultEntry::new(
+                                plan_name.clone(),
+                                id,
+                                output_schema,
+                                value_cbor,
+                            );
+                            self.record_plan_result(&entry)?;
+                            self.push_plan_result_entry(entry);
+                        }
                     }
                 }
                 self.plan_instances.remove(&id);
@@ -1231,6 +1252,10 @@ impl<S: Store + 'static> Kernel<S> {
     fn record_plan_result(&mut self, entry: &PlanResultEntry) -> Result<(), KernelError> {
         let record = entry.to_record();
         self.append_record(JournalRecord::PlanResult(record))
+    }
+
+    fn record_plan_ended(&mut self, record: PlanEndedRecord) -> Result<(), KernelError> {
+        self.append_record(JournalRecord::PlanEnded(record))
     }
 
     fn append_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
@@ -1381,22 +1406,19 @@ fn canonicalize_patch<S: Store>(
 
     let schema_index = SchemaIndex::new(schema_map);
     if effect_defs.is_empty() {
-        effect_defs.extend(
-            builtins::builtin_effects()
-                .iter()
-                .map(|e| e.effect.clone()),
-        );
+        effect_defs.extend(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
     }
     let effect_catalog = EffectCatalog::from_defs(effect_defs);
     for node in canonical.nodes.iter_mut() {
         if let AirNode::Defplan(plan) = node {
-            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog)
-                .map_err(|err| {
-                KernelError::Manifest(format!(
-                    "plan '{}' literal normalization failed: {err}",
-                    plan.name
-                ))
-            })?;
+            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog).map_err(
+                |err| {
+                    KernelError::Manifest(format!(
+                        "plan '{}' literal normalization failed: {err}",
+                        plan.name
+                    ))
+                },
+            )?;
         }
     }
 

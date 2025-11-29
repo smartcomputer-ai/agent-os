@@ -66,7 +66,10 @@ fn reducer_http_effect_is_denied() {
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world.submit_event_value(fixtures::START_SCHEMA, &fixtures::plan_input_record(vec![]));
     let err = world.kernel.tick().unwrap_err();
-    assert!(matches!(err, KernelError::UnsupportedReducerReceipt(_)), "unexpected error: {err:?}");
+    assert!(
+        matches!(err, KernelError::UnsupportedReducerReceipt(_)),
+        "unexpected error: {err:?}"
+    );
 }
 
 #[test]
