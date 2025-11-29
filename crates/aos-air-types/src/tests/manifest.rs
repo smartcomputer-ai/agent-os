@@ -111,22 +111,13 @@ fn manifest_with_secrets_round_trip() {
         "caps": [],
         "policies": [],
         "secrets": [{
-            "alias": "payments/stripe",
-            "version": 1,
-            "binding_id": "stripe:prod",
-            "expected_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "policy": {
-                "allowed_caps": ["stripe_cap"],
-                "allowed_plans": ["com.acme/Plan@1"]
-            }
+            "name": "payments/stripe@1",
+            "hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         }]
     });
     assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
     let manifest: Manifest = serde_json::from_value(manifest_json.clone()).expect("manifest json");
     assert_eq!(manifest.secrets.len(), 1);
     let round = serde_json::to_value(manifest).expect("serialize");
-    assert_eq!(
-        round["secrets"][0]["alias"],
-        manifest_json["secrets"][0]["alias"]
-    );
+    assert_eq!(round["secrets"], manifest_json["secrets"]);
 }

@@ -5,7 +5,8 @@ use std::{
 
 use aos_air_types::{
     AirNode, CapGrant, DefPlan, ExprOrValue, Manifest, NamedRef, PlanStepKind, SecretDecl,
-    SecretRef, ValueLiteral, builtins, plan_literals::SchemaIndex, validate,
+    SecretEntry, SecretPolicy, SecretRef, ValueLiteral, builtins, plan_literals::SchemaIndex,
+    validate,
 };
 use aos_cbor::Hash;
 use serde_json::Value as JsonValue;
@@ -22,6 +23,7 @@ pub struct CatalogEntry {
 pub struct Catalog {
     pub manifest: Manifest,
     pub nodes: HashMap<String, CatalogEntry>,
+    pub resolved_secrets: Vec<SecretDecl>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -31,6 +33,7 @@ enum NodeKind {
     Plan,
     Cap,
     Policy,
+    Secret,
 }
 
 impl NodeKind {
@@ -41,6 +44,7 @@ impl NodeKind {
             NodeKind::Plan => "defplan",
             NodeKind::Cap => "defcap",
             NodeKind::Policy => "defpolicy",
+            NodeKind::Secret => "defsecret",
         }
     }
 
@@ -52,6 +56,7 @@ impl NodeKind {
                 | (NodeKind::Plan, AirNode::Defplan(_))
                 | (NodeKind::Cap, AirNode::Defcap(_))
                 | (NodeKind::Policy, AirNode::Defpolicy(_))
+                | (NodeKind::Secret, AirNode::Defsecret(_))
         )
     }
 }
@@ -75,12 +80,18 @@ pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResul
     load_refs(store, &manifest.plans, NodeKind::Plan, &mut nodes)?;
     load_refs(store, &manifest.caps, NodeKind::Cap, &mut nodes)?;
     load_refs(store, &manifest.policies, NodeKind::Policy, &mut nodes)?;
+    load_secret_refs(store, &manifest.secrets, &mut nodes)?;
 
     normalize_plan_literals(&mut nodes)?;
-    validate_plans(&manifest, &nodes)?;
-    validate_secrets(&manifest, &nodes)?;
+    let resolved_secrets = resolve_secrets(&manifest, &nodes)?;
+    validate_plans(&manifest, &nodes, &resolved_secrets)?;
+    validate_secrets(&manifest, &resolved_secrets)?;
 
-    Ok(Catalog { manifest, nodes })
+    Ok(Catalog {
+        manifest,
+        nodes,
+        resolved_secrets,
+    })
 }
 
 fn load_refs<S: Store>(
@@ -114,6 +125,23 @@ fn load_refs<S: Store>(
         nodes.insert(reference.name.clone(), CatalogEntry { hash, node });
     }
     Ok(())
+}
+
+fn load_secret_refs<S: Store>(
+    store: &S,
+    secrets: &[SecretEntry],
+    nodes: &mut HashMap<String, CatalogEntry>,
+) -> StoreResult<()> {
+    let mut refs = Vec::new();
+    for entry in secrets {
+        if let SecretEntry::Ref(named) = entry {
+            refs.push(named.clone());
+        }
+    }
+    if refs.is_empty() {
+        return Ok(());
+    }
+    load_refs(store, &refs, NodeKind::Secret, nodes)
 }
 
 fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreResult<()> {
@@ -156,6 +184,29 @@ fn parse_hash_str(value: &str) -> StoreResult<Hash> {
         value: value.to_string(),
         source,
     })
+}
+
+fn parse_secret_name(name: &str) -> StoreResult<(String, u64)> {
+    let parts: Vec<&str> = name.rsplitn(2, '@').collect();
+    if parts.len() != 2 {
+        return Err(StoreError::InvalidSecretName {
+            name: name.to_string(),
+            reason: "missing @version suffix".into(),
+        });
+    }
+    let version = parts[0]
+        .parse::<u64>()
+        .map_err(|_| StoreError::InvalidSecretName {
+            name: name.to_string(),
+            reason: "version is not a positive integer".into(),
+        })?;
+    if version < 1 {
+        return Err(StoreError::InvalidSecretName {
+            name: name.to_string(),
+            reason: "version must be >= 1".into(),
+        });
+    }
+    Ok((parts[1].to_string(), version))
 }
 
 fn ensure_builtin_schema_refs(manifest: &mut Manifest) -> StoreResult<()> {
@@ -213,7 +264,51 @@ fn ensure_builtin_hash(reference: &NamedRef, builtin: &builtins::BuiltinSchema) 
     Ok(())
 }
 
-fn validate_plans(manifest: &Manifest, nodes: &HashMap<String, CatalogEntry>) -> StoreResult<()> {
+fn resolve_secrets(
+    manifest: &Manifest,
+    nodes: &HashMap<String, CatalogEntry>,
+) -> StoreResult<Vec<SecretDecl>> {
+    let mut decls = Vec::new();
+    for entry in &manifest.secrets {
+        match entry {
+            SecretEntry::Decl(decl) => decls.push(decl.clone()),
+            SecretEntry::Ref(named) => {
+                let Some(node) = nodes.get(&named.name) else {
+                    return Err(StoreError::UnknownSecret {
+                        alias: named.name.clone(),
+                        version: 0,
+                        context: "defsecret not loaded".into(),
+                    });
+                };
+                let AirNode::Defsecret(def) = &node.node else {
+                    return Err(StoreError::NodeKindMismatch {
+                        name: named.name.clone(),
+                        expected: NodeKind::Secret.label(),
+                    });
+                };
+                let (alias, version) = parse_secret_name(&def.name)?;
+                decls.push(SecretDecl {
+                    alias,
+                    version,
+                    binding_id: def.binding_id.clone(),
+                    expected_digest: def.expected_digest.clone(),
+                    policy: Some(SecretPolicy {
+                        allowed_caps: def.allowed_caps.clone(),
+                        allowed_plans: def.allowed_plans.clone(),
+                    })
+                    .filter(|p| !p.allowed_caps.is_empty() || !p.allowed_plans.is_empty()),
+                });
+            }
+        }
+    }
+    Ok(decls)
+}
+
+fn validate_plans(
+    manifest: &Manifest,
+    nodes: &HashMap<String, CatalogEntry>,
+    secrets: &[SecretDecl],
+) -> StoreResult<()> {
     for plan_ref in &manifest.plans {
         if let Some(entry) = nodes.get(&plan_ref.name) {
             if let AirNode::Defplan(plan) = &entry.node {
@@ -221,22 +316,15 @@ fn validate_plans(manifest: &Manifest, nodes: &HashMap<String, CatalogEntry>) ->
                     name: plan.name.clone(),
                     source,
                 })?;
+                validate_plan_secrets(plan, &index_secret_decls(secrets)?)?;
             }
         }
     }
     Ok(())
 }
 
-fn validate_secrets(manifest: &Manifest, nodes: &HashMap<String, CatalogEntry>) -> StoreResult<()> {
-    let declarations = index_secret_decls(&manifest.secrets)?;
-    for plan_ref in &manifest.plans {
-        if let Some(entry) = nodes.get(&plan_ref.name) {
-            if let AirNode::Defplan(plan) = &entry.node {
-                validate_plan_secrets(plan, &declarations)?;
-            }
-        }
-    }
-
+fn validate_secrets(manifest: &Manifest, declarations: &[SecretDecl]) -> StoreResult<()> {
+    let declarations = index_secret_decls(declarations)?;
     if let Some(defaults) = manifest.defaults.as_ref() {
         for grant in &defaults.cap_grants {
             validate_cap_grant_secrets(grant, &declarations)?;
@@ -818,13 +906,13 @@ mod tests {
             plans: vec![],
             caps: vec![],
             policies: vec![],
-            secrets: vec![SecretDecl {
+            secrets: vec![SecretEntry::Decl(SecretDecl {
                 alias: "payments/stripe".into(),
                 version: 1,
                 binding_id: " ".into(),
                 expected_digest: None,
                 policy: None,
-            }],
+            })],
             defaults: None,
             module_bindings: IndexMap::new(),
             routing: None,
@@ -844,7 +932,7 @@ mod tests {
             plans: vec![],
             caps: vec![],
             policies: vec![],
-            secrets: vec![SecretDecl {
+            secrets: vec![SecretEntry::Decl(SecretDecl {
                 alias: "payments/stripe".into(),
                 version: 1,
                 binding_id: "stripe:prod".into(),
@@ -853,7 +941,7 @@ mod tests {
                     allowed_caps: vec!["other_cap".into()],
                     allowed_plans: vec![],
                 }),
-            }],
+            })],
             defaults: Some(ManifestDefaults {
                 policy: None,
                 cap_grants: vec![CapGrant {

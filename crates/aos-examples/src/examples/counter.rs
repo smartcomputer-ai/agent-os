@@ -174,6 +174,7 @@ fn build_loaded_manifest(store: Arc<FsStore>, wasm_bytes: &[u8]) -> Result<Loade
 
     Ok(LoadedManifest {
         manifest,
+        secrets: Vec::new(),
         modules,
         plans: HashMap::new(),
         caps: HashMap::new(),

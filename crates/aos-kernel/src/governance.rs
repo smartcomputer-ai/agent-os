@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use crate::manifest::LoadedManifest;
-use aos_air_types::{AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name};
+use aos_air_types::{
+    AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
+    SecretPolicy,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{
@@ -141,6 +144,7 @@ impl ManifestPatch {
         let mut caps: HashMap<Name, DefCap> = HashMap::new();
         let mut policies: HashMap<Name, DefPolicy> = HashMap::new();
         let mut schemas: HashMap<Name, DefSchema> = HashMap::new();
+        let mut secrets: Vec<SecretDecl> = Vec::new();
         for node in &self.nodes {
             match node {
                 AirNode::Defmodule(m) => {
@@ -158,11 +162,26 @@ impl ManifestPatch {
                 AirNode::Defschema(s) => {
                     schemas.insert(s.name.clone(), s.clone());
                 }
+                AirNode::Defsecret(s) => {
+                    let (alias, version) = parse_secret_name(&s.name);
+                    secrets.push(SecretDecl {
+                        alias,
+                        version,
+                        binding_id: s.binding_id.clone(),
+                        expected_digest: s.expected_digest.clone(),
+                        policy: Some(SecretPolicy {
+                            allowed_caps: s.allowed_caps.clone(),
+                            allowed_plans: s.allowed_plans.clone(),
+                        })
+                        .filter(|p| !p.allowed_caps.is_empty() || !p.allowed_plans.is_empty()),
+                    });
+                }
                 _ => {}
             }
         }
         LoadedManifest {
             manifest: self.manifest.clone(),
+            secrets,
             modules,
             plans,
             caps,
@@ -170,4 +189,14 @@ impl ManifestPatch {
             schemas,
         }
     }
+}
+
+fn parse_secret_name(name: &str) -> (String, u64) {
+    let mut parts = name.rsplitn(2, '@');
+    let version_part = parts
+        .next()
+        .and_then(|p| p.parse::<u64>().ok())
+        .unwrap_or(0);
+    let alias = parts.next().unwrap_or("").to_string();
+    (alias, version_part)
 }

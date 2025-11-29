@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
-    AirNode, DefModule, Manifest, Name, NamedRef, TypeExpr, builtins,
+    AirNode, DefModule, Manifest, Name, NamedRef, SecretDecl, SecretEntry, TypeExpr, builtins,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
@@ -70,6 +70,7 @@ impl fmt::Debug for KernelConfig {
 pub struct Kernel<S: Store> {
     store: Arc<S>,
     manifest: Manifest,
+    secrets: Vec<SecretDecl>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
     reducers: ReducerRegistry<S>,
     router: HashMap<String, Vec<Name>>,
@@ -228,7 +229,7 @@ impl<S: Store + 'static> Kernel<S> {
         journal: Box<dyn Journal>,
         config: KernelConfig,
     ) -> Result<Self, KernelError> {
-        let secret_resolver = select_secret_resolver(&loaded.manifest, &config)?;
+        let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
         let mut router = HashMap::new();
         if let Some(routing) = loaded.manifest.routing.as_ref() {
             for route in &routing.events {
@@ -305,10 +306,10 @@ impl<S: Store + 'static> Kernel<S> {
             effect_manager: EffectManager::new(
                 capability_resolver,
                 policy_gate,
-                if loaded.manifest.secrets.is_empty() {
+                if loaded.secrets.is_empty() {
                     None
                 } else {
-                    Some(crate::secret::SecretCatalog::new(&loaded.manifest.secrets))
+                    Some(crate::secret::SecretCatalog::new(&loaded.secrets))
                 },
                 secret_resolver.clone(),
             ),
@@ -318,6 +319,7 @@ impl<S: Store + 'static> Kernel<S> {
             governance: GovernanceManager::new(),
             secret_resolver: secret_resolver.clone(),
             allow_placeholder_secrets: config.allow_placeholder_secrets,
+            secrets: loaded.secrets,
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
@@ -970,14 +972,14 @@ impl<S: Store + 'static> Kernel<S> {
         self.schema_index = schema_index;
         self.reducer_schemas = reducer_schemas;
         self.secret_resolver = ensure_secret_resolver(
-            &self.manifest,
+            !self.secrets.is_empty(),
             self.secret_resolver.clone(),
             self.allow_placeholder_secrets,
         )?;
-        let secret_catalog = if self.manifest.secrets.is_empty() {
+        let secret_catalog = if self.secrets.is_empty() {
             None
         } else {
-            Some(crate::secret::SecretCatalog::new(&self.manifest.secrets))
+            Some(crate::secret::SecretCatalog::new(&self.secrets))
         };
         self.effect_manager = EffectManager::new(
             capability_resolver,
@@ -1272,22 +1274,22 @@ impl<S: Store + 'static> Kernel<S> {
 }
 
 fn select_secret_resolver(
-    manifest: &Manifest,
+    has_secrets: bool,
     config: &KernelConfig,
 ) -> Result<Option<SharedSecretResolver>, KernelError> {
     ensure_secret_resolver(
-        manifest,
+        has_secrets,
         config.secret_resolver.clone(),
         config.allow_placeholder_secrets,
     )
 }
 
 fn ensure_secret_resolver(
-    manifest: &Manifest,
+    has_secrets: bool,
     provided: Option<SharedSecretResolver>,
     allow_placeholder: bool,
 ) -> Result<Option<SharedSecretResolver>, KernelError> {
-    if manifest.secrets.is_empty() {
+    if !has_secrets {
         return Ok(None);
     }
     if let Some(resolver) = provided {
@@ -1559,15 +1561,22 @@ mod tests {
     fn kernel_requires_secret_resolver_for_secretful_manifest() {
         let store = Arc::new(MemStore::new());
         let mut manifest = empty_manifest();
-        manifest.secrets.push(SecretDecl {
+        manifest.secrets.push(SecretEntry::Decl(SecretDecl {
             alias: "payments/stripe".into(),
             version: 1,
             binding_id: "stripe:prod".into(),
             expected_digest: None,
             policy: None,
-        });
+        }));
         let loaded = LoadedManifest {
             manifest,
+            secrets: vec![SecretDecl {
+                alias: "payments/stripe".into(),
+                version: 1,
+                binding_id: "stripe:prod".into(),
+                expected_digest: None,
+                policy: None,
+            }],
             modules: HashMap::new(),
             plans: HashMap::new(),
             caps: HashMap::new(),

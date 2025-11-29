@@ -122,7 +122,7 @@ fn params_to_json(params_cbor: &[u8]) -> Option<JsonValue> {
 mod tests {
     use super::*;
     use crate::governance::ManifestPatch;
-    use aos_air_types::{HashRef, Manifest, NamedRef, SecretDecl};
+use aos_air_types::{HashRef, Manifest, NamedRef, SecretDecl, SecretEntry};
     use aos_store::MemStore;
 
     fn empty_manifest() -> Manifest {
@@ -209,13 +209,13 @@ mod tests {
         let store = Arc::new(MemStore::new());
         let patch = ManifestPatch {
             manifest: Manifest {
-                secrets: vec![SecretDecl {
+                secrets: vec![SecretEntry::Decl(SecretDecl {
                     alias: "payments/stripe".into(),
                     version: 1,
                     binding_id: "stripe:prod".into(),
                     expected_digest: None,
                     policy: None,
-                }],
+                })],
                 ..empty_manifest()
             },
             nodes: vec![],

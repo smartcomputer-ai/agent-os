@@ -153,6 +153,7 @@ pub mod fixtures {
 
         let mut loaded = LoadedManifest {
             manifest,
+            secrets: Vec::new(),
             modules: modules_map,
             plans: plans_map,
             caps,

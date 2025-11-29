@@ -55,6 +55,7 @@ pub fn load_from_assets(
                     AirNode::Defplan(plan) => plans.push(plan),
                     AirNode::Defcap(cap) => caps.push(cap),
                     AirNode::Defpolicy(policy) => policies.push(policy),
+                    AirNode::Defsecret(_) => {}
                 }
             }
         }
@@ -315,7 +316,11 @@ fn manifest_catalog(store: &FsStore, manifest: Manifest) -> Result<Catalog> {
 }
 
 fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
-    let Catalog { manifest, nodes } = catalog;
+    let Catalog {
+        manifest,
+        nodes,
+        resolved_secrets,
+    } = catalog;
     let mut modules = HashMap::new();
     let mut plans = HashMap::new();
     let mut caps = HashMap::new();
@@ -339,12 +344,14 @@ fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
             AirNode::Defschema(schema) => {
                 schemas.insert(schema.name.clone(), schema);
             }
+            AirNode::Defsecret(_) => {}
             AirNode::Manifest(_) => {}
         }
     }
 
     LoadedManifest {
         manifest,
+        secrets: resolved_secrets,
         modules,
         plans,
         caps,

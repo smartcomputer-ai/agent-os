@@ -81,6 +81,8 @@ pub enum StoreError {
         version: u64,
         context: String,
     },
+    #[error("secret name '{name}' is invalid: {reason}")]
+    InvalidSecretName { name: String, reason: String },
     #[error("secret {alias}@{version} not permitted for {context}")]
     SecretPolicyViolation {
         alias: String,

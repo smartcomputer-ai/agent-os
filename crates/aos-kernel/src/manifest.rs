@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use aos_air_types::{
-    AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
+    AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
     builtins::builtin_schemas,
 };
 use aos_store::{Catalog, Store, load_manifest_from_path};
@@ -10,6 +10,7 @@ use crate::error::KernelError;
 
 pub struct LoadedManifest {
     pub manifest: Manifest,
+    pub secrets: Vec<SecretDecl>,
     pub modules: HashMap<Name, DefModule>,
     pub plans: HashMap<Name, DefPlan>,
     pub caps: HashMap<Name, DefCap>,
@@ -56,6 +57,7 @@ impl ManifestLoader {
         }
         Ok(LoadedManifest {
             manifest: attach_builtin_schemas(catalog.manifest),
+            secrets: catalog.resolved_secrets,
             modules,
             plans,
             caps,
