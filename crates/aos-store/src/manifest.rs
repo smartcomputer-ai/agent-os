@@ -544,12 +544,12 @@ mod tests {
     use super::*;
     use crate::MemStore;
     use aos_air_types::{
-        AirNode, CapGrant, CapType, DefCap, DefPlan, EffectKind, EmptyObject, Expr, ExprConst,
-        ExprOp, ExprOpCode, ExprRef, HashRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
-        PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitReceipt,
+        AirNode, CapGrant, CapType, DefCap, DefPlan, DefSecret, EffectKind, EmptyObject, Expr,
+        ExprConst, ExprOp, ExprOpCode, ExprRef, HashRef, Manifest, ManifestDefaults, NamedRef,
+        PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitReceipt,
         PlanStepEmitEffect, PlanStepEnd, PlanStepKind, Routing, RoutingEvent, SchemaRef,
-        SecretDecl, SecretPolicy, SecretRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRef,
-        ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
+        SecretDecl, SecretEntry, SecretPolicy, SecretRef, TypeExpr, TypePrimitive,
+        TypePrimitiveText, TypeRef, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
     };
     use indexmap::IndexMap;
 
@@ -872,20 +872,20 @@ mod tests {
             caps: vec![],
             policies: vec![],
             secrets: vec![
-                SecretDecl {
+                SecretEntry::Decl(SecretDecl {
                     alias: "payments/stripe".into(),
                     version: 1,
                     binding_id: "stripe:prod".into(),
                     expected_digest: None,
                     policy: None,
-                },
-                SecretDecl {
+                }),
+                SecretEntry::Decl(SecretDecl {
                     alias: "payments/stripe".into(),
                     version: 1,
                     binding_id: "stripe:prod".into(),
                     expected_digest: None,
                     policy: None,
-                },
+                }),
             ],
             defaults: None,
             module_bindings: IndexMap::new(),
@@ -962,5 +962,138 @@ mod tests {
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::SecretPolicyViolation { .. }));
+    }
+
+    #[test]
+    fn rejects_duplicate_defsecret_alias_version() {
+        let store = MemStore::default();
+        let def = DefSecret {
+            name: "payments/stripe@1".into(),
+            binding_id: "binding".into(),
+            expected_digest: None,
+            allowed_caps: vec![],
+            allowed_plans: vec![],
+        };
+        let hash = store.put_node(&AirNode::Defsecret(def.clone())).unwrap();
+        // Two references to the same alias/version via the same defsecret hash
+        let manifest = Manifest {
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![
+                SecretEntry::Ref(NamedRef {
+                    name: def.name.clone(),
+                    hash: HashRef::new(hash.to_hex()).unwrap(),
+                }),
+                SecretEntry::Ref(NamedRef {
+                    name: def.name.clone(),
+                    hash: HashRef::new(hash.to_hex()).unwrap(),
+                }),
+            ],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
+        let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
+        assert!(matches!(err, StoreError::DuplicateSecret { .. }));
+    }
+
+    #[test]
+    fn rejects_defsecret_missing_binding() {
+        let store = MemStore::default();
+        let def = DefSecret {
+            name: "payments/stripe@1".into(),
+            binding_id: " ".into(),
+            expected_digest: None,
+            allowed_caps: vec![],
+            allowed_plans: vec![],
+        };
+        let hash = store.put_node(&AirNode::Defsecret(def)).unwrap();
+        let manifest = Manifest {
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![SecretEntry::Ref(NamedRef {
+                name: "payments/stripe@1".into(),
+                hash: HashRef::new(hash.to_hex()).unwrap(),
+            })],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
+        let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
+        assert!(matches!(err, StoreError::SecretMissingBinding { .. }));
+    }
+
+    #[test]
+    fn loads_defsecret_refs() {
+        let store = MemStore::default();
+        let def = DefSecret {
+            name: "payments/stripe@1".into(),
+            binding_id: "binding".into(),
+            expected_digest: None,
+            allowed_caps: vec![],
+            allowed_plans: vec![],
+        };
+        let hash = store.put_node(&AirNode::Defsecret(def)).unwrap();
+        let manifest = Manifest {
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![SecretEntry::Ref(NamedRef {
+                name: "payments/stripe@1".into(),
+                hash: HashRef::new(hash.to_hex()).unwrap(),
+            })],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
+        let catalog = load_manifest_from_bytes(&store, &manifest_bytes).expect("load manifest");
+        assert_eq!(catalog.resolved_secrets.len(), 1);
+        assert_eq!(catalog.resolved_secrets[0].alias, "payments/stripe");
+        assert_eq!(catalog.resolved_secrets[0].version, 1);
+    }
+
+    #[test]
+    fn rejects_invalid_defsecret_name() {
+        let store = MemStore::default();
+        let def = DefSecret {
+            name: "payments-stripe-nover".into(),
+            binding_id: "binding".into(),
+            expected_digest: None,
+            allowed_caps: vec![],
+            allowed_plans: vec![],
+        };
+        let hash = store.put_node(&AirNode::Defsecret(def)).unwrap();
+        let manifest = Manifest {
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![SecretEntry::Ref(NamedRef {
+                name: "payments-stripe-nover".into(),
+                hash: HashRef::new(hash.to_hex()).unwrap(),
+            })],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
+        let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
+        assert!(matches!(err, StoreError::InvalidSecretName { .. }));
     }
 }

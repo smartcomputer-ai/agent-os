@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    self as air_types, AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, HashRef,
-    Manifest, Name,
+    self as air_types, AirNode, DefCap, DefModule, DefPlan, DefPolicy, DefSchema, DefSecret,
+    HashRef, Manifest, Name, NamedRef, SecretEntry,
 };
 use aos_kernel::{LoadedManifest, governance::ManifestPatch};
 use aos_store::{Catalog, FsStore, Store, load_manifest_from_bytes};
@@ -30,6 +30,7 @@ pub fn load_from_assets(
     let mut plans: Vec<DefPlan> = Vec::new();
     let mut caps: Vec<DefCap> = Vec::new();
     let mut policies: Vec<DefPolicy> = Vec::new();
+    let mut secrets: Vec<DefSecret> = Vec::new();
 
     for dir in ["defs", "air", "plans"].iter() {
         let dir_path = example_root.join(dir);
@@ -55,7 +56,7 @@ pub fn load_from_assets(
                     AirNode::Defplan(plan) => plans.push(plan),
                     AirNode::Defcap(cap) => caps.push(cap),
                     AirNode::Defpolicy(policy) => policies.push(policy),
-                    AirNode::Defsecret(_) => {}
+                    AirNode::Defsecret(secret) => secrets.push(secret),
                 }
             }
         }
@@ -66,7 +67,7 @@ pub fn load_from_assets(
         None => return Ok(None),
     };
 
-    let hashes = write_nodes(&store, schemas, modules, plans, caps, policies)?;
+    let hashes = write_nodes(&store, schemas, modules, plans, caps, policies, secrets)?;
     patch_manifest_refs(&mut manifest, &hashes)?;
     let catalog = manifest_catalog(&store, manifest)?;
     Ok(Some(catalog_to_loaded(catalog)))
@@ -97,12 +98,14 @@ fn write_nodes(
     plans: Vec<DefPlan>,
     caps: Vec<DefCap>,
     policies: Vec<DefPolicy>,
+    secrets: Vec<DefSecret>,
 ) -> Result<StoredHashes> {
     ensure_unique_names(&schemas, "defschema")?;
     ensure_unique_names(&modules, "defmodule")?;
     ensure_unique_names(&plans, "defplan")?;
     ensure_unique_names(&caps, "defcap")?;
     ensure_unique_names(&policies, "defpolicy")?;
+    ensure_unique_names(&secrets, "defsecret")?;
 
     let mut hashes = StoredHashes::default();
     for schema in schemas {
@@ -140,6 +143,13 @@ fn write_nodes(
             .context("store defpolicy node")?;
         hashes.policies.insert(name, HashRef::new(hash.to_hex())?);
     }
+    for secret in secrets {
+        let name = secret.name.clone();
+        let hash = store
+            .put_node(&AirNode::Defsecret(secret))
+            .context("store defsecret node")?;
+        hashes.secrets.insert(name, HashRef::new(hash.to_hex())?);
+    }
     Ok(hashes)
 }
 
@@ -164,6 +174,7 @@ struct StoredHashes {
     plans: HashMap<Name, HashRef>,
     caps: HashMap<Name, HashRef>,
     policies: HashMap<Name, HashRef>,
+    secrets: HashMap<Name, HashRef>,
 }
 
 fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result<()> {
@@ -172,7 +183,21 @@ fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result
     patch_named_refs("plan", &mut manifest.plans, &hashes.plans)?;
     patch_named_refs("cap", &mut manifest.caps, &hashes.caps)?;
     patch_named_refs("policy", &mut manifest.policies, &hashes.policies)?;
+    let mut secret_refs = secrets_as_named_refs(&manifest.secrets)?;
+    patch_named_refs("secret", &mut secret_refs, &hashes.secrets)?;
+    manifest.secrets = secret_refs.into_iter().map(SecretEntry::Ref).collect();
     Ok(())
+}
+
+fn secrets_as_named_refs(entries: &[SecretEntry]) -> Result<Vec<NamedRef>> {
+    let mut refs = Vec::new();
+    for entry in entries {
+        match entry {
+            SecretEntry::Ref(r) => refs.push(r.clone()),
+            SecretEntry::Decl(_) => bail!("inline secret declarations are unsupported in examples; provide defsecret nodes instead"),
+        }
+    }
+    Ok(refs)
 }
 
 fn patch_named_refs(
@@ -305,6 +330,12 @@ impl HasName for DefCap {
 }
 
 impl HasName for DefPolicy {
+    fn name(&self) -> Name {
+        self.name.clone()
+    }
+}
+
+impl HasName for DefSecret {
     fn name(&self) -> Name {
         self.name.clone()
     }
@@ -555,6 +586,7 @@ mod tests {
             AirNode::Defplan(plan) => plan.name.clone(),
             AirNode::Defcap(cap) => cap.name.clone(),
             AirNode::Defpolicy(policy) => policy.name.clone(),
+            AirNode::Defsecret(secret) => secret.name.clone(),
             AirNode::Manifest(_) => panic!("cannot build ref for manifest"),
         };
         aos_air_types::NamedRef {

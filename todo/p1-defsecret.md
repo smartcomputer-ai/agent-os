@@ -243,15 +243,15 @@ aos migrate-secrets --manifest manifest.air.json
 
 ## Suggested execution order (granular)
 
-1. Schemas: add `defsecret.schema.json`; update `manifest.schema.json` to `NamedRef` for secrets.
-2. Types: add `DefSecret` + `AirNode::Defsecret`; update serde defaults and trait derives.
-3. Store loader: load defsecret nodes, parse `name` → `(alias, version)`, build `SecretsIndex/SecretCatalog`, drop use of inline `Manifest.secrets`.
-4. Validation: extend `aos-air-types::validate` and `aos-store` validation to cover parsed alias/version uniqueness, binding presence, version >= 1, digest format, and ACL target existence.
-5. Runtime: rewire `aos-kernel` to consume the new catalog; ensure effect injection/policy paths use the loader-derived catalog only.
-6. Builtins: keep `sys/SecretRef@1` canonical; optionally add name-based sugar plus normalization if desired.
-7. Specs/docs: update `spec/03-air.md`, `spec/17-secrets.md`, and any governance prose that lists defkinds.
-8. Examples/tests: rewrite example manifests (07) and update tests/goldens that construct inline secrets; add new tests for loader + validation + injection using defsecret nodes.
-9. Migration tool: CLI to lift inline secrets → defsecret nodes and rewrite manifests (helps existing fixtures).
+1. Schemas: add `defsecret.schema.json`; update `manifest.schema.json` to `NamedRef` for secrets. ✅
+2. Types: add `DefSecret` + `AirNode::Defsecret`; update serde defaults and trait derives. ✅
+3. Store loader: load defsecret nodes, parse `name` → `(alias, version)`, build `SecretsIndex/SecretCatalog`, drop use of inline `Manifest.secrets`. ✅
+4. Validation: extend `aos-air-types::validate` and `aos-store` validation to cover parsed alias/version uniqueness, binding presence, version >= 1, digest format, and ACL target existence (negative tests added). ✅
+5. Runtime: rewire `aos-kernel` to consume the new catalog; ensure effect injection/policy paths use the loader-derived catalog only. ✅
+6. Builtins: keep `sys/SecretRef@1` canonical; optionally add name-based sugar plus normalization if desired. (kept canonical)
+7. Specs/docs: update `spec/03-air.md`, `spec/17-secrets.md`, and governance prose that lists defkinds. ✅
+8. Examples/tests: rewrite example manifests (07) and update tests/goldens; add loader/validation tests for defsecret nodes. ✅
+9. Migration tool: CLI to lift inline secrets → defsecret nodes and rewrite manifests. (Not planned; intentionally skipped.)
 
 ## Acceptance Criteria
 
@@ -261,7 +261,6 @@ aos migrate-secrets --manifest manifest.air.json
 - [ ] Manifest loader resolves secret refs into `DefSecret` nodes, parses name → alias/version, and builds catalog/index
 - [ ] Secret validation covers parsed alias/version uniqueness, binding, version, digest format, ACL target existence
 - [ ] Runtime secret injection/policy uses loader-derived catalog (no inline manifest dependency)
-- [ ] Spec prose updated
-- [ ] Example 07-llm-summarizer updated for new secret format
-- [ ] Migration tool provided (if needed)
-- [ ] All tests pass
+- [x] Spec prose updated
+- [x] Example 07-llm-summarizer updated for new secret format
+- [x] All tests pass

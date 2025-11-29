@@ -185,7 +185,11 @@ mod tests {
             ),
             (
                 "spec/schemas/manifest.schema.json",
-                "sha256:523563bd36611b33d3611d62b192e435fe3d29ea201fec195945003ad6e5e4a9",
+                "sha256:74a15ba11a31d109e8f7d2de585bb73a924d5201d1c97f00689472a1c9f109df",
+            ),
+            (
+                "spec/schemas/defsecret.schema.json",
+                "sha256:2ff01ee39376e4bc37722bf1ceb763d4412f142be325903513dfaaf8e7a729f7",
             ),
             (
                 "spec/defs/builtin-schemas.air.json",

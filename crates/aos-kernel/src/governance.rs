@@ -196,7 +196,11 @@ fn parse_secret_name(name: &str) -> (String, u64) {
     let version_part = parts
         .next()
         .and_then(|p| p.parse::<u64>().ok())
-        .unwrap_or(0);
-    let alias = parts.next().unwrap_or("").to_string();
+        .filter(|v| *v >= 1)
+        .expect("defsecret name must end with @<version>=1");
+    let alias = parts
+        .next()
+        .map(str::to_string)
+        .expect("defsecret name must include alias");
     (alias, version_part)
 }

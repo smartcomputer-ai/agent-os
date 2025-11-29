@@ -21,16 +21,7 @@
     { "name": "demo/llm-policy@1" }
   ],
   "secrets": [
-    {
-      "alias": "llm/api",
-      "version": 1,
-      "binding_id": "env:LLM_API_KEY",
-      "expected_digest": null,
-      "policy": {
-        "allowed_caps": [ "cap_llm" ],
-        "allowed_plans": [ "demo/summarize_plan@1" ]
-      }
-    }
+    { "name": "demo/llm_api_secret@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
   ],
   "defaults": {
     "policy": "demo/llm-policy@1",

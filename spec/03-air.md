@@ -9,6 +9,7 @@ AIR (Agent Intermediate Representation) is a small, typed, canonical control‑p
 - spec/schemas/defplan.schema.json
 - spec/schemas/defcap.schema.json
 - spec/schemas/defpolicy.schema.json
+- spec/schemas/defsecret.schema.json
 - spec/schemas/manifest.schema.json
 
 These schemas validate structure. Semantic checks (DAG acyclicity, type compatibility, name/hash resolution, capability bindings) are enforced by the kernel validator.
@@ -23,7 +24,7 @@ The policy engine is minimal: ordered allow/deny rules with budgets enforced on 
 
 ## 1) Vocabulary and Identity
 
-**Kind**: One of `defschema`, `defmodule`, `defplan`, `defcap`, `defpolicy`, or `manifest`. (`defmigration` is reserved for future use.)
+**Kind**: One of `defschema`, `defmodule`, `defplan`, `defcap`, `defpolicy`, `defsecret`, or `manifest`. (`defmigration` is reserved for future use.)
 
 **Name**: A versioned identifier with the format `namespace/name@version`, where version is a positive integer. Example: `com.acme/rss_fetch@1`.
 
