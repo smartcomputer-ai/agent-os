@@ -189,13 +189,12 @@ fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreRe
     let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(effect_defs);
     for (name, entry) in nodes.iter_mut() {
         if let AirNode::Defplan(plan) = &mut entry.node {
-            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog)
-                .map_err(|source| {
-                StoreError::PlanNormalization {
+            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog).map_err(
+                |source| StoreError::PlanNormalization {
                     name: name.clone(),
                     source,
-                }
-            })?;
+                },
+            )?;
         }
     }
     Ok(())

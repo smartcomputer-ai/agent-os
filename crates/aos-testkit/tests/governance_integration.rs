@@ -10,7 +10,7 @@ use aos_air_types::{
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
-use aos_cbor::{to_canonical_cbor, Hash};
+use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
@@ -242,7 +242,10 @@ fn reject_prevents_apply_and_records_decision() {
         })
         .expect("approved/rejected record present");
 
-    assert!(matches!(record.decision, aos_kernel::journal::ApprovalDecisionRecord::Reject));
+    assert!(matches!(
+        record.decision,
+        aos_kernel::journal::ApprovalDecisionRecord::Reject
+    ));
 }
 
 #[test]

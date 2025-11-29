@@ -322,8 +322,10 @@ fn cbor_bytes(v: &CborValue) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aos_air_types::{
+        builtins::builtin_effects, builtins::builtin_schemas, catalog::EffectCatalog,
+    };
     use std::collections::BTreeMap;
-    use aos_air_types::{builtins::builtin_effects, builtins::builtin_schemas, catalog::EffectCatalog};
     use std::collections::HashMap;
     fn header_params(map: Vec<(&str, &str)>) -> CborValue {
         let mut headers = BTreeMap::new();

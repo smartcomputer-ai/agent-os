@@ -69,7 +69,9 @@ pub fn load_from_assets(
         None => return Ok(None),
     };
 
-    let hashes = write_nodes(&store, schemas, modules, plans, caps, policies, secrets, effects)?;
+    let hashes = write_nodes(
+        &store, schemas, modules, plans, caps, policies, secrets, effects,
+    )?;
     patch_manifest_refs(&mut manifest, &hashes)?;
     let catalog = manifest_catalog(&store, manifest)?;
     Ok(Some(catalog_to_loaded(catalog)))
@@ -208,7 +210,9 @@ fn secrets_as_named_refs(entries: &[SecretEntry]) -> Result<Vec<NamedRef>> {
     for entry in entries {
         match entry {
             SecretEntry::Ref(r) => refs.push(r.clone()),
-            SecretEntry::Decl(_) => bail!("inline secret declarations are unsupported in examples; provide defsecret nodes instead"),
+            SecretEntry::Decl(_) => bail!(
+                "inline secret declarations are unsupported in examples; provide defsecret nodes instead"
+            ),
         }
     }
     Ok(refs)
@@ -227,7 +231,8 @@ fn patch_named_refs(
         {
             builtin.hash_ref.clone()
         } else if kind == "effect" {
-            if let Some(builtin) = air_types::builtins::find_builtin_effect(reference.name.as_str()) {
+            if let Some(builtin) = air_types::builtins::find_builtin_effect(reference.name.as_str())
+            {
                 builtin.hash_ref.clone()
             } else {
                 bail!("manifest references unknown {kind} '{}'", reference.name);

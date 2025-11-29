@@ -9,12 +9,7 @@ use serde_cbor::Value as CborValue;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use aos_air_types::{
-    EffectKind,
-    builtins,
-    catalog::EffectCatalog,
-    plan_literals::SchemaIndex,
-};
+use aos_air_types::{EffectKind, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex};
 
 /// Plan-origin effects with semantically identical params but different CBOR shapes
 /// must canonicalize to the same params bytes and intent hash.
@@ -269,11 +264,8 @@ fn reducer_params_round_trip_journal_replay() {
 }
 
 fn builtin_effect_context() -> (Arc<EffectCatalog>, Arc<SchemaIndex>) {
-    let catalog = EffectCatalog::from_defs(
-        builtins::builtin_effects()
-            .iter()
-            .map(|e| e.effect.clone()),
-    );
+    let catalog =
+        EffectCatalog::from_defs(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
     let mut schemas = HashMap::new();
     for builtin in builtins::builtin_schemas() {
         schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
@@ -283,7 +275,14 @@ fn builtin_effect_context() -> (Arc<EffectCatalog>, Arc<SchemaIndex>) {
 
 fn mgr_with_cap(cap_gate: CapabilityResolver) -> EffectManager {
     let (effects, schemas) = builtin_effect_context();
-    EffectManager::new(cap_gate, Box::new(AllowAllPolicy), effects, schemas, None, None)
+    EffectManager::new(
+        cap_gate,
+        Box::new(AllowAllPolicy),
+        effects,
+        schemas,
+        None,
+        None,
+    )
 }
 
 fn timer_params_cbor(deliver_at: u64, key: Option<String>) -> Vec<u8> {

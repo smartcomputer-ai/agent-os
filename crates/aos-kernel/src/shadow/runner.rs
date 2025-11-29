@@ -122,7 +122,7 @@ fn params_to_json(params_cbor: &[u8]) -> Option<JsonValue> {
 mod tests {
     use super::*;
     use crate::governance::ManifestPatch;
-use aos_air_types::{HashRef, Manifest, NamedRef, SecretDecl, SecretEntry};
+    use aos_air_types::{HashRef, Manifest, NamedRef, SecretDecl, SecretEntry};
     use aos_store::MemStore;
 
     fn empty_manifest() -> Manifest {

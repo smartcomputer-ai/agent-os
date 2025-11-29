@@ -107,7 +107,9 @@ impl EffectManager {
                 .origin_scope(&runtime_kind)
                 .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?;
             if !scope.allows_reducers() {
-                return Err(KernelError::UnsupportedReducerReceipt(runtime_kind.as_str().into()));
+                return Err(KernelError::UnsupportedReducerReceipt(
+                    runtime_kind.as_str().into(),
+                ));
             }
         }
 
@@ -117,7 +119,7 @@ impl EffectManager {
             &runtime_kind,
             &params_cbor,
         )
-            .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
         let canonical_params = normalize_secret_variants(&canonical_params)
             .map_err(|err| KernelError::SecretResolution(err.to_string()))?;
         let grant = self

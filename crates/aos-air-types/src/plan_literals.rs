@@ -60,10 +60,11 @@ pub fn normalize_plan_literals(
     for step in &mut plan.steps {
         match &mut step.kind {
             crate::PlanStepKind::EmitEffect(step) => {
-                let schema_name = effect_params_schema(&step.kind, effects)
-                    .ok_or(PlanLiteralError::UnknownEffect {
+                let schema_name = effect_params_schema(&step.kind, effects).ok_or(
+                    PlanLiteralError::UnknownEffect {
                         kind: step.kind.clone(),
-                    })?;
+                    },
+                )?;
                 let schema =
                     schemas
                         .get(schema_name)
@@ -1072,13 +1073,8 @@ mod tests {
             }),
         );
 
-        normalize_plan_literals(
-            &mut plan,
-            &schemas,
-            &HashMap::new(),
-            &effect_catalog(),
-        )
-        .expect("normalize");
+        normalize_plan_literals(&mut plan, &schemas, &HashMap::new(), &effect_catalog())
+            .expect("normalize");
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(
                 matches!(step.params, ExprOrValue::Expr(_)),

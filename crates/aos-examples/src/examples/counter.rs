@@ -183,9 +183,8 @@ fn build_loaded_manifest(store: Arc<FsStore>, wasm_bytes: &[u8]) -> Result<Loade
         .iter()
         .map(|e| (e.effect.name.clone(), e.effect.clone()))
         .collect();
-    let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(
-        builtin_effects.values().cloned(),
-    );
+    let effect_catalog =
+        aos_air_types::catalog::EffectCatalog::from_defs(builtin_effects.values().cloned());
 
     Ok(LoadedManifest {
         manifest,

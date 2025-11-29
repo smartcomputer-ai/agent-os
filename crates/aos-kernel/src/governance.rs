@@ -8,7 +8,7 @@ use aos_air_types::{
 use serde::{Deserialize, Serialize};
 
 use crate::journal::{
-    AppliedRecord, ApprovedRecord, ApprovalDecisionRecord, GovernanceRecord, ProposedRecord,
+    AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, GovernanceRecord, ProposedRecord,
     ShadowReportRecord,
 };
 use crate::shadow::ShadowSummary;
@@ -186,8 +186,14 @@ impl ManifestPatch {
         }
         // Ensure built-in schemas/effects are present so shadow validation has full catalogs.
         for builtin in aos_air_types::builtins::builtin_schemas() {
-            schemas.entry(builtin.schema.name.clone()).or_insert(builtin.schema.clone());
-            if !manifest.schemas.iter().any(|nr| nr.name == builtin.schema.name) {
+            schemas
+                .entry(builtin.schema.name.clone())
+                .or_insert(builtin.schema.clone());
+            if !manifest
+                .schemas
+                .iter()
+                .any(|nr| nr.name == builtin.schema.name)
+            {
                 manifest.schemas.push(aos_air_types::NamedRef {
                     name: builtin.schema.name.clone(),
                     hash: builtin.hash_ref.clone(),
@@ -200,7 +206,11 @@ impl ManifestPatch {
             }
         }
         for builtin in aos_air_types::builtins::builtin_effects() {
-            if !manifest.effects.iter().any(|nr| nr.name == builtin.effect.name) {
+            if !manifest
+                .effects
+                .iter()
+                .any(|nr| nr.name == builtin.effect.name)
+            {
                 manifest.effects.push(aos_air_types::NamedRef {
                     name: builtin.effect.name.clone(),
                     hash: builtin.hash_ref.clone(),

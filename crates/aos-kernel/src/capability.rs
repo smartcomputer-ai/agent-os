@@ -2,8 +2,8 @@ use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{
     CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, TypeExpr, TypeList, TypeMap,
-    TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral,
-    builtins, catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
+    TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, builtins,
+    catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
 };
 use aos_cbor::to_canonical_cbor;
 use aos_effects::{CapabilityBudget, CapabilityGrant};
@@ -43,11 +43,8 @@ impl CapabilityResolver {
             .into_iter()
             .map(|(grant, cap_type)| (grant.name.clone(), ResolvedGrant { grant, cap_type }))
             .collect();
-        let catalog = EffectCatalog::from_defs(
-            builtins::builtin_effects()
-                .iter()
-                .map(|e| e.effect.clone()),
-        );
+        let catalog =
+            EffectCatalog::from_defs(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
         Self::new(map, Arc::new(catalog))
     }
 
@@ -283,13 +280,15 @@ mod tests {
         );
         let manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord { record }));
         let caps = HashMap::from([("sys/http.out@1".into(), defcap())]);
-        assert!(CapabilityResolver::from_manifest(
-            &manifest,
-            &caps,
-            &empty_schema_index(),
-            empty_effect_catalog(),
-        )
-        .is_ok());
+        assert!(
+            CapabilityResolver::from_manifest(
+                &manifest,
+                &caps,
+                &empty_schema_index(),
+                empty_effect_catalog(),
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -336,13 +335,15 @@ mod tests {
         );
         let manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord { record }));
         let caps = HashMap::from([("sys/http.out@1".into(), cap_with_ref.clone())]);
-        assert!(CapabilityResolver::from_manifest(
-            &manifest,
-            &caps,
-            &schema_index,
-            empty_effect_catalog(),
-        )
-        .is_ok());
+        assert!(
+            CapabilityResolver::from_manifest(
+                &manifest,
+                &caps,
+                &schema_index,
+                empty_effect_catalog(),
+            )
+            .is_ok()
+        );
 
         let invalid_manifest = manifest_with_grant(ValueLiteral::Record(ValueRecord {
             record: IndexMap::new(),

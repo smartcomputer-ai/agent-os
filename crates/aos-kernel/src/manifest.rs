@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
-    SecretDecl, builtins::builtin_schemas,
-    catalog::EffectCatalog,
+    SecretDecl, builtins::builtin_schemas, catalog::EffectCatalog,
 };
 use aos_store::{Catalog, Store, load_manifest_from_path};
 
