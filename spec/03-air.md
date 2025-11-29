@@ -195,6 +195,7 @@ Reducer export: `step(ptr, len) -> (ptr, len)`
 No WASI ambient syscalls, no threads, no clock. All I/O happens via the effect layer. Prefer `dec128` in values; normalize NaNs if floats are used internally.
 
 **Note**: Pure modules (stateless, side-effect-free functions) are deferred to v1.1+. Use reducers for all computation in v1.
+`module_kind` is currently limited to `"reducer"`; future versions may add `"pure"` without breaking existing manifests.
 
 See: spec/schemas/defmodule.schema.json
 
@@ -536,6 +537,8 @@ Authoring ergonomic insight: most plan fields already know the target schema (ef
 
 1. A plain JSON value (in sugar or canonical lens), which the loader interprets via the declared schema.
 2. A fully tagged `Expr` tree when dynamic computation or references are needed.
+
+Disambiguation rule: Loaders first attempt to parse an `ExprOrValue` slot as an `Expr` (looking for `op`, `ref`, `record`, etc.). If that fails, the JSON is treated as a plain Value and interpreted using the surrounding schema.
 
 Loaders may optionally lift literals into constant expressions internally so diagnostics stay consistent. Guards (`edges[].when`), `await_receipt.for`, and other predicate positions remain full `Expr` to keep intent clear: if branching logic or lookups are happening, you must be explicit.
 

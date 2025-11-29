@@ -160,13 +160,13 @@ if output.effects.len() > 1 {
 
 ## Checklist
 
-- [ ] 1. Add Name format comments to builtin schemas
-- [ ] 2. Add bold "no $schema in payloads" rule
+- [x] 1. Add Name format comments to builtin schemas
+- [x] 2. Add bold "no $schema in payloads" rule
 - [x] 3. Document edge uniqueness constraint
 - [x] 4. Clarify routing.inboxes purpose
 - [x] 5. Add air_version to manifest
 - [x] 6. Enforce one effect per reducer step
-- [ ] 7. Document pure modules as reserved
-- [ ] 8. Add test vectors
+- [x] 7. Document pure modules as reserved
+- [x] 8. Add test vectors
 - [ ] 9. Add retry-backoff example
-- [ ] 10. Clarify ExprOrValue parsing order
+- [x] 10. Clarify ExprOrValue parsing order

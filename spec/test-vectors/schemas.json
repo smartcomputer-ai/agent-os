@@ -1,0 +1,21 @@
+[
+  {
+    "label": "defschema_point",
+    "json": {
+      "$kind": "defschema",
+      "name": "com.acme/Point@1",
+      "type": {
+        "record": {
+          "x": {
+            "int": {}
+          },
+          "y": {
+            "int": {}
+          }
+        }
+      }
+    },
+    "cbor_hex": "d9d9f7a3646e616d6570636f6d2e61636d652f506f696e7440316474797065a1667265636f7264a26178a163696e74a06179a163696e74a065246b696e6469646566736368656d61",
+    "hash": "sha256:9b74eadb8810612f1becfbf9b4502cccb0ef290b90e3e912b316fc279e779add"
+  }
+]

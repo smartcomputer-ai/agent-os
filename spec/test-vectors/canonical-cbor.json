@@ -1,0 +1,28 @@
+[
+  {
+    "label": "empty_map",
+    "json": {},
+    "cbor_hex": "d9d9f7a0",
+    "hash": "sha256:75bd49cb964988d6fd2c058f51230c3dc2a254753751fbe0f313b4b1e0681b69"
+  },
+  {
+    "label": "simple_record",
+    "json": {
+      "a": 1,
+      "b": 2
+    },
+    "cbor_hex": "d9d9f7a2616101616202",
+    "hash": "sha256:7d5fc784e8d341244b992c902413575266e3140e9081fe12fc95849cf27e7df6"
+  },
+  {
+    "label": "list_mixed",
+    "json": [
+      "hi",
+      1,
+      true,
+      null
+    ],
+    "cbor_hex": "d9d9f78462686901f5f6",
+    "hash": "sha256:0e2c2f23ecdea86fcc33f4975460ea705a19da61c5eef7218112387036581271"
+  }
+]

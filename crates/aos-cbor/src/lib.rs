@@ -207,6 +207,49 @@ mod tests {
         }
     }
 
+    #[derive(serde::Deserialize)]
+    struct Vector {
+        label: String,
+        json: Value,
+        cbor_hex: String,
+        hash: String,
+    }
+
+    fn load_vectors(relative: &str) -> Vec<Vector> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../")
+            .join(relative);
+        let data = fs::read_to_string(path).expect("vector file");
+        serde_json::from_str(&data).expect("valid vectors json")
+    }
+
+    #[test]
+    fn spec_test_vectors_match_hashes() {
+        for file in [
+            "spec/test-vectors/canonical-cbor.json",
+            "spec/test-vectors/schemas.json",
+            "spec/test-vectors/plans.json",
+        ] {
+            for vector in load_vectors(file) {
+                let bytes = to_canonical_cbor(&vector.json).expect("canonical cbor");
+                assert_eq!(
+                    hex::encode(&bytes),
+                    vector.cbor_hex,
+                    "cbor hex mismatch for {} in {}",
+                    vector.label,
+                    file
+                );
+                assert_eq!(
+                    Hash::of_bytes(&bytes).to_hex(),
+                    vector.hash,
+                    "hash mismatch for {} in {}",
+                    vector.label,
+                    file
+                );
+            }
+        }
+    }
+
     #[test]
     fn parse_and_format_round_trip() {
         let original = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
