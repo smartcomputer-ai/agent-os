@@ -5,7 +5,7 @@
     "type": {
       "record": {
         "deliver_at_ns": { "nat": {} },
-        "key": { "text": {} }
+        "key": { "option": { "text": {} } }
       }
     }
   },
@@ -15,7 +15,7 @@
     "type": {
       "record": {
         "delivered_at_ns": { "nat": {} },
-        "key": { "text": {} }
+        "key": { "option": { "text": {} } }
       }
     }
   },
@@ -65,13 +65,13 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {} },
+        "reducer": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
         "requested": { "ref": "sys/TimerSetParams@1" },
         "receipt": { "ref": "sys/TimerSetReceipt@1" },
-        "cost_cents": { "nat": {} },
+        "cost_cents": { "option": { "nat": {} } },
         "signature": { "bytes": {} }
       }
     }
@@ -82,13 +82,13 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {} },
+        "reducer": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
         "requested": { "ref": "sys/BlobPutParams@1" },
         "receipt": { "ref": "sys/BlobPutReceipt@1" },
-        "cost_cents": { "nat": {} },
+        "cost_cents": { "option": { "nat": {} } },
         "signature": { "bytes": {} }
       }
     }
@@ -99,13 +99,13 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {} },
+        "reducer": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
         "requested": { "ref": "sys/BlobGetParams@1" },
         "receipt": { "ref": "sys/BlobGetReceipt@1" },
-        "cost_cents": { "nat": {} },
+        "cost_cents": { "option": { "nat": {} } },
         "signature": { "bytes": {} }
       }
     }

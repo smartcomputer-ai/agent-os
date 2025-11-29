@@ -10,6 +10,8 @@ use crate::{
     TypePrimitiveText, TypePrimitiveUuid, TypeSet,
     builtins::builtin_schemas,
     plan_literals::{PlanLiteralError, SchemaIndex, normalize_plan_literals},
+    validate,
+    validate::ValidationError,
 };
 
 fn schema_index() -> SchemaIndex {
@@ -69,6 +71,14 @@ fn schema_index() -> SchemaIndex {
         }),
     );
     SchemaIndex::new(map)
+}
+
+fn effect_catalog() -> crate::catalog::EffectCatalog {
+    crate::catalog::EffectCatalog::from_defs(
+        crate::builtins::builtin_effects()
+            .iter()
+            .map(|e| e.effect.clone()),
+    )
 }
 
 fn reducer_modules() -> HashMap<String, DefModule> {
@@ -158,7 +168,13 @@ fn normalizes_all_expr_or_value_slots() {
 
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
-    normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).expect("normalize");
+    normalize_plan_literals(
+        &mut plan,
+        &schema_index(),
+        &reducer_modules(),
+        &effect_catalog(),
+    )
+    .expect("normalize");
 
     // assign literal
     if let crate::PlanStepKind::Assign(step) = &plan.steps[0].kind {
@@ -177,6 +193,43 @@ fn normalizes_all_expr_or_value_slots() {
     if let crate::PlanStepKind::End(step) = &plan.steps[3].kind {
         assert!(matches!(step.result, Some(ExprOrValue::Literal(_))));
     }
+}
+
+#[test]
+fn normalize_fills_derived_caps_and_effects() {
+    let plan_json = json!({
+        "$kind": "defplan",
+        "name": "com.acme/plan-derive@1",
+        "input": "com.acme/Input@1",
+        "steps": [
+            {
+                "id": "emit",
+                "op": "emit_effect",
+                "kind": "http.request",
+                "params": {"ref": "@plan.input"},
+                "cap": "cap_http",
+                "bind": {"effect_id_as": "req"}
+            },
+            { "id": "end", "op": "end" }
+        ],
+        "edges": [ {"from": "emit", "to": "end"} ]
+        // required_caps / allowed_effects intentionally omitted
+    });
+
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
+    let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
+    assert!(plan.required_caps.is_empty() && plan.allowed_effects.is_empty());
+
+    normalize_plan_literals(
+        &mut plan,
+        &schema_index(),
+        &reducer_modules(),
+        &effect_catalog(),
+    )
+    .expect("normalize");
+
+    assert_eq!(plan.required_caps, vec!["cap_http".to_string()]);
+    assert_eq!(plan.allowed_effects, vec![EffectKind::http_request()]);
 }
 
 #[test]
@@ -199,7 +252,13 @@ fn literal_without_local_schema_errors() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    let err = normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).unwrap_err();
+    let err = normalize_plan_literals(
+        &mut plan,
+        &schema_index(),
+        &reducer_modules(),
+        &effect_catalog(),
+    )
+    .unwrap_err();
     assert!(matches!(
         err,
         crate::plan_literals::PlanLiteralError::MissingSchema { .. }
@@ -225,7 +284,13 @@ fn end_result_without_output_schema_errors() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    let err = normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).unwrap_err();
+    let err = normalize_plan_literals(
+        &mut plan,
+        &schema_index(),
+        &reducer_modules(),
+        &effect_catalog(),
+    )
+    .unwrap_err();
     assert!(matches!(err, PlanLiteralError::MissingSchema { context } if context == "end.result"));
 }
 
@@ -252,7 +317,8 @@ fn emit_effect_requires_known_params_schema() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    let err = normalize_plan_literals(&mut plan, &schemas, &reducer_modules()).unwrap_err();
+    let err = normalize_plan_literals(&mut plan, &schemas, &reducer_modules(), &effect_catalog())
+        .unwrap_err();
     assert!(
         matches!(err, PlanLiteralError::SchemaNotFound { name } if name == "sys/LlmGenerateParams@1")
     );
@@ -277,7 +343,13 @@ fn set_literals_are_sorted_and_deduped() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).expect("normalize");
+    normalize_plan_literals(
+        &mut plan,
+        &schema_index(),
+        &reducer_modules(),
+        &effect_catalog(),
+    )
+    .expect("normalize");
     let crate::PlanStepKind::Assign(step) = &plan.steps[0].kind else {
         panic!("expected assign step");
     };
@@ -320,7 +392,13 @@ fn map_with_non_text_keys_rejects_object_sugar() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    let err = normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).unwrap_err();
+    let err = normalize_plan_literals(
+        &mut plan,
+        &schema_index(),
+        &reducer_modules(),
+        &effect_catalog(),
+    )
+    .unwrap_err();
     match err {
         PlanLiteralError::InvalidJson(message) => {
             assert!(
@@ -355,7 +433,13 @@ fn map_literals_with_tuple_syntax_are_sorted_and_deduped() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).expect("normalize");
+    normalize_plan_literals(
+        &mut plan,
+        &schema_index(),
+        &reducer_modules(),
+        &effect_catalog(),
+    )
+    .expect("normalize");
     let crate::PlanStepKind::Assign(step) = &plan.steps[0].kind else {
         panic!("expected assign step");
     };
@@ -379,6 +463,34 @@ fn map_literals_with_tuple_syntax_are_sorted_and_deduped() {
         "map entries should be sorted lexicographically and deduped"
     );
     assert_eq!(map.map.len(), 2, "duplicate keys must be collapsed");
+}
+
+#[test]
+fn duplicate_edges_are_rejected() {
+    let plan_json = json!({
+        "$kind": "defplan",
+        "name": "com.acme/DuplicateEdges@1",
+        "input": "com.acme/Input@1",
+        "steps": [
+            { "id": "assign", "op": "assign", "expr": "hi", "bind": {"as": "tmp"} },
+            { "id": "end", "op": "end" }
+        ],
+        "edges": [
+            {"from": "assign", "to": "end"},
+            {"from": "assign", "to": "end", "when": {"op": "eq", "args": [{"ref": "@var:tmp"}, {"text": "hi"}]}}
+        ],
+        "required_caps": [],
+        "allowed_effects": []
+    });
+
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
+    let plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
+    let err = validate::validate_plan(&plan).unwrap_err();
+    assert!(matches!(
+        err,
+        ValidationError::DuplicateEdge { from, to, .. }
+        if from.as_str() == "assign" && to.as_str() == "end"
+    ));
 }
 
 #[test]
@@ -425,7 +537,13 @@ fn expr_or_value_accepts_full_expr_trees() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    normalize_plan_literals(&mut plan, &schema_index(), &reducer_modules()).expect("normalize");
+    normalize_plan_literals(
+        &mut plan,
+        &schema_index(),
+        &reducer_modules(),
+        &effect_catalog(),
+    )
+    .expect("normalize");
     let crate::PlanStepKind::Assign(assign) = &plan.steps[0].kind else {
         panic!("expected assign step");
     };

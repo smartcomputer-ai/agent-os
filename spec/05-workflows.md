@@ -64,7 +64,7 @@ Manifest:
 
 ### 3. Plan → Plan (await_event)
 
-Plans can wait for domain events (from other plans or reducers).
+Plans can wait for domain events (from other plans or reducers) without ending and restarting.
 
 ```json
 {
@@ -73,15 +73,19 @@ Plans can wait for domain events (from other plans or reducers).
   "where": {
     "op": "eq",
     "args": [
-      {"ref": "@event.correlation_id"},
-      {"ref": "@plan.input.request_id"}
+      {"ref": "@event.request_id"},
+      {"ref": "@var:correlation_id"}
     ]
   },
   "bind": {"as": "work_result"}
 }
 ```
 
-**Semantics**: Plan step blocks until a matching event appears in the journal; `where` predicate filters.
+**Semantics** (v1): future-only; first match wakes this plan instance; broadcast (events are not consumed); predicate evaluates with `@event` plus any locals/steps. When the trigger specified `correlate_by`, the kernel injects `@var:correlation_id`—use it in `where` so concurrent runs do not cross-match.
+
+**Why keep it**: This lets one plan carry its locals/invariants across multiple domain events (e.g., pause for approval, wait for async work) without reconstituting state in reducers or spawning new plans. Use multi-plan choreography when phases are loosely coupled or owned by different services; otherwise `await_event` keeps the audit trail within a single plan id.
+
+**When to use**: You want a single plan instance to span multiple external events (e.g., wait for human approval, chained plan→plan rendezvous) while keeping locals/invariants intact. If phases are loosely coupled or owned by different teams, prefer multiple plans triggered by events instead.
 
 ### 4. Conditional Flow (edges with guards)
 
@@ -179,9 +183,7 @@ Plan `fulfillment_plan@1`:
     {"from": "notify", "to": "wait_notify"},
     {"from": "wait_notify", "to": "raise_result"},
     {"from": "raise_result", "to": "done"}
-  ],
-  "required_caps": ["payment_cap", "inventory_cap", "mailer_cap"],
-  "allowed_effects": ["payment.charge", "inventory.reserve", "email.send"]
+  ]
 }
 ```
 

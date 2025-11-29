@@ -15,14 +15,16 @@
 - **Expected digest (optional)**: `Hash` (`sha256:…`) of the *plaintext* secret bytes (canonical form). Used to catch backend drift and keep master-key rotations manifest-stable even if ciphertext/KEK changes.
 
 ## Schema surface (AIR)
+- `defsecret.schema.json` (defkind)
+  - Fields: `name` (`alias@version`), `binding_id`, optional `expected_digest`, optional `allowed_caps`, `allowed_plans`.
 - `common.schema.json`
   - Adds effect kinds `vault.put`, `vault.rotate`.
 - Built-in schemas (`spec/defs/builtin-schemas.air.json`)
   - Adds `sys/SecretRef@1`, plus ergonomic variants `sys/TextOrSecretRef@1` and `sys/BytesOrSecretRef@1` using normal `variant` types (no special unions).
   - HTTP/LLM and any auth-bearing schemas should use these variants for tokens/keys instead of bespoke fields.
 - Manifest (`manifest.schema.json`)
-  - `secrets` array entries: `{ alias, version, binding_id, expected_digest?, policy: { allowed_caps?, allowed_plans? } }`.
-  - Validation: (alias,version) pairs are unique; every `SecretRef` in plans/modules/caps resolves to a manifest entry; `allowed_caps`/`allowed_plans` names must exist. Secret ACL check runs after normal cap/policy allow/deny.
+  - `secrets` array entries are `NamedRef` (`{name, hash}`) pointing to `defsecret` nodes stored in CAS.
+  - Validation: defsecret `name` must parse to `(alias, version>=1)`; (alias,version) pairs unique; every `SecretRef` in plans/modules/caps resolves to a declared secret; `allowed_caps`/`allowed_plans` names must exist. Secret ACL check runs after normal cap/policy allow/deny.
 - **Canonical value form**: SecretRefs in canonical JSON/CBOR are always the variant `{"$tag":"secret","$value":{"alias":<text>,"version":<int>}}`. Authoring sugar like `{"secret": {...}}` must be normalized to that shape before hashing.
 - Capability types
   - `vault.put`, `vault.rotate`; executor uses resolver map keyed by `binding_id`.
@@ -47,7 +49,7 @@
 - Optional; if a resolver maps a binding to `env`, executor reads the env var. Determinism can be enforced by providing `expected_digest`; otherwise shadow uses placeholders. Avoid in production unless explicitly allowed; fail closed on missing resolver.
 
 ## Rotation
-- **Secret rotation (design-time plan)**: a governance plan calls `vault.put` to store new plaintext, receives `{alias, version, digest}`, and emits a manifest patch that adds/bumps `{alias, version, expected_digest: digest, binding_id}`. Patch flows through proposal → shadow → approve → apply; runtime plans cannot mutate the manifest.
+- **Secret rotation (design-time plan)**: a governance plan calls `vault.put` to store new plaintext, receives `{alias, version, digest}`, and emits a manifest patch that adds/bumps a `defsecret` node plus a manifest `secrets` ref `{name, hash}`. Patch flows through proposal → shadow → approve → apply; runtime plans cannot mutate the manifest.
 - **Master key rotation**: backend-specific; rewrap DEKs with new KEK/KMS key. Manifest unaffected unless expected_digest changes.
 
 ## Audit and redaction

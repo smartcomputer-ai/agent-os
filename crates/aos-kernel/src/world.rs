@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
-    AirNode, DefModule, Manifest, Name, NamedRef, TypeExpr, builtins,
+    AirNode, DefModule, Manifest, Name, NamedRef, SecretDecl, SecretEntry, TypeExpr, builtins,
+    catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
@@ -22,10 +23,10 @@ use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
-    DomainEventRecord, EffectIntentRecord, EffectReceiptRecord, GovernanceRecord,
-    IntentOriginRecord, Journal, JournalEntry, JournalKind, JournalRecord, JournalSeq,
-    ManifestAppliedRecord, OwnedJournalEntry, PlanResultRecord, ProposalApprovedRecord,
-    ProposalSubmittedRecord, ShadowRunCompletedRecord, SnapshotRecord,
+    AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, DomainEventRecord, EffectIntentRecord,
+    EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry, JournalKind,
+    JournalRecord, JournalSeq, OwnedJournalEntry, PlanEndStatus, PlanEndedRecord, PlanResultRecord,
+    ProposedRecord, ShadowReportRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
@@ -70,6 +71,7 @@ impl fmt::Debug for KernelConfig {
 pub struct Kernel<S: Store> {
     store: Arc<S>,
     manifest: Manifest,
+    secrets: Vec<SecretDecl>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
     reducers: ReducerRegistry<S>,
     router: HashMap<String, Vec<Name>>,
@@ -214,6 +216,15 @@ impl<S: Store + 'static> KernelBuilder<S> {
 }
 
 impl<S: Store + 'static> Kernel<S> {
+    fn ensure_single_effect(output: &ReducerOutput) -> Result<(), KernelError> {
+        if output.effects.len() > 1 {
+            return Err(KernelError::ReducerOutput(
+                "reducers may emit at most one effect per step; raise a domain intent and use a plan for additional effects".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn from_loaded_manifest(
         store: Arc<S>,
         loaded: LoadedManifest,
@@ -228,7 +239,7 @@ impl<S: Store + 'static> Kernel<S> {
         journal: Box<dyn Journal>,
         config: KernelConfig,
     ) -> Result<Self, KernelError> {
-        let secret_resolver = select_secret_resolver(&loaded.manifest, &config)?;
+        let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
         let mut router = HashMap::new();
         if let Some(routing) = loaded.manifest.routing.as_ref() {
             for route in &routing.events {
@@ -256,10 +267,12 @@ impl<S: Store + 'static> Kernel<S> {
             bindings.sort_by(|a, b| a.plan.cmp(&b.plan));
         }
         let schema_index = Arc::new(build_schema_index_from_loaded(store.as_ref(), &loaded)?);
+        let effect_catalog = Arc::new(loaded.effect_catalog.clone());
         let capability_resolver = CapabilityResolver::from_manifest(
             &loaded.manifest,
             &loaded.caps,
             schema_index.as_ref(),
+            effect_catalog.clone(),
         )?;
         ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
         ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
@@ -305,10 +318,12 @@ impl<S: Store + 'static> Kernel<S> {
             effect_manager: EffectManager::new(
                 capability_resolver,
                 policy_gate,
-                if loaded.manifest.secrets.is_empty() {
+                effect_catalog.clone(),
+                schema_index.clone(),
+                if loaded.secrets.is_empty() {
                     None
                 } else {
-                    Some(crate::secret::SecretCatalog::new(&loaded.manifest.secrets))
+                    Some(crate::secret::SecretCatalog::new(&loaded.secrets))
                 },
                 secret_resolver.clone(),
             ),
@@ -318,6 +333,7 @@ impl<S: Store + 'static> Kernel<S> {
             governance: GovernanceManager::new(),
             secret_resolver: secret_resolver.clone(),
             allow_placeholder_secrets: config.allow_placeholder_secrets,
+            secrets: loaded.secrets,
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
@@ -381,6 +397,8 @@ impl<S: Store + 'static> Kernel<S> {
         reducer_name: String,
         output: ReducerOutput,
     ) -> Result<(), KernelError> {
+        Self::ensure_single_effect(&output)?;
+
         match output.state {
             Some(state) => {
                 self.reducer_state.insert(reducer_name.clone(), state);
@@ -561,6 +579,9 @@ impl<S: Store + 'static> Kernel<S> {
             }
             JournalRecord::PlanResult(record) => {
                 self.restore_plan_result(record);
+            }
+            JournalRecord::PlanEnded(_) => {
+                // No runtime side effects to restore; plan instances are not replayed from journal.
             }
             _ => {}
         }
@@ -748,7 +769,7 @@ impl<S: Store + 'static> Kernel<S> {
         let patch_bytes = to_canonical_cbor(&canonical_patch)
             .map_err(|err| KernelError::Manifest(format!("encode patch: {err}")))?;
         let patch_hash = self.store.put_blob(&patch_bytes)?;
-        let record = GovernanceRecord::ProposalSubmitted(ProposalSubmittedRecord {
+        let record = GovernanceRecord::Proposed(ProposedRecord {
             proposal_id,
             description,
             patch_hash: patch_hash.to_hex(),
@@ -772,6 +793,13 @@ impl<S: Store + 'static> Kernel<S> {
         match proposal.state {
             ProposalState::Applied => return Err(KernelError::ProposalAlreadyApplied(proposal_id)),
             ProposalState::Submitted | ProposalState::Shadowed | ProposalState::Approved => {}
+            ProposalState::Rejected => {
+                return Err(KernelError::ProposalStateInvalid {
+                    proposal_id,
+                    state: proposal.state,
+                    required: "not rejected",
+                });
+            }
         }
         let patch = self.load_manifest_patch(&proposal.patch_hash)?;
         let config = ShadowConfig {
@@ -782,11 +810,14 @@ impl<S: Store + 'static> Kernel<S> {
         };
         let mut summary = ShadowExecutor::run(self.store.clone(), &config)?;
         summary.ledger_deltas = Self::compute_ledger_deltas(&self.manifest, &config.patch.manifest);
-        let summary_bytes = serde_cbor::to_vec(&summary)
-            .map_err(|err| KernelError::Manifest(format!("encode summary: {err}")))?;
-        let record = GovernanceRecord::ShadowRunCompleted(ShadowRunCompletedRecord {
+        let record = GovernanceRecord::ShadowReport(ShadowReportRecord {
             proposal_id,
-            summary: summary_bytes,
+            patch_hash: proposal.patch_hash.clone(),
+            manifest_hash: summary.manifest_hash.clone(),
+            effects_predicted: summary.predicted_effects.clone(),
+            pending_receipts: summary.pending_receipts.clone(),
+            plan_results: summary.plan_results.clone(),
+            ledger_deltas: summary.ledger_deltas.clone(),
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);
@@ -797,6 +828,23 @@ impl<S: Store + 'static> Kernel<S> {
         &mut self,
         proposal_id: u64,
         approver: impl Into<String>,
+    ) -> Result<(), KernelError> {
+        self.decide_proposal(proposal_id, approver, ApprovalDecisionRecord::Approve)
+    }
+
+    pub fn reject_proposal(
+        &mut self,
+        proposal_id: u64,
+        approver: impl Into<String>,
+    ) -> Result<(), KernelError> {
+        self.decide_proposal(proposal_id, approver, ApprovalDecisionRecord::Reject)
+    }
+
+    fn decide_proposal(
+        &mut self,
+        proposal_id: u64,
+        approver: impl Into<String>,
+        decision: ApprovalDecisionRecord,
     ) -> Result<(), KernelError> {
         let proposal = self
             .governance
@@ -817,9 +865,11 @@ impl<S: Store + 'static> Kernel<S> {
                 required: "shadowed",
             });
         }
-        let record = GovernanceRecord::ProposalApproved(ProposalApprovedRecord {
+        let record = GovernanceRecord::Approved(ApprovedRecord {
             proposal_id,
+            patch_hash: proposal.patch_hash.clone(),
             approver: approver.into(),
+            decision,
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);
@@ -845,9 +895,15 @@ impl<S: Store + 'static> Kernel<S> {
         }
         let patch = self.load_manifest_patch(&proposal.patch_hash)?;
         self.swap_manifest(&patch)?;
-        let record = GovernanceRecord::ManifestApplied(ManifestAppliedRecord {
+
+        let manifest_bytes = to_canonical_cbor(&patch.manifest)
+            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
+        let manifest_hash_new = Hash::of_bytes(&manifest_bytes).to_hex();
+
+        let record = GovernanceRecord::Applied(AppliedRecord {
             proposal_id,
-            manifest_hash: proposal.patch_hash.clone(),
+            patch_hash: proposal.patch_hash.clone(),
+            manifest_hash_new,
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;
         self.governance.apply_record(&record);
@@ -870,10 +926,12 @@ impl<S: Store + 'static> Kernel<S> {
             &loaded,
         )?);
         let reducer_schemas = Arc::new(build_reducer_schemas(&loaded.modules, &schema_index)?);
+        let effect_catalog = Arc::new(loaded.effect_catalog.clone());
         let capability_resolver = CapabilityResolver::from_manifest(
             &loaded.manifest,
             &loaded.caps,
             schema_index.as_ref(),
+            effect_catalog.clone(),
         )?;
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
@@ -932,21 +990,23 @@ impl<S: Store + 'static> Kernel<S> {
         self.recent_receipt_index.clear();
         self.plan_results.clear();
 
-        self.schema_index = schema_index;
+        self.schema_index = schema_index.clone();
         self.reducer_schemas = reducer_schemas;
         self.secret_resolver = ensure_secret_resolver(
-            &self.manifest,
+            !self.secrets.is_empty(),
             self.secret_resolver.clone(),
             self.allow_placeholder_secrets,
         )?;
-        let secret_catalog = if self.manifest.secrets.is_empty() {
+        let secret_catalog = if self.secrets.is_empty() {
             None
         } else {
-            Some(crate::secret::SecretCatalog::new(&self.manifest.secrets))
+            Some(crate::secret::SecretCatalog::new(&self.secrets))
         };
         self.effect_manager = EffectManager::new(
             capability_resolver,
             policy_gate,
+            effect_catalog,
+            schema_index.clone(),
             secret_catalog,
             self.secret_resolver.clone(),
         );
@@ -1061,13 +1121,31 @@ impl<S: Store + 'static> Kernel<S> {
             }
             if outcome.completed {
                 if !self.suppress_journal {
-                    if let (Some(value_cbor), Some(output_schema)) =
-                        (outcome.result_cbor.clone(), outcome.result_schema.clone())
-                    {
-                        let entry =
-                            PlanResultEntry::new(plan_name.clone(), id, output_schema, value_cbor);
-                        self.record_plan_result(&entry)?;
-                        self.push_plan_result_entry(entry);
+                    let status = if outcome.plan_error.is_some() {
+                        PlanEndStatus::Error
+                    } else {
+                        PlanEndStatus::Ok
+                    };
+                    let ended = PlanEndedRecord {
+                        plan_name: plan_name.clone(),
+                        plan_id: id,
+                        status: status.clone(),
+                        error_code: outcome.plan_error.as_ref().map(|err| err.code.clone()),
+                    };
+                    self.record_plan_ended(ended)?;
+                    if status == PlanEndStatus::Ok {
+                        if let (Some(value_cbor), Some(output_schema)) =
+                            (outcome.result_cbor.clone(), outcome.result_schema.clone())
+                        {
+                            let entry = PlanResultEntry::new(
+                                plan_name.clone(),
+                                id,
+                                output_schema,
+                                value_cbor,
+                            );
+                            self.record_plan_result(&entry)?;
+                            self.push_plan_result_entry(entry);
+                        }
                     }
                 }
                 self.plan_instances.remove(&id);
@@ -1187,6 +1265,10 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(JournalRecord::PlanResult(record))
     }
 
+    fn record_plan_ended(&mut self, record: PlanEndedRecord) -> Result<(), KernelError> {
+        self.append_record(JournalRecord::PlanEnded(record))
+    }
+
     fn append_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
         if self.suppress_journal {
             return Ok(());
@@ -1237,22 +1319,22 @@ impl<S: Store + 'static> Kernel<S> {
 }
 
 fn select_secret_resolver(
-    manifest: &Manifest,
+    has_secrets: bool,
     config: &KernelConfig,
 ) -> Result<Option<SharedSecretResolver>, KernelError> {
     ensure_secret_resolver(
-        manifest,
+        has_secrets,
         config.secret_resolver.clone(),
         config.allow_placeholder_secrets,
     )
 }
 
 fn ensure_secret_resolver(
-    manifest: &Manifest,
+    has_secrets: bool,
     provided: Option<SharedSecretResolver>,
     allow_placeholder: bool,
 ) -> Result<Option<SharedSecretResolver>, KernelError> {
-    if manifest.secrets.is_empty() {
+    if !has_secrets {
         return Ok(None);
     }
     if let Some(resolver) = provided {
@@ -1313,6 +1395,7 @@ fn canonicalize_patch<S: Store>(
         schema_map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
     }
     let mut module_map: HashMap<Name, DefModule> = HashMap::new();
+    let mut effect_defs = Vec::new();
 
     for node in &canonical.nodes {
         match node {
@@ -1322,6 +1405,9 @@ fn canonicalize_patch<S: Store>(
             AirNode::Defmodule(module) => {
                 module_map.insert(module.name.clone(), module.clone());
             }
+            AirNode::Defeffect(effect) => {
+                effect_defs.push(effect.clone());
+            }
             _ => {}
         }
     }
@@ -1330,14 +1416,20 @@ fn canonicalize_patch<S: Store>(
     extend_module_map_from_store(store, &canonical.manifest.modules, &mut module_map)?;
 
     let schema_index = SchemaIndex::new(schema_map);
+    if effect_defs.is_empty() {
+        effect_defs.extend(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
+    }
+    let effect_catalog = EffectCatalog::from_defs(effect_defs);
     for node in canonical.nodes.iter_mut() {
         if let AirNode::Defplan(plan) = node {
-            normalize_plan_literals(plan, &schema_index, &module_map).map_err(|err| {
-                KernelError::Manifest(format!(
-                    "plan '{}' literal normalization failed: {err}",
-                    plan.name
-                ))
-            })?;
+            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog).map_err(
+                |err| {
+                    KernelError::Manifest(format!(
+                        "plan '{}' literal normalization failed: {err}",
+                        plan.name
+                    ))
+                },
+            )?;
         }
     }
 
@@ -1443,6 +1535,7 @@ mod tests {
     use crate::journal::mem::MemJournal;
     use aos_air_types::{HashRef, SecretDecl};
     use aos_store::MemStore;
+    use aos_wasm_abi::ReducerEffect;
 
     fn named_ref(name: &str, hash: &str) -> NamedRef {
         NamedRef {
@@ -1458,9 +1551,11 @@ mod tests {
 
     fn empty_manifest() -> Manifest {
         Manifest {
+            air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -1469,6 +1564,23 @@ mod tests {
             routing: None,
             triggers: vec![],
         }
+    }
+
+    #[test]
+    fn reducer_output_with_multiple_effects_is_rejected() {
+        let output = ReducerOutput {
+            effects: vec![
+                ReducerEffect::new("timer.set", vec![1]),
+                ReducerEffect::new("blob.put", vec![2]),
+            ],
+            ..Default::default()
+        };
+
+        let err = Kernel::<MemStore>::ensure_single_effect(&output).unwrap_err();
+        assert!(
+            matches!(err, KernelError::ReducerOutput(ref message) if message.contains("at most one effect")),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
@@ -1524,20 +1636,29 @@ mod tests {
     fn kernel_requires_secret_resolver_for_secretful_manifest() {
         let store = Arc::new(MemStore::new());
         let mut manifest = empty_manifest();
-        manifest.secrets.push(SecretDecl {
+        manifest.secrets.push(SecretEntry::Decl(SecretDecl {
             alias: "payments/stripe".into(),
             version: 1,
             binding_id: "stripe:prod".into(),
             expected_digest: None,
             policy: None,
-        });
+        }));
         let loaded = LoadedManifest {
             manifest,
+            secrets: vec![SecretDecl {
+                alias: "payments/stripe".into(),
+                version: 1,
+                binding_id: "stripe:prod".into(),
+                expected_digest: None,
+                policy: None,
+            }],
             modules: HashMap::new(),
             plans: HashMap::new(),
+            effects: HashMap::new(),
             caps: HashMap::new(),
             policies: HashMap::new(),
             schemas: HashMap::new(),
+            effect_catalog: EffectCatalog::new(),
         };
 
         let result = Kernel::from_loaded_manifest(store, loaded, Box::new(MemJournal::new()));

@@ -99,8 +99,12 @@ impl ShadowExecutor {
             })
             .collect::<Vec<_>>();
 
+        let manifest_bytes = to_canonical_cbor(&config.patch.manifest)
+            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
+        let manifest_hash = Hash::of_bytes(&manifest_bytes).to_hex();
+
         Ok(ShadowSummary {
-            manifest_hash: config.patch_hash.clone(),
+            manifest_hash,
             predicted_effects,
             pending_receipts,
             plan_results,
@@ -118,14 +122,16 @@ fn params_to_json(params_cbor: &[u8]) -> Option<JsonValue> {
 mod tests {
     use super::*;
     use crate::governance::ManifestPatch;
-    use aos_air_types::{HashRef, Manifest, NamedRef, SecretDecl};
+    use aos_air_types::{HashRef, Manifest, NamedRef, SecretDecl, SecretEntry};
     use aos_store::MemStore;
 
     fn empty_manifest() -> Manifest {
         Manifest {
+            air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
+            effects: vec![],
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -138,6 +144,11 @@ mod tests {
 
     fn hash_of_patch(patch: &ManifestPatch) -> String {
         let bytes = to_canonical_cbor(patch).expect("canonical patch bytes");
+        Hash::of_bytes(&bytes).to_hex()
+    }
+
+    fn hash_of_manifest(patch: &ManifestPatch) -> String {
+        let bytes = to_canonical_cbor(&patch.manifest).expect("canonical manifest bytes");
         Hash::of_bytes(&bytes).to_hex()
     }
 
@@ -180,6 +191,7 @@ mod tests {
             nodes: vec![],
         };
         let patch_hash = hash_of_patch(&patch);
+        let manifest_hash = hash_of_manifest(&patch);
         let summary = ShadowExecutor::run(
             store,
             &ShadowConfig {
@@ -191,7 +203,7 @@ mod tests {
         )
         .expect("shadow run");
 
-        assert_eq!(summary.manifest_hash, patch_hash);
+        assert_eq!(summary.manifest_hash, manifest_hash);
     }
 
     #[test]
@@ -199,18 +211,19 @@ mod tests {
         let store = Arc::new(MemStore::new());
         let patch = ManifestPatch {
             manifest: Manifest {
-                secrets: vec![SecretDecl {
+                secrets: vec![SecretEntry::Decl(SecretDecl {
                     alias: "payments/stripe".into(),
                     version: 1,
                     binding_id: "stripe:prod".into(),
                     expected_digest: None,
                     policy: None,
-                }],
+                })],
                 ..empty_manifest()
             },
             nodes: vec![],
         };
         let patch_hash = hash_of_patch(&patch);
+        let manifest_hash = hash_of_manifest(&patch);
 
         let summary = ShadowExecutor::run(
             store,
@@ -223,6 +236,6 @@ mod tests {
         )
         .expect("shadow should allow placeholder secrets");
 
-        assert_eq!(summary.manifest_hash, patch_hash);
+        assert_eq!(summary.manifest_hash, manifest_hash);
     }
 }

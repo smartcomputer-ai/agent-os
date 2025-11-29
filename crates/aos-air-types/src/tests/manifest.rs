@@ -11,6 +11,7 @@ fn manifest_json_round_trip() {
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [],
         "plans": [{"name": "com.acme/Plan@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+        "effects": [],
         "caps": [],
         "policies": [],
         "triggers": []
@@ -35,6 +36,7 @@ fn manifest_with_defaults_routing_and_triggers_validates() {
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [{"name": "com.acme/Reducer@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
         "plans": [{"name": "com.acme/Plan@1", "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],
+        "effects": [],
         "caps": [{"name": "com.acme/Cap@1", "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}],
         "policies": [{"name": "com.acme/Policy@1", "hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}],
         "defaults": {
@@ -108,25 +110,17 @@ fn manifest_with_secrets_round_trip() {
         "schemas": [],
         "modules": [],
         "plans": [],
+        "effects": [],
         "caps": [],
         "policies": [],
         "secrets": [{
-            "alias": "payments/stripe",
-            "version": 1,
-            "binding_id": "stripe:prod",
-            "expected_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "policy": {
-                "allowed_caps": ["stripe_cap"],
-                "allowed_plans": ["com.acme/Plan@1"]
-            }
+            "name": "payments/stripe@1",
+            "hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         }]
     });
     assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
     let manifest: Manifest = serde_json::from_value(manifest_json.clone()).expect("manifest json");
     assert_eq!(manifest.secrets.len(), 1);
     let round = serde_json::to_value(manifest).expect("serialize");
-    assert_eq!(
-        round["secrets"][0]["alias"],
-        manifest_json["secrets"][0]["alias"]
-    );
+    assert_eq!(round["secrets"], manifest_json["secrets"]);
 }

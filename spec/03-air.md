@@ -9,6 +9,7 @@ AIR (Agent Intermediate Representation) is a small, typed, canonical control‑p
 - spec/schemas/defplan.schema.json
 - spec/schemas/defcap.schema.json
 - spec/schemas/defpolicy.schema.json
+- spec/schemas/defsecret.schema.json
 - spec/schemas/manifest.schema.json
 
 These schemas validate structure. Semantic checks (DAG acyclicity, type compatibility, name/hash resolution, capability bindings) are enforced by the kernel validator.
@@ -23,7 +24,7 @@ The policy engine is minimal: ordered allow/deny rules with budgets enforced on 
 
 ## 1) Vocabulary and Identity
 
-**Kind**: One of `defschema`, `defmodule`, `defplan`, `defcap`, `defpolicy`, or `manifest`. (`defmigration` is reserved for future use.)
+**Kind**: One of `defschema`, `defmodule`, `defplan`, `defcap`, `defpolicy`, `defsecret`, `defeffect`, or `manifest`. (`defmigration` is reserved for future use.)
 
 **Name**: A versioned identifier with the format `namespace/name@version`, where version is a positive integer. Example: `com.acme/rss_fetch@1`.
 
@@ -65,7 +66,7 @@ AIR nodes exist in two interchangeable JSON lenses plus one canonical binary for
 **Why**: Humans want concise, schema-directed JSON; agents and tools often need an explicit, lossless overlay. Accepting both lenses at load time keeps authoring pleasant without sacrificing determinism.
 
 1. **Authoring sugar (default)** — plain JSON interpreted using the surrounding schema reference. Use natural literals (`true`, `42`, `"text"`, `{field: …}`, arrays) exactly as before.
-2. **Canonical JSON (tagged)** — every literal carries an explicit type tag mirroring `ExprConst` (`{ "nat": 42 }`, `{ "list": [ { "text": "a" } ] }`, `{ "variant": { "tag": "Ok", "value": { "text": "done" } } }`, `{ "const": { "null": {} } }`, etc.). This lens is ideal for diffs, automated patches, and inspector output because it round-trips without schema context.
+2. **Canonical JSON (tagged)** — every literal carries an explicit type tag mirroring `ExprConst` (`{ "nat": 42 }`, `{ "list": [ { "text": "a" } ] }`, `{ "variant": { "tag": "Ok", "value": { "text": "done" } } }`, `{ "null": {} }`, etc.). This lens is ideal for diffs, automated patches, and inspector output because it round-trips without schema context.
 
 The loader **MUST** accept either lens at every typed value position, resolve the schema from context (plan IO, effect params, reducer schemas, capability params, etc.), and convert to a typed value before hashing.
 
@@ -87,7 +88,7 @@ Regardless of the JSON lens, the loader applies the same canonicalization before
 - **`variant`**: Sugar `{ "Tag": <value?> }` expands to a canonical envelope (e.g., `{ "variant": { "tag": "Tag", "value": … } }`) before CBOR.
 - **`option<T>`**: Represent `none` as `null` in sugar or `{ "option": null }` in canonical JSON; `some` wraps the nested value.
 
-**Nulls in Expr vs Value**: When an `ExprOrValue` slot is authored as a literal Value, `null` still denotes `none` for `option<T>`. When authored as an expression, use `{ "const": { "null": {} } }` to produce a `null`/`none` value; raw JSON `null` is only valid on the literal path and is not parsed as an `ExprConst`.
+**Nulls in Expr vs Value**: When an `ExprOrValue` slot is authored as a literal Value, raw JSON `null` denotes `none` for `option<T>`. When authored as an expression, use `{ "null": {} }` to produce a `null`/`none` value. Raw JSON `null` is **not** valid in expression ASTs and is only accepted on the literal path.
 
 These rules make previously implicit loader behavior normative and testable.
 
@@ -106,9 +107,11 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 ```
 {
   "$kind": "manifest",
+  "air_version"?: "1",
   "schemas": [{name, hash}],
   "modules": [{name, hash}],
   "plans": [{name, hash}],
+  "effects": [{name, hash}],
   "caps": [{name, hash}],
   "policies": [{name, hash}],
   "routing": {
@@ -123,7 +126,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. The `routing.events` field is optional in v1. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is optional; if omitted, loaders assume the latest supported major (currently `"1"`). Supplying an unknown version is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. The runtime auto-includes the built-in `defeffect` bundle if omitted so manifests may stay terse.
 
 See: spec/schemas/manifest.schema.json
 
@@ -192,12 +195,15 @@ Reducer export: `step(ptr, len) -> (ptr, len)`
 No WASI ambient syscalls, no threads, no clock. All I/O happens via the effect layer. Prefer `dec128` in values; normalize NaNs if floats are used internally.
 
 **Note**: Pure modules (stateless, side-effect-free functions) are deferred to v1.1+. Use reducers for all computation in v1.
+`module_kind` is currently limited to `"reducer"`; future versions may add `"pure"` without breaking existing manifests.
 
 See: spec/schemas/defmodule.schema.json
 
 ## 7) Effect Catalog (Built-in v1)
 
-`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The runtime currently ships a **built-in catalog** enumerated here. Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions. For strict enum validation/autocomplete, see `spec/schemas/builtin.catalog.schema.json`.
+`EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions. For strict enum validation/autocomplete, see `spec/schemas/builtin.catalog.schema.json`.
+
+`origin_scope` on each `defeffect` gates who may emit it: reducers only for `reducer/both`, plans only for `plan/both`. The built-in reducer micro-effects are `blob.put`, `blob.get`, and `timer.set`; others are plan-only in v1.
 
 Built-in kinds in v1:
 
@@ -218,7 +224,7 @@ Built-in kinds in v1:
 - receipt: `{ delivered_at_ns:nat, key?:text }`
 
 **llm.generate**
-- params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, input_ref:hash, tools?:list<text> }`
+- params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, input_ref:hash, tools?:list<text>, api_key?:TextOrSecretRef }`
 - receipt: `{ output_ref:hash, token_usage:{prompt:nat,completion:nat}, cost_cents:nat, provider_id:text }`
 
 **vault.put**
@@ -237,9 +243,9 @@ Reducers that emit micro-effects rely on the kernel to translate adapter receipt
 
 | Schema | Purpose | Fields |
 | --- | --- | --- |
-| **`sys/TimerFired@1`** | Delivery of a `timer.set` receipt back to the originating reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text` (always `"timer.set"` in v1), `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/TimerSetParams@1`, `receipt:sys/TimerSetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
-| **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
-| **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:Name`, `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/TimerFired@1`** | Delivery of a `timer.set` receipt back to the originating reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text` (always `"timer.set"` in v1), `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/TimerSetParams@1`, `receipt:sys/TimerSetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
+| **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 
 Reducers should add routing entries for these schemas (e.g., `routing.events[].event = sys/TimerFired@1`). Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/budget enforcement can trust the same structures without changing reducer code.
 
@@ -348,7 +354,45 @@ The `params` must conform to the defcap's schema and encode concrete allowlists/
 
 See: spec/schemas/defcap.schema.json
 
-## 10) defpolicy (Rule Pack)
+## 10) defeffect (Effect Catalog Entries)
+
+`defeffect` declares an effect kind, its parameter/receipt schemas, the capability type that guards it, and which emitters may use it.
+
+### Shape
+
+```json
+{
+  "$kind": "defeffect",
+  "name": "sys/http.request@1",
+  "kind": "http.request",
+  "params_schema": "sys/HttpRequestParams@1",
+  "receipt_schema": "sys/HttpRequestReceipt@1",
+  "cap_type": "http.out",
+  "origin_scope": "plan",
+  "description": "Optional human text"
+}
+```
+
+### Fields
+
+- `name`: Versioned Name of the effect definition (namespace/name@version)
+- `kind`: EffectKind string referenced by plans/reducers (e.g., `http.request`)
+- `params_schema`: SchemaRef for effect parameters
+- `receipt_schema`: SchemaRef for effect receipts
+- `cap_type`: Capability type that must guard this effect
+- `origin_scope`: `"reducer" | "plan" | "both"`; reducers may emit only reducer/both, plans may emit plan/both
+- `description?`: Optional prose
+
+### Notes
+
+- Built-in v1 effects are shipped in `spec/defs/builtin-effects.air.json`; the runtime auto-includes them even if `manifest.effects` is empty.
+- Unknown effect kinds (not declared in the manifest or built-ins) are rejected during plan normalization/dispatch.
+- Reducer receipt translation remains limited to effects whose `origin_scope` allows reducers.
+- (Future) Adapter binding stays out of `defeffect`; a manifest-level `effect_bindings` table can later map kinds to adapters without changing the defkind.
+
+See: spec/schemas/defeffect.schema.json
+
+## 11) defpolicy (Rule Pack)
 
 Policies define ordered rules that allow or deny effects based on their characteristics and origin.
 
@@ -405,7 +449,7 @@ Decisions are journaled: `PolicyDecisionRecorded { intent_hash, policy_name, rul
 
 See: spec/schemas/defpolicy.schema.json
 
-## 11) defplan (Orchestration DAG)
+## 12) defplan (Orchestration DAG)
 
 Plans are finite DAGs of steps that orchestrate effects, wait for receipts, and coordinate with reducers via events. They have a typed environment, optional guard predicates on edges, and a deterministic scheduler.
 
@@ -431,7 +475,7 @@ Plans are the **orchestration layer**, NOT a compute runtime. They coordinate ex
 
 ### v1 Scope and Future Extensions
 
-Version 1.0 keeps plans minimal: `emit_effect`, `await_receipt`, `raise_event`, `await_event`, `assign`, `end`. Structured concurrency (sub-plans, fan-out/fan-in) is deferred to v1.1+ to validate real-world needs first.
+Version 1.0 keeps plans minimal: `emit_effect`, `await_receipt`, `raise_event`, `await_event`, `assign`, `end`. `await_event` stays to let a single plan instance span multiple domain events without handing off through reducers; structured concurrency (sub-plans, fan-out/fan-in) is deferred to v1.1+ to validate real-world needs first.
 
 See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `spawn_for_each`, `await_plans_all`).
 
@@ -446,8 +490,8 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
   "locals"?: {name: <SchemaRef>…},
   "steps": [<Step>…],
   "edges": [{from: StepId, to: StepId, when?: <Expr>}…],
-  "required_caps": [<CapGrantName>…],
-  "allowed_effects": [<EffectKind>…],
+  "required_caps": [<CapGrantName>…],  // derived from emit_effect.cap; optional in authoring
+  "allowed_effects": [<EffectKind>…],  // derived from emit_effect.kind; optional in authoring
   "invariants"?: [<Expr>…]
 }
 ```
@@ -457,7 +501,7 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 **raise_event**: Publish an event to a reducer
 - `{ id, op:"raise_event", reducer:Name, key?:Expr, event:ExprOrValue }`
 - If target reducer is keyed, `key` is required and must typecheck to its key schema
-- The kernel infers the payload schema from the reducer's manifest entry and validates/canonicalizes the event (and optional key) before emitting, so authors should not embed `$schema` fields inside the payload.
+- The kernel infers the payload schema from the reducer's manifest entry and validates/canonicalizes the event (and optional key) before emitting. **Never embed `$schema` fields inside event or effect payloads; self-describing payloads are rejected.**
 
 **emit_effect**: Request an external effect
 - `{ id, op:"emit_effect", kind:EffectKind, params:ExprOrValue, cap:CapGrantName, bind:{effect_id_as:VarName} }`
@@ -467,10 +511,21 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 
 **await_event** (optional): Wait for a matching DomainEvent
 - `{ id, op:"await_event", event:SchemaRef, where?:Expr, bind:{as:VarName} }`
-- Waits until a matching DomainEvent appears; `where` is a boolean predicate over the event value
+- Semantics (v1):
+  - **Future-only**: Plan registers the wait when the step first runs; only events appended afterwards are observed.
+  - **Per-waiter first match**: The first event (by journal order) matching `event` and passing `where` resumes that plan instance.
+  - **Broadcast**: Multiple plan instances waiting on the same schema all see the event; there is no consumption.
+  - **Predicate scope**: `where` evaluates with `@event` bound to the incoming event and may reference locals/steps/plan input; `@var:correlation_id` is available when the plan was started from a trigger with `correlate_by`.
+  - **One outstanding wait** per plan instance; the step blocks until satisfied, then normal DAG scheduling continues.
+  - **Correlation guard (required when correlated)**: If the plan was started via a trigger with `correlate_by`, an `await_event` step must provide a `where` predicate (typically `@event.<key> == @var:correlation_id`) to prevent cross-talk across concurrent runs.
 
 **assign**: Bind a value to a variable
 - `{ id, op:"assign", expr:ExprOrValue, bind:{as:VarName} }`
+
+**Invariants (v1)**:
+- Evaluated after each step completes and once more when the plan finishes.
+- May reference plan input, locals, completed step outputs, and `@var:correlation_id`; must not reference `@event`.
+- On first failure, the kernel ends the plan and records `PlanEnded { status:"error", error_code:"invariant_violation" }`; no further steps run.
 
 **end**: Complete the plan
 - `{ id, op:"end", result?:ExprOrValue }`
@@ -482,6 +537,8 @@ Authoring ergonomic insight: most plan fields already know the target schema (ef
 
 1. A plain JSON value (in sugar or canonical lens), which the loader interprets via the declared schema.
 2. A fully tagged `Expr` tree when dynamic computation or references are needed.
+
+Disambiguation rule: Loaders first attempt to parse an `ExprOrValue` slot as an `Expr` (looking for `op`, `ref`, `record`, etc.). If that fails, the JSON is treated as a plain Value and interpreted using the surrounding schema.
 
 Loaders may optionally lift literals into constant expressions internally so diagnostics stay consistent. Guards (`edges[].when`), `await_receipt.for`, and other predicate positions remain full `Expr` to keep intent clear: if branching logic or lookups are happening, you must be explicit.
 
@@ -495,7 +552,7 @@ Loaders may optionally lift literals into constant expressions internally so dia
 
 ### Guards (Edge Predicates)
 
-Edges can have optional `when` predicates called **guards**. A guard is a boolean expression that must evaluate to `true` for an edge to be traversable. This enables conditional branching in plan DAGs: a step becomes ready only when all predecessor edges are completed **and** all their guards evaluate to `true`.
+Edges can have optional `when` predicates called **guards**. A guard is a boolean expression that must evaluate to `true` for an edge to be traversable. This enables conditional branching in plan DAGs: a step becomes ready only when all predecessor edges are completed **and** all their guards evaluate to `true`. Duplicate `(from,to)` edges are invalid.
 
 Example:
 ```json
@@ -521,7 +578,7 @@ The plan completes at `end` or when the graph has no outgoing edges (error if ou
 
 See: spec/schemas/defplan.schema.json (steps/Expr defined there)
 
-## 12) StartPlan (Runtime API and Triggers)
+## 13) StartPlan (Runtime API and Triggers)
 
 Plans can start in two ways:
 
@@ -531,7 +588,7 @@ Plans can start in two ways:
 
 The kernel pins the manifest hash for the instance, checks input/locals against schemas, and executes under the current policy/cap ledger. Effects always check live grants at enqueue time.
 
-## 13) Validation Rules (Semantic)
+## 14) Validation Rules (Semantic)
 
 The kernel validator enforces these semantic checks:
 
@@ -539,13 +596,13 @@ The kernel validator enforces these semantic checks:
 
 **defmodule**: `wasm_hash` present; referenced schemas exist; `effects_emitted`/`cap_slots` (if present) are well‑formed.
 
-**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `emit_effect.kind` ∈ `allowed_effects`; `emit_effect.cap` ∈ `required_caps` or defaults; `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.event` must evaluate to a value conforming to a declared schema (and keyed reducers require matching keys); invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
+**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `required_caps`/`allowed_effects` are derived sets of `emit_effect.{cap,kind}` (if provided they must exactly match the derived values); `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.event` must evaluate to a value conforming to a declared schema (and keyed reducers require matching keys); invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
 
 **defpolicy**: Rule shapes valid; referenced effect kinds known.
 
 **defcap**: `cap_type` in built‑ins; parameter schema compatible.
 
-## 14) Patch Format (AIR Changes)
+## 15) Patch Format (AIR Changes)
 
 Patches describe changes to the control plane (design-time modifications).
 
@@ -572,16 +629,22 @@ Patches describe changes to the control plane (design-time modifications).
 
 Patches are applied transactionally to yield a new manifest; full re‑validation is required. The governance system turns patches into journal entries: Proposed → (Shadow) → Approved → Applied.
 
-## 15) Journal Entries (AIR‑Related)
+## 16) Journal Entries (AIR‑Related)
 
 The journal records both design-time (governance) and runtime (execution) events.
 
 ### Governance and Control Plane (Design Time)
 
-- **Proposed** `{ patch_hash, author, manifest_base }`
-- **ShadowReport** `{ patch_hash, effects_predicted:[EffectKind…], diffs:[typed summary] }`
-- **Approved** `{ patch_hash, approver }`
-- **Applied** `{ manifest_hash_new }`
+- **Proposed** `{ proposal_id:u64, patch_hash, author, manifest_base, description? }`
+- **ShadowReport** `{ proposal_id:u64, patch_hash, manifest_hash, effects_predicted:[EffectKind…], pending_receipts?:[PendingPlanReceipt], plan_results?:[PlanResultPreview], ledger_deltas?:[LedgerDelta] }`
+- **Approved** `{ proposal_id:u64, patch_hash, approver, decision:"approve"|"reject" }`
+- **Applied** `{ proposal_id:u64, patch_hash, manifest_hash_new }`
+
+Notes:
+- `proposal_id` is the world-local correlation key; `patch_hash` is the content key and may repeat if the same patch is resubmitted.
+- `ShadowReport.manifest_hash` is the candidate manifest root produced by applying the patch (not the patch hash).
+- `Applied.manifest_hash_new` is the new manifest root after apply (not the patch hash).
+- Apply is only valid after an `Approved` record whose `decision` is `approve`; a `reject` decision halts the proposal.
 
 ### Plan and Effect Lifecycle (Runtime)
 
@@ -599,13 +662,13 @@ Runtime journal entries are canonical CBOR enums; the important ones for AIR pla
 - **BudgetExceeded** `{ grant_name, dimension:"tokens"|"bytes"|"cents", delta:nat, new_balance:int }`
   - Appended when a receipt settlement drives a budget dimension negative; grant marked exhausted
 
-## 16) Determinism and Replay
+## 17) Determinism and Replay
 
 Deterministic plan execution, reducer invocations, and expression evaluation guarantee that same manifest + journal + receipts ⇒ identical state.
 
 Effects occur only at the boundary; receipts bind non‑determinism. Replay reuses recorded receipts; shadow‑runs stub effects and report predicted intents/paths up to the first await.
 
-## 17) Error Handling (v1)
+## 18) Error Handling (v1)
 
 **Validation**: Reject patch; journal Proposed → Rejected with reasons.
 
@@ -613,14 +676,14 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 **Budgets**: Decrement on receipts; over‑budget → policy denial at enqueue.
 
-## 18) On‑Disk Expectations
+## 19) On‑Disk Expectations
 
 - **Store nodes**: `.aos/store/nodes/sha256/<hash>` (canonical CBOR bytes of AIR nodes)
 - **Modules (WASM)**: `modules/<name>@<ver>-<hash>.wasm` (`wasm_hash` = content hash)
 - **Blobs**: `.aos/store/blobs/sha256/<hash>`
 - **Manifest roots**: `manifest.air.cbor` (binary) and `manifest.air.json` (text)
 
-## 19) Security Model
+## 20) Security Model
 
 **Object‑capabilities**: Effects require a CapGrant by name; grants live in kernel state and can be referenced in manifest defaults or `plan.required_caps`.
 

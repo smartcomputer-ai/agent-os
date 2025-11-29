@@ -5,6 +5,11 @@
   "type": "object",
   "properties": {
     "$kind": { "const": "manifest" },
+    "air_version": {
+      "type": "string",
+      "enum": ["1"],
+      "description": "AIR format major version (string). Optional; if omitted, loaders assume the latest supported major (currently \"1\")."
+    },
     "schemas": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
@@ -17,11 +22,19 @@
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
+    "effects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NamedRef" }
+    },
     "caps": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
     "policies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/NamedRef" }
+    },
+    "secrets": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
@@ -78,8 +91,8 @@
           "items": {
             "type": "object",
             "properties": {
-              "source": { "type": "string" },
-              "reducer": { "$ref": "common.schema.json#/$defs/Name" }
+              "source": { "type": "string", "description": "External inbox or adapter channel name (e.g., http.inbox:contact_form)" },
+              "reducer": { "$ref": "common.schema.json#/$defs/Name", "description": "Reducer that will receive messages from this inbox; Name-formatted string" }
             },
             "required": ["source","reducer"],
             "additionalProperties": false
@@ -101,51 +114,9 @@
         "required": ["event","plan"],
         "additionalProperties": false
       }
-    },
-    "secrets": {
-      "description": "Logical secrets known to this world (alias/version/binding, no values).",
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "alias": {
-            "type": "string",
-            "description": "Logical secret name, unique per manifest (e.g. \"payments/stripe\")."
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Monotonically increasing version for this alias."
-          },
-          "binding_id": {
-            "type": "string",
-            "description": "Opaque id resolved to a backend in node-local config."
-          },
-          "expected_digest": {
-            "$ref": "common.schema.json#/$defs/Hash",
-            "description": "Optional digest of the plaintext value for drift detection."
-          },
-          "policy": {
-            "type": "object",
-            "properties": {
-              "allowed_caps": {
-                "type": "array",
-                "items": { "$ref": "common.schema.json#/$defs/CapGrantName" }
-              },
-              "allowed_plans": {
-                "type": "array",
-                "items": { "$ref": "common.schema.json#/$defs/Name" }
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "required": ["alias","version","binding_id"],
-        "additionalProperties": false
-      }
     }
   },
-  "required": ["$kind","schemas","modules","plans","caps","policies"],
+  "required": ["$kind","schemas","modules","plans","effects","caps","policies"],
   "additionalProperties": false,
   "$defs": {
     "NamedRef": {

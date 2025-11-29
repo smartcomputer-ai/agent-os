@@ -127,6 +127,18 @@ pub struct SecretRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefSecret {
+    pub name: Name,
+    pub binding_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_digest: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_caps: Vec<CapGrantName>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_plans: Vec<Name>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TypeExpr {
     Primitive(TypePrimitive),
@@ -410,6 +422,8 @@ pub enum AirNode {
     Defplan(DefPlan),
     Defcap(DefCap),
     Defpolicy(DefPolicy),
+    Defsecret(DefSecret),
+    Defeffect(DefEffect),
     Manifest(Manifest),
 }
 
@@ -561,6 +575,34 @@ pub struct DefCap {
     pub schema: TypeExpr,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OriginScope {
+    Reducer,
+    Plan,
+    Both,
+}
+
+impl OriginScope {
+    pub fn allows_plans(self) -> bool {
+        matches!(self, OriginScope::Plan | OriginScope::Both)
+    }
+
+    pub fn allows_reducers(self) -> bool {
+        matches!(self, OriginScope::Reducer | OriginScope::Both)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefEffect {
+    pub name: Name,
+    pub kind: EffectKind,
+    pub params_schema: SchemaRef,
+    pub receipt_schema: SchemaRef,
+    pub cap_type: CapType,
+    pub origin_scope: OriginScope,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 pub struct CapType(String);
@@ -669,15 +711,21 @@ pub enum OriginKind {
     Reducer,
 }
 
+pub const CURRENT_AIR_VERSION: &str = "1";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub air_version: Option<String>,
     pub schemas: Vec<NamedRef>,
     pub modules: Vec<NamedRef>,
     pub plans: Vec<NamedRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<NamedRef>,
     pub caps: Vec<NamedRef>,
     pub policies: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub secrets: Vec<SecretDecl>,
+    pub secrets: Vec<SecretEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defaults: Option<ManifestDefaults>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
@@ -692,6 +740,13 @@ pub struct Manifest {
 pub struct NamedRef {
     pub name: Name,
     pub hash: HashRef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SecretEntry {
+    Ref(NamedRef),
+    Decl(SecretDecl),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

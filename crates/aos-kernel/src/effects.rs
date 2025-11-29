@@ -7,6 +7,8 @@ use crate::capability::CapabilityResolver;
 use crate::error::KernelError;
 use crate::policy::PolicyGate;
 use crate::secret::{SecretResolver, normalize_secret_variants};
+use aos_air_types::catalog::EffectCatalog;
+use aos_air_types::plan_literals::SchemaIndex;
 
 #[derive(Default)]
 pub struct EffectQueue {
@@ -35,6 +37,8 @@ pub struct EffectManager {
     queue: EffectQueue,
     capability_gate: CapabilityResolver,
     policy_gate: Box<dyn PolicyGate>,
+    effect_catalog: Arc<EffectCatalog>,
+    schema_index: Arc<SchemaIndex>,
     secret_catalog: Option<crate::secret::SecretCatalog>,
     secret_resolver: Option<Arc<dyn SecretResolver>>,
 }
@@ -43,6 +47,8 @@ impl EffectManager {
     pub fn new(
         capability_gate: CapabilityResolver,
         policy_gate: Box<dyn PolicyGate>,
+        effect_catalog: Arc<EffectCatalog>,
+        schema_index: Arc<SchemaIndex>,
         secret_catalog: Option<crate::secret::SecretCatalog>,
         secret_resolver: Option<Arc<dyn SecretResolver>>,
     ) -> Self {
@@ -50,6 +56,8 @@ impl EffectManager {
             queue: EffectQueue::default(),
             capability_gate,
             policy_gate,
+            effect_catalog,
+            schema_index,
             secret_catalog,
             secret_resolver,
         }
@@ -93,8 +101,25 @@ impl EffectManager {
         runtime_kind: EffectKind,
         params_cbor: Vec<u8>,
     ) -> Result<EffectIntent, KernelError> {
-        let canonical_params = normalize_effect_params(&runtime_kind, &params_cbor)
-            .map_err(|err| KernelError::EffectManager(err.to_string()))?;
+        if let EffectSource::Reducer { .. } = &source {
+            let scope = self
+                .effect_catalog
+                .origin_scope(&runtime_kind)
+                .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?;
+            if !scope.allows_reducers() {
+                return Err(KernelError::UnsupportedReducerReceipt(
+                    runtime_kind.as_str().into(),
+                ));
+            }
+        }
+
+        let canonical_params = normalize_effect_params(
+            &self.effect_catalog,
+            &self.schema_index,
+            &runtime_kind,
+            &params_cbor,
+        )
+        .map_err(|err| KernelError::EffectManager(err.to_string()))?;
         let canonical_params = normalize_secret_variants(&canonical_params)
             .map_err(|err| KernelError::SecretResolution(err.to_string()))?;
         let grant = self

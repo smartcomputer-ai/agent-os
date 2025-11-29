@@ -10,7 +10,7 @@ use aos_air_types::{
     DefPlan, EmptyObject, Expr, ExprOrValue, HashRef, PlanEdge, PlanStep, PlanStepKind, TypeExpr,
     TypePrimitive, TypePrimitiveInt, ValueBool, ValueBytes, ValueDec128, ValueDurationNs,
     ValueHash, ValueInt, ValueList, ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull,
-    ValueRecord, ValueSet, ValueText, ValueTimeNs, ValueUuid, ValueVariant,
+    ValueRecord, ValueSet, ValueText, ValueTimeNs, ValueUuid, ValueVariant, catalog::EffectCatalog,
 };
 use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
@@ -103,6 +103,12 @@ pub struct PlanTickOutcome {
     pub result: Option<ExprValue>,
     pub result_schema: Option<String>,
     pub result_cbor: Option<Vec<u8>>,
+    pub plan_error: Option<PlanError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanError {
+    pub code: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,7 +210,11 @@ impl PlanInstance {
                 if self.all_steps_completed() {
                     self.completed = true;
                     outcome.completed = true;
-                    self.enforce_invariants()?;
+                    if let Some(err) = self.enforce_invariants()? {
+                        self.completed = true;
+                        outcome.plan_error = Some(err);
+                        return Ok(outcome);
+                    }
                 }
                 return Ok(outcome);
             }
@@ -248,7 +258,15 @@ impl PlanInstance {
                     );
                     record.insert("params".into(), params_value);
                     self.record_step_value(&step_id, ExprValue::Record(record));
-                    self.complete_step(&step_id)?;
+                    match self.complete_step(&step_id)? {
+                        Some(err) => {
+                            outcome.completed = true;
+                            self.completed = true;
+                            outcome.plan_error = Some(err);
+                            return Ok(outcome);
+                        }
+                        None => {}
+                    }
                     progressed = true;
                 }
             }
@@ -264,7 +282,15 @@ impl PlanInstance {
                             eval_expr_or_value(&assign.expr, &self.env, "plan assign eval error")?;
                         self.env.vars.insert(assign.bind.var.clone(), value.clone());
                         self.record_step_value(&step_id, value);
-                        self.complete_step(&step_id)?;
+                        match self.complete_step(&step_id)? {
+                            Some(err) => {
+                                outcome.completed = true;
+                                self.completed = true;
+                                outcome.plan_error = Some(err);
+                                return Ok(outcome);
+                            }
+                            None => {}
+                        }
                         progressed = true;
                         break;
                     }
@@ -278,7 +304,15 @@ impl PlanInstance {
                                 .vars
                                 .insert(await_step.bind.var.clone(), value.clone());
                             self.record_step_value(&step_id, value);
-                            self.complete_step(&step_id)?;
+                            match self.complete_step(&step_id)? {
+                                Some(err) => {
+                                    outcome.completed = true;
+                                    self.completed = true;
+                                    outcome.plan_error = Some(err);
+                                    return Ok(outcome);
+                                }
+                                None => {}
+                            }
                             progressed = true;
                             break;
                         }
@@ -290,13 +324,27 @@ impl PlanInstance {
                         waiting_registered = true;
                     }
                     PlanStepKind::AwaitEvent(await_event) => {
+                        if self.correlation_id.is_some() && await_event.where_clause.is_none() {
+                            return Err(KernelError::Manifest(
+                                "await_event requires a where predicate when correlate_by is set"
+                                    .into(),
+                            ));
+                        }
                         if let Some(value) = self.event_value.take() {
                             self.env
                                 .vars
                                 .insert(await_event.bind.var.clone(), value.clone());
                             self.record_step_value(&step_id, value);
                             self.event_wait = None;
-                            self.complete_step(&step_id)?;
+                            match self.complete_step(&step_id)? {
+                                Some(err) => {
+                                    outcome.completed = true;
+                                    self.completed = true;
+                                    outcome.plan_error = Some(err);
+                                    return Ok(outcome);
+                                }
+                                None => {}
+                            }
                             progressed = true;
                             break;
                         }
@@ -436,7 +484,15 @@ impl PlanInstance {
                             record.insert("key".into(), key_value);
                         }
                         self.record_step_value(&step_id, ExprValue::Record(record));
-                        self.complete_step(&step_id)?;
+                        match self.complete_step(&step_id)? {
+                            Some(err) => {
+                                outcome.completed = true;
+                                self.completed = true;
+                                outcome.plan_error = Some(err);
+                                return Ok(outcome);
+                            }
+                            None => {}
+                        }
                     }
                     PlanStepKind::End(end) => {
                         match (&self.plan.output, &end.result) {
@@ -508,7 +564,11 @@ impl PlanInstance {
 
                         self.completed = true;
                         outcome.completed = true;
-                        self.enforce_invariants()?;
+                        if let Some(err) = self.enforce_invariants()? {
+                            self.completed = true;
+                            outcome.plan_error = Some(err);
+                            return Ok(outcome);
+                        }
                         return Ok(outcome);
                     }
                 }
@@ -704,24 +764,27 @@ impl PlanInstance {
         self.env.steps.insert(step_id.to_string(), value);
     }
 
-    fn complete_step(&mut self, step_id: &str) -> Result<(), KernelError> {
+    fn complete_step(&mut self, step_id: &str) -> Result<Option<PlanError>, KernelError> {
         self.mark_completed(step_id);
         self.enforce_invariants()
     }
 
-    fn enforce_invariants(&mut self) -> Result<(), KernelError> {
+    fn invariant_violation_error(&self) -> PlanError {
+        PlanError {
+            code: "invariant_violation".into(),
+        }
+    }
+
+    fn enforce_invariants(&mut self) -> Result<Option<PlanError>, KernelError> {
         for (idx, invariant) in self.plan.invariants.iter().enumerate() {
             let value = eval_expr(invariant, &self.env).map_err(|err| {
                 KernelError::Manifest(format!("plan invariant {idx} eval error: {err}"))
             })?;
             if !value_to_bool(value)? {
-                return Err(KernelError::PlanInvariantFailed {
-                    plan: self.name.clone(),
-                    index: idx,
-                });
+                return Ok(Some(self.invariant_violation_error()));
             }
         }
-        Ok(())
+        Ok(None)
     }
 
     fn ready_steps(&self) -> Result<Vec<String>, KernelError> {
@@ -1097,11 +1160,31 @@ mod tests {
             ),
         ];
         let resolver = CapabilityResolver::from_runtime_grants(grants);
-        EffectManager::new(resolver, Box::new(AllowAllPolicy), None, None)
+        let effect_catalog = Arc::new(EffectCatalog::from_defs(
+            aos_air_types::builtins::builtin_effects()
+                .iter()
+                .map(|b| b.effect.clone()),
+        ));
+        EffectManager::new(
+            resolver,
+            Box::new(AllowAllPolicy),
+            effect_catalog,
+            builtin_schema_index(),
+            None,
+            None,
+        )
     }
 
     fn empty_schema_index() -> Arc<SchemaIndex> {
         Arc::new(SchemaIndex::new(HashMap::new()))
+    }
+
+    fn builtin_schema_index() -> Arc<SchemaIndex> {
+        let mut map = HashMap::new();
+        for builtin in aos_air_types::builtins::builtin_schemas() {
+            map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
+        }
+        Arc::new(SchemaIndex::new(map))
     }
 
     fn empty_reducer_schemas() -> Arc<HashMap<String, ReducerSchema>> {
@@ -1708,6 +1791,32 @@ mod tests {
     }
 
     #[test]
+    fn await_event_requires_predicate_when_correlated() {
+        let steps = vec![PlanStep {
+            id: "await".into(),
+            kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
+                event: SchemaRef::new("com.test/Evt@1").unwrap(),
+                where_clause: None,
+                bind: PlanBind { var: "evt".into() },
+            }),
+        }];
+
+        let plan = base_plan(steps);
+        let correlation_value = ExprValue::Text("corr".into());
+        let mut instance = PlanInstance::new(
+            1,
+            plan,
+            default_env(),
+            empty_schema_index(),
+            empty_reducer_schemas(),
+            Some((b"corr".to_vec(), correlation_value)),
+        );
+        let mut effects = test_effect_manager();
+        let err = instance.tick(&mut effects).unwrap_err();
+        assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("where predicate")));
+    }
+
+    #[test]
     fn end_step_returns_result_when_schema_declared() {
         let steps = vec![PlanStep {
             id: "end".into(),
@@ -1811,8 +1920,12 @@ mod tests {
         }));
         let mut instance = new_plan_instance(plan);
         let mut effects = test_effect_manager();
-        let err = instance.tick(&mut effects).unwrap_err();
-        assert!(matches!(err, KernelError::PlanInvariantFailed { .. }));
+        let outcome = instance.tick(&mut effects).unwrap();
+        assert!(outcome.completed);
+        assert!(matches!(
+            outcome.plan_error.as_ref().map(|e| e.code.as_str()),
+            Some("invariant_violation")
+        ));
     }
 
     #[test]

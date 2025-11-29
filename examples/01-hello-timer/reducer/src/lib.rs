@@ -55,7 +55,7 @@ impl Default for TimerPc {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartEvent {
     deliver_at_ns: u64,
-    key: String,
+    key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,18 +77,14 @@ fn handle_start(ctx: &mut ReducerCtx<TimerState>, event: StartEvent) {
         } else {
             TimerPc::Awaiting
         };
-        ctx.state.key = Some(event.key.clone());
+        ctx.state.key = event.key.clone();
         ctx.state.deadline_ns = Some(event.deliver_at_ns);
         ctx.state.fired_key = None;
 
-        if let (TimerPc::Awaiting, Some(key), Some(deadline)) = (
-            &ctx.state.pc,
-            ctx.state.key.clone(),
-            ctx.state.deadline_ns,
-        ) {
+        if let (TimerPc::Awaiting, Some(deadline)) = (&ctx.state.pc, ctx.state.deadline_ns) {
             let params = TimerSetParams {
                 deliver_at_ns: deadline,
-                key: Some(key),
+                key: ctx.state.key.clone(),
             };
             ctx.effects().timer_set(&params, "timer");
         }

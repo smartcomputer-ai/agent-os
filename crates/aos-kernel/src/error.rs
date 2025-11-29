@@ -53,8 +53,6 @@ pub enum KernelError {
         cap: String,
         reason: String,
     },
-    #[error("plan '{plan}' invariant #{index} failed")]
-    PlanInvariantFailed { plan: String, index: usize },
     #[error("journal error: {0}")]
     Journal(String),
     #[error("snapshot unavailable: {0}")]

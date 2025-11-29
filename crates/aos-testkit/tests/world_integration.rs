@@ -1,10 +1,10 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOrValue, ExprRecord,
-    PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
-    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
-    ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueMap,
-    ValueNull, ValueRecord, ValueText,
+    DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprOrValue,
+    ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
+    PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
+    PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord,
+    ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
@@ -13,7 +13,7 @@ use aos_effects::builtins::{
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::error::KernelError;
-use aos_kernel::journal::{JournalKind, mem::MemJournal};
+use aos_kernel::journal::{JournalKind, JournalRecord, PlanEndStatus, mem::MemJournal};
 use aos_testkit::fixtures::{self, START_SCHEMA};
 use aos_testkit::{TestWorld, effect_params_text, fake_hash};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
@@ -156,10 +156,16 @@ fn sugar_literal_plan_executes_http_flow() {
     }
     let mut modules = HashMap::new();
     modules.insert(result_module.name.clone(), result_module.clone());
+    let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(
+        aos_air_types::builtins::builtin_effects()
+            .iter()
+            .map(|e| e.effect.clone()),
+    );
     normalize_plan_literals(
         &mut plan,
         &builtin_schema_index_with_custom_types(),
         &modules,
+        &effect_catalog,
     )
     .expect("normalize literals");
 
@@ -1131,6 +1137,87 @@ fn plan_outputs_are_journaled_and_replayed() {
     assert_eq!(replay_results.len(), 1);
     let replay_value: ExprValue = serde_cbor::from_slice(&replay_results[0].value_cbor).unwrap();
     assert_eq!(replay_value, value);
+}
+
+#[test]
+fn invariant_failure_records_plan_ended_error() {
+    let store = fixtures::new_mem_store();
+    let plan_name = "com.acme/InvariantPlan@1";
+
+    let build_manifest = || {
+        let plan = DefPlan {
+            name: plan_name.to_string(),
+            input: fixtures::schema("com.acme/PlanIn@1"),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![PlanStep {
+                id: "set".into(),
+                kind: PlanStepKind::Assign(PlanStepAssign {
+                    expr: Expr::Const(ExprConst::Int { int: 5 }).into(),
+                    bind: PlanBind { var: "val".into() },
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![Expr::Op(ExprOp {
+                op: ExprOpCode::Lt,
+                args: vec![
+                    Expr::Ref(ExprRef {
+                        reference: "@var:val".into(),
+                    }),
+                    Expr::Const(ExprConst::Int { int: 1 }),
+                ],
+            })],
+        };
+
+        let mut loaded = fixtures::build_loaded_manifest(
+            vec![plan],
+            vec![fixtures::start_trigger(plan_name)],
+            vec![],
+            vec![],
+        );
+        insert_test_schemas(
+            &mut loaded,
+            vec![
+                def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+                def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            ],
+        );
+        loaded
+    };
+
+    let manifest = build_manifest();
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+    world.submit_event_value(
+        START_SCHEMA,
+        &fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]),
+    );
+    world.kernel.tick_until_idle().unwrap();
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let mut ended_entries = journal_entries
+        .iter()
+        .filter(|entry| entry.kind == JournalKind::PlanEnded);
+    let ended = ended_entries.next().expect("plan ended entry");
+    assert!(ended_entries.next().is_none(), "only one plan ended entry");
+
+    let record: JournalRecord = serde_cbor::from_slice(&ended.payload).unwrap();
+    match record {
+        JournalRecord::PlanEnded(rec) => {
+            assert_eq!(rec.plan_name, plan_name);
+            assert_eq!(rec.status, PlanEndStatus::Error);
+            assert_eq!(rec.error_code.as_deref(), Some("invariant_violation"));
+        }
+        other => panic!("unexpected record {:?}", other),
+    }
+
+    assert!(
+        journal_entries
+            .iter()
+            .all(|entry| entry.kind != JournalKind::PlanResult),
+        "no plan result recorded on invariant failure"
+    );
 }
 
 /// Plans that raise events should deliver them to reducers according to manifest routing.

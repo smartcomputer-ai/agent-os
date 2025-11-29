@@ -22,6 +22,7 @@
     },
     "edges": {
       "type": "array",
+      "uniqueItems": true,
       "items": {
         "type": "object",
         "properties": {
@@ -35,11 +36,15 @@
     },
     "required_caps": {
       "type": "array",
-      "items": { "$ref": "common.schema.json#/$defs/CapGrantName" }
+      "items": { "$ref": "common.schema.json#/$defs/CapGrantName" },
+      "uniqueItems": true,
+      "description": "Derived from emit_effect steps; may be omitted in authoring."
     },
     "allowed_effects": {
       "type": "array",
-      "items": { "$ref": "common.schema.json#/$defs/EffectKind" }
+      "items": { "$ref": "common.schema.json#/$defs/EffectKind" },
+      "uniqueItems": true,
+      "description": "Derived from emit_effect steps; may be omitted in authoring."
     },
     "invariants": {
       "type": "array",

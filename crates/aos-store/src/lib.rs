@@ -65,6 +65,12 @@ pub enum StoreError {
         #[source]
         source: aos_air_types::plan_literals::PlanLiteralError,
     },
+    #[error("secret {alias}@{version} has invalid version (must be >=1) (context: {context})")]
+    InvalidSecretVersion {
+        alias: String,
+        version: u64,
+        context: String,
+    },
     #[error("manifest declares duplicate secret {alias}@{version}")]
     DuplicateSecret { alias: String, version: u64 },
     #[error("secret {alias}@{version} missing binding_id")]
@@ -75,12 +81,16 @@ pub enum StoreError {
         version: u64,
         context: String,
     },
+    #[error("secret name '{name}' is invalid: {reason}")]
+    InvalidSecretName { name: String, reason: String },
     #[error("secret {alias}@{version} not permitted for {context}")]
     SecretPolicyViolation {
         alias: String,
         version: u64,
         context: String,
     },
+    #[error("manifest declares unsupported air_version '{found}' (supported: {supported})")]
+    UnsupportedAirVersion { found: String, supported: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

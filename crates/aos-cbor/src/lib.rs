@@ -173,7 +173,7 @@ mod tests {
             ),
             (
                 "spec/schemas/defplan.schema.json",
-                "sha256:eebedc0b8aefa79140808bb1c81865ee55b8e77842af2896c562c5f9dc40ec52",
+                "sha256:17e4c5c9eec58d537c4e95b340c5afd046228eb45b4240a936b89d06fb58b3a5",
             ),
             (
                 "spec/schemas/defcap.schema.json",
@@ -185,11 +185,15 @@ mod tests {
             ),
             (
                 "spec/schemas/manifest.schema.json",
-                "sha256:523563bd36611b33d3611d62b192e435fe3d29ea201fec195945003ad6e5e4a9",
+                "sha256:b7bbdf2f686803fb87b99c182afa0fe3fc725c97eb0001fa56ac84f645623cdc",
+            ),
+            (
+                "spec/schemas/defsecret.schema.json",
+                "sha256:2ff01ee39376e4bc37722bf1ceb763d4412f142be325903513dfaaf8e7a729f7",
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:a88426d62ada36ebf99ac9ae38630465f0b7c4b07ea58d304a87b7e31ff29acc",
+                "sha256:c4c2a4b0bf29c03afd4c7731bf8ac3fceee8a552580247500cfdaef7d0bd77ab",
             ),
         ];
 
@@ -200,6 +204,49 @@ mod tests {
             assert_eq!(value, decoded, "round trip mismatch for {name}");
             let hash = Hash::of_cbor(&value).expect("hash");
             assert_eq!(expected_hash, hash.to_hex(), "hash mismatch for {name}");
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Vector {
+        label: String,
+        json: Value,
+        cbor_hex: String,
+        hash: String,
+    }
+
+    fn load_vectors(relative: &str) -> Vec<Vector> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../")
+            .join(relative);
+        let data = fs::read_to_string(path).expect("vector file");
+        serde_json::from_str(&data).expect("valid vectors json")
+    }
+
+    #[test]
+    fn spec_test_vectors_match_hashes() {
+        for file in [
+            "spec/test-vectors/canonical-cbor.json",
+            "spec/test-vectors/schemas.json",
+            "spec/test-vectors/plans.json",
+        ] {
+            for vector in load_vectors(file) {
+                let bytes = to_canonical_cbor(&vector.json).expect("canonical cbor");
+                assert_eq!(
+                    hex::encode(&bytes),
+                    vector.cbor_hex,
+                    "cbor hex mismatch for {} in {}",
+                    vector.label,
+                    file
+                );
+                assert_eq!(
+                    Hash::of_bytes(&bytes).to_hex(),
+                    vector.hash,
+                    "hash mismatch for {} in {}",
+                    vector.label,
+                    file
+                );
+            }
         }
     }
 

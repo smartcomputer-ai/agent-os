@@ -1,0 +1,41 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    { "name": "demo/StartWork@1" },
+    { "name": "demo/WorkRequested@1" },
+    { "name": "demo/WorkOk@1" },
+    { "name": "demo/WorkErr@1" },
+    { "name": "demo/RetryState@1" },
+    { "name": "demo/RetryEvent@1" },
+    { "name": "sys/TimerSetParams@1" },
+    { "name": "sys/TimerSetReceipt@1" },
+    { "name": "sys/TimerFired@1" }
+  ],
+  "modules": [ { "name": "demo/RetrySM@1" } ],
+  "plans": [ { "name": "demo/WorkPlan@1" } ],
+  "effects": [],
+  "caps": [ { "name": "sys/timer@1" } ],
+  "policies": [ { "name": "demo/default_policy@1" } ],
+  "defaults": {
+    "policy": "demo/default_policy@1",
+    "cap_grants": [
+      { "name": "timer_grant", "cap": "sys/timer@1", "params": { "record": {} } }
+    ]
+  },
+  "module_bindings": {
+    "demo/RetrySM@1": { "slots": { "timer": "timer_grant" } }
+  },
+  "routing": {
+    "events": [
+      { "event": "demo/StartWork@1", "reducer": "demo/RetrySM@1" },
+      { "event": "demo/WorkOk@1", "reducer": "demo/RetrySM@1" },
+      { "event": "demo/WorkErr@1", "reducer": "demo/RetrySM@1" },
+      { "event": "sys/TimerFired@1", "reducer": "demo/RetrySM@1" }
+    ],
+    "inboxes": []
+  },
+  "triggers": [
+    { "event": "demo/WorkRequested@1", "plan": "demo/WorkPlan@1" }
+  ]
+}

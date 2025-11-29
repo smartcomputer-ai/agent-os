@@ -67,7 +67,7 @@ fn reducer_http_effect_is_denied() {
     world.submit_event_value(fixtures::START_SCHEMA, &fixtures::plan_input_record(vec![]));
     let err = world.kernel.tick().unwrap_err();
     assert!(
-        matches!(err, KernelError::PolicyDenied { .. }),
+        matches!(err, KernelError::UnsupportedReducerReceipt(_)),
         "unexpected error: {err:?}"
     );
 }

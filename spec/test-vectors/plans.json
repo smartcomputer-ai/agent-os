@@ -1,0 +1,21 @@
+[
+  {
+    "label": "defplan_min_end",
+    "json": {
+      "$kind": "defplan",
+      "name": "com.acme/Plan@1",
+      "input": "com.acme/Point@1",
+      "steps": [
+        {
+          "id": "end",
+          "op": "end"
+        }
+      ],
+      "edges": [],
+      "required_caps": [],
+      "allowed_effects": []
+    },
+    "cbor_hex": "d9d9f7a7646e616d656f636f6d2e61636d652f506c616e403165246b696e6467646566706c616e6565646765738065696e70757470636f6d2e61636d652f506f696e74403165737465707381a262696463656e64626f7063656e646d72657175697265645f63617073806f616c6c6f7765645f6566666563747380",
+    "hash": "sha256:d22044a0312bc264029427c93af440d1c27749468f7bd94cdad3100849b343ae"
+  }
+]

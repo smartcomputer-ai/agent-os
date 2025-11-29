@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aos.dev/air/v1/defeffect.schema.json",
+  "title": "AIR v1 defeffect",
+  "description": "Effect kind definition. Declares an effect's param/receipt schemas and required capability type.",
+  "type": "object",
+  "properties": {
+    "$kind": { "const": "defeffect" },
+    "name": { "$ref": "common.schema.json#/$defs/Name" },
+    "kind": {
+      "$ref": "common.schema.json#/$defs/EffectKind",
+      "description": "The effect kind string used in emit_effect steps"
+    },
+    "params_schema": {
+      "$ref": "common.schema.json#/$defs/SchemaRef",
+      "description": "Schema for effect parameters"
+    },
+    "receipt_schema": {
+      "$ref": "common.schema.json#/$defs/SchemaRef",
+      "description": "Schema for effect receipts"
+    },
+    "cap_type": {
+      "$ref": "common.schema.json#/$defs/CapType",
+      "description": "Capability type that guards this effect"
+    },
+    "origin_scope": {
+      "type": "string",
+      "enum": ["reducer", "plan", "both"],
+      "description": "Which emitters may use this effect in v1"
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional human-readable description"
+    }
+  },
+  "required": ["$kind", "name", "kind", "params_schema", "receipt_schema", "cap_type", "origin_scope"],
+  "additionalProperties": false
+}

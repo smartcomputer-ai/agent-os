@@ -1,0 +1,14 @@
+{
+  "$kind": "defmodule",
+  "name": "demo/RetrySM@1",
+  "module_kind": "reducer",
+  "abi": {
+    "reducer": {
+      "state": "demo/RetryState@1",
+      "event": "demo/RetryEvent@1",
+      "annotations": "sys/BytesOrSecretRef@1",
+      "effects_emitted": ["timer.set"],
+      "cap_slots": { "timer": "timer" }
+    }
+  }
+}

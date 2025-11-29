@@ -149,6 +149,7 @@ fn build_loaded_manifest(store: Arc<FsStore>, wasm_bytes: &[u8]) -> Result<Loade
     let modules = HashMap::from([(module.name.clone(), module.clone())]);
 
     let manifest = Manifest {
+        air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
         schemas: vec![
             named_ref(PC_SCHEMA, pc_hash)?,
             named_ref(STATE_SCHEMA, state_hash)?,
@@ -156,6 +157,13 @@ fn build_loaded_manifest(store: Arc<FsStore>, wasm_bytes: &[u8]) -> Result<Loade
         ],
         modules: vec![named_ref(REDUCER_NAME, module_hash)?],
         plans: Vec::new(),
+        effects: aos_air_types::builtins::builtin_effects()
+            .iter()
+            .map(|e| NamedRef {
+                name: e.effect.name.clone(),
+                hash: e.hash_ref.clone(),
+            })
+            .collect(),
         caps: Vec::new(),
         policies: Vec::new(),
         secrets: Vec::new(),
@@ -172,13 +180,23 @@ fn build_loaded_manifest(store: Arc<FsStore>, wasm_bytes: &[u8]) -> Result<Loade
         triggers: Vec::new(),
     };
 
+    let builtin_effects: HashMap<_, _> = aos_air_types::builtins::builtin_effects()
+        .iter()
+        .map(|e| (e.effect.name.clone(), e.effect.clone()))
+        .collect();
+    let effect_catalog =
+        aos_air_types::catalog::EffectCatalog::from_defs(builtin_effects.values().cloned());
+
     Ok(LoadedManifest {
         manifest,
+        secrets: Vec::new(),
         modules,
         plans: HashMap::new(),
+        effects: builtin_effects,
         caps: HashMap::new(),
         policies: HashMap::new(),
         schemas,
+        effect_catalog,
     })
 }
 

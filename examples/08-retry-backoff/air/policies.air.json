@@ -1,0 +1,9 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/default_policy@1",
+    "rules": [
+      { "when": {}, "decision": "allow" }
+    ]
+  }
+]

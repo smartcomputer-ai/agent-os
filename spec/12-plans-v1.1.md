@@ -305,12 +305,39 @@ Invariant evaluation timing is underspecified. When do they run? How do violatio
 - Invariants must be total (all refs must resolve) and side-effect-free
 - Validator checks that invariant expressions are boolean-typed
 
-### Example
+### Examples
 
+**Happy path guard**
+```json
+{
+  "$kind": "defplan",
+  "name": "com.acme/limit-transfer@1",
+  "input": "com.acme/TransferRequest@1",
+  "locals": { "approved": "com.acme/Approval@1" },
+  "steps": [
+    { "id": "request", "op": "emit_effect", "kind": "http_request", "params": {"ref":"@plan.input"}, "cap": "payments", "bind": { "effect_id_as": "req" } },
+    { "id": "await", "op": "await_receipt", "for": {"ref":"@var:req"}, "bind": { "as": "resp" } },
+    { "id": "end", "op": "end" }
+  ],
+  "edges": [
+    {"from":"request","to":"await"},
+    {"from":"await","to":"end"}
+  ],
+  "invariants": [
+    { "op": "lt", "args": [ {"ref":"@plan.input.amount_cents"}, {"const": { "nat": 1000000 }} ] }
+  ]
+}
+```
+The invariant enforces `amount_cents < 1_000_000` after each step; the plan completes normally while the condition holds.
+
+**Failure path**
 ```json
 {
   "$kind": "defplan",
   "name": "com.acme/payment_plan@1",
+  "locals": { "total_spent": "com.acme/Money@1" },
+  "steps": [{ "id":"end", "op":"end" }],
+  "edges": [],
   "invariants": [
     {
       "op": "le",
@@ -322,8 +349,7 @@ Invariant evaluation timing is underspecified. When do they run? How do violatio
   ]
 }
 ```
-
-If `total_spent.cents > 100000` after any step, plan terminates with invariant violation.
+If `total_spent.cents > 100000` after any step, the plan ends with `status:error, error_code:"invariant_violation"`.
 
 ---
 

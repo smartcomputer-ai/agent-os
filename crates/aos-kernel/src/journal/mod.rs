@@ -42,6 +42,7 @@ pub enum JournalKind {
     PolicyDecision,
     Governance,
     PlanResult,
+    PlanEnded,
     Custom,
 }
 
@@ -58,6 +59,7 @@ pub enum JournalRecord {
     Snapshot(SnapshotRecord),
     Governance(GovernanceRecord),
     PlanResult(PlanResultRecord),
+    PlanEnded(PlanEndedRecord),
     Custom(CustomRecord),
 }
 
@@ -71,9 +73,26 @@ impl JournalRecord {
             JournalRecord::Snapshot(_) => JournalKind::Snapshot,
             JournalRecord::Governance(_) => JournalKind::Governance,
             JournalRecord::PlanResult(_) => JournalKind::PlanResult,
+            JournalRecord::PlanEnded(_) => JournalKind::PlanEnded,
             JournalRecord::Custom(_) => JournalKind::Custom,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanEndStatus {
+    Ok,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanEndedRecord {
+    pub plan_name: String,
+    pub plan_id: u64,
+    pub status: PlanEndStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -155,36 +174,61 @@ pub struct SnapshotRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum GovernanceRecord {
-    ProposalSubmitted(ProposalSubmittedRecord),
-    ShadowRunCompleted(ShadowRunCompletedRecord),
-    ProposalApproved(ProposalApprovedRecord),
-    ManifestApplied(ManifestAppliedRecord),
+    Proposed(ProposedRecord),
+    ShadowReport(ShadowReportRecord),
+    Approved(ApprovedRecord),
+    Applied(AppliedRecord),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProposalSubmittedRecord {
+pub struct ProposedRecord {
     pub proposal_id: u64,
     pub description: Option<String>,
     pub patch_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ShadowRunCompletedRecord {
+pub struct ShadowReportRecord {
     pub proposal_id: u64,
-    #[serde(with = "serde_bytes")]
-    pub summary: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProposalApprovedRecord {
-    pub proposal_id: u64,
-    pub approver: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ManifestAppliedRecord {
-    pub proposal_id: u64,
+    pub patch_hash: String,
     pub manifest_hash: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects_predicted: Vec<crate::shadow::PredictedEffect>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_receipts: Vec<crate::shadow::PendingPlanReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plan_results: Vec<crate::shadow::PlanResultPreview>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ledger_deltas: Vec<crate::shadow::LedgerDelta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalDecisionRecord {
+    Approve,
+    Reject,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApprovedRecord {
+    pub proposal_id: u64,
+    pub patch_hash: String,
+    pub approver: String,
+    #[serde(default = "ApprovalDecisionRecord::default_approve")]
+    pub decision: ApprovalDecisionRecord,
+}
+
+impl ApprovalDecisionRecord {
+    fn default_approve() -> Self {
+        ApprovalDecisionRecord::Approve
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AppliedRecord {
+    pub proposal_id: u64,
+    pub patch_hash: String,
+    pub manifest_hash_new: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
