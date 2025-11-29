@@ -61,7 +61,16 @@ This breaks the "everything that defines the world is data in AIR" story.
 4. **Clear audit trail**: Secret definition changes are versioned AIR nodes
 5. **Simpler validation**: One pattern for all manifest entries
 
-## Proposed Design
+## Chosen Design (clean refactor)
+
+- Make secrets first-class nodes: add `defsecret` + `AirNode::Defsecret`; manifest `secrets` becomes `[{name, hash}]`.
+- `DefSecret` stores only `name` (alias@version) plus binding/digest/ACL; loader parses `name` into `(alias, version)` and enforces invariants.
+- Keep `SecretRef` canonical as `{alias, version}` for hashing/replay; optionally allow a sugar that parses a `name` string during normalization.
+- Loader resolves manifest refs into `DefSecret` nodes, derives `(alias, version)` keys, and builds a runtime `SecretCatalog`; no inline manifest secrets remain.
+- Validation enforces parsed alias/version uniqueness, version bounds, binding presence, digest format, and ACL targets (caps/plans) at load time.
+- Migration tool lifts existing inline secrets into defsecret nodes and rewrites manifest `secrets` to named refs.
+
+## Proposed Design (details)
 
 ### New defkind: `defsecret`
 
@@ -77,7 +86,8 @@ This breaks the "everything that defines the world is data in AIR" story.
 ```
 
 Fields:
-- **name**: Standard versioned name (replaces alias+version)
+- **name**: Standard versioned name (`alias@version`)
+- **alias/version (derived)**: Parsed from `name` during validation; enforced to be well-formed and `version >= 1`
 - **binding_id**: Opaque ID resolved to a backend in node-local config
 - **expected_digest**: Optional hash of plaintext for drift detection
 - **allowed_caps**: Capability grants that may use this secret
@@ -92,27 +102,13 @@ Fields:
   "plans": [{"name": "...", "hash": "sha256:..."}],
   "caps": [{"name": "...", "hash": "sha256:..."}],
   "policies": [{"name": "...", "hash": "sha256:..."}],
-  "secrets": [{"name": "...", "hash": "sha256:..."}]  // Now consistent!
+  "secrets": [{"name": "...", "hash": "sha256:..."}]  // now consistent
 }
 ```
 
 ### Updated SecretRef
 
-SecretRef can now use the standard Name format:
-
-```json
-{
-  "$kind": "defschema",
-  "name": "sys/SecretRef@1",
-  "type": {
-    "record": {
-      "name": { "text": {} }  // e.g., "payments/stripe@1"
-    }
-  }
-}
-```
-
-Or keep the alias+version form if you prefer human-readable references:
+Keep canonical `{alias, version}`:
 
 ```json
 {
@@ -123,7 +119,7 @@ Or keep the alias+version form if you prefer human-readable references:
 }
 ```
 
-The Name format (`payments/stripe@1`) is cleaner and matches other references.
+Optional sugar (if desired later): accept `{ "name": "payments/stripe@1" }` during normalization, parsing to the canonical form so hashing stays stable.
 
 ## Implementation Plan
 
@@ -212,30 +208,23 @@ pub enum AirNode {
 
 ### Step 4: Update manifest loader
 
-The loader needs to resolve `secrets` entries by hash and load the `defsecret` nodes.
+- Resolve `manifest.secrets: Vec<NamedRef>` → load `DefSecret` nodes by hash → parse `name` into `(alias, version)` (enforce `version >= 1`) → build:
+  - `HashMap<Name, DefSecret>` (by def name) for governance/diff/shadow tools
+  - `SecretCatalog` keyed by `(alias, version)` for runtime enforcement/injection
+- Remove reliance on inline `Manifest.secrets`; loader is the single place that materializes secrets into runtime shape.
 
 ### Step 5: Update secret resolver
 
-The kernel's secret resolver needs to look up secrets by Name instead of by inline definition.
+- Kernel receives the `SecretCatalog` derived above; no code should read manifest inline secrets.
+- Keep resolver contract: resolve by `binding_id`, optional `expected_digest`.
+- Normalize secret variants and inject using the new catalog; no behavior change, just new source of truth.
+- Catalog lookup is still by `(alias, version)`; these are derived from `DefSecret.name` so there is no drift between serialized data and runtime keys.
 
 ### Step 6: Update SecretRef handling
 
-If changing SecretRef to use Name instead of alias+version:
-
-```diff
-// builtin-schemas.air.json
-  {
-    "$kind": "defschema",
-    "name": "sys/SecretRef@1",
-    "type": {
-      "record": {
--       "alias": { "text": {} },
--       "version": { "nat": {} }
-+       "name": { "text": {} }
-      }
-    }
-  }
-```
+- Keep canonical `{alias, version}` for hashing/replay.
+- Optional sugar (later): accept `"name": "alias@version"` during normalization, parsing to canonical form so hashes stay stable.
+- If we adopt name-based schema, the diff would be the same shape as above but should only be applied alongside normalization logic.
 
 ### Step 7: Update spec prose
 
@@ -252,13 +241,26 @@ aos migrate-secrets --manifest manifest.air.json
 # Extracts inline secrets to defsecret nodes, updates manifest
 ```
 
+## Suggested execution order (granular)
+
+1. Schemas: add `defsecret.schema.json`; update `manifest.schema.json` to `NamedRef` for secrets.
+2. Types: add `DefSecret` + `AirNode::Defsecret`; update serde defaults and trait derives.
+3. Store loader: load defsecret nodes, parse `name` → `(alias, version)`, build `SecretsIndex/SecretCatalog`, drop use of inline `Manifest.secrets`.
+4. Validation: extend `aos-air-types::validate` and `aos-store` validation to cover parsed alias/version uniqueness, binding presence, version >= 1, digest format, and ACL target existence.
+5. Runtime: rewire `aos-kernel` to consume the new catalog; ensure effect injection/policy paths use the loader-derived catalog only.
+6. Builtins: keep `sys/SecretRef@1` canonical; optionally add name-based sugar plus normalization if desired.
+7. Specs/docs: update `spec/03-air.md`, `spec/17-secrets.md`, and any governance prose that lists defkinds.
+8. Examples/tests: rewrite example manifests (07) and update tests/goldens that construct inline secrets; add new tests for loader + validation + injection using defsecret nodes.
+9. Migration tool: CLI to lift inline secrets → defsecret nodes and rewrite manifests (helps existing fixtures).
+
 ## Acceptance Criteria
 
 - [ ] `defsecret.schema.json` added with correct shape
 - [ ] `manifest.schema.json` updated to use `[{name, hash}]` for secrets
-- [ ] Rust `DefSecret` type implemented
-- [ ] Manifest loader handles `defsecret` nodes
-- [ ] Secret resolver updated for new model
+- [ ] Rust `DefSecret` type + `AirNode::Defsecret` implemented (serialized fields match schema)
+- [ ] Manifest loader resolves secret refs into `DefSecret` nodes, parses name → alias/version, and builds catalog/index
+- [ ] Secret validation covers parsed alias/version uniqueness, binding, version, digest format, ACL target existence
+- [ ] Runtime secret injection/policy uses loader-derived catalog (no inline manifest dependency)
 - [ ] Spec prose updated
 - [ ] Example 07-llm-summarizer updated for new secret format
 - [ ] Migration tool provided (if needed)
