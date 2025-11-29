@@ -5,6 +5,11 @@
   "type": "object",
   "properties": {
     "$kind": { "const": "manifest" },
+    "air_version": {
+      "type": "string",
+      "enum": ["1"],
+      "description": "AIR format major version (string). Optional; if omitted, loaders assume the latest supported major (currently \"1\")."
+    },
     "schemas": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }

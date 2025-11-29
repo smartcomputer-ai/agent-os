@@ -11,6 +11,12 @@ pub enum ValidationError {
     EmptyPlan { plan: String },
     #[error("plan {plan} has duplicate step id {step_id}")]
     DuplicateStepId { plan: String, step_id: StepId },
+    #[error("plan {plan} has duplicate edge {from} -> {to}")]
+    DuplicateEdge {
+        plan: String,
+        from: StepId,
+        to: StepId,
+    },
     #[error("plan {plan} edge references unknown step id {step_id}")]
     EdgeReferencesUnknownStep { plan: String, step_id: StepId },
     #[error("plan {plan} contains cycles")]
@@ -127,6 +133,7 @@ pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
     for step in &plan.steps {
         graph.add_node(step.id.as_str());
     }
+    let mut edges = HashSet::new();
     for edge in &plan.edges {
         if !step_ids.contains(edge.from.as_str()) {
             return Err(ValidationError::EdgeReferencesUnknownStep {
@@ -138,6 +145,14 @@ pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
             return Err(ValidationError::EdgeReferencesUnknownStep {
                 plan: plan.name.clone(),
                 step_id: edge.to.clone(),
+            });
+        }
+        let key = (edge.from.clone(), edge.to.clone());
+        if !edges.insert(key.clone()) {
+            return Err(ValidationError::DuplicateEdge {
+                plan: plan.name.clone(),
+                from: key.0,
+                to: key.1,
             });
         }
         graph.add_edge(edge.from.as_str(), edge.to.as_str(), ());

@@ -572,6 +572,7 @@ mod tests {
         write_node(&air_dir.join("module.air.json"), &[module_node.clone()]);
 
         let manifest = Manifest {
+            air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
             schemas: vec![
                 named_ref_from_node(&state_node),
                 named_ref_from_node(&event_node),

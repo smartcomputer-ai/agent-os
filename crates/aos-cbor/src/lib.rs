@@ -173,7 +173,7 @@ mod tests {
             ),
             (
                 "spec/schemas/defplan.schema.json",
-                "sha256:9d2e63891354b627ddae8e2634ad4692ab40ff325805412f079301477a5326dd",
+                "sha256:17e4c5c9eec58d537c4e95b340c5afd046228eb45b4240a936b89d06fb58b3a5",
             ),
             (
                 "spec/schemas/defcap.schema.json",
@@ -185,7 +185,7 @@ mod tests {
             ),
             (
                 "spec/schemas/manifest.schema.json",
-                "sha256:d38f9ee08a03b6c3aa8f5653ca34d56d149f1535a3f7ea6432e3b084497f70fd",
+                "sha256:144f2d0132f72f3892c334b09208839c0ecb589822a0094b57b1420f5c4e6233",
             ),
             (
                 "spec/schemas/defsecret.schema.json",

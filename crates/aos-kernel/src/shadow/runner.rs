@@ -127,6 +127,7 @@ mod tests {
 
     fn empty_manifest() -> Manifest {
         Manifest {
+            air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],

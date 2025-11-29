@@ -216,6 +216,15 @@ impl<S: Store + 'static> KernelBuilder<S> {
 }
 
 impl<S: Store + 'static> Kernel<S> {
+    fn ensure_single_effect(output: &ReducerOutput) -> Result<(), KernelError> {
+        if output.effects.len() > 1 {
+            return Err(KernelError::ReducerOutput(
+                "reducers may emit at most one effect per step; raise a domain intent and use a plan for additional effects".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn from_loaded_manifest(
         store: Arc<S>,
         loaded: LoadedManifest,
@@ -388,6 +397,8 @@ impl<S: Store + 'static> Kernel<S> {
         reducer_name: String,
         output: ReducerOutput,
     ) -> Result<(), KernelError> {
+        Self::ensure_single_effect(&output)?;
+
         match output.state {
             Some(state) => {
                 self.reducer_state.insert(reducer_name.clone(), state);
@@ -1524,6 +1535,7 @@ mod tests {
     use crate::journal::mem::MemJournal;
     use aos_air_types::{HashRef, SecretDecl};
     use aos_store::MemStore;
+    use aos_wasm_abi::ReducerEffect;
 
     fn named_ref(name: &str, hash: &str) -> NamedRef {
         NamedRef {
@@ -1539,6 +1551,7 @@ mod tests {
 
     fn empty_manifest() -> Manifest {
         Manifest {
+            air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
@@ -1551,6 +1564,23 @@ mod tests {
             routing: None,
             triggers: vec![],
         }
+    }
+
+    #[test]
+    fn reducer_output_with_multiple_effects_is_rejected() {
+        let output = ReducerOutput {
+            effects: vec![
+                ReducerEffect::new("timer.set", vec![1]),
+                ReducerEffect::new("blob.put", vec![2]),
+            ],
+            ..Default::default()
+        };
+
+        let err = Kernel::<MemStore>::ensure_single_effect(&output).unwrap_err();
+        assert!(
+            matches!(err, KernelError::ReducerOutput(ref message) if message.contains("at most one effect")),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]

@@ -10,6 +10,8 @@ use crate::{
     TypePrimitiveText, TypePrimitiveUuid, TypeSet,
     builtins::builtin_schemas,
     plan_literals::{PlanLiteralError, SchemaIndex, normalize_plan_literals},
+    validate,
+    validate::ValidationError,
 };
 
 fn schema_index() -> SchemaIndex {
@@ -461,6 +463,34 @@ fn map_literals_with_tuple_syntax_are_sorted_and_deduped() {
         "map entries should be sorted lexicographically and deduped"
     );
     assert_eq!(map.map.len(), 2, "duplicate keys must be collapsed");
+}
+
+#[test]
+fn duplicate_edges_are_rejected() {
+    let plan_json = json!({
+        "$kind": "defplan",
+        "name": "com.acme/DuplicateEdges@1",
+        "input": "com.acme/Input@1",
+        "steps": [
+            { "id": "assign", "op": "assign", "expr": "hi", "bind": {"as": "tmp"} },
+            { "id": "end", "op": "end" }
+        ],
+        "edges": [
+            {"from": "assign", "to": "end"},
+            {"from": "assign", "to": "end", "when": {"op": "eq", "args": [{"ref": "@var:tmp"}, {"text": "hi"}]}}
+        ],
+        "required_caps": [],
+        "allowed_effects": []
+    });
+
+    assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
+    let plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
+    let err = validate::validate_plan(&plan).unwrap_err();
+    assert!(matches!(
+        err,
+        ValidationError::DuplicateEdge { from, to, .. }
+        if from.as_str() == "assign" && to.as_str() == "end"
+    ));
 }
 
 #[test]

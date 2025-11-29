@@ -149,6 +149,7 @@ fn build_loaded_manifest(store: Arc<FsStore>, wasm_bytes: &[u8]) -> Result<Loade
     let modules = HashMap::from([(module.name.clone(), module.clone())]);
 
     let manifest = Manifest {
+        air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
         schemas: vec![
             named_ref(PC_SCHEMA, pc_hash)?,
             named_ref(STATE_SCHEMA, state_hash)?,

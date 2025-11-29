@@ -395,6 +395,7 @@ fn sample_plan_json() -> serde_json::Value {
 fn plan_patch(plan: DefPlan) -> ManifestPatch {
     ManifestPatch {
         manifest: Manifest {
+            air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![NamedRef {

@@ -107,6 +107,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 ```
 {
   "$kind": "manifest",
+  "air_version"?: "1",
   "schemas": [{name, hash}],
   "modules": [{name, hash}],
   "plans": [{name, hash}],
@@ -125,7 +126,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. The `routing.events` field is optional in v1. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. The runtime auto-includes the built-in `defeffect` bundle if omitted so manifests may stay terse.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is optional; if omitted, loaders assume the latest supported major (currently `"1"`). Supplying an unknown version is a validation error. The `routing.events` field is optional in v1. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. The runtime auto-includes the built-in `defeffect` bundle if omitted so manifests may stay terse.
 
 See: spec/schemas/manifest.schema.json
 
@@ -548,7 +549,7 @@ Loaders may optionally lift literals into constant expressions internally so dia
 
 ### Guards (Edge Predicates)
 
-Edges can have optional `when` predicates called **guards**. A guard is a boolean expression that must evaluate to `true` for an edge to be traversable. This enables conditional branching in plan DAGs: a step becomes ready only when all predecessor edges are completed **and** all their guards evaluate to `true`.
+Edges can have optional `when` predicates called **guards**. A guard is a boolean expression that must evaluate to `true` for an edge to be traversable. This enables conditional branching in plan DAGs: a step becomes ready only when all predecessor edges are completed **and** all their guards evaluate to `true`. Duplicate `(from,to)` edges are invalid.
 
 Example:
 ```json

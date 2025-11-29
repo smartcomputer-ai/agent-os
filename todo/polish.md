@@ -162,10 +162,10 @@ if output.effects.len() > 1 {
 
 - [ ] 1. Add Name format comments to builtin schemas
 - [ ] 2. Add bold "no $schema in payloads" rule
-- [ ] 3. Document edge uniqueness constraint
+- [x] 3. Document edge uniqueness constraint
 - [ ] 4. Clarify routing.inboxes purpose
-- [ ] 5. Add air_version to manifest
-- [ ] 6. Enforce one effect per reducer step
+- [x] 5. Add air_version to manifest
+- [x] 6. Enforce one effect per reducer step
 - [ ] 7. Document pure modules as reserved
 - [ ] 8. Add test vectors
 - [ ] 9. Add retry-backoff example

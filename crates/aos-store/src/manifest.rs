@@ -6,7 +6,7 @@ use std::{
 use aos_air_types::{
     AirNode, CapGrant, DefPlan, ExprOrValue, Manifest, NamedRef, PlanStepKind, SecretDecl,
     SecretEntry, SecretPolicy, SecretRef, ValueLiteral, builtins, plan_literals::SchemaIndex,
-    validate,
+    validate, CURRENT_AIR_VERSION,
 };
 use aos_cbor::Hash;
 use serde_json::Value as JsonValue;
@@ -75,6 +75,7 @@ pub fn load_manifest_from_path<S: Store>(
 
 pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResult<Catalog> {
     let mut manifest: Manifest = serde_cbor::from_slice(bytes)?;
+    ensure_air_version(&mut manifest)?;
     ensure_builtin_schema_refs(&mut manifest)?;
     ensure_builtin_effect_refs(&mut manifest)?;
     let mut nodes = HashMap::new();
@@ -97,6 +98,20 @@ pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResul
         nodes,
         resolved_secrets,
     })
+}
+
+fn ensure_air_version(manifest: &mut Manifest) -> StoreResult<()> {
+    match &manifest.air_version {
+        Some(version) if version == CURRENT_AIR_VERSION => Ok(()),
+        Some(version) => Err(StoreError::UnsupportedAirVersion {
+            found: version.clone(),
+            supported: CURRENT_AIR_VERSION.to_string(),
+        }),
+        None => {
+            manifest.air_version = Some(CURRENT_AIR_VERSION.to_string());
+            Ok(())
+        }
+    }
 }
 
 fn load_refs<S: Store>(
@@ -712,6 +727,7 @@ mod tests {
 
     fn manifest_with_plan(plan_ref: NamedRef) -> Manifest {
         Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![plan_ref],
@@ -782,6 +798,7 @@ mod tests {
     fn injects_builtin_schema_for_routed_events() {
         let store = MemStore::default();
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
@@ -844,6 +861,7 @@ mod tests {
         };
         let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![NamedRef {
                 name: secret_schema.schema.name.clone(),
                 hash: secret_schema.hash_ref.clone(),
@@ -898,6 +916,7 @@ mod tests {
         };
         let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![NamedRef {
                 name: secret_schema.schema.name.clone(),
                 hash: secret_schema.hash_ref.clone(),
@@ -928,6 +947,7 @@ mod tests {
     fn rejects_duplicate_secret_decl() {
         let store = MemStore::default();
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
@@ -964,6 +984,7 @@ mod tests {
     fn rejects_secret_missing_binding() {
         let store = MemStore::default();
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
@@ -991,6 +1012,7 @@ mod tests {
     fn rejects_secret_policy_for_cap() {
         let store = MemStore::default();
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
@@ -1042,6 +1064,7 @@ mod tests {
         let hash = store.put_node(&AirNode::Defsecret(def.clone())).unwrap();
         // Two references to the same alias/version via the same defsecret hash
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
@@ -1080,6 +1103,7 @@ mod tests {
         };
         let hash = store.put_node(&AirNode::Defsecret(def)).unwrap();
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
@@ -1112,6 +1136,7 @@ mod tests {
         };
         let hash = store.put_node(&AirNode::Defsecret(def)).unwrap();
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
@@ -1146,6 +1171,7 @@ mod tests {
         };
         let hash = store.put_node(&AirNode::Defsecret(def)).unwrap();
         let manifest = Manifest {
+            air_version: Some(CURRENT_AIR_VERSION.to_string()),
             schemas: vec![],
             modules: vec![],
             plans: vec![],

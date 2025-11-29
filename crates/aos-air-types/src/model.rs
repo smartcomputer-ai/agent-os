@@ -711,8 +711,12 @@ pub enum OriginKind {
     Reducer,
 }
 
+pub const CURRENT_AIR_VERSION: &str = "1";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub air_version: Option<String>,
     pub schemas: Vec<NamedRef>,
     pub modules: Vec<NamedRef>,
     pub plans: Vec<NamedRef>,
