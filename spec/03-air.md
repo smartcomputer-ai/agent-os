@@ -431,7 +431,7 @@ Plans are the **orchestration layer**, NOT a compute runtime. They coordinate ex
 
 ### v1 Scope and Future Extensions
 
-Version 1.0 keeps plans minimal: `emit_effect`, `await_receipt`, `raise_event`, `await_event`, `assign`, `end`. Structured concurrency (sub-plans, fan-out/fan-in) is deferred to v1.1+ to validate real-world needs first.
+Version 1.0 keeps plans minimal: `emit_effect`, `await_receipt`, `raise_event`, `await_event`, `assign`, `end`. `await_event` stays to let a single plan instance span multiple domain events without handing off through reducers; structured concurrency (sub-plans, fan-out/fan-in) is deferred to v1.1+ to validate real-world needs first.
 
 See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `spawn_for_each`, `await_plans_all`).
 
@@ -467,7 +467,13 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 
 **await_event** (optional): Wait for a matching DomainEvent
 - `{ id, op:"await_event", event:SchemaRef, where?:Expr, bind:{as:VarName} }`
-- Waits until a matching DomainEvent appears; `where` is a boolean predicate over the event value
+- Semantics (v1):
+  - **Future-only**: Plan registers the wait when the step first runs; only events appended afterwards are observed.
+  - **Per-waiter first match**: The first event (by journal order) matching `event` and passing `where` resumes that plan instance.
+  - **Broadcast**: Multiple plan instances waiting on the same schema all see the event; there is no consumption.
+  - **Predicate scope**: `where` evaluates with `@event` bound to the incoming event and may reference locals/steps/plan input; `@var:correlation_id` is available when the plan was started from a trigger with `correlate_by`.
+  - **One outstanding wait** per plan instance; the step blocks until satisfied, then normal DAG scheduling continues.
+  - **Correlation guard (required when correlated)**: If the plan was started via a trigger with `correlate_by`, an `await_event` step must provide a `where` predicate (typically `@event.<key> == @var:correlation_id`) to prevent cross-talk across concurrent runs.
 
 **assign**: Bind a value to a variable
 - `{ id, op:"assign", expr:ExprOrValue, bind:{as:VarName} }`

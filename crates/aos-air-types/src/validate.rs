@@ -100,7 +100,11 @@ pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
     let allowed_effects: HashSet<_> = plan.allowed_effects.iter().collect();
     let required_caps: HashSet<_> = plan.required_caps.iter().collect();
 
+    // "correlation_id" is injected by the kernel when a plan is started via a trigger
+    // that specifies `correlate_by`. Allow expressions to reference it even though the
+    // value is only present at runtime when correlation is configured.
     let mut available_vars: HashSet<String> = plan.locals.keys().cloned().collect();
+    available_vars.insert("correlation_id".into());
     let mut effect_handles: HashSet<String> = HashSet::new();
     for step in &plan.steps {
         match &step.kind {

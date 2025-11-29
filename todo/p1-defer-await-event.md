@@ -1,197 +1,55 @@
-# P1: Defer await_event to v1.1
+# P1: Defer await_event to v1.1 (superseded)
+
+**Update (decision)**: We are **not removing** `await_event`. Instead we clarified its v1 semantics, required correlation predicates when triggers set `correlate_by`, and added documentation + tests to make its role explicit. The feature stays, but is now better specified and guarded.
 
 **Priority**: P1 (recommended for v1)
 **Effort**: Small-Medium
-**Risk if deferred**: Low (we're deferring, not implementing)
+**Risk if deferred**: Low (docs/spec guardrails already landed)
 
 ## Summary
 
-The `await_event` plan step allows plans to wait for domain events. However:
-1. No examples use it
-2. Key semantics are underspecified
-3. The core pattern (reducer→trigger→plan→raise_event→reducer) is sufficient for v1
+The `await_event` plan step allows plans to wait for domain events. The original proposal was to defer/remove it. After review, we kept it and:
+1. Documented exact semantics (future-only, first match per waiter, broadcast, predicate scope, correlation guard)
+2. Required a `where` predicate when the plan was started with `correlate_by` (runtime guard + validation allowance for `correlation_id`)
+3. Updated specs/workflows to state why `await_event` matters (keeps a single plan’s locals/invariants across multiple domain events)
 
-We should defer `await_event` to v1.1 where it can be properly specified and tested.
+So the “defer” recommendation is superseded by clarifying and tightening the feature in v1.
 
 ## Rationale
 
-### Underspecified semantics
+### Underspecified semantics (now resolved in docs/runtime)
 
-The current spec leaves critical questions unanswered:
+- Future vs historical: clarified as future-only (wait registered at step activation).
+- Multiple matches: first matching event by journal order resumes the waiter.
+- Racing waiters: broadcast; events are not consumed.
+- Correlation: `correlate_by` key is injected as `@var:correlation_id`; `await_event` now requires a `where` when correlated.
 
-1. **Historical vs future events?**
-   - Does it only see events appended *after* the step becomes active?
-   - Or can it match events already in the journal?
+### Examples/tests coverage
 
-2. **Multiple matches?**
-   - If multiple events match the `where` predicate, which one wins?
-   - First by journal height? Last? Any?
+Runtime + validator tests now cover `await_event`; we still lack an `examples/` sample, but kernel/testkit suites exercise it.
 
-3. **Racing waiters?**
-   - Can multiple `await_event` steps in different plans match the same event?
-   - Is it "first come first served" or broadcast?
+### Core pattern vs await_event
 
-4. **Correlation and keyed reducers?**
-   - How does this interact with `correlate_by` in triggers?
-   - Does the plan instance have a "scope" that filters events?
+The trigger→plan→raise_event loop is sufficient for many flows, but `await_event` is valuable when a single plan needs to span multiple domain events while keeping its locals/invariants intact (e.g., approvals, chained orchestration). Removing it would force extra reducer state or plan hand-offs. We chose to keep it and clarify semantics instead of deferring.
 
-### No examples use it
+### What remains for v1.1+
 
-```bash
-grep -r "await_event" examples/
-# No results
-```
+- Add an `examples/` scenario showcasing correlated `await_event`.
+- Consider multi-wait/structured concurrency extensions once real workloads demand it.
 
-The feature is completely untested in practice.
+## Implementation Notes (what we shipped)
 
-### The core pattern is sufficient
+- Kept schema/type/runtime support for `await_event`.
+- Added runtime guard: correlated runs must supply `where` on `await_event`.
+- Validator now whitelists `correlation_id` so predicates can reference it.
+- Specs updated: `spec/02-architecture.md`, `spec/03-air.md`, `spec/05-workflows.md` (semantics, rationale, when-to-use, correlation guidance).
+- New unit test ensures guard triggers when missing predicate in correlated runs.
 
-For v1, the canonical coordination pattern is:
+## Acceptance Criteria (updated)
 
-```
-Reducer emits DomainIntent
-    ↓
-Trigger starts Plan
-    ↓
-Plan orchestrates effects (emit_effect/await_receipt)
-    ↓
-Plan raises result event (raise_event)
-    ↓
-Reducer advances state
-```
-
-This covers:
-- Effect orchestration
-- Saga patterns
-- Compensation flows
-- Long-running workflows (via timer.set)
-
-`await_event` adds plan-to-plan coordination, which is a more advanced pattern that can wait for v1.1.
-
-### What v1.1 should specify
-
-When we add `await_event` in v1.1, we should specify:
-
-1. **Only future events**: Events must be appended after step activation
-2. **First match wins**: Earliest matching event by journal height
-3. **Broadcast semantics**: Multiple waiters can match the same event
-4. **Explicit correlation**: Use `where` predicate; no implicit scoping
-
-## Proposed Change
-
-### Option A: Remove from schema (recommended)
-
-Remove `await_event` from the v1 plan step types:
-
-```diff
-// defplan.schema.json
-"Step": {
-  "type": "object",
-  "oneOf": [
-    { "$ref": "#/$defs/StepRaiseEvent" },
-    { "$ref": "#/$defs/StepEmitEffect" },
-    { "$ref": "#/$defs/StepAwaitReceipt" },
--   { "$ref": "#/$defs/StepAwaitEvent" },
-    { "$ref": "#/$defs/StepAssign" },
-    { "$ref": "#/$defs/StepEnd" }
-  ]
-}
-```
-
-### Option B: Keep but mark as reserved
-
-Keep the step type but reject it during validation:
-
-```rust
-PlanStepKind::AwaitEvent(_) => {
-    return Err(ValidationError::ReservedFeature {
-        feature: "await_event",
-        message: "await_event is reserved for v1.1"
-    });
-}
-```
-
-### Recommendation: Option A
-
-Clean removal is better. If no examples use it, there's no migration burden.
-
-## Implementation Plan
-
-### Step 1: Remove from JSON Schema
-
-```diff
-// spec/schemas/defplan.schema.json
-
-// Remove from Step oneOf
-- { "$ref": "#/$defs/StepAwaitEvent" },
-
-// Remove the definition
-- "StepAwaitEvent": {
--   "allOf": [
--     { "$ref": "#/$defs/StepBase" },
--     {
--       "type": "object",
--       "properties": {
--         "id": { "$ref": "common.schema.json#/$defs/StepId" },
--         "op": { "const": "await_event" },
--         "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
--         "where": { "$ref": "common.schema.json#/$defs/Expr" },
--         "bind": { "$ref": "#/$defs/BindAs" }
--       },
--       "required": ["op","event","bind"],
--       "additionalProperties": false
--     }
--   ]
-- },
-```
-
-### Step 2: Remove from Rust types
-
-```diff
-// aos-air-types/src/model.rs
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum PlanStepKind {
-    RaiseEvent(PlanStepRaiseEvent),
-    EmitEffect(PlanStepEmitEffect),
-    AwaitReceipt(PlanStepAwaitReceipt),
--   AwaitEvent(PlanStepAwaitEvent),
-    Assign(PlanStepAssign),
-    End(PlanStepEnd),
-}
-
-- #[derive(Debug, Clone, Serialize, Deserialize)]
-- pub struct PlanStepAwaitEvent {
--     pub event: SchemaRef,
--     #[serde(rename = "where", default, skip_serializing_if = "Option::is_none")]
--     pub where_clause: Option<Expr>,
--     pub bind: PlanBind,
-- }
-```
-
-### Step 3: Remove from plan executor
-
-Remove any handling of `await_event` in the kernel's plan executor.
-
-### Step 4: Update spec prose
-
-In `spec/03-air.md` §11, remove `await_event` from the Steps section and add a note:
-
-> **Note**: `await_event` (plan waiting for domain events) is deferred to v1.1. The v1 coordination pattern uses triggers to start plans and `raise_event` to notify reducers.
-
-In `spec/05-workflows.md`, update any examples that mention `await_event` to use the reducer-driven pattern instead.
-
-### Step 5: Update tests
-
-Remove any tests that use `await_event`.
-
-## Acceptance Criteria
-
-- [ ] `await_event` step type removed from JSON schema
-- [ ] `PlanStepAwaitEvent` removed from Rust types
-- [ ] Plan executor doesn't handle `await_event`
-- [ ] Spec prose updated to document deferral
-- [ ] Workflow patterns doc uses only v1 primitives
-- [ ] All tests pass
-- [ ] spec/12-plans-v1.1.md documents future `await_event` semantics
+- [x] `await_event` semantics documented (future-only, first match, broadcast, predicate scope, correlation guard)
+- [x] Docs explain why `await_event` is retained and when to use it vs multi-plan choreography
+- [x] Runtime rejects correlated runs without an `await_event.where` predicate
+- [x] Validator allows `@var:correlation_id` in predicates
+- [x] Workflow doc example updated to correlation-aware `await_event`
+- [x] Tests updated/added and passing

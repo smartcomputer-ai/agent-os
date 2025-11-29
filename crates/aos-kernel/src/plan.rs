@@ -290,6 +290,12 @@ impl PlanInstance {
                         waiting_registered = true;
                     }
                     PlanStepKind::AwaitEvent(await_event) => {
+                        if self.correlation_id.is_some() && await_event.where_clause.is_none() {
+                            return Err(KernelError::Manifest(
+                                "await_event requires a where predicate when correlate_by is set"
+                                    .into(),
+                            ));
+                        }
                         if let Some(value) = self.event_value.take() {
                             self.env
                                 .vars
@@ -1705,6 +1711,32 @@ mod tests {
                 ExprValue::Text("match".into()),
             )])))
         );
+    }
+
+    #[test]
+    fn await_event_requires_predicate_when_correlated() {
+        let steps = vec![PlanStep {
+            id: "await".into(),
+            kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
+                event: SchemaRef::new("com.test/Evt@1").unwrap(),
+                where_clause: None,
+                bind: PlanBind { var: "evt".into() },
+            }),
+        }];
+
+        let plan = base_plan(steps);
+        let correlation_value = ExprValue::Text("corr".into());
+        let mut instance = PlanInstance::new(
+            1,
+            plan,
+            default_env(),
+            empty_schema_index(),
+            empty_reducer_schemas(),
+            Some((b"corr".to_vec(), correlation_value)),
+        );
+        let mut effects = test_effect_manager();
+        let err = instance.tick(&mut effects).unwrap_err();
+        assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("where predicate")));
     }
 
     #[test]

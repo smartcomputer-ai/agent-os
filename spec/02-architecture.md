@@ -109,7 +109,7 @@ The typical runtime flow between reducers and plans follows six steps:
 3. **Plan emits effects** under capabilities; the kernel checks: (a) capability grant constraints, (b) conservative budget pre-check, (c) policy decision (origin-aware). The Effect Manager dispatches if allowed.
 4. **Adapter executes** the effect and appends a signed receipt; the plan's `await_receipt` step resumes with the receipt value.
 5. **Plan raises result** via `raise_event`, publishing a DomainEvent (e.g., `PaymentResult`) to the target reducer; the reducer consumes it and advances its typestate.
-6. **Optional continuation**: plans may `await_event` for subsequent reducer‑produced events to continue orchestration in one instance.
+6. **Optional continuation**: plans may `await_event` for subsequent reducer‑produced events to continue orchestration in one instance. The wait is future-only, first-match-per-waiter, and broadcast (events are not consumed). When a trigger set a `correlate_by` key, `await_event` **must** include a `where` predicate (typically matching that key) to avoid cross-talk between concurrent plan instances.
 
 ### Governance and Observability
 
