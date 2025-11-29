@@ -354,17 +354,17 @@ Ensure all examples include the built-in effects in their manifests (or document
 
 ## Acceptance Criteria
 
-- [ ] `defeffect.schema.json` added with correct shape
-- [ ] `manifest.schema.json` includes `effects` array
-- [ ] `builtin-effects.air.json` defines all v1 effects
-- [ ] `origin_scope` enforced (plans only emit plan/both; reducers only reducer/both)
-- [ ] Rust `DefEffect` type implemented
-- [ ] `AirNode` enum includes `Defeffect` variant
-- [ ] Manifest loader handles effect definitions
-- [ ] Plan validator uses defeffect for param schema lookup
-- [ ] Effect manager uses defeffect for receipt schema lookup
+- [x] `defeffect.schema.json` added with correct shape
+- [x] `manifest.schema.json` includes `effects` array
+- [x] `builtin-effects.air.json` defines all v1 effects
+- [x] `origin_scope` enforced (plans only emit plan/both; reducers only reducer/both)
+- [x] Rust `DefEffect` type implemented
+- [x] `AirNode` enum includes `Defeffect` variant
+- [x] Manifest loader handles effect definitions
+- [x] Plan validator uses defeffect for param schema lookup
+- [x] Effect manager uses defeffect for receipt schema lookup
 - [ ] (Optional) Manifest supports `effect_bindings` table for adapter routing
-- [ ] Spec prose updated
-- [ ] All examples work with new model
-- [ ] All tests pass
-- [ ] Hash tests updated for new schemas
+- [x] Spec prose updated
+- [x] All examples work with new model
+- [x] All tests pass
+- [x] Hash tests updated for new schemas
