@@ -91,8 +91,8 @@
           "items": {
             "type": "object",
             "properties": {
-              "source": { "type": "string" },
-              "reducer": { "$ref": "common.schema.json#/$defs/Name" }
+              "source": { "type": "string", "description": "External inbox or adapter channel name (e.g., http.inbox:contact_form)" },
+              "reducer": { "$ref": "common.schema.json#/$defs/Name", "description": "Reducer that will receive messages from this inbox; Name-formatted string" }
             },
             "required": ["source","reducer"],
             "additionalProperties": false
