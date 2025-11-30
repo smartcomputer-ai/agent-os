@@ -310,6 +310,7 @@ The schema defines parameter constraints enforced at enqueue time.
 **sys/http.out@1**
 - Schema: `{ hosts: set<text>, verbs: set<text>, path_prefixes?: set<text> }`
 - At enqueue: `authority(url) ∈ hosts`; `method ∈ verbs`; path `starts_with` any `path_prefixes` if present.
+- Terminology: `verbs` is the allowlist of HTTP methods for the capability; each request still supplies its concrete `method`.
 
 **sys/llm.basic@1**
 - Schema: `{ providers?: set<text>, models?: set<text>, max_tokens_max?: nat, temperature_max?: dec128, tools_allow?: set<text> }`
