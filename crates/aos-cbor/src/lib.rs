@@ -185,7 +185,7 @@ mod tests {
             ),
             (
                 "spec/schemas/manifest.schema.json",
-                "sha256:b7bbdf2f686803fb87b99c182afa0fe3fc725c97eb0001fa56ac84f645623cdc",
+                "sha256:b78d85f28169cabd097178d5bbacaa8630231d566c3fc69efffbd38091081a03",
             ),
             (
                 "spec/schemas/defsecret.schema.json",

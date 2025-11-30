@@ -2,6 +2,8 @@
 
 Status legend: ✅ already aligned | 🟡 partially | 🔴 not yet
 
+this is pre, pre, pre alpha software. there is not a single instance of this OS besides what you see here in my repo. We have complete leeway in refacoring, this is why we're doing this cleanup/polish.
+
 ---
 
 ## 1) Require explicit `air_version` (stop “assume latest”)

@@ -479,6 +479,7 @@ mod tests {
     fn manifest_named_refs_allow_authoring_placeholders() {
         let json = r#"{
             "$kind": "manifest",
+            "air_version": "1",
             "schemas": [
                 { "name": "demo/State@1", "hash": "" },
                 { "name": "demo/Event@1" },
