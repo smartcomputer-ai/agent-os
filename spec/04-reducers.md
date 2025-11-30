@@ -1,6 +1,6 @@
 # Reducers
 
-Reducers are deterministic, WASM-compiled state machines that own application/domain state and business invariants. They consume events, update state, and may emit domain intents (events) and a constrained set of micro-effects. Complex, multi-step external orchestration is handled by AIR plans; reducers remain focused on domain evolution.
+Reducers are deterministic, WASM-compiled state machines that own application/domain state and business invariants. They consume events, update state, and may emit domain intents (events) and a constrained set of micro-effects (effects whose `origin_scope` allows reducers). Complex, multi-step external orchestration is handled by AIR plans; reducers remain focused on domain evolution.
 
 **Note on examples**: Plan examples in this chapter use AIR v1's authoring sugar (plain JSON values) for readability. You may also use canonical JSON (tagged) or full `Expr` trees where `ExprOrValue` is accepted. See `spec/03-air.md` §3 for details on JSON lenses and canonicalization. Reducer WASM ABI boundaries always use canonical CBOR regardless of authoring format.
 
@@ -16,7 +16,7 @@ Reducers are the **single source of state changes**. They advance only when they
 
 **Business logic lives here**: validation, transitions, invariants, and shaping domain intents.
 
-**Effects policy**: Reducers may emit only micro-effects (e.g., `blob.put`, `timer.set`) under explicit capability slots. High-risk or multi-hop external effects (email/HTTP to third parties, LLM, payments) must be orchestrated by plans.
+**Effects policy**: Reducers may emit only micro-effects (effects whose `origin_scope` includes reducers, e.g., `blob.put`, `timer.set` in v1) under explicit capability slots. High-risk or multi-hop external effects (email/HTTP to third parties, LLM, payments) must be orchestrated by plans.
 
 **Orchestration handoff**: Reducers emit DomainIntent events (e.g., `ChargeRequested`, `NotifyCustomer`), which trigger plans via manifest triggers. Plans perform effects, await receipts, and raise result events back.
 
@@ -57,7 +57,7 @@ All I/O happens via returned effects; reducers cannot perform syscalls. **Replay
 
 - `state`: new canonical state bytes
 - `domain_events` (optional): zero or more domain events (including DomainIntent); kernel appends them to the journal and routes by manifest
-- `effects` (optional): micro-effects only; see Effect Emission
+- `effects` (optional): micro-effects only (as defined by `origin_scope`); see Effect Emission
 - `ann` (optional): structured annotations for observability
 
 ### ReducerEffect Shape
@@ -323,7 +323,7 @@ To maintain clear separation between reducers and plans, the kernel enforces:
 
 ### Reducer Effect Limits (v1)
 - **At most ONE effect per step**: reducers emit zero or one effect per invocation
-- **Only "micro-effects"**: `blob.put`, `blob.get`, `timer.set`
+- **Only "micro-effects"**: effects whose `origin_scope` allows reducers (currently `blob.put`, `blob.get`, `timer.set`)
 - **NO network effects**: `http.request`, `llm.generate`, `email.send`, `payment.charge` must go through plans
 
 ### Policy Enforcement (v1)

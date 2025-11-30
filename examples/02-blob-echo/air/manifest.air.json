@@ -1,25 +1,49 @@
 {
   "$kind": "manifest",
   "schemas": [
-    { "name": "demo/BlobEchoPc@1" },
-    { "name": "demo/BlobEchoState@1" },
-    { "name": "demo/BlobEchoEvent@1" },
-    { "name": "sys/BlobPutParams@1" },
-    { "name": "sys/BlobPutReceipt@1" },
-    { "name": "sys/BlobGetParams@1" },
-    { "name": "sys/BlobGetReceipt@1" },
-    { "name": "sys/BlobPutResult@1" },
-    { "name": "sys/BlobGetResult@1" }
+    {
+      "name": "demo/BlobEchoPc@1"
+    },
+    {
+      "name": "demo/BlobEchoState@1"
+    },
+    {
+      "name": "demo/BlobEchoEvent@1"
+    },
+    {
+      "name": "sys/BlobPutParams@1"
+    },
+    {
+      "name": "sys/BlobPutReceipt@1"
+    },
+    {
+      "name": "sys/BlobGetParams@1"
+    },
+    {
+      "name": "sys/BlobGetReceipt@1"
+    },
+    {
+      "name": "sys/BlobPutResult@1"
+    },
+    {
+      "name": "sys/BlobGetResult@1"
+    }
   ],
   "modules": [
-    { "name": "demo/BlobEchoSM@1" }
+    {
+      "name": "demo/BlobEchoSM@1"
+    }
   ],
   "plans": [],
   "caps": [
-    { "name": "sys/blob@1" }
+    {
+      "name": "sys/blob@1"
+    }
   ],
   "policies": [
-    { "name": "demo/blob_policy@1" }
+    {
+      "name": "demo/blob_policy@1"
+    }
   ],
   "defaults": {
     "policy": "demo/blob_policy@1",
@@ -27,7 +51,9 @@
       {
         "name": "blob_grant",
         "cap": "sys/blob@1",
-        "params": { "record": {} }
+        "params": {
+          "record": {}
+        }
       }
     ]
   },
@@ -40,11 +66,29 @@
   },
   "routing": {
     "events": [
-      { "event": "demo/BlobEchoEvent@1", "reducer": "demo/BlobEchoSM@1" },
-      { "event": "sys/BlobPutResult@1", "reducer": "demo/BlobEchoSM@1" },
-      { "event": "sys/BlobGetResult@1", "reducer": "demo/BlobEchoSM@1" }
+      {
+        "event": "demo/BlobEchoEvent@1",
+        "reducer": "demo/BlobEchoSM@1"
+      },
+      {
+        "event": "sys/BlobPutResult@1",
+        "reducer": "demo/BlobEchoSM@1"
+      },
+      {
+        "event": "sys/BlobGetResult@1",
+        "reducer": "demo/BlobEchoSM@1"
+      }
     ],
     "inboxes": []
   },
-  "triggers": []
+  "triggers": [],
+  "air_version": "1",
+  "effects": [
+    {
+      "name": "sys/blob.put@1"
+    },
+    {
+      "name": "sys/blob.get@1"
+    }
+  ]
 }

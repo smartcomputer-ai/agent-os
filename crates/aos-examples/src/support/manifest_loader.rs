@@ -18,12 +18,10 @@ const ZERO_HASH_SENTINEL: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Attempts to load a manifest for the provided example directory by reading AIR JSON assets
-/// under `air/`, `plans/`, and `defs/`. Returns `Ok(None)` if no manifest is found so callers can
-/// fall back to the legacy Rust-built manifests.
-pub fn load_from_assets(
-    store: Arc<FsStore>,
-    example_root: &Path,
-) -> Result<Option<LoadedManifest>> {
+/// under `air/`, versioned `air.*` bundles, `plans/` (legacy), and `defs/`. The `asset_root`
+/// can itself be an AIR bundle (e.g., `examples/06-safe-upgrade/air.v2`). Returns `Ok(None)`
+/// if no manifest is found so callers can fall back to the legacy Rust-built manifests.
+pub fn load_from_assets(store: Arc<FsStore>, asset_root: &Path) -> Result<Option<LoadedManifest>> {
     let mut manifest: Option<Manifest> = None;
     let mut schemas: Vec<DefSchema> = Vec::new();
     let mut modules: Vec<DefModule> = Vec::new();
@@ -33,11 +31,7 @@ pub fn load_from_assets(
     let mut secrets: Vec<DefSecret> = Vec::new();
     let mut effects: Vec<DefEffect> = Vec::new();
 
-    for dir in ["defs", "air", "plans"].iter() {
-        let dir_path = example_root.join(dir);
-        if !dir_path.exists() {
-            continue;
-        }
+    for dir_path in asset_search_dirs(asset_root)? {
         for path in collect_json_files(&dir_path)? {
             let nodes = parse_air_nodes(&path)
                 .with_context(|| format!("parse AIR nodes from {}", path.display()))?;
@@ -281,7 +275,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in ["schemas", "modules", "plans", "caps", "policies"] {
+    for key in ["schemas", "modules", "plans", "caps", "policies", "effects"] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {
@@ -430,6 +424,39 @@ fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
     }
 }
 
+fn asset_search_dirs(asset_root: &Path) -> Result<Vec<PathBuf>> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+
+    if asset_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.starts_with("air") || n == "defs" || n == "plans")
+        .unwrap_or(false)
+    {
+        dirs.push(asset_root.to_path_buf());
+    }
+
+    if asset_root.is_dir() {
+        for entry in fs::read_dir(asset_root).context("read asset root")? {
+            let entry = entry.context("read asset dir entry")?;
+            if !entry.file_type().context("stat asset dir entry")?.is_dir() {
+                continue;
+            }
+            let name_os = entry.file_name();
+            let name = match name_os.to_str() {
+                Some(s) => s.to_owned(),
+                None => continue,
+            };
+            if name == "defs" || name == "plans" || name.starts_with("air") {
+                dirs.push(entry.path());
+            }
+        }
+    }
+
+    dirs.sort();
+    Ok(dirs)
+}
+
 fn collect_json_files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for entry in WalkDir::new(dir) {
@@ -479,6 +506,7 @@ mod tests {
     fn manifest_named_refs_allow_authoring_placeholders() {
         let json = r#"{
             "$kind": "manifest",
+            "air_version": "1",
             "schemas": [
                 { "name": "demo/State@1", "hash": "" },
                 { "name": "demo/Event@1" },
@@ -571,8 +599,8 @@ mod tests {
         );
         write_node(&air_dir.join("module.air.json"), &[module_node.clone()]);
 
-        let manifest = Manifest {
-            air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
+        let mut manifest = Manifest {
+            air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![
                 named_ref_from_node(&state_node),
                 named_ref_from_node(&event_node),
@@ -594,6 +622,16 @@ mod tests {
             routing: None,
             triggers: Vec::new(),
         };
+        manifest
+            .schemas
+            .extend(
+                aos_air_types::builtins::builtin_schemas()
+                    .iter()
+                    .map(|s| NamedRef {
+                        name: s.schema.name.clone(),
+                        hash: s.hash_ref.clone(),
+                    }),
+            );
         write_node(
             &air_dir.join("manifest.air.json"),
             &[AirNode::Manifest(manifest)],

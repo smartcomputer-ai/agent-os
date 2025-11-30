@@ -85,9 +85,8 @@ AgentOS **is not** a general‑purpose programming language, compute lives in yo
 
 ## First Version Scope
 
-The first version ships with a single‑threaded world with an append‑only journal and snapshots. AIR v1 defines five core forms: **defschema**, **defmodule**, **defplan**, **defcap**, and **defpolicy**, along with canonical encoding and typed patches. Deterministic WASM execution powers reducers and pure modules. Four adapters: HTTP, blob/FS, timer, and LLM. Each comes with capabilities and signed receipts. The constitutional loop and shadow runs protect the apply step, and a provenance "why graph" connects effects to state.
+The first version ships with a single‑threaded world with an append‑only journal and snapshots. AIR v1 defines five core forms: **defschema**, **defmodule**, **defplan**, **defcap**, and **defpolicy**, along with canonical encoding and typed patches. Deterministic WASM execution powers reducers. Pure modules are planned for v1.1+; `module_kind` is `"reducer"` only in v1. Four adapters: HTTP, blob/FS, timer, and LLM. Each comes with capabilities and signed receipts. The constitutional loop and shadow runs protect the apply step, and a provenance "why graph" connects effects to state.
 
 Migrations, multi‑world fabric, and complex policy engines are deferred to later versions. The architecture leaves clean hooks for them.
-
 
 

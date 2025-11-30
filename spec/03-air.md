@@ -107,7 +107,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 ```
 {
   "$kind": "manifest",
-  "air_version"?: "1",
+  "air_version": "1",
   "schemas": [{name, hash}],
   "modules": [{name, hash}],
   "plans": [{name, hash}],
@@ -126,7 +126,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. `air_version` is optional; if omitted, loaders assume the latest supported major (currently `"1"`). Supplying an unknown version is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. The runtime auto-includes the built-in `defeffect` bundle if omitted so manifests may stay terse.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-ins are no longer auto-included. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
 
 See: spec/schemas/manifest.schema.json
 
@@ -203,7 +203,7 @@ See: spec/schemas/defmodule.schema.json
 
 `EffectKind` is an open namespaced string; the core schema no longer freezes the list. The catalog is now **data-driven via `defeffect` nodes** listed in `manifest.effects` plus the built-in bundle (`spec/defs/builtin-effects.air.json`). Canonical parameter/receipt schemas live under `spec/defs/builtin-schemas.air.json` so plans, reducers, and adapters all hash the same shapes. Tooling can stay strict for these built-ins while leaving space for adapter-defined kinds in future versions. For strict enum validation/autocomplete, see `spec/schemas/builtin.catalog.schema.json`.
 
-`origin_scope` on each `defeffect` gates who may emit it: reducers only for `reducer/both`, plans only for `plan/both`. The built-in reducer micro-effects are `blob.put`, `blob.get`, and `timer.set`; others are plan-only in v1.
+`origin_scope` on each `defeffect` gates who may emit it: reducers only for `reducer/both`, plans only for `plan/both`. “Micro-effects” are exactly those whose `origin_scope` allows reducers (currently `blob.put`, `blob.get`, `timer.set` in v1); others are plan-only.
 
 Built-in kinds in v1:
 
@@ -310,6 +310,7 @@ The schema defines parameter constraints enforced at enqueue time.
 **sys/http.out@1**
 - Schema: `{ hosts: set<text>, verbs: set<text>, path_prefixes?: set<text> }`
 - At enqueue: `authority(url) ∈ hosts`; `method ∈ verbs`; path `starts_with` any `path_prefixes` if present.
+- Terminology: `verbs` is the allowlist of HTTP methods for the capability; each request still supplies its concrete `method`.
 
 **sys/llm.basic@1**
 - Schema: `{ providers?: set<text>, models?: set<text>, max_tokens_max?: nat, temperature_max?: dec128, tools_allow?: set<text> }`
@@ -385,7 +386,7 @@ See: spec/schemas/defcap.schema.json
 
 ### Notes
 
-- Built-in v1 effects are shipped in `spec/defs/builtin-effects.air.json`; the runtime auto-includes them even if `manifest.effects` is empty.
+- Built-in v1 effects live in `spec/defs/builtin-effects.air.json`; include the ones your world uses (hashes may be filled by tooling for built-ins).
 - Unknown effect kinds (not declared in the manifest or built-ins) are rejected during plan normalization/dispatch.
 - Reducer receipt translation remains limited to effects whose `origin_scope` allows reducers.
 - (Future) Adapter binding stays out of `defeffect`; a manifest-level `effect_bindings` table can later map kinds to adapters without changing the defkind.
@@ -419,8 +420,6 @@ Policies define ordered rules that allow or deny effects based on their characte
 
 - `effect_kind?: EffectKind` – namespaced effect kind (http.request, llm.generate, etc.)
 - `cap_name?: text` – which CapGrant name
-- `host?: text` – host suffix or glob (prefer using CapGrant.hosts instead)
-- `method?: text` – HTTP method
 - `origin_kind?: "plan" | "reducer"` – whether the effect originates from a plan or a reducer
 - `origin_name?: Name` – the specific plan or reducer Name
 
@@ -515,9 +514,9 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
   - **Future-only**: Plan registers the wait when the step first runs; only events appended afterwards are observed.
   - **Per-waiter first match**: The first event (by journal order) matching `event` and passing `where` resumes that plan instance.
   - **Broadcast**: Multiple plan instances waiting on the same schema all see the event; there is no consumption.
-  - **Predicate scope**: `where` evaluates with `@event` bound to the incoming event and may reference locals/steps/plan input; `@var:correlation_id` is available when the plan was started from a trigger with `correlate_by`.
-  - **One outstanding wait** per plan instance; the step blocks until satisfied, then normal DAG scheduling continues.
-  - **Correlation guard (required when correlated)**: If the plan was started via a trigger with `correlate_by`, an `await_event` step must provide a `where` predicate (typically `@event.<key> == @var:correlation_id`) to prevent cross-talk across concurrent runs.
+- **Predicate scope**: `where` evaluates with `@event` bound to the incoming event and may reference locals/steps/plan input; `@var:correlation_id` is available when the plan was started from a trigger with `correlate_by`.
+- **One outstanding wait** per plan instance; the step blocks until satisfied, then normal DAG scheduling continues.
+- **Correlation guard (required when correlated)**: If the plan was started via a trigger with `correlate_by`, every `await_event` must provide a `where` predicate that references the correlation key (e.g., `@event.<key> == @var:correlation_id`) to prevent cross-talk across concurrent runs; this is enforced at validation time.
 
 **assign**: Bind a value to a variable
 - `{ id, op:"assign", expr:ExprOrValue, bind:{as:VarName} }`
@@ -708,7 +707,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 20.3 defpolicy (allow google rss; deny LLM from reducers)
 
 ```json
-{ "$kind":"defpolicy", "name":"com.acme/policy@1", "rules": [ { "when": { "effect_kind":"http.request", "host":"news.google.com" }, "decision":"allow" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"reducer" }, "decision":"deny" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"plan" }, "decision":"allow" } ] }
+{ "$kind":"defpolicy", "name":"com.acme/policy@1", "rules": [ { "when": { "effect_kind":"http.request", "cap_name":"cap_http" }, "decision":"allow" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"reducer" }, "decision":"deny" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"plan" }, "decision":"allow" } ] }
 ```
 
 20.4 defplan (daily_digest)

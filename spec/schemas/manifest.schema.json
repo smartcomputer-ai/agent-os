@@ -8,7 +8,7 @@
     "air_version": {
       "type": "string",
       "enum": ["1"],
-      "description": "AIR format major version (string). Optional; if omitted, loaders assume the latest supported major (currently \"1\")."
+      "description": "AIR format major version (string). Required; must be \"1\" for v1 manifests."
     },
     "schemas": {
       "type": "array",
@@ -116,7 +116,7 @@
       }
     }
   },
-  "required": ["$kind","schemas","modules","plans","effects","caps","policies"],
+  "required": ["$kind","air_version","schemas","modules","plans","effects","caps","policies"],
   "additionalProperties": false,
   "$defs": {
     "NamedRef": {

@@ -129,7 +129,7 @@ pub mod fixtures {
         };
 
         let mut manifest = Manifest {
-            air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
+            air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: module_refs,
             plans: plan_refs,

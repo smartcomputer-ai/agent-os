@@ -14,6 +14,7 @@ use crate::support::util;
 
 pub struct HarnessConfig<'a> {
     pub example_root: &'a Path,
+    pub assets_root: Option<&'a Path>,
     pub reducer_name: &'a str,
     pub event_schema: &'a str,
     pub module_crate: &'a str,
@@ -26,6 +27,7 @@ pub struct ExampleReducerHarness {
     store: Arc<FsStore>,
     wasm_hash: HashRef,
     kernel_config: KernelConfig,
+    assets_root: PathBuf,
 }
 
 impl ExampleReducerHarness {
@@ -37,13 +39,12 @@ impl ExampleReducerHarness {
             .put_blob(&wasm_bytes)
             .context("store reducer wasm blob")?;
         let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash reducer wasm")?;
+        let assets_root = cfg.assets_root.unwrap_or(cfg.example_root).to_path_buf();
 
         // Eagerly load and patch once so we fail fast if assets are missing.
         {
-            let mut loaded = manifest_loader::load_from_assets(store.clone(), cfg.example_root)?
-                .ok_or_else(|| {
-                    anyhow!("example manifest missing at {}", cfg.example_root.display())
-                })?;
+            let mut loaded = manifest_loader::load_from_assets(store.clone(), &assets_root)?
+                .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
             patch_module_hash(&mut loaded, cfg.reducer_name, &wasm_hash_ref)?;
         }
 
@@ -56,6 +57,7 @@ impl ExampleReducerHarness {
             store,
             wasm_hash: wasm_hash_ref,
             kernel_config,
+            assets_root,
         })
     }
 
@@ -87,13 +89,8 @@ impl ExampleReducerHarness {
     }
 
     fn load_manifest(&self) -> Result<LoadedManifest> {
-        let mut loaded = manifest_loader::load_from_assets(self.store.clone(), &self.example_root)?
-            .ok_or_else(|| {
-                anyhow!(
-                    "example manifest missing at {}",
-                    self.example_root.display()
-                )
-            })?;
+        let mut loaded = manifest_loader::load_from_assets(self.store.clone(), &self.assets_root)?
+            .ok_or_else(|| anyhow!("example manifest missing at {}", self.assets_root.display()))?;
         patch_module_hash(&mut loaded, &self.reducer_name, &self.wasm_hash)?;
         Ok(loaded)
     }

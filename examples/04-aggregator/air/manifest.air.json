@@ -1,24 +1,50 @@
 {
   "$kind": "manifest",
   "schemas": [
-    { "name": "demo/AggregatorPc@1" },
-    { "name": "demo/AggregatorState@1" },
-    { "name": "demo/AggregatorEvent@1" },
-    { "name": "demo/AggregateRequested@1" },
-    { "name": "demo/AggregationTarget@1" },
-    { "name": "demo/AggregateResponse@1" }
+    {
+      "name": "demo/AggregatorPc@1"
+    },
+    {
+      "name": "demo/AggregatorState@1"
+    },
+    {
+      "name": "demo/AggregatorEvent@1"
+    },
+    {
+      "name": "demo/AggregateRequested@1"
+    },
+    {
+      "name": "demo/AggregationTarget@1"
+    },
+    {
+      "name": "demo/AggregateResponse@1"
+    },
+    {
+      "name": "sys/HttpRequestParams@1"
+    },
+    {
+      "name": "sys/HttpRequestReceipt@1"
+    }
   ],
   "modules": [
-    { "name": "demo/Aggregator@1" }
+    {
+      "name": "demo/Aggregator@1"
+    }
   ],
   "plans": [
-    { "name": "demo/aggregator_plan@1" }
+    {
+      "name": "demo/aggregator_plan@1"
+    }
   ],
   "caps": [
-    { "name": "demo/http_aggregate_cap@1" }
+    {
+      "name": "demo/http_aggregate_cap@1"
+    }
   ],
   "policies": [
-    { "name": "demo/http-aggregate-policy@1" }
+    {
+      "name": "demo/http-aggregate-policy@1"
+    }
   ],
   "defaults": {
     "policy": "demo/http-aggregate-policy@1",
@@ -28,8 +54,20 @@
         "cap": "demo/http_aggregate_cap@1",
         "params": {
           "record": {
-            "hosts": { "set": [ { "text": "example.com" } ] },
-            "verbs": { "set": [ { "text": "GET" } ] }
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "verbs": {
+              "set": [
+                {
+                  "text": "GET"
+                }
+              ]
+            }
           }
         }
       }
@@ -38,11 +76,24 @@
   "module_bindings": {},
   "routing": {
     "events": [
-      { "event": "demo/AggregatorEvent@1", "reducer": "demo/Aggregator@1" }
+      {
+        "event": "demo/AggregatorEvent@1",
+        "reducer": "demo/Aggregator@1"
+      }
     ],
     "inboxes": []
   },
   "triggers": [
-    { "event": "demo/AggregateRequested@1", "plan": "demo/aggregator_plan@1", "correlate_by": "request_id" }
+    {
+      "event": "demo/AggregateRequested@1",
+      "plan": "demo/aggregator_plan@1",
+      "correlate_by": "request_id"
+    }
+  ],
+  "air_version": "1",
+  "effects": [
+    {
+      "name": "sys/http.request@1"
+    }
   ]
 }

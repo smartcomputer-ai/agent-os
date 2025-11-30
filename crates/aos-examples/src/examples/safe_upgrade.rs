@@ -43,8 +43,10 @@ enum UpgradePcView {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
+    let assets_root = example_root.join("air.v1");
     let harness = ExampleReducerHarness::prepare(HarnessConfig {
         example_root,
+        assets_root: Some(assets_root.as_path()),
         reducer_name: REDUCER_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_PATH,
@@ -168,9 +170,9 @@ fn load_upgrade_patch(
     example_root: &Path,
     harness: &ExampleReducerHarness,
 ) -> Result<ManifestPatch> {
-    let proposal_root = example_root.join("proposal");
-    let mut loaded = manifest_loader::load_from_assets(harness.store(), &proposal_root)?
-        .ok_or_else(|| anyhow!("proposal manifest missing at {}", proposal_root.display()))?;
+    let upgrade_root = example_root.join("air.v2");
+    let mut loaded = manifest_loader::load_from_assets(harness.store(), &upgrade_root)?
+        .ok_or_else(|| anyhow!("upgrade manifest missing at {}", upgrade_root.display()))?;
     harness.patch_module_hash(&mut loaded)?;
     Ok(manifest_loader::manifest_patch_from_loaded(&loaded))
 }

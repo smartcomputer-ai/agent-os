@@ -181,11 +181,11 @@ mod tests {
             ),
             (
                 "spec/schemas/defpolicy.schema.json",
-                "sha256:c8146b00718449e9d49ddfa70589d848202bd5bde695b656a088c8f39481d843",
+                "sha256:10460bec4d5ab5ae0ef1d529f4bb98414c7429f8432e9b048d48c8762aff7b68",
             ),
             (
                 "spec/schemas/manifest.schema.json",
-                "sha256:b7bbdf2f686803fb87b99c182afa0fe3fc725c97eb0001fa56ac84f645623cdc",
+                "sha256:b78d85f28169cabd097178d5bbacaa8630231d566c3fc69efffbd38091081a03",
             ),
             (
                 "spec/schemas/defsecret.schema.json",

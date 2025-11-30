@@ -2,34 +2,19 @@
   "$kind": "manifest",
   "schemas": [
     {
-      "name": "demo/FetchNotifyPc@1"
+      "name": "demo/SafeUpgradePc@1"
     },
     {
-      "name": "demo/FetchNotifyState@1"
+      "name": "demo/SafeUpgradeState@1"
     },
     {
-      "name": "demo/FetchNotifyEvent@1"
+      "name": "demo/SafeUpgradeEvent@1"
     },
     {
-      "name": "demo/FetchRequest@1"
+      "name": "demo/UpgradeFetchRequest@1"
     },
     {
-      "name": "sys/BlobPutParams@1"
-    },
-    {
-      "name": "sys/BlobPutReceipt@1"
-    },
-    {
-      "name": "sys/BlobGetParams@1"
-    },
-    {
-      "name": "sys/BlobGetReceipt@1"
-    },
-    {
-      "name": "sys/BlobPutResult@1"
-    },
-    {
-      "name": "sys/BlobGetResult@1"
+      "name": "demo/SafeUpgradeResult@1"
     },
     {
       "name": "sys/HttpRequestParams@1"
@@ -40,26 +25,29 @@
   ],
   "modules": [
     {
-      "name": "demo/FetchNotify@1"
+      "name": "demo/SafeUpgrade@1"
     }
   ],
   "plans": [
     {
-      "name": "demo/fetch_plan@1"
+      "name": "demo/fetch_plan@2"
     }
   ],
   "caps": [
     {
       "name": "demo/http_fetch_cap@1"
+    },
+    {
+      "name": "demo/http_followup_cap@1"
     }
   ],
   "policies": [
     {
-      "name": "demo/http-policy@1"
+      "name": "demo/http-policy@2"
     }
   ],
   "defaults": {
-    "policy": "demo/http-policy@1",
+    "policy": "demo/http-policy@2",
     "cap_grants": [
       {
         "name": "cap_http_fetch",
@@ -73,7 +61,29 @@
                 }
               ]
             },
-            "verbs": {
+            "methods": {
+              "set": [
+                {
+                  "text": "GET"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "name": "cap_http_followup",
+        "cap": "demo/http_followup_cap@1",
+        "params": {
+          "record": {
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "methods": {
               "set": [
                 {
                   "text": "GET"
@@ -89,16 +99,16 @@
   "routing": {
     "events": [
       {
-        "event": "demo/FetchNotifyEvent@1",
-        "reducer": "demo/FetchNotify@1"
+        "event": "demo/SafeUpgradeEvent@1",
+        "reducer": "demo/SafeUpgrade@1"
       }
     ],
     "inboxes": []
   },
   "triggers": [
     {
-      "event": "demo/FetchRequest@1",
-      "plan": "demo/fetch_plan@1",
+      "event": "demo/UpgradeFetchRequest@1",
+      "plan": "demo/fetch_plan@2",
       "correlate_by": "request_id"
     }
   ],
@@ -106,12 +116,6 @@
   "effects": [
     {
       "name": "sys/http.request@1"
-    },
-    {
-      "name": "sys/blob.put@1"
-    },
-    {
-      "name": "sys/blob.get@1"
     }
   ]
 }

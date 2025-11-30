@@ -40,14 +40,6 @@
           "$ref": "common.schema.json#/$defs/CapGrantName",
           "description": "Match capability grant name"
         },
-        "host": {
-          "type": "string",
-          "description": "Match host suffix or glob (prefer using CapGrant.hosts instead)"
-        },
-        "method": {
-          "type": "string",
-          "description": "Match HTTP method (GET, POST, etc.)"
-        },
         "origin_kind": {
           "type": "string",
           "enum": ["plan", "reducer"],

@@ -695,10 +695,6 @@ pub struct PolicyMatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap_name: Option<CapGrantName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub method: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_kind: Option<OriginKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_name: Option<Name>,
@@ -715,8 +711,7 @@ pub const CURRENT_AIR_VERSION: &str = "1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub air_version: Option<String>,
+    pub air_version: String,
     pub schemas: Vec<NamedRef>,
     pub modules: Vec<NamedRef>,
     pub plans: Vec<NamedRef>,
@@ -1018,6 +1013,7 @@ mod tests {
     fn manifest_round_trip() {
         let manifest_json = json!({
             "$kind": "manifest",
+            "air_version": "1",
             "schemas": [
                 {
                     "name": "com.acme/Order@1",

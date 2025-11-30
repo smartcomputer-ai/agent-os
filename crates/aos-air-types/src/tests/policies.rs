@@ -35,14 +35,12 @@ fn policy_match_serializes_round_trip() {
     let r#match = PolicyMatch {
         effect_kind: Some(crate::EffectKind::http_request()),
         cap_name: None,
-        host: Some("example.com".into()),
-        method: Some("GET".into()),
         origin_kind: Some(crate::OriginKind::Plan),
         origin_name: Some("com.acme/Plan@1".into()),
     };
     let json = serde_json::to_value(&r#match).expect("serialize");
     let round_trip: PolicyMatch = serde_json::from_value(json).expect("deserialize");
-    assert_eq!(round_trip.method.as_deref(), Some("GET"));
+    assert_eq!(round_trip.origin_kind, Some(crate::OriginKind::Plan));
 }
 
 #[test]
@@ -55,8 +53,6 @@ fn policy_supports_multiple_rules_and_filters() {
                 "when": {
                     "effect_kind": "http.request",
                     "cap_name": "cap_http",
-                    "host": "example.com",
-                    "method": "GET",
                     "origin_kind": "plan",
                     "origin_name": "com.acme/Plan@1"
                 },

@@ -230,7 +230,7 @@ mod tests {
 
     fn manifest_with_grant(params: ValueLiteral) -> Manifest {
         Manifest {
-            air_version: Some(aos_air_types::CURRENT_AIR_VERSION.to_string()),
+            air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: vec![],
             plans: vec![],
