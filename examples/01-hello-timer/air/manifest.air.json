@@ -69,5 +69,10 @@
     "inboxes": []
   },
   "triggers": [],
-  "air_version": "1"
+  "air_version": "1",
+  "effects": [
+    {
+      "name": "sys/timer.set@1"
+    }
+  ]
 }

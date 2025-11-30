@@ -126,7 +126,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. The runtime auto-includes the built-in `defeffect` bundle if omitted so manifests may stay terse.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-ins are no longer auto-included. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
 
 See: spec/schemas/manifest.schema.json
 
@@ -385,7 +385,7 @@ See: spec/schemas/defcap.schema.json
 
 ### Notes
 
-- Built-in v1 effects are shipped in `spec/defs/builtin-effects.air.json`; the runtime auto-includes them even if `manifest.effects` is empty.
+- Built-in v1 effects live in `spec/defs/builtin-effects.air.json`; include the ones your world uses (hashes may be filled by tooling for built-ins).
 - Unknown effect kinds (not declared in the manifest or built-ins) are rejected during plan normalization/dispatch.
 - Reducer receipt translation remains limited to effects whose `origin_scope` allows reducers.
 - (Future) Adapter binding stays out of `defeffect`; a manifest-level `effect_bindings` table can later map kinds to adapters without changing the defkind.

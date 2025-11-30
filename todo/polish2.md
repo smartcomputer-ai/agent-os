@@ -14,11 +14,12 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
   - Loader now errors when `air_version` is missing or unsupported (`crates/aos-store/src/manifest.rs` + new `StoreError::MissingAirVersion`).
 
 ## 2) Remove built-in auto-inclusion magic
-- 🔴 **Problem**: Runtime/tooling auto-attaches built-in schemas/effects (spec/03-air.md lines ~129, 388; crates/aos-store/src/manifest.rs:260-289; crates/aos-kernel/src/manifest.rs:64-109), so manifest isn’t the single source of truth.
-- **Fix**:
-  - Drop auto-attach in loaders/kernels; require built-ins to be explicitly listed in `manifest.effects` and `manifest.schemas` (hashes already in `spec/defs/builtin-*.air.json`).
-  - Update docs in `spec/03-air.md` §§4,7 accordingly.
-  - Add authoring/tooling step (e.g., `aos world init`) that inserts built-ins once so files stay explicit.
+- ✅ **Problem**: Runtime/tooling auto-attached built-in schemas/effects (spec/03-air.md; crates/aos-store/src/manifest.rs; crates/aos-kernel/src/manifest.rs), so manifest wasn’t the single source of truth.
+- ✅ **Fix** (done):
+  - Removed auto-attach in store/kernel loaders; manifests must list all built-in schemas/effects.
+  - Store loader validates presence and fills canonical hashes for built-ins; missing ones raise `StoreError::MissingBuiltin`.
+  - Spec updated to require explicit listing (no more “auto-include” prose).
+  - Example manifests now include built-in schema/effect refs; authoring loader normalizes `effects` hashes too.
 
 ## 3) Simplify policy match surface (drop host/method)
 - 🔴 **Problem**: `defpolicy.Match` still contains HTTP-specific `host` and `method` (spec/03-air.md §11; spec/schemas/defpolicy.schema.json lines 40-59), overlapping with CapGrant constraints.
@@ -52,7 +53,7 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
 
 ## Quick status table
 - Require explicit `air_version`: ✅
-- Remove built-in auto-inclusion: 🔴
+- Remove built-in auto-inclusion: ✅
 - Policy host/method removal: 🔴
 - Await-event correlation validation: 🟡 (runtime only)
 - Micro-effect definition via `origin_scope`: 🟡 (code OK, docs lag)

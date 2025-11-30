@@ -281,7 +281,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in ["schemas", "modules", "plans", "caps", "policies"] {
+    for key in ["schemas", "modules", "plans", "caps", "policies", "effects"] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {
@@ -572,7 +572,7 @@ mod tests {
         );
         write_node(&air_dir.join("module.air.json"), &[module_node.clone()]);
 
-        let manifest = Manifest {
+        let mut manifest = Manifest {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![
                 named_ref_from_node(&state_node),
@@ -595,6 +595,16 @@ mod tests {
             routing: None,
             triggers: Vec::new(),
         };
+        manifest
+            .schemas
+            .extend(
+                aos_air_types::builtins::builtin_schemas()
+                    .iter()
+                    .map(|s| NamedRef {
+                        name: s.schema.name.clone(),
+                        hash: s.hash_ref.clone(),
+                    }),
+            );
         write_node(
             &air_dir.join("manifest.air.json"),
             &[AirNode::Manifest(manifest)],

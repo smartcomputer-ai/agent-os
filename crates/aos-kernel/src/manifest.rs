@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
-    SecretDecl, builtins::builtin_schemas, catalog::EffectCatalog,
+    SecretDecl, catalog::EffectCatalog,
 };
 use aos_store::{Catalog, Store, load_manifest_from_path};
 
@@ -61,7 +61,7 @@ impl ManifestLoader {
                 _ => {}
             }
         }
-        let manifest = attach_builtin_effects(attach_builtin_schemas(catalog.manifest));
+        let manifest = catalog.manifest;
         let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
         Ok(LoadedManifest {
             manifest,
@@ -75,36 +75,4 @@ impl ManifestLoader {
             effect_catalog,
         })
     }
-}
-
-fn attach_builtin_schemas(mut manifest: Manifest) -> Manifest {
-    for builtin in builtin_schemas() {
-        let exists = manifest
-            .schemas
-            .iter()
-            .any(|named| named.name == builtin.schema.name);
-        if !exists {
-            manifest.schemas.push(aos_air_types::NamedRef {
-                name: builtin.schema.name.clone(),
-                hash: builtin.hash_ref.clone(),
-            });
-        }
-    }
-    manifest
-}
-
-fn attach_builtin_effects(mut manifest: Manifest) -> Manifest {
-    for builtin in aos_air_types::builtins::builtin_effects() {
-        let exists = manifest
-            .effects
-            .iter()
-            .any(|named| named.name == builtin.effect.name);
-        if !exists {
-            manifest.effects.push(aos_air_types::NamedRef {
-                name: builtin.effect.name.clone(),
-                hash: builtin.hash_ref.clone(),
-            });
-        }
-    }
-    manifest
 }

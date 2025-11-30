@@ -15,6 +15,12 @@
     },
     {
       "name": "demo/SafeUpgradeResult@1"
+    },
+    {
+      "name": "sys/HttpRequestParams@1"
+    },
+    {
+      "name": "sys/HttpRequestReceipt@1"
     }
   ],
   "modules": [
@@ -106,5 +112,10 @@
       "correlate_by": "request_id"
     }
   ],
-  "air_version": "1"
+  "air_version": "1",
+  "effects": [
+    {
+      "name": "sys/http.request@1"
+    }
+  ]
 }

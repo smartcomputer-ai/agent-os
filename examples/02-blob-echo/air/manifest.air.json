@@ -82,5 +82,13 @@
     "inboxes": []
   },
   "triggers": [],
-  "air_version": "1"
+  "air_version": "1",
+  "effects": [
+    {
+      "name": "sys/blob.put@1"
+    },
+    {
+      "name": "sys/blob.get@1"
+    }
+  ]
 }

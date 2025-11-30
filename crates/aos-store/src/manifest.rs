@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::{collections::HashMap, path::Path};
 
 use aos_air_types::{
     AirNode, CURRENT_AIR_VERSION, CapGrant, DefPlan, ExprOrValue, Manifest, NamedRef, PlanStepKind,
@@ -80,10 +77,8 @@ pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResul
             supported: CURRENT_AIR_VERSION.to_string(),
         });
     }
-    let mut manifest: Manifest = serde_cbor::value::from_value(value)?;
+    let manifest: Manifest = serde_cbor::value::from_value(value)?;
     ensure_air_version(&manifest)?;
-    ensure_builtin_schema_refs(&mut manifest)?;
-    ensure_builtin_effect_refs(&mut manifest)?;
     let mut nodes = HashMap::new();
 
     load_refs(store, &manifest.schemas, NodeKind::Schema, &mut nodes)?;
@@ -255,71 +250,6 @@ fn parse_secret_name(name: &str) -> StoreResult<(String, u64)> {
         });
     }
     Ok((parts[1].to_string(), version))
-}
-
-fn ensure_builtin_schema_refs(manifest: &mut Manifest) -> StoreResult<()> {
-    let mut present: HashSet<String> = HashSet::new();
-    for reference in &manifest.schemas {
-        if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
-            ensure_builtin_hash(reference, builtin)?;
-            present.insert(reference.name.clone());
-        }
-    }
-
-    for name in referenced_builtin_schema_names(manifest) {
-        if present.contains(&name) {
-            continue;
-        }
-        if let Some(builtin) = builtins::find_builtin_schema(&name) {
-            manifest.schemas.push(NamedRef {
-                name: builtin.schema.name.clone(),
-                hash: builtin.hash_ref.clone(),
-            });
-            present.insert(name);
-        }
-    }
-    Ok(())
-}
-
-fn ensure_builtin_effect_refs(manifest: &mut Manifest) -> StoreResult<()> {
-    let mut present: HashSet<String> = HashSet::new();
-    for reference in &manifest.effects {
-        if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
-            ensure_builtin_effect_hash(reference, builtin)?;
-            present.insert(reference.name.clone());
-        }
-    }
-
-    // Always include all built-in effects so plans can rely on them even if omitted.
-    for builtin in builtins::builtin_effects() {
-        if !present.contains(&builtin.effect.name) {
-            manifest.effects.push(NamedRef {
-                name: builtin.effect.name.clone(),
-                hash: builtin.hash_ref.clone(),
-            });
-            present.insert(builtin.effect.name.clone());
-        }
-    }
-    Ok(())
-}
-
-fn referenced_builtin_schema_names(manifest: &Manifest) -> HashSet<String> {
-    let mut names = HashSet::new();
-    if let Some(routing) = manifest.routing.as_ref() {
-        for route in &routing.events {
-            maybe_add_builtin_name(route.event.as_str(), &mut names);
-        }
-    }
-    for trigger in &manifest.triggers {
-        maybe_add_builtin_name(trigger.event.as_str(), &mut names);
-    }
-    names
-}
-
-fn maybe_add_builtin_name(schema: &str, names: &mut HashSet<String>) {
-    if builtins::find_builtin_schema(schema).is_some() {
-        names.insert(schema.to_string());
-    }
 }
 
 fn ensure_builtin_hash(reference: &NamedRef, builtin: &builtins::BuiltinSchema) -> StoreResult<()> {
@@ -632,9 +562,9 @@ mod tests {
         AirNode, CapGrant, CapType, DefCap, DefPlan, DefSecret, EffectKind, EmptyObject, Expr,
         ExprConst, ExprOp, ExprOpCode, ExprRef, HashRef, Manifest, ManifestDefaults, NamedRef,
         PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitReceipt,
-        PlanStepEmitEffect, PlanStepEnd, PlanStepKind, Routing, RoutingEvent, SchemaRef,
-        SecretDecl, SecretEntry, SecretPolicy, SecretRef, TypeExpr, TypePrimitive,
-        TypePrimitiveText, TypeRef, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
+        PlanStepEmitEffect, PlanStepEnd, PlanStepKind, SchemaRef, SecretDecl, SecretEntry,
+        SecretPolicy, SecretRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRef, ValueLiteral,
+        ValueMap, ValueNull, ValueRecord, ValueText,
     };
     use indexmap::IndexMap;
 
@@ -737,13 +667,33 @@ mod tests {
         }
     }
 
-    fn manifest_with_plan(plan_ref: NamedRef) -> Manifest {
+    fn builtin_schema_refs() -> Vec<NamedRef> {
+        builtins::builtin_schemas()
+            .iter()
+            .map(|b| NamedRef {
+                name: b.schema.name.clone(),
+                hash: b.hash_ref.clone(),
+            })
+            .collect()
+    }
+
+    fn builtin_effect_refs() -> Vec<NamedRef> {
+        builtins::builtin_effects()
+            .iter()
+            .map(|b| NamedRef {
+                name: b.effect.name.clone(),
+                hash: b.hash_ref.clone(),
+            })
+            .collect()
+    }
+
+    fn empty_manifest_with_builtins() -> Manifest {
         Manifest {
             air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
+            schemas: builtin_schema_refs(),
             modules: vec![],
-            plans: vec![plan_ref],
-            effects: vec![],
+            plans: vec![],
+            effects: builtin_effect_refs(),
             caps: vec![],
             policies: vec![],
             secrets: vec![],
@@ -752,6 +702,12 @@ mod tests {
             routing: None,
             triggers: vec![],
         }
+    }
+
+    fn manifest_with_plan(plan_ref: NamedRef) -> Manifest {
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.plans.push(plan_ref);
+        manifest
     }
 
     #[test]
@@ -807,47 +763,6 @@ mod tests {
     }
 
     #[test]
-    fn injects_builtin_schema_for_routed_events() {
-        let store = MemStore::default();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: Some(Routing {
-                events: vec![RoutingEvent {
-                    event: SchemaRef::new("sys/TimerFired@1").unwrap(),
-                    reducer: "com.acme/Reducer@1".into(),
-                    key_field: None,
-                }],
-                inboxes: vec![],
-            }),
-            triggers: vec![],
-        };
-        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
-        let catalog = load_manifest_from_bytes(&store, &manifest_bytes).expect("load");
-        assert!(
-            catalog
-                .manifest
-                .schemas
-                .iter()
-                .any(|r| r.name == "sys/TimerFired@1")
-        );
-        assert!(matches!(
-            catalog
-                .nodes
-                .get("sys/TimerFired@1")
-                .map(|entry| &entry.node),
-            Some(AirNode::Defschema(_))
-        ));
-    }
-
     #[test]
     fn rejects_unknown_secret_reference() {
         let store = MemStore::default();
@@ -872,29 +787,19 @@ mod tests {
             budget: None,
         };
         let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![NamedRef {
-                name: secret_schema.schema.name.clone(),
-                hash: secret_schema.hash_ref.clone(),
-            }],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![NamedRef {
-                name: defcap.name.clone(),
-                hash: HashRef::new(defcap_hash.to_hex()).unwrap(),
-            }],
-            policies: vec![],
-            secrets: vec![],
-            defaults: Some(ManifestDefaults {
-                policy: None,
-                cap_grants: vec![cap_grant],
-            }),
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.schemas.push(NamedRef {
+            name: secret_schema.schema.name.clone(),
+            hash: secret_schema.hash_ref.clone(),
+        });
+        manifest.caps.push(NamedRef {
+            name: defcap.name.clone(),
+            hash: HashRef::new(defcap_hash.to_hex()).unwrap(),
+        });
+        manifest.defaults = Some(ManifestDefaults {
+            policy: None,
+            cap_grants: vec![cap_grant],
+        });
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(
@@ -927,29 +832,19 @@ mod tests {
             budget: None,
         };
         let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![NamedRef {
-                name: secret_schema.schema.name.clone(),
-                hash: secret_schema.hash_ref.clone(),
-            }],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![NamedRef {
-                name: defcap.name.clone(),
-                hash: HashRef::new(defcap_hash.to_hex()).unwrap(),
-            }],
-            policies: vec![],
-            secrets: vec![],
-            defaults: Some(ManifestDefaults {
-                policy: None,
-                cap_grants: vec![cap_grant],
-            }),
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.schemas.push(NamedRef {
+            name: secret_schema.schema.name.clone(),
+            hash: secret_schema.hash_ref.clone(),
+        });
+        manifest.caps.push(NamedRef {
+            name: defcap.name.clone(),
+            hash: HashRef::new(defcap_hash.to_hex()).unwrap(),
+        });
+        manifest.defaults = Some(ManifestDefaults {
+            policy: None,
+            cap_grants: vec![cap_grant],
+        });
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::InvalidSecretVersion { .. }));
@@ -958,35 +853,23 @@ mod tests {
     #[test]
     fn rejects_duplicate_secret_decl() {
         let store = MemStore::default();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![
-                SecretEntry::Decl(SecretDecl {
-                    alias: "payments/stripe".into(),
-                    version: 1,
-                    binding_id: "stripe:prod".into(),
-                    expected_digest: None,
-                    policy: None,
-                }),
-                SecretEntry::Decl(SecretDecl {
-                    alias: "payments/stripe".into(),
-                    version: 1,
-                    binding_id: "stripe:prod".into(),
-                    expected_digest: None,
-                    policy: None,
-                }),
-            ],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.secrets = vec![
+            SecretEntry::Decl(SecretDecl {
+                alias: "payments/stripe".into(),
+                version: 1,
+                binding_id: "stripe:prod".into(),
+                expected_digest: None,
+                policy: None,
+            }),
+            SecretEntry::Decl(SecretDecl {
+                alias: "payments/stripe".into(),
+                version: 1,
+                binding_id: "stripe:prod".into(),
+                expected_digest: None,
+                policy: None,
+            }),
+        ];
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::DuplicateSecret { .. }));
@@ -995,26 +878,14 @@ mod tests {
     #[test]
     fn rejects_secret_missing_binding() {
         let store = MemStore::default();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![SecretEntry::Decl(SecretDecl {
-                alias: "payments/stripe".into(),
-                version: 1,
-                binding_id: " ".into(),
-                expected_digest: None,
-                policy: None,
-            })],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.secrets.push(SecretEntry::Decl(SecretDecl {
+            alias: "payments/stripe".into(),
+            version: 1,
+            binding_id: " ".into(),
+            expected_digest: None,
+            policy: None,
+        }));
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::SecretMissingBinding { .. }));
@@ -1023,41 +894,30 @@ mod tests {
     #[test]
     fn rejects_secret_policy_for_cap() {
         let store = MemStore::default();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![SecretEntry::Decl(SecretDecl {
-                alias: "payments/stripe".into(),
-                version: 1,
-                binding_id: "stripe:prod".into(),
-                expected_digest: None,
-                policy: Some(SecretPolicy {
-                    allowed_caps: vec!["other_cap".into()],
-                    allowed_plans: vec![],
-                }),
-            })],
-            defaults: Some(ManifestDefaults {
-                policy: None,
-                cap_grants: vec![CapGrant {
-                    name: "secret_cap".into(),
-                    cap: "com.acme/secret@1".into(),
-                    params: ValueLiteral::SecretRef(SecretRef {
-                        alias: "payments/stripe".into(),
-                        version: 1,
-                    }),
-                    expiry_ns: None,
-                    budget: None,
-                }],
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.secrets.push(SecretEntry::Decl(SecretDecl {
+            alias: "payments/stripe".into(),
+            version: 1,
+            binding_id: "stripe:prod".into(),
+            expected_digest: None,
+            policy: Some(SecretPolicy {
+                allowed_caps: vec!["other_cap".into()],
+                allowed_plans: vec![],
             }),
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
+        }));
+        manifest.defaults = Some(ManifestDefaults {
+            policy: None,
+            cap_grants: vec![CapGrant {
+                name: "secret_cap".into(),
+                cap: "com.acme/secret@1".into(),
+                params: ValueLiteral::SecretRef(SecretRef {
+                    alias: "payments/stripe".into(),
+                    version: 1,
+                }),
+                expiry_ns: None,
+                budget: None,
+            }],
+        });
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::SecretPolicyViolation { .. }));
@@ -1075,29 +935,17 @@ mod tests {
         };
         let hash = store.put_node(&AirNode::Defsecret(def.clone())).unwrap();
         // Two references to the same alias/version via the same defsecret hash
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![
-                SecretEntry::Ref(NamedRef {
-                    name: def.name.clone(),
-                    hash: HashRef::new(hash.to_hex()).unwrap(),
-                }),
-                SecretEntry::Ref(NamedRef {
-                    name: def.name.clone(),
-                    hash: HashRef::new(hash.to_hex()).unwrap(),
-                }),
-            ],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.secrets = vec![
+            SecretEntry::Ref(NamedRef {
+                name: def.name.clone(),
+                hash: HashRef::new(hash.to_hex()).unwrap(),
+            }),
+            SecretEntry::Ref(NamedRef {
+                name: def.name.clone(),
+                hash: HashRef::new(hash.to_hex()).unwrap(),
+            }),
+        ];
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::DuplicateSecret { .. }));
@@ -1114,23 +962,11 @@ mod tests {
             allowed_plans: vec![],
         };
         let hash = store.put_node(&AirNode::Defsecret(def)).unwrap();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![SecretEntry::Ref(NamedRef {
-                name: "payments/stripe@1".into(),
-                hash: HashRef::new(hash.to_hex()).unwrap(),
-            })],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.secrets.push(SecretEntry::Ref(NamedRef {
+            name: "payments/stripe@1".into(),
+            hash: HashRef::new(hash.to_hex()).unwrap(),
+        }));
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::SecretMissingBinding { .. }));
@@ -1171,23 +1007,11 @@ mod tests {
             allowed_plans: vec![],
         };
         let hash = store.put_node(&AirNode::Defsecret(def)).unwrap();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![SecretEntry::Ref(NamedRef {
-                name: "payments/stripe@1".into(),
-                hash: HashRef::new(hash.to_hex()).unwrap(),
-            })],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.secrets.push(SecretEntry::Ref(NamedRef {
+            name: "payments/stripe@1".into(),
+            hash: HashRef::new(hash.to_hex()).unwrap(),
+        }));
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let catalog = load_manifest_from_bytes(&store, &manifest_bytes).expect("load manifest");
         assert_eq!(catalog.resolved_secrets.len(), 1);
@@ -1206,23 +1030,11 @@ mod tests {
             allowed_plans: vec![],
         };
         let hash = store.put_node(&AirNode::Defsecret(def)).unwrap();
-        let manifest = Manifest {
-            air_version: CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![SecretEntry::Ref(NamedRef {
-                name: "payments-stripe-nover".into(),
-                hash: HashRef::new(hash.to_hex()).unwrap(),
-            })],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
+        let mut manifest = empty_manifest_with_builtins();
+        manifest.secrets.push(SecretEntry::Ref(NamedRef {
+            name: "payments-stripe-nover".into(),
+            hash: HashRef::new(hash.to_hex()).unwrap(),
+        }));
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
         let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
         assert!(matches!(err, StoreError::InvalidSecretName { .. }));

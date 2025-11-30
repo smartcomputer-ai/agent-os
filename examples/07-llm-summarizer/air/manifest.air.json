@@ -15,6 +15,39 @@
     },
     {
       "name": "demo/SummarizeResult@1"
+    },
+    {
+      "name": "sys/HttpRequestParams@1"
+    },
+    {
+      "name": "sys/HttpRequestReceipt@1"
+    },
+    {
+      "name": "sys/LlmGenerateParams@1"
+    },
+    {
+      "name": "sys/LlmGenerateReceipt@1"
+    },
+    {
+      "name": "sys/SecretRef@1"
+    },
+    {
+      "name": "sys/TextOrSecretRef@1"
+    },
+    {
+      "name": "sys/BytesOrSecretRef@1"
+    },
+    {
+      "name": "sys/VaultPutParams@1"
+    },
+    {
+      "name": "sys/VaultPutReceipt@1"
+    },
+    {
+      "name": "sys/VaultRotateParams@1"
+    },
+    {
+      "name": "sys/VaultRotateReceipt@1"
     }
   ],
   "modules": [
@@ -108,5 +141,13 @@
       "correlate_by": "request_id"
     }
   ],
-  "air_version": "1"
+  "air_version": "1",
+  "effects": [
+    {
+      "name": "sys/http.request@1"
+    },
+    {
+      "name": "sys/llm.generate@1"
+    }
+  ]
 }
