@@ -46,8 +46,7 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
 - **Fix**: Add `spec/schemas/patch.schema.json` covering patch document + operations; link from §15 and wire into tooling validation if applicable.
 
 ## 8) Optional: make `required_caps` / `allowed_effects` derived-only
-- 🟡 **Problem**: Fields persist in plans and are normalized (spec/03-air.md §12; spec/schemas/defplan.schema.json; crates/aos-air-types/src/validate.rs:99-144). This is redundant with `emit_effect` steps.
-- **Fix (optional)**: Treat them as tooling-only projections (not stored/hased) or remove from schema and derive on load; update prose accordingly. If kept, document “redundant hint” status explicitly.
+- ⏭️ **Skipped for v1**: Already implemented the safe derived+validated path (fields optional for authoring, normalized/validated against steps, present in canonical CBOR). Removing them now would churn schema hashes/fixtures for marginal gain; the lists aid readability and tooling that doesn’t re-derive on the fly. Revisit in v1.1 if we want a leaner canonical form.
 
 ---
 
@@ -60,3 +59,4 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
 - Pure modules messaging: ✅
 - Patch schema: 🔴
 - Derived caps/effects optionality: 🟡 (current behavior is “persist + validate”)
+
