@@ -70,7 +70,6 @@ struct RuntimeRule {
     origin_kind: Option<OriginKind>,
     origin_name: Option<String>,
     decision: PolicyDecision,
-    host_or_method_specified: bool,
 }
 
 impl RuntimeRule {
@@ -84,14 +83,10 @@ impl RuntimeRule {
                 AirDecision::Allow => PolicyDecision::Allow,
                 AirDecision::Deny => PolicyDecision::Deny,
             },
-            host_or_method_specified: rule.when.host.is_some() || rule.when.method.is_some(),
         }
     }
 
     fn matches(&self, intent: &EffectIntent, source: &EffectSource) -> bool {
-        if self.host_or_method_specified {
-            return false;
-        }
         if let Some(expected) = &self.cap_name {
             if intent.cap_name != *expected {
                 return false;

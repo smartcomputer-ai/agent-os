@@ -22,10 +22,10 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
   - Example manifests now include built-in schema/effect refs; authoring loader normalizes `effects` hashes too.
 
 ## 3) Simplify policy match surface (drop host/method)
-- 🔴 **Problem**: `defpolicy.Match` still contains HTTP-specific `host` and `method` (spec/03-air.md §11; spec/schemas/defpolicy.schema.json lines 40-59), overlapping with CapGrant constraints.
-- **Fix**:
-  - Remove `host`/`method` fields from schema and prose; leave `effect_kind`, `cap_name`, `origin_kind`, `origin_name` as the v1 surface.
-  - Update any examples/tests that reference `host`/`method`.
+- ✅ **Problem**: `defpolicy.Match` still contained HTTP-specific `host` and `method`, overlapping with CapGrant constraints.
+- ✅ **Fix** (done):
+  - Removed `host`/`method` from `spec/schemas/defpolicy.schema.json` and the spec bullets/example policy in `spec/03-air.md`.
+  - Simplified policy model/runtime (aos-air-types, aos-kernel) to drop these fields; tests updated accordingly.
 
 ## 4) Validate `await_event` correlation at authoring time
 - 🟡 **Problem**: Runtime rejects missing `where` when `correlate_by` is set (crates/aos-kernel/src/plan.rs:327-333), but validator does not enforce presence/reference (crates/aos-air-types/src/validate.rs:167-212).
@@ -54,7 +54,7 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
 ## Quick status table
 - Require explicit `air_version`: ✅
 - Remove built-in auto-inclusion: ✅
-- Policy host/method removal: 🔴
+- Policy host/method removal: ✅
 - Await-event correlation validation: 🟡 (runtime only)
 - Micro-effect definition via `origin_scope`: 🟡 (code OK, docs lag)
 - Pure modules messaging: 🔴

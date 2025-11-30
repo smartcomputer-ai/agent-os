@@ -419,8 +419,6 @@ Policies define ordered rules that allow or deny effects based on their characte
 
 - `effect_kind?: EffectKind` – namespaced effect kind (http.request, llm.generate, etc.)
 - `cap_name?: text` – which CapGrant name
-- `host?: text` – host suffix or glob (prefer using CapGrant.hosts instead)
-- `method?: text` – HTTP method
 - `origin_kind?: "plan" | "reducer"` – whether the effect originates from a plan or a reducer
 - `origin_name?: Name` – the specific plan or reducer Name
 
@@ -708,7 +706,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 20.3 defpolicy (allow google rss; deny LLM from reducers)
 
 ```json
-{ "$kind":"defpolicy", "name":"com.acme/policy@1", "rules": [ { "when": { "effect_kind":"http.request", "host":"news.google.com" }, "decision":"allow" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"reducer" }, "decision":"deny" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"plan" }, "decision":"allow" } ] }
+{ "$kind":"defpolicy", "name":"com.acme/policy@1", "rules": [ { "when": { "effect_kind":"http.request", "cap_name":"cap_http" }, "decision":"allow" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"reducer" }, "decision":"deny" }, { "when": { "effect_kind":"llm.generate", "origin_kind":"plan" }, "decision":"allow" } ] }
 ```
 
 20.4 defplan (daily_digest)

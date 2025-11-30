@@ -695,10 +695,6 @@ pub struct PolicyMatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap_name: Option<CapGrantName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub method: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_kind: Option<OriginKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_name: Option<Name>,
