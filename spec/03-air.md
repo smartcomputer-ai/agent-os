@@ -513,9 +513,9 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
   - **Future-only**: Plan registers the wait when the step first runs; only events appended afterwards are observed.
   - **Per-waiter first match**: The first event (by journal order) matching `event` and passing `where` resumes that plan instance.
   - **Broadcast**: Multiple plan instances waiting on the same schema all see the event; there is no consumption.
-  - **Predicate scope**: `where` evaluates with `@event` bound to the incoming event and may reference locals/steps/plan input; `@var:correlation_id` is available when the plan was started from a trigger with `correlate_by`.
-  - **One outstanding wait** per plan instance; the step blocks until satisfied, then normal DAG scheduling continues.
-  - **Correlation guard (required when correlated)**: If the plan was started via a trigger with `correlate_by`, an `await_event` step must provide a `where` predicate (typically `@event.<key> == @var:correlation_id`) to prevent cross-talk across concurrent runs.
+- **Predicate scope**: `where` evaluates with `@event` bound to the incoming event and may reference locals/steps/plan input; `@var:correlation_id` is available when the plan was started from a trigger with `correlate_by`.
+- **One outstanding wait** per plan instance; the step blocks until satisfied, then normal DAG scheduling continues.
+- **Correlation guard (required when correlated)**: If the plan was started via a trigger with `correlate_by`, every `await_event` must provide a `where` predicate that references the correlation key (e.g., `@event.<key> == @var:correlation_id`) to prevent cross-talk across concurrent runs; this is enforced at validation time.
 
 **assign**: Bind a value to a variable
 - `{ id, op:"assign", expr:ExprOrValue, bind:{as:VarName} }`

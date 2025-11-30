@@ -1,8 +1,8 @@
 use std::{collections::HashMap, path::Path};
 
 use aos_air_types::{
-    AirNode, CURRENT_AIR_VERSION, CapGrant, DefPlan, ExprOrValue, Manifest, NamedRef, PlanStepKind,
-    SecretDecl, SecretEntry, SecretPolicy, SecretRef, ValueLiteral, builtins,
+    AirNode, CURRENT_AIR_VERSION, CapGrant, DefPlan, Expr, ExprOrValue, Manifest, NamedRef,
+    PlanStepKind, SecretDecl, SecretEntry, SecretPolicy, SecretRef, ValueLiteral, builtins,
     plan_literals::SchemaIndex, validate,
 };
 use aos_cbor::Hash;
@@ -324,6 +324,7 @@ fn validate_plans(
     nodes: &HashMap<String, CatalogEntry>,
     secrets: &[SecretDecl],
 ) -> StoreResult<()> {
+    let correlation_keys = correlate_keys_by_plan(manifest);
     for plan_ref in &manifest.plans {
         if let Some(entry) = nodes.get(&plan_ref.name) {
             if let AirNode::Defplan(plan) = &entry.node {
@@ -331,11 +332,100 @@ fn validate_plans(
                     name: plan.name.clone(),
                     source,
                 })?;
+                validate_plan_correlation(plan, correlation_keys.get(&plan.name))?;
                 validate_plan_secrets(plan, &index_secret_decls(secrets)?)?;
             }
         }
     }
     Ok(())
+}
+
+fn correlate_keys_by_plan(manifest: &Manifest) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for trigger in &manifest.triggers {
+        if let Some(key) = &trigger.correlate_by {
+            map.insert(trigger.plan.clone(), key.clone());
+        }
+    }
+    map
+}
+
+fn validate_plan_correlation(plan: &DefPlan, correlate_key: Option<&String>) -> StoreResult<()> {
+    let Some(key) = correlate_key else {
+        return Ok(());
+    };
+    for step in &plan.steps {
+        if let PlanStepKind::AwaitEvent(await_step) = &step.kind {
+            let Some(predicate) = await_step.where_clause.as_ref() else {
+                return Err(StoreError::MissingCorrelationPredicate {
+                    plan: plan.name.clone(),
+                    step_id: step.id.clone(),
+                    key: key.clone(),
+                });
+            };
+            if !predicate_references_key(predicate, key) {
+                return Err(StoreError::MissingCorrelationReference {
+                    plan: plan.name.clone(),
+                    step_id: step.id.clone(),
+                    key: key.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn predicate_references_key(expr: &Expr, key: &str) -> bool {
+    let mut found = false;
+    collect_refs(expr, &mut |reference: &str| {
+        if reference == "@var:correlation_id" {
+            found = true;
+        }
+        if let Some(rest) = reference.strip_prefix("@event.") {
+            if rest.split('.').next() == Some(key) {
+                found = true;
+            }
+        }
+    });
+    found
+}
+
+fn collect_refs(expr: &Expr, f: &mut impl FnMut(&str)) {
+    match expr {
+        Expr::Ref(r) => f(&r.reference),
+        Expr::Const(_) => {}
+        Expr::Op(op) => {
+            for a in &op.args {
+                collect_refs(a, f);
+            }
+        }
+        Expr::Record(rec) => {
+            for v in rec.record.values() {
+                collect_refs(v, f);
+            }
+        }
+        Expr::List(l) => {
+            for v in &l.list {
+                collect_refs(v, f);
+            }
+        }
+        Expr::Set(s) => {
+            for v in &s.set {
+                collect_refs(v, f);
+            }
+        }
+        Expr::Map(m) => {
+            for entry in &m.map {
+                collect_refs(&entry.key, f);
+                collect_refs(&entry.value, f);
+            }
+        }
+        Expr::Variant(v) => {
+            if let Some(value) = &v.variant.value {
+                collect_refs(value, f);
+            }
+        }
+    }
 }
 
 fn validate_secrets(manifest: &Manifest, declarations: &[SecretDecl]) -> StoreResult<()> {
@@ -561,10 +651,10 @@ mod tests {
     use aos_air_types::{
         AirNode, CapGrant, CapType, DefCap, DefPlan, DefSecret, EffectKind, EmptyObject, Expr,
         ExprConst, ExprOp, ExprOpCode, ExprRef, HashRef, Manifest, ManifestDefaults, NamedRef,
-        PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitReceipt,
-        PlanStepEmitEffect, PlanStepEnd, PlanStepKind, SchemaRef, SecretDecl, SecretEntry,
-        SecretPolicy, SecretRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRef, ValueLiteral,
-        ValueMap, ValueNull, ValueRecord, ValueText,
+        PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
+        PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, SchemaRef, SecretDecl,
+        SecretEntry, SecretPolicy, SecretRef, Trigger, TypeExpr, TypePrimitive, TypePrimitiveText,
+        TypeRef, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
     };
     use indexmap::IndexMap;
 
@@ -763,6 +853,56 @@ mod tests {
     }
 
     #[test]
+    fn await_event_requires_where_when_correlated() {
+        let store = MemStore::default();
+        let plan = DefPlan {
+            name: "com.acme/plan@1".into(),
+            input: SchemaRef::new("sys/TimerSetParams@1").unwrap(),
+            output: None,
+            locals: Default::default(),
+            steps: vec![PlanStep {
+                id: "wait".into(),
+                kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    where_clause: None,
+                    bind: PlanBind { var: "ev".into() },
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+        let plan_hash = store.put_node(&AirNode::Defplan(plan.clone())).unwrap();
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: builtin_schema_refs(),
+            modules: vec![],
+            plans: vec![NamedRef {
+                name: plan.name.clone(),
+                hash: HashRef::new(plan_hash.to_hex()).unwrap(),
+            }],
+            effects: builtin_effect_refs(),
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![Trigger {
+                event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                plan: plan.name.clone(),
+                correlate_by: Some("id".into()),
+            }],
+        };
+        let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();
+        let err = load_manifest_from_bytes(&store, &manifest_bytes).unwrap_err();
+        assert!(matches!(
+            err,
+            StoreError::MissingCorrelationPredicate { .. }
+        ));
+    }
+
     #[test]
     fn rejects_unknown_secret_reference() {
         let store = MemStore::default();

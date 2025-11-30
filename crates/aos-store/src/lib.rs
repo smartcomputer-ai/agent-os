@@ -93,6 +93,22 @@ pub enum StoreError {
     UnsupportedAirVersion { found: String, supported: String },
     #[error("manifest must declare air_version (supported: {supported})")]
     MissingAirVersion { supported: String },
+    #[error(
+        "plan {plan} triggered with correlate_by='{key}' must have where clause on await_event step {step_id}"
+    )]
+    MissingCorrelationPredicate {
+        plan: String,
+        step_id: String,
+        key: String,
+    },
+    #[error(
+        "plan {plan} await_event step {step_id} must reference correlation key '{key}' or @var:correlation_id"
+    )]
+    MissingCorrelationReference {
+        plan: String,
+        step_id: String,
+        key: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

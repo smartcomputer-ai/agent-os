@@ -28,10 +28,10 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
   - Simplified policy model/runtime (aos-air-types, aos-kernel) to drop these fields; tests updated accordingly.
 
 ## 4) Validate `await_event` correlation at authoring time
-- 🟡 **Problem**: Runtime rejects missing `where` when `correlate_by` is set (crates/aos-kernel/src/plan.rs:327-333), but validator does not enforce presence/reference (crates/aos-air-types/src/validate.rs:167-212).
-- **Fix**:
-  - In validator: if manifest has any trigger with `correlate_by`, require every `await_event` in that plan to include `where`; optionally ensure the predicate references the correlation key.
-  - Mirror this rule in `spec/03-air.md` §12 semantics.
+- ✅ **Problem**: Runtime rejected missing `where` when `correlate_by` is set, but validation didn’t enforce it.
+- ✅ **Fix** (done):
+  - Store-level validation now enforces: if a plan is started via a trigger with `correlate_by`, every `await_event` must have a `where` predicate and it must reference the correlation key or `@var:correlation_id` (`crates/aos-store/src/manifest.rs` + new errors).
+  - Spec text to update next (see #5) — runtime + validation behavior aligned.
 
 ## 5) Make micro-effect rule point to `origin_scope`
 - 🟡 **Problem**: Docs hardcode micro-effect list (`timer/blob`) while enforcement uses `origin_scope` (spec/03-air.md §7; spec/04-reducers.md §“Anti-Patterns”; crates/aos-kernel/src/effects.rs:95-122).
@@ -55,7 +55,7 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
 - Require explicit `air_version`: ✅
 - Remove built-in auto-inclusion: ✅
 - Policy host/method removal: ✅
-- Await-event correlation validation: 🟡 (runtime only)
+- Await-event correlation validation: ✅
 - Micro-effect definition via `origin_scope`: 🟡 (code OK, docs lag)
 - Pure modules messaging: 🔴
 - Patch schema: 🔴
