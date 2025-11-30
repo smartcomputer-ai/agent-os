@@ -38,8 +38,8 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
 - **Fix**: Update reducer/air text to define “micro-effects” = effects whose `origin_scope` allows reducers; keep list as informational example.
 
 ## 6) Align “pure modules” messaging with v1 scope
-- 🔴 **Problem**: Overview still states pure modules ship in v1 (spec/01-overview.md lines ~78-88) while core spec says `module_kind` is `"reducer"` only (spec/03-air.md §6 notes deferred).
-- **Fix**: Edit overview to say pure modules are deferred to v1.1+; keep enum extensibility note in §6.
+- ✅ **Problem**: Overview still stated pure modules ship in v1 while core spec says `module_kind` is `"reducer"` only (deferred).
+- ✅ **Fix** (done): Updated `spec/01-overview.md` to say pure modules are deferred to v1.1+, keeping v1 `module_kind` = `"reducer"` only (spec/03-air.md already notes future `"pure"`).
 
 ## 7) Add schema for patches
 - 🔴 **Problem**: Patch format is prose-only (spec/03-air.md §15); no JSON Schema alongside others.
@@ -57,6 +57,6 @@ this is pre, pre, pre alpha software. there is not a single instance of this OS 
 - Policy host/method removal: ✅
 - Await-event correlation validation: ✅
 - Micro-effect definition via `origin_scope`: 🟡 (code OK, docs lag)
-- Pure modules messaging: 🔴
+- Pure modules messaging: ✅
 - Patch schema: 🔴
 - Derived caps/effects optionality: 🟡 (current behavior is “persist + validate”)
