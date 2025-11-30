@@ -5,5 +5,5 @@ pub mod counter;
 pub mod fetch_notify;
 pub mod hello_timer;
 pub mod llm_summarizer;
-pub mod safe_upgrade;
 pub mod retry_backoff;
+pub mod safe_upgrade;

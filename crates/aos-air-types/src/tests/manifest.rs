@@ -8,6 +8,7 @@ use crate::{Manifest, NamedRef};
 fn manifest_json_round_trip() {
     let manifest_json = json!({
         "$kind": "manifest",
+        "air_version": "1",
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [],
         "plans": [{"name": "com.acme/Plan@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
@@ -33,6 +34,7 @@ fn named_ref_requires_hash() {
 fn manifest_with_defaults_routing_and_triggers_validates() {
     let manifest_json = json!({
         "$kind": "manifest",
+        "air_version": "1",
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
         "modules": [{"name": "com.acme/Reducer@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
         "plans": [{"name": "com.acme/Plan@1", "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],
@@ -84,6 +86,7 @@ fn manifest_with_defaults_routing_and_triggers_validates() {
 fn module_binding_requires_slots_schema() {
     let manifest_json = json!({
         "$kind": "manifest",
+        "air_version": "1",
         "schemas": [],
         "modules": [],
         "plans": [],
@@ -107,6 +110,7 @@ fn module_binding_requires_slots_schema() {
 fn manifest_with_secrets_round_trip() {
     let manifest_json = json!({
         "$kind": "manifest",
+        "air_version": "1",
         "schemas": [],
         "modules": [],
         "plans": [],
