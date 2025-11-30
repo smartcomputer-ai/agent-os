@@ -5,11 +5,11 @@ Status legend: ✅ already aligned | 🟡 partially | 🔴 not yet
 ---
 
 ## 1) Require explicit `air_version` (stop “assume latest”)
-- 🔴 **Problem**: `air_version` is optional and defaults to current major (spec/03-air.md lines ~110–129; spec/schemas/manifest.schema.json; crates/aos-store/src/manifest.rs:103-114). Future majors would silently upgrade old manifests.
-- **Fix**:
-  - Make `air_version` required and `enum: ["1"]` in `spec/schemas/manifest.schema.json` (add to `required`).
-  - Update prose in `spec/03-air.md` §4 to remove “assume latest” sentence.
-  - Keep loader behavior consistent: error on missing/unknown version (adjust `ensure_air_version` in `crates/aos-store/src/manifest.rs`).
+- ✅ **Problem**: `air_version` was optional and defaulted to current major (spec/03-air.md lines ~110–129; spec/schemas/manifest.schema.json; crates/aos-store/src/manifest.rs:103-114). Future majors would silently upgrade old manifests.
+- ✅ **Fix** (done):
+  - `air_version` is now required and enumerated to `"1"` in `spec/schemas/manifest.schema.json`.
+  - Prose updated in `spec/03-air.md` §4 to make the field required and remove the “assume latest” behavior.
+  - Loader now errors when `air_version` is missing or unsupported (`crates/aos-store/src/manifest.rs` + new `StoreError::MissingAirVersion`).
 
 ## 2) Remove built-in auto-inclusion magic
 - 🔴 **Problem**: Runtime/tooling auto-attaches built-in schemas/effects (spec/03-air.md lines ~129, 388; crates/aos-store/src/manifest.rs:260-289; crates/aos-kernel/src/manifest.rs:64-109), so manifest isn’t the single source of truth.
@@ -49,7 +49,7 @@ Status legend: ✅ already aligned | 🟡 partially | 🔴 not yet
 ---
 
 ## Quick status table
-- Require explicit `air_version`: 🔴
+- Require explicit `air_version`: ✅
 - Remove built-in auto-inclusion: 🔴
 - Policy host/method removal: 🔴
 - Await-event correlation validation: 🟡 (runtime only)
@@ -57,4 +57,3 @@ Status legend: ✅ already aligned | 🟡 partially | 🔴 not yet
 - Pure modules messaging: 🔴
 - Patch schema: 🔴
 - Derived caps/effects optionality: 🟡 (current behavior is “persist + validate”)
-

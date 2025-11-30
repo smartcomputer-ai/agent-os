@@ -1,23 +1,41 @@
 {
   "$kind": "manifest",
   "schemas": [
-    { "name": "demo/SafeUpgradePc@1" },
-    { "name": "demo/SafeUpgradeState@1" },
-    { "name": "demo/SafeUpgradeEvent@1" },
-    { "name": "demo/UpgradeFetchRequest@1" },
-    { "name": "demo/SafeUpgradeResult@1" }
+    {
+      "name": "demo/SafeUpgradePc@1"
+    },
+    {
+      "name": "demo/SafeUpgradeState@1"
+    },
+    {
+      "name": "demo/SafeUpgradeEvent@1"
+    },
+    {
+      "name": "demo/UpgradeFetchRequest@1"
+    },
+    {
+      "name": "demo/SafeUpgradeResult@1"
+    }
   ],
   "modules": [
-    { "name": "demo/SafeUpgrade@1" }
+    {
+      "name": "demo/SafeUpgrade@1"
+    }
   ],
   "plans": [
-    { "name": "demo/fetch_plan@1" }
+    {
+      "name": "demo/fetch_plan@1"
+    }
   ],
   "caps": [
-    { "name": "demo/http_fetch_cap@1" }
+    {
+      "name": "demo/http_fetch_cap@1"
+    }
   ],
   "policies": [
-    { "name": "demo/http-policy@1" }
+    {
+      "name": "demo/http-policy@1"
+    }
   ],
   "defaults": {
     "policy": "demo/http-policy@1",
@@ -27,8 +45,20 @@
         "cap": "demo/http_fetch_cap@1",
         "params": {
           "record": {
-            "hosts": { "set": [ { "text": "example.com" } ] },
-            "methods": { "set": [ { "text": "GET" } ] }
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "methods": {
+              "set": [
+                {
+                  "text": "GET"
+                }
+              ]
+            }
           }
         }
       }
@@ -37,11 +67,19 @@
   "module_bindings": {},
   "routing": {
     "events": [
-      { "event": "demo/SafeUpgradeEvent@1", "reducer": "demo/SafeUpgrade@1" }
+      {
+        "event": "demo/SafeUpgradeEvent@1",
+        "reducer": "demo/SafeUpgrade@1"
+      }
     ],
     "inboxes": []
   },
   "triggers": [
-    { "event": "demo/UpgradeFetchRequest@1", "plan": "demo/fetch_plan@1", "correlate_by": "request_id" }
-  ]
+    {
+      "event": "demo/UpgradeFetchRequest@1",
+      "plan": "demo/fetch_plan@1",
+      "correlate_by": "request_id"
+    }
+  ],
+  "air_version": "1"
 }

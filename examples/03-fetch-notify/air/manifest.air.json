@@ -1,22 +1,38 @@
 {
   "$kind": "manifest",
   "schemas": [
-    { "name": "demo/FetchNotifyPc@1" },
-    { "name": "demo/FetchNotifyState@1" },
-    { "name": "demo/FetchNotifyEvent@1" },
-    { "name": "demo/FetchRequest@1" }
+    {
+      "name": "demo/FetchNotifyPc@1"
+    },
+    {
+      "name": "demo/FetchNotifyState@1"
+    },
+    {
+      "name": "demo/FetchNotifyEvent@1"
+    },
+    {
+      "name": "demo/FetchRequest@1"
+    }
   ],
   "modules": [
-    { "name": "demo/FetchNotify@1" }
+    {
+      "name": "demo/FetchNotify@1"
+    }
   ],
   "plans": [
-    { "name": "demo/fetch_plan@1" }
+    {
+      "name": "demo/fetch_plan@1"
+    }
   ],
   "caps": [
-    { "name": "demo/http_fetch_cap@1" }
+    {
+      "name": "demo/http_fetch_cap@1"
+    }
   ],
   "policies": [
-    { "name": "demo/http-policy@1" }
+    {
+      "name": "demo/http-policy@1"
+    }
   ],
   "defaults": {
     "policy": "demo/http-policy@1",
@@ -26,8 +42,20 @@
         "cap": "demo/http_fetch_cap@1",
         "params": {
           "record": {
-            "hosts": { "set": [ { "text": "example.com" } ] },
-            "verbs": { "set": [ { "text": "GET" } ] }
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "verbs": {
+              "set": [
+                {
+                  "text": "GET"
+                }
+              ]
+            }
           }
         }
       }
@@ -36,11 +64,19 @@
   "module_bindings": {},
   "routing": {
     "events": [
-      { "event": "demo/FetchNotifyEvent@1", "reducer": "demo/FetchNotify@1" }
+      {
+        "event": "demo/FetchNotifyEvent@1",
+        "reducer": "demo/FetchNotify@1"
+      }
     ],
     "inboxes": []
   },
   "triggers": [
-    { "event": "demo/FetchRequest@1", "plan": "demo/fetch_plan@1", "correlate_by": "request_id" }
-  ]
+    {
+      "event": "demo/FetchRequest@1",
+      "plan": "demo/fetch_plan@1",
+      "correlate_by": "request_id"
+    }
+  ],
+  "air_version": "1"
 }

@@ -1,27 +1,50 @@
 {
   "$kind": "manifest",
   "schemas": [
-    { "name": "demo/LlmSummarizerPc@1" },
-    { "name": "demo/LlmSummarizerState@1" },
-    { "name": "demo/LlmSummarizerEvent@1" },
-    { "name": "demo/SummarizeRequest@1" },
-    { "name": "demo/SummarizeResult@1" }
+    {
+      "name": "demo/LlmSummarizerPc@1"
+    },
+    {
+      "name": "demo/LlmSummarizerState@1"
+    },
+    {
+      "name": "demo/LlmSummarizerEvent@1"
+    },
+    {
+      "name": "demo/SummarizeRequest@1"
+    },
+    {
+      "name": "demo/SummarizeResult@1"
+    }
   ],
   "modules": [
-    { "name": "demo/LlmSummarizer@1" }
+    {
+      "name": "demo/LlmSummarizer@1"
+    }
   ],
   "plans": [
-    { "name": "demo/summarize_plan@1" }
+    {
+      "name": "demo/summarize_plan@1"
+    }
   ],
   "caps": [
-    { "name": "demo/http_fetch_cap@1" },
-    { "name": "demo/llm_summarize_cap@1" }
+    {
+      "name": "demo/http_fetch_cap@1"
+    },
+    {
+      "name": "demo/llm_summarize_cap@1"
+    }
   ],
   "policies": [
-    { "name": "demo/llm-policy@1" }
+    {
+      "name": "demo/llm-policy@1"
+    }
   ],
   "secrets": [
-    { "name": "demo/llm_api_secret@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+    {
+      "name": "demo/llm_api_secret@1",
+      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
   ],
   "defaults": {
     "policy": "demo/llm-policy@1",
@@ -31,8 +54,20 @@
         "cap": "demo/http_fetch_cap@1",
         "params": {
           "record": {
-            "hosts": { "set": [ { "text": "example.com" } ] },
-            "methods": { "set": [ { "text": "GET" } ] }
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "methods": {
+              "set": [
+                {
+                  "text": "GET"
+                }
+              ]
+            }
           }
         }
       },
@@ -41,8 +76,16 @@
         "cap": "demo/llm_summarize_cap@1",
         "params": {
           "record": {
-            "models": { "set": [ { "text": "mock-summarizer" } ] },
-            "max_tokens": { "nat": 2048 }
+            "models": {
+              "set": [
+                {
+                  "text": "mock-summarizer"
+                }
+              ]
+            },
+            "max_tokens": {
+              "nat": 2048
+            }
           }
         }
       }
@@ -51,11 +94,19 @@
   "module_bindings": {},
   "routing": {
     "events": [
-      { "event": "demo/LlmSummarizerEvent@1", "reducer": "demo/LlmSummarizer@1" }
+      {
+        "event": "demo/LlmSummarizerEvent@1",
+        "reducer": "demo/LlmSummarizer@1"
+      }
     ],
     "inboxes": []
   },
   "triggers": [
-    { "event": "demo/SummarizeRequest@1", "plan": "demo/summarize_plan@1", "correlate_by": "request_id" }
-  ]
+    {
+      "event": "demo/SummarizeRequest@1",
+      "plan": "demo/summarize_plan@1",
+      "correlate_by": "request_id"
+    }
+  ],
+  "air_version": "1"
 }

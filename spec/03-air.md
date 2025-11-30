@@ -107,7 +107,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 ```
 {
   "$kind": "manifest",
-  "air_version"?: "1",
+  "air_version": "1",
   "schemas": [{name, hash}],
   "modules": [{name, hash}],
   "plans": [{name, hash}],
@@ -126,7 +126,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. `air_version` is optional; if omitted, loaders assume the latest supported major (currently `"1"`). Supplying an unknown version is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. The runtime auto-includes the built-in `defeffect` bundle if omitted so manifests may stay terse.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. The runtime auto-includes the built-in `defeffect` bundle if omitted so manifests may stay terse.
 
 See: spec/schemas/manifest.schema.json
 

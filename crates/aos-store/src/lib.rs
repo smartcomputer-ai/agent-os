@@ -91,6 +91,8 @@ pub enum StoreError {
     },
     #[error("manifest declares unsupported air_version '{found}' (supported: {supported})")]
     UnsupportedAirVersion { found: String, supported: String },
+    #[error("manifest must declare air_version (supported: {supported})")]
+    MissingAirVersion { supported: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

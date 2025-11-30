@@ -1,22 +1,40 @@
 {
   "$kind": "manifest",
   "schemas": [
-    { "name": "demo/TimerPc@1" },
-    { "name": "demo/TimerState@1" },
-    { "name": "demo/TimerEvent@1" },
-    { "name": "sys/TimerSetParams@1" },
-    { "name": "sys/TimerSetReceipt@1" },
-    { "name": "sys/TimerFired@1" }
+    {
+      "name": "demo/TimerPc@1"
+    },
+    {
+      "name": "demo/TimerState@1"
+    },
+    {
+      "name": "demo/TimerEvent@1"
+    },
+    {
+      "name": "sys/TimerSetParams@1"
+    },
+    {
+      "name": "sys/TimerSetReceipt@1"
+    },
+    {
+      "name": "sys/TimerFired@1"
+    }
   ],
   "modules": [
-    { "name": "demo/TimerSM@1" }
+    {
+      "name": "demo/TimerSM@1"
+    }
   ],
   "plans": [],
   "caps": [
-    { "name": "sys/timer@1" }
+    {
+      "name": "sys/timer@1"
+    }
   ],
   "policies": [
-    { "name": "demo/default_policy@1" }
+    {
+      "name": "demo/default_policy@1"
+    }
   ],
   "defaults": {
     "policy": "demo/default_policy@1",
@@ -24,7 +42,9 @@
       {
         "name": "timer_grant",
         "cap": "sys/timer@1",
-        "params": { "record": {} }
+        "params": {
+          "record": {}
+        }
       }
     ]
   },
@@ -37,10 +57,17 @@
   },
   "routing": {
     "events": [
-      { "event": "demo/TimerEvent@1", "reducer": "demo/TimerSM@1" },
-      { "event": "sys/TimerFired@1", "reducer": "demo/TimerSM@1" }
+      {
+        "event": "demo/TimerEvent@1",
+        "reducer": "demo/TimerSM@1"
+      },
+      {
+        "event": "sys/TimerFired@1",
+        "reducer": "demo/TimerSM@1"
+      }
     ],
     "inboxes": []
   },
-  "triggers": []
+  "triggers": [],
+  "air_version": "1"
 }
