@@ -39,6 +39,7 @@ struct BlobHarnessStore {
 pub fn run(example_root: &Path) -> Result<()> {
     let harness = ExampleReducerHarness::prepare(HarnessConfig {
         example_root,
+        assets_root: None,
         reducer_name: REDUCER_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: "examples/02-blob-echo/reducer",

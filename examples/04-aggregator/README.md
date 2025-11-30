@@ -10,7 +10,6 @@ response summaries for every target once the plan rejoins.
 Artifacts:
 
 - `air/` — canonical JSON AIR assets (schemas, reducer module, manifest,
-  capabilities, and policies)
-- `plans/` — AIR `defplan` definitions used by this demo
+  capabilities, policies, and plans)
 - `reducer/` — Wasm reducer crate compiled via `aos-wasm-build`
 - `defs/` — reserved for shared/builtin JSON definitions

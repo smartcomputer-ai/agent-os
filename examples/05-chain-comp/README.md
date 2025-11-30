@@ -16,7 +16,6 @@ we can respond with synthetic receipts and exercise the failure path.
 Artifacts:
 
 - `air/` — canonical JSON AIR assets (schemas, reducer module, manifest,
-  capabilities, and policies)
-- `plans/` — AIR `defplan` definitions (`charge`, `reserve`, `notify`,
+  capabilities, policies, and plans: `charge`, `reserve`, `notify`,
   `refund`)
 - `reducer/` — Wasm reducer crate compiled via `aos-wasm-build`
