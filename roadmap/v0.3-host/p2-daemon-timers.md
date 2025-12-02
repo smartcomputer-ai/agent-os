@@ -6,6 +6,10 @@
 
 Replace the stub timer with a real timer adapter that schedules OS timers. Implement a daemon loop that continuously drains the kernel, fires due timers, and responds to control-channel commands.
 
+Restart safety note: daemon startup should call the P1 durable outbox rehydrate path (snapshot `queued_effects` + journal tail intents without receipts) to repopulate dispatch queues and the timer heap before entering the main loop. This ensures timers/effects pending at crash time are delivered exactly once after restart.
+
+Clock source note: use a monotonic clock for `deliver_at_ns` computations and deadline comparisons to avoid wall-clock jumps (`SystemTime` leaps). Host helpers should wrap `Instant`/`CLOCK_MONOTONIC` and only translate to absolute ns for persistence.
+
 ## Critical Design Constraints
 
 These constraints come from the existing kernel implementation and must be respected:

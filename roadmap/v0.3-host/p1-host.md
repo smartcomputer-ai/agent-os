@@ -98,6 +98,24 @@ Notes:
 - **API naming**: `enqueue_external` mirrors the kernel's internal distinction (`submit_domain_event`/`handle_receipt` for external inputs vs `enqueue_event` for internal routing).
 - **No separate `pending_effects()`**: The kernel's `drain_effects()` clears the queue and snapshots capture queued intents. A non-destructive peek would break replay semantics. Instead, `run_cycle()` takes ownership of drained intents internally.
 - **Keyed state**: The `key` parameter is forward-compatible with keyed reducers (cells). `DomainEvent` already carries an optional key, and manifests declare `key_field`, but routing ignores it today. Including the parameter now avoids API churn.
+- **Kernel config passthrough**: WorldHost `open` must thread `KernelConfig` (module cache dir, eager load, secret resolver/placeholder secrets) through to the kernel so host mode respects cache/secrets settings, matching the spec behavior.
+
+#### Durable outbox / restart semantics
+
+Goal: every intent that hits the journal either gets dispatched or already has a receipt, even if the host crashes between “intent recorded” and “receipt recorded”.
+
+Plan:
+- On startup, after kernel replay, rehydrate the dispatch queue from two sources:
+  - Snapshot `queued_effects` (already persisted) → enqueue for dispatch.
+  - Journal tail after the last snapshot: collect `EffectIntent` records that do not have a corresponding `EffectReceipt` record → enqueue for dispatch.
+- Build a set of receipt intent_hashes from snapshot (`recent_receipts`) + tail to filter out already-completed intents so we don’t double-send.
+- Timers: rebuild the timer heap from `pending_reducer_receipts` in the snapshot (these carry the params) plus any unmatched timer intents found in the tail scan.
+- Implementation note: the kernel doesn’t yet expose these helpers; when landing P1, add an API to retrieve `pending_reducer_receipts`, `queued_effects`, and tail intents/receipts since the last snapshot so the host can rehydrate without poking internals.
+
+Rationale:
+- Keeps determinism: journal remains the source of truth; no second outbox store.
+- Closes the crash window between intent append and snapshotting; avoids hanging worlds with “orphaned” intents.
+- Avoids adapter double-dispatch by de-duping against recorded receipts.
 
 ### AsyncEffectAdapter
 

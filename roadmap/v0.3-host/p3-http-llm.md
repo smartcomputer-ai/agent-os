@@ -559,22 +559,24 @@ url = "2"
 
 ## Error Handling
 
-All adapter-level validation errors return error receipts (not host errors) to preserve replay semantics.
+Keep payloads canonical: always emit `HttpRequestReceipt` / `LlmGenerateReceipt`; use `ReceiptStatus` to signal failure. This keeps `await_receipt` decoding stable and replay deterministic.
 
-| Situation | Receipt Status | Payload |
-|-----------|----------------|---------|
-| Request succeeds | `Ok` | `HttpRequestReceipt` / `LlmGenerateReceipt` |
-| HTTP error (4xx/5xx) | `Ok` | Receipt with status code (caller decides if error) |
-| Network failure | `Error` | `{ code: "request_failed", message }` |
-| Body too large | `Error` | `{ code: "body_too_large", message }` |
-| Invalid body_ref/input_ref hash | `Error` | `{ code: "invalid_body_ref"/"invalid_input_ref", message }` |
-| body_ref/input_ref not in CAS | `Error` | `{ code: "body_ref_not_found"/"input_ref_not_found", message }` |
-| CAS write failed | `Error` | `{ code: "cas_write_failed", message }` |
-| Unknown provider | `Error` | `{ code: "unknown_provider", message }` |
-| Missing API key | `Error` | `{ code: "api_key_missing", message }` |
-| Invalid input JSON | `Error` | `{ code: "invalid_input_json", message }` |
-| LLM API error | `Error` | `{ code: "api_error_NNN", message }` |
-| Timeout | `Timeout` | Synthesized by AdapterRegistry |
+| Situation | Receipt Status | Payload (canonical schema) |
+|-----------|----------------|----------------------------|
+| Request succeeds | `Ok` | `HttpRequestReceipt` / `LlmGenerateReceipt` with normal fields |
+| HTTP error (4xx/5xx) | `Ok` (preferred) | Receipt with status code, headers/body_ref set as available; caller decides error |
+| Network failure | `Error` | `HttpRequestReceipt` with status sentinel (e.g., 599), empty headers, `body_ref` to CAS blob containing error text; timings best-effort |
+| Body too large | `Error` | `HttpRequestReceipt` with status sentinel, empty headers, `body_ref` to CAS blob describing limit exceeded |
+| Invalid body_ref/input_ref hash | `Error` | `HttpRequestReceipt` / `LlmGenerateReceipt` with `body_ref`/`output_ref` pointing to CAS blob describing the decode error; status sentinel or keep last known status |
+| body_ref/input_ref not in CAS | `Error` | Same as above: canonical receipt with `body_ref`/`output_ref` to CAS error text |
+| CAS write failed | `Error` | Canonical receipt with `body_ref`/`output_ref` empty, `token_usage` zeros, status sentinel; cost None |
+| Unknown provider | `Error` | `LlmGenerateReceipt` with `output_ref` to CAS error text, `token_usage` zeros, `cost_cents` None |
+| Missing API key | `Error` | Same as above |
+| Invalid input JSON | `Error` | Same as above |
+| LLM API error | `Error` (or `Ok` with status code if you prefer) | `LlmGenerateReceipt` with `output_ref` to CAS error text; token_usage zeros |
+| Timeout | `Timeout` | Canonical receipt with minimal fields (status sentinel), empty headers/output_ref optional; best-effort timings; cost None |
+
+If richer error metadata is needed, extend the canonical schemas with optional `error`/`error_ref` fields rather than changing payload shapes.
 
 ## Success Criteria
 

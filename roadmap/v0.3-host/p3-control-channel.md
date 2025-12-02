@@ -6,6 +6,7 @@
 - Provide **IO + translation only**: JSON/CBOR messages → `WorldHost` calls → responses. No adapter logic, no timer logic.
 - Transport: local-only (Unix socket in world dir by default); optional stdio mode for embedding/debug. Windows named pipe later; TCP/auth deferred.
 - Governance verbs (propose/shadow/approve/apply) stay out of scope for this slice; add hooks for them in P3+.
+ - Governance verbs (propose/shadow/approve/apply) must be first-class control methods later; do not route them through generic enqueue or domain events.
 
 ## Components
 
@@ -30,6 +31,7 @@
 - `shutdown {}` → graceful drain + snapshot + exit.
 - `put-blob {mode, data?}` → upload a blob to the world's CAS, return `HashRef`. Support stdin/file streaming; avoid base64 for large payloads when using stdio mode.
 - Optional: `step {}` for a single `run_cycle_with_timers` when daemon is running (batch mode continues to call `run_cycle` directly).
+- Governance (P5+): add `propose/shadow/approve/apply` as explicit control verbs that call kernel governance APIs (not generic event enqueue); validate patches against `patch.schema.json` before submission and enforce sequencing on proposal_ids.
 
 ### Protocol Details
 - **Envelope**: `{ "v": 1, "id": "<client-uuid>", "cmd": "<verb>", "payload": {...} }`
