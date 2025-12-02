@@ -38,23 +38,21 @@ So you’re totally right: you need at least *one* proper “world as a process�
 
 ---
 
-## 2. The core abstraction: a `WorldRuntime` you can host in different modes
+## 2. The core abstraction: a `WorldHost` you can run in different modes
 
 Before deciding CLI vs daemon, it helps to explicitly define a host API the kernel exposes. Something along these lines (conceptually):
 
 ```rust
-pub struct WorldRuntime { /* holds manifest, journal, snapshot cache, etc. */ }
+pub struct WorldHost { /* holds manifest, journal, snapshot cache, etc. */ }
 
-impl WorldRuntime {
-    pub fn open(path: &Path) -> Result<Self>;
+impl WorldHost {
+    pub fn open(path: &Path, config: HostConfig) -> Result<Self>;
 
     /// Apply one event (DomainEvent, Receipt, Governance event, etc.)
     pub fn enqueue_external_event(&mut self, evt: ExternalEvent) -> Result<()>;
 
-    /// Run the deterministic stepper until:
-    /// - no more ready work, or
-    /// - a configured "fuel" limit is hit.
-    pub fn drain(&mut self, fuel: Option<u64>) -> Result<DrainOutcome>;
+    /// Run the deterministic stepper until no more ready work (kernel has no fuel; host may count ticks for guardrails)
+    pub fn drain(&mut self) -> Result<DrainOutcome>;
 
     /// Expose read-only query surfaces as in the StateReader sketch.
     pub fn state_reader(&self) -> &dyn StateReader;
@@ -64,6 +62,10 @@ impl WorldRuntime {
     pub fn apply_receipt(&mut self, receipt: EffectReceipt) -> Result<()>;
 }
 ```
+
+Notes:
+- Kernel already owns manifest load/validation, journal + snapshot I/O, deterministic stepping, effect queueing, receipt application, and state queries; the host should delegate rather than duplicate.
+- Kernel has no fuel concept; if you want guardrails, count ticks in the host and stop after N.
 
 That’s roughly what you already have conceptually in the architecture doc; just make it a **first-class runtime struct** that can be:
 
@@ -87,7 +89,7 @@ Think: `aos world run ./worlds/demo`.
 
 Characteristics:
 
-* Starts a `WorldRuntime` in a process.
+* Starts a `WorldHost` in a process.
 
 * Spins a simple scheduler loop:
 
@@ -135,7 +137,7 @@ Think: `aos world exec ./worlds/demo --event demo/Foo@1 '{"x": 1}'`.
 This mode:
 
 1. Opens the world directory.
-2. Loads the last snapshot + replays the tail (if needed) to get a live `WorldRuntime`.
+2. Loads the last snapshot + replays the tail (if needed) to get a live `WorldHost`.
 3. Injects one or more external events:
 
    * DomainEvent(s) (e.g. “user clicked X”)
@@ -171,7 +173,7 @@ My view: still *very* worth having, but as a **secondary mode** that shares all 
 
 Rather than choosing one forever, you can make both feel first-class by:
 
-1. **Centering everything on `WorldRuntime`** (or whatever you call the kernel host API).
+1. **Centering everything on `WorldHost`** (or whatever you call the kernel host API).
 
 2. Writing two thin harnesses:
 
@@ -192,7 +194,7 @@ Rather than choosing one forever, you can make both feel first-class by:
 
 This is similar to how things like `docker` vs `dockerd` or `git` vs a local SSH agent are split: the UX exposes “a thing you talk to”; behind the scenes it may start a daemon or hit disk directly.
 
-Key point: **don’t fork the kernel logic**. Your existing harness and the future CLI/daemon should all go through the same `WorldRuntime` abstraction.
+Key point: **don’t fork the kernel logic**. Your existing harness and the future CLI/daemon should all go through the same `WorldHost` abstraction.
 
 ---
 
@@ -337,7 +339,7 @@ Under the hood, this uses the **same runner** as `aos world run`.
 
 Right now you have test harnesses (`ExampleReducerHarness`, `HttpHarness`, etc.). I’d:
 
-* Rebuild them on top of `WorldRuntime`.
+* Rebuild them on top of `WorldHost`.
 * Have them *literally* call into the same API your CLI uses:
 
   * `enqueue_external_event`
@@ -368,7 +370,7 @@ Putting it all together, here’s a practical path:
 
 ### Phase 0: Extract the runtime host API
 
-* Extract what your current harnesses are doing into a `WorldRuntime` (or `KernelHost`, etc.).
+* Extract what your current harnesses are doing into a `WorldHost` (or `KernelHost`, etc.).
 * Make sure it owns:
 
   * journal I/O,
@@ -410,3 +412,13 @@ At that point you’ll have:
 * A **nice exploration loop**: `aos dev` to poke a world, introspect events, and watch an agent do stuff.
 
 And crucially: you haven’t made a hard choice between “always-running” vs “CLI-per-step”. You’ve made **run-modes a hosting concern** over a single deterministic kernel, which fits the AgentOS architecture really cleanly.
+
+---
+
+## Open decisions (control channel)
+
+- **Transport:** default to Unix socket vs stdin/stdout; where to place the socket (world dir? tmp? env override?); leave room for TCP if ever remote.
+- **Framing:** JSON Lines for dev-friendliness vs CBOR for compactness; likely JSON first, optional CBOR later.
+- **Command surface (MVP):** send-event, inject-receipt, query-state, query-manifest; governance verbs (propose/approve/apply) to be confirmed after P3.
+- **Auth:** currently assumes local trusted caller; if remote is allowed, decide on auth (mTLS/token) and capability scoping.
+- **Versioning:** include a protocol version field so CLI/REPL/tests can negotiate changes.
