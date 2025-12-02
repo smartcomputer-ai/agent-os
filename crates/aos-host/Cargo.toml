@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 aos-kernel = { path = "../aos-kernel" }
 aos-effects = { path = "../aos-effects" }
-aos-store = { path = "../aos-store" }
 aos-cbor = { path = "../aos-cbor" }
 
 tokio = { version = "1", features = ["full"] }
@@ -17,3 +16,5 @@ tracing = "0.1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_cbor = "0.11"
+aos-store = { path = "../aos-store" }

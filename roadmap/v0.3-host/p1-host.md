@@ -331,7 +331,7 @@ serde_json = "1"
    - [ ] Timer-aware partitioning (defer to P2) and CLI-surface wiring
    - [x] Rehydration from queued effects + tail intents/receipts
 9. [x] Implement `BatchRunner` (`modes/batch.rs`) using `run_cycle()`
-10. [ ] Implement CLI commands (`cli/`)
+10. [x] Implement CLI commands (`aos-cli`) — `aos world init/step` using `aos-host` BatchRunner
 11. [ ] Write unit tests for WorldHost (open/enqueue_external/drain/run_cycle/snapshot/state)
 12. [ ] Test with `examples/00-counter`
 13. [ ] (Forwarded from P5) Add a minimal `p1-host-test` harness (see `p1-host-test.md`) so integration tests can drive `WorldHost` through the same `run_cycle` entry point

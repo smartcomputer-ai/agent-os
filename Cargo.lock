@@ -139,8 +139,14 @@ dependencies = [
 name = "aos-cli"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "aos-host",
  "aos-kernel",
+ "aos-store",
  "clap",
+ "serde_cbor",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -203,6 +209,7 @@ dependencies = [
  "async-trait",
  "clap",
  "serde",
+ "serde_cbor",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
