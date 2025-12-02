@@ -1,0 +1,152 @@
+use std::path::Path;
+use std::sync::Arc;
+
+use aos_effects::EffectReceipt;
+use aos_kernel::{Kernel, KernelBuilder, KernelConfig, KernelHeights};
+use aos_store::Store;
+
+use crate::adapters::registry::AdapterRegistry;
+use crate::adapters::registry::AdapterRegistryConfig;
+use crate::config::HostConfig;
+use crate::error::HostError;
+
+#[derive(Debug, Clone)]
+pub enum ExternalEvent {
+    DomainEvent { schema: String, value: Vec<u8> },
+    Receipt(EffectReceipt),
+}
+
+#[derive(Clone, Copy)]
+pub enum RunMode<'a> {
+    Batch,
+    WithTimers { adapter_registry: &'a AdapterRegistry },
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DrainOutcome {
+    pub ticks: u64,
+    pub idle: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CycleOutcome {
+    pub initial_drain: DrainOutcome,
+    pub effects_dispatched: usize,
+    pub receipts_applied: usize,
+    pub final_drain: DrainOutcome,
+}
+
+pub struct WorldHost<S: Store + 'static> {
+    kernel: Kernel<S>,
+    adapter_registry: AdapterRegistry,
+    config: HostConfig,
+}
+
+impl<S: Store + 'static> WorldHost<S> {
+    pub fn open(
+        store: Arc<S>,
+        manifest_path: &Path,
+        host_config: HostConfig,
+        kernel_config: KernelConfig,
+    ) -> Result<Self, HostError> {
+        let mut builder = KernelBuilder::new(store.clone())
+            .with_fs_journal(manifest_path.parent().unwrap_or(Path::new(".")))?;
+
+        if let Some(dir) = kernel_config.module_cache_dir.clone() {
+            builder = builder.with_module_cache_dir(dir);
+        }
+
+        builder = builder.with_eager_module_load(kernel_config.eager_module_load);
+
+        if let Some(resolver) = kernel_config.secret_resolver.clone() {
+            builder = builder.with_secret_resolver(resolver);
+        }
+
+        builder = builder.allow_placeholder_secrets(kernel_config.allow_placeholder_secrets);
+
+        let kernel = builder.from_manifest_path(manifest_path)?;
+
+        let adapter_registry = AdapterRegistry::new(AdapterRegistryConfig {
+            effect_timeout: host_config.effect_timeout,
+        });
+
+        Ok(Self {
+            kernel,
+            adapter_registry,
+            config: host_config,
+        })
+    }
+
+    pub fn config(&self) -> &HostConfig {
+        &self.config
+    }
+
+    pub fn adapter_registry_mut(&mut self) -> &mut AdapterRegistry {
+        &mut self.adapter_registry
+    }
+
+    pub fn enqueue_external(&mut self, evt: ExternalEvent) -> Result<(), HostError> {
+        match evt {
+            ExternalEvent::DomainEvent { schema, value } => {
+                self.kernel.submit_domain_event(schema, value);
+            }
+            ExternalEvent::Receipt(receipt) => {
+                self.kernel.handle_receipt(receipt)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn drain(&mut self) -> Result<DrainOutcome, HostError> {
+        self.kernel.tick_until_idle()?;
+        Ok(DrainOutcome {
+            ticks: 0,
+            idle: true,
+        })
+    }
+
+    pub fn state(&self, reducer: &str, key: Option<&[u8]>) -> Option<&Vec<u8>> {
+        // keyed state not yet implemented; ignore key
+        let _ = key;
+        self.kernel.reducer_state(reducer)
+    }
+
+    pub fn snapshot(&mut self) -> Result<(), HostError> {
+        Ok(self.kernel.create_snapshot()?)
+    }
+
+    pub async fn run_cycle(&mut self, mode: RunMode<'_>) -> Result<CycleOutcome, HostError> {
+        let initial = self.drain()?;
+        let intents = self.kernel.drain_effects();
+        let effects_dispatched = intents.len();
+
+        let receipts = match mode {
+            RunMode::Batch => self.adapter_registry.execute_batch(intents).await,
+            RunMode::WithTimers { adapter_registry } => adapter_registry.execute_batch(intents).await,
+        };
+
+        let receipts_applied = receipts.len();
+        for receipt in receipts {
+            self.kernel.handle_receipt(receipt)?;
+        }
+        let final_drain = self.drain()?;
+        Ok(CycleOutcome {
+            initial_drain: initial,
+            effects_dispatched,
+            receipts_applied,
+            final_drain,
+        })
+    }
+
+    pub fn heights(&self) -> KernelHeights {
+        self.kernel.heights()
+    }
+
+    pub fn kernel(&self) -> &Kernel<S> {
+        &self.kernel
+    }
+
+    pub fn kernel_mut(&mut self) -> &mut Kernel<S> {
+        &mut self.kernel
+    }
+}

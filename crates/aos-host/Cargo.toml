@@ -1,0 +1,19 @@
+[package]
+name = "aos-host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aos-kernel = { path = "../aos-kernel" }
+aos-effects = { path = "../aos-effects" }
+aos-store = { path = "../aos-store" }
+aos-cbor = { path = "../aos-cbor" }
+
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
