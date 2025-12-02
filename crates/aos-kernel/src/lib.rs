@@ -27,4 +27,7 @@ pub use secret::{
     SecretResolverError, SharedSecretResolver,
 };
 pub use shadow::{ShadowConfig, ShadowExecutor, ShadowSummary};
-pub use world::{Kernel, KernelBuilder, KernelConfig, PlanResultEntry};
+pub use world::{
+    Kernel, KernelBuilder, KernelConfig, KernelHeights, PlanResultEntry, TailIntent, TailReceipt,
+    TailScan,
+};

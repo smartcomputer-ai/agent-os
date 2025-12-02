@@ -94,6 +94,7 @@ pub struct Kernel<S: Store> {
     governance: GovernanceManager,
     secret_resolver: Option<SharedSecretResolver>,
     allow_placeholder_secrets: bool,
+    last_snapshot_height: Option<JournalSeq>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +103,32 @@ pub struct PlanResultEntry {
     pub plan_id: u64,
     pub output_schema: String,
     pub value_cbor: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelHeights {
+    pub snapshot: Option<JournalSeq>,
+    pub head: JournalSeq,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TailIntent {
+    pub seq: JournalSeq,
+    pub record: EffectIntentRecord,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TailReceipt {
+    pub seq: JournalSeq,
+    pub record: EffectReceiptRecord,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct TailScan {
+    pub from: JournalSeq,
+    pub to: JournalSeq,
+    pub intents: Vec<TailIntent>,
+    pub receipts: Vec<TailReceipt>,
 }
 
 #[derive(Clone, Debug)]
@@ -334,6 +361,7 @@ impl<S: Store + 'static> Kernel<S> {
             secret_resolver: secret_resolver.clone(),
             allow_placeholder_secrets: config.allow_placeholder_secrets,
             secrets: loaded.secrets,
+            last_snapshot_height: None,
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
@@ -516,6 +544,7 @@ impl<S: Store + 'static> Kernel<S> {
             snapshot_ref: hash.to_hex(),
             height,
         }))?;
+        self.last_snapshot_height = Some(height);
         Ok(())
     }
 
@@ -537,6 +566,7 @@ impl<S: Store + 'static> Kernel<S> {
         }
         if let Some(snapshot) = latest_snapshot {
             resume_seq = Some(snapshot.height);
+            self.last_snapshot_height = Some(snapshot.height);
             self.load_snapshot(&snapshot)?;
         }
         self.suppress_journal = true;
@@ -594,6 +624,7 @@ impl<S: Store + 'static> Kernel<S> {
         let bytes = self.store.get_blob(hash)?;
         let snapshot: KernelSnapshot = serde_cbor::from_slice(&bytes)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
+        self.last_snapshot_height = Some(record.height);
         self.apply_snapshot(snapshot)
     }
 
@@ -716,11 +747,86 @@ impl<S: Store + 'static> Kernel<S> {
         self.reducer_state.get(reducer)
     }
 
+    pub fn heights(&self) -> KernelHeights {
+        KernelHeights {
+            snapshot: self.last_snapshot_height,
+            head: self.journal.next_seq(),
+        }
+    }
+
+    pub fn journal_head(&self) -> JournalSeq {
+        self.journal.next_seq()
+    }
+
+    pub fn queued_effects_snapshot(&self) -> Vec<EffectIntentSnapshot> {
+        self.effect_manager
+            .queued()
+            .iter()
+            .map(EffectIntentSnapshot::from_intent)
+            .collect()
+    }
+
+    pub fn pending_reducer_receipts_snapshot(&self) -> Vec<ReducerReceiptSnapshot> {
+        self.pending_reducer_receipts
+            .iter()
+            .map(|(hash, ctx)| ReducerReceiptSnapshot::from_context(*hash, ctx))
+            .collect()
+    }
+
     pub fn pending_plan_receipts(&self) -> Vec<(u64, [u8; 32])> {
         self.pending_receipts
             .iter()
             .map(|(hash, plan_id)| (*plan_id, *hash))
             .collect()
+    }
+
+    pub fn tail_scan_after(&self, height: JournalSeq) -> Result<TailScan, KernelError> {
+        let head = self.journal.next_seq();
+        let from_seq = if self.last_snapshot_height.is_none() && height == 0 {
+            0
+        } else {
+            height.saturating_add(1)
+        };
+        if from_seq >= head {
+            return Ok(TailScan {
+                from: height,
+                to: head,
+                intents: Vec::new(),
+                receipts: Vec::new(),
+            });
+        }
+
+        let entries = self.journal.load_from(from_seq)?;
+        let mut scan = TailScan {
+            from: height,
+            to: head,
+            intents: Vec::new(),
+            receipts: Vec::new(),
+        };
+
+        for entry in entries {
+            match entry.kind {
+                JournalKind::EffectIntent => {
+                    let record: EffectIntentRecord = serde_cbor::from_slice(&entry.payload)
+                        .map_err(|err| KernelError::Journal(err.to_string()))?;
+                    scan.intents.push(TailIntent {
+                        seq: entry.seq,
+                        record,
+                    });
+                }
+                JournalKind::EffectReceipt => {
+                    let record: EffectReceiptRecord = serde_cbor::from_slice(&entry.payload)
+                        .map_err(|err| KernelError::Journal(err.to_string()))?;
+                    scan.receipts.push(TailReceipt {
+                        seq: entry.seq,
+                        record,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        Ok(scan)
     }
 
     pub fn has_plan_instance(&self, id: u64) -> bool {
@@ -1532,10 +1638,15 @@ fn diff_named_refs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::mem::MemJournal;
+    use crate::journal::{mem::MemJournal, JournalEntry, JournalKind};
     use aos_air_types::{HashRef, SecretDecl};
     use aos_store::MemStore;
     use aos_wasm_abi::ReducerEffect;
+    use serde_cbor::ser::to_vec;
+    use std::fs::File;
+    use std::io::Write;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     fn named_ref(name: &str, hash: &str) -> NamedRef {
         NamedRef {
@@ -1564,6 +1675,12 @@ mod tests {
             routing: None,
             triggers: vec![],
         }
+    }
+
+    fn write_manifest(path: &std::path::Path, manifest: &Manifest) {
+        let bytes = to_vec(manifest).expect("serialize manifest");
+        let mut file = File::create(path).expect("create manifest file");
+        file.write_all(&bytes).expect("write manifest");
     }
 
     #[test]
@@ -1664,6 +1781,56 @@ mod tests {
         let result = Kernel::from_loaded_manifest(store, loaded, Box::new(MemJournal::new()));
 
         assert!(matches!(result, Err(KernelError::SecretResolverMissing)));
+    }
+
+    #[test]
+    fn tail_scan_returns_entries_after_height() {
+        let tmp = TempDir::new().unwrap();
+        let manifest_path = tmp.path().join("manifest.cbor");
+        write_manifest(&manifest_path, &empty_manifest());
+
+        let store = Arc::new(MemStore::new());
+        let mut kernel = KernelBuilder::new(store)
+            .from_manifest_path(&manifest_path)
+            .expect("kernel");
+
+        let intent = EffectIntentRecord {
+            intent_hash: [1u8; 32],
+            kind: "http.request".into(),
+            cap_name: "cap/http@1".into(),
+            params_cbor: vec![1],
+            idempotency_key: [2u8; 32],
+            origin: IntentOriginRecord::Reducer {
+                name: "example/Reducer@1".into(),
+            },
+        };
+        let intent_bytes = serde_cbor::to_vec(&intent).unwrap();
+        kernel
+            .journal
+            .append(JournalEntry::new(JournalKind::EffectIntent, &intent_bytes))
+            .unwrap();
+
+        let receipt = EffectReceiptRecord {
+            intent_hash: [1u8; 32],
+            adapter_id: "stub.http".into(),
+            status: aos_effects::ReceiptStatus::Ok,
+            payload_cbor: vec![],
+            cost_cents: None,
+            signature: vec![],
+        };
+        let receipt_bytes = serde_cbor::to_vec(&receipt).unwrap();
+        kernel
+            .journal
+            .append(JournalEntry::new(JournalKind::EffectReceipt, &receipt_bytes))
+            .unwrap();
+
+        let scan = kernel.tail_scan_after(0).expect("tail scan");
+        assert_eq!(scan.intents.len(), 1);
+        assert_eq!(scan.receipts.len(), 1);
+        assert_eq!(scan.intents[0].seq, 0);
+        assert_eq!(scan.receipts[0].seq, 1);
+        assert_eq!(scan.intents[0].record.intent_hash, [1u8; 32]);
+        assert_eq!(scan.receipts[0].record.intent_hash, [1u8; 32]);
     }
 }
 
