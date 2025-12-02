@@ -1,6 +1,6 @@
-# P4: REPL + Developer Experience
+# P4: REPL & Developer Experience
 
-**Goal:** Interactive exploration of running worlds.
+**Goal:** Provide a pleasant interactive loop (`aos dev`) that talks to a running world (auto-starts daemon if needed) using the same control channel.
 
 ## REPL Implementation
 
@@ -22,14 +22,14 @@ use rustyline::Editor;
 use rustyline::error::ReadlineError;
 
 pub struct ReplSession<S: Store + 'static> {
-    runtime: WorldRuntime<S>,
+    host: WorldHost<S>,
     timer_heap: Arc<Mutex<TimerHeap>>,
     editor: Editor<()>,
     history_path: PathBuf,
 }
 
 impl<S: Store + 'static> ReplSession<S> {
-    pub fn new(runtime: WorldRuntime<S>, timer_heap: Arc<Mutex<TimerHeap>>) -> Self {
+    pub fn new(host: WorldHost<S>, timer_heap: Arc<Mutex<TimerHeap>>) -> Self {
         let mut editor = Editor::<()>::new().expect("create editor");
         let history_path = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -39,7 +39,7 @@ impl<S: Store + 'static> ReplSession<S> {
         // Load history
         let _ = editor.load_history(&history_path);
 
-        Self { runtime, timer_heap, editor, history_path }
+        Self { host, timer_heap, editor, history_path }
     }
 
     pub async fn run(&mut self) -> Result<(), HostError> {
@@ -142,7 +142,7 @@ impl<S: Store + 'static> ReplSession<S> {
             .map_err(|e| HostError::InvalidInput(e.to_string()))?;
         let cbor = serde_cbor::to_vec(&value)?;
 
-        self.runtime.enqueue_event(ExternalEvent::DomainEvent {
+        self.host.enqueue(ExternalEvent::DomainEvent {
             schema: schema.to_string(),
             value: cbor,
         })?;
@@ -163,7 +163,7 @@ impl<S: Store + 'static> ReplSession<S> {
             return Ok(());
         }
 
-        match self.runtime.state(reducer) {
+        match self.host.state(reducer) {
             Some(bytes) => {
                 // Try to decode as JSON for pretty printing
                 match serde_cbor::from_slice::<serde_json::Value>(bytes) {
@@ -181,7 +181,7 @@ impl<S: Store + 'static> ReplSession<S> {
     }
 
     fn cmd_effects(&self) -> Result<(), HostError> {
-        let effects = self.runtime.kernel().drain_effects();
+        let effects = self.host.pending_effects();
         if effects.is_empty() {
             println!("No pending effects");
         } else {
@@ -218,24 +218,27 @@ impl<S: Store + 'static> ReplSession<S> {
         // Fire due timers
         {
             let mut heap = self.timer_heap.lock().unwrap();
-            let fired = self.runtime.fire_due_timers(&mut heap)?;
+            let fired = self.host.fire_due_timers(&mut heap)?;
             if fired > 0 {
                 println!("Fired {} timer(s)", fired);
             }
         }
 
         // Drain and execute
-        let outcome = self.runtime.drain(None)?;
+        let outcome = self.host.drain()?;
         println!("Drained: {} ticks", outcome.ticks);
 
-        let receipts = self.runtime.execute_effects().await?;
+        let intents = self.host.pending_effects();
+        let receipts = self.host.dispatch_effects(intents).await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
         if !receipts.is_empty() {
             println!("Executed {} effect(s)", receipts.len());
             for receipt in receipts {
-                self.runtime.enqueue_event(ExternalEvent::Receipt(receipt))?;
+                self.host.enqueue(ExternalEvent::Receipt(receipt))?;
             }
             // Drain again after receipts
-            let outcome2 = self.runtime.drain(None)?;
+            let outcome2 = self.host.drain()?;
             if outcome2.ticks > 0 {
                 println!("Drained: {} more ticks", outcome2.ticks);
             }
@@ -271,14 +274,14 @@ impl<S: Store + 'static> ReplSession<S> {
     }
 
     fn cmd_snapshot(&mut self) -> Result<(), HostError> {
-        self.runtime.snapshot()?;
+        self.host.snapshot()?;
         println!("Snapshot created");
         Ok(())
     }
 
     fn cmd_manifest(&self) -> Result<(), HostError> {
         // Show manifest summary
-        let kernel = self.runtime.kernel();
+        let kernel = self.host.kernel();
         println!("Manifest:");
         println!("  Reducers: ...");  // TODO: expose from kernel
         println!("  Plans: ...");
@@ -341,22 +344,22 @@ async fn run_dev(path: &Path, template: &str) -> Result<()> {
         scaffold_world(path, template)?;
     }
 
-    // Open runtime
+    // Open host
     let store = Arc::new(FsStore::open(path)?);
-    let config = RuntimeConfig::from_env()?;
+    let config = HostConfig::from_env()?;
 
     let timer_adapter = TimerAdapter::new();
     let timer_heap = timer_adapter.heap();
 
-    let mut runtime = WorldRuntime::open(store, &path.join("manifest.air.json"), config)?;
-    runtime.adapters.register(Box::new(timer_adapter));
-    runtime.adapters.register(Box::new(HttpAdapter::new(HttpAdapterConfig::default())));
+    let mut host = WorldHost::open(store, &path.join("manifest.air.json"), config)?;
+    host.adapters.register(Box::new(timer_adapter));
+    host.adapters.register(Box::new(HttpAdapter::new(HttpAdapterConfig::default())));
     if let Ok(llm) = LlmAdapter::from_env() {
-        runtime.adapters.register(Box::new(llm));
+        host.adapters.register(Box::new(llm));
     }
 
     // Start REPL
-    let mut session = ReplSession::new(runtime, timer_heap);
+    let mut session = ReplSession::new(host, timer_heap);
     session.run().await?;
 
     Ok(())
@@ -395,21 +398,14 @@ dirs = "5"
 
 ## Tasks
 
-1. Add `rustyline` for line editing and history
-2. Implement `ReplSession` with readline loop
-3. Implement command handlers (event, state, effects, timers, step, run)
-4. Add pretty formatting with colors
-5. Implement `aos dev` CLI command
-6. Add world scaffolding from templates
-7. Add command history persistence
-8. Test interactive workflow with examples
+1) Implement control-channel client reused by CLI/REPL (Unix socket or stdin JSON).
+2) Map REPL commands to control ops; add pretty printers for events/effects/receipts/state.
+3) Add scaffolding helper for templates (minimal, counter, chat).
+4) Wire `aos dev` to auto-start daemon if absent, then launch REPL; Ctrl-C exits REPL and stops auto-started daemon.
+5) Persist history under platform data dir.
 
 ## Success Criteria
 
-- `aos dev examples/00-counter` drops into REPL
-- Can send events with `event demo/Increment@1 {}`
-- Can query state with `state demo/Counter@1`
-- `step` drains kernel and executes effects
-- `run` runs continuously until Ctrl-C
-- History persists across sessions
-- Pleasant colored output
+- `aos dev examples/00-counter` lets you `event demo/Increment@1 {}` and see state update.
+- Works whether daemon already running or auto-started; exiting REPL shuts down auto-started daemon cleanly.
+- History persists across sessions; output is readable/colored.

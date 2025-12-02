@@ -1,6 +1,6 @@
 # P3: HTTP + LLM Adapters
 
-**Goal:** Real effect adapters for external I/O.
+**Goal:** Ship real HTTP and LLM adapters with sensible defaults/allowlists, wired into WorldHost/daemon and batch modes.
 
 ## HTTP Adapter
 
@@ -337,14 +337,14 @@ pub struct LlmGenerateReceipt {
 
 ```rust
 // config.rs additions
-pub struct RuntimeConfig {
+pub struct HostConfig {
     // ... existing fields ...
     pub http: HttpAdapterConfig,
     pub llm: Option<LlmAdapterConfig>,
 }
 
 // Environment-based config
-impl RuntimeConfig {
+impl HostConfig {
     pub fn from_env() -> Result<Self, HostError> {
         Ok(Self {
             http: HttpAdapterConfig::default(),
@@ -356,14 +356,12 @@ impl RuntimeConfig {
 
 ## Tasks
 
-1. Add `reqwest` dependency with JSON feature
-2. Implement `HttpAdapter` with reqwest
-3. Implement `LlmAdapter` with OpenAI-compatible API
-4. Add param/receipt types matching spec schemas
-5. Add host validation (allowed hosts, body size limits)
-6. Add environment variable config for API keys
-7. Test with `examples/03-fetch-notify` (HTTP)
-8. Test with `examples/07-llm-summarizer` (LLM)
+1) Add `reqwest`, `url`, `serde_json` deps; wrap adapters behind `adapter-http`/`adapter-llm` feature flags (default on).
+2) Implement HTTP adapter with host allowlist + body cap; map errors to `ReceiptStatus::Error`; tests for blocked host/oversize body.
+3) Implement LLM adapter (OpenAI-compatible) with env config; enforce token/timeout limits; deterministic error when API key missing.
+4) Add param/receipt types aligned to spec schemas; surface config via `HostConfig` (http + optional llm).
+5) Wire adapters into WorldHost/daemon; CLI hints (`aos world run` auto-registers llm if key present).
+6) Smoke-test `examples/03-fetch-notify` and `examples/07-llm-summarizer` (with key).
 
 ## Dependencies (additions)
 

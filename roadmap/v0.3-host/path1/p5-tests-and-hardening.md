@@ -1,32 +1,35 @@
-# P5: Tests, Determinism, and Recording
+# P5: Tests & Hardening
 
-**Goal:** Re-base tests on the new host runtime, add deterministic record/replay for adapters, and harden operational safeguards. This phase can be scheduled after P1–P4 land.
+**Goal:** Align testing with WorldHost, add deterministic record/replay, and enforce guardrails once P1–P4 land.
 
 ## Focus Areas
 
-- **Host-backed test harness**: expose a lightweight test facade over `aos-host::runtime` so integration tests use the same code paths as the daemon and batch modes.
-- **Deterministic adapters**: in-memory timer, HTTP, and LLM shims that can record receipts to fixtures and replay them byte-for-byte.
-- **Replay-or-die checks**: ensure worlds replay from genesis to the latest snapshot with identical state; add a CI job that runs `cargo test -- --nocapture` plus a replay verification.
-- **Policy/allowlist enforcement**: validate adapter allowlists (HTTP hosts, model names) in tests; add negative cases.
-- **Load/snapshot safety**: fuzz-ish test that alternates drain/execute/snapshot/reopen to catch snapshot boundary bugs.
+- Host-backed test harness: lightweight facade over `aos-host::WorldHost` so integration tests follow the same paths as daemon/batch.
+- Deterministic adapters: in-memory timer/http/llm shims with record/replay fixtures.
+- Replay-or-die: replay from genesis to latest snapshot and assert byte-identical state.
+- Policy/allowlist enforcement: cover host/size/model limits with negative cases.
+- Snapshot boundary safety: alternate drain/execute/snapshot/reopen to catch persistence bugs.
 
-## Work Items
+## Tasks
 
-1. Add `aos-testkit` helpers that spin up `WorldRuntime` with in-memory store and deterministic adapters.
-2. Add record/replay helpers (feature-gated) for HTTP and LLM adapters; fixtures under `tests/data/`.
-3. Write integration tests for example worlds (`examples/00-counter`, timer demo, HTTP fetch, LLM summarizer) using the new helpers.
-4. Add a replay check: open world → run step(s) → close → reopen → replay journal → assert state and receipts match.
-5. Add allowlist/limit tests (HTTP host deny, response size limit, missing API key for LLM).
-6. Add CI target `cargo test -p aos-host -p aos-testkit` plus replay job; document in CONTRIBUTING.
+1) Add `TestHost` helper mirroring CLI semantics (enqueue, drain, dispatch, apply receipts).
+2) Deterministic timer/http/llm shims; record/replay helpers (feature-gated) with fixtures in `tests/data/`.
+3) Integration tests for example worlds (counter, timer, http fetch, llm summarizer) via `TestHost`.
+4) Replay-or-die check in CI; document the command in CONTRIBUTING.
+5) Policy validation tests for adapter configs (allowlists, size/token limits, missing API key).
 
-## Deliverables
+### Naming / packaging options (decide after P1–P4 land)
 
-- `aos-testkit` utilities that mirror CLI semantics (enqueue, drain, execute, apply receipts).
-- Fixture-backed record/replay adapters for HTTP/LLM (opt-in feature flags to keep default builds lean).
-- Integration tests covering happy-path and failure-path for timers, HTTP, LLM.
-- CI docs/commands showing how to run replay verification locally and in CI.
+- Keep crate name `aos-testkit` and tighten scope in README/docs to “tests via WorldHost.”
+- Or rename to `aos-testhost` to make the WorldHost dependency explicit. If we rename:
+  - Update workspace members, imports, and CI scripts.
+  - Optionally keep a temporary `aos-testkit` re-export for transition, then remove.
+- Either way, deprecate old bespoke harnesses once `TestHost` covers them.
 
-## Out-of-Scope (ok to punt further)
+Decision point: revisit post P4 (REPL/daemon) when the host API stabilizes; pick the name then to avoid churn if APIs shift.
 
-- Full fuzzing or long-running soak tests.
-- Real cryptographic signing for receipts (can stay stubbed until a later milestone).
+## Success Criteria
+
+- `cargo test -p aos-host -p aos-testkit` passes without network when replay fixtures are used.
+- Replay check proves state equality after reopen.
+- Negative cases (blocked host, oversize body, missing API key) return error receipts, not panics.

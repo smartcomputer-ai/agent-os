@@ -1,12 +1,32 @@
-# P2: Daemon Mode + Timer Adapter
+# P2: Daemon Mode + Real Timers
 
-**Goal:** Long-lived world runner with real timer delivery.
+**Goal:** Turn batch WorldHost into a long-lived host with real timer delivery, control channel, and clean shutdown.
 
 ## Overview
 
-Replace stub timer with a real timer adapter that schedules OS timers. Implement a daemon loop that continuously drains the kernel and fires due timers.
+Replace the stub timer with a real timer adapter that schedules OS timers. Implement a daemon loop that continuously drains the kernel, fires due timers, and responds to control-channel commands.
 
 ## New Components
+
+### Host Loop (daemon)
+
+```
+WorldDaemon {
+  host: WorldHost,
+  timer_heap: TimerHeap,
+  control_rx: mpsc::Receiver<ControlMsg>,
+}
+
+loop select {
+  ctrl msg   => enqueue event/receipt/proposal, trigger drain
+  timer due  => inject TimerFired, drain
+  idle tick  => drain if work pending
+  shutdown   => snapshot + exit
+}
+```
+
+- Control channel MVP: JSON over stdin/stdout or Unix socket with commands like `send-event`, `inject-receipt`, later `shadow/apply`.
+- Ctrl-C triggers graceful shutdown (broadcast), final snapshot.
 
 ### TimerHeap
 
@@ -89,11 +109,11 @@ impl AsyncEffectAdapter for TimerAdapter {
 }
 ```
 
-### WorldRuntime Timer Integration
+### WorldHost Timer Integration
 
 ```rust
 // runtime.rs additions
-impl<S: Store + 'static> WorldRuntime<S> {
+impl<S: Store + 'static> WorldHost<S> {
     /// Fire all due timers, injecting TimerFired events into the kernel
     pub fn fire_due_timers(&mut self, timer_heap: &mut TimerHeap) -> Result<usize, HostError> {
         let now = Instant::now();
@@ -121,13 +141,13 @@ impl<S: Store + 'static> WorldRuntime<S> {
 use tokio::sync::broadcast;
 
 pub struct WorldDaemon<S: Store + 'static> {
-    runtime: WorldRuntime<S>,
+    host: WorldHost<S>,
     timer_heap: Arc<Mutex<TimerHeap>>,
     shutdown_rx: broadcast::Receiver<()>,
 }
 
 impl<S: Store + 'static> WorldDaemon<S> {
-    pub fn new(runtime: WorldRuntime<S>, timer_heap: Arc<Mutex<TimerHeap>>) -> Self;
+    pub fn new(host: WorldHost<S>, timer_heap: Arc<Mutex<TimerHeap>>) -> Self;
 
     pub async fn run(&mut self) -> Result<(), HostError> {
         tracing::info!("World daemon started");
@@ -144,7 +164,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 // Timer fired
                 _ = sleep => {
                     let mut heap = self.timer_heap.lock().unwrap();
-                    let fired = self.runtime.fire_due_timers(&mut heap)?;
+                    let fired = self.host.fire_due_timers(&mut heap)?;
                     if fired > 0 {
                         tracing::info!("Fired {} timer(s)", fired);
                     }
@@ -162,15 +182,18 @@ impl<S: Store + 'static> WorldDaemon<S> {
         }
 
         // Clean shutdown: snapshot
-        self.runtime.snapshot()?;
+        self.host.snapshot()?;
         tracing::info!("World daemon stopped");
         Ok(())
     }
 
     async fn drain_and_execute(&mut self) -> Result<(), HostError> {
         loop {
-            let outcome = self.runtime.drain(None)?;
-            let receipts = self.runtime.execute_effects().await?;
+            let outcome = self.host.drain()?;
+            let intents = self.host.pending_effects();
+            let receipts = self.host.dispatch_effects(intents).await
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?;
 
             if receipts.is_empty() && outcome.idle {
                 break;
@@ -178,7 +201,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
 
             // Feed receipts back
             for receipt in receipts {
-                self.runtime.enqueue_event(ExternalEvent::Receipt(receipt))?;
+                self.host.enqueue(ExternalEvent::Receipt(receipt))?;
             }
         }
         Ok(())
@@ -204,13 +227,13 @@ pub enum WorldCommands {
 // Implementation
 async fn run_daemon(path: &Path) -> Result<()> {
     let store = Arc::new(FsStore::open(path)?);
-    let config = RuntimeConfig::default();
+    let config = HostConfig::default();
 
     let timer_adapter = TimerAdapter::new();
     let timer_heap = timer_adapter.heap();
 
-    let mut runtime = WorldRuntime::open(store, &path.join("manifest.air.json"), config)?;
-    runtime.adapters.register(Box::new(timer_adapter));
+    let mut host = WorldHost::open(store, &path.join("manifest.air.json"), config)?;
+    host.adapters.register(Box::new(timer_adapter));
     // Register other adapters...
 
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
@@ -221,7 +244,7 @@ async fn run_daemon(path: &Path) -> Result<()> {
         shutdown_tx.send(()).ok();
     });
 
-    let mut daemon = WorldDaemon::new(runtime, timer_heap);
+    let mut daemon = WorldDaemon::new(host, timer_heap);
     daemon.run().await?;
 
     Ok(())
@@ -252,14 +275,12 @@ fn setup_logging() {
 
 ## Tasks
 
-1. Implement `TimerHeap` with min-heap ordering
-2. Implement real `TimerAdapter` that schedules into heap
-3. Add `fire_due_timers()` to `WorldRuntime`
-4. Implement `WorldDaemon` with tokio select loop
-5. Add `aos world run` CLI command
-6. Add Ctrl-C shutdown handling
-7. Set up tracing for pretty logging
-8. Test with `examples/01-hello-timer`
+1) Implement `TimerHeap` + `TimerAdapter` (real deadlines, not stub).
+2) Add `fire_due_timers()` to `WorldHost`.
+3) Implement `WorldDaemon` select loop with control channel + graceful shutdown.
+4) Wire `aos world run` CLI; Ctrl-C triggers snapshot and exit.
+5) Set up `tracing-subscriber` for readable logs.
+6) Test with `examples/01-hello-timer` (fires at wall-clock times), replay after restart.
 
 ## Dependencies (additions)
 
