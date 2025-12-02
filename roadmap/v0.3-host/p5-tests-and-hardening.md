@@ -14,7 +14,7 @@
 
 1) Add `TestHost` helper mirroring control/CLI semantics (send-event/enqueue, run_to_idle/drain_and_execute, pending_effects, dispatch_effects, apply_receipt, state_json).
 2) Deterministic timer/http/llm shims; record/replay helpers (feature-gated) with fixtures in `tests/data/` (canonical CBOR of intents/receipts).
-3) Integration tests for example worlds (counter, timer, http fetch, llm summarizer) via `TestHost` using the same drain-and-dispatch loop as daemon/REPL (`run_cycle_with_timers` when timers matter).
+3) Integration tests for example worlds (counter, timer, http fetch, llm summarizer) via `TestHost` using the same drain-and-dispatch loop as daemon/REPL (`run_cycle(RunMode::WithTimers)` when timers matter).
 4) Replay-or-die check in CI; document the command in CONTRIBUTING (e.g., `aos world replay ./world --assert`).
 5) Policy validation tests for adapter configs (size/token limits, missing API key); ensure negative cases return error receipts, not panics.
 6) Optional: add a tiny `aos world replay` CLI for developer/CI use.

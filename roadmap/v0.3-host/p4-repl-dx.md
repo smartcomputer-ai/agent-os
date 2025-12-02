@@ -4,7 +4,7 @@
 
 ## Principles
 - Single interface: all REPL commands go through the control channel (Unix socket/stdio). No direct kernel/adapter access.
-- Respect daemon semantics: `step` in daemon mode must invoke `run_cycle_with_timers` (via control `step`). Batch-only paths are a fallback when no daemon is running.
+- Respect daemon semantics: `step` in daemon mode must invoke `run_cycle(RunMode::WithTimers)` (via control `step`). Batch-only paths are a fallback when no daemon is running.
 - Auto-manage lifecycle: if no daemon is running, auto-start one for the session; on exit, shut it down only if we started it.
 - Clear command semantics: distinguish enqueue-only vs enqueue+step; keep commands idempotent and versioned with the control protocol.
 
@@ -29,11 +29,11 @@ crates/aos-host/src/repl/
 
 ## Command Surface (maps to control verbs)
 - `event <schema> <json>` → `send-event` (enqueue only).
-- `event-step <schema> <json>` (or `event ... --step`) → enqueue + `step` (daemon uses `run_cycle_with_timers`).
+- `event-step <schema> <json>` (or `event ... --step`) → enqueue + `step` (daemon uses `run_cycle(RunMode::WithTimers)`).
 - `event @file.json` or `event @-` → allow file/stdin inputs (client-side convenience before sending `send-event`).
 - `state <reducer> [--key <json>]` → `query-state` (returns raw bytes; REPL pretty-prints if decodes as JSON).
 - `state` with no args: list reducers by reading manifest via control (once exposed).
-- `step` → control `step` (daemon: `run_cycle_with_timers`; batch fallback: local `WorldHost::run_cycle` if no daemon).
+- `step` → control `step` (daemon: `run_cycle(RunMode::WithTimers)`; batch fallback: local `WorldHost::run_cycle` if no daemon).
 - `snapshot` → control `snapshot`.
 - `shutdown` → control `shutdown` (only if we own the daemon).
 - `manifest` → optional `query-manifest` control verb (or drop if not implemented).

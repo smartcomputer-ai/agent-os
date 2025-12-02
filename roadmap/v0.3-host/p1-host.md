@@ -67,7 +67,10 @@ impl<S: Store + 'static> WorldHost<S> {
     /// This is the primary entry point for batch/daemon/REPL modes.
     /// Internally drains effects (taking ownership), dispatches via adapters,
     /// applies all receipts, and drains again.
-    pub async fn run_cycle(&mut self) -> Result<CycleOutcome, HostError>;
+    /// `RunMode::Batch` uses the generic adapter path.
+    /// `RunMode::WithTimers { scheduler }` partitions timer.set intents,
+    /// schedules them, and dispatches the rest — this keeps all run logic in one place.
+    pub async fn run_cycle(&mut self, mode: RunMode<'_>) -> Result<CycleOutcome, HostError>;
 
     /// Access the underlying kernel (for advanced use / testing)
     pub fn kernel(&self) -> &Kernel<S>;
@@ -89,6 +92,13 @@ pub struct CycleOutcome {
     pub effects_dispatched: usize,
     pub receipts_applied: usize,
     pub final_drain: DrainOutcome,
+}
+
+/// Run modes share the same core loop; timer partitioning lives here so
+/// batch/daemon/REPL never fork the drain/dispatch path.
+pub enum RunMode<'a> {
+    Batch,
+    WithTimers { scheduler: &'a mut TimerScheduler },
 }
 ```
 
@@ -200,11 +210,8 @@ impl<S: Store + 'static> BatchRunner<S> {
 
     /// Run a single batch step:
     /// 1. Inject events via `enqueue_external`
-    /// 2. Call `run_cycle()` (drain → dispatch → apply receipts → drain)
+    /// 2. Call `run_cycle(RunMode::Batch)` (drain → dispatch → apply receipts → drain)
     /// 3. Snapshot
-    ///
-    /// Note: Daemon mode (P2) uses `run_cycle_with_timers()` which partitions
-    /// timer intents specially. Batch mode uses the simpler `run_cycle()`.
     pub async fn step(&mut self, events: Vec<ExternalEvent>) -> Result<StepResult, HostError>;
 
     /// Access the underlying host
@@ -218,7 +225,7 @@ pub struct StepResult {
 }
 ```
 
-Note: The core drain/dispatch/receipt loop lives in `WorldHost::run_cycle()`. `BatchRunner`, `WorldDaemon` (P2), and REPL (P4) all use this shared method rather than duplicating the logic.
+Note: The core drain/dispatch/receipt loop lives in `WorldHost::run_cycle()`. `BatchRunner`, `WorldDaemon` (P2), and REPL (P4) all use this shared method rather than duplicating the logic; timer partitioning is handled by passing `RunMode::WithTimers`.
 
 ## Stub Adapters
 
@@ -306,6 +313,7 @@ serde_json = "1"
 
 ## Tasks
 
+0. Kernel prep (see `p0-kernel-prep.md`): expose tail-scan + pending receipt/intent accessors so host can rehydrate dispatch queues safely.
 1. Create `crates/aos-host/` directory structure
 2. Add `aos-host` to workspace `Cargo.toml`
 3. Implement `HostError` (`error.rs`)
@@ -319,11 +327,12 @@ serde_json = "1"
    - Store `config: HostConfig` field
    - Implement `enqueue_external()` (not `enqueue()`)
    - Implement `state(reducer, key)` with optional key parameter
-   - Implement `run_cycle()` as the shared drain/dispatch/receipt loop
+   - Implement `run_cycle(mode)` as the shared drain/dispatch/receipt loop (timer partitioning lives behind `RunMode::WithTimers`)
 9. Implement `BatchRunner` (`modes/batch.rs`) using `run_cycle()`
 10. Implement CLI commands (`cli/`)
 11. Write unit tests for WorldHost (open/enqueue_external/drain/run_cycle/snapshot/state)
 12. Test with `examples/00-counter`
+13. (Forwarded from P5) Add a minimal `p1-host-test` harness (see `p1-host-test.md`) so integration tests can drive `WorldHost` through the same `run_cycle` entry point
 
 ## Success Criteria
 
