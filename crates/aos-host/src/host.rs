@@ -1,14 +1,18 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use aos_effects::EffectReceipt;
-use aos_kernel::{Kernel, KernelBuilder, KernelConfig, KernelHeights};
+use aos_effects::{EffectIntent, EffectReceipt};
+use aos_kernel::{Kernel, KernelBuilder, KernelConfig, KernelHeights, TailIntent, TailScan};
 use aos_store::Store;
 
 use crate::adapters::registry::AdapterRegistry;
 use crate::adapters::registry::AdapterRegistryConfig;
 use crate::config::HostConfig;
 use crate::error::HostError;
+use crate::adapters::stub::{
+    StubBlobAdapter, StubBlobGetAdapter, StubHttpAdapter, StubLlmAdapter, StubTimerAdapter,
+};
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
@@ -49,26 +53,56 @@ impl<S: Store + 'static> WorldHost<S> {
         host_config: HostConfig,
         kernel_config: KernelConfig,
     ) -> Result<Self, HostError> {
-        let mut builder = KernelBuilder::new(store.clone())
-            .with_fs_journal(manifest_path.parent().unwrap_or(Path::new(".")))?;
+        let root = manifest_path.parent().unwrap_or(Path::new("."));
+        let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(root)?;
 
-        if let Some(dir) = kernel_config.module_cache_dir.clone() {
+        if let Some(dir) = host_config
+            .module_cache_dir
+            .clone()
+            .or(kernel_config.module_cache_dir.clone())
+        {
             builder = builder.with_module_cache_dir(dir);
         }
-
-        builder = builder.with_eager_module_load(kernel_config.eager_module_load);
-
+        builder = builder.with_eager_module_load(host_config.eager_module_load);
         if let Some(resolver) = kernel_config.secret_resolver.clone() {
             builder = builder.with_secret_resolver(resolver);
         }
+        builder = builder.allow_placeholder_secrets(host_config.allow_placeholder_secrets);
 
-        builder = builder.allow_placeholder_secrets(kernel_config.allow_placeholder_secrets);
+        let mut kernel = builder.from_manifest_path(manifest_path)?;
 
-        let kernel = builder.from_manifest_path(manifest_path)?;
+        // Rehydrate dispatch queue: queued_effects snapshot + tail intents lacking receipts.
+        let heights = kernel.heights();
+        let tail = kernel.tail_scan_after(heights.snapshot.unwrap_or(0))?;
+        let receipts_seen = receipts_set(&tail);
 
-        let adapter_registry = AdapterRegistry::new(AdapterRegistryConfig {
-            effect_timeout: host_config.effect_timeout,
-        });
+        let mut to_dispatch: Vec<EffectIntent> = kernel
+            .queued_effects_snapshot()
+            .into_iter()
+            .map(|snap| snap.into_intent())
+            .collect();
+
+        for TailIntent { record, .. } in tail.intents.iter() {
+            if receipts_seen.contains(&record.intent_hash) {
+                continue;
+            }
+            let intent = EffectIntent::from_raw_params(
+                record.kind.clone().into(),
+                record.cap_name.clone(),
+                record.params_cbor.clone(),
+                record.idempotency_key,
+            )
+            .ok();
+            if let Some(intent) = intent {
+                to_dispatch.push(intent);
+            }
+        }
+
+        let adapter_registry = default_registry(&host_config);
+
+        if !to_dispatch.is_empty() {
+            kernel.restore_effect_queue(to_dispatch);
+        }
 
         Ok(Self {
             kernel,
@@ -83,6 +117,10 @@ impl<S: Store + 'static> WorldHost<S> {
 
     pub fn adapter_registry_mut(&mut self) -> &mut AdapterRegistry {
         &mut self.adapter_registry
+    }
+
+    pub fn adapter_registry(&self) -> &AdapterRegistry {
+        &self.adapter_registry
     }
 
     pub fn enqueue_external(&mut self, evt: ExternalEvent) -> Result<(), HostError> {
@@ -149,4 +187,20 @@ impl<S: Store + 'static> WorldHost<S> {
     pub fn kernel_mut(&mut self) -> &mut Kernel<S> {
         &mut self.kernel
     }
+}
+
+fn default_registry(config: &HostConfig) -> AdapterRegistry {
+    let mut registry = AdapterRegistry::new(AdapterRegistryConfig {
+        effect_timeout: config.effect_timeout,
+    });
+    registry.register(Box::new(StubTimerAdapter));
+    registry.register(Box::new(StubHttpAdapter));
+    registry.register(Box::new(StubLlmAdapter));
+    registry.register(Box::new(StubBlobAdapter));
+    registry.register(Box::new(StubBlobGetAdapter));
+    registry
+}
+
+fn receipts_set(tail: &TailScan) -> HashSet<[u8; 32]> {
+    tail.receipts.iter().map(|r| r.record.intent_hash).collect()
 }

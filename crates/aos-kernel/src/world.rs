@@ -477,6 +477,10 @@ impl<S: Store + 'static> Kernel<S> {
         self.effect_manager.drain()
     }
 
+    pub fn restore_effect_queue(&mut self, intents: Vec<aos_effects::EffectIntent>) {
+        self.effect_manager.restore_queue(intents);
+    }
+
     pub fn create_snapshot(&mut self) -> Result<(), KernelError> {
         self.tick_until_idle()?;
         if !self.scheduler.is_empty() {

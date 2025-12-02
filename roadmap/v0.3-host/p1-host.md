@@ -313,26 +313,28 @@ serde_json = "1"
 
 ## Tasks
 
-0. Kernel prep (see `p0-kernel-prep.md`): expose tail-scan + pending receipt/intent accessors so host can rehydrate dispatch queues safely.
-1. Create `crates/aos-host/` directory structure
-2. Add `aos-host` to workspace `Cargo.toml`
-3. Implement `HostError` (`error.rs`)
-4. Implement `HostConfig` (`config.rs`) — include adapter timeouts, limits
-5. Implement `AsyncEffectAdapter` trait (`adapters/traits.rs`)
-6. Implement `AdapterRegistry` with `AdapterRegistryConfig` (`adapters/registry.rs`)
-   - Implement timeout handling that synthesizes `ReceiptStatus::Timeout` receipts
-   - Ensure `execute_batch` always returns receipts (never drops intents)
-7. Implement stub adapters (timer, blob, http, llm)
-8. Implement `WorldHost` (`host.rs`) wrapping `Kernel`
-   - Store `config: HostConfig` field
-   - Implement `enqueue_external()` (not `enqueue()`)
-   - Implement `state(reducer, key)` with optional key parameter
-   - Implement `run_cycle(mode)` as the shared drain/dispatch/receipt loop (timer partitioning lives behind `RunMode::WithTimers`)
-9. Implement `BatchRunner` (`modes/batch.rs`) using `run_cycle()`
-10. Implement CLI commands (`cli/`)
-11. Write unit tests for WorldHost (open/enqueue_external/drain/run_cycle/snapshot/state)
-12. Test with `examples/00-counter`
-13. (Forwarded from P5) Add a minimal `p1-host-test` harness (see `p1-host-test.md`) so integration tests can drive `WorldHost` through the same `run_cycle` entry point
+0. [x] Kernel prep (see `p0-kernel-prep.md`): expose tail-scan + pending receipt/intent accessors so host can rehydrate dispatch queues safely.
+1. [x] Create `crates/aos-host/` directory structure
+2. [x] Add `aos-host` to workspace `Cargo.toml`
+3. [x] Implement `HostError` (`error.rs`)
+4. [x] Implement `HostConfig` (`config.rs`) — include adapter timeouts, limits
+5. [x] Implement `AsyncEffectAdapter` trait (`adapters/traits.rs`)
+6. [x] Implement `AdapterRegistry` with `AdapterRegistryConfig` (`adapters/registry.rs`)
+   - [x] Implement timeout handling that synthesizes `ReceiptStatus::Timeout` receipts
+   - [x] Ensure `execute_batch` always returns receipts (never drops intents)
+7. [x] Implement stub adapters (timer, blob, http, llm)
+8. [ ] Implement `WorldHost` (`host.rs`) wrapping `Kernel`
+   - [x] Store `config: HostConfig` field
+   - [x] Implement `enqueue_external()` (not `enqueue()`)
+   - [x] Implement `state(reducer, key)` with optional key parameter
+   - [x] Implement `run_cycle(mode)` as the shared drain/dispatch/receipt loop (timer partitioning lives behind `RunMode::WithTimers`)
+   - [ ] Timer-aware partitioning (defer to P2) and CLI-surface wiring
+   - [x] Rehydration from queued effects + tail intents/receipts
+9. [x] Implement `BatchRunner` (`modes/batch.rs`) using `run_cycle()`
+10. [ ] Implement CLI commands (`cli/`)
+11. [ ] Write unit tests for WorldHost (open/enqueue_external/drain/run_cycle/snapshot/state)
+12. [ ] Test with `examples/00-counter`
+13. [ ] (Forwarded from P5) Add a minimal `p1-host-test` harness (see `p1-host-test.md`) so integration tests can drive `WorldHost` through the same `run_cycle` entry point
 
 ## Success Criteria
 
