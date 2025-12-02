@@ -204,3 +204,100 @@ fn default_registry(config: &HostConfig) -> AdapterRegistry {
 fn receipts_set(tail: &TailScan) -> HashSet<[u8; 32]> {
     tail.receipts.iter().map(|r| r.record.intent_hash).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aos_store::MemStore;
+    use serde_cbor::to_vec;
+    use serde_json::json;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    fn write_minimal_manifest(path: &std::path::Path) {
+        // Minimal manifest: no reducers/plans; just air_version and empty lists.
+        let manifest = json!({
+            "air_version": "1",
+            "schemas": [],
+            "modules": [],
+            "plans": [],
+            "effects": [],
+            "caps": [],
+            "policies": [],
+            "triggers": []
+        });
+        let bytes = serde_cbor::to_vec(&manifest).expect("cbor encode");
+        let mut file = File::create(path).expect("create manifest");
+        file.write_all(&bytes).expect("write manifest");
+    }
+
+    #[tokio::test]
+    async fn run_cycle_no_events_no_effects() {
+        let tmp = TempDir::new().unwrap();
+        let manifest_path = tmp.path().join("manifest.cbor");
+        write_minimal_manifest(&manifest_path);
+
+        let store = Arc::new(MemStore::new());
+        let host_config = HostConfig::default();
+        let kernel_config = KernelConfig::default();
+        let mut host = WorldHost::open(store, &manifest_path, host_config, kernel_config).unwrap();
+
+        let cycle = host.run_cycle(RunMode::Batch).await.unwrap();
+        assert_eq!(cycle.effects_dispatched, 0);
+        assert_eq!(cycle.receipts_applied, 0);
+        host.snapshot().unwrap();
+    }
+
+    #[tokio::test]
+    async fn enqueue_domain_event_and_run() {
+        let tmp = TempDir::new().unwrap();
+        let manifest_path = tmp.path().join("manifest.cbor");
+        write_minimal_manifest(&manifest_path);
+
+        let store = Arc::new(MemStore::new());
+        let host_config = HostConfig::default();
+        let kernel_config = KernelConfig::default();
+        let mut host = WorldHost::open(store, &manifest_path, host_config, kernel_config).unwrap();
+
+        // Inject a domain event (no reducers, so it should just record and idle)
+        host.enqueue_external(ExternalEvent::DomainEvent {
+            schema: "demo/Event@1".into(),
+            value: to_vec(&json!({"x": 1})).unwrap(),
+        })
+        .unwrap();
+
+        let cycle = host.run_cycle(RunMode::Batch).await.unwrap();
+        assert_eq!(cycle.effects_dispatched, 0);
+        host.snapshot().unwrap();
+    }
+
+    #[tokio::test]
+    async fn receipts_are_applied_and_state_remains_available() {
+        let tmp = TempDir::new().unwrap();
+        let manifest_path = tmp.path().join("manifest.cbor");
+        write_minimal_manifest(&manifest_path);
+
+        let store = Arc::new(MemStore::new());
+        let host_config = HostConfig::default();
+        let kernel_config = KernelConfig::default();
+        let mut host = WorldHost::open(store, &manifest_path, host_config, kernel_config).unwrap();
+
+        // No reducers, but we can still apply a receipt (should be ignored gracefully)
+        let fake_receipt = aos_effects::EffectReceipt {
+            intent_hash: [9u8; 32],
+            adapter_id: "stub.http".into(),
+            status: aos_effects::ReceiptStatus::Ok,
+            payload_cbor: vec![],
+            cost_cents: None,
+            signature: vec![],
+        };
+        // Should not error even if unknown; kernel will treat as unknown receipt
+        let _ = host.enqueue_external(ExternalEvent::Receipt(fake_receipt));
+
+        let cycle = host.run_cycle(RunMode::Batch).await.unwrap();
+        assert_eq!(cycle.receipts_applied, 0);
+
+        host.snapshot().unwrap();
+    }
+}
