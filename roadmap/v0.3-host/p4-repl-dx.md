@@ -30,12 +30,15 @@ crates/aos-host/src/repl/
 ## Command Surface (maps to control verbs)
 - `event <schema> <json>` → `send-event` (enqueue only).
 - `event-step <schema> <json>` (or `event ... --step`) → enqueue + `step` (daemon uses `run_cycle_with_timers`).
+- `event @file.json` or `event @-` → allow file/stdin inputs (client-side convenience before sending `send-event`).
 - `state <reducer> [--key <json>]` → `query-state` (returns raw bytes; REPL pretty-prints if decodes as JSON).
+- `state` with no args: list reducers by reading manifest via control (once exposed).
 - `step` → control `step` (daemon: `run_cycle_with_timers`; batch fallback: local `WorldHost::run_cycle` if no daemon).
 - `snapshot` → control `snapshot`.
 - `shutdown` → control `shutdown` (only if we own the daemon).
 - `manifest` → optional `query-manifest` control verb (or drop if not implemented).
 - `effects` / `timers` → only if control protocol exposes pending effects/timers; otherwise omit to avoid special-casing.
+- Optional log/tail: pretty-print recent journal entries if control exposes them.
 
 ## CLI `aos dev`
 - Detect running daemon via control socket.
@@ -54,7 +57,8 @@ crates/aos-host/src/repl/
 2) Rewrite REPL commands to call control verbs; add `event-step` helper.
 3) Add auto-start/auto-shutdown logic for daemon ownership in `aos dev`.
 4) Optional: add control verbs for `pending-effects` / `pending-timers`; otherwise drop those commands from REPL.
-5) Persist history under platform data dir; keep the UI responsive (async readline).
+5) Add file/stdin helpers for `event` inputs on the client side.
+6) Persist history under platform data dir; keep the UI responsive (async readline).
 
 ## Success Criteria
 - `aos dev examples/00-counter` connects (or starts daemon), `event-step demo/Increment@1 {}` updates state via control `state`.

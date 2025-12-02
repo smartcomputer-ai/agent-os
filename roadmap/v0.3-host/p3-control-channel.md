@@ -4,13 +4,13 @@
 
 ## Scope and Boundaries
 - Provide **IO + translation only**: JSON/CBOR messages → `WorldHost` calls → responses. No adapter logic, no timer logic.
-- Transport: local-only (Unix socket in world dir by default); optional stdio mode for embedding/debug. TCP/auth deferred.
+- Transport: local-only (Unix socket in world dir by default); optional stdio mode for embedding/debug. Windows named pipe later; TCP/auth deferred.
 - Governance verbs (propose/shadow/approve/apply) stay out of scope for this slice; add hooks for them in P3+.
 
 ## Components
 
 ### ControlServer
-- Runs inside `WorldDaemon`; owns a listener (Unix socket path under world dir, e.g., `.aos/control.sock`) and a request loop.
+- Runs inside `WorldDaemon`; owns a listener (Unix socket path under world dir, e.g., `.aos/control.sock`) and a request loop. On Windows, plan for a named pipe (e.g., `\\.\pipe\\aos-<world-id>`); stdio remains a fallback.
 - Deserializes framed messages (JSON Lines first; CBOR optional), dispatches to `WorldHost`, sends a response envelope.
 - Shares a channel with the daemon loop for wakeups; `shutdown` command triggers the same clean shutdown path as Ctrl-C; `step` should instruct the daemon to run `run_cycle_with_timers()` (not the batch cycle) so timer partitioning is preserved.
 - Versioned protocol: `version`, `id`, `method`, `payload`, `error?`. Reject mismatched versions.
@@ -28,27 +28,31 @@
 - `snapshot {}` → force snapshot.
 - `journal-head {}` → return last seq/id for health checks.
 - `shutdown {}` → graceful drain + snapshot + exit.
+- `put-blob {mode, data?}` → upload a blob to the world's CAS, return `HashRef`. Support stdin/file streaming; avoid base64 for large payloads when using stdio mode.
 - Optional: `step {}` for a single `run_cycle_with_timers` when daemon is running (batch mode continues to call `run_cycle` directly).
 
 ### Protocol Details
-- **Envelope**: `{ "version": 1, "id": "<client-uuid>", "method": "<verb>", "payload": {...} }`
+- **Envelope**: `{ "v": 1, "id": "<client-uuid>", "cmd": "<verb>", "payload": {...} }`
 - **Response**: `{ "id": "<same>", "ok": true, "result": {...} }` or `{ "id": "<same>", "ok": false, "error": { "code": "...", "message": "..."} }`
 - **Framing**: JSON Lines (`\n` delimited). CBOR framing is optional via `--cbor` flag negotiated at connect time.
 - **Errors**: use stable codes (`invalid_request`, `unknown_method`, `decode_error`, `host_error`, `timeout`, `not_running`).
 - **Security**: local-only; set `SO_PEERCRED`/uid check on Unix if available; socket perms `0600`.
+- **Optional event stream**: allow clients to subscribe to journal tail (`journal-appended` events) for live logs; NDJSON framing works well here.
 
 ### Integration with P1/P2/P4
 - P2 (daemon+timers) remains unchanged; the daemon just spins ControlServer alongside its timer loop, wakes on control messages, and uses `run_cycle_with_timers` for control-driven steps.
 - P1 (batch) keeps direct `WorldHost` calls; batch CLI can optionally use ControlClient in `--stdio` mode for parity.
 - P4 (REPL) must route all commands through ControlClient, not direct host access. CLI `aos world run/step` can reuse the same client.
+- CLI behavior: commands check for a live control socket/pipe; if present, they attach and issue control verbs. If absent, `aos world run/dev` can start a daemon; `aos world step` falls back to batch-mode `WorldHost`.
 
 ## Tasks
 1) Implement `ControlServer` (Unix socket + stdio mode) with request dispatch and version negotiation.
 2) Implement `ControlClient` helper (framing, retries, timeouts, optional stdio).
 3) Wire `WorldDaemon` to start ControlServer and honor `shutdown` commands.
 4) Add CLI plumbing: `aos world run` connects to socket (or starts daemon), `aos world step` may use stdio mode for hermeticity.
-5) Tests: unit tests for protocol framing/dispatch; integration test that round-trips `send-event`/`inject-receipt`/`query-state` through a running daemon.
-6) Docs: protocol reference + socket location + versioning + error codes; note governance verbs are TBD.
+5) Add `put-blob` support in control server/client (stdin/file upload) and surface it in CLI/REPL helpers.
+6) Tests: unit tests for protocol framing/dispatch; integration test that round-trips `send-event`/`inject-receipt`/`query-state`/`put-blob` through a running daemon.
+7) Docs: protocol reference + socket location + versioning + error codes; note governance verbs are TBD.
 
 ## Success Criteria
 - `aos world run <world>` starts a daemon with a listening control socket; `aos world step` and REPL operate via the control channel.
