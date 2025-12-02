@@ -185,8 +185,8 @@ impl<S: Store + 'static> BatchRunner<S> {
     /// 2. Call `run_cycle()` (drain → dispatch → apply receipts → drain)
     /// 3. Snapshot
     ///
-    /// Uses the shared `run_cycle()` method to avoid duplicating the
-    /// drain/dispatch/receipt loop that daemon and REPL modes also need.
+    /// Note: Daemon mode (P2) uses `run_cycle_with_timers()` which partitions
+    /// timer intents specially. Batch mode uses the simpler `run_cycle()`.
     pub async fn step(&mut self, events: Vec<ExternalEvent>) -> Result<StepResult, HostError>;
 
     /// Access the underlying host

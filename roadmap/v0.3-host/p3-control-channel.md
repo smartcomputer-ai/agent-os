@@ -12,7 +12,7 @@
 ### ControlServer
 - Runs inside `WorldDaemon`; owns a listener (Unix socket path under world dir, e.g., `.aos/control.sock`) and a request loop.
 - Deserializes framed messages (JSON Lines first; CBOR optional), dispatches to `WorldHost`, sends a response envelope.
-- Shares a channel with the daemon loop for wakeups; `shutdown` command triggers the same clean shutdown path as Ctrl-C.
+- Shares a channel with the daemon loop for wakeups; `shutdown` command triggers the same clean shutdown path as Ctrl-C; `step` should instruct the daemon to run `run_cycle_with_timers()` (not the batch cycle) so timer partitioning is preserved.
 - Versioned protocol: `version`, `id`, `method`, `payload`, `error?`. Reject mismatched versions.
 
 ### ControlClient (library)
@@ -22,13 +22,13 @@
   - Optional `--stdio` to talk to an embedded server (useful for tests).
 
 ### Command Surface (MVP)
-- `send-event {schema, value_cbor, key_cbor?}` → enqueue domain event, drain optional? (server does not auto-drain; client can request `step` separately).
+- `send-event {schema, value_cbor, key_cbor?}` → enqueue domain event; default is **no auto-drain**. Provide a convenience `send-event-and-step` (or `step {inject:[...]}`) for single-shot flows.
 - `inject-receipt {receipt}` → enqueue receipt (same shape as `EffectReceipt`).
 - `query-state {reducer, key?}` → returns raw CBOR bytes; higher-level decoding is client-side.
 - `snapshot {}` → force snapshot.
 - `journal-head {}` → return last seq/id for health checks.
 - `shutdown {}` → graceful drain + snapshot + exit.
-- Optional: `step {}` for a single `drain_and_execute` cycle so batch-mode CLI and REPL can reuse the same verb.
+- Optional: `step {}` for a single `run_cycle_with_timers` when daemon is running (batch mode continues to call `run_cycle` directly).
 
 ### Protocol Details
 - **Envelope**: `{ "version": 1, "id": "<client-uuid>", "method": "<verb>", "payload": {...} }`
@@ -38,7 +38,7 @@
 - **Security**: local-only; set `SO_PEERCRED`/uid check on Unix if available; socket perms `0600`.
 
 ### Integration with P1/P2/P4
-- P2 (daemon+timers) remains unchanged; the daemon just spins ControlServer alongside its timer loop and wakes when commands arrive.
+- P2 (daemon+timers) remains unchanged; the daemon just spins ControlServer alongside its timer loop, wakes on control messages, and uses `run_cycle_with_timers` for control-driven steps.
 - P1 (batch) keeps direct `WorldHost` calls; batch CLI can optionally use ControlClient in `--stdio` mode for parity.
 - P4 (REPL) must route all commands through ControlClient, not direct host access. CLI `aos world run/step` can reuse the same client.
 

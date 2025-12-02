@@ -66,16 +66,18 @@ If the adapter returns a receipt immediately when scheduling, `handle_receipt` p
 WorldDaemon {
   host: WorldHost,
   timer_heap: TimerHeap,
+  control_rx: mpsc::Receiver<ControlMsg>,
   shutdown_rx: broadcast::Receiver<()>,
 }
 
 loop select {
-  timer due  => build TimerSetReceipt, call handle_receipt, run_cycle
+  timer due  => build TimerSetReceipt, call handle_receipt, run_cycle_with_timers
+  control msg=> apply command + run_cycle_with_timers
   shutdown   => snapshot + exit
 }
 ```
 
-**Layering note:** Keep `WorldDaemon` focused on timers, adapters, and shutdown. A separate `ControlServer` component (P4) will handle the control channel (Unix socket/stdio), translate JSON commands into `ExternalEvent`/governance events, and feed them into `WorldHost`.
+**Layering note:** Keep `WorldDaemon` focused on timers, adapters, and shutdown. A separate `ControlServer` component (P3) will handle the control channel (Unix socket/stdio), translate JSON commands into `ExternalEvent`/governance events, and feed them into `WorldHost`.
 
 - Ctrl-C triggers graceful shutdown (broadcast), final snapshot.
 
@@ -229,14 +231,25 @@ fn now_monotonic_ns() -> u64 {
 // modes/daemon.rs
 use tokio::sync::broadcast;
 
+/// ControlMsg is defined by the ControlServer (P3). Variants include:
+/// - SendEvent(ExternalEvent)
+/// - InjectReceipt(EffectReceipt)
+/// - Snapshot
+/// - Step
+/// See p3-control-channel.md for the full control protocol.
 pub struct WorldDaemon<S: Store + 'static> {
     host: WorldHost<S>,
     timer_scheduler: TimerScheduler,
+    control_rx: mpsc::Receiver<ControlMsg>,  // fed by ControlServer (P3)
     shutdown_rx: broadcast::Receiver<()>,
 }
 
 impl<S: Store + 'static> WorldDaemon<S> {
-    pub fn new(host: WorldHost<S>) -> Self {
+    pub fn new(
+        host: WorldHost<S>,
+        control_rx: mpsc::Receiver<ControlMsg>,
+        shutdown_rx: broadcast::Receiver<()>,
+    ) -> Self {
         let mut timer_scheduler = TimerScheduler::new();
         // Rehydrate pending timers from kernel's pending_reducer_receipts
         // (these survived in the snapshot)
@@ -244,6 +257,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
         Self {
             host,
             timer_scheduler,
+            control_rx,
             shutdown_rx,
         }
     }
@@ -266,6 +280,15 @@ impl<S: Store + 'static> WorldDaemon<S> {
                     let fired = self.host.fire_due_timers(&mut self.timer_scheduler)?;
                     if fired > 0 {
                         tracing::info!("Fired {} timer(s)", fired);
+                    }
+                }
+
+                // Control message (from ControlServer)
+                cmd = self.control_rx.recv() => {
+                    if let Some(cmd) = cmd {
+                        self.apply_control(cmd).await?;
+                    } else {
+                        tracing::warn!("control channel closed");
                     }
                 }
 
@@ -318,6 +341,25 @@ impl<S: Store + 'static> WorldDaemon<S> {
         }
         Ok(())
     }
+
+    /// Applies a control command (from P3 ControlServer) and decides whether to run a cycle.
+    async fn apply_control(&mut self, cmd: ControlMsg) -> Result<(), HostError> {
+        match cmd {
+            ControlMsg::SendEvent(evt) => {
+                self.host.enqueue_external(evt)?;
+            }
+            ControlMsg::InjectReceipt(receipt) => {
+                self.host.kernel_mut().handle_receipt(receipt)?;
+            }
+            ControlMsg::Snapshot => {
+                self.host.snapshot()?;
+            }
+            ControlMsg::Step => {
+                // the outer loop will run run_cycle_with_timers
+            }
+        }
+        Ok(())
+    }
 }
 ```
 
@@ -351,6 +393,7 @@ async fn run_daemon(path: &Path) -> Result<()> {
     // Register non-timer adapters (http, llm, blob)
     // Timer is handled specially by WorldDaemon, not via AdapterRegistry
 
+    let (control_tx, control_rx) = mpsc::channel(128); // filled by ControlServer (P3)
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
     // Handle Ctrl-C
@@ -359,8 +402,8 @@ async fn run_daemon(path: &Path) -> Result<()> {
         shutdown_tx.send(()).ok();
     });
 
-    let mut daemon = WorldDaemon::new(host, shutdown_rx);
-    daemon.run().await?;
+    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx);
+    daemon.run().await?; // control messages can request Step; daemon uses run_cycle_with_timers()
 
     Ok(())
 }
@@ -442,6 +485,6 @@ This means `WorldHost::run_cycle()` (from P1) is for batch mode only. Daemon mod
 ### Control channel is separate from daemon
 
 `WorldDaemon` handles only: timers, adapter dispatch, shutdown.
-`ControlServer` (P4) handles: Unix socket/stdio, JSON commands, governance events.
+`ControlServer` (P3) handles: Unix socket/stdio, JSON commands, governance events; `Step` commands should invoke the daemon's `run_cycle_with_timers` so timer partitioning semantics are preserved.
 
 This keeps concerns separated and allows daemon to be tested without control channel complexity.
