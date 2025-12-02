@@ -43,29 +43,43 @@ So you’re totally right: you need at least *one* proper “world as a process�
 Before deciding CLI vs daemon, it helps to explicitly define a host API the kernel exposes. Something along these lines (conceptually):
 
 ```rust
-pub struct WorldHost { /* holds manifest, journal, snapshot cache, etc. */ }
+pub struct WorldHost<S: Store> {
+    kernel: Kernel<S>,
+    store: Arc<S>,
+    adapters: AdapterRegistry,
+    config: HostConfig,  // retained for introspection and adapter config
+}
 
-impl WorldHost {
-    pub fn open(path: &Path, config: HostConfig) -> Result<Self>;
+impl<S: Store> WorldHost<S> {
+    pub fn open(store: Arc<S>, path: &Path, config: HostConfig) -> Result<Self>;
+
+    /// Access host configuration
+    pub fn config(&self) -> &HostConfig;
 
     /// Apply one event (DomainEvent, Receipt, Governance event, etc.)
-    pub fn enqueue_external_event(&mut self, evt: ExternalEvent) -> Result<()>;
+    pub fn enqueue_external(&mut self, evt: ExternalEvent) -> Result<()>;
 
-    /// Run the deterministic stepper until no more ready work (kernel has no fuel; host may count ticks for guardrails)
+    /// Run the deterministic stepper until no more ready work
     pub fn drain(&mut self) -> Result<DrainOutcome>;
 
-    /// Expose read-only query surfaces as in the StateReader sketch.
-    pub fn state_reader(&self) -> &dyn StateReader;
+    /// Query reducer state (key is for future keyed reducers/cells)
+    pub fn state(&self, reducer: &str, key: Option<&[u8]>) -> Option<&[u8]>;
 
-    /// Hook for adapters/effect manager: get pending effect intents, mark them delivered, etc.
-    pub fn pending_effects(&self) -> Vec<EffectIntentRef>;
-    pub fn apply_receipt(&mut self, receipt: EffectReceipt) -> Result<()>;
+    /// Run one complete cycle: drain → dispatch effects → apply receipts → drain again
+    /// This is the shared entry point for batch/daemon/REPL modes.
+    pub async fn run_cycle(&mut self) -> Result<CycleOutcome>;
+
+    /// Create a snapshot
+    pub fn snapshot(&mut self) -> Result<()>;
 }
 ```
 
 Notes:
 - Kernel already owns manifest load/validation, journal + snapshot I/O, deterministic stepping, effect queueing, receipt application, and state queries; the host should delegate rather than duplicate.
 - Kernel has no fuel concept; if you want guardrails, count ticks in the host and stop after N.
+- **No separate `pending_effects()`**: The kernel's `drain_effects()` clears the queue (and snapshots capture queued intents). A non-destructive peek would break replay semantics. Instead, `run_cycle()` takes ownership of drained intents internally.
+- **Keyed state**: The `key` parameter is forward-compatible with keyed reducers (cells). `DomainEvent` already carries an optional key, and manifests declare `key_field`, but routing ignores it today.
+- **Adapter errors → receipts**: `AdapterRegistry::execute_batch` always returns receipts (never `Err`). Adapter failures become `ReceiptStatus::Error` or `ReceiptStatus::Timeout` receipts. This ensures the kernel's invariants hold: every intent gets a receipt, plans/reducers unblock, and replay is deterministic.
 
 That’s roughly what you already have conceptually in the architecture doc; just make it a **first-class runtime struct** that can be:
 
@@ -422,3 +436,51 @@ And crucially: you haven’t made a hard choice between “always-running” vs 
 - **Command surface (MVP):** send-event, inject-receipt, query-state, query-manifest; governance verbs (propose/approve/apply) to be confirmed after P3.
 - **Auth:** currently assumes local trusted caller; if remote is allowed, decide on auth (mTLS/token) and capability scoping.
 - **Versioning:** include a protocol version field so CLI/REPL/tests can negotiate changes.
+
+---
+
+## Design decisions (resolved)
+
+These decisions were made after reviewing the kernel implementation and considering replay/snapshot semantics:
+
+### 1. API naming: `enqueue_external` (not `enqueue`)
+
+The kernel already distinguishes external inputs (`submit_domain_event`, `handle_receipt`) from internal routing (`enqueue_event`). The host API mirrors this: `enqueue_external` makes the boundary explicit and avoids confusion once governance/internal events are exposed.
+
+### 2. Store `HostConfig` on `WorldHost`
+
+`HostConfig` is passed to `open()` and retained as a field. This is needed for:
+- Adapter configuration (timeouts, endpoints, model defaults)
+- REPL introspection (`config show`)
+- Runtime diagnostics
+
+### 3. No separate `pending_effects()` method
+
+The kernel's `drain_effects()` **clears the queue**, and snapshots capture queued intents ([world.rs:448-450, 484-488](crates/aos-kernel/src/world.rs#L448-L488)). A "non-destructive" `pending_effects()` would double-dispatch after receipts and wouldn't rehydrate on replay.
+
+Instead, `run_cycle()` takes ownership of drained intents internally. If batch/daemon/REPL need to inspect intents (for logging, filtering), they can do so on the owned `Vec<EffectIntent>` after calling `kernel.drain_effects()` directly.
+
+### 4. Keyed state queries: include `key` parameter now
+
+`DomainEvent` already carries an optional `key` field ([aos-wasm-abi/src/lib.rs:33-83](crates/aos-wasm-abi/src/lib.rs#L33-L83)), and manifests declare `key_field`, but routing ignores it today ([world.rs:242-249](crates/aos-kernel/src/world.rs#L242-L249)). Including `key: Option<&[u8]>` in the API now avoids churn when keyed routing (cells) is implemented.
+
+### 5. Adapter errors always become receipts
+
+`handle_receipt` is the **only** thing that clears `pending_receipts`/`pending_reducer_receipts` and unblocks plans/reducers ([world.rs:1159-1197](crates/aos-kernel/src/world.rs#L1159-L1197)). If `execute_batch` returned `Err` and we dropped the intent, the world would hang forever — and a snapshot wouldn't requeue it.
+
+Design:
+- **Adapter failure** (HTTP 500, rate limit, etc.) → `ReceiptStatus::Error` receipt with error info in payload
+- **Adapter timeout** → `ReceiptStatus::Timeout` receipt (synthesized by host)
+- **Adapter unreachable** → `ReceiptStatus::Error` receipt (synthesized by host)
+- **True host failure** (process crash, OOM) → out of scope; no receipt, world waits until restart
+
+This keeps the kernel's invariants intact across restarts.
+
+### 6. Shared `run_cycle()` method
+
+The drain → dispatch → apply receipts → drain loop is needed by:
+- `BatchRunner::step()` (P1)
+- `WorldDaemon::tick()` (P2)
+- REPL `cmd_step` (P4)
+
+Rather than duplicating this logic, `WorldHost::run_cycle()` is the single implementation. Mode-specific wrappers can add their own concerns (snapshotting, logging, error handling) around it.

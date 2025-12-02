@@ -35,37 +35,41 @@ crates/aos-host/
 ```rust
 // host.rs
 pub struct WorldHost<S: Store + 'static> {
-    kernel: Kernel<S>,        // deterministic core
-    store: Arc<S>,            // backing store
+    kernel: Kernel<S>,         // deterministic core
+    store: Arc<S>,             // backing store
     adapters: AdapterRegistry, // async effect executors
+    config: HostConfig,        // retained for introspection and adapter config
 }
 
 impl<S: Store + 'static> WorldHost<S> {
     /// Open a world from a manifest path
     pub fn open(store: Arc<S>, manifest_path: &Path, config: HostConfig) -> Result<Self, HostError>;
 
+    /// Access host configuration
+    pub fn config(&self) -> &HostConfig;
+
     /// Enqueue an external event (domain event or receipt)
-    pub fn enqueue(&mut self, evt: ExternalEvent) -> Result<(), HostError>;
+    /// Named explicitly to distinguish from kernel-internal event routing
+    pub fn enqueue_external(&mut self, evt: ExternalEvent) -> Result<(), HostError>;
 
     /// Run kernel until idle (kernel has no fuel; host may count ticks for guardrails)
     pub fn drain(&mut self) -> Result<DrainOutcome, HostError>;
 
-    /// Inspect pending effect intents (non-destructive view of kernel queue)
-    pub fn pending_effects(&self) -> Vec<EffectIntent>;
-
-    /// Apply a receipt back into the kernel
-    pub fn apply_receipt(&mut self, receipt: EffectReceipt) -> Result<(), HostError>;
-
-    /// Convenience: dispatch intents via registered adapters, return receipts
-    pub async fn dispatch_effects(&self, intents: Vec<EffectIntent>) -> Vec<Result<EffectReceipt, AdapterError>>;
-
     /// Query reducer state
-    pub fn state(&self, reducer: &str) -> Option<&[u8]>;
+    /// The `key` parameter is for future keyed reducers (cells); ignored for now but
+    /// included to avoid API churn when keyed routing is implemented.
+    pub fn state(&self, reducer: &str, key: Option<&[u8]>) -> Option<&[u8]>;
 
     /// Create a snapshot (calls `tick_until_idle` first)
     pub fn snapshot(&mut self) -> Result<(), HostError>;
 
-    /// Access the underlying kernel (for advanced use)
+    /// Run one complete cycle: drain → dispatch effects → apply receipts → drain again
+    /// This is the primary entry point for batch/daemon/REPL modes.
+    /// Internally drains effects (taking ownership), dispatches via adapters,
+    /// applies all receipts, and drains again.
+    pub async fn run_cycle(&mut self) -> Result<CycleOutcome, HostError>;
+
+    /// Access the underlying kernel (for advanced use / testing)
     pub fn kernel(&self) -> &Kernel<S>;
     pub fn kernel_mut(&mut self) -> &mut Kernel<S>;
 }
@@ -79,11 +83,21 @@ pub struct DrainOutcome {
     pub ticks: u64,
     pub idle: bool,
 }
+
+pub struct CycleOutcome {
+    pub initial_drain: DrainOutcome,
+    pub effects_dispatched: usize,
+    pub receipts_applied: usize,
+    pub final_drain: DrainOutcome,
+}
 ```
 
 Notes:
 - Fuel is not a kernel concept today; `drain` should just call `tick_until_idle` and count ticks for diagnostics/guardrails.
 - Kernel keeps ownership of manifest load, journal/snapshot, deterministic stepping, effect queueing, receipt application, and state queries. Host only orchestrates adapters, process lifetime, and CLI/daemon wiring.
+- **API naming**: `enqueue_external` mirrors the kernel's internal distinction (`submit_domain_event`/`handle_receipt` for external inputs vs `enqueue_event` for internal routing).
+- **No separate `pending_effects()`**: The kernel's `drain_effects()` clears the queue and snapshots capture queued intents. A non-destructive peek would break replay semantics. Instead, `run_cycle()` takes ownership of drained intents internally.
+- **Keyed state**: The `key` parameter is forward-compatible with keyed reducers (cells). `DomainEvent` already carries an optional key, and manifests declare `key_field`, but routing ignores it today. Including the parameter now avoids API churn.
 
 ### AsyncEffectAdapter
 
@@ -117,17 +131,43 @@ pub enum AdapterError {
 // adapters/registry.rs
 pub struct AdapterRegistry {
     adapters: HashMap<String, Box<dyn AsyncEffectAdapter>>,
+    config: AdapterRegistryConfig,
+}
+
+pub struct AdapterRegistryConfig {
+    /// Timeout for individual effect execution; synthesizes Timeout receipt on expiry
+    pub effect_timeout: Duration,
 }
 
 impl AdapterRegistry {
-    pub fn new() -> Self;
+    pub fn new(config: AdapterRegistryConfig) -> Self;
     pub fn register(&mut self, adapter: Box<dyn AsyncEffectAdapter>);
     pub fn get(&self, kind: &str) -> Option<&dyn AsyncEffectAdapter>;
 
-    /// Execute all intents, returning receipts
-    pub async fn execute_batch(&self, intents: Vec<EffectIntent>) -> Vec<Result<EffectReceipt, AdapterError>>;
+    /// Execute all intents, always returning receipts.
+    ///
+    /// **Error handling semantics:**
+    /// - Adapter execution failures (HTTP 500, rate limits, etc.) → `ReceiptStatus::Error` receipt
+    /// - Adapter timeouts → `ReceiptStatus::Timeout` receipt
+    /// - Adapter unreachable (can't connect at all) → synthesize `ReceiptStatus::Error` receipt
+    ///
+    /// This ensures every intent gets a receipt, which is required for:
+    /// - `handle_receipt` to clear pending_receipts and unblock plans/reducers
+    /// - Deterministic replay (snapshots won't requeue intents without receipts)
+    pub async fn execute_batch(&self, intents: Vec<EffectIntent>) -> Vec<EffectReceipt>;
 }
 ```
+
+**Design rationale (adapter errors vs receipts):**
+
+| Situation | Handling | Journal Record |
+|-----------|----------|----------------|
+| Adapter returns success | `ReceiptStatus::Ok` | Receipt with payload |
+| Adapter returns failure (HTTP 500, rate limit) | `ReceiptStatus::Error` | Receipt with error info in payload |
+| Adapter times out | `ReceiptStatus::Timeout` | Synthetic timeout receipt |
+| Adapter unreachable (host-level failure) | `ReceiptStatus::Error` | Synthetic error receipt |
+
+The kernel requires every `EffectIntent` to eventually receive a `ReceiptAppended` event. If `execute_batch` returned `Err` and we dropped the intent, the world would hang forever (plans wait on `pending_receipts`). Translating all failures into receipts keeps the kernel's invariants intact across restarts.
 
 ### BatchRunner
 
@@ -141,20 +181,26 @@ impl<S: Store + 'static> BatchRunner<S> {
     pub fn new(host: WorldHost<S>) -> Self;
 
     /// Run a single batch step:
-    /// 1. Inject events/receipts
-    /// 2. Drain kernel to idle
-    /// 3. Dispatch pending effects via adapters → collect receipts
-    /// 4. Feed receipts back, drain again
-    /// 5. Snapshot
+    /// 1. Inject events via `enqueue_external`
+    /// 2. Call `run_cycle()` (drain → dispatch → apply receipts → drain)
+    /// 3. Snapshot
+    ///
+    /// Uses the shared `run_cycle()` method to avoid duplicating the
+    /// drain/dispatch/receipt loop that daemon and REPL modes also need.
     pub async fn step(&mut self, events: Vec<ExternalEvent>) -> Result<StepResult, HostError>;
+
+    /// Access the underlying host
+    pub fn host(&self) -> &WorldHost<S>;
+    pub fn host_mut(&mut self) -> &mut WorldHost<S>;
 }
 
 pub struct StepResult {
-    pub drain_outcome: DrainOutcome,
-    pub effects_executed: usize,
-    pub receipts_applied: usize,
+    pub cycle: CycleOutcome,
+    pub events_injected: usize,
 }
 ```
+
+Note: The core drain/dispatch/receipt loop lives in `WorldHost::run_cycle()`. `BatchRunner`, `WorldDaemon` (P2), and REPL (P4) all use this shared method rather than duplicating the logic.
 
 ## Stub Adapters
 
@@ -245,14 +291,20 @@ serde_json = "1"
 1. Create `crates/aos-host/` directory structure
 2. Add `aos-host` to workspace `Cargo.toml`
 3. Implement `HostError` (`error.rs`)
-4. Implement `HostConfig` (`config.rs`)
+4. Implement `HostConfig` (`config.rs`) — include adapter timeouts, limits
 5. Implement `AsyncEffectAdapter` trait (`adapters/traits.rs`)
-6. Implement `AdapterRegistry` (`adapters/registry.rs`)
+6. Implement `AdapterRegistry` with `AdapterRegistryConfig` (`adapters/registry.rs`)
+   - Implement timeout handling that synthesizes `ReceiptStatus::Timeout` receipts
+   - Ensure `execute_batch` always returns receipts (never drops intents)
 7. Implement stub adapters (timer, blob, http, llm)
 8. Implement `WorldHost` (`host.rs`) wrapping `Kernel`
-9. Implement `BatchRunner` (`modes/batch.rs`)
+   - Store `config: HostConfig` field
+   - Implement `enqueue_external()` (not `enqueue()`)
+   - Implement `state(reducer, key)` with optional key parameter
+   - Implement `run_cycle()` as the shared drain/dispatch/receipt loop
+9. Implement `BatchRunner` (`modes/batch.rs`) using `run_cycle()`
 10. Implement CLI commands (`cli/`)
-11. Write unit tests for WorldHost (open/enqueue/drain/pending_effects/apply_receipt/snapshot)
+11. Write unit tests for WorldHost (open/enqueue_external/drain/run_cycle/snapshot/state)
 12. Test with `examples/00-counter`
 
 ## Success Criteria
