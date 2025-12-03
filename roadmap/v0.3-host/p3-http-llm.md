@@ -5,7 +5,7 @@
 ## Status (2025-12-03)
 
 - ✅ HTTP adapter implemented with canonical params/receipt, CAS body_ref in/out, monotonic timings, size cap, and error receipts for network/timeout/invalid refs.
-- ✅ LLM adapter implemented (OpenAI-compatible) with canonical params/receipt, CAS input/output, token_usage + rough cost estimate, provider map (openai default). API keys must come from params (secret/literal); no host-side fallback.
+- ✅ LLM adapter implemented (OpenAI-compatible) with canonical params/receipt, CAS input/output, token_usage; cost_cents currently left `None` to avoid nondeterministic estimates; provider map (openai default). API keys must come from params (secret/literal); no host-side fallback.
 - ✅ Feature gates `adapter-http` / `adapter-llm` added (default on); registry wires real adapters, falls back to stubs if disabled.
 - ✅ HostConfig extended with `http` and `llm`; default constructed from env for URLs/timeouts (no keys).
 - ⚠️ Tests/smoke: adapter-specific tests and example runs (03-fetch-notify, 07-llm-summarizer) still to run/regress.
@@ -556,7 +556,7 @@ impl<S: Store + Send + Sync + 'static> WorldHost<S> {
    - Honor `api_key` from params (literal or secret), no host fallback
    - Support multiple providers via `HostConfig.llm.providers` map
 4. Wire adapters into WorldHost with store access for CAS operations.
-5. CLI hints: LLM adapter is registered when feature is enabled; callers must supply `api_key` in params/secret (no auto-env key). 
+5. CLI hints: LLM adapter is registered when feature is enabled; callers must supply `api_key` in params/secret (no auto-env key).
 6. Smoke-test with examples that use HTTP/LLM effects. (Pending)
 
 ## Dependencies (additions)

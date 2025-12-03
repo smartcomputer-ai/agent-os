@@ -164,11 +164,11 @@ impl<S: Store + 'static> TestHost<S> {
         host_config: HostConfig,
     ) -> Result<Self, HostError> {
         let kernel = Kernel::from_loaded_manifest(
-            store,
+            store.clone(),
             loaded,
             Box::new(aos_kernel::journal::mem::MemJournal::new()),
         )?;
-        let host = WorldHost::from_kernel(kernel, host_config);
+        let host = WorldHost::from_kernel(kernel, store, host_config);
         Ok(Self { host })
     }
 }

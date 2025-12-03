@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use aos_host::config::HostConfig;
 use aos_host::control::{ControlClient, ControlMode, ControlServer, RequestEnvelope};
 use aos_host::host::{ExternalEvent, WorldHost};
 use aos_host::manifest_loader;
@@ -16,6 +15,7 @@ use aos_store::FsStore;
 use clap::{Parser, Subcommand};
 use serde_json::Value as JsonValue;
 use tokio::sync::{broadcast, mpsc};
+use util::{host_config_from_env_and_overrides, load_world_env};
 
 #[derive(Parser, Debug)]
 #[command(name = "aos", version, about = "AgentOS CLI")]
@@ -76,6 +76,18 @@ enum WorldCommand {
         /// Clear journal before step
         #[arg(long = "reset-journal")]
         do_reset_journal: bool,
+
+        /// Override HTTP adapter timeout (milliseconds)
+        #[arg(long)]
+        http_timeout_ms: Option<u64>,
+
+        /// Override HTTP adapter max response body size (bytes)
+        #[arg(long)]
+        http_max_body_bytes: Option<usize>,
+
+        /// Disable LLM adapter (even if compiled)
+        #[arg(long)]
+        no_llm: bool,
     },
     /// Run world in daemon mode with real timers
     Run {
@@ -113,6 +125,18 @@ enum WorldCommand {
         /// Event value as JSON (for --event)
         #[arg(long)]
         value: Option<String>,
+
+        /// Override HTTP adapter timeout (milliseconds)
+        #[arg(long)]
+        http_timeout_ms: Option<u64>,
+
+        /// Override HTTP adapter max response body size (bytes)
+        #[arg(long)]
+        http_max_body_bytes: Option<usize>,
+
+        /// Disable LLM adapter (even if compiled)
+        #[arg(long)]
+        no_llm: bool,
     },
 }
 
@@ -132,6 +156,9 @@ async fn main() -> Result<()> {
                 value,
                 force_build,
                 do_reset_journal,
+                http_timeout_ms,
+                http_max_body_bytes,
+                no_llm,
             } => {
                 cmd_world_step(
                     path,
@@ -143,6 +170,9 @@ async fn main() -> Result<()> {
                     value,
                     force_build,
                     do_reset_journal,
+                    http_timeout_ms,
+                    http_max_body_bytes,
+                    no_llm,
                 )
                 .await
             }
@@ -156,6 +186,9 @@ async fn main() -> Result<()> {
                 do_reset_journal,
                 event,
                 value,
+                http_timeout_ms,
+                http_max_body_bytes,
+                no_llm,
             } => {
                 cmd_world_run(
                     path,
@@ -167,6 +200,9 @@ async fn main() -> Result<()> {
                     do_reset_journal,
                     event,
                     value,
+                    http_timeout_ms,
+                    http_max_body_bytes,
+                    no_llm,
                 )
                 .await
             }
@@ -211,6 +247,9 @@ async fn cmd_world_step(
     value: Option<String>,
     force_build: bool,
     do_reset_journal: bool,
+    http_timeout_ms: Option<u64>,
+    http_max_body_bytes: Option<usize>,
+    no_llm: bool,
 ) -> Result<()> {
     // If daemon is running, send through control channel
     let store_root = match store_path.as_ref() {
@@ -260,6 +299,9 @@ async fn cmd_world_step(
     if !path.is_dir() {
         anyhow::bail!("'{}' is not a directory", path.display());
     }
+
+    // Load world-specific .env (does not override existing env vars)
+    load_world_env(&path)?;
 
     // Resolve directories with defaults
     // If paths are relative, make them relative to the world directory
@@ -322,7 +364,11 @@ async fn cmd_world_step(
     }
 
     // Create host and run
-    let host_config = HostConfig::default();
+    let host_config = host_config_from_env_and_overrides(
+        http_timeout_ms,
+        http_max_body_bytes,
+        no_llm,
+    );
     let kernel_config = util::make_kernel_config(&store_root)?;
     let host =
         WorldHost::from_loaded_manifest(store, loaded, &store_root, host_config, kernel_config)?;
@@ -368,6 +414,9 @@ async fn cmd_world_run(
     do_reset_journal: bool,
     event: Option<String>,
     value: Option<String>,
+    http_timeout_ms: Option<u64>,
+    http_max_body_bytes: Option<usize>,
+    no_llm: bool,
 ) -> Result<()> {
     // Set up logging
     setup_logging();
@@ -379,6 +428,9 @@ async fn cmd_world_run(
     if !path.is_dir() {
         anyhow::bail!("'{}' is not a directory", path.display());
     }
+
+    // Load world-specific .env (does not override existing env vars)
+    load_world_env(&path)?;
 
     // Resolve directories with defaults
     let air_dir = match air {
@@ -471,7 +523,11 @@ async fn cmd_world_run(
     }
 
     // Create host
-    let host_config = HostConfig::default();
+    let host_config = host_config_from_env_and_overrides(
+        http_timeout_ms,
+        http_max_body_bytes,
+        no_llm,
+    );
     let kernel_config = util::make_kernel_config(&store_root)?;
     let host =
         WorldHost::from_loaded_manifest(store, loaded, &store_root, host_config, kernel_config)?;

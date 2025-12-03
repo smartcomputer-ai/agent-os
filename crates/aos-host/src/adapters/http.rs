@@ -67,6 +67,28 @@ impl<S: Store> HttpAdapter<S> {
             .ok()
             .and_then(|h| HashRef::new(h.to_hex()).ok())
     }
+
+    fn timeout_receipt(
+        &self,
+        intent: &EffectIntent,
+        timings: Option<RequestTimings>,
+    ) -> EffectReceipt {
+        let receipt_payload = HttpRequestReceipt {
+            status: 598,
+            headers: HeaderMap::new(),
+            body_ref: None,
+            timings: timings.unwrap_or_else(default_timings),
+            adapter_id: "host.http".into(),
+        };
+        EffectReceipt {
+            intent_hash: intent.intent_hash,
+            adapter_id: "host.http".into(),
+            status: ReceiptStatus::Timeout,
+            payload_cbor: serde_cbor::to_vec(&receipt_payload).unwrap_or_default(),
+            cost_cents: None,
+            signature: vec![0; 64],
+        }
+    }
 }
 
 #[async_trait]
@@ -156,10 +178,8 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
                 ))
             }
             Err(_) => {
-                return Ok(self.error_receipt(
+                return Ok(self.timeout_receipt(
                     intent,
-                    598,
-                    "adapter timeout",
                     Some(timings_from(start_ns, self.config.timeout)),
                 ))
             }

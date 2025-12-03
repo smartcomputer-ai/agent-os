@@ -26,7 +26,7 @@ async fn daemon_fires_timer_and_routes_event() {
     let manifest = timer_manifest(&store);
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
-    let host = WorldHost::from_kernel(kernel, HostConfig::default());
+    let host = WorldHost::from_kernel(kernel, store.clone(), HostConfig::default());
 
     let (control_tx, control_rx) = mpsc::channel(8);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);

@@ -229,7 +229,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         let receipt = LlmGenerateReceipt {
             output_ref,
             token_usage: usage.clone(),
-            cost_cents: estimate_cost(&params.model, &api_response.usage),
+            cost_cents: None,
             provider_id: provider_id.clone(),
         };
 
@@ -238,7 +238,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             adapter_id: format!("host.llm.{provider_id}"),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&receipt)?,
-            cost_cents: receipt.cost_cents,
+            cost_cents: None,
             signature: vec![0; 64],
         })
     }
@@ -264,20 +264,7 @@ struct Message {
 struct OpenAiUsage {
     prompt_tokens: u64,
     completion_tokens: u64,
-    total_tokens: u64,
-}
-
-fn estimate_cost(model: &str, usage: &OpenAiUsage) -> Option<u64> {
-    let total = usage.total_tokens.max(usage.prompt_tokens + usage.completion_tokens);
-    // very rough cents estimate
-    let per_k = if model.contains("gpt-4o-mini") {
-        1 // $0.01 per 1k
-    } else if model.contains("gpt-4o") || model.contains("gpt-4") {
-        10 // $0.10 per 1k
-    } else {
-        1
-    };
-    Some(((total as f64 / 1000.0) * per_k as f64).ceil() as u64)
+    _total_tokens: u64,
 }
 
 fn zero_hashref() -> HashRef {

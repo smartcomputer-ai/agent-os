@@ -321,8 +321,7 @@ impl<S: Store + 'static> WorldHost<S> {
     }
 
     /// Create a WorldHost from an existing kernel (for TestHost use).
-    pub fn from_kernel(kernel: Kernel<S>, config: HostConfig) -> Self {
-        let store = kernel.store();
+    pub fn from_kernel(kernel: Kernel<S>, store: Arc<S>, config: HostConfig) -> Self {
         let adapter_registry = default_registry(store.clone(), &config);
         Self {
             kernel,

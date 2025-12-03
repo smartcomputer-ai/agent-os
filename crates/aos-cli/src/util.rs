@@ -2,14 +2,17 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
+use aos_host::config::HostConfig;
 use aos_host::util::{is_placeholder_hash, patch_modules};
 use aos_kernel::{KernelConfig, LoadedManifest};
 use aos_store::{FsStore, Store};
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
+use dotenvy;
 
 /// Compile a reducer crate to WASM and store the blob.
 pub fn compile_reducer(
@@ -70,5 +73,59 @@ pub fn make_kernel_config(store_root: &Path) -> Result<KernelConfig> {
         eager_module_load: true,
         secret_resolver: None,
         allow_placeholder_secrets: true,
+    })
+}
+
+/// Load .env from the world directory without overriding existing environment variables.
+pub fn load_world_env(world_path: &Path) -> Result<()> {
+    let env_path = world_path.join(".env");
+    if env_path.exists() {
+        for item in dotenvy::from_path_iter(&env_path).context("load .env")? {
+            let (key, val) = item?;
+            if std::env::var_os(&key).is_none() {
+                unsafe {
+                    std::env::set_var(&key, &val);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn host_config_from_env_and_overrides(
+    http_timeout_ms: Option<u64>,
+    http_max_body_bytes: Option<usize>,
+    no_llm: bool,
+) -> HostConfig {
+    let mut cfg = HostConfig::from_env();
+
+    if let Some(ms) = env_u64("AOS_HTTP_TIMEOUT_MS").or(http_timeout_ms) {
+        cfg.http.timeout = Duration::from_millis(ms);
+    }
+    if let Some(bytes) = env_usize("AOS_HTTP_MAX_BODY_BYTES").or(http_max_body_bytes) {
+        cfg.http.max_body_size = bytes;
+    }
+
+    let disable_llm_env = env_bool("AOS_DISABLE_LLM").unwrap_or(false);
+    if disable_llm_env || no_llm {
+        cfg.llm = None;
+    }
+
+    cfg
+}
+
+fn env_u64(key: &str) -> Option<u64> {
+    std::env::var(key).ok().and_then(|v| v.parse().ok())
+}
+
+fn env_usize(key: &str) -> Option<usize> {
+    std::env::var(key).ok().and_then(|v| v.parse().ok())
+}
+
+fn env_bool(key: &str) -> Option<bool> {
+    std::env::var(key).ok().and_then(|v| match v.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     })
 }

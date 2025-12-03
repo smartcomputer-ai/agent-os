@@ -44,7 +44,7 @@ async fn control_channel_round_trip() {
 
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
-    let host = WorldHost::from_kernel(kernel, HostConfig::default());
+    let host = WorldHost::from_kernel(kernel, store.clone(), HostConfig::default());
 
     let (control_tx, control_rx) = mpsc::channel(16);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
@@ -141,7 +141,7 @@ async fn control_channel_errors() {
     let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![], vec![]);
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
-    let host = WorldHost::from_kernel(kernel, HostConfig::default());
+    let host = WorldHost::from_kernel(kernel, store.clone(), HostConfig::default());
 
     let (control_tx, control_rx) = mpsc::channel(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
@@ -212,7 +212,7 @@ async fn control_channel_put_blob() {
     let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![], vec![]);
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
-    let host = WorldHost::from_kernel(kernel, HostConfig::default());
+    let host = WorldHost::from_kernel(kernel, store.clone(), HostConfig::default());
 
     let (control_tx, control_rx) = mpsc::channel(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
