@@ -373,7 +373,12 @@ pub struct ControlClient {
 
 impl ControlClient {
     pub async fn connect(path: &Path) -> std::io::Result<Self> {
-        let stream = UnixStream::connect(path).await?;
+        let stream = UnixStream::connect(path).await.map_err(|e| {
+            std::io::Error::new(
+                e.kind(),
+                format!("failed to connect to control socket {}: {e}", path.display()),
+            )
+        })?;
         let (r, w) = stream.into_split();
         let reader = BufReader::new(r);
         Ok(Self {

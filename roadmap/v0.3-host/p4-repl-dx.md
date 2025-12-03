@@ -39,6 +39,7 @@ crates/aos-host/src/repl/
 - `shutdown` → control `shutdown` (only if we own the daemon).
 - `manifest` → optional `query-manifest` control verb (or drop if not implemented).
 - `effects` / `timers` → only if control protocol exposes pending effects/timers; otherwise omit to avoid special-casing.
+- TODO: add optional live journal tail/stream once control protocol supports it.
 - Optional log/tail: pretty-print recent journal entries if control exposes them.
 
 ## CLI `aos dev`
