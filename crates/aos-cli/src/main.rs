@@ -399,11 +399,21 @@ async fn cmd_world_run(
     let (control_tx, control_rx) = mpsc::channel(128);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
-    // Handle Ctrl-C
+    // Handle Ctrl-C and SIGTERM for graceful shutdown
     let shutdown_tx_clone = shutdown_tx.clone();
     tokio::spawn(async move {
-        tokio::signal::ctrl_c().await.ok();
-        tracing::info!("Ctrl-C received, shutting down...");
+        let mut term =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Ctrl-C received, shutting down...");
+            }
+            _ = async {
+                if let Some(ref mut t) = term { t.recv().await; }
+            } => {
+                tracing::info!("SIGTERM received, shutting down...");
+            }
+        }
         let _ = shutdown_tx_clone.send(());
     });
 

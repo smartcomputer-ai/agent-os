@@ -7,6 +7,7 @@
 - Respect daemon semantics: `step` in daemon mode must invoke `run_cycle(RunMode::WithTimers)` (via control `step`). Batch-only paths are a fallback when no daemon is running.
 - Auto-manage lifecycle: if no daemon is running, auto-start one for the session; on exit, shut it down only if we started it.
 - Clear command semantics: distinguish enqueue-only vs enqueue+step; keep commands idempotent and versioned with the control protocol.
+- Safety: treat the control socket as the single-authority endpoint. Before auto-starting a daemon, check for an existing socket and refuse to stomp a running instance. If the socket file exists but is unreachable, surface a clear error and ask the user to clean up or kill the stale process—never auto-remove a potentially-live socket.
 
 ## REPL Architecture
 
