@@ -165,6 +165,12 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
         let response = match timeout(self.config.timeout, req.send()).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
+                if e.is_timeout() {
+                    return Ok(self.timeout_receipt(
+                        intent,
+                        Some(timings_from(start_ns, start.elapsed())),
+                    ));
+                }
                 return Ok(self.error_receipt(
                     intent,
                     599,

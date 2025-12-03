@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use aos_effects::{EffectIntent, EffectReceipt};
-use aos_kernel::{Kernel, KernelConfig};
+use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_store::Store;
 use serde::de::DeserializeOwned;
 
@@ -40,6 +40,29 @@ impl<S: Store + 'static> TestHost<S> {
         kernel_config: KernelConfig,
     ) -> Result<Self, HostError> {
         let host = WorldHost::open(store, manifest_path, host_config, kernel_config)?;
+        Ok(Self { host })
+    }
+
+    /// Create a TestHost from a pre-loaded manifest (in-memory journal).
+    pub fn from_loaded_manifest(
+        store: Arc<S>,
+        loaded: LoadedManifest,
+    ) -> Result<Self, HostError> {
+        Self::from_loaded_manifest_with_config(store, loaded, HostConfig::default())
+    }
+
+    /// Create a TestHost from a pre-loaded manifest with custom host config.
+    pub fn from_loaded_manifest_with_config(
+        store: Arc<S>,
+        loaded: LoadedManifest,
+        host_config: HostConfig,
+    ) -> Result<Self, HostError> {
+        let kernel = Kernel::from_loaded_manifest(
+            store.clone(),
+            loaded,
+            Box::new(aos_kernel::journal::mem::MemJournal::new()),
+        )?;
+        let host = WorldHost::from_kernel(kernel, store, host_config);
         Ok(Self { host })
     }
 
@@ -140,35 +163,5 @@ impl<S: Store + 'static> TestHost<S> {
     /// Get kernel heights (journal position).
     pub fn heights(&self) -> aos_kernel::KernelHeights {
         self.host.heights()
-    }
-}
-
-/// Additional constructors for programmatic manifest building (requires test-fixtures feature).
-#[cfg(any(feature = "test-fixtures", test))]
-impl<S: Store + 'static> TestHost<S> {
-    /// Create a TestHost from a pre-loaded manifest.
-    ///
-    /// This is the primary constructor for tests that programmatically build manifests
-    /// using the fixtures module.
-    pub fn from_loaded_manifest(
-        store: Arc<S>,
-        loaded: aos_kernel::LoadedManifest,
-    ) -> Result<Self, HostError> {
-        Self::from_loaded_manifest_with_config(store, loaded, HostConfig::default())
-    }
-
-    /// Create a TestHost from a pre-loaded manifest with custom host config.
-    pub fn from_loaded_manifest_with_config(
-        store: Arc<S>,
-        loaded: aos_kernel::LoadedManifest,
-        host_config: HostConfig,
-    ) -> Result<Self, HostError> {
-        let kernel = Kernel::from_loaded_manifest(
-            store.clone(),
-            loaded,
-            Box::new(aos_kernel::journal::mem::MemJournal::new()),
-        )?;
-        let host = WorldHost::from_kernel(kernel, store, host_config);
-        Ok(Self { host })
     }
 }

@@ -8,6 +8,7 @@
 - ✅ LLM adapter implemented (OpenAI-compatible) with canonical params/receipt, CAS input/output, token_usage; cost_cents currently left `None` to avoid nondeterministic estimates; provider map (openai default). API keys must come from params (secret/literal); no host-side fallback.
 - ✅ Feature gates `adapter-http` / `adapter-llm` added (default on); registry wires real adapters, falls back to stubs if disabled.
 - ✅ HostConfig extended with `http` and `llm`; default constructed from env for URLs/timeouts (no keys).
+- ✅ CLI flags/env: `--http-timeout-ms` / `AOS_HTTP_TIMEOUT_MS`, `--http-max-body-bytes` / `AOS_HTTP_MAX_BODY_BYTES`, `--no-llm` / `AOS_DISABLE_LLM`; world-local `.env` at world root (not `.aos`) is loaded if present without overriding existing env vars.
 - ⚠️ Tests/smoke: adapter-specific tests and example runs (03-fetch-notify, 07-llm-summarizer) still to run/regress.
 - ⚠️ Docs below kept for design; “CLI auto-registers with OPENAI_API_KEY” no longer true—adapter registers regardless, key must be provided in params via secrets.
 

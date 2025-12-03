@@ -253,6 +253,7 @@ struct Message {
 struct OpenAiUsage {
     prompt_tokens: u64,
     completion_tokens: u64,
+    #[serde(rename = "total_tokens")]
     _total_tokens: u64,
 }
 

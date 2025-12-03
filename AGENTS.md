@@ -92,6 +92,7 @@ Planned adapters: `aos-adapter-http`, `aos-adapter-llm`, `aos-adapter-fs`, `aos-
 - Snapshots/"goldens": for canonical CBOR and journals, store fixtures under `tests/data/`. Regenerate consciously; diff byte-for-byte to protect determinism.
 - Replay-or-die: for kernel/plan tests, run once to produce a journal, then replay from genesis and assert byte-identical snapshots.
 - Async tests: if needed, use `#[tokio::test(flavor = "current_thread")]` to keep scheduling deterministic.
+- `aos-host` note: integration tests expect fixtures; run with `--features test-fixtures` when invoking `cargo test -p aos-host`.
 
 ## Examples Ladder (index)
 - See `examples/README.md` for the numbered demos.
