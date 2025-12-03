@@ -347,7 +347,7 @@ impl<S: Store + 'static> WorldHost<S> {
             // Build EffectReceipt and feed through handle_receipt
             let receipt = EffectReceipt {
                 intent_hash: entry.intent_hash,
-                adapter_id: "host.timer".into(),
+                adapter_id: "timer.set".into(),
                 status: ReceiptStatus::Ok,
                 payload_cbor,
                 cost_cents: Some(0),

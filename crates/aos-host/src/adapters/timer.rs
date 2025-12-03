@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use aos_effects::EffectIntent;
 use aos_effects::builtins::TimerSetParams;
 use aos_kernel::snapshot::ReducerReceiptSnapshot;
+use tracing::warn;
 
 use crate::error::HostError;
 
@@ -183,6 +184,12 @@ impl TimerScheduler {
                         params_cbor: ctx.params_cbor.clone(),
                     };
                     self.heap.push(entry);
+                } else {
+                    warn!(
+                        intent_hash = ?ctx.intent_hash,
+                        reducer = %ctx.reducer,
+                        "failed to decode TimerSetParams while rehydrating timer; dropping entry"
+                    );
                 }
             }
         }

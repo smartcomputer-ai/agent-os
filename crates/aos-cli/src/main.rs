@@ -409,9 +409,6 @@ async fn cmd_world_run(
     // Create and run daemon
     let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx);
 
-    // Rehydrate pending timers from previous session
-    daemon.rehydrate_timers();
-
     // Inject startup event if provided - do this directly on the daemon's host
     // instead of through the control channel to avoid race conditions
     if let Some(schema) = event {

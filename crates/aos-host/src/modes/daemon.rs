@@ -75,12 +75,17 @@ impl<S: Store + 'static> WorldDaemon<S> {
         control_rx: mpsc::Receiver<ControlMsg>,
         shutdown_rx: broadcast::Receiver<()>,
     ) -> Self {
-        Self {
+        let mut daemon = Self {
             host,
             timer_scheduler: TimerScheduler::new(),
             control_rx,
             shutdown_rx,
-        }
+        };
+
+        // Automatically rehydrate timers from pending reducer receipts so callers
+        // can't forget to restore timers after a restart.
+        daemon.rehydrate_timers();
+        daemon
     }
 
     /// Rehydrate pending timers from kernel snapshot.
@@ -88,6 +93,10 @@ impl<S: Store + 'static> WorldDaemon<S> {
     /// Call this after construction but before `run()` to restore any timers
     /// that were pending when the daemon last shut down.
     pub fn rehydrate_timers(&mut self) {
+        if !self.timer_scheduler.is_empty() {
+            tracing::debug!("Timer scheduler already populated; skipping rehydrate");
+            return;
+        }
         let pending = self.host.kernel().pending_reducer_receipts_snapshot();
         self.timer_scheduler.rehydrate_from_pending(&pending);
         let count = self.timer_scheduler.len();
