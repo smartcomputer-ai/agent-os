@@ -40,7 +40,12 @@ impl<S: Store> LlmAdapter<S> {
         message: impl Into<String>,
     ) -> EffectReceipt {
         let msg = message.into();
-        let output_ref = self.put_blob(msg.as_bytes());
+        let output_ref = self
+            .store
+            .put_blob(msg.as_bytes())
+            .ok()
+            .and_then(|h| HashRef::new(h.to_hex()).ok())
+            .unwrap_or_else(zero_hashref);
         let receipt = LlmGenerateReceipt {
             output_ref,
             token_usage: TokenUsage {
@@ -58,14 +63,6 @@ impl<S: Store> LlmAdapter<S> {
             cost_cents: None,
             signature: vec![0; 64],
         }
-    }
-
-    fn put_blob(&self, bytes: &[u8]) -> HashRef {
-        let hash = self
-            .store
-            .put_blob(bytes)
-            .expect("store llm blob");
-        HashRef::new(hash.to_hex()).expect("hash ref")
     }
 }
 
@@ -96,12 +93,8 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        // Resolve API key: params first, then provider default.
-        let api_key = params
-            .api_key
-            .clone()
-            .or_else(|| provider.api_key.clone());
-        let api_key = match api_key {
+        // Resolve API key: must come from params (literal or secret-ref resolved upstream).
+        let api_key = match params.api_key.clone() {
             Some(key) if !key.is_empty() => key,
             _ => {
                 return Ok(self.error_receipt(
@@ -208,7 +201,25 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             .and_then(|c| c.message.content.clone())
             .unwrap_or_default();
 
-        let output_ref = self.put_blob(content.as_bytes());
+        let output_ref = match self.store.put_blob(content.as_bytes()) {
+            Ok(h) => match HashRef::new(h.to_hex()) {
+                Ok(hr) => hr,
+                Err(e) => {
+                    return Ok(self.error_receipt(
+                        intent,
+                        &provider_id,
+                        format!("invalid output hash: {e}"),
+                    ))
+                }
+            },
+            Err(e) => {
+                return Ok(self.error_receipt(
+                    intent,
+                    &provider_id,
+                    format!("store output failed: {e}"),
+                ))
+            }
+        };
 
         let usage = TokenUsage {
             prompt: api_response.usage.prompt_tokens,
@@ -267,4 +278,9 @@ fn estimate_cost(model: &str, usage: &OpenAiUsage) -> Option<u64> {
         1
     };
     Some(((total as f64 / 1000.0) * per_k as f64).ceil() as u64)
+}
+
+fn zero_hashref() -> HashRef {
+    HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
+        .expect("static zero hashref")
 }

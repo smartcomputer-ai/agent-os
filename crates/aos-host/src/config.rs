@@ -18,23 +18,21 @@ pub struct HostConfig {
 
 impl Default for HostConfig {
     fn default() -> Self {
-        let llm = LlmAdapterConfig::from_env()
-            .ok()
-            .and_then(|cfg| {
-                if cfg.providers.values().any(|p| p.api_key.is_some()) {
-                    Some(cfg)
-                } else {
-                    None
-                }
-            });
         Self {
             effect_timeout: Duration::from_secs(30),
             module_cache_dir: None,
             eager_module_load: false,
             allow_placeholder_secrets: false,
             http: HttpAdapterConfig::default(),
-            llm,
+            llm: LlmAdapterConfig::from_env().ok(),
         }
+    }
+}
+
+impl HostConfig {
+    /// Build HostConfig using environment defaults (currently same as Default).
+    pub fn from_env() -> Self {
+        Self::default()
     }
 }
 
@@ -61,8 +59,6 @@ impl Default for HttpAdapterConfig {
 pub struct ProviderConfig {
     pub base_url: String,
     pub timeout: Duration,
-    /// Optional API key to use when params.api_key is None (convenience for CLI).
-    pub api_key: Option<String>,
 }
 
 /// Configuration for the LLM adapter.
@@ -77,7 +73,6 @@ impl LlmAdapterConfig {
     pub fn from_env() -> Result<Self, std::env::VarError> {
         let base_url = std::env::var("OPENAI_BASE_URL")
             .unwrap_or_else(|_| "https://api.openai.com/v1".into());
-        let api_key = std::env::var("OPENAI_API_KEY").ok();
 
         let mut providers = HashMap::new();
         providers.insert(
@@ -85,7 +80,6 @@ impl LlmAdapterConfig {
             ProviderConfig {
                 base_url,
                 timeout: Duration::from_secs(120),
-                api_key,
             },
         );
 

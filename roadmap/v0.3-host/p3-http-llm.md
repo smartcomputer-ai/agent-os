@@ -2,6 +2,15 @@
 
 **Goal:** Ship real HTTP and LLM adapters that use the canonical AIR types from `aos-effects::builtins`, with CAS-based body/prompt/output handling, and integrate with WorldHost/daemon.
 
+## Status (2025-12-03)
+
+- ✅ HTTP adapter implemented with canonical params/receipt, CAS body_ref in/out, monotonic timings, size cap, and error receipts for network/timeout/invalid refs.
+- ✅ LLM adapter implemented (OpenAI-compatible) with canonical params/receipt, CAS input/output, token_usage + rough cost estimate, provider map (openai default). API keys must come from params (secret/literal); no host-side fallback.
+- ✅ Feature gates `adapter-http` / `adapter-llm` added (default on); registry wires real adapters, falls back to stubs if disabled.
+- ✅ HostConfig extended with `http` and `llm`; default constructed from env for URLs/timeouts (no keys).
+- ⚠️ Tests/smoke: adapter-specific tests and example runs (03-fetch-notify, 07-llm-summarizer) still to run/regress.
+- ⚠️ Docs below kept for design; “CLI auto-registers with OPENAI_API_KEY” no longer true—adapter registers regardless, key must be provided in params via secrets.
+
 ## Design Principles
 
 1. **Use canonical types**: Import `HttpRequestParams`, `HttpRequestReceipt`, `LlmGenerateParams`, `LlmGenerateReceipt` from `aos-effects::builtins`. Do not redefine.
@@ -544,11 +553,11 @@ impl<S: Store + Send + Sync + 'static> WorldHost<S> {
    - Fetch prompt/messages from CAS via `input_ref`
    - Write output to CAS, return `output_ref`
    - Fill `token_usage`, `cost_cents`, `provider_id`
-   - Honor `api_key` (literal or from config)
+   - Honor `api_key` from params (literal or secret), no host fallback
    - Support multiple providers via `HostConfig.llm.providers` map
 4. Wire adapters into WorldHost with store access for CAS operations.
-5. CLI hints: `aos world run` auto-registers LLM adapter if `OPENAI_API_KEY` is set.
-6. Smoke-test with examples that use HTTP/LLM effects.
+5. CLI hints: LLM adapter is registered when feature is enabled; callers must supply `api_key` in params/secret (no auto-env key). 
+6. Smoke-test with examples that use HTTP/LLM effects. (Pending)
 
 ## Dependencies (additions)
 
