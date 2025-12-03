@@ -39,7 +39,7 @@ pub struct ResponseEnvelope {
     pub error: Option<ControlError>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ControlError {
     pub code: String,
     pub message: String,

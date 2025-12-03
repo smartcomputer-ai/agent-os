@@ -133,3 +133,123 @@ async fn control_channel_round_trip() {
     // Await daemon exit
     daemon_handle.await.unwrap().unwrap();
 }
+
+/// Control errors: unknown method and invalid request.
+#[tokio::test]
+async fn control_channel_errors() {
+    let store: Arc<TestStore> = fixtures::new_mem_store();
+    let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![], vec![]);
+    let kernel =
+        Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
+    let host = WorldHost::from_kernel(kernel, HostConfig::default());
+
+    let (control_tx, control_rx) = mpsc::channel(4);
+    let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None);
+    let daemon_handle = tokio::spawn(async move { daemon.run().await });
+
+    let sock_dir = TempDir::new().unwrap();
+    let sock_path = sock_dir.path().join("control.sock");
+    let server = ControlServer::new(
+        sock_path.clone(),
+        control_tx.clone(),
+        shutdown_tx.clone(),
+        aos_host::control::ControlMode::Ndjson,
+    );
+    tokio::spawn(async move {
+        let _ = server.run().await;
+    });
+
+    for _ in 0..20 {
+        if sock_path.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let mut client = ControlClient::connect(&sock_path).await.unwrap();
+
+    // Unknown method
+    let resp = client
+        .request(&RequestEnvelope {
+            v: 1,
+            id: "u".into(),
+            cmd: "does-not-exist".into(),
+            payload: json!({}),
+        })
+        .await
+        .unwrap();
+    assert!(!resp.ok);
+    assert_eq!(
+        resp.error.as_ref().map(|e| e.code.as_str()),
+        Some("unknown_method")
+    );
+
+    // Invalid request: missing schema
+    let resp = client
+        .request(&RequestEnvelope {
+            v: 1,
+            id: "inv".into(),
+            cmd: "send-event".into(),
+            payload: json!({ "value_b64": "" }),
+        })
+        .await
+        .unwrap();
+    assert!(!resp.ok);
+    assert_eq!(
+        resp.error.as_ref().map(|e| e.code.as_str()),
+        Some("invalid_request")
+    );
+
+    let _ = shutdown_tx.send(());
+    daemon_handle.await.unwrap().unwrap();
+}
+
+/// put-blob control verb: store data and get hash back.
+#[tokio::test]
+async fn control_channel_put_blob() {
+    let store: Arc<TestStore> = fixtures::new_mem_store();
+    let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![], vec![]);
+    let kernel =
+        Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
+    let host = WorldHost::from_kernel(kernel, HostConfig::default());
+
+    let (control_tx, control_rx) = mpsc::channel(4);
+    let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None);
+    let daemon_handle = tokio::spawn(async move { daemon.run().await });
+
+    let sock_dir = TempDir::new().unwrap();
+    let sock_path = sock_dir.path().join("control.sock");
+    let server = ControlServer::new(
+        sock_path.clone(),
+        control_tx.clone(),
+        shutdown_tx.clone(),
+        aos_host::control::ControlMode::Ndjson,
+    );
+    tokio::spawn(async move {
+        let _ = server.run().await;
+    });
+
+    for _ in 0..20 {
+        if sock_path.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let mut client = ControlClient::connect(&sock_path).await.unwrap();
+
+    let data = b"hello control blob";
+    let resp = client.put_blob("put", data).await.unwrap();
+    assert!(resp.ok);
+    let hash = resp
+        .result
+        .and_then(|v| v.get("hash").cloned())
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .expect("hash");
+    assert!(!hash.is_empty());
+
+    let _ = shutdown_tx.send(());
+    daemon_handle.await.unwrap().unwrap();
+}

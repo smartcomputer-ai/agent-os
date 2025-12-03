@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use aos_host::config::HostConfig;
-use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
+use aos_host::control::{ControlClient, ControlMode, ControlServer, RequestEnvelope};
 use aos_host::host::{ExternalEvent, WorldHost};
 use aos_host::manifest_loader;
 use aos_host::modes::batch::BatchRunner;
@@ -212,6 +212,47 @@ async fn cmd_world_step(
     force_build: bool,
     do_reset_journal: bool,
 ) -> Result<()> {
+    // If daemon is running, send through control channel
+    let store_root = match store_path.as_ref() {
+        Some(p) if p.is_relative() => path.join(p),
+        Some(p) => p.clone(),
+        None => path.clone(),
+    };
+    let control_path = store_root.join(".aos/control.sock");
+    if control_path.exists() {
+        match ControlClient::connect(&control_path).await {
+            Ok(mut client) => {
+                // Optionally enqueue event
+                if let Some(schema) = event.as_ref() {
+                    let json = value.clone().unwrap_or_else(|| "{}".to_string());
+                    let parsed: JsonValue =
+                        serde_json::from_str(&json).context("parse event value as JSON")?;
+                    let cbor = serde_cbor::to_vec(&parsed).context("encode event value as CBOR")?;
+                    let resp = client.send_event("step-event", schema, &cbor).await?;
+                    if !resp.ok {
+                        anyhow::bail!("daemon control send-event failed: {:?}", resp.error);
+                    }
+                }
+                let resp = client.step("step").await?;
+                if !resp.ok {
+                    anyhow::bail!("daemon control step failed: {:?}", resp.error);
+                }
+                println!("Step sent via daemon control channel");
+                return Ok(());
+            }
+            Err(e) => {
+                anyhow::bail!(
+                    "control socket {} exists but could not connect ({e}); refusing to fall back. \
+                     If the daemon is not running, delete the socket and retry.",
+                    control_path.display()
+                );
+            }
+        }
+    }
+
+    // Fallback to batch mode if no daemon
+    // (existing batch implementation below)
+
     // Validate world directory
     if !path.exists() {
         anyhow::bail!("world directory '{}' not found", path.display());
@@ -222,22 +263,26 @@ async fn cmd_world_step(
 
     // Resolve directories with defaults
     // If paths are relative, make them relative to the world directory
-    let air_dir = match air {
-        Some(p) if p.is_relative() => path.join(p),
-        Some(p) => p,
-        None => path.join("air"),
-    };
-    let reducer_dir = match reducer {
-        Some(p) if p.is_relative() => path.join(p),
-        Some(p) => p,
-        None => path.join("reducer"),
-    };
-    // store_root is where .aos/ will be created (defaults to world directory)
-    let store_root = match store_path {
-        Some(p) if p.is_relative() => path.join(p),
-        Some(p) => p,
-        None => path.clone(),
-    };
+    let air_dir = air
+        .as_ref()
+        .map(|p| {
+            if p.is_relative() {
+                path.join(p)
+            } else {
+                p.clone()
+            }
+        })
+        .unwrap_or_else(|| path.join("air"));
+    let reducer_dir = reducer
+        .as_ref()
+        .map(|p| {
+            if p.is_relative() {
+                path.join(p)
+            } else {
+                p.clone()
+            }
+        })
+        .unwrap_or_else(|| path.join("reducer"));
 
     // Optionally reset journal (journal is at <store_root>/.aos/journal/)
     if do_reset_journal {
@@ -458,6 +503,7 @@ async fn cmd_world_run(
         control_path.clone(),
         control_tx.clone(),
         shutdown_tx.clone(),
+        ControlMode::Ndjson,
     );
     let server_handle = tokio::spawn(async move {
         if let Err(e) = server.run().await {
