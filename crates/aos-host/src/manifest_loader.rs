@@ -19,7 +19,10 @@ use log::warn;
 use serde_json::Value;
 use walkdir::WalkDir;
 
-const ZERO_HASH_SENTINEL: &str =
+/// Placeholder hash used for authoring AIR JSON manifests. When a module's
+/// `wasm_hash` equals this value, it indicates the hash should be patched
+/// at load time with the actual compiled WASM hash.
+pub const ZERO_HASH_SENTINEL: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Attempts to load a manifest for the provided example directory by reading AIR JSON assets

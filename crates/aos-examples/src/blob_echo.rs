@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_cbor;
 use sha2::{Digest, Sha256};
 
-use crate::support::reducer_harness::{ExampleReducerHarness, ExampleRun, HarnessConfig};
+use crate::reducer_harness::{ExampleReducerHarness, ExampleRun, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/BlobEchoSM@1";
 const EVENT_SCHEMA: &str = "demo/BlobEchoEvent@1";

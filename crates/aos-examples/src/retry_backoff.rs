@@ -9,7 +9,7 @@ use aos_store::FsStore;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
-use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/RetrySM@1";
 const START_EVENT_SCHEMA: &str = "demo/StartWork@1";

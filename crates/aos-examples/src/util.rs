@@ -11,14 +11,7 @@ use camino::Utf8PathBuf;
 use log::debug;
 use once_cell::sync::OnceCell;
 
-pub fn reset_journal(example_root: &Path) -> Result<()> {
-    let journal_dir = example_root.join(".aos").join("journal");
-    if journal_dir.exists() {
-        fs::remove_dir_all(&journal_dir)
-            .with_context(|| format!("remove {}", journal_dir.display()))?;
-    }
-    Ok(())
-}
+pub use aos_host::util::reset_journal;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(crate::workspace_root())

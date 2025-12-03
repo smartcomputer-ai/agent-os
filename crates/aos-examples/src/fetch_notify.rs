@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
 const REDUCER_NAME: &str = "demo/FetchNotify@1";

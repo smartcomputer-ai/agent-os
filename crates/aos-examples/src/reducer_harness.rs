@@ -4,13 +4,14 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::{HashRef, Name};
 use aos_cbor::Hash;
+use aos_host::manifest_loader;
+use aos_host::util::patch_modules;
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_store::{FsStore, Store};
 use serde::{Serialize, de::DeserializeOwned};
 
-use crate::support::manifest_loader;
-use crate::support::util;
+use crate::util;
 
 pub struct HarnessConfig<'a> {
     pub example_root: &'a Path,
@@ -187,10 +188,9 @@ fn patch_module_hash(
     reducer_name: &str,
     wasm_hash: &HashRef,
 ) -> Result<()> {
-    let module = loaded
-        .modules
-        .get_mut(reducer_name)
-        .ok_or_else(|| anyhow!("module '{reducer_name}' missing from manifest"))?;
-    module.wasm_hash = wasm_hash.clone();
+    let patched = patch_modules(loaded, wasm_hash, |name, _| name == reducer_name);
+    if patched == 0 {
+        anyhow::bail!("module '{reducer_name}' missing from manifest");
+    }
     Ok(())
 }

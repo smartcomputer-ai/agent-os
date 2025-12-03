@@ -12,7 +12,7 @@ use aos_store::FsStore;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
-use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/TimerSM@1";
 const EVENT_SCHEMA: &str = "demo/TimerEvent@1";

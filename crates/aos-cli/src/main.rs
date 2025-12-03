@@ -8,15 +8,13 @@ use aos_host::config::HostConfig;
 use aos_host::host::{ExternalEvent, WorldHost};
 use aos_host::manifest_loader;
 use aos_host::modes::batch::BatchRunner;
-use aos_kernel::{KernelConfig, LoadedManifest};
+use aos_host::util::{has_placeholder_modules, is_placeholder_hash, patch_modules, reset_journal};
+use aos_kernel::KernelConfig;
 use aos_store::{FsStore, Store};
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use serde_json::Value as JsonValue;
-
-const ZERO_HASH_SENTINEL: &str =
-    "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
 #[derive(Parser, Debug)]
 #[command(name = "aos", version, about = "AgentOS CLI")]
@@ -75,8 +73,8 @@ enum WorldCommand {
         force_build: bool,
 
         /// Clear journal before step
-        #[arg(long)]
-        reset_journal: bool,
+        #[arg(long = "reset-journal")]
+        do_reset_journal: bool,
     },
 }
 
@@ -95,7 +93,7 @@ async fn main() -> Result<()> {
                 event,
                 value,
                 force_build,
-                reset_journal,
+                do_reset_journal,
             } => {
                 cmd_world_step(
                     path,
@@ -106,7 +104,7 @@ async fn main() -> Result<()> {
                     event,
                     value,
                     force_build,
-                    reset_journal,
+                    do_reset_journal,
                 )
                 .await
             }
@@ -150,7 +148,7 @@ async fn cmd_world_step(
     event: Option<String>,
     value: Option<String>,
     force_build: bool,
-    reset_journal: bool,
+    do_reset_journal: bool,
 ) -> Result<()> {
     // Validate world directory
     if !path.exists() {
@@ -180,12 +178,9 @@ async fn cmd_world_step(
     };
 
     // Optionally reset journal (journal is at <store_root>/.aos/journal/)
-    if reset_journal {
-        let journal_dir = store_root.join(".aos/journal");
-        if journal_dir.exists() {
-            fs::remove_dir_all(&journal_dir).context("remove journal")?;
-            println!("Journal cleared");
-        }
+    if do_reset_journal {
+        reset_journal(&store_root)?;
+        println!("Journal cleared");
     }
 
     // Open store (creates .aos/store/ inside store_root)
@@ -272,23 +267,14 @@ fn compile_reducer(
 }
 
 fn patch_module_hashes(
-    loaded: &mut LoadedManifest,
+    loaded: &mut aos_kernel::LoadedManifest,
     wasm_hash: &HashRef,
     specific_module: Option<&str>,
 ) -> Result<usize> {
-    let mut patched = 0;
-
-    for (name, module) in loaded.modules.iter_mut() {
-        let should_patch = match specific_module {
-            Some(target) => name.as_str() == target,
-            None => module.wasm_hash.as_str() == ZERO_HASH_SENTINEL,
-        };
-
-        if should_patch {
-            module.wasm_hash = wasm_hash.clone();
-            patched += 1;
-        }
-    }
+    let patched = match specific_module {
+        Some(target) => patch_modules(loaded, wasm_hash, |name, _| name == target),
+        None => patch_modules(loaded, wasm_hash, |_, m| is_placeholder_hash(m)),
+    };
 
     if let Some(target) = specific_module {
         if patched == 0 {
@@ -297,13 +283,6 @@ fn patch_module_hashes(
     }
 
     Ok(patched)
-}
-
-fn has_placeholder_modules(loaded: &LoadedManifest) -> bool {
-    loaded
-        .modules
-        .values()
-        .any(|m| m.wasm_hash.as_str() == ZERO_HASH_SENTINEL)
 }
 
 fn make_kernel_config(store_root: &Path) -> Result<KernelConfig> {

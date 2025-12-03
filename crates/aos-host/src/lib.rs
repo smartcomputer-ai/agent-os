@@ -5,6 +5,7 @@ pub mod error;
 pub mod host;
 pub mod manifest_loader;
 pub mod modes;
+pub mod util;
 
 pub mod testhost;
 

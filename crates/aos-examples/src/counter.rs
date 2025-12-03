@@ -8,7 +8,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/CounterSM@1";
 const EVENT_SCHEMA: &str = "demo/CounterEvent@1";

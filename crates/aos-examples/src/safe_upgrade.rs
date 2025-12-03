@@ -6,8 +6,8 @@ use aos_kernel::shadow::ShadowHarness;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
-use crate::support::manifest_loader;
-use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use aos_host::manifest_loader;
+use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
 const REDUCER_NAME: &str = "demo/SafeUpgrade@1";
