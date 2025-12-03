@@ -8,11 +8,11 @@ use aos_store::Store;
 
 use crate::adapters::registry::AdapterRegistry;
 use crate::adapters::registry::AdapterRegistryConfig;
-use crate::config::HostConfig;
-use crate::error::HostError;
 use crate::adapters::stub::{
     StubBlobAdapter, StubBlobGetAdapter, StubHttpAdapter, StubLlmAdapter, StubTimerAdapter,
 };
+use crate::config::HostConfig;
+use crate::error::HostError;
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
@@ -23,7 +23,9 @@ pub enum ExternalEvent {
 #[derive(Clone, Copy)]
 pub enum RunMode<'a> {
     Batch,
-    WithTimers { adapter_registry: &'a AdapterRegistry },
+    WithTimers {
+        adapter_registry: &'a AdapterRegistry,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -160,7 +162,9 @@ impl<S: Store + 'static> WorldHost<S> {
 
         let receipts = match mode {
             RunMode::Batch => self.adapter_registry.execute_batch(intents).await,
-            RunMode::WithTimers { adapter_registry } => adapter_registry.execute_batch(intents).await,
+            RunMode::WithTimers { adapter_registry } => {
+                adapter_registry.execute_batch(intents).await
+            }
         };
 
         let receipts_applied = receipts.len();

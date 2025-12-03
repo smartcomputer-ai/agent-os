@@ -11,11 +11,11 @@ use aos_air_types::{
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_cbor::{Hash, to_canonical_cbor};
+use aos_host::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
 use aos_kernel::shadow::{LedgerDelta, LedgerKind, ShadowHarness};
-use aos_host::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use aos_wasm_abi::ReducerOutput;
 use indexmap::IndexMap;
 use serde_cbor;

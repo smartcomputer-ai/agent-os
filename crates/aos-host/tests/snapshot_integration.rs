@@ -4,12 +4,12 @@ use aos_air_types::{
 };
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_host::fixtures::{self, START_SCHEMA, TestWorld};
 use aos_kernel::Kernel;
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_store::FsStore;
-use aos_host::fixtures::{self, START_SCHEMA, TestWorld};
 use aos_wasm_abi::ReducerOutput;
 use serde_cbor;
 use std::sync::Arc;

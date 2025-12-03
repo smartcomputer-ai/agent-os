@@ -10,7 +10,9 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    Init { path: PathBuf },
+    Init {
+        path: PathBuf,
+    },
     Step {
         path: PathBuf,
         #[arg(long)]

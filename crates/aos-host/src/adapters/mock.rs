@@ -91,9 +91,8 @@ impl MockHttpHarness {
             for intent in intents {
                 match intent.kind.as_str() {
                     EffectKind::HTTP_REQUEST => {
-                        let params: HttpRequestParams =
-                            serde_cbor::from_slice(&intent.params_cbor)
-                                .context("decode http request params")?;
+                        let params: HttpRequestParams = serde_cbor::from_slice(&intent.params_cbor)
+                            .context("decode http request params")?;
                         out.push(HttpRequestContext { intent, params });
                     }
                     other => {

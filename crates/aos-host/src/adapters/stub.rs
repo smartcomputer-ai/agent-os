@@ -62,8 +62,8 @@ impl AsyncEffectAdapter for StubTimerAdapter {
 
     async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
         // Parse the requested timer params to get deliver_at_ns
-        let params: TimerSetParams = serde_cbor::from_slice(&intent.params_cbor)
-            .unwrap_or(TimerSetParams {
+        let params: TimerSetParams =
+            serde_cbor::from_slice(&intent.params_cbor).unwrap_or(TimerSetParams {
                 deliver_at_ns: 0,
                 key: None,
             });

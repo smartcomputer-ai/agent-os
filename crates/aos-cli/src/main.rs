@@ -99,7 +99,10 @@ async fn cmd_world_step(
         let parsed: JsonValue = serde_json::from_str(&json)
             .map_err(|e| HostError::External(format!("invalid event JSON: {e}")))?;
         let cbor = serde_cbor::to_vec(&parsed)?;
-        events.push(ExternalEvent::DomainEvent { schema, value: cbor });
+        events.push(ExternalEvent::DomainEvent {
+            schema,
+            value: cbor,
+        });
     }
 
     let res = runner.step(events).await?;

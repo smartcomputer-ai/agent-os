@@ -86,8 +86,7 @@ pub fn timer_trigger(plan: &str) -> Trigger {
 
 /// Returns the zero hash helper used as a placeholder for plan references.
 pub fn zero_hash() -> HashRef {
-    HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
-        .unwrap()
+    HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000").unwrap()
 }
 
 /// Returns a fake hash reference with all bytes set to the provided value.

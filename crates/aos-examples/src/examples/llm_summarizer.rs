@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse, MockLlmHarness};
 use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse, MockLlmHarness};
 
 const REDUCER_NAME: &str = "demo/LlmSummarizer@1";
 const EVENT_SCHEMA: &str = "demo/LlmSummarizerEvent@1";

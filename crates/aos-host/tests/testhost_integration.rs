@@ -309,9 +309,9 @@ async fn testhost_with_fixtures_build_loaded_manifest() {
 
     // Build manifest using fixtures helper
     let loaded = fixtures::build_loaded_manifest(
-        vec![],                                           // no plans
-        vec![],                                           // no triggers
-        vec![module],                                     // one reducer
+        vec![],       // no plans
+        vec![],       // no triggers
+        vec![module], // one reducer
         vec![fixtures::routing_event("test/Event@1", "test/Reducer@1")],
     );
 
@@ -405,7 +405,10 @@ async fn testhost_timer_effect_flow() {
         vec![],
         vec![],
         vec![module],
-        vec![fixtures::routing_event("test/TimerEvent@1", "test/TimerReducer@1")],
+        vec![fixtures::routing_event(
+            "test/TimerEvent@1",
+            "test/TimerReducer@1",
+        )],
     );
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
@@ -424,8 +427,7 @@ async fn testhost_timer_effect_flow() {
     assert_eq!(timer_intent.kind.as_str(), "timer.set");
 
     // Parse and verify params
-    let parsed_params: TimerSetParams =
-        serde_cbor::from_slice(&timer_intent.params_cbor).unwrap();
+    let parsed_params: TimerSetParams = serde_cbor::from_slice(&timer_intent.params_cbor).unwrap();
     assert_eq!(parsed_params.deliver_at_ns, 1_000_000);
     assert_eq!(parsed_params.key, Some("test-timer".into()));
 
@@ -479,7 +481,10 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
         vec![],
         vec![],
         vec![module],
-        vec![fixtures::routing_event("test/TimerEvent@1", "test/TimerReducer@1")],
+        vec![fixtures::routing_event(
+            "test/TimerEvent@1",
+            "test/TimerReducer@1",
+        )],
     );
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();

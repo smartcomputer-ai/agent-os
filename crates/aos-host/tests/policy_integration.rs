@@ -5,8 +5,8 @@ use aos_air_types::{
     ValueMap, ValueNull, ValueRecord, ValueText,
 };
 use aos_effects::builtins::HttpRequestParams;
+use aos_host::fixtures::{self, TestWorld, zero_hash};
 use aos_kernel::error::KernelError;
-use aos_host::fixtures::{self, zero_hash, TestWorld};
 use aos_wasm_abi::ReducerEffect;
 use indexmap::IndexMap;
 

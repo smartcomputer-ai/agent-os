@@ -20,7 +20,7 @@ impl Default for AdapterRegistryConfig {
 }
 
 pub struct AdapterRegistry {
-    adapters: HashMap<String, Box<dyn AsyncEffectAdapter>>, 
+    adapters: HashMap<String, Box<dyn AsyncEffectAdapter>>,
     config: AdapterRegistryConfig,
 }
 
@@ -45,26 +45,27 @@ impl AdapterRegistry {
 
         for intent in intents {
             let receipt = match self.get(intent.kind.as_str()) {
-                Some(adapter) => match timeout(self.config.effect_timeout, adapter.execute(&intent)).await
-                {
-                    Ok(Ok(receipt)) => receipt,
-                    Ok(Err(_err)) => EffectReceipt {
-                        intent_hash: intent.intent_hash,
-                        adapter_id: adapter.kind().to_string(),
-                        status: ReceiptStatus::Error,
-                        payload_cbor: vec![],
-                        cost_cents: None,
-                        signature: vec![],
-                    },
-                    Err(_) => EffectReceipt {
-                        intent_hash: intent.intent_hash,
-                        adapter_id: adapter.kind().to_string(),
-                        status: ReceiptStatus::Timeout,
-                        payload_cbor: vec![],
-                        cost_cents: None,
-                        signature: vec![],
-                    },
-                },
+                Some(adapter) => {
+                    match timeout(self.config.effect_timeout, adapter.execute(&intent)).await {
+                        Ok(Ok(receipt)) => receipt,
+                        Ok(Err(_err)) => EffectReceipt {
+                            intent_hash: intent.intent_hash,
+                            adapter_id: adapter.kind().to_string(),
+                            status: ReceiptStatus::Error,
+                            payload_cbor: vec![],
+                            cost_cents: None,
+                            signature: vec![],
+                        },
+                        Err(_) => EffectReceipt {
+                            intent_hash: intent.intent_hash,
+                            adapter_id: adapter.kind().to_string(),
+                            status: ReceiptStatus::Timeout,
+                            payload_cbor: vec![],
+                            cost_cents: None,
+                            signature: vec![],
+                        },
+                    }
+                }
                 None => EffectReceipt {
                     intent_hash: intent.intent_hash,
                     adapter_id: "adapter.missing".into(),

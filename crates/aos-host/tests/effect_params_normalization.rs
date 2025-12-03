@@ -1,9 +1,9 @@
 use aos_effects::CapabilityGrant;
+use aos_host::fixtures;
 use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
-use aos_host::fixtures;
 use aos_wasm_abi::ReducerEffect;
 use serde_cbor::Value as CborValue;
 use std::collections::{BTreeMap, HashMap};

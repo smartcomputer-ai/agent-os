@@ -1642,7 +1642,7 @@ fn diff_named_refs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::{mem::MemJournal, JournalEntry, JournalKind};
+    use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
     use aos_air_types::{HashRef, SecretDecl};
     use aos_store::MemStore;
     use aos_wasm_abi::ReducerEffect;
@@ -1825,7 +1825,10 @@ mod tests {
         let receipt_bytes = serde_cbor::to_vec(&receipt).unwrap();
         kernel
             .journal
-            .append(JournalEntry::new(JournalKind::EffectReceipt, &receipt_bytes))
+            .append(JournalEntry::new(
+                JournalKind::EffectReceipt,
+                &receipt_bytes,
+            ))
             .unwrap();
 
         let scan = kernel.tail_scan_after(0).expect("tail scan");

@@ -14,7 +14,7 @@ use aos_air_types::{
     TypeRecord, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
 };
 use aos_effects::builtins::TimerSetParams;
-use aos_host::fixtures::{self, zero_hash, START_SCHEMA, TestStore};
+use aos_host::fixtures::{self, START_SCHEMA, TestStore, zero_hash};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use indexmap::IndexMap;
 use std::sync::Arc;
