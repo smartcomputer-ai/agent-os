@@ -241,10 +241,7 @@ impl<S: Store + 'static> KernelBuilder<S> {
         Kernel::from_loaded_manifest_with_config(self.store, loaded, self.journal, self.config)
     }
 
-    pub fn from_loaded_manifest(
-        self,
-        loaded: LoadedManifest,
-    ) -> Result<Kernel<S>, KernelError> {
+    pub fn from_loaded_manifest(self, loaded: LoadedManifest) -> Result<Kernel<S>, KernelError> {
         Kernel::from_loaded_manifest_with_config(self.store, loaded, self.journal, self.config)
     }
 }

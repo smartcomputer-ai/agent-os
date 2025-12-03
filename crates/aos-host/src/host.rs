@@ -3,7 +3,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use aos_effects::{EffectIntent, EffectReceipt};
-use aos_kernel::{Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent, TailScan};
+use aos_kernel::{
+    Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent, TailScan,
+};
 use aos_store::{FsStore, Store};
 
 use crate::adapters::registry::AdapterRegistry;
@@ -126,14 +128,17 @@ impl WorldHost<FsStore> {
         host_config: HostConfig,
         kernel_config: KernelConfig,
     ) -> Result<Self, HostError> {
-        let store = Arc::new(FsStore::open(world_root).map_err(|e| HostError::Store(e.to_string()))?);
+        let store =
+            Arc::new(FsStore::open(world_root).map_err(|e| HostError::Store(e.to_string()))?);
 
         let loaded = manifest_loader::load_from_assets(store.clone(), world_root)
             .map_err(|e| HostError::Manifest(e.to_string()))?
-            .ok_or_else(|| HostError::Manifest(format!(
-                "no manifest found in '{}' (expected air/ directory with AIR JSON files)",
-                world_root.display()
-            )))?;
+            .ok_or_else(|| {
+                HostError::Manifest(format!(
+                    "no manifest found in '{}' (expected air/ directory with AIR JSON files)",
+                    world_root.display()
+                ))
+            })?;
 
         Self::from_loaded_manifest(store, loaded, world_root, host_config, kernel_config)
     }

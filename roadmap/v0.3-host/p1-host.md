@@ -333,11 +333,12 @@ serde_json = "1"
 9. [x] Implement `BatchRunner` (`modes/batch.rs`) using `run_cycle()`
 10. [x] Implement CLI commands (`aos-cli`) — `aos world init/step` using `aos-host` BatchRunner
 11. [x] Write unit tests for WorldHost (open/enqueue_external/drain/run_cycle/snapshot/state)
-12. [ ] Test with `examples/00-counter`
+12. [x] Test with examples (CLI tested with `01-hello-timer` and `06-safe-upgrade`; `00-counter` uses programmatic manifest)
 13. [x] (Forwarded from P5) Add a minimal `p1-host-test` harness (see `p1-host-test.md`) so integration tests can drive `WorldHost` through the same `run_cycle` entry point
 
 ## Success Criteria
 
-- `aos world step examples/00-counter --event demo/Increment@1 --value '{}'` runs successfully
+- `aos world step examples/01-hello-timer --reset-journal` runs successfully
+- `aos world step examples/06-safe-upgrade --air air.v1 --reset-journal` runs successfully
 - Batch mode completes end-to-end with stub adapters
 - Unit tests pass for WorldHost core methods

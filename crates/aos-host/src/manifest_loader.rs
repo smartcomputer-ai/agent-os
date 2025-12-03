@@ -209,9 +209,9 @@ fn secrets_as_named_refs(entries: &[SecretEntry]) -> Result<Vec<NamedRef>> {
     for entry in entries {
         match entry {
             SecretEntry::Ref(r) => refs.push(r.clone()),
-            SecretEntry::Decl(_) => bail!(
-                "inline secret declarations are unsupported; provide defsecret nodes instead"
-            ),
+            SecretEntry::Decl(_) => {
+                bail!("inline secret declarations are unsupported; provide defsecret nodes instead")
+            }
         }
     }
     Ok(refs)
