@@ -123,9 +123,11 @@ fn env_usize(key: &str) -> Option<usize> {
 }
 
 fn env_bool(key: &str) -> Option<bool> {
-    std::env::var(key).ok().and_then(|v| match v.to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    })
+    std::env::var(key)
+        .ok()
+        .and_then(|v| match v.to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        })
 }

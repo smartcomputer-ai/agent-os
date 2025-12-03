@@ -12,9 +12,11 @@ use aos_store::{FsStore, Store};
 
 use crate::adapters::registry::AdapterRegistry;
 use crate::adapters::registry::AdapterRegistryConfig;
-use crate::adapters::stub::{StubBlobAdapter, StubBlobGetAdapter, StubLlmAdapter, StubTimerAdapter};
 #[cfg(not(feature = "adapter-http"))]
 use crate::adapters::stub::StubHttpAdapter;
+use crate::adapters::stub::{
+    StubBlobAdapter, StubBlobGetAdapter, StubLlmAdapter, StubTimerAdapter,
+};
 use crate::adapters::timer::TimerScheduler;
 use crate::config::HostConfig;
 use crate::error::HostError;

@@ -71,8 +71,8 @@ pub struct LlmAdapterConfig {
 impl LlmAdapterConfig {
     /// Build provider map from environment; returns error only on malformed input.
     pub fn from_env() -> Result<Self, std::env::VarError> {
-        let base_url = std::env::var("OPENAI_BASE_URL")
-            .unwrap_or_else(|_| "https://api.openai.com/v1".into());
+        let base_url =
+            std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into());
 
         let mut providers = HashMap::new();
         providers.insert(

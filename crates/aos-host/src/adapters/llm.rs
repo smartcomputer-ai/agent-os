@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::config::{LlmAdapterConfig, ProviderConfig};
 use super::traits::AsyncEffectAdapter;
+use crate::config::{LlmAdapterConfig, ProviderConfig};
 use aos_store::Store;
 
 /// LLM adapter that targets OpenAI-compatible chat/completions API.
@@ -89,20 +89,14 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                     intent,
                     &provider_id,
                     format!("unknown provider {provider_id}"),
-                ))
+                ));
             }
         };
 
         // Resolve API key: must come from params (literal or secret-ref resolved upstream).
         let api_key = match params.api_key.clone() {
             Some(key) if !key.is_empty() => key,
-            _ => {
-                return Ok(self.error_receipt(
-                    intent,
-                    &provider_id,
-                    "api_key missing",
-                ))
-            }
+            _ => return Ok(self.error_receipt(intent, &provider_id, "api_key missing")),
         };
 
         // Load prompt/messages from CAS
@@ -113,7 +107,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                     intent,
                     &provider_id,
                     format!("invalid input_ref: {e}"),
-                ))
+                ));
             }
         };
         let input_bytes = match self.store.get_blob(input_hash) {
@@ -123,7 +117,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                     intent,
                     &provider_id,
                     format!("input_ref not found: {e}"),
-                ))
+                ));
             }
         };
 
@@ -134,7 +128,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                     intent,
                     &provider_id,
                     format!("invalid input JSON: {e}"),
-                ))
+                ));
             }
         };
 
@@ -151,7 +145,10 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             body["tools"] = serde_json::json!(params.tools);
         }
 
-        let url = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/chat/completions",
+            provider.base_url.trim_end_matches('/')
+        );
 
         let response = self
             .client
@@ -166,11 +163,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         let response = match response {
             Ok(r) => r,
             Err(e) => {
-                return Ok(self.error_receipt(
-                    intent,
-                    &provider_id,
-                    format!("request failed: {e}"),
-                ))
+                return Ok(self.error_receipt(intent, &provider_id, format!("request failed: {e}")));
             }
         };
 
@@ -187,11 +180,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         let api_response: OpenAiResponse = match response.json().await {
             Ok(r) => r,
             Err(e) => {
-                return Ok(self.error_receipt(
-                    intent,
-                    &provider_id,
-                    format!("parse error: {e}"),
-                ))
+                return Ok(self.error_receipt(intent, &provider_id, format!("parse error: {e}")));
             }
         };
 
@@ -209,7 +198,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                         intent,
                         &provider_id,
                         format!("invalid output hash: {e}"),
-                    ))
+                    ));
                 }
             },
             Err(e) => {
@@ -217,7 +206,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                     intent,
                     &provider_id,
                     format!("store output failed: {e}"),
-                ))
+                ));
             }
         };
 

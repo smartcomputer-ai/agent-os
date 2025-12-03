@@ -376,7 +376,10 @@ impl ControlClient {
         let stream = UnixStream::connect(path).await.map_err(|e| {
             std::io::Error::new(
                 e.kind(),
-                format!("failed to connect to control socket {}: {e}", path.display()),
+                format!(
+                    "failed to connect to control socket {}: {e}",
+                    path.display()
+                ),
             )
         })?;
         let (r, w) = stream.into_split();

@@ -364,11 +364,8 @@ async fn cmd_world_step(
     }
 
     // Create host and run
-    let host_config = host_config_from_env_and_overrides(
-        http_timeout_ms,
-        http_max_body_bytes,
-        no_llm,
-    );
+    let host_config =
+        host_config_from_env_and_overrides(http_timeout_ms, http_max_body_bytes, no_llm);
     let kernel_config = util::make_kernel_config(&store_root)?;
     let host =
         WorldHost::from_loaded_manifest(store, loaded, &store_root, host_config, kernel_config)?;
@@ -523,11 +520,8 @@ async fn cmd_world_run(
     }
 
     // Create host
-    let host_config = host_config_from_env_and_overrides(
-        http_timeout_ms,
-        http_max_body_bytes,
-        no_llm,
-    );
+    let host_config =
+        host_config_from_env_and_overrides(http_timeout_ms, http_max_body_bytes, no_llm);
     let kernel_config = util::make_kernel_config(&store_root)?;
     let host =
         WorldHost::from_loaded_manifest(store, loaded, &store_root, host_config, kernel_config)?;

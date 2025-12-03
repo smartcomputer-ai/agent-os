@@ -1,18 +1,18 @@
+use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use once_cell::sync::OnceCell;
 
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_effects::builtins::{HeaderMap, HttpRequestParams, HttpRequestReceipt, RequestTimings};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use async_trait::async_trait;
-use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::Client;
+use reqwest::header::{HeaderName, HeaderValue};
 use tokio::time::timeout;
 
-use crate::config::HttpAdapterConfig;
 use super::traits::AsyncEffectAdapter;
+use crate::config::HttpAdapterConfig;
 use aos_store::Store;
 
 /// HTTP adapter that executes real outbound requests and stores bodies in CAS.
@@ -110,7 +110,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
                         599,
                         format!("invalid body_ref: {e}"),
                         None,
-                    ))
+                    ));
                 }
             };
             match self.store.get_blob(hash) {
@@ -136,7 +136,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
                     405,
                     format!("unsupported method {other}"),
                     None,
-                ))
+                ));
             }
         };
 
@@ -149,12 +149,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
                     req = req.header(name, val);
                 }
                 _ => {
-                    return Ok(self.error_receipt(
-                        intent,
-                        400,
-                        format!("invalid header {k}"),
-                        None,
-                    ))
+                    return Ok(self.error_receipt(intent, 400, format!("invalid header {k}"), None));
                 }
             }
         }
@@ -175,13 +170,12 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
                     599,
                     format!("request failed: {e}"),
                     Some(timings_from(start_ns, start.elapsed())),
-                ))
+                ));
             }
             Err(_) => {
-                return Ok(self.timeout_receipt(
-                    intent,
-                    Some(timings_from(start_ns, self.config.timeout)),
-                ))
+                return Ok(
+                    self.timeout_receipt(intent, Some(timings_from(start_ns, self.config.timeout)))
+                );
             }
         };
 
@@ -201,7 +195,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
                     599,
                     format!("read body failed: {e}"),
                     Some(timings_from(start_ns, start.elapsed())),
-                ))
+                ));
             }
         };
 
