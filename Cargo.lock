@@ -174,9 +174,9 @@ dependencies = [
  "aos-air-types",
  "aos-cbor",
  "aos-effects",
+ "aos-host",
  "aos-kernel",
  "aos-store",
- "aos-testkit",
  "aos-wasm-abi",
  "aos-wasm-build",
  "assert_cmd",
@@ -267,13 +267,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
-]
-
-[[package]]
-name = "aos-testkit"
-version = "0.1.0"
-dependencies = [
- "aos-host",
 ]
 
 [[package]]

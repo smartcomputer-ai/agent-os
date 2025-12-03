@@ -3,9 +3,8 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::support::http_harness::{HttpHarness, MockHttpResponse};
+use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse, MockLlmHarness};
 use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
-use aos_testkit::MockLlmHarness;
 
 const REDUCER_NAME: &str = "demo/LlmSummarizer@1";
 const EVENT_SCHEMA: &str = "demo/LlmSummarizerEvent@1";
@@ -51,7 +50,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     };
     run.submit_event(&start_event)?;
 
-    let mut http = HttpHarness::new();
+    let mut http = MockHttpHarness::new();
     let requests = http.collect_requests(run.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(

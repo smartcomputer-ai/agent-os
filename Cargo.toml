@@ -10,7 +10,6 @@ members = [
   "crates/aos-kernel",
   "crates/aos-host",
   "crates/aos-wasm-sdk",
-  "crates/aos-testkit",
   "crates/aos-cli",
   "crates/aos-examples",
   "crates/aos-wasm-build"

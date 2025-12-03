@@ -6,7 +6,7 @@ use aos_kernel::shadow::ShadowHarness;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
-use crate::support::http_harness::{HttpHarness, MockHttpResponse};
+use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 use crate::support::manifest_loader;
 use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 
@@ -60,7 +60,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     println!("   start v1 fetch → url={}", url_for(&start_event));
     run.submit_event(&start_event)?;
 
-    let mut http = HttpHarness::new();
+    let mut http = MockHttpHarness::new();
     let mut requests = http.collect_requests(run.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(

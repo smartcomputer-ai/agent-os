@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::support::http_harness::{HttpHarness, MockHttpResponse};
+use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/Aggregator@1";
@@ -84,8 +84,8 @@ pub fn run(example_root: &Path) -> Result<()> {
     println!("     aggregate start → topic={topic}");
     run.submit_event(&start_event)?;
 
-    let mut harness = HttpHarness::new();
-    let mut requests = harness.collect_requests(run.kernel_mut())?;
+    let mut http = MockHttpHarness::new();
+    let mut requests = http.collect_requests(run.kernel_mut())?;
     if requests.len() != 3 {
         return Err(anyhow!(
             "aggregator plan expected 3 http intents, got {}",
@@ -98,17 +98,17 @@ pub fn run(example_root: &Path) -> Result<()> {
     let ctx_c = requests.remove(0);
 
     println!("     responding out of order (b → c → a)");
-    harness.respond_with(
+    http.respond_with(
         run.kernel_mut(),
         ctx_b,
         MockHttpResponse::json(200, "{\"source\":\"beta\"}"),
     )?;
-    harness.respond_with(
+    http.respond_with(
         run.kernel_mut(),
         ctx_c,
         MockHttpResponse::json(201, "{\"source\":\"gamma\"}"),
     )?;
-    harness.respond_with(
+    http.respond_with(
         run.kernel_mut(),
         ctx_a,
         MockHttpResponse::json(202, "{\"source\":\"alpha\"}"),

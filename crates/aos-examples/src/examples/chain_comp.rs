@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::support::http_harness::{HttpHarness, MockHttpResponse};
+use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 use crate::support::reducer_harness::{ExampleReducerHarness, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/ChainComp@1";
@@ -102,9 +102,9 @@ pub fn run(example_root: &Path) -> Result<()> {
     println!("     saga start → order_id={order_id}");
     run.submit_event(&start_event)?;
 
-    let mut harness = HttpHarness::new();
+    let mut http = MockHttpHarness::new();
 
-    let mut requests = harness.collect_requests(run.kernel_mut())?;
+    let mut requests = http.collect_requests(run.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "expected 1 charge intent, found {}",
@@ -113,13 +113,13 @@ pub fn run(example_root: &Path) -> Result<()> {
     }
     let charge_ctx = requests.remove(0);
     println!("     responding to charge");
-    harness.respond_with(
+    http.respond_with(
         run.kernel_mut(),
         charge_ctx,
         MockHttpResponse::json(201, "{\"charge\":\"ok\"}"),
     )?;
 
-    let mut requests = harness.collect_requests(run.kernel_mut())?;
+    let mut requests = http.collect_requests(run.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "expected 1 reserve intent after charge, found {}",
@@ -128,13 +128,13 @@ pub fn run(example_root: &Path) -> Result<()> {
     }
     let reserve_ctx = requests.remove(0);
     println!("     forcing reserve failure to trigger compensation");
-    harness.respond_with(
+    http.respond_with(
         run.kernel_mut(),
         reserve_ctx,
         MockHttpResponse::json(503, "{\"reserve\":\"error\"}"),
     )?;
 
-    let mut requests = harness.collect_requests(run.kernel_mut())?;
+    let mut requests = http.collect_requests(run.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "expected refund intent after failure, found {}",
@@ -143,7 +143,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     }
     let refund_ctx = requests.remove(0);
     println!("     refunding original charge");
-    harness.respond_with(
+    http.respond_with(
         run.kernel_mut(),
         refund_ctx,
         MockHttpResponse::json(202, "{\"refund\":\"ok\"}"),

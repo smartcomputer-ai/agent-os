@@ -1,6 +1,6 @@
 # P1.5: Host Test Harness & Infrastructure Consolidation
 
-**Status:** Phase 1, 2 & 4 COMPLETE (Phase 3 pending)
+**Status:** COMPLETE - aos-testkit deleted, all functionality consolidated in aos-host
 
 **Goal:** Consolidate fragmented test infrastructure around `WorldHost`/`TestHost` so P1–P5 share a single runtime path, then complete the minimal test harness for `examples/00-counter` and `examples/01-hello-timer`.
 
@@ -19,34 +19,44 @@
   - Replay smoke checks
 - [x] Fixed stub timer adapter to return proper `TimerSetReceipt` format
 
-### Phase 2: Testkit Re-exports (DONE)
-- [x] Added `aos-host` dependency to `aos-testkit` with `test-fixtures` feature
-- [x] Converted `aos-testkit/src/lib.rs` to re-export from `aos-host::fixtures`
-- [x] All 42 testkit tests pass with the new re-export layer
-- [x] `TestWorld` kept for low-level kernel testing (direct synchronous access)
-- [x] `TestHost` now re-exported from testkit for users wanting high-level abstraction
+### Phase 2: Testkit Migration (DONE)
+- [x] Moved all testkit functionality to aos-host
+- [x] `TestWorld` now in `aos-host/src/fixtures/mod.rs`
+- [x] `TestHost` in `aos-host/src/testhost.rs`
+- [x] All 42 original testkit tests migrated to `aos-host/tests/`
 
-### Phase 4: Consolidation (DONE - done before Phase 3)
-- [x] Moved `TestWorld` to `aos-host/src/fixtures/mod.rs`
-- [x] Moved `MockLlmHarness` to `aos-host/src/adapters/mock.rs`
-- [x] Removed `aos-testkit/src/llm_harness.rs`
-- [x] Converted `aos-testkit` to pure re-export shim (~27 lines)
-- [x] Moved all integration tests from `aos-testkit/tests/` to `aos-host/tests/`:
-  - `helpers.rs`, `world_integration.rs`, `journal_integration.rs`
-  - `snapshot_integration.rs`, `governance_integration.rs`, `policy_integration.rs`
-  - `secret_integration.rs`, `effect_params_normalization.rs`
-- [x] Deleted `aos-testkit/tests/` directory
-- [x] Minimized `aos-testkit` to single dependency (aos-host with test-fixtures)
-- [x] All 54 aos-host tests pass (original 12 + 42 migrated)
+### Phase 3: Mock Adapter Consolidation (DONE)
+- [x] Created `MockHttpHarness` in `aos-host/src/adapters/mock.rs`
+- [x] Created `MockLlmHarness` in `aos-host/src/adapters/mock.rs`
+- [x] Updated examples to use mock harnesses from `aos-host::adapters::mock`
+- [x] Deleted `aos-examples/src/support/http_harness.rs`
+- [x] All 9 examples pass with consolidated mock adapters
+- [x] `ExampleReducerHarness` kept for FsStore + manifest_loader integration (works well)
+
+### Phase 4: Final Cleanup (DONE)
+- [x] Moved all integration tests from `aos-testkit/tests/` to `aos-host/tests/`
+- [x] Updated `aos-examples` to depend on `aos-host` directly (not aos-testkit)
+- [x] **Deleted `aos-testkit` crate entirely**
+- [x] Updated workspace `Cargo.toml` to remove aos-testkit
+- [x] Updated `AGENTS.md` documentation
+- [x] All 54 aos-host tests pass
+- [x] All 9 examples pass
 
 ### Running Tests
 ```bash
-# aos-host tests (with fixtures) - canonical location
+# aos-host tests (requires test-fixtures feature for integration tests)
 cargo test -p aos-host --features test-fixtures
 
-# aos-testkit - now a pure re-export shim (no tests)
-cargo test -p aos-testkit
+# All workspace tests
+cargo test --workspace
+
+# Examples (all 9)
+cargo run -p aos-examples -- all
 ```
+
+Note: `cargo test -p aos-host` without `--features test-fixtures` will fail because integration tests
+depend on the fixtures module which is feature-gated. Use `cargo test --workspace` to run all tests
+with proper feature resolution.
 
 ---
 
