@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use aos_host::config::HostConfig;
-use aos_host::control::ControlServer;
+use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
 use aos_host::host::{ExternalEvent, WorldHost};
 use aos_host::manifest_loader;
 use aos_host::modes::batch::BatchRunner;
@@ -358,6 +358,42 @@ async fn cmd_world_run(
         tracing::info!("Journal cleared");
     }
 
+    // Control socket detection: if a daemon is already running and reachable, refuse to start another.
+    let control_path = store_root.join(".aos/control.sock");
+    if control_path.exists() {
+        match ControlClient::connect(&control_path).await {
+            Ok(mut client) => {
+                let probe = RequestEnvelope {
+                    v: 1,
+                    id: "probe".into(),
+                    cmd: "journal-head".into(),
+                    payload: serde_json::json!({}),
+                };
+                if let Ok(resp) = client.request(&probe).await {
+                    if resp.ok {
+                        tracing::info!(
+                            "Control socket already active at {}. Reusing existing daemon.",
+                            control_path.display()
+                        );
+                        return Ok(());
+                    }
+                }
+                anyhow::bail!(
+                    "control socket {} exists but is unhealthy; refusing to overwrite it. \
+                     If the daemon is not running, delete the socket and retry.",
+                    control_path.display()
+                );
+            }
+            Err(e) => {
+                anyhow::bail!(
+                    "control socket {} exists but could not connect ({e}); refusing to overwrite it. \
+                     If the daemon is not running, delete the socket and retry.",
+                    control_path.display()
+                );
+            }
+        }
+    }
+
     // Open store
     let store = Arc::new(FsStore::open(&store_root).context("open store")?);
 
@@ -418,7 +454,6 @@ async fn cmd_world_run(
     });
 
     // Start control server (Unix socket under store root)
-    let control_path = store_root.join(".aos/control.sock");
     let server = ControlServer::new(
         control_path.clone(),
         control_tx.clone(),
