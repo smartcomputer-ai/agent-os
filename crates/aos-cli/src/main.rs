@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use aos_host::config::HostConfig;
+use aos_host::control::ControlServer;
 use aos_host::host::{ExternalEvent, WorldHost};
 use aos_host::manifest_loader;
 use aos_host::modes::batch::BatchRunner;
@@ -406,8 +407,21 @@ async fn cmd_world_run(
         let _ = shutdown_tx_clone.send(());
     });
 
+    // Start control server (Unix socket under store root)
+    let control_path = store_root.join(".aos/control.sock");
+    let server = ControlServer::new(
+        control_path.clone(),
+        control_tx.clone(),
+        shutdown_tx.clone(),
+    );
+    let server_handle = tokio::spawn(async move {
+        if let Err(e) = server.run().await {
+            tracing::error!("control server error: {e}");
+        }
+    });
+
     // Create and run daemon
-    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx);
+    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, Some(server_handle));
 
     // Inject startup event if provided - do this directly on the daemon's host
     // instead of through the control channel to avoid race conditions
@@ -423,9 +437,6 @@ async fn cmd_world_run(
                 value: cbor,
             })?;
     }
-
-    // Drop control channel - in the future, a REPL or control server would keep this open
-    drop(control_tx);
 
     // Run the daemon
     daemon.run().await?;

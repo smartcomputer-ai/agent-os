@@ -1,6 +1,7 @@
 pub mod adapters;
 pub mod cli;
 pub mod config;
+pub mod control;
 pub mod error;
 pub mod host;
 pub mod manifest_loader;
@@ -13,6 +14,7 @@ pub mod testhost;
 pub mod fixtures;
 
 pub use adapters::timer::TimerScheduler;
+pub use control::{ControlClient, ControlServer, RequestEnvelope, ResponseEnvelope};
 pub use host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};
 pub use modes::batch::{BatchRunner, StepResult};
 pub use modes::daemon::{ControlMsg, WorldDaemon};

@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use aos_effects::EffectReceipt;
 use aos_store::Store;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::task::JoinHandle;
 
 use crate::adapters::timer::TimerScheduler;
 use crate::error::HostError;
@@ -37,16 +38,35 @@ fn to_tokio_instant(i: std::time::Instant) -> tokio::time::Instant {
 /// These are fed into the daemon via the control channel. In P3, a `ControlServer`
 /// will handle the Unix socket/stdio interface and translate JSON commands into
 /// these messages.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ControlMsg {
-    /// Send a domain event or receipt.
-    SendEvent(ExternalEvent),
-    /// Inject an effect receipt directly.
-    InjectReceipt(EffectReceipt),
-    /// Create a snapshot.
-    Snapshot,
-    /// Run a single step (drain + dispatch + apply receipts).
-    Step,
+    SendEvent {
+        event: ExternalEvent,
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    InjectReceipt {
+        receipt: EffectReceipt,
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    Snapshot {
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    Step {
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    QueryState {
+        reducer: String,
+        key: Option<Vec<u8>>,
+        resp: oneshot::Sender<Result<Option<Vec<u8>>, HostError>>,
+    },
+    JournalHead {
+        resp: oneshot::Sender<Result<u64, HostError>>,
+    },
+    Shutdown {
+        resp: oneshot::Sender<Result<(), HostError>>,
+        /// Optional sender to propagate shutdown to the control server.
+        shutdown_tx: broadcast::Sender<()>,
+    },
 }
 
 /// World daemon for long-lived execution with real timers.
@@ -61,6 +81,7 @@ pub struct WorldDaemon<S: Store + 'static> {
     timer_scheduler: TimerScheduler,
     control_rx: mpsc::Receiver<ControlMsg>,
     shutdown_rx: broadcast::Receiver<()>,
+    control_server: Option<JoinHandle<()>>,
 }
 
 impl<S: Store + 'static> WorldDaemon<S> {
@@ -74,12 +95,14 @@ impl<S: Store + 'static> WorldDaemon<S> {
         host: WorldHost<S>,
         control_rx: mpsc::Receiver<ControlMsg>,
         shutdown_rx: broadcast::Receiver<()>,
+        control_server: Option<JoinHandle<()>>,
     ) -> Self {
         let mut daemon = Self {
             host,
             timer_scheduler: TimerScheduler::new(),
             control_rx,
             shutdown_rx,
+            control_server,
         };
 
         // Automatically rehydrate timers from pending reducer receipts so callers
@@ -159,7 +182,12 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 msg = self.control_rx.recv(), if control_open => {
                     match msg {
                         Some(cmd) => {
+                            let should_stop = matches!(cmd, ControlMsg::Shutdown { .. });
                             self.apply_control(cmd).await?;
+                            if should_stop {
+                                tracing::info!("Shutdown requested via control channel");
+                                break;
+                            }
                         }
                         None => {
                             tracing::debug!("Control channel closed");
@@ -180,6 +208,10 @@ impl<S: Store + 'static> WorldDaemon<S> {
         // Clean shutdown: create snapshot
         self.host.snapshot()?;
         tracing::info!("World daemon stopped");
+        // Ensure control server task is joined if present
+        if let Some(handle) = self.control_server.take() {
+            let _ = handle.await;
+        }
         Ok(())
     }
 
@@ -205,23 +237,53 @@ impl<S: Store + 'static> WorldDaemon<S> {
     /// Apply a control command.
     async fn apply_control(&mut self, cmd: ControlMsg) -> Result<(), HostError> {
         match cmd {
-            ControlMsg::SendEvent(evt) => {
+            ControlMsg::SendEvent { event: evt, resp } => {
                 tracing::debug!("Received external event");
-                self.host.enqueue_external(evt)?;
-                self.run_daemon_cycle().await?;
+                let res = (|| -> Result<(), HostError> {
+                    self.host.enqueue_external(evt)?;
+                    Ok(())
+                })();
+                let res = match res {
+                    Ok(_) => self.run_daemon_cycle().await.map(|_| ()),
+                    Err(e) => Err(e),
+                };
+                let _ = resp.send(res);
             }
-            ControlMsg::InjectReceipt(receipt) => {
+            ControlMsg::InjectReceipt { receipt, resp } => {
                 tracing::debug!("Injecting receipt");
-                self.host.kernel_mut().handle_receipt(receipt)?;
-                self.run_daemon_cycle().await?;
+                let res = (|| -> Result<(), HostError> {
+                    self.host.kernel_mut().handle_receipt(receipt)?;
+                    Ok(())
+                })();
+                let res = match res {
+                    Ok(_) => self.run_daemon_cycle().await.map(|_| ()),
+                    Err(e) => Err(e),
+                };
+                let _ = resp.send(res);
             }
-            ControlMsg::Snapshot => {
+            ControlMsg::Snapshot { resp } => {
                 tracing::info!("Creating snapshot (by request)");
-                self.host.snapshot()?;
+                let res = self.host.snapshot();
+                let _ = resp.send(res);
             }
-            ControlMsg::Step => {
+            ControlMsg::Step { resp } => {
                 tracing::debug!("Running step (by request)");
-                self.run_daemon_cycle().await?;
+                let res = self.run_daemon_cycle().await;
+                let _ = resp.send(res.map(|_| ()));
+            }
+            ControlMsg::QueryState { reducer, key, resp } => {
+                let result = self.host.state(&reducer, key.as_deref()).cloned();
+                let _ = resp.send(Ok(result));
+            }
+            ControlMsg::JournalHead { resp } => {
+                let heights = self.host.heights();
+                let _ = resp.send(Ok(heights.head));
+            }
+            ControlMsg::Shutdown { resp, shutdown_tx } => {
+                let _ = shutdown_tx.send(()); // notify control server listener
+                let _ = resp.send(Ok(()));
+                tracing::info!("Shutdown requested via control channel");
+                // run loop will break after this handler returns
             }
         }
         Ok(())

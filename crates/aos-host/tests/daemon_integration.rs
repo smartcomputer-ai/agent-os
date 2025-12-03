@@ -9,7 +9,7 @@ use aos_host::modes::daemon::{ControlMsg, WorldDaemon};
 use aos_host::{ExternalEvent, WorldHost};
 use aos_kernel::Kernel;
 use aos_kernel::journal::mem::MemJournal;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
 // Re-use shared helpers defined for other integration tests.
 #[path = "helpers.rs"]
@@ -32,18 +32,23 @@ async fn daemon_fires_timer_and_routes_event() {
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
     // Spawn daemon; it returns itself so we can inspect final state.
-    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx);
+    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, None);
     let handle = tokio::spawn(async move { (daemon.run().await, daemon) });
 
     // Kick off the reducer that emits timer.set.
     let start_value = serde_cbor::to_vec(&serde_json::json!({ "id": "t1" })).unwrap();
+    let (resp_tx, resp_rx) = oneshot::channel();
     control_tx
-        .send(ControlMsg::SendEvent(ExternalEvent::DomainEvent {
-            schema: START_SCHEMA.into(),
-            value: start_value,
-        }))
+        .send(ControlMsg::SendEvent {
+            event: ExternalEvent::DomainEvent {
+                schema: START_SCHEMA.into(),
+                value: start_value,
+            },
+            resp: resp_tx,
+        })
         .await
         .unwrap();
+    let _ = resp_rx.await;
 
     // Allow the daemon loop to schedule and fire the timer.
     tokio::time::sleep(Duration::from_millis(50)).await;
