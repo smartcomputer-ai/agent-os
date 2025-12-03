@@ -70,19 +70,12 @@ impl<S: Store + 'static> TestHost<S> {
         self.host.enqueue_external(ExternalEvent::Receipt(receipt))
     }
 
-    /// Run a batch cycle (no timers).
+    /// Run a batch cycle.
+    ///
+    /// In batch mode, all effects (including timers) are dispatched via the
+    /// adapter registry. Timers fire immediately via StubTimerAdapter.
     pub async fn run_cycle_batch(&mut self) -> Result<CycleOutcome, HostError> {
         self.host.run_cycle(RunMode::Batch).await
-    }
-
-    /// Run a cycle with a custom adapter registry (for timer support).
-    pub async fn run_cycle_with_adapters(
-        &mut self,
-        adapter_registry: &AdapterRegistry,
-    ) -> Result<CycleOutcome, HostError> {
-        self.host
-            .run_cycle(RunMode::WithTimers { adapter_registry })
-            .await
     }
 
     /// Create a snapshot.

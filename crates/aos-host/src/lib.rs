@@ -12,5 +12,7 @@ pub mod testhost;
 #[cfg(any(feature = "test-fixtures", test))]
 pub mod fixtures;
 
-pub use host::{ExternalEvent, RunMode, WorldHost};
+pub use adapters::timer::TimerScheduler;
+pub use host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};
 pub use modes::batch::{BatchRunner, StepResult};
+pub use modes::daemon::{ControlMsg, WorldDaemon};

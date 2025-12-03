@@ -1,8 +1,10 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::SystemTime;
 
-use aos_effects::{EffectIntent, EffectReceipt};
+use aos_effects::builtins::TimerSetReceipt;
+use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::{
     Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent, TailScan,
 };
@@ -13,6 +15,7 @@ use crate::adapters::registry::AdapterRegistryConfig;
 use crate::adapters::stub::{
     StubBlobAdapter, StubBlobGetAdapter, StubHttpAdapter, StubLlmAdapter, StubTimerAdapter,
 };
+use crate::adapters::timer::TimerScheduler;
 use crate::config::HostConfig;
 use crate::error::HostError;
 use crate::manifest_loader;
@@ -23,12 +26,17 @@ pub enum ExternalEvent {
     Receipt(EffectReceipt),
 }
 
-#[derive(Clone, Copy)]
+/// Execution mode for `run_cycle`.
+///
+/// - `Batch`: All effects (including timers) go through the adapter registry.
+///   Timers are handled by StubTimerAdapter and fire immediately (good for tests).
+/// - `Daemon`: Timer intents are scheduled on the provided `TimerScheduler` instead
+///   of being executed immediately. The daemon fires them later via `fire_due_timers`.
 pub enum RunMode<'a> {
+    /// Batch mode: all effects dispatched via adapter registry.
     Batch,
-    WithTimers {
-        adapter_registry: &'a AdapterRegistry,
-    },
+    /// Daemon mode: timer.set intents scheduled on scheduler, others via adapter registry.
+    Daemon { scheduler: &'a mut TimerScheduler },
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -259,8 +267,19 @@ impl<S: Store + 'static> WorldHost<S> {
 
         let receipts = match mode {
             RunMode::Batch => self.adapter_registry.execute_batch(intents).await,
-            RunMode::WithTimers { adapter_registry } => {
-                adapter_registry.execute_batch(intents).await
+            RunMode::Daemon { scheduler } => {
+                // Partition: timer.set → schedule (no receipt), others → execute
+                let (timer_intents, other_intents): (Vec<_>, Vec<_>) = intents
+                    .into_iter()
+                    .partition(|i| i.kind.as_str() == EffectKind::TIMER_SET);
+
+                // Schedule timers without producing receipts
+                for intent in timer_intents {
+                    scheduler.schedule(&intent)?;
+                }
+
+                // Execute non-timer effects
+                self.adapter_registry.execute_batch(other_intents).await
             }
         };
 
@@ -298,6 +317,57 @@ impl<S: Store + 'static> WorldHost<S> {
             config,
         }
     }
+
+    /// Fire all due timers by building receipts and calling `handle_receipt`.
+    ///
+    /// This is the correct way to fire timers in daemon mode. The kernel will:
+    /// 1. Remove context from `pending_reducer_receipts`
+    /// 2. Record receipt in journal
+    /// 3. Build `sys/TimerFired@1` via `build_reducer_receipt_event()`
+    /// 4. Push reducer event to scheduler
+    ///
+    /// Returns the number of timers fired.
+    pub fn fire_due_timers(&mut self, scheduler: &mut TimerScheduler) -> Result<usize, HostError> {
+        let now_ns = now_wallclock_ns();
+        let due = scheduler.pop_due(now_ns);
+        let count = due.len();
+
+        for entry in due {
+            // Build the receipt with actual delivery time
+            let timer_receipt = TimerSetReceipt {
+                delivered_at_ns: now_ns,
+                key: entry.key,
+            };
+
+            // Serialize receipt payload
+            let payload_cbor = serde_cbor::to_vec(&timer_receipt).map_err(|e| {
+                HostError::Timer(format!("failed to encode TimerSetReceipt: {}", e))
+            })?;
+
+            // Build EffectReceipt and feed through handle_receipt
+            let receipt = EffectReceipt {
+                intent_hash: entry.intent_hash,
+                adapter_id: "host.timer".into(),
+                status: ReceiptStatus::Ok,
+                payload_cbor,
+                cost_cents: Some(0),
+                signature: vec![0; 64], // TODO: real signing
+            };
+
+            // This triggers the full receipt flow in kernel
+            self.kernel.handle_receipt(receipt)?;
+        }
+
+        Ok(count)
+    }
+}
+
+/// Get current wall-clock time in nanoseconds (Unix epoch).
+pub fn now_wallclock_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64
 }
 
 fn default_registry(config: &HostConfig) -> AdapterRegistry {

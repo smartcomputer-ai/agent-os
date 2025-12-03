@@ -1,5 +1,6 @@
 pub mod registry;
 pub mod stub;
+pub mod timer;
 pub mod traits;
 
 #[cfg(any(feature = "test-fixtures", test))]

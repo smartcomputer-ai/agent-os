@@ -12,4 +12,6 @@ pub enum HostError {
     Store(String),
     #[error("manifest error: {0}")]
     Manifest(String),
+    #[error("timer error: {0}")]
+    Timer(String),
 }

@@ -9,10 +9,12 @@ use aos_host::config::HostConfig;
 use aos_host::host::{ExternalEvent, WorldHost};
 use aos_host::manifest_loader;
 use aos_host::modes::batch::BatchRunner;
+use aos_host::modes::daemon::WorldDaemon;
 use aos_host::util::{has_placeholder_modules, reset_journal};
 use aos_store::FsStore;
 use clap::{Parser, Subcommand};
 use serde_json::Value as JsonValue;
+use tokio::sync::{broadcast, mpsc};
 
 #[derive(Parser, Debug)]
 #[command(name = "aos", version, about = "AgentOS CLI")]
@@ -74,6 +76,43 @@ enum WorldCommand {
         #[arg(long = "reset-journal")]
         do_reset_journal: bool,
     },
+    /// Run world in daemon mode with real timers
+    Run {
+        /// Path to world directory
+        path: PathBuf,
+
+        /// AIR assets directory (default: <path>/air)
+        #[arg(long)]
+        air: Option<PathBuf>,
+
+        /// Reducer crate directory (default: <path>/reducer)
+        #[arg(long)]
+        reducer: Option<PathBuf>,
+
+        /// Store/journal directory (default: <path>/.aos)
+        #[arg(long)]
+        store: Option<PathBuf>,
+
+        /// Module name to patch with compiled WASM (default: all placeholders)
+        #[arg(long)]
+        module: Option<String>,
+
+        /// Force reducer recompilation
+        #[arg(long)]
+        force_build: bool,
+
+        /// Clear journal before running
+        #[arg(long = "reset-journal")]
+        do_reset_journal: bool,
+
+        /// Event schema to inject at startup
+        #[arg(long)]
+        event: Option<String>,
+
+        /// Event value as JSON (for --event)
+        #[arg(long)]
+        value: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -103,6 +142,30 @@ async fn main() -> Result<()> {
                     value,
                     force_build,
                     do_reset_journal,
+                )
+                .await
+            }
+            WorldCommand::Run {
+                path,
+                air,
+                reducer,
+                store,
+                module,
+                force_build,
+                do_reset_journal,
+                event,
+                value,
+            } => {
+                cmd_world_run(
+                    path,
+                    air,
+                    reducer,
+                    store,
+                    module,
+                    force_build,
+                    do_reset_journal,
+                    event,
+                    value,
                 )
                 .await
             }
@@ -237,5 +300,138 @@ async fn cmd_world_step(
         "Step complete: events={} effects={} receipts={}",
         res.events_injected, res.cycle.effects_dispatched, res.cycle.receipts_applied
     );
+    Ok(())
+}
+
+/// Set up tracing subscriber for daemon logging.
+fn setup_logging() {
+    tracing_subscriber::fmt()
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_level(true)
+        .init();
+}
+
+async fn cmd_world_run(
+    path: PathBuf,
+    air: Option<PathBuf>,
+    reducer: Option<PathBuf>,
+    store_path: Option<PathBuf>,
+    module: Option<String>,
+    force_build: bool,
+    do_reset_journal: bool,
+    event: Option<String>,
+    value: Option<String>,
+) -> Result<()> {
+    // Set up logging
+    setup_logging();
+
+    // Validate world directory
+    if !path.exists() {
+        anyhow::bail!("world directory '{}' not found", path.display());
+    }
+    if !path.is_dir() {
+        anyhow::bail!("'{}' is not a directory", path.display());
+    }
+
+    // Resolve directories with defaults
+    let air_dir = match air {
+        Some(p) if p.is_relative() => path.join(p),
+        Some(p) => p,
+        None => path.join("air"),
+    };
+    let reducer_dir = match reducer {
+        Some(p) if p.is_relative() => path.join(p),
+        Some(p) => p,
+        None => path.join("reducer"),
+    };
+    let store_root = match store_path {
+        Some(p) if p.is_relative() => path.join(p),
+        Some(p) => p,
+        None => path.clone(),
+    };
+
+    // Optionally reset journal
+    if do_reset_journal {
+        reset_journal(&store_root)?;
+        tracing::info!("Journal cleared");
+    }
+
+    // Open store
+    let store = Arc::new(FsStore::open(&store_root).context("open store")?);
+
+    // Compile reducer if present
+    let wasm_hash = if reducer_dir.exists() {
+        tracing::info!("Compiling reducer from {}...", reducer_dir.display());
+        let hash = util::compile_reducer(&reducer_dir, &store_root, &store, force_build)?;
+        tracing::info!("Reducer compiled: {}", hash.as_str());
+        Some(hash)
+    } else {
+        None
+    };
+
+    // Load manifest from AIR assets
+    let mut loaded = manifest_loader::load_from_assets(store.clone(), &air_dir)
+        .context("load manifest from assets")?
+        .ok_or_else(|| anyhow!("no manifest found in {}", air_dir.display()))?;
+
+    // Patch module hashes
+    if let Some(hash) = &wasm_hash {
+        let patched = util::patch_module_hashes(&mut loaded, hash, module.as_deref())?;
+        if patched > 0 {
+            tracing::info!("Patched {} module(s) with WASM hash", patched);
+        }
+    } else if has_placeholder_modules(&loaded) {
+        anyhow::bail!(
+            "manifest has modules with placeholder hashes but no reducer/ found; \
+             use --reducer to specify reducer crate"
+        );
+    }
+
+    // Create host
+    let host_config = HostConfig::default();
+    let kernel_config = util::make_kernel_config(&store_root)?;
+    let host =
+        WorldHost::from_loaded_manifest(store, loaded, &store_root, host_config, kernel_config)?;
+
+    // Set up channels
+    let (control_tx, control_rx) = mpsc::channel(128);
+    let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+    // Handle Ctrl-C
+    let shutdown_tx_clone = shutdown_tx.clone();
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.ok();
+        tracing::info!("Ctrl-C received, shutting down...");
+        let _ = shutdown_tx_clone.send(());
+    });
+
+    // Create and run daemon
+    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx);
+
+    // Rehydrate pending timers from previous session
+    daemon.rehydrate_timers();
+
+    // Inject startup event if provided - do this directly on the daemon's host
+    // instead of through the control channel to avoid race conditions
+    if let Some(schema) = event {
+        let json = value.unwrap_or_else(|| "{}".to_string());
+        let parsed: JsonValue = serde_json::from_str(&json).context("parse event value as JSON")?;
+        let cbor = serde_cbor::to_vec(&parsed).context("encode event value as CBOR")?;
+        tracing::info!("Injecting startup event: {}", schema);
+        daemon
+            .host_mut()
+            .enqueue_external(ExternalEvent::DomainEvent {
+                schema,
+                value: cbor,
+            })?;
+    }
+
+    // Drop control channel - in the future, a REPL or control server would keep this open
+    drop(control_tx);
+
+    // Run the daemon
+    daemon.run().await?;
+
     Ok(())
 }

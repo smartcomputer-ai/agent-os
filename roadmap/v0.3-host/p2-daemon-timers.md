@@ -1,6 +1,35 @@
 # P2: Daemon Mode + Real Timers
 
+**Status: COMPLETE** ✓
+
 **Goal:** Turn batch WorldHost into a long-lived host with real timer delivery, control channel, and clean shutdown.
+
+## Implementation Summary
+
+Completed implementation with the following files:
+
+### New Files Created
+- `crates/aos-host/src/adapters/timer.rs` — `TimerHeap`, `TimerScheduler`, `TimerEntry`
+- `crates/aos-host/src/modes/daemon.rs` — `WorldDaemon`, `ControlMsg`
+
+### Modified Files
+- `crates/aos-host/src/adapters/mod.rs` — Added `timer` module export
+- `crates/aos-host/src/modes/mod.rs` — Added `daemon` module export
+- `crates/aos-host/src/host.rs` — Added `RunMode::Daemon`, `fire_due_timers()`, `now_wallclock_ns()`
+- `crates/aos-host/src/lib.rs` — Added exports for new types
+- `crates/aos-host/src/error.rs` — Added `Timer` error variant
+- `crates/aos-host/src/testhost.rs` — Removed `WithTimers` mode usage
+- `crates/aos-cli/src/main.rs` — Added `world run` command with logging
+- `crates/aos-cli/Cargo.toml` — Added `tracing`, `tracing-subscriber`
+
+### Verified Working
+- Timer fires at correct wall-clock time (tested with 5-second delay)
+- Receipt goes through `handle_receipt` → `sys/TimerFired@1` delivered to reducer
+- Clean shutdown with snapshot on Ctrl-C
+- Replay from journal works correctly
+- Pending timers fire immediately if deadline passed during downtime
+
+---
 
 ## Overview
 
@@ -402,16 +431,16 @@ fn setup_logging() {
 
 ## Tasks
 
-1. Implement `TimerHeap` with persistable `deliver_at_ns` deadlines (not `Instant`)
-2. Implement `TimerScheduler` that schedules intents without producing receipts
-3. Implement `TimerEntry::build_receipt()` using AIR types (`TimerSetReceipt`)
-4. Add `fire_due_timers()` to `WorldHost` that builds receipts and calls `handle_receipt`
-5. Implement `WorldDaemon` select loop with timer firing + graceful shutdown
-6. Implement `run_cycle(RunMode::WithTimers)` that partitions timer intents from other effects
-7. Add timer rehydration on restart from `pending_reducer_receipts` in snapshot
-8. Wire `aos world run` CLI; Ctrl-C triggers snapshot and exit
-9. Set up `tracing-subscriber` for readable logs
-10. Test with `examples/01-hello-timer`:
+1. ✓ Implement `TimerHeap` with persistable `deliver_at_ns` deadlines (not `Instant`)
+2. ✓ Implement `TimerScheduler` that schedules intents without producing receipts
+3. ✓ Implement `TimerEntry::build_receipt()` using AIR types (`TimerSetReceipt`)
+4. ✓ Add `fire_due_timers()` to `WorldHost` that builds receipts and calls `handle_receipt`
+5. ✓ Implement `WorldDaemon` select loop with timer firing + graceful shutdown
+6. ✓ Implement `run_cycle(RunMode::Daemon)` that partitions timer intents from other effects
+7. ✓ Add timer rehydration on restart from `pending_reducer_receipts` in snapshot
+8. ✓ Wire `aos world run` CLI; Ctrl-C triggers snapshot and exit
+9. ✓ Set up `tracing-subscriber` for readable logs
+10. ✓ Test with `examples/01-hello-timer`:
     - Timer fires at correct wall-clock time
     - `sys/TimerFired@1` event delivered to reducer
     - Replay after restart works correctly
