@@ -1,3 +1,7 @@
+//! Mock adapters for testing.
+//!
+//! This module provides mock implementations of effect adapters for use in tests.
+
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -8,17 +12,22 @@ use aos_effects::builtins::LlmGenerateParams;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::Store;
-use log::debug;
 use sha2::{Digest, Sha256};
+use tracing::debug;
 
-const MOCK_ADAPTER_ID: &str = "llm.mock";
+const MOCK_LLM_ADAPTER_ID: &str = "llm.mock";
 
+/// Context for an LLM request intercepted by the mock harness.
 #[derive(Debug, Clone)]
 pub struct LlmRequestContext {
     pub intent: EffectIntent,
     pub params: LlmGenerateParams,
 }
 
+/// Mock LLM harness for testing LLM effect flows.
+///
+/// This harness intercepts `llm.generate` effects, validates parameters,
+/// and generates synthetic responses for testing purposes.
 pub struct MockLlmHarness<S: Store> {
     store: Arc<S>,
     expected_api_key: Option<String>,
@@ -37,6 +46,7 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         self
     }
 
+    /// Collect all pending LLM requests from the kernel.
     pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequestContext>> {
         let mut out = Vec::new();
         loop {
@@ -61,6 +71,7 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         Ok(out)
     }
 
+    /// Respond to an LLM request with a synthetic response.
     pub fn respond_with(&self, kernel: &mut Kernel<S>, ctx: LlmRequestContext) -> Result<()> {
         let prompt_hash = hash_from_ref(&ctx.params.input_ref)?;
         let prompt_bytes = self
@@ -102,7 +113,7 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         let receipt_value = build_receipt_value(&output_ref, &summary_text);
         let receipt = EffectReceipt {
             intent_hash: ctx.intent.intent_hash,
-            adapter_id: MOCK_ADAPTER_ID.into(),
+            adapter_id: MOCK_LLM_ADAPTER_ID.into(),
             status: ReceiptStatus::Ok,
             payload_cbor: serde_cbor::to_vec(&receipt_value)?,
             cost_cents: Some(0),
@@ -261,7 +272,7 @@ fn build_receipt_value(output_ref: &HashRef, summary: &str) -> ExprValue {
     record.insert("cost_millis".into(), ExprValue::Nat(250));
     record.insert(
         "provider_id".into(),
-        ExprValue::Text(MOCK_ADAPTER_ID.into()),
+        ExprValue::Text(MOCK_LLM_ADAPTER_ID.into()),
     );
     ExprValue::Record(record)
 }

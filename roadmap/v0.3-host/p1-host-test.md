@@ -1,6 +1,52 @@
 # P1.5: Host Test Harness & Infrastructure Consolidation
 
+**Status:** Phase 1, 2 & 4 COMPLETE (Phase 3 pending)
+
 **Goal:** Consolidate fragmented test infrastructure around `WorldHost`/`TestHost` so P1–P5 share a single runtime path, then complete the minimal test harness for `examples/00-counter` and `examples/01-hello-timer`.
+
+---
+
+## Completed Work
+
+### Phase 1: TestHost + Fixtures (DONE)
+- [x] Created `crates/aos-host/src/fixtures/mod.rs` with all fixture helpers
+- [x] Expanded TestHost API: `from_loaded_manifest`, `drain_effects`, `state<T>`, `run_cycle_with_adapters`, `kernel()` escape hatches
+- [x] Added `test-fixtures` feature flag to aos-host
+- [x] Created 8 integration tests in `crates/aos-host/tests/testhost_integration.rs`:
+  - Counter-style manifest building
+  - Timer effect flow (emit → drain → inject receipt)
+  - `run_cycle_batch` with stub adapters
+  - Replay smoke checks
+- [x] Fixed stub timer adapter to return proper `TimerSetReceipt` format
+
+### Phase 2: Testkit Re-exports (DONE)
+- [x] Added `aos-host` dependency to `aos-testkit` with `test-fixtures` feature
+- [x] Converted `aos-testkit/src/lib.rs` to re-export from `aos-host::fixtures`
+- [x] All 42 testkit tests pass with the new re-export layer
+- [x] `TestWorld` kept for low-level kernel testing (direct synchronous access)
+- [x] `TestHost` now re-exported from testkit for users wanting high-level abstraction
+
+### Phase 4: Consolidation (DONE - done before Phase 3)
+- [x] Moved `TestWorld` to `aos-host/src/fixtures/mod.rs`
+- [x] Moved `MockLlmHarness` to `aos-host/src/adapters/mock.rs`
+- [x] Removed `aos-testkit/src/llm_harness.rs`
+- [x] Converted `aos-testkit` to pure re-export shim (~27 lines)
+- [x] Moved all integration tests from `aos-testkit/tests/` to `aos-host/tests/`:
+  - `helpers.rs`, `world_integration.rs`, `journal_integration.rs`
+  - `snapshot_integration.rs`, `governance_integration.rs`, `policy_integration.rs`
+  - `secret_integration.rs`, `effect_params_normalization.rs`
+- [x] Deleted `aos-testkit/tests/` directory
+- [x] Minimized `aos-testkit` to single dependency (aos-host with test-fixtures)
+- [x] All 54 aos-host tests pass (original 12 + 42 migrated)
+
+### Running Tests
+```bash
+# aos-host tests (with fixtures) - canonical location
+cargo test -p aos-host --features test-fixtures
+
+# aos-testkit - now a pure re-export shim (no tests)
+cargo test -p aos-testkit
+```
 
 ---
 

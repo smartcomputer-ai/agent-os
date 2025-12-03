@@ -14,8 +14,7 @@ use aos_effects::builtins::{
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::{JournalKind, JournalRecord, PlanEndStatus, mem::MemJournal};
-use aos_testkit::fixtures::{self, START_SCHEMA};
-use aos_testkit::{TestWorld, effect_params_text, fake_hash};
+use aos_host::fixtures::{self, effect_params_text, fake_hash, START_SCHEMA, TestWorld};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use indexmap::IndexMap;
 use serde_cbor;

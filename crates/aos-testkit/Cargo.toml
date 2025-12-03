@@ -3,25 +3,8 @@ name = "aos-testkit"
 version = "0.1.0"
 edition = "2024"
 publish = false
+description = "Re-export shim for aos-host test fixtures (deprecated - use aos-host directly)"
 
 [dependencies]
-aos-store = { path = "../aos-store" }
-aos-effects = { path = "../aos-effects" }
-aos-cbor = { path = "../aos-cbor" }
-aos-kernel = { path = "../aos-kernel" }
-aos-air-types = { path = "../aos-air-types" }
-aos-air-exec = { path = "../aos-air-exec" }
-aos-wasm-abi = { path = "../aos-wasm-abi" }
-indexmap = "2"
-anyhow = "1"
-sha2 = "0.10"
-hex = "0.4"
-serde = { version = "1", features = ["derive"] }
-serde_cbor = "0.11"
-wat = "1"
-rand = "0.8"
-log = "0.4"
-
-[dev-dependencies]
-tempfile = "3"
-serde_json = "1"
+# All functionality is now in aos-host with test-fixtures feature
+aos-host = { path = "../aos-host", features = ["test-fixtures"] }

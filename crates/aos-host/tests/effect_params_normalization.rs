@@ -3,7 +3,7 @@ use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
-use aos_testkit::fixtures;
+use aos_host::fixtures;
 use aos_wasm_abi::ReducerEffect;
 use serde_cbor::Value as CborValue;
 use std::collections::{BTreeMap, HashMap};
@@ -215,7 +215,7 @@ fn reducer_params_round_trip_journal_replay() {
     );
 
     // Run kernel to emit effect, record journal, replay, and compare params_cbor.
-    let mut world = aos_testkit::TestWorld::with_store(store.clone(), manifest).unwrap();
+    let mut world = fixtures::TestWorld::with_store(store.clone(), manifest).unwrap();
     world.submit_event_value(
         fixtures::START_SCHEMA,
         &fixtures::plan_input_record(vec![("id", aos_air_exec::Value::Text("1".into()))]),
@@ -226,7 +226,7 @@ fn reducer_params_round_trip_journal_replay() {
     let intent = effects.pop().unwrap();
     let journal = world.kernel.dump_journal().unwrap();
 
-    let mut replay_world = aos_testkit::TestWorld::with_store_and_journal(
+    let mut replay_world = fixtures::TestWorld::with_store_and_journal(
         store.clone(),
         fixtures::build_loaded_manifest(
             vec![],

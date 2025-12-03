@@ -4,8 +4,7 @@ use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord};
-use aos_testkit::TestWorld;
-use aos_testkit::fixtures::{self, START_SCHEMA};
+use aos_host::fixtures::{self, START_SCHEMA, TestWorld};
 use serde_cbor;
 use tempfile::TempDir;
 

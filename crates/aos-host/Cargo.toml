@@ -3,10 +3,24 @@ name = "aos-host"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+test-fixtures = ["aos-air-types", "aos-air-exec", "aos-wasm-abi", "indexmap", "wat", "sha2", "hex"]
+
 [dependencies]
 aos-kernel = { path = "../aos-kernel" }
 aos-effects = { path = "../aos-effects" }
 aos-cbor = { path = "../aos-cbor" }
+aos-store = { path = "../aos-store" }
+
+# Optional dependencies for test-fixtures feature
+aos-air-types = { path = "../aos-air-types", optional = true }
+aos-air-exec = { path = "../aos-air-exec", optional = true }
+aos-wasm-abi = { path = "../aos-wasm-abi", optional = true }
+indexmap = { version = "2", optional = true }
+wat = { version = "1", optional = true }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }
 
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
@@ -17,5 +31,13 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_cbor = "0.11"
-aos-store = { path = "../aos-store" }
 tempfile = "3"
+
+[dev-dependencies]
+aos-air-types = { path = "../aos-air-types" }
+aos-air-exec = { path = "../aos-air-exec" }
+aos-wasm-abi = { path = "../aos-wasm-abi" }
+indexmap = "2"
+wat = "1"
+sha2 = "0.10"
+hex = "0.4"

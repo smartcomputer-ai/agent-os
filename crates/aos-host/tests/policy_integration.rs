@@ -6,8 +6,7 @@ use aos_air_types::{
 };
 use aos_effects::builtins::HttpRequestParams;
 use aos_kernel::error::KernelError;
-use aos_testkit::TestWorld;
-use aos_testkit::fixtures::{self, zero_hash};
+use aos_host::fixtures::{self, zero_hash, TestWorld};
 use aos_wasm_abi::ReducerEffect;
 use indexmap::IndexMap;
 

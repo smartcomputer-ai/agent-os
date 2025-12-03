@@ -187,6 +187,16 @@ impl<S: Store + 'static> WorldHost<S> {
     pub fn kernel_mut(&mut self) -> &mut Kernel<S> {
         &mut self.kernel
     }
+
+    /// Create a WorldHost from an existing kernel (for TestHost use).
+    pub fn from_kernel(kernel: Kernel<S>, config: HostConfig) -> Self {
+        let adapter_registry = default_registry(&config);
+        Self {
+            kernel,
+            adapter_registry,
+            config,
+        }
+    }
 }
 
 fn default_registry(config: &HostConfig) -> AdapterRegistry {
