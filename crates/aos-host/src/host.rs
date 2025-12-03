@@ -12,9 +12,9 @@ use aos_store::{FsStore, Store};
 
 use crate::adapters::registry::AdapterRegistry;
 use crate::adapters::registry::AdapterRegistryConfig;
-use crate::adapters::stub::{
-    StubBlobAdapter, StubBlobGetAdapter, StubHttpAdapter, StubLlmAdapter, StubTimerAdapter,
-};
+use crate::adapters::stub::{StubBlobAdapter, StubBlobGetAdapter, StubLlmAdapter, StubTimerAdapter};
+#[cfg(not(feature = "adapter-http"))]
+use crate::adapters::stub::StubHttpAdapter;
 use crate::adapters::timer::TimerScheduler;
 use crate::config::HostConfig;
 use crate::error::HostError;
@@ -112,7 +112,7 @@ impl<S: Store + 'static> WorldHost<S> {
             }
         }
 
-        let adapter_registry = default_registry(&host_config);
+        let adapter_registry = default_registry(store.clone(), &host_config);
 
         if !to_dispatch.is_empty() {
             kernel.restore_effect_queue(to_dispatch);
@@ -205,7 +205,7 @@ impl WorldHost<FsStore> {
             }
         }
 
-        let adapter_registry = default_registry(&host_config);
+        let adapter_registry = default_registry(store.clone(), &host_config);
 
         if !to_dispatch.is_empty() {
             kernel.restore_effect_queue(to_dispatch);
@@ -323,7 +323,7 @@ impl<S: Store + 'static> WorldHost<S> {
     /// Create a WorldHost from an existing kernel (for TestHost use).
     pub fn from_kernel(kernel: Kernel<S>, config: HostConfig) -> Self {
         let store = kernel.store();
-        let adapter_registry = default_registry(&config);
+        let adapter_registry = default_registry(store.clone(), &config);
         Self {
             kernel,
             adapter_registry,
@@ -384,15 +384,42 @@ pub fn now_wallclock_ns() -> u64 {
         .as_nanos() as u64
 }
 
-fn default_registry(config: &HostConfig) -> AdapterRegistry {
+fn default_registry<S: Store + 'static>(store: Arc<S>, config: &HostConfig) -> AdapterRegistry {
     let mut registry = AdapterRegistry::new(AdapterRegistryConfig {
         effect_timeout: config.effect_timeout,
     });
     registry.register(Box::new(StubTimerAdapter));
-    registry.register(Box::new(StubHttpAdapter));
-    registry.register(Box::new(StubLlmAdapter));
     registry.register(Box::new(StubBlobAdapter));
     registry.register(Box::new(StubBlobGetAdapter));
+
+    #[cfg(feature = "adapter-http")]
+    {
+        registry.register(Box::new(crate::adapters::http::HttpAdapter::new(
+            store.clone(),
+            config.http.clone(),
+        )));
+    }
+    #[cfg(not(feature = "adapter-http"))]
+    {
+        registry.register(Box::new(StubHttpAdapter));
+    }
+
+    #[cfg(feature = "adapter-llm")]
+    {
+        if let Some(llm_cfg) = &config.llm {
+            registry.register(Box::new(crate::adapters::llm::LlmAdapter::new(
+                store,
+                llm_cfg.clone(),
+            )));
+        } else {
+            registry.register(Box::new(StubLlmAdapter));
+        }
+    }
+    #[cfg(not(feature = "adapter-llm"))]
+    {
+        registry.register(Box::new(StubLlmAdapter));
+    }
+
     registry
 }
 
