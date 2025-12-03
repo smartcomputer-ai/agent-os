@@ -3,6 +3,7 @@ pub mod cli;
 pub mod config;
 pub mod error;
 pub mod host;
+pub mod manifest_loader;
 pub mod modes;
 
 pub mod testhost;

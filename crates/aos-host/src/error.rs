@@ -8,4 +8,8 @@ pub enum HostError {
     Adapter(String),
     #[error("invalid external event: {0}")]
     External(String),
+    #[error("store error: {0}")]
+    Store(String),
+    #[error("manifest error: {0}")]
+    Manifest(String),
 }

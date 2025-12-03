@@ -3,8 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use aos_effects::{EffectIntent, EffectReceipt};
-use aos_kernel::{Kernel, KernelBuilder, KernelConfig, KernelHeights, TailIntent, TailScan};
-use aos_store::Store;
+use aos_kernel::{Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent, TailScan};
+use aos_store::{FsStore, Store};
 
 use crate::adapters::registry::AdapterRegistry;
 use crate::adapters::registry::AdapterRegistryConfig;
@@ -13,6 +13,7 @@ use crate::adapters::stub::{
 };
 use crate::config::HostConfig;
 use crate::error::HostError;
+use crate::manifest_loader;
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
@@ -112,7 +113,98 @@ impl<S: Store + 'static> WorldHost<S> {
             config: host_config,
         })
     }
+}
 
+impl WorldHost<FsStore> {
+    /// Open a world from a directory containing AIR JSON assets.
+    ///
+    /// This method loads the manifest from `air/` subdirectories using the
+    /// manifest_loader, which parses AIR JSON files and constructs a LoadedManifest.
+    /// Use this for worlds defined via JSON assets rather than a pre-built CBOR manifest.
+    pub fn open_dir(
+        world_root: &Path,
+        host_config: HostConfig,
+        kernel_config: KernelConfig,
+    ) -> Result<Self, HostError> {
+        let store = Arc::new(FsStore::open(world_root).map_err(|e| HostError::Store(e.to_string()))?);
+
+        let loaded = manifest_loader::load_from_assets(store.clone(), world_root)
+            .map_err(|e| HostError::Manifest(e.to_string()))?
+            .ok_or_else(|| HostError::Manifest(format!(
+                "no manifest found in '{}' (expected air/ directory with AIR JSON files)",
+                world_root.display()
+            )))?;
+
+        Self::from_loaded_manifest(store, loaded, world_root, host_config, kernel_config)
+    }
+
+    /// Create a WorldHost from a pre-loaded manifest.
+    pub fn from_loaded_manifest(
+        store: Arc<FsStore>,
+        loaded: LoadedManifest,
+        world_root: &Path,
+        host_config: HostConfig,
+        kernel_config: KernelConfig,
+    ) -> Result<Self, HostError> {
+        let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(world_root)?;
+
+        if let Some(dir) = host_config
+            .module_cache_dir
+            .clone()
+            .or(kernel_config.module_cache_dir.clone())
+        {
+            builder = builder.with_module_cache_dir(dir);
+        }
+        builder = builder.with_eager_module_load(host_config.eager_module_load);
+        if let Some(resolver) = kernel_config.secret_resolver.clone() {
+            builder = builder.with_secret_resolver(resolver);
+        }
+        builder = builder.allow_placeholder_secrets(host_config.allow_placeholder_secrets);
+
+        let mut kernel = builder.from_loaded_manifest(loaded)?;
+
+        // Rehydrate dispatch queue: queued_effects snapshot + tail intents lacking receipts.
+        let heights = kernel.heights();
+        let tail = kernel.tail_scan_after(heights.snapshot.unwrap_or(0))?;
+        let receipts_seen = receipts_set(&tail);
+
+        let mut to_dispatch: Vec<EffectIntent> = kernel
+            .queued_effects_snapshot()
+            .into_iter()
+            .map(|snap| snap.into_intent())
+            .collect();
+
+        for TailIntent { record, .. } in tail.intents.iter() {
+            if receipts_seen.contains(&record.intent_hash) {
+                continue;
+            }
+            let intent = EffectIntent::from_raw_params(
+                record.kind.clone().into(),
+                record.cap_name.clone(),
+                record.params_cbor.clone(),
+                record.idempotency_key,
+            )
+            .ok();
+            if let Some(intent) = intent {
+                to_dispatch.push(intent);
+            }
+        }
+
+        let adapter_registry = default_registry(&host_config);
+
+        if !to_dispatch.is_empty() {
+            kernel.restore_effect_queue(to_dispatch);
+        }
+
+        Ok(Self {
+            kernel,
+            adapter_registry,
+            config: host_config,
+        })
+    }
+}
+
+impl<S: Store + 'static> WorldHost<S> {
     pub fn config(&self) -> &HostConfig {
         &self.config
     }

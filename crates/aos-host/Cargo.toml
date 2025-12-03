@@ -5,16 +5,19 @@ edition = "2024"
 
 [features]
 default = []
-test-fixtures = ["aos-air-types", "aos-air-exec", "aos-wasm-abi", "indexmap", "wat", "sha2", "hex"]
+test-fixtures = ["aos-air-exec", "aos-wasm-abi", "indexmap", "wat", "sha2", "hex"]
 
 [dependencies]
 aos-kernel = { path = "../aos-kernel" }
 aos-effects = { path = "../aos-effects" }
 aos-cbor = { path = "../aos-cbor" }
 aos-store = { path = "../aos-store" }
+aos-air-types = { path = "../aos-air-types" }
+
+walkdir = "2"
+log = "0.4"
 
 # Optional dependencies for test-fixtures feature
-aos-air-types = { path = "../aos-air-types", optional = true }
 aos-air-exec = { path = "../aos-air-exec", optional = true }
 aos-wasm-abi = { path = "../aos-wasm-abi", optional = true }
 indexmap = { version = "2", optional = true }
@@ -34,7 +37,6 @@ serde_cbor = "0.11"
 tempfile = "3"
 
 [dev-dependencies]
-aos-air-types = { path = "../aos-air-types" }
 aos-air-exec = { path = "../aos-air-exec" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 indexmap = "2"

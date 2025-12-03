@@ -240,6 +240,13 @@ impl<S: Store + 'static> KernelBuilder<S> {
         let loaded = ManifestLoader::load_from_path(&*self.store, path)?;
         Kernel::from_loaded_manifest_with_config(self.store, loaded, self.journal, self.config)
     }
+
+    pub fn from_loaded_manifest(
+        self,
+        loaded: LoadedManifest,
+    ) -> Result<Kernel<S>, KernelError> {
+        Kernel::from_loaded_manifest_with_config(self.store, loaded, self.journal, self.config)
+    }
 }
 
 impl<S: Store + 'static> Kernel<S> {

@@ -140,9 +140,12 @@ name = "aos-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aos-air-types",
  "aos-host",
  "aos-kernel",
  "aos-store",
+ "aos-wasm-build",
+ "camino",
  "clap",
  "serde_cbor",
  "serde_json",
@@ -213,6 +216,7 @@ dependencies = [
  "clap",
  "hex",
  "indexmap",
+ "log",
  "serde",
  "serde_cbor",
  "serde_json",
@@ -221,6 +225,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "walkdir",
  "wat",
 ]
 

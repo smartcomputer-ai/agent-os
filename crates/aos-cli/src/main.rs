@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use aos_host::config::HostConfig;
 use aos_host::error::HostError;
@@ -10,6 +9,9 @@ use aos_kernel::KernelConfig;
 use aos_store::FsStore;
 use clap::{Parser, Subcommand};
 use serde_json::Value as JsonValue;
+
+#[allow(unused_imports)]
+use aos_store::Store; // Used for trait bound in WorldHost::<FsStore>
 
 #[derive(Parser, Debug)]
 #[command(name = "aos", version, about = "AgentOS CLI")]
@@ -31,12 +33,12 @@ enum Commands {
 enum WorldCommand {
     /// Initialize a world directory
     Init {
-        /// Path to world manifest (file path). Parent dir will receive .aos store.
+        /// Path to world directory. Creates .aos subdirectory for store/journal.
         path: PathBuf,
     },
     /// Run a single batch step (P1 batch mode)
     Step {
-        /// Path to manifest file
+        /// Path to world directory (containing air/ with AIR JSON files)
         path: PathBuf,
         /// Event schema to inject
         #[arg(long)]
@@ -59,16 +61,13 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn cmd_world_init(path: PathBuf) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-        fs::create_dir_all(parent.join(".aos"))?;
-    }
+    fs::create_dir_all(&path)?;
+    fs::create_dir_all(path.join(".aos"))?;
+    fs::create_dir_all(path.join("air"))?;
     println!(
-        "World init complete. Add or edit manifest at {} and store under {}",
-        path.display(),
-        path.parent()
-            .map(|p| p.join(".aos").display().to_string())
-            .unwrap_or_else(|| ".aos".to_string())
+        "World init complete. Add AIR JSON files to {} and store under {}",
+        path.join("air").display(),
+        path.join(".aos").display()
     );
     Ok(())
 }
@@ -79,18 +78,15 @@ async fn cmd_world_step(
     value: Option<String>,
 ) -> anyhow::Result<()> {
     if !path.exists() {
-        anyhow::bail!("manifest path '{}' not found", path.display());
+        anyhow::bail!("world directory '{}' not found", path.display());
     }
-
-    let root = path
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
-    let store = Arc::new(FsStore::open(&root)?);
+    if !path.is_dir() {
+        anyhow::bail!("'{}' is not a directory", path.display());
+    }
 
     let host_config = HostConfig::default();
     let kernel_config = KernelConfig::default();
-    let host = WorldHost::open(store, &path, host_config, kernel_config)?;
+    let host = WorldHost::<FsStore>::open_dir(&path, host_config, kernel_config)?;
     let mut runner = BatchRunner::new(host);
 
     let mut events = Vec::new();
