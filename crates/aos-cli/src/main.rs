@@ -1,18 +1,16 @@
+mod util;
+
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use aos_air_types::HashRef;
 use aos_host::config::HostConfig;
 use aos_host::host::{ExternalEvent, WorldHost};
 use aos_host::manifest_loader;
 use aos_host::modes::batch::BatchRunner;
-use aos_host::util::{has_placeholder_modules, is_placeholder_hash, patch_modules, reset_journal};
-use aos_kernel::KernelConfig;
-use aos_store::{FsStore, Store};
-use aos_wasm_build::{BuildRequest, Builder};
-use camino::Utf8PathBuf;
+use aos_host::util::{has_placeholder_modules, reset_journal};
+use aos_store::FsStore;
 use clap::{Parser, Subcommand};
 use serde_json::Value as JsonValue;
 
@@ -189,7 +187,7 @@ async fn cmd_world_step(
     // Compile reducer if present
     let wasm_hash = if reducer_dir.exists() {
         println!("Compiling reducer from {}...", reducer_dir.display());
-        let hash = compile_reducer(&reducer_dir, &store_root, &store, force_build)?;
+        let hash = util::compile_reducer(&reducer_dir, &store_root, &store, force_build)?;
         println!("Reducer compiled: {}", hash.as_str());
         Some(hash)
     } else {
@@ -203,7 +201,7 @@ async fn cmd_world_step(
 
     // Patch module hashes
     if let Some(hash) = &wasm_hash {
-        let patched = patch_module_hashes(&mut loaded, hash, module.as_deref())?;
+        let patched = util::patch_module_hashes(&mut loaded, hash, module.as_deref())?;
         if patched > 0 {
             println!("Patched {} module(s) with WASM hash", patched);
         }
@@ -216,7 +214,7 @@ async fn cmd_world_step(
 
     // Create host and run
     let host_config = HostConfig::default();
-    let kernel_config = make_kernel_config(&store_root)?;
+    let kernel_config = util::make_kernel_config(&store_root)?;
     let host =
         WorldHost::from_loaded_manifest(store, loaded, &store_root, host_config, kernel_config)?;
     let mut runner = BatchRunner::new(host);
@@ -240,58 +238,4 @@ async fn cmd_world_step(
         res.events_injected, res.cycle.effects_dispatched, res.cycle.receipts_applied
     );
     Ok(())
-}
-
-fn compile_reducer(
-    reducer_dir: &Path,
-    store_root: &Path,
-    store: &FsStore,
-    force_build: bool,
-) -> Result<HashRef> {
-    let cache_dir = store_root.join(".aos/cache/modules");
-    fs::create_dir_all(&cache_dir).context("create module cache directory")?;
-
-    let utf_path = Utf8PathBuf::from_path_buf(reducer_dir.to_path_buf())
-        .map_err(|p| anyhow!("reducer path is not UTF-8: {}", p.display()))?;
-
-    let mut request = BuildRequest::new(utf_path);
-    request.cache_dir = Some(cache_dir);
-    request.use_cache = !force_build;
-    request.config.release = false;
-
-    let artifact = Builder::compile(request).context("compile reducer")?;
-    let hash = store
-        .put_blob(&artifact.wasm_bytes)
-        .context("store wasm blob")?;
-    HashRef::new(hash.to_hex()).context("create hash ref")
-}
-
-fn patch_module_hashes(
-    loaded: &mut aos_kernel::LoadedManifest,
-    wasm_hash: &HashRef,
-    specific_module: Option<&str>,
-) -> Result<usize> {
-    let patched = match specific_module {
-        Some(target) => patch_modules(loaded, wasm_hash, |name, _| name == target),
-        None => patch_modules(loaded, wasm_hash, |_, m| is_placeholder_hash(m)),
-    };
-
-    if let Some(target) = specific_module {
-        if patched == 0 {
-            anyhow::bail!("module '{}' not found in manifest", target);
-        }
-    }
-
-    Ok(patched)
-}
-
-fn make_kernel_config(store_root: &Path) -> Result<KernelConfig> {
-    let cache_dir = store_root.join(".aos/cache/wasmtime");
-    fs::create_dir_all(&cache_dir).context("create wasmtime cache directory")?;
-    Ok(KernelConfig {
-        module_cache_dir: Some(cache_dir),
-        eager_module_load: true,
-        secret_resolver: None,
-        allow_placeholder_secrets: true,
-    })
 }
