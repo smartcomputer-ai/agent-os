@@ -56,7 +56,12 @@ async fn control_channel_round_trip() {
     // Start control server
     let sock_dir = TempDir::new().unwrap();
     let sock_path = sock_dir.path().join("control.sock");
-    let server = ControlServer::new(sock_path.clone(), control_tx.clone(), shutdown_tx.clone());
+    let server = ControlServer::new(
+        sock_path.clone(),
+        control_tx.clone(),
+        shutdown_tx.clone(),
+        aos_host::control::ControlMode::Ndjson,
+    );
     tokio::spawn(async move {
         let _ = server.run().await;
     });

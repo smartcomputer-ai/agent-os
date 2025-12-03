@@ -12,6 +12,12 @@ use crate::error::HostError;
 use crate::host::{ExternalEvent, WorldHost};
 use crate::modes::daemon::ControlMsg;
 
+#[derive(Clone, Copy, Debug)]
+pub enum ControlMode {
+    Ndjson,
+    Stdio,
+}
+
 const PROTOCOL_VERSION: u8 = 1;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -75,6 +81,7 @@ pub struct ControlServer {
     control_tx: mpsc::Sender<ControlMsg>,
     shutdown_tx: broadcast::Sender<()>,
     shutdown_rx: broadcast::Receiver<()>,
+    mode: ControlMode,
 }
 
 impl ControlServer {
@@ -82,6 +89,7 @@ impl ControlServer {
         path: P,
         control_tx: mpsc::Sender<ControlMsg>,
         shutdown_tx: broadcast::Sender<()>,
+        mode: ControlMode,
     ) -> Self {
         let shutdown_rx = shutdown_tx.subscribe();
         Self {
@@ -89,6 +97,7 @@ impl ControlServer {
             control_tx,
             shutdown_tx,
             shutdown_rx,
+            mode,
         }
     }
 
@@ -113,7 +122,7 @@ impl ControlServer {
                     if let Ok((stream, _)) = res {
                         let tx = self.control_tx.clone();
                         let shutdown_tx = self.shutdown_tx.clone();
-                        tokio::spawn(handle_conn(stream, tx, shutdown_tx));
+                        tokio::spawn(handle_conn(stream, tx, shutdown_tx, self.mode));
                     }
                 }
                 _ = self.shutdown_rx.recv() => {
@@ -131,32 +140,38 @@ async fn handle_conn(
     stream: UnixStream,
     control_tx: mpsc::Sender<ControlMsg>,
     shutdown_tx: broadcast::Sender<()>,
+    mode: ControlMode,
 ) {
-    let (r, mut w) = stream.into_split();
-    let mut reader = BufReader::new(r);
-    let mut line = String::new();
+    match mode {
+        ControlMode::Ndjson => {
+            let (r, mut w) = stream.into_split();
+            let mut reader = BufReader::new(r);
+            let mut line = String::new();
 
-    while let Ok(n) = reader.read_line(&mut line).await {
-        if n == 0 {
-            break;
+            while let Ok(n) = reader.read_line(&mut line).await {
+                if n == 0 {
+                    break;
+                }
+                let resp = match serde_json::from_str::<RequestEnvelope>(&line) {
+                    Ok(req) => handle_request(req, &control_tx, &shutdown_tx).await,
+                    Err(e) => ResponseEnvelope {
+                        id: "".into(),
+                        ok: false,
+                        result: None,
+                        error: Some(ControlError::decode(e.to_string())),
+                    },
+                };
+                if let Ok(json) = serde_json::to_string(&resp) {
+                    let _ = w.write_all(json.as_bytes()).await;
+                    let _ = w.write_all(b"\n").await;
+                }
+                line.clear();
+            }
         }
-        let resp = match serde_json::from_str::<RequestEnvelope>(&line) {
-            Ok(req) => handle_request(req, &control_tx, &shutdown_tx).await,
-            Err(e) => ResponseEnvelope {
-                id: "".into(),
-                ok: false,
-                result: None,
-                error: Some(ControlError {
-                    code: "decode_error".into(),
-                    message: e.to_string(),
-                }),
-            },
-        };
-        if let Ok(json) = serde_json::to_string(&resp) {
-            let _ = w.write_all(json.as_bytes()).await;
-            let _ = w.write_all(b"\n").await;
+        ControlMode::Stdio => {
+            // Not used for Unix socket; placeholder for potential stdio support.
+            let _ = shutdown_tx.send(());
         }
-        line.clear();
     }
 }
 
@@ -353,6 +368,7 @@ struct PutBlobPayload {
 pub struct ControlClient {
     reader: BufReader<tokio::net::unix::OwnedReadHalf>,
     writer: tokio::net::unix::OwnedWriteHalf,
+    timeout: std::time::Duration,
 }
 
 impl ControlClient {
@@ -360,7 +376,92 @@ impl ControlClient {
         let stream = UnixStream::connect(path).await?;
         let (r, w) = stream.into_split();
         let reader = BufReader::new(r);
-        Ok(Self { reader, writer: w })
+        Ok(Self {
+            reader,
+            writer: w,
+            timeout: std::time::Duration::from_secs(5),
+        })
+    }
+
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    pub async fn send_event(
+        &mut self,
+        id: impl Into<String>,
+        schema: &str,
+        value_cbor: &[u8],
+    ) -> std::io::Result<ResponseEnvelope> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "send-event".into(),
+            payload: serde_json::json!({
+                "schema": schema,
+                "value_b64": BASE64_STANDARD.encode(value_cbor),
+            }),
+        };
+        self.request(&env).await
+    }
+
+    pub async fn step(&mut self, id: impl Into<String>) -> std::io::Result<ResponseEnvelope> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "step".into(),
+            payload: serde_json::json!({}),
+        };
+        self.request(&env).await
+    }
+
+    pub async fn query_state(
+        &mut self,
+        id: impl Into<String>,
+        reducer: &str,
+    ) -> std::io::Result<ResponseEnvelope> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "query-state".into(),
+            payload: serde_json::json!({ "reducer": reducer }),
+        };
+        self.request(&env).await
+    }
+
+    pub async fn shutdown(&mut self, id: impl Into<String>) -> std::io::Result<ResponseEnvelope> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "shutdown".into(),
+            payload: serde_json::json!({}),
+        };
+        self.request(&env).await
+    }
+
+    pub async fn snapshot(&mut self, id: impl Into<String>) -> std::io::Result<ResponseEnvelope> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "snapshot".into(),
+            payload: serde_json::json!({}),
+        };
+        self.request(&env).await
+    }
+
+    pub async fn put_blob(
+        &mut self,
+        id: impl Into<String>,
+        data: &[u8],
+    ) -> std::io::Result<ResponseEnvelope> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "put-blob".into(),
+            payload: serde_json::json!({ "data_b64": BASE64_STANDARD.encode(data) }),
+        };
+        self.request(&env).await
     }
 
     pub async fn request(
@@ -371,7 +472,23 @@ impl ControlClient {
         self.writer.write_all(json.as_bytes()).await?;
         self.writer.write_all(b"\n").await?;
         let mut line = String::new();
-        let _ = self.reader.read_line(&mut line).await?;
+        let read = tokio::time::timeout(self.timeout, self.reader.read_line(&mut line)).await;
+        let n = match read {
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "control request timed out",
+                ));
+            }
+        };
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "control connection closed",
+            ));
+        }
         let resp = serde_json::from_str(&line)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         Ok(resp)
