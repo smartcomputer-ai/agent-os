@@ -701,6 +701,11 @@ impl<S: Store + 'static> Kernel<S> {
         self.push_plan_result_entry(PlanResultEntry::from_record(record));
     }
 
+    /// Access underlying store (Arc clone).
+    pub fn store(&self) -> Arc<S> {
+        self.store.clone()
+    }
+
     fn restore_effect_intent(&mut self, record: EffectIntentRecord) -> Result<(), KernelError> {
         let effect_kind = record.kind.clone();
         let params_cbor = record.params_cbor.clone();

@@ -59,6 +59,10 @@ pub enum ControlMsg {
         key: Option<Vec<u8>>,
         resp: oneshot::Sender<Result<Option<Vec<u8>>, HostError>>,
     },
+    PutBlob {
+        data: Vec<u8>,
+        resp: oneshot::Sender<Result<String, HostError>>,
+    },
     JournalHead {
         resp: oneshot::Sender<Result<u64, HostError>>,
     },
@@ -278,6 +282,10 @@ impl<S: Store + 'static> WorldDaemon<S> {
             ControlMsg::JournalHead { resp } => {
                 let heights = self.host.heights();
                 let _ = resp.send(Ok(heights.head));
+            }
+            ControlMsg::PutBlob { data, resp } => {
+                let res = self.host.put_blob(&data);
+                let _ = resp.send(res);
             }
             ControlMsg::Shutdown { resp, shutdown_tx } => {
                 let _ = shutdown_tx.send(()); // notify control server listener

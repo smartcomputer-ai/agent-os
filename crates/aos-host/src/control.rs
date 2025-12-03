@@ -300,6 +300,22 @@ async fn handle_request(
                 let head = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "head": head }))
             }
+            "put-blob" => {
+                let payload: PutBlobPayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let data = BASE64_STANDARD
+                    .decode(payload.data_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::PutBlob { data, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let hash_hex = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "hash": hash_hex }))
+            }
             _ => Err(ControlError::unknown_method()),
         }
     })()
@@ -326,6 +342,11 @@ struct InjectReceiptPayload {
     intent_hash: [u8; 32],
     adapter_id: String,
     payload_b64: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PutBlobPayload {
+    data_b64: String,
 }
 
 /// Minimal control client used by tests and CLI helpers.

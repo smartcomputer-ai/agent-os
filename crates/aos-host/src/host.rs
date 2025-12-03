@@ -57,6 +57,7 @@ pub struct WorldHost<S: Store + 'static> {
     kernel: Kernel<S>,
     adapter_registry: AdapterRegistry,
     config: HostConfig,
+    store: Arc<S>,
 }
 
 impl<S: Store + 'static> WorldHost<S> {
@@ -121,6 +122,7 @@ impl<S: Store + 'static> WorldHost<S> {
             kernel,
             adapter_registry,
             config: host_config,
+            store,
         })
     }
 }
@@ -213,6 +215,7 @@ impl WorldHost<FsStore> {
             kernel,
             adapter_registry,
             config: host_config,
+            store,
         })
     }
 }
@@ -220,6 +223,15 @@ impl WorldHost<FsStore> {
 impl<S: Store + 'static> WorldHost<S> {
     pub fn config(&self) -> &HostConfig {
         &self.config
+    }
+
+    /// Put a blob into the backing store and return its hex hash string.
+    pub fn put_blob(&self, bytes: &[u8]) -> Result<String, HostError> {
+        let hash = self
+            .store
+            .put_blob(bytes)
+            .map_err(|e| HostError::Store(e.to_string()))?;
+        Ok(hash.to_hex())
     }
 
     pub fn adapter_registry_mut(&mut self) -> &mut AdapterRegistry {
@@ -310,11 +322,13 @@ impl<S: Store + 'static> WorldHost<S> {
 
     /// Create a WorldHost from an existing kernel (for TestHost use).
     pub fn from_kernel(kernel: Kernel<S>, config: HostConfig) -> Self {
+        let store = kernel.store();
         let adapter_registry = default_registry(&config);
         Self {
             kernel,
             adapter_registry,
             config,
+            store,
         }
     }
 
