@@ -59,7 +59,7 @@ aos
     ├── info
     ├── run [--batch] [--reset-journal]
     ├── event <schema> (<json>|@file|@-) [--batch]
-    ├── state <reducer> [--key <json>] [--pretty]
+    ├── state <reducer> [--key <json>] [--raw]
     ├── snapshot
     ├── head
     ├── manifest [--raw]
@@ -117,17 +117,17 @@ Enqueue a domain event.
 
 - `@file` reads JSON from a file path.
 - `@-` reads JSON from stdin.
-- **Without `--batch`**: Enqueues the event only. Requires a running daemon; errors if no daemon.
+- **Without `--batch`**: Enqueues the event only. If daemon running, sends via control channel. If no daemon, writes directly to journal.
 - **With `--batch`**: Enqueues the event then runs until quiescent. Errors if daemon is running (batch mode only).
 
 Control verb: `send-event` (enqueue only).
 
-#### `world state <reducer> [--key <json>] [--pretty]`
+#### `world state <reducer> [--key <json>] [--raw]`
 
 Query reducer state.
 
 - `--key` for future keyed reducers (cells).
-- `--pretty` decodes CBOR as JSON and pretty-prints.
+- Output is pretty-printed JSON by default; `--raw` outputs compact JSON.
 
 Control verb: `query-state`.
 
@@ -218,7 +218,7 @@ Control verb: `gov-show` (read-only introspection).
 
 | CLI Command | Control Verb | Notes |
 |-------------|--------------|-------|
-| `event` | `send-event` | Enqueue only (daemon required) |
+| `event` | `send-event` | Enqueue only (daemon or direct journal) |
 | `event --batch` | N/A | Batch mode: enqueue + run until quiescent |
 | `state` | `query-state` | |
 | `snapshot` | `snapshot` | |
@@ -337,7 +337,7 @@ async fn try_control_client(store_root: &Path) -> Option<ControlClient> {
 - [x] Wire all control-surface commands through `ControlClient` when daemon is present.
 - [x] Add batch-mode fallback for commands that can operate without a daemon.
 - [x] Add file/stdin input helpers for `@file` and `@-` syntax.
-- [x] Add `--pretty` output formatting for `state` command.
+- [x] Add `--raw` output formatting for `state` command (pretty by default).
 - [ ] Update documentation and help text.
 
 ## Success Criteria
@@ -346,8 +346,8 @@ All verified:
 
 - [x] `export AOS_WORLD=./examples/00-counter && aos world run --batch` processes until quiescent.
 - [x] `aos world event demo/CounterEvent@1 '{"Start":{"target":3}}' --batch` enqueues event and runs until quiescent.
-- [x] `aos world event demo/CounterEvent@1 '"Tick"'` (no --batch) errors if no daemon running.
-- [x] `aos world state demo/CounterSM@1 --pretty` returns formatted JSON.
+- [x] `aos world event demo/CounterEvent@1 '"Tick"'` (no --batch) writes to journal if no daemon.
+- [x] `aos world state demo/CounterSM@1` returns formatted JSON (pretty by default).
 - [x] `aos world gov list` prints stub message (governance not yet implemented).
 - [x] Commands detect running daemon and use control channel; fall back to batch mode when appropriate.
 - [x] No REPL code; all interaction is through CLI subcommands.
