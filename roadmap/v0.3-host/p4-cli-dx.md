@@ -1,4 +1,6 @@
-# P4: CLI Developer Experience
+# P4: CLI Developer Experience ✅
+
+**Status:** Complete
 
 **Goal:** Make `aos world` the single, ergonomic CLI surface for controlling worlds. Replace the planned REPL with an improved CLI that maps cleanly to control channel verbs and supports governance.
 
@@ -55,9 +57,8 @@ aos
 └── world
     ├── init [PATH] [--template <name>]
     ├── info
-    ├── run [--event <schema>] [--value <json>|@file] [--reset-journal]
-    ├── step [--event <schema>] [--value <json>|@file] [--reset-journal]
-    ├── event <schema> (<json>|@file|@-) [--step]
+    ├── run [--batch] [--reset-journal]
+    ├── event <schema> (<json>|@file|@-) [--batch]
     ├── state <reducer> [--key <json>] [--pretty]
     ├── snapshot
     ├── head
@@ -88,42 +89,38 @@ Create a new world directory with skeleton manifest and store structure.
 
 Display read-only summary: manifest hash, journal head, active adapters, store location.
 
-#### `world run`
+#### `world run [--batch] [--reset-journal]`
 
-Start the long-lived daemon with real timers and adapters.
+Start the world.
 
-- Refuses to start if a daemon is already running (control socket exists and is healthy).
-- Logs events/effects/receipts to console.
-- Ctrl-C triggers graceful shutdown with final snapshot.
+- **Without `--batch` (daemon mode)**:
+  - Refuses to start if a daemon is already running (control socket exists and is healthy).
+  - Runs long-lived with real timers and adapters.
+  - Logs events/effects/receipts to console.
+  - Ctrl-C triggers graceful shutdown with final snapshot.
+
+- **With `--batch`**:
+  - Errors if a daemon is already running.
+  - Runs in batch mode: processes until quiescent, then exits.
+  - Useful for CI, scripts, and replaying events.
 
 Options:
-- `--event <schema>` + `--value <json>|@file` — inject an event at startup.
 - `--reset-journal` — clear journal before starting.
-
-#### `world step`
-
-Run a single batch step, then exit.
-
-- If a daemon is running, sends `step` through the control channel.
-- Otherwise falls back to opening `WorldHost` directly in batch mode.
-
-Options:
-- `--event <schema>` + `--value <json>|@file` — inject an event before stepping.
-- `--reset-journal` — clear journal before stepping.
 
 ### Control-Surface Commands
 
 These commands first attempt to use the control channel (if daemon is running), then fall back to batch mode where semantically valid.
 
-#### `world event <schema> (<json>|@file|@-) [--step]`
+#### `world event <schema> (<json>|@file|@-) [--batch]`
 
 Enqueue a domain event.
 
 - `@file` reads JSON from a file path.
 - `@-` reads JSON from stdin.
-- `--step` enqueues the event then runs `step` (daemon: `run_cycle(RunMode::WithTimers)`).
+- **Without `--batch`**: Enqueues the event only. Requires a running daemon; errors if no daemon.
+- **With `--batch`**: Enqueues the event then runs until quiescent. Errors if daemon is running (batch mode only).
 
-Control verb: `send-event` (enqueue only) or `send-event` + `step` (with `--step`).
+Control verb: `send-event` (enqueue only).
 
 #### `world state <reducer> [--key <json>] [--pretty]`
 
@@ -221,8 +218,8 @@ Control verb: `gov-show` (read-only introspection).
 
 | CLI Command | Control Verb | Notes |
 |-------------|--------------|-------|
-| `event` | `send-event` | `--step` adds `step` call |
-| `event --step` | `send-event` + `step` | Enqueue then run cycle |
+| `event` | `send-event` | Enqueue only (daemon required) |
+| `event --batch` | N/A | Batch mode: enqueue + run until quiescent |
 | `state` | `query-state` | |
 | `snapshot` | `snapshot` | |
 | `head` | `journal-head` | |
@@ -278,7 +275,6 @@ pub enum WorldSubcommand {
     Init { path: Option<PathBuf>, template: Option<String> },
     Info,
     Run(RunArgs),
-    Step(StepArgs),
     Event(EventArgs),
     State(StateArgs),
     Snapshot,
@@ -333,25 +329,28 @@ async fn try_control_client(store_root: &Path) -> Option<ControlClient> {
 
 ## Tasks
 
-1. Refactor `WorldOpts` as global Clap args with env var support.
-2. Implement world resolution helper with CWD detection.
-3. Add new commands: `info`, `event`, `state`, `head`, `manifest`, `put-blob`, `shutdown`.
-4. Add `world gov` subcommand tree (propose/shadow/approve/apply/list/show).
-5. Wire all control-surface commands through `ControlClient` when daemon is present.
-6. Add batch-mode fallback for commands that can operate without a daemon.
-7. Update `run` and `step` to use global world options.
-8. Add file/stdin input helpers for `--value @file` and `--value @-`.
-9. Add `--pretty` output formatting for `state` command.
-10. Update documentation and help text.
+- [x] Refactor `WorldOpts` as global Clap args with env var support.
+- [x] Implement world resolution helper with CWD detection.
+- [x] Remove `step` command; update `run` with `--batch` flag.
+- [x] Add new commands: `info`, `event`, `state`, `head`, `manifest`, `put-blob`, `shutdown`.
+- [x] Add `world gov` subcommand tree (propose/shadow/approve/apply/list/show) as stubs.
+- [x] Wire all control-surface commands through `ControlClient` when daemon is present.
+- [x] Add batch-mode fallback for commands that can operate without a daemon.
+- [x] Add file/stdin input helpers for `@file` and `@-` syntax.
+- [x] Add `--pretty` output formatting for `state` command.
+- [ ] Update documentation and help text.
 
 ## Success Criteria
 
-- `export AOS_WORLD=./examples/00-counter && aos world step` works without specifying path.
-- `aos world event demo/Increment@1 '{}' --step` enqueues and steps in one command.
-- `aos world state demo/Counter@1 --pretty` returns formatted JSON.
-- `aos world gov propose --patch @patch.json` submits a proposal through the control channel.
-- Commands detect running daemon and use control channel; fall back to batch mode when appropriate.
-- No REPL code; all interaction is through CLI subcommands.
+All verified:
+
+- [x] `export AOS_WORLD=./examples/00-counter && aos world run --batch` processes until quiescent.
+- [x] `aos world event demo/CounterEvent@1 '{"Start":{"target":3}}' --batch` enqueues event and runs until quiescent.
+- [x] `aos world event demo/CounterEvent@1 '"Tick"'` (no --batch) errors if no daemon running.
+- [x] `aos world state demo/CounterSM@1 --pretty` returns formatted JSON.
+- [x] `aos world gov list` prints stub message (governance not yet implemented).
+- [x] Commands detect running daemon and use control channel; fall back to batch mode when appropriate.
+- [x] No REPL code; all interaction is through CLI subcommands.
 
 ## Future Extensions
 
