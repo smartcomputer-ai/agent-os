@@ -35,11 +35,6 @@ pub async fn try_control_client(dirs: &ResolvedDirs) -> Option<ControlClient> {
     }
 }
 
-/// Check if a daemon is running (control socket exists and is healthy).
-pub async fn is_daemon_running(dirs: &ResolvedDirs) -> bool {
-    try_control_client(dirs).await.is_some()
-}
-
 /// Prepare the world for running: compile reducer, load manifest, patch modules.
 ///
 /// Returns the store and loaded manifest ready to create a WorldHost.

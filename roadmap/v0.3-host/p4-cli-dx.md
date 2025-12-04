@@ -58,7 +58,7 @@ aos
     ├── init [PATH] [--template <name>]
     ├── info
     ├── run [--batch] [--reset-journal]
-    ├── event <schema> (<json>|@file|@-) [--batch]
+    ├── event <schema> (<json>|@file|@-)
     ├── state <reducer> [--key <json>] [--raw]
     ├── snapshot
     ├── head
@@ -111,16 +111,16 @@ Options:
 
 These commands first attempt to use the control channel (if daemon is running), then fall back to batch mode where semantically valid.
 
-#### `world event <schema> (<json>|@file|@-) [--batch]`
+#### `world event <schema> (<json>|@file|@-)`
 
-Enqueue a domain event.
+Send a domain event.
 
 - `@file` reads JSON from a file path.
 - `@-` reads JSON from stdin.
-- **Without `--batch`**: Enqueues the event only. If daemon running, sends via control channel. If no daemon, writes directly to journal.
-- **With `--batch`**: Enqueues the event then runs until quiescent. Errors if daemon is running (batch mode only).
+- **Daemon running**: Enqueues via control channel; daemon processes asynchronously.
+- **No daemon**: Runs in batch mode — enqueues event, processes until quiescent, then exits.
 
-Control verb: `send-event` (enqueue only).
+Control verb: `send-event` (when daemon running).
 
 #### `world state <reducer> [--key <json>] [--raw]`
 
@@ -218,8 +218,7 @@ Control verb: `gov-show` (read-only introspection).
 
 | CLI Command | Control Verb | Notes |
 |-------------|--------------|-------|
-| `event` | `send-event` | Enqueue only (daemon or direct journal) |
-| `event --batch` | N/A | Batch mode: enqueue + run until quiescent |
+| `event` | `send-event` | Daemon: enqueue only. No daemon: batch mode |
 | `state` | `query-state` | |
 | `snapshot` | `snapshot` | |
 | `head` | `journal-head` | |
@@ -345,8 +344,8 @@ async fn try_control_client(store_root: &Path) -> Option<ControlClient> {
 All verified:
 
 - [x] `export AOS_WORLD=./examples/00-counter && aos world run --batch` processes until quiescent.
-- [x] `aos world event demo/CounterEvent@1 '{"Start":{"target":3}}' --batch` enqueues event and runs until quiescent.
-- [x] `aos world event demo/CounterEvent@1 '"Tick"'` (no --batch) writes to journal if no daemon.
+- [x] `aos world event demo/CounterEvent@1 '{"Start":{"target":3}}'` processes event immediately (no daemon = batch mode).
+- [x] `aos world event demo/CounterEvent@1 '"Tick"'` with daemon enqueues only.
 - [x] `aos world state demo/CounterSM@1` returns formatted JSON (pretty by default).
 - [x] `aos world gov list` prints stub message (governance not yet implemented).
 - [x] Commands detect running daemon and use control channel; fall back to batch mode when appropriate.
@@ -358,3 +357,14 @@ All verified:
 - `aos world replay` — replay journal for debugging/testing.
 - `aos world dev` — convenience wrapper that starts daemon and provides enhanced feedback.
 - Interactive terminal UI (Ink-style) if we need richer live interaction.
+
+
+## How to Test
+
+```
+cargo run -p aos-cli -- world -w ./examples/00-counter/ run --batch
+cargo run -p aos-cli -- world -w ./examples/00-counter/ event demo/CounterEvent@1 '{"Start": {"target": 3}}'
+cargo run -p aos-cli -- world -w ./examples/00-counter/ state demo/CounterSM@1
+cargo run -p aos-cli -- world -w ./examples/00-counter/ run --batch
+cargo run -p aos-cli -- world -w ./examples/00-counter/ event demo/CounterEvent@1 '"Tick"'
+```
