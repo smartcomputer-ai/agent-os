@@ -15,6 +15,7 @@ pub mod scheduler;
 pub mod secret;
 pub mod shadow;
 pub mod snapshot;
+pub mod patch_doc;
 pub mod world;
 
 pub use effects::{EffectManager, EffectQueue};

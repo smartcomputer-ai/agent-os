@@ -1503,7 +1503,7 @@ fn encode_correlation_bytes(value: &ExprValue) -> Vec<u8> {
     }
 }
 
-fn canonicalize_patch<S: Store>(
+pub fn canonicalize_patch<S: Store>(
     store: &S,
     patch: ManifestPatch,
 ) -> Result<ManifestPatch, KernelError> {
