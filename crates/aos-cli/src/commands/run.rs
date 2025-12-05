@@ -7,7 +7,7 @@ use aos_host::util::reset_journal;
 use clap::Args;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::opts::{resolve_dirs, WorldOpts};
+use crate::opts::{WorldOpts, resolve_dirs};
 use crate::util::load_world_env;
 
 use super::{create_host, prepare_world};
@@ -88,10 +88,7 @@ pub async fn cmd_run(opts: &WorldOpts, args: &RunArgs) -> Result<()> {
 }
 
 /// Run in batch mode: process until quiescent, then exit.
-async fn run_batch(
-    opts: &WorldOpts,
-    dirs: &crate::opts::ResolvedDirs,
-) -> Result<()> {
+async fn run_batch(opts: &WorldOpts, dirs: &crate::opts::ResolvedDirs) -> Result<()> {
     use aos_host::modes::batch::BatchRunner;
 
     let (store, loaded) = prepare_world(dirs, opts)?;

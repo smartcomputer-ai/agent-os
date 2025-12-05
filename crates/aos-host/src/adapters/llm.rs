@@ -163,7 +163,11 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         let response = match response {
             Ok(r) => r,
             Err(e) => {
-                return Ok(self.error_receipt(intent, &provider_id, format!("request failed: {e}")));
+                return Ok(self.error_receipt(
+                    intent,
+                    &provider_id,
+                    format!("request failed: {e}"),
+                ));
             }
         };
 

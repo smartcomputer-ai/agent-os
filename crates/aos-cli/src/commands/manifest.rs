@@ -7,7 +7,7 @@ use aos_host::manifest_loader;
 use aos_store::FsStore;
 use clap::Args;
 
-use crate::opts::{resolve_dirs, WorldOpts};
+use crate::opts::{WorldOpts, resolve_dirs};
 
 #[derive(Args, Debug)]
 pub struct ManifestArgs {

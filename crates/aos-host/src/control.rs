@@ -382,9 +382,7 @@ async fn handle_request(
                     "approve" => ApprovalDecisionRecord::Approve,
                     "reject" => ApprovalDecisionRecord::Reject,
                     other => {
-                        return Err(ControlError::decode(format!(
-                            "invalid decision: {other}"
-                        )))
+                        return Err(ControlError::decode(format!("invalid decision: {other}")));
                     }
                 };
                 let (tx, rx) = oneshot::channel();

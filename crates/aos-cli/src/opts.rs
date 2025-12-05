@@ -105,37 +105,19 @@ pub fn resolve_dirs(opts: &WorldOpts) -> Result<ResolvedDirs> {
     let air_dir = opts
         .air
         .clone()
-        .map(|p| {
-            if p.is_relative() {
-                world.join(p)
-            } else {
-                p
-            }
-        })
+        .map(|p| if p.is_relative() { world.join(p) } else { p })
         .unwrap_or_else(|| world.join("air"));
 
     let reducer_dir = opts
         .reducer
         .clone()
-        .map(|p| {
-            if p.is_relative() {
-                world.join(p)
-            } else {
-                p
-            }
-        })
+        .map(|p| if p.is_relative() { world.join(p) } else { p })
         .unwrap_or_else(|| world.join("reducer"));
 
     let store_root = opts
         .store
         .clone()
-        .map(|p| {
-            if p.is_relative() {
-                world.join(p)
-            } else {
-                p
-            }
-        })
+        .map(|p| if p.is_relative() { world.join(p) } else { p })
         .unwrap_or_else(|| world.clone());
 
     Ok(ResolvedDirs {

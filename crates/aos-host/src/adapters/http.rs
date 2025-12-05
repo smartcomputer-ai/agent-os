@@ -149,7 +149,12 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
                     req = req.header(name, val);
                 }
                 _ => {
-                    return Ok(self.error_receipt(intent, 400, format!("invalid header {k}"), None));
+                    return Ok(self.error_receipt(
+                        intent,
+                        400,
+                        format!("invalid header {k}"),
+                        None,
+                    ));
                 }
             }
         }
@@ -166,10 +171,9 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for HttpAdapter<S> {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
                 if e.is_timeout() {
-                    return Ok(self.timeout_receipt(
-                        intent,
-                        Some(timings_from(start_ns, start.elapsed())),
-                    ));
+                    return Ok(
+                        self.timeout_receipt(intent, Some(timings_from(start_ns, start.elapsed())))
+                    );
                 }
                 return Ok(self.error_receipt(
                     intent,

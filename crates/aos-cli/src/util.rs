@@ -141,14 +141,15 @@ pub fn validate_patch_json(doc: &Value) -> Result<()> {
     let common_schema: Value =
         serde_json::from_str(aos_air_types::schemas::COMMON).context("load common schema")?;
 
-    let compiled = JSONSchema::options()
-        .with_document("common.schema.json".to_string(), common_schema.clone())
-        .with_document(
-            "https://aos.dev/air/v1/common.schema.json".to_string(),
-            common_schema,
-        )
-        .compile(&patch_schema)
-        .context("compile patch schema")?;
+    let mut opts = JSONSchema::options();
+    opts.with_document("common.schema.json".to_string(), common_schema.clone());
+    opts.with_document(
+        "https://aos.dev/air/v1/common.schema.json".to_string(),
+        common_schema,
+    );
+    // Leak the schema to give it 'static lifetime for jsonschema API.
+    let leaked: &'static Value = Box::leak(Box::new(patch_schema));
+    let compiled = opts.compile(leaked).context("compile patch schema")?;
 
     if let Err(errors) = compiled.validate(doc) {
         let msgs: Vec<String> = errors

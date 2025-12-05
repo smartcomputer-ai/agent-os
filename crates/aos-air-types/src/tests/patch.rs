@@ -1,7 +1,7 @@
 use serde_json::json;
 
-use crate::schemas::PATCH;
 use super::assert_json_schema;
+use crate::schemas::PATCH;
 
 #[test]
 fn patch_schema_accepts_minimal_add_def() {

@@ -4,24 +4,28 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aos_air_types::HashRef;
-use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams};
+use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_host::adapters::http::HttpAdapter;
 use aos_host::adapters::llm::LlmAdapter;
-use aos_host::config::{HttpAdapterConfig, LlmAdapterConfig, ProviderConfig};
 use aos_host::adapters::traits::AsyncEffectAdapter;
+use aos_host::config::{HttpAdapterConfig, LlmAdapterConfig, ProviderConfig};
 use aos_store::{MemStore, Store};
 use serde_cbor;
 use serde_json::json;
-use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 fn build_intent(kind: EffectKind, params_cbor: Vec<u8>) -> EffectIntent {
     // cap name is irrelevant for adapter execution here
     EffectIntent::from_raw_params(kind, "cap", params_cbor, [0u8; 32]).unwrap()
 }
 
-async fn start_test_server(body: &'static [u8], status_line: &'static str, delay: Option<Duration>) -> SocketAddr {
+async fn start_test_server(
+    body: &'static [u8],
+    status_line: &'static str,
+    delay: Option<Duration>,
+) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -136,13 +140,7 @@ async fn llm_errors_missing_api_key() {
         model: "gpt-4o-mini".into(),
         temperature: "0".into(),
         max_tokens: 16,
-        input_ref: HashRef::new(
-            store
-                .put_blob(b"[]")
-                .unwrap()
-                .to_hex(),
-        )
-        .unwrap(),
+        input_ref: HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap(),
         tools: vec![],
         api_key: None,
     };
@@ -168,13 +166,7 @@ async fn llm_unknown_provider_errors() {
         model: "gpt".into(),
         temperature: "0".into(),
         max_tokens: 16,
-        input_ref: HashRef::new(
-            store
-                .put_blob(b"[]")
-                .unwrap()
-                .to_hex(),
-        )
-        .unwrap(),
+        input_ref: HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap(),
         tools: vec![],
         api_key: Some("key".into()),
     };
@@ -204,7 +196,9 @@ async fn llm_input_ref_missing_errors() {
     let adapter = LlmAdapter::new(store, cfg);
 
     // Build params with a valid-looking hash that is not present in the store.
-    let missing_ref = HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000").unwrap();
+    let missing_ref =
+        HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap();
     let params = LlmGenerateParams {
         provider: "openai".into(),
         model: "gpt".into(),

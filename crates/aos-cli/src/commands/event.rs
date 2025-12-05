@@ -7,7 +7,7 @@ use clap::Args;
 use serde_json::Value as JsonValue;
 
 use crate::input::parse_input_value;
-use crate::opts::{resolve_dirs, WorldOpts};
+use crate::opts::{WorldOpts, resolve_dirs};
 use crate::util::load_world_env;
 
 use super::{create_host, prepare_world, try_control_client};
@@ -31,9 +31,7 @@ pub async fn cmd_event(opts: &WorldOpts, args: &EventArgs) -> Result<()> {
 
     // If daemon is running, send via control channel (enqueue only, daemon processes)
     if let Some(mut client) = try_control_client(&dirs).await {
-        let resp = client
-            .send_event("cli-event", &args.schema, &cbor)
-            .await?;
+        let resp = client.send_event("cli-event", &args.schema, &cbor).await?;
         if !resp.ok {
             anyhow::bail!("send-event failed: {:?}", resp.error);
         }

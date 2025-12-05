@@ -44,10 +44,7 @@ impl<S: Store + 'static> TestHost<S> {
     }
 
     /// Create a TestHost from a pre-loaded manifest (in-memory journal).
-    pub fn from_loaded_manifest(
-        store: Arc<S>,
-        loaded: LoadedManifest,
-    ) -> Result<Self, HostError> {
+    pub fn from_loaded_manifest(store: Arc<S>, loaded: LoadedManifest) -> Result<Self, HostError> {
         Self::from_loaded_manifest_with_config(store, loaded, HostConfig::default())
     }
 

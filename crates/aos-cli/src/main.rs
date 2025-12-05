@@ -89,8 +89,12 @@ async fn main() -> Result<()> {
                 WorldSubcommand::State(args) => commands::state::cmd_state(opts, &args).await,
                 WorldSubcommand::Snapshot => commands::snapshot::cmd_snapshot(opts).await,
                 WorldSubcommand::Head => commands::head::cmd_head(opts).await,
-                WorldSubcommand::Manifest(args) => commands::manifest::cmd_manifest(opts, &args).await,
-                WorldSubcommand::PutBlob(args) => commands::put_blob::cmd_put_blob(opts, &args).await,
+                WorldSubcommand::Manifest(args) => {
+                    commands::manifest::cmd_manifest(opts, &args).await
+                }
+                WorldSubcommand::PutBlob(args) => {
+                    commands::put_blob::cmd_put_blob(opts, &args).await
+                }
                 WorldSubcommand::Shutdown => commands::shutdown::cmd_shutdown(opts).await,
                 WorldSubcommand::Gov(args) => commands::gov::cmd_gov(opts, &args).await,
             }

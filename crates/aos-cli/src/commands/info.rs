@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use aos_host::manifest_loader;
 use aos_store::FsStore;
 
-use crate::opts::{resolve_dirs, WorldOpts};
+use crate::opts::{WorldOpts, resolve_dirs};
 
 pub async fn cmd_info(opts: &WorldOpts) -> Result<()> {
     let dirs = resolve_dirs(opts)?;

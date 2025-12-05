@@ -7,10 +7,10 @@ pub mod caps;
 pub mod effects;
 pub mod manifest;
 pub mod modules;
+pub mod patch;
 pub mod plans;
 pub mod policies;
 pub mod schemas;
-pub mod patch;
 
 static COMMON_SCHEMA: Lazy<Value> =
     Lazy::new(|| serde_json::from_str(COMMON).expect("embedded common schema must be valid JSON"));

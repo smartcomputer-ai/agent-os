@@ -4,7 +4,7 @@ use anyhow::Result;
 use aos_host::control::RequestEnvelope;
 use aos_kernel::journal::fs::FsJournal;
 
-use crate::opts::{resolve_dirs, WorldOpts};
+use crate::opts::{WorldOpts, resolve_dirs};
 
 use super::try_control_client;
 

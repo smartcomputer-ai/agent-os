@@ -7,7 +7,7 @@ use aos_store::{FsStore, Store};
 use clap::Args;
 
 use crate::input::parse_input_bytes;
-use crate::opts::{resolve_dirs, WorldOpts};
+use crate::opts::{WorldOpts, resolve_dirs};
 
 use super::try_control_client;
 

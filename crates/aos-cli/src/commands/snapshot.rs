@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::opts::{resolve_dirs, WorldOpts};
+use crate::opts::{WorldOpts, resolve_dirs};
 use crate::util::load_world_env;
 
 use super::{create_host, prepare_world, try_control_client};
