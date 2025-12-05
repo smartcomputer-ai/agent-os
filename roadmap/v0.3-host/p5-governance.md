@@ -28,3 +28,34 @@
 - No semantic changes to patch ops; schema is structural and matches existing prose.
 - Governance verbs remain explicit kernel calls; do not treat them as generic events in the control plane.
 - If richer error info is needed, extend the schema with optional fields rather than inventing alternate payload shapes.
+
+## Forward prep for self-upgrade (v0.4)
+- Reserve governance effect schemas and give them concrete shapes now (to avoid hash churn later); these will move into `spec/defs/builtin-schemas.air.json` and the effect catalog when self-upgrade lands:
+  - **Params**
+    - `sys/GovProposeParams@1`: `{ patch_hash:hash, manifest_base?:hash, description?:text }`
+    - `sys/GovShadowParams@1`: `{ proposal_id:nat }`
+    - `sys/GovApproveParams@1`: `{ proposal_id:nat, decision:"approve"|"reject", approver:text }`
+    - `sys/GovApplyParams@1`: `{ proposal_id:nat }`
+  - **Receipts**
+    - `sys/GovProposeReceipt@1`: `{ proposal_id:nat, patch_hash:hash, manifest_base?:hash }`
+    - `sys/GovShadowReceipt@1`: `{ proposal_id:nat, manifest_hash:hash, effects_predicted:[EffectKind], pending_receipts?:[PendingPlanReceipt], plan_results?:[PlanResultPreview], ledger_deltas?:[LedgerDelta] }` (mirrors `ShadowReport` fields)
+    - `sys/GovApproveReceipt@1`: `{ proposal_id:nat, decision:"approve"|"reject", patch_hash:hash, approver:text }`
+    - `sys/GovApplyReceipt@1`: `{ proposal_id:nat, manifest_hash_new:hash, patch_hash:hash }`
+- Define a new cap type `governance` and a built-in `defcap` (to ship in v0.4) with schema:
+  ```json
+  {
+    "$kind":"defcap",
+    "name":"sys/governance@1",
+    "cap_type":"governance",
+    "schema":{
+      "record":{
+        "modes":{ "set":{ "text":{} } },          // which verbs: propose/shadow/approve/apply
+        "namespaces":{ "set":{ "text":{} } },     // allowed AIR namespaces to touch
+        "max_patches":{ "nat":{} }                // optional ceiling for proposals
+      }
+    }
+  }
+  ```
+- Keep control-channel verbs typed and reusable by both operators and in-world plans; avoid CLI-only payloads that would block effect parity later.
+- Ensure patch schema validation is factored so it can be invoked from both control verbs and future governance effect handlers (no CLI-only validation path).
+- Receipts emitted by governance effects must mirror the canonical governance journal entries (Proposed/ShadowReport/Approved/Applied) so replay remains deterministic; journal stays the source of truth.
