@@ -155,6 +155,13 @@ pub fn compile_patch_document<S: Store>(
     }
     rewrite_manifest_refs(&mut canonical.manifest, &hash_map);
 
+    // Store new/updated nodes so downstream canonicalization/validation can resolve refs.
+    for node in &canonical.nodes {
+        store
+            .put_node(node)
+            .map_err(|e| KernelError::Manifest(e.to_string()))?;
+    }
+
     Ok(canonical)
 }
 

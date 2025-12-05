@@ -112,9 +112,15 @@ pub fn build_loaded_manifest(
         .collect();
     let module_refs: Vec<NamedRef> = modules
         .iter()
-        .map(|module| NamedRef {
-            name: module.name.clone(),
-            hash: module.wasm_hash.clone(),
+        .map(|module| {
+            let def_hash = aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defmodule(
+                module.clone(),
+            ))
+            .expect("hash defmodule");
+            NamedRef {
+                name: module.name.clone(),
+                hash: HashRef::new(def_hash.to_hex()).expect("hash ref"),
+            }
         })
         .collect();
 

@@ -29,13 +29,13 @@ async fn control_governance_propose_shadow_apply_flow() {
     // Build a tiny patch: add a defschema and set manifest refs to include it.
     let base_loaded = simple_state_manifest(&store);
     let patch = manifest_patch_from_loaded(&base_loaded);
-    let _new_world = TestWorld::with_store(store.clone(), base_loaded).unwrap();
+    let _new_world = TestWorld::with_store(store.clone(), simple_state_manifest(&store)).unwrap();
 
     // Propose
     let (resp_tx, resp_rx) = oneshot::channel();
     control_tx
         .send(ControlMsg::Propose {
-            patch,
+            patch: aos_host::modes::daemon::GovernancePatchInput::Manifest(patch),
             description: Some("ctrl gov test".into()),
             resp: resp_tx,
         })

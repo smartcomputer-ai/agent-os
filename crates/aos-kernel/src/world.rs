@@ -328,6 +328,10 @@ impl<S: Store + 'static> Kernel<S> {
             None => Box::new(AllowAllPolicy),
         };
 
+        // Persist the loaded manifest + defs into the store so governance/patch doc
+        // compilation can resolve the base manifest hash from CAS.
+        persist_loaded_manifest(store.as_ref(), &loaded)?;
+
         let mut kernel = Self {
             store: store.clone(),
             manifest: loaded.manifest.clone(),
@@ -1946,5 +1950,31 @@ fn ensure_module_capabilities(
             }
         }
     }
+    Ok(())
+}
+
+fn persist_loaded_manifest<S: Store>(
+    store: &S,
+    loaded: &LoadedManifest,
+) -> Result<(), KernelError> {
+    for schema in loaded.schemas.values() {
+        store.put_node(&AirNode::Defschema(schema.clone()))?;
+    }
+    for module in loaded.modules.values() {
+        store.put_node(&AirNode::Defmodule(module.clone()))?;
+    }
+    for plan in loaded.plans.values() {
+        store.put_node(&AirNode::Defplan(plan.clone()))?;
+    }
+    for cap in loaded.caps.values() {
+        store.put_node(&AirNode::Defcap(cap.clone()))?;
+    }
+    for policy in loaded.policies.values() {
+        store.put_node(&AirNode::Defpolicy(policy.clone()))?;
+    }
+    for effect in loaded.effects.values() {
+        store.put_node(&AirNode::Defeffect(effect.clone()))?;
+    }
+    store.put_node(&AirNode::Manifest(loaded.manifest.clone()))?;
     Ok(())
 }
