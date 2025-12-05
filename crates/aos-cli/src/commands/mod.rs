@@ -2,6 +2,7 @@
 
 pub mod event;
 pub mod gov;
+mod gov_control;
 pub mod head;
 pub mod info;
 pub mod init;
@@ -59,8 +60,12 @@ pub fn prepare_world(
     // Compile reducer if present
     let wasm_hash = if dirs.reducer_dir.exists() {
         println!("Compiling reducer from {}...", dirs.reducer_dir.display());
-        let hash =
-            util::compile_reducer(&dirs.reducer_dir, &dirs.store_root, &store, opts.force_build)?;
+        let hash = util::compile_reducer(
+            &dirs.reducer_dir,
+            &dirs.store_root,
+            &store,
+            opts.force_build,
+        )?;
         println!("Reducer compiled: {}", hash.as_str());
         Some(hash)
     } else {
