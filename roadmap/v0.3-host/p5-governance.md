@@ -4,11 +4,14 @@
 **Effort**: Medium  
 **Risk if deferred**: Medium (governance ergonomics + correctness)
 
-**Status snapshot**: Patch schema authored and embedded (`spec/schemas/patch.schema.json`); governance param/receipt schemas and effect kinds drafted in built-ins for v0.4. Control verbs/CLI validation path wired; patch-doc compiler implemented in kernel. Remaining: control-path patch-doc submission, policy/cap for governance, adapter (deferred to p1).
+**Status snapshot**: Patch schema authored and embedded (`spec/schemas/patch.schema.json`). Patch-doc compiler lives in kernel; control daemon accepts PatchDocuments and compiles/validates server-side. CLI now defaults to patch-doc submission with hash auto-fill and `--require-hashes` to enforce explicit hashes. Governance effect schemas/caps drafted (for v0.4 self-upgrade), but effect adapter is deferred. Still to do: spec updates, policy/cap wiring, CLI helper for patch-from-air dir, and governance effects adapter (p1).
 
 ## What’s missing
-- Patch format (`base_manifest_hash`, operations like `add_def`, `replace_def`, `remove_def`, `set_manifest_refs`, `set_defaults`, etc.) is only specified in prose (spec/03-air.md §15). There is no JSON Schema to validate proposals before they hit the kernel/shadow runner.
-- Control/CLI path for governance verbs is underspecified. Propose/shadow/approve/apply should be first-class calls, not generic “enqueue event” plumbing.
+- **Spec sync**: `spec/03-air.md §15` still needs to point at `patch.schema.json` and the new compiler/validation path.
+- **Governance cap/policy wiring**: cap type + default policy rules not yet embedded/enforced.
+- **CLI UX**: add a `--patch-dir <air>` helper that builds a PatchDocument from an AIR bundle and submits (hash auto-fill already works for authored docs).
+- **Governance effects adapter**: still deferred to p1 (self-upgrade) to let in-world plans call `governance.*`.
+- **Docs**: mention hash auto-fill + `--require-hashes` in CLI help and roadmap changelog.
 
 ## Why it matters
 - Completes the “everything in the control plane has a schema” story; proposals become structurally validated before execution.
@@ -16,11 +19,13 @@
 - Keeps governance deterministic and auditable by routing through explicit kernel APIs (not generic domain events).
 
 ## Proposed work
- 1) **Author patch schema** *(done)*: added `spec/schemas/patch.schema.json`.
- 2) **Spec update**: update `spec/03-air.md §15` to reference the schema, document invariants (single `base_manifest_hash`, op shapes, no duplicate ops per target).
- 3) **Kernel/tooling validation** *(partially done)*: patch-doc compiler added in kernel; schema validation still to be wired into submission paths.
- 4) **Control channel/CLI** *(partially done)*: verbs added; CLI validates patch JSON but still needs patch-doc submission wiring and schema check on control path.
- 5) **Fixtures/tests** *(partially done)*: patch_doc unit tests added; control governance integration test added. Still need negative fixtures for invalid patches via control once validation is wired.
+ 1) **Author patch schema** **(done)**: `spec/schemas/patch.schema.json`.
+ 2) **Spec update** *(todo)*: update `spec/03-air.md §15` to reference the schema, describe compiler/validation path and invariants.
+ 3) **Kernel/tooling validation** **(done)**: patch-doc compiler + server-side schema validation in control daemon.
+ 4) **Control channel/CLI** **(done/extend)**: verbs live; CLI submits PatchDocuments by default with hash auto-fill and `--require-hashes`. **Todo**: add `--patch-dir` helper to build from AIR bundle.
+ 5) **Fixtures/tests** **(done)**: patch_doc unit tests; control_patchdoc integration covers accept/reject. (Add more negative cases only if new surface appears.)
+ 6) **Governance caps/policy** *(todo)*: embed `sys/governance@1` cap and a default deny/allow policy stub (can ship with p1).
+ 7) **Governance effects adapter** *(deferred to p1 self-upgrade)*: wire `governance.*` effect kinds to kernel governance loop.
 
 ## Design notes
 - No semantic changes to patch ops; schema is structural and matches existing prose.

@@ -213,7 +213,8 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
     Ok(())
 }
 
-fn autofill_patchdoc_hashes(doc: &mut serde_json::Value, require_hashes: bool) -> Result<()> {
+// Exposed for tests.
+pub fn autofill_patchdoc_hashes(doc: &mut serde_json::Value, require_hashes: bool) -> Result<()> {
     let Some(patches) = doc.get_mut("patches").and_then(|v| v.as_array_mut()) else {
         return Ok(());
     };
@@ -307,5 +308,47 @@ fn node_name(node: &AirNode) -> Option<&str> {
         AirNode::Defeffect(n) => Some(n.name.as_str()),
         AirNode::Defsecret(n) => Some(n.name.as_str()),
         AirNode::Manifest(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn autofill_fills_zero_hashes_by_default() {
+        let mut doc = serde_json::json!({
+            "base_manifest_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "patches": [
+                { "add_def": { "kind": "defschema", "node": { "$kind":"defschema", "name":"demo/Added@1", "type": { "bool": {} } } } },
+                { "set_manifest_refs": { "add": [ { "kind":"defschema", "name":"demo/Added@1", "hash": ZERO_HASH_SENTINEL } ] } }
+            ]
+        });
+
+        autofill_patchdoc_hashes(&mut doc, false).expect("autofill");
+        let filled = doc["patches"][1]["set_manifest_refs"]["add"][0]["hash"]
+            .as_str()
+            .expect("hash present");
+        assert_ne!(filled, ZERO_HASH_SENTINEL, "hash should be filled");
+        assert!(
+            filled.starts_with("sha256:"),
+            "hash should be canonical sha256 prefix"
+        );
+    }
+
+    #[test]
+    fn require_hashes_rejects_zero_hashes() {
+        let mut doc = serde_json::json!({
+            "base_manifest_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "patches": [
+                { "set_manifest_refs": { "add": [ { "kind":"defschema", "name":"demo/Added@1", "hash": ZERO_HASH_SENTINEL } ] } }
+            ]
+        });
+
+        let err = autofill_patchdoc_hashes(&mut doc, true)
+            .expect_err("should fail when hashes remain zero");
+        assert!(err.to_string().contains("hash missing")
+            || err.to_string().contains("hash still zero"),
+            "require-hashes should error on zero hashes, got {err}");
     }
 }

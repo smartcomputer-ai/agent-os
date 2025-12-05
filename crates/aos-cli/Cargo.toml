@@ -24,6 +24,10 @@ dotenvy = "0.15"
 jsonschema = "0.17"
 aos-cbor = { path = "../aos-cbor" }
 
+[dev-dependencies]
+anyhow = "1"
+serde_json = "1"
+
 [[bin]]
 name = "aos"
 path = "src/main.rs"
