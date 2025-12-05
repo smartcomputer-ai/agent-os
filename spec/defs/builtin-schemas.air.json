@@ -259,5 +259,147 @@
         "digest": { "hash": {} }
       }
     }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovProposeParams@1",
+    "type": {
+      "record": {
+        "patch_hash": { "hash": {} },
+        "manifest_base": { "option": { "hash": {} } },
+        "description": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovProposeReceipt@1",
+    "type": {
+      "record": {
+        "proposal_id": { "nat": {} },
+        "patch_hash": { "hash": {} },
+        "manifest_base": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovShadowParams@1",
+    "type": {
+      "record": {
+        "proposal_id": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovShadowReceipt@1",
+    "type": {
+      "record": {
+        "proposal_id": { "nat": {} },
+        "manifest_hash": { "hash": {} },
+        "predicted_effects": {
+          "list": {
+            "record": {
+              "kind": { "text": {} },
+              "cap": { "text": {} },
+              "intent_hash": { "hash": {} },
+              "params_json": { "option": { "text": {} } }
+            }
+          }
+        },
+        "pending_receipts": {
+          "list": {
+            "record": {
+              "plan_id": { "nat": {} },
+              "plan": { "option": { "text": {} } },
+              "intent_hash": { "hash": {} }
+            }
+          }
+        },
+        "plan_results": {
+          "list": {
+            "record": {
+              "plan": { "text": {} },
+              "plan_id": { "nat": {} },
+              "output_schema": { "text": {} }
+            }
+          }
+        },
+        "ledger_deltas": {
+          "list": {
+            "record": {
+              "ledger": {
+                "variant": {
+                  "capability": { "unit": {} },
+                  "policy": { "unit": {} }
+                }
+              },
+              "name": { "text": {} },
+              "change": {
+                "variant": {
+                  "added": { "unit": {} },
+                  "removed": { "unit": {} },
+                  "changed": { "unit": {} }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovApproveParams@1",
+    "type": {
+      "record": {
+        "proposal_id": { "nat": {} },
+        "decision": {
+          "variant": {
+            "approve": { "unit": {} },
+            "reject": { "unit": {} }
+          }
+        },
+        "approver": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovApproveReceipt@1",
+    "type": {
+      "record": {
+        "proposal_id": { "nat": {} },
+        "decision": {
+          "variant": {
+            "approve": { "unit": {} },
+            "reject": { "unit": {} }
+          }
+        },
+        "patch_hash": { "hash": {} },
+        "approver": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovApplyParams@1",
+    "type": {
+      "record": {
+        "proposal_id": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovApplyReceipt@1",
+    "type": {
+      "record": {
+        "proposal_id": { "nat": {} },
+        "manifest_hash_new": { "hash": {} },
+        "patch_hash": { "hash": {} }
+      }
+    }
   }
 ]

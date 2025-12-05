@@ -4,6 +4,8 @@
 **Effort**: Medium  
 **Risk if deferred**: Medium (governance ergonomics + correctness)
 
+**Status snapshot**: Patch schema authored and embedded (`spec/schemas/patch.schema.json`); governance param/receipt schemas and effect kinds drafted in built-ins for v0.4. Control/CLI wiring and kernel integration still TODO.
+
 ## What’s missing
 - Patch format (`base_manifest_hash`, operations like `add_def`, `replace_def`, `remove_def`, `set_manifest_refs`, `set_defaults`, etc.) is only specified in prose (spec/03-air.md §15). There is no JSON Schema to validate proposals before they hit the kernel/shadow runner.
 - Control/CLI path for governance verbs is underspecified. Propose/shadow/approve/apply should be first-class calls, not generic “enqueue event” plumbing.
@@ -59,3 +61,8 @@
 - Keep control-channel verbs typed and reusable by both operators and in-world plans; avoid CLI-only payloads that would block effect parity later.
 - Ensure patch schema validation is factored so it can be invoked from both control verbs and future governance effect handlers (no CLI-only validation path).
 - Receipts emitted by governance effects must mirror the canonical governance journal entries (Proposed/ShadowReport/Approved/Applied) so replay remains deterministic; journal stays the source of truth.
+- **TODO (authoring ergonomics)**: keep “hashless” authoring like `examples/06-safe-upgrade`:
+  - Accept sugar patches with ZERO_HASH wasm placeholders and missing manifest ref hashes.
+  - CLI/control path should load nodes, write them to the store, fill hashes, patch manifest refs, then canonicalize and hash the patch before submission.
+  - Validate only the patch envelope/ops via `patch.schema.json`; structural/node validation and canonicalization happen in the submit path.
+  - Add a CLI convenience (`aos world gov propose --patch-dir <air dir>`) that builds the patch from an asset bundle, computes hashes, validates, then submits, so authors don’t need to hand-edit hashes.

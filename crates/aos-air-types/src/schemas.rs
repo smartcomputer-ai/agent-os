@@ -26,6 +26,7 @@ embed_schema! {
     DEFCAP => "../../../spec/schemas/defcap.schema.json",
     DEFPOLICY => "../../../spec/schemas/defpolicy.schema.json",
     MANIFEST => "../../../spec/schemas/manifest.schema.json",
+    PATCH => "../../../spec/schemas/patch.schema.json",
 }
 
 pub fn find(name: &str) -> Option<&'static str> {

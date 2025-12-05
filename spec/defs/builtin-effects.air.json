@@ -61,5 +61,41 @@
     "receipt_schema": "sys/VaultRotateReceipt@1",
     "cap_type": "secret",
     "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/governance.propose@1",
+    "kind": "governance.propose",
+    "params_schema": "sys/GovProposeParams@1",
+    "receipt_schema": "sys/GovProposeReceipt@1",
+    "cap_type": "governance",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/governance.shadow@1",
+    "kind": "governance.shadow",
+    "params_schema": "sys/GovShadowParams@1",
+    "receipt_schema": "sys/GovShadowReceipt@1",
+    "cap_type": "governance",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/governance.approve@1",
+    "kind": "governance.approve",
+    "params_schema": "sys/GovApproveParams@1",
+    "receipt_schema": "sys/GovApproveReceipt@1",
+    "cap_type": "governance",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/governance.apply@1",
+    "kind": "governance.apply",
+    "params_schema": "sys/GovApplyParams@1",
+    "receipt_schema": "sys/GovApplyReceipt@1",
+    "cap_type": "governance",
+    "origin_scope": "plan"
   }
 ]
