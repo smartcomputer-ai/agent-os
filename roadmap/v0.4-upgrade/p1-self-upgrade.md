@@ -49,3 +49,7 @@
 - Capabilities are the safety lever: small, scoped `govern` grants to specific upgrade plans/modules; default world policy denies.  
 - Human approval remains possible: encode approver identity in params/receipts; policy can require it before `approve`/`apply`.  
 - Out of scope: cross‑world orchestration and multi‑world policy delegation (leave to later roadmap).
+
+## Deferred items (align with host P5 status)
+- Governance effect adapter: intercept `governance.*` intents in-kernel, run the same propose/shadow/approve/apply handler, and emit receipts. Needed for plan-driven self-upgrade; deferred until p1 starts. 
+- CLI helper `aos world gov propose --patch-dir <air>`: build patch from AIR bundle, fill hashes, validate, submit via control; preserves hashless authoring ergonomics.

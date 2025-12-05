@@ -66,3 +66,4 @@
   - CLI/control path should load nodes, write them to the store, fill hashes, patch manifest refs, then canonicalize and hash the patch before submission.
   - Validate only the patch envelope/ops via `patch.schema.json`; structural/node validation and canonicalization happen in the submit path.
   - Add a CLI convenience (`aos world gov propose --patch-dir <air dir>`) that builds the patch from an asset bundle, computes hashes, validates, then submits, so authors don’t need to hand-edit hashes.
+- **Deferred to p1 self-upgrade**: governance effect adapter (`governance.*` intents handled in-kernel with same propose/shadow/approve/apply pathway) so in-world plans can self-upgrade. Keep control verbs and validation ready; adapter work will land with v0.4 self-upgrade milestone.
