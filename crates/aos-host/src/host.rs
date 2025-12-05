@@ -244,6 +244,11 @@ impl<S: Store + 'static> WorldHost<S> {
         &self.adapter_registry
     }
 
+    /// Access underlying store (read-only).
+    pub fn store(&self) -> &S {
+        &self.store
+    }
+
     pub fn enqueue_external(&mut self, evt: ExternalEvent) -> Result<(), HostError> {
         match evt {
             ExternalEvent::DomainEvent { schema, value } => {

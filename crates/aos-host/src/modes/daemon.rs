@@ -22,6 +22,7 @@ use crate::host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::shadow::ShadowSummary;
+use aos_kernel::patch_doc::{PatchDocument, compile_patch_document};
 
 /// Convert a `std::time::Instant` to a `tokio::time::Instant`.
 ///
@@ -63,7 +64,7 @@ pub enum ControlMsg {
         resp: oneshot::Sender<Result<Option<Vec<u8>>, HostError>>,
     },
     Propose {
-        patch: ManifestPatch,
+        patch: GovernancePatchInput,
         description: Option<String>,
         resp: oneshot::Sender<Result<u64, HostError>>,
     },
@@ -93,6 +94,12 @@ pub enum ControlMsg {
         /// Optional sender to propagate shutdown to the control server.
         shutdown_tx: broadcast::Sender<()>,
     },
+}
+
+#[derive(Debug)]
+pub enum GovernancePatchInput {
+    Manifest(ManifestPatch),
+    PatchDoc(PatchDocument),
 }
 
 /// World daemon for long-lived execution with real timers.
@@ -315,7 +322,18 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 resp,
             } => {
                 tracing::info!("Governance propose via control");
-                let res = self.host.kernel_mut().submit_proposal(patch, description);
+                let res = match patch {
+                    GovernancePatchInput::Manifest(patch) => {
+                        self.host.kernel_mut().submit_proposal(patch, description)
+                    }
+                    GovernancePatchInput::PatchDoc(doc) => {
+                        let compiled = compile_patch_document(self.host.store(), doc)
+                            .map_err(HostError::from)?;
+                        self.host
+                            .kernel_mut()
+                            .submit_proposal(compiled, description)
+                    }
+                };
                 let _ = resp.send(res.map_err(HostError::from));
             }
             ControlMsg::Shadow { proposal_id, resp } => {

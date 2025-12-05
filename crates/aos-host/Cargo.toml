@@ -43,6 +43,7 @@ tempfile = "3"
 reqwest = { version = "0.11", features = ["json"], optional = true }
 url = { version = "2", optional = true }
 once_cell = "1"
+jsonschema = "0.17"
 
 [dev-dependencies]
 aos-air-exec = { path = "../aos-air-exec" }

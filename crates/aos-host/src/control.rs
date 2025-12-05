@@ -5,6 +5,8 @@ use aos_kernel::KernelHeights;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::shadow::ShadowSummary;
+use aos_kernel::patch_doc::PatchDocument;
+use jsonschema::JSONSchema;
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
@@ -341,8 +343,17 @@ async fn handle_request(
                 let patch_bytes = BASE64_STANDARD
                     .decode(payload.patch_b64)
                     .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
-                let patch: ManifestPatch = serde_cbor::from_slice(&patch_bytes)
-                    .map_err(|e| ControlError::decode(format!("decode patch cbor: {e}")))?;
+                // Try ManifestPatch CBOR first; fallback to PatchDocument JSON (validated).
+                let patch = if let Ok(manifest) = serde_cbor::from_slice::<ManifestPatch>(&patch_bytes) {
+                    crate::modes::daemon::GovernancePatchInput::Manifest(manifest)
+                } else if let Ok(doc_json) = serde_json::from_slice::<serde_json::Value>(&patch_bytes) {
+                    validate_patch_doc(&doc_json)?;
+                    let doc: PatchDocument = serde_json::from_value(doc_json)
+                        .map_err(|e| ControlError::decode(format!("decode patch doc: {e}")))?;
+                    crate::modes::daemon::GovernancePatchInput::PatchDoc(doc)
+                } else {
+                    return Err(ControlError::decode("patch_b64 is neither ManifestPatch CBOR nor PatchDocument JSON"));
+                };
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
                     .send(ControlMsg::Propose {
@@ -481,6 +492,30 @@ fn default_approve() -> String {
 
 fn default_approver() -> String {
     "control-client".into()
+}
+
+fn validate_patch_doc(doc: &serde_json::Value) -> Result<(), ControlError> {
+    let patch_schema: serde_json::Value = serde_json::from_str(aos_air_types::schemas::PATCH)
+        .map_err(|e| ControlError::decode(format!("load patch schema: {e}")))?;
+    let common_schema: serde_json::Value = serde_json::from_str(aos_air_types::schemas::COMMON)
+        .map_err(|e| ControlError::decode(format!("load common schema: {e}")))?;
+    let mut opts = JSONSchema::options();
+    opts.with_document("common.schema.json".into(), common_schema.clone());
+    opts.with_document(
+        "https://aos.dev/air/v1/common.schema.json".into(),
+        common_schema,
+    );
+    let compiled = opts
+        .compile(&patch_schema)
+        .map_err(|e| ControlError::decode(format!("compile patch schema: {e}")))?;
+    if let Err(errors) = compiled.validate(doc) {
+        let msgs: Vec<String> = errors.map(|e| format!("{}: {}", e.instance_path, e)).collect();
+        return Err(ControlError::decode(format!(
+            "patch schema validation failed: {}",
+            msgs.join("; ")
+        )));
+    }
+    Ok(())
 }
 
 /// Minimal control client used by tests and CLI helpers.

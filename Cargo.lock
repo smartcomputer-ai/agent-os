@@ -223,6 +223,7 @@ dependencies = [
  "clap",
  "hex",
  "indexmap",
+ "jsonschema",
  "log",
  "once_cell",
  "reqwest",
