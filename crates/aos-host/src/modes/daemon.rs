@@ -19,6 +19,9 @@ use tokio::task::JoinHandle;
 use crate::adapters::timer::TimerScheduler;
 use crate::error::HostError;
 use crate::host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};
+use aos_kernel::governance::ManifestPatch;
+use aos_kernel::journal::ApprovalDecisionRecord;
+use aos_kernel::shadow::ShadowSummary;
 
 /// Convert a `std::time::Instant` to a `tokio::time::Instant`.
 ///
@@ -58,6 +61,25 @@ pub enum ControlMsg {
         reducer: String,
         key: Option<Vec<u8>>,
         resp: oneshot::Sender<Result<Option<Vec<u8>>, HostError>>,
+    },
+    Propose {
+        patch: ManifestPatch,
+        description: Option<String>,
+        resp: oneshot::Sender<Result<u64, HostError>>,
+    },
+    Shadow {
+        proposal_id: u64,
+        resp: oneshot::Sender<Result<ShadowSummary, HostError>>,
+    },
+    Approve {
+        proposal_id: u64,
+        approver: String,
+        decision: ApprovalDecisionRecord,
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    Apply {
+        proposal_id: u64,
+        resp: oneshot::Sender<Result<(), HostError>>,
     },
     PutBlob {
         data: Vec<u8>,
@@ -285,6 +307,52 @@ impl<S: Store + 'static> WorldDaemon<S> {
             }
             ControlMsg::PutBlob { data, resp } => {
                 let res = self.host.put_blob(&data);
+                let _ = resp.send(res);
+            }
+            ControlMsg::Propose {
+                patch,
+                description,
+                resp,
+            } => {
+                tracing::info!("Governance propose via control");
+                let res = self.host.kernel_mut().submit_proposal(patch, description);
+                let _ = resp.send(res.map_err(HostError::from));
+            }
+            ControlMsg::Shadow { proposal_id, resp } => {
+                tracing::info!("Governance shadow via control");
+                let res = self
+                    .host
+                    .kernel_mut()
+                    .run_shadow(proposal_id, None)
+                    .map_err(HostError::from);
+                let _ = resp.send(res);
+            }
+            ControlMsg::Approve {
+                proposal_id,
+                approver,
+                decision,
+                resp,
+            } => {
+                tracing::info!("Governance approve via control");
+                let res = match decision {
+                    ApprovalDecisionRecord::Approve => self
+                        .host
+                        .kernel_mut()
+                        .approve_proposal(proposal_id, approver),
+                    ApprovalDecisionRecord::Reject => self
+                        .host
+                        .kernel_mut()
+                        .reject_proposal(proposal_id, approver),
+                };
+                let _ = resp.send(res.map_err(HostError::from));
+            }
+            ControlMsg::Apply { proposal_id, resp } => {
+                tracing::info!("Governance apply via control");
+                let res = self
+                    .host
+                    .kernel_mut()
+                    .apply_proposal(proposal_id)
+                    .map_err(HostError::from);
                 let _ = resp.send(res);
             }
             ControlMsg::Shutdown { resp, shutdown_tx } => {

@@ -2,8 +2,12 @@ use std::path::Path;
 
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::KernelHeights;
+use aos_kernel::governance::ManifestPatch;
+use aos_kernel::journal::ApprovalDecisionRecord;
+use aos_kernel::shadow::ShadowSummary;
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_cbor;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -331,6 +335,89 @@ async fn handle_request(
                 let hash_hex = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "hash": hash_hex }))
             }
+            "propose" => {
+                let payload: ProposePayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let patch_bytes = BASE64_STANDARD
+                    .decode(payload.patch_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let patch: ManifestPatch = serde_cbor::from_slice(&patch_bytes)
+                    .map_err(|e| ControlError::decode(format!("decode patch cbor: {e}")))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::Propose {
+                        patch,
+                        description: payload.description,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let proposal_id = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "proposal_id": proposal_id }))
+            }
+            "shadow" => {
+                let payload: ShadowPayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::Shadow {
+                        proposal_id: payload.proposal_id,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let summary: ShadowSummary = inner.map_err(ControlError::host)?;
+                let value = serde_json::to_value(&summary)
+                    .map_err(|e| ControlError::decode(format!("encode summary json: {e}")))?;
+                Ok(value)
+            }
+            "approve" => {
+                let payload: ApprovePayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let decision = match payload.decision.as_str() {
+                    "approve" => ApprovalDecisionRecord::Approve,
+                    "reject" => ApprovalDecisionRecord::Reject,
+                    other => {
+                        return Err(ControlError::decode(format!(
+                            "invalid decision: {other}"
+                        )))
+                    }
+                };
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::Approve {
+                        proposal_id: payload.proposal_id,
+                        approver: payload.approver,
+                        decision,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({}))
+            }
+            "apply" => {
+                let payload: ApplyPayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::Apply {
+                        proposal_id: payload.proposal_id,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({}))
+            }
             _ => Err(ControlError::unknown_method()),
         }
     })()
@@ -362,6 +449,40 @@ struct InjectReceiptPayload {
 #[derive(Debug, Deserialize)]
 struct PutBlobPayload {
     data_b64: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProposePayload {
+    patch_b64: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ShadowPayload {
+    proposal_id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApprovePayload {
+    proposal_id: u64,
+    #[serde(default = "default_approve")]
+    decision: String,
+    #[serde(default = "default_approver")]
+    approver: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApplyPayload {
+    proposal_id: u64,
+}
+
+fn default_approve() -> String {
+    "approve".into()
+}
+
+fn default_approver() -> String {
+    "control-client".into()
 }
 
 /// Minimal control client used by tests and CLI helpers.

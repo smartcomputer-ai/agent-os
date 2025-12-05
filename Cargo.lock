@@ -150,6 +150,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "hex",
+ "jsonschema",
  "serde_cbor",
  "serde_json",
  "tokio",

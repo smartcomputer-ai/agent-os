@@ -13,6 +13,8 @@ use aos_store::{FsStore, Store};
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use dotenvy;
+use jsonschema::JSONSchema;
+use serde_json::Value;
 
 /// Compile a reducer crate to WASM and store the blob.
 pub fn compile_reducer(
@@ -130,4 +132,29 @@ fn env_bool(key: &str) -> Option<bool> {
             "0" | "false" | "no" | "off" => Some(false),
             _ => None,
         })
+}
+
+/// Validate a patch JSON document against patch.schema.json (and common schema refs).
+pub fn validate_patch_json(doc: &Value) -> Result<()> {
+    let patch_schema: Value =
+        serde_json::from_str(aos_air_types::schemas::PATCH).context("load patch schema")?;
+    let common_schema: Value =
+        serde_json::from_str(aos_air_types::schemas::COMMON).context("load common schema")?;
+
+    let compiled = JSONSchema::options()
+        .with_document("common.schema.json".to_string(), common_schema.clone())
+        .with_document(
+            "https://aos.dev/air/v1/common.schema.json".to_string(),
+            common_schema,
+        )
+        .compile(&patch_schema)
+        .context("compile patch schema")?;
+
+    if let Err(errors) = compiled.validate(doc) {
+        let msgs: Vec<String> = errors
+            .map(|e| format!("{}: {}", e.instance_path, e))
+            .collect();
+        anyhow::bail!("patch schema validation failed: {}", msgs.join("; "));
+    }
+    Ok(())
 }

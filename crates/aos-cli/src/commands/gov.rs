@@ -1,11 +1,13 @@
 //! `aos world gov` governance commands (stubs).
 
+use std::fs;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 
 use crate::opts::{resolve_dirs, WorldOpts};
+use crate::util::validate_patch_json;
 
 #[derive(Args, Debug)]
 pub struct GovArgs {
@@ -90,11 +92,19 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
             if !propose_args.patch.exists() {
                 anyhow::bail!("patch file not found: {}", propose_args.patch.display());
             }
-            println!(
-                "Governance not yet implemented.\n\
-                 Would propose patch from: {}",
-                propose_args.patch.display()
-            );
+            let text = std::fs::read_to_string(&propose_args.patch)
+                .context("read patch file")?;
+            let json: serde_json::Value =
+                serde_json::from_str(&text).context("parse patch JSON")?;
+
+            if json.get("patches").is_some() {
+                validate_patch_json(&json)?;
+                println!("Patch validated against patch.schema.json");
+            } else {
+                println!("Patch has no 'patches' field; skipping patch.schema.json validation (authoring sugar manifest patch?).");
+            }
+
+            println!("Governance not yet implemented; patch ready for submission");
         }
         GovSubcommand::Shadow(shadow_args) => {
             println!(
