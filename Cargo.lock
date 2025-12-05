@@ -141,6 +141,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "aos-air-types",
+ "aos-cbor",
  "aos-host",
  "aos-kernel",
  "aos-store",

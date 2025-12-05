@@ -5,13 +5,14 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
-use serde_cbor;
-
 use crate::commands::gov_control::send_req;
 use crate::opts::{WorldOpts, resolve_dirs};
 use crate::util::validate_patch_json;
-use aos_host::control::ControlClient;
+use aos_air_types::AirNode;
+use aos_cbor::Hash;
+use aos_host::{control::ControlClient, manifest_loader::ZERO_HASH_SENTINEL};
 use base64::prelude::*;
+use std::collections::HashMap;
 
 #[derive(Args, Debug)]
 pub struct GovArgs {
@@ -49,6 +50,10 @@ pub struct ProposeArgs {
     /// Optional description
     #[arg(long)]
     pub description: Option<String>,
+
+    /// Require all hashes to be provided (disable auto-fill of zero/missing hashes)
+    #[arg(long, default_value_t = false, help = "Enforce that all manifest refs in patch doc carry non-zero hashes; disable client auto-fill")]
+    pub require_hashes: bool,
 }
 
 #[derive(Args, Debug)]
@@ -108,19 +113,20 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
             let json: serde_json::Value =
                 serde_json::from_str(&text).context("parse patch JSON")?;
 
-            if json.get("patches").is_some() {
-                validate_patch_json(&json)?;
-                println!("Patch validated against patch.schema.json");
-            } else {
-                println!(
-                    "Patch has no 'patches' field; skipping patch.schema.json validation (authoring sugar manifest patch?)."
-                );
-            }
-
-            // For now expect CBOR patch bytes in the file if not a JSON patch envelope.
             let patch_bytes = if json.get("patches").is_some() {
-                // Submit JSON patch by serializing to CBOR (kernel will canonicalize internally).
-                serde_cbor::to_vec(&json).context("encode patch JSON to CBOR")?
+                let mut doc = json;
+                autofill_patchdoc_hashes(&mut doc, propose_args.require_hashes)?;
+                validate_patch_json(&doc)?;
+                println!(
+                    "PatchDoc validated{}",
+                    if propose_args.require_hashes {
+                        " (hashes enforced)"
+                    } else {
+                        " (hashes auto-filled where zero/missing)"
+                    }
+                );
+                // Send JSON bytes; server will accept PatchDocument JSON.
+                serde_json::to_vec(&doc).context("encode patch JSON")?
             } else {
                 // treat as raw CBOR
                 fs::read(&propose_args.patch).context("read patch cbor")?
@@ -205,4 +211,101 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn autofill_patchdoc_hashes(doc: &mut serde_json::Value, require_hashes: bool) -> Result<()> {
+    let Some(patches) = doc.get_mut("patches").and_then(|v| v.as_array_mut()) else {
+        return Ok(());
+    };
+
+    // Collect hashes for new/updated defs in this document.
+    let mut known_hashes: HashMap<String, String> = HashMap::new();
+    for patch in patches.iter() {
+        if let Some(add_def) = patch.get("add_def") {
+            if let Some(node) = add_def.get("node") {
+                if let Ok(node_air) = serde_json::from_value::<AirNode>(node.clone()) {
+                    if let Some(name) = node_name(&node_air) {
+                        known_hashes.insert(name.to_string(), Hash::of_cbor(&node_air)?.to_hex());
+                    }
+                }
+            }
+        }
+        if let Some(repl) = patch.get("replace_def") {
+            if let Some(node) = repl.get("new_node") {
+                if let Ok(node_air) = serde_json::from_value::<AirNode>(node.clone()) {
+                    if let Some(name) = node_name(&node_air) {
+                        known_hashes.insert(name.to_string(), Hash::of_cbor(&node_air)?.to_hex());
+                    }
+                }
+            }
+        }
+    }
+
+    for patch in patches.iter_mut() {
+        if let Some(set_refs) = patch.get_mut("set_manifest_refs") {
+            if let Some(add) = set_refs.get_mut("add").and_then(|v| v.as_array_mut()) {
+                for entry in add.iter_mut() {
+                    let obj = entry
+                        .as_object_mut()
+                        .ok_or_else(|| anyhow::anyhow!("manifest ref entry must be object"))?;
+                    let name = obj
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("manifest ref missing name"))?;
+                    let needs_fill = match obj.get("hash").and_then(|v| v.as_str()) {
+                        None => true,
+                        Some(h) if h == ZERO_HASH_SENTINEL => true,
+                        Some(_) => false,
+                    };
+                    if needs_fill {
+                        if let Some(h) = known_hashes.get(name) {
+                            obj.insert("hash".into(), serde_json::Value::String(h.clone()));
+                        } else if require_hashes {
+                            anyhow::bail!(
+                                "hash missing for manifest ref '{}' and --require-hashes is set",
+                                name
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if require_hashes {
+        for patch in patches.iter() {
+            if let Some(set_refs) = patch.get("set_manifest_refs") {
+                if let Some(add) = set_refs.get("add").and_then(|v| v.as_array()) {
+                    for entry in add {
+                        if let Some(h) = entry.get("hash").and_then(|v| v.as_str()) {
+                            if h == ZERO_HASH_SENTINEL {
+                                anyhow::bail!(
+                                    "hash still zero for manifest ref '{}'",
+                                    entry
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("<unknown>")
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn node_name(node: &AirNode) -> Option<&str> {
+    match node {
+        AirNode::Defmodule(n) => Some(n.name.as_str()),
+        AirNode::Defplan(n) => Some(n.name.as_str()),
+        AirNode::Defschema(n) => Some(n.name.as_str()),
+        AirNode::Defcap(n) => Some(n.name.as_str()),
+        AirNode::Defpolicy(n) => Some(n.name.as_str()),
+        AirNode::Defeffect(n) => Some(n.name.as_str()),
+        AirNode::Defsecret(n) => Some(n.name.as_str()),
+        AirNode::Manifest(_) => None,
+    }
 }
