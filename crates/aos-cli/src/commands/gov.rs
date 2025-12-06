@@ -6,13 +6,16 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use crate::commands::gov_control::send_req;
-use crate::opts::{WorldOpts, resolve_dirs};
+use crate::opts::{ResolvedDirs, WorldOpts, resolve_dirs};
 use crate::util::validate_patch_json;
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
 use aos_host::{control::ControlClient, manifest_loader::ZERO_HASH_SENTINEL};
 use base64::prelude::*;
 use std::collections::HashMap;
+use aos_host::manifest_loader::load_from_assets;
+use aos_store::FsStore;
+use std::sync::Arc;
 
 #[derive(Args, Debug)]
 pub struct GovArgs {
@@ -43,9 +46,17 @@ pub enum GovSubcommand {
 
 #[derive(Args, Debug)]
 pub struct ProposeArgs {
-    /// Path to patch file
+    /// Path to patch file (PatchDocument JSON or ManifestPatch CBOR)
+    #[arg(long, conflicts_with = "patch_dir")]
+    pub patch: Option<PathBuf>,
+
+    /// Build a PatchDocument from an AIR directory (compute hashes, set manifest refs)
+    #[arg(long, conflicts_with = "patch")]
+    pub patch_dir: Option<PathBuf>,
+
+    /// Optional base manifest hash; defaults to current world manifest if omitted
     #[arg(long)]
-    pub patch: PathBuf,
+    pub base: Option<String>,
 
     /// Optional description
     #[arg(long)]
@@ -54,6 +65,10 @@ pub struct ProposeArgs {
     /// Require all hashes to be provided (disable auto-fill of zero/missing hashes)
     #[arg(long, default_value_t = false, help = "Enforce that all manifest refs in patch doc carry non-zero hashes; disable client auto-fill")]
     pub require_hashes: bool,
+
+    /// Dry-run: print the generated PatchDocument JSON and exit
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug)]
@@ -105,31 +120,45 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
 
     match &args.cmd {
         GovSubcommand::Propose(propose_args) => {
-            // Validate patch file exists
-            if !propose_args.patch.exists() {
-                anyhow::bail!("patch file not found: {}", propose_args.patch.display());
-            }
-            let text = std::fs::read_to_string(&propose_args.patch).context("read patch file")?;
-            let json: serde_json::Value =
-                serde_json::from_str(&text).context("parse patch JSON")?;
-
-            let patch_bytes = if json.get("patches").is_some() {
-                let mut doc = json;
-                autofill_patchdoc_hashes(&mut doc, propose_args.require_hashes)?;
-                validate_patch_json(&doc)?;
-                println!(
-                    "PatchDoc validated{}",
-                    if propose_args.require_hashes {
-                        " (hashes enforced)"
-                    } else {
-                        " (hashes auto-filled where zero/missing)"
-                    }
-                );
-                // Send JSON bytes; server will accept PatchDocument JSON.
-                serde_json::to_vec(&doc).context("encode patch JSON")?
+            let patch_bytes = if let Some(dir) = &propose_args.patch_dir {
+                let doc = build_patchdoc_from_dir(&dirs, dir, propose_args.base.clone())?;
+                let mut doc_json = serde_json::to_value(&doc).context("serialize patch doc")?;
+                autofill_patchdoc_hashes(&mut doc_json, propose_args.require_hashes)?;
+                validate_patch_json(&doc_json)?;
+                if propose_args.dry_run {
+                    println!("{}", serde_json::to_string_pretty(&doc_json)?);
+                    return Ok(());
+                }
+                serde_json::to_vec(&doc_json).context("encode patch JSON")?
             } else {
-                // treat as raw CBOR
-                fs::read(&propose_args.patch).context("read patch cbor")?
+                let patch_path = propose_args
+                    .patch
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("--patch or --patch-dir is required"))?;
+                if !patch_path.exists() {
+                    anyhow::bail!("patch file not found: {}", patch_path.display());
+                }
+                let text = std::fs::read_to_string(patch_path).context("read patch file")?;
+                let json: serde_json::Value =
+                    serde_json::from_str(&text).context("parse patch JSON")?;
+
+                if json.get("patches").is_some() {
+                    let mut doc = json;
+                    autofill_patchdoc_hashes(&mut doc, propose_args.require_hashes)?;
+                    validate_patch_json(&doc)?;
+                    if propose_args.dry_run {
+                        println!("{}", serde_json::to_string_pretty(&doc)?);
+                        return Ok(());
+                    }
+                    serde_json::to_vec(&doc).context("encode patch JSON")?
+                } else {
+                    if propose_args.dry_run {
+                        println!("(dry-run) raw CBOR patch file {}", patch_path.display());
+                        return Ok(());
+                    }
+                    // treat as raw CBOR
+                    fs::read(patch_path).context("read patch cbor")?
+                }
             };
 
             let mut client = ControlClient::connect(&dirs.control_socket())
@@ -309,6 +338,123 @@ fn node_name(node: &AirNode) -> Option<&str> {
         AirNode::Defsecret(n) => Some(n.name.as_str()),
         AirNode::Manifest(_) => None,
     }
+}
+
+fn build_patchdoc_from_dir(
+    dirs: &ResolvedDirs,
+    air_dir: &PathBuf,
+    base_override: Option<String>,
+) -> Result<serde_json::Value> {
+    let store = Arc::new(FsStore::open(&dirs.store_root)?);
+    let loaded = load_from_assets(store.clone(), air_dir)
+        .context("load AIR from patch-dir")?
+        .ok_or_else(|| anyhow::anyhow!("no manifest found under {}", air_dir.display()))?;
+
+    // Derive base manifest hash: CLI defaults to current world manifest.air.cbor unless overridden.
+    let base_manifest_hash = if let Some(h) = base_override {
+        h
+    } else {
+        let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
+        let bytes = fs::read(&manifest_path).with_context(|| {
+            format!(
+                "read current world manifest at {} (or pass --base)",
+                manifest_path.display()
+            )
+        })?;
+        Hash::of_bytes(&bytes).to_hex()
+    };
+
+    // Build add_def ops for all defs in the loaded bundle.
+    let mut patches: Vec<serde_json::Value> = Vec::new();
+    for node in loaded
+        .modules
+        .values()
+        .cloned()
+        .map(AirNode::Defmodule)
+        .chain(loaded.plans.values().cloned().map(AirNode::Defplan))
+        .chain(loaded.schemas.values().cloned().map(AirNode::Defschema))
+        .chain(loaded.caps.values().cloned().map(AirNode::Defcap))
+        .chain(loaded.policies.values().cloned().map(AirNode::Defpolicy))
+        .chain(loaded.effects.values().cloned().map(AirNode::Defeffect))
+    {
+        let kind = match &node {
+            AirNode::Defmodule(_) => "defmodule",
+            AirNode::Defplan(_) => "defplan",
+            AirNode::Defschema(_) => "defschema",
+            AirNode::Defcap(_) => "defcap",
+            AirNode::Defpolicy(_) => "defpolicy",
+            AirNode::Defeffect(_) => "defeffect",
+            AirNode::Defsecret(_) | AirNode::Manifest(_) => continue, // skip secrets/manifest for now
+        };
+        patches.push(serde_json::json!({
+            "add_def": { "kind": kind, "node": serde_json::to_value(&node)? }
+        }));
+    }
+
+    // Set manifest refs from the loaded manifest.
+    let mut add_refs: Vec<serde_json::Value> = Vec::new();
+    add_refs.extend(
+        loaded
+            .manifest
+            .schemas
+            .iter()
+            .map(|r| serde_json::json!({"kind":"defschema","name":r.name,"hash":r.hash.as_str()})),
+    );
+    add_refs.extend(
+        loaded
+            .manifest
+            .modules
+            .iter()
+            .map(|r| serde_json::json!({"kind":"defmodule","name":r.name,"hash":r.hash.as_str()})),
+    );
+    add_refs.extend(
+        loaded
+            .manifest
+            .plans
+            .iter()
+            .map(|r| serde_json::json!({"kind":"defplan","name":r.name,"hash":r.hash.as_str()})),
+    );
+    add_refs.extend(
+        loaded
+            .manifest
+            .caps
+            .iter()
+            .map(|r| serde_json::json!({"kind":"defcap","name":r.name,"hash":r.hash.as_str()})),
+    );
+    add_refs.extend(
+        loaded
+            .manifest
+            .policies
+            .iter()
+            .map(|r| serde_json::json!({"kind":"defpolicy","name":r.name,"hash":r.hash.as_str()})),
+    );
+    add_refs.extend(
+        loaded
+            .manifest
+            .effects
+            .iter()
+            .map(|r| serde_json::json!({"kind":"defeffect","name":r.name,"hash":r.hash.as_str()})),
+    );
+
+    if !add_refs.is_empty() {
+        patches.push(serde_json::json!({
+            "set_manifest_refs": { "add": add_refs, "remove": [] }
+        }));
+    }
+
+    if let Some(defaults) = &loaded.manifest.defaults {
+        patches.push(serde_json::json!({
+            "set_defaults": {
+                "policy": defaults.policy,
+                "cap_grants": defaults.cap_grants
+            }
+        }));
+    }
+
+    Ok(serde_json::json!({
+        "base_manifest_hash": base_manifest_hash,
+        "patches": patches,
+    }))
 }
 
 #[cfg(test)]
