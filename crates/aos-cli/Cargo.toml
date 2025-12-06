@@ -27,6 +27,8 @@ aos-cbor = { path = "../aos-cbor" }
 [dev-dependencies]
 anyhow = "1"
 serde_json = "1"
+assert_cmd = "2"
+tempfile = "3"
 
 [[bin]]
 name = "aos"
