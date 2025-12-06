@@ -11,10 +11,10 @@
 
 ## Tasks
 
-1) **TestHost affordances (right-now scope).** Add helpers for: `run_to_idle`, `run_cycle_with_timers` (daemon-style), `drain_and_dispatch` (drain + adapter exec), `apply_receipt`, and `state_json`. Keep API tight; skip pending_effects/record/replay plumbing.
-2) **Examples through TestHost.** Port counter + hello-timer (and optionally fetch-notify/llm-summarizer) to integration tests that use TestHost + mock adapters. Keep `crates/aos-examples/tests/cli.rs` as a smoke test but ensure it routes through host/mocks (no real HTTP/LLM).
-3) **Replay command.** Add `aos world replay` to `aos-cli`: open world, replay to head, assert success, print heights/hash. Mark experimental; no CONTRIBUTING/CI hook yet.
-4) **Snapshot safety (lightweight).** Add one WorldHost-level test: drain → snapshot → reopen → continue (ensures queued intents/awaits persist). Keep if effort stays low; otherwise defer explicitly.
+1) **TestHost affordances (right-now scope).** ✅ Added helpers: `run_to_idle`, `run_cycle_with_timers` (daemon-style), `drain_and_dispatch`, `apply_receipt`, `state_json`; kept API tight and skipped pending_effects/record/replay plumbing.
+2) **Examples through TestHost.** ✅ Counter, hello-timer, blob-echo, fetch-notify, aggregator, chain-comp, retry-backoff, safe-upgrade, llm-summarizer now run through `ExampleHost` (TestHost-based) with mock adapters; CLI smoke remains opt-in and still mock-only.
+3) **Replay command.** ✅ `aos world replay` added to `aos-cli` (experimental; no CONTRIBUTING/CI wiring).
+4) **Snapshot safety (lightweight).** ✅ WorldHost-level test added (`crates/aos-host/tests/host_snapshot.rs`) to ensure queued intents persist across snapshot/reopen.
 
 ## Explicitly deferred for now
 
