@@ -4,7 +4,7 @@
 **Effort**: Medium  
 **Risk if deferred**: Medium (governance ergonomics + correctness)
 
-**Status snapshot**: Patch schema authored and embedded (`spec/schemas/patch.schema.json`). Patch-doc compiler lives in kernel; control daemon accepts PatchDocuments and compiles/validates server-side. CLI now defaults to patch-doc submission with hash auto-fill and `--require-hashes` to enforce explicit hashes. Governance effect schemas/caps drafted (for v0.4 self-upgrade), but effect adapter is deferred. Still to do: spec updates, policy/cap wiring, CLI helper for patch-from-air dir, and governance effects adapter (p1).
+**Status snapshot**: Patch schema authored and embedded (`spec/schemas/patch.schema.json`). Patch-doc compiler lives in kernel; control daemon accepts PatchDocuments and compiles/validates server-side. CLI defaults to patch-doc submission with hash auto-fill, `--require-hashes`, and a new `--patch-dir` helper (build PatchDocument from AIR dir, optional base hash, dry-run). Governance effect schemas/caps drafted (for v0.4 self-upgrade); effect adapter deferred. Still to do: final spec wording tweaks, governance cap/policy embedding, and the adapter (p1).
 
 ## What’s missing
 - **Spec sync**: `spec/03-air.md §15` still needs to point at `patch.schema.json` and the new compiler/validation path.
@@ -20,11 +20,11 @@
 
 ## Proposed work
  1) **Author patch schema** **(done)**: `spec/schemas/patch.schema.json`.
- 2) **Spec update** *(todo)*: update `spec/03-air.md §15` to reference the schema, describe compiler/validation path and invariants.
+ 2) **Spec update** **(done)**: `spec/03-air.md §15` references the schema and documents the compile/validate path and authoring sugar.
  3) **Kernel/tooling validation** **(done)**: patch-doc compiler + server-side schema validation in control daemon.
- 4) **Control channel/CLI** **(done/extend)**: verbs live; CLI submits PatchDocuments by default with hash auto-fill and `--require-hashes`. **Todo**: add `--patch-dir` helper to build from AIR bundle.
- 5) **Fixtures/tests** **(done)**: patch_doc unit tests; control_patchdoc integration covers accept/reject. (Add more negative cases only if new surface appears.)
- 6) **Governance caps/policy** *(todo)*: embed `sys/governance@1` cap and a default deny/allow policy stub (can ship with p1).
+ 4) **Control channel/CLI** **(done)**: verbs live; CLI submits PatchDocuments by default with hash auto-fill/`--require-hashes` and `--patch-dir` + `--base` + `--dry-run`.
+ 5) **Fixtures/tests** **(done)**: patch_doc unit tests; control_patchdoc integration covers accept/reject; CLI integration test covers `--patch-dir` dry-run output.
+ 6) **Governance caps/policy** *(todo, p1)*: embed `sys/governance@1` cap and default policy stub (ship with self-upgrade).
  7) **Governance effects adapter** *(deferred to p1 self-upgrade)*: wire `governance.*` effect kinds to kernel governance loop.
 
 ## Design notes

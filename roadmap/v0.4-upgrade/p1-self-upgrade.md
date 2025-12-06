@@ -20,6 +20,7 @@
    - Add `defeffect` entries: `governance.propose`, `governance.shadow`, `governance.approve`, `governance.apply` with plan‑only `origin_scope`.  
    - Define param/receipt schemas (canonical AIR) carrying `patch_cbor`, `proposal_id`, `manifest_hash_base/new`, `shadow_report`, `decision/approver`, and status.  
    - Add built‑in capability type `governance` and cap grants (e.g., `sys/govern@1`) that guard these effects.
+   - TODO: embed `sys/governance@1` cap and a default policy stub (moved from P5).
 
 2) **Policy wiring**  
    - Extend policy matching for `effect_kind=governance.*`; default deny.  
