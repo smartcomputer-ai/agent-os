@@ -8,6 +8,7 @@ pub mod info;
 pub mod init;
 pub mod manifest;
 pub mod put_blob;
+pub mod replay;
 pub mod run;
 pub mod shutdown;
 pub mod snapshot;

@@ -57,6 +57,9 @@ enum WorldSubcommand {
     /// Force a snapshot
     Snapshot,
 
+    /// Replay journal to head (experimental)
+    Replay(commands::replay::ReplayArgs),
+
     /// Show journal head
     Head,
 
@@ -88,6 +91,7 @@ async fn main() -> Result<()> {
                 WorldSubcommand::Event(args) => commands::event::cmd_event(opts, &args).await,
                 WorldSubcommand::State(args) => commands::state::cmd_state(opts, &args).await,
                 WorldSubcommand::Snapshot => commands::snapshot::cmd_snapshot(opts).await,
+                WorldSubcommand::Replay(args) => commands::replay::cmd_replay(opts, &args).await,
                 WorldSubcommand::Head => commands::head::cmd_head(opts).await,
                 WorldSubcommand::Manifest(args) => {
                     commands::manifest::cmd_manifest(opts, &args).await

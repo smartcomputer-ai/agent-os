@@ -293,6 +293,28 @@ async fn testhost_state_bytes_and_typed_state_match() {
     assert_eq!(typed, expected_state);
 }
 
+/// Ensure state_json helper decodes CBOR to JSON.
+#[tokio::test]
+async fn testhost_state_json() {
+    let store = fixtures::new_mem_store();
+    let expected_state = CounterState {
+        pc: CounterPc::Counting,
+        remaining: 2,
+    };
+    let loaded = build_counter_manifest(&store, &expected_state);
+    let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
+
+    host.send_event(
+        EVENT_SCHEMA,
+        serde_json::json!({ "Start": { "target": 2 } }),
+    )
+    .unwrap();
+    host.run_cycle_batch().await.unwrap();
+
+    let json = host.state_json(REDUCER_NAME).unwrap();
+    assert_eq!(json["remaining"], 2);
+}
+
 /// Test using the fixtures module helper to build a minimal manifest
 #[tokio::test]
 async fn testhost_with_fixtures_build_loaded_manifest() {
@@ -503,4 +525,48 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
     // State should be set
     let state_bytes = host.state_bytes("test/TimerReducer@1").unwrap();
     assert_eq!(state_bytes, &vec![0xBB]);
+}
+
+/// run_cycle_with_timers should schedule timer intents and immediately fire them for tests.
+#[tokio::test]
+async fn testhost_run_cycle_with_timers_schedules_and_fires() {
+    let store = fixtures::new_mem_store();
+
+    // Reducer emits a timer.set effect
+    let timer_params = TimerSetParams {
+        deliver_at_ns: 123,
+        key: None,
+    };
+    let effect = ReducerEffect::with_cap_slot(
+        aos_effects::EffectKind::TIMER_SET,
+        serde_cbor::to_vec(&timer_params).unwrap(),
+        "default",
+    );
+    let output = ReducerOutput {
+        state: Some(vec![0xCC]),
+        domain_events: vec![],
+        effects: vec![effect],
+        ann: None,
+    };
+    let module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
+    let loaded = fixtures::build_loaded_manifest(
+        vec![],
+        vec![],
+        vec![module],
+        vec![fixtures::routing_event(
+            "test/TimerEvent@1",
+            "test/TimerReducer@1",
+        )],
+    );
+
+    let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
+    host.send_event("test/TimerEvent@1", serde_json::json!({}))
+        .unwrap();
+
+    let cycle = host.run_cycle_with_timers().await.unwrap();
+    assert_eq!(cycle.effects_dispatched, 1);
+    assert_eq!(cycle.receipts_applied, 1);
+
+    let state_bytes = host.state_bytes("test/TimerReducer@1").unwrap();
+    assert_eq!(state_bytes, &vec![0xCC]);
 }
