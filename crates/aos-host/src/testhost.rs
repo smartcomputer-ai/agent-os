@@ -24,6 +24,11 @@ pub struct TestHost<S: Store + 'static> {
 }
 
 impl<S: Store + 'static> TestHost<S> {
+    /// Wrap an existing WorldHost (escape hatch for custom setup in examples/tests).
+    pub fn from_world_host(host: WorldHost<S>) -> Self {
+        Self { host }
+    }
+
     /// Open a TestHost from a manifest file path.
     pub fn open(store: Arc<S>, manifest_path: &Path) -> Result<Self, HostError> {
         let host = WorldHost::open(

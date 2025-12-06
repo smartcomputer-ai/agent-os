@@ -4,13 +4,16 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
+use aos_host::config::HostConfig;
+use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
 use aos_host::testhost::TestHost;
 use aos_host::util::patch_modules;
 use aos_host::util::reset_journal;
 use aos_kernel::LoadedManifest;
 use aos_kernel::journal::mem::MemJournal;
-use aos_kernel::Kernel;
+use aos_kernel::journal::OwnedJournalEntry;
+use aos_kernel::{Kernel, KernelConfig};
 use aos_store::{FsStore, Store};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -34,6 +37,7 @@ pub struct ExampleHost {
     store: Arc<FsStore>,
     loaded: LoadedManifest,
     wasm_hash: HashRef,
+    kernel_config: KernelConfig,
     runtime: Runtime,
 }
 
@@ -48,13 +52,23 @@ impl ExampleHost {
             .context("store reducer wasm blob")?;
         let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash reducer wasm")?;
 
-        let assets_root = cfg.assets_root.unwrap_or(cfg.example_root);
-        let mut loaded = manifest_loader::load_from_assets(store.clone(), assets_root)
-            .context("load manifest from assets")?
-            .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
-        patch_module_hash(&mut loaded, cfg.reducer_name, &wasm_hash_ref)?;
+        let assets_root = cfg.assets_root.unwrap_or(cfg.example_root).to_path_buf();
 
-        let host = TestHost::from_loaded_manifest(store.clone(), loaded.clone())?;
+        let loaded_host =
+            load_and_patch(store.clone(), &assets_root, cfg.reducer_name, &wasm_hash_ref)?;
+        let loaded_replay =
+            load_and_patch(store.clone(), &assets_root, cfg.reducer_name, &wasm_hash_ref)?;
+
+        let host_config = HostConfig::default();
+        let kernel_config = util::kernel_config(cfg.example_root)?;
+        let world_host = WorldHost::from_loaded_manifest(
+            store.clone(),
+            loaded_host,
+            cfg.example_root,
+            host_config,
+            kernel_config.clone(),
+        )?;
+        let host = TestHost::from_world_host(world_host);
         let runtime = Builder::new_current_thread().enable_all().build()?;
 
         Ok(Self {
@@ -62,8 +76,9 @@ impl ExampleHost {
             reducer_name: cfg.reducer_name.to_string(),
             event_schema: cfg.event_schema.to_string(),
             store,
-            loaded,
+            loaded: loaded_replay,
             wasm_hash: wasm_hash_ref,
+            kernel_config: kernel_config.clone(),
             runtime,
         })
     }
@@ -130,6 +145,7 @@ impl ExampleHost {
             final_state_bytes,
             journal_entries,
             reducer_name: self.reducer_name,
+            kernel_config: self.kernel_config,
         })
     }
 }
@@ -138,16 +154,18 @@ pub struct ReplayHandle {
     store: Arc<FsStore>,
     loaded: LoadedManifest,
     final_state_bytes: Vec<u8>,
-    journal_entries: Vec<aos_kernel::journal::OwnedJournalEntry>,
+    journal_entries: Vec<OwnedJournalEntry>,
     reducer_name: String,
+    kernel_config: KernelConfig,
 }
 
 impl ReplayHandle {
     pub fn verify_replay(self) -> Result<Vec<u8>> {
-        let mut kernel = Kernel::from_loaded_manifest(
+        let mut kernel = Kernel::from_loaded_manifest_with_config(
             self.store.clone(),
             self.loaded,
             Box::new(MemJournal::from_entries(&self.journal_entries)),
+            self.kernel_config,
         )?;
         kernel.tick_until_idle()?;
         let replay_bytes = kernel
@@ -173,4 +191,17 @@ fn patch_module_hash(
         anyhow::bail!("module '{reducer_name}' missing from manifest");
     }
     Ok(())
+}
+
+fn load_and_patch(
+    store: Arc<FsStore>,
+    assets_root: &Path,
+    reducer_name: &str,
+    wasm_hash: &HashRef,
+) -> Result<LoadedManifest> {
+    let mut loaded = manifest_loader::load_from_assets(store, assets_root)
+        .context("load manifest from assets")?
+        .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
+    patch_module_hash(&mut loaded, reducer_name, wasm_hash)?;
+    Ok(loaded)
 }

@@ -13,7 +13,7 @@ use super::{create_host, prepare_world};
 #[derive(Args, Debug)]
 pub struct ReplayArgs {}
 
-pub async fn cmd_replay(opts: &WorldOpts, args: &ReplayArgs) -> Result<()> {
+pub async fn cmd_replay(opts: &WorldOpts, _args: &ReplayArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
     load_world_env(&dirs.world)?;
 
