@@ -12,7 +12,7 @@ use aos_store::FsStore;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
-use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::example_host::{ExampleHost, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/TimerSM@1";
 const EVENT_SCHEMA: &str = "demo/TimerEvent@1";
@@ -62,14 +62,13 @@ struct TimerSetReceipt {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    let harness = ExampleReducerHarness::prepare(HarnessConfig {
+    let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
         reducer_name: REDUCER_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: "examples/01-hello-timer/reducer",
     })?;
-    let mut run = harness.start()?;
 
     println!("→ Hello Timer demo");
     println!("     start key=? deliver_ns={DELIVER_AT_NS}");
@@ -77,16 +76,16 @@ pub fn run(example_root: &Path) -> Result<()> {
         deliver_at_ns: DELIVER_AT_NS,
         key: None,
     };
-    run.submit_event(&start)?;
-    synthesize_timer_receipts(run.kernel_mut())?;
+    host.send_event(&start)?;
+    synthesize_timer_receipts(host.kernel_mut())?;
 
-    let final_state: TimerState = run.read_state()?;
+    let final_state: TimerState = host.read_state()?;
     println!(
         "   final state: pc={:?}, key={:?}, fired_key={:?}",
         final_state.pc, final_state.key, final_state.fired_key
     );
 
-    run.finish()?.verify_replay()?;
+    host.finish()?.verify_replay()?;
     Ok(())
 }
 

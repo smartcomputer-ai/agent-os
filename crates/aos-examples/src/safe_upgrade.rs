@@ -6,7 +6,7 @@ use aos_kernel::shadow::ShadowHarness;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
-use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::example_host::{ExampleHost, HarnessConfig};
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 use aos_host::manifest_loader;
 
@@ -44,24 +44,23 @@ enum UpgradePcView {
 
 pub fn run(example_root: &Path) -> Result<()> {
     let assets_root = example_root.join("air.v1");
-    let harness = ExampleReducerHarness::prepare(HarnessConfig {
+    let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: Some(assets_root.as_path()),
         reducer_name: REDUCER_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_PATH,
     })?;
-    let mut run = harness.start()?;
 
     println!("→ Safe upgrade demo");
     let start_event = UpgradeEventEnvelope::Start {
         url: "https://example.com/data.json".into(),
     };
     println!("   start v1 fetch → url={}", url_for(&start_event));
-    run.submit_event(&start_event)?;
+    host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();
-    let mut requests = http.collect_requests(run.kernel_mut())?;
+    let mut requests = http.collect_requests(host.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "expected a single HTTP intent before upgrade, saw {}",
@@ -74,12 +73,12 @@ pub fn run(example_root: &Path) -> Result<()> {
         primary.params.method, primary.params.url
     );
     http.respond_with(
-        run.kernel_mut(),
+        host.kernel_mut(),
         primary,
         MockHttpResponse::json(200, "{\"demo\":true}"),
     )?;
 
-    let state_v1: UpgradeStateView = run.read_state()?;
+    let state_v1: UpgradeStateView = host.read_state()?;
     println!(
         "   v1 complete: pending={:?} primary_status={:?} follow_status={:?} requests={}",
         state_v1.pending_request,
@@ -88,12 +87,12 @@ pub fn run(example_root: &Path) -> Result<()> {
         state_v1.requests_observed
     );
 
-    let proposal_patch = load_upgrade_patch(example_root, &harness)?;
-    let proposal_id = run
+    let proposal_patch = load_upgrade_patch(example_root, &host)?;
+    let proposal_id = host
         .kernel_mut()
         .submit_proposal(proposal_patch, Some("upgrade to fetch_plan@2".into()))?;
     let seed_event = serde_cbor::to_vec(&start_event)?;
-    let summary = run.kernel_mut().run_shadow(
+    let summary = host.kernel_mut().run_shadow(
         proposal_id,
         Some(ShadowHarness {
             seed_events: vec![(EVENT_SCHEMA.to_string(), seed_event)],
@@ -110,14 +109,14 @@ pub fn run(example_root: &Path) -> Result<()> {
         println!("     delta: {:?} {:?}", delta.ledger, delta.name);
     }
 
-    run.kernel_mut()
+    host.kernel_mut()
         .approve_proposal(proposal_id, "demo-approver")?;
-    run.kernel_mut().apply_proposal(proposal_id)?;
+    host.kernel_mut().apply_proposal(proposal_id)?;
     println!("   applied manifest hash {}", summary.manifest_hash);
 
     println!("   start v2 fetch → url={}", url_for(&start_event));
-    run.submit_event(&start_event)?;
-    let mut upgraded_requests = http.collect_requests(run.kernel_mut())?;
+    host.send_event(&start_event)?;
+    let mut upgraded_requests = http.collect_requests(host.kernel_mut())?;
     if upgraded_requests.len() != 1 {
         return Err(anyhow!(
             "expected primary HTTP intent after upgrade, saw {}",
@@ -130,12 +129,12 @@ pub fn run(example_root: &Path) -> Result<()> {
         primary_v2.params.method, primary_v2.params.url
     );
     http.respond_with(
-        run.kernel_mut(),
+        host.kernel_mut(),
         primary_v2,
         MockHttpResponse::json(201, "{\"demo\":true,\"call\":1}"),
     )?;
 
-    let mut followups = http.collect_requests(run.kernel_mut())?;
+    let mut followups = http.collect_requests(host.kernel_mut())?;
     if followups.len() != 1 {
         return Err(anyhow!(
             "expected follow-up HTTP intent after upgrade, saw {}",
@@ -148,12 +147,12 @@ pub fn run(example_root: &Path) -> Result<()> {
         follow.params.method, follow.params.url
     );
     http.respond_with(
-        run.kernel_mut(),
+        host.kernel_mut(),
         follow,
         MockHttpResponse::json(202, "{\"demo\":true,\"call\":2}"),
     )?;
 
-    let state_v2: UpgradeStateView = run.read_state()?;
+    let state_v2: UpgradeStateView = host.read_state()?;
     println!(
         "   v2 complete: pending={:?} primary_status={:?} follow_status={:?} requests={}",
         state_v2.pending_request,
@@ -162,18 +161,18 @@ pub fn run(example_root: &Path) -> Result<()> {
         state_v2.requests_observed
     );
 
-    run.finish()?.verify_replay()?;
+    host.finish()?.verify_replay()?;
     Ok(())
 }
 
 fn load_upgrade_patch(
     example_root: &Path,
-    harness: &ExampleReducerHarness,
+    host: &ExampleHost,
 ) -> Result<ManifestPatch> {
     let upgrade_root = example_root.join("air.v2");
-    let mut loaded = manifest_loader::load_from_assets(harness.store(), &upgrade_root)?
+    let mut loaded = manifest_loader::load_from_assets(host.store(), &upgrade_root)?
         .ok_or_else(|| anyhow!("upgrade manifest missing at {}", upgrade_root.display()))?;
-    harness.patch_module_hash(&mut loaded)?;
+    aos_host::util::patch_modules(&mut loaded, host.wasm_hash(), |name, _| name == REDUCER_NAME);
     Ok(manifest_loader::manifest_patch_from_loaded(&loaded))
 }
 

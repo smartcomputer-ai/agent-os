@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::example_host::{ExampleHost, HarnessConfig};
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
 const REDUCER_NAME: &str = "demo/Aggregator@1";
@@ -52,14 +52,13 @@ enum AggregatorPcView {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    let harness = ExampleReducerHarness::prepare(HarnessConfig {
+    let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
         reducer_name: REDUCER_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_PATH,
     })?;
-    let mut run = harness.start()?;
 
     println!("→ Aggregator demo");
     let start_event = AggregatorEventEnvelope::Start {
@@ -82,10 +81,10 @@ pub fn run(example_root: &Path) -> Result<()> {
     };
     let AggregatorEventEnvelope::Start { topic, .. } = &start_event;
     println!("     aggregate start → topic={topic}");
-    run.submit_event(&start_event)?;
+    host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();
-    let mut requests = http.collect_requests(run.kernel_mut())?;
+    let mut requests = http.collect_requests(host.kernel_mut())?;
     if requests.len() != 3 {
         return Err(anyhow!(
             "aggregator plan expected 3 http intents, got {}",
@@ -99,22 +98,22 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     println!("     responding out of order (b → c → a)");
     http.respond_with(
-        run.kernel_mut(),
+        host.kernel_mut(),
         ctx_b,
         MockHttpResponse::json(200, "{\"source\":\"beta\"}"),
     )?;
     http.respond_with(
-        run.kernel_mut(),
+        host.kernel_mut(),
         ctx_c,
         MockHttpResponse::json(201, "{\"source\":\"gamma\"}"),
     )?;
     http.respond_with(
-        run.kernel_mut(),
+        host.kernel_mut(),
         ctx_a,
         MockHttpResponse::json(202, "{\"source\":\"alpha\"}"),
     )?;
 
-    let state: AggregatorStateView = run.read_state()?;
+    let state: AggregatorStateView = host.read_state()?;
     if !state.pending_targets.is_empty() {
         return Err(anyhow!(
             "fan-out should clear pending targets, found {:?}",
@@ -141,7 +140,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         state.pc, state.last_responses
     );
 
-    run.finish()?.verify_replay()?;
+    host.finish()?.verify_replay()?;
 
     Ok(())
 }

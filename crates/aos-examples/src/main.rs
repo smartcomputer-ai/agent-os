@@ -5,7 +5,7 @@ mod counter;
 mod fetch_notify;
 mod hello_timer;
 mod llm_summarizer;
-mod reducer_harness;
+mod example_host;
 mod retry_backoff;
 mod safe_upgrade;
 mod util;

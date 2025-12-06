@@ -8,7 +8,7 @@ use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::example_host::{ExampleHost, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/CounterSM@1";
 const EVENT_SCHEMA: &str = "demo/CounterEvent@1";
@@ -40,32 +40,33 @@ enum CounterEvent {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    let harness = ExampleReducerHarness::prepare(HarnessConfig {
+    let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
         reducer_name: REDUCER_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: "examples/00-counter/reducer",
     })?;
-    let mut run = harness.start()?;
 
     println!("→ Counter demo (target {TARGET_COUNT})");
     println!("     start (target {TARGET_COUNT})");
-    run.submit_event(&CounterEvent::Start {
+    host.send_event(&CounterEvent::Start {
         target: TARGET_COUNT,
     })?;
 
     for tick in 1..=TARGET_COUNT {
-        run.submit_event(&CounterEvent::Tick)?;
+        host.send_event(&CounterEvent::Tick)?;
         println!("     tick #{tick}");
     }
 
-    let final_state: CounterState = run.read_state()?;
+    host.run_cycle_batch()?;
+
+    let final_state: CounterState = host.read_state()?;
     println!(
         "   final state: pc={:?}, remaining={}",
         final_state.pc, final_state.remaining
     );
 
-    run.finish()?.verify_replay()?;
+    host.finish()?.verify_replay()?;
     Ok(())
 }

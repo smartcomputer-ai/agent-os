@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_cbor;
 use sha2::{Digest, Sha256};
 
-use crate::reducer_harness::{ExampleReducerHarness, ExampleRun, HarnessConfig};
+use crate::example_host::{ExampleHost, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/BlobEchoSM@1";
 const EVENT_SCHEMA: &str = "demo/BlobEchoEvent@1";
@@ -37,14 +37,13 @@ struct BlobHarnessStore {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    let harness = ExampleReducerHarness::prepare(HarnessConfig {
+    let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
         reducer_name: REDUCER_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: "examples/02-blob-echo/reducer",
     })?;
-    let mut run = harness.start()?;
 
     let input = BlobEchoInput {
         namespace: "demo".into(),
@@ -53,19 +52,19 @@ pub fn run(example_root: &Path) -> Result<()> {
     };
 
     println!("→ Blob Echo demo");
-    drive_blob_echo(&mut run, input)?;
+    drive_blob_echo(&mut host, input)?;
 
-    let final_state: ReducerEchoState = run.read_state()?;
+    let final_state: ReducerEchoState = host.read_state()?;
     println!(
         "   final state: pc={:?}, stored_ref={:?}, retrieved_ref={:?}",
         final_state.pc, final_state.stored_blob_ref, final_state.retrieved_blob_ref
     );
 
-    run.finish()?.verify_replay()?;
+    host.finish()?.verify_replay()?;
     Ok(())
 }
 
-fn drive_blob_echo(run: &mut ExampleRun<'_>, input: BlobEchoInput) -> Result<()> {
+fn drive_blob_echo(host: &mut ExampleHost, input: BlobEchoInput) -> Result<()> {
     let mut harness = BlobHarnessStore::default();
     let blob_ref = hash_bytes(&input.data);
     harness
@@ -80,8 +79,8 @@ fn drive_blob_echo(run: &mut ExampleRun<'_>, input: BlobEchoInput) -> Result<()>
         key: input.key,
         data: input.data,
     };
-    run.submit_event(&start_event)?;
-    synthesize_blob_effects(run.kernel_mut(), &mut harness)
+    host.send_event(&start_event)?;
+    synthesize_blob_effects(host.kernel_mut(), &mut harness)
 }
 
 fn synthesize_blob_effects(

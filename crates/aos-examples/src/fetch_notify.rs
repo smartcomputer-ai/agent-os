@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::example_host::{ExampleHost, HarnessConfig};
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
 const REDUCER_NAME: &str = "demo/FetchNotify@1";
@@ -31,14 +31,13 @@ enum FetchPcView {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    let harness = ExampleReducerHarness::prepare(HarnessConfig {
+    let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
         reducer_name: REDUCER_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_PATH,
     })?;
-    let mut run = harness.start()?;
 
     println!("→ Fetch & Notify demo");
     let start_event = FetchEventEnvelope::Start {
@@ -47,10 +46,10 @@ pub fn run(example_root: &Path) -> Result<()> {
     };
     let FetchEventEnvelope::Start { url, method } = &start_event;
     println!("     start fetch → url={url} method={method}");
-    run.submit_event(&start_event)?;
+    host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();
-    let requests = http.collect_requests(run.kernel_mut())?;
+    let requests = http.collect_requests(host.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "fetch-notify demo expected a single http request, got {}",
@@ -66,14 +65,14 @@ pub fn run(example_root: &Path) -> Result<()> {
         "{{\"url\":\"{}\",\"method\":\"{}\",\"demo\":true}}",
         request.params.url, request.params.method
     );
-    http.respond_with(run.kernel_mut(), request, MockHttpResponse::json(200, body))?;
+    http.respond_with(host.kernel_mut(), request, MockHttpResponse::json(200, body))?;
 
-    let state: FetchStateView = run.read_state()?;
+    let state: FetchStateView = host.read_state()?;
     println!(
         "   completed: pc={:?} status={:?} preview={:?}",
         state.pc, state.last_status, state.last_body_preview
     );
 
-    run.finish()?.verify_replay()?;
+    host.finish()?.verify_replay()?;
     Ok(())
 }

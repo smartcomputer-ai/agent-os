@@ -3,7 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::example_host::{ExampleHost, HarnessConfig};
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse, MockLlmHarness};
 
 const REDUCER_NAME: &str = "demo/LlmSummarizer@1";
@@ -35,23 +35,22 @@ enum StatePcView {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    let harness = ExampleReducerHarness::prepare(HarnessConfig {
+    let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
         reducer_name: REDUCER_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_PATH,
     })?;
-    let mut run = harness.start()?;
 
     println!("→ LLM summarizer demo");
     let start_event = LlmSummarizerEventEnvelope::Start {
         url: "https://example.com/story.txt".into(),
     };
-    run.submit_event(&start_event)?;
+    host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();
-    let requests = http.collect_requests(run.kernel_mut())?;
+    let requests = http.collect_requests(host.kernel_mut())?;
     if requests.len() != 1 {
         return Err(anyhow!(
             "summarizer plan expected 1 http intent, got {}",
@@ -62,25 +61,25 @@ pub fn run(example_root: &Path) -> Result<()> {
     let document = "AOS keeps plans and reducers separate. Summaries should be deterministic so"
         .to_string()
         + " reviewers can trust the replay path.";
-    let store = harness.store();
+    let store = host.store();
     http.respond_with_body(
-        run.kernel_mut(),
+        host.kernel_mut(),
         Some(store.as_ref()),
         http_ctx,
         MockHttpResponse::json(200, document.clone()),
     )?;
 
     let mut llm = MockLlmHarness::new(store.clone()).with_expected_api_key(DEMO_LLM_API_KEY);
-    let llm_requests = llm.collect_requests(run.kernel_mut())?;
+    let llm_requests = llm.collect_requests(host.kernel_mut())?;
     if llm_requests.len() != 1 {
         return Err(anyhow!(
             "expected one llm.generate intent, found {}",
             llm_requests.len()
         ));
     }
-    llm.respond_with(run.kernel_mut(), llm_requests.into_iter().next().unwrap())?;
+    llm.respond_with(host.kernel_mut(), llm_requests.into_iter().next().unwrap())?;
 
-    let state: LlmSummarizerStateView = run.read_state()?;
+    let state: LlmSummarizerStateView = host.read_state()?;
     if state.last_summary.is_none() {
         return Err(anyhow!("summary missing from reducer state"));
     }
@@ -92,7 +91,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         state.last_cost_millis
     );
 
-    run.finish()?.verify_replay()?;
+    host.finish()?.verify_replay()?;
 
     Ok(())
 }

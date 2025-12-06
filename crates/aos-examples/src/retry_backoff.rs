@@ -9,7 +9,7 @@ use aos_store::FsStore;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
-use crate::reducer_harness::{ExampleReducerHarness, HarnessConfig};
+use crate::example_host::{ExampleHost, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/RetrySM@1";
 const START_EVENT_SCHEMA: &str = "demo/StartWork@1";
@@ -59,14 +59,13 @@ struct RetryState {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    let harness = ExampleReducerHarness::prepare(HarnessConfig {
+    let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
         reducer_name: REDUCER_NAME,
         event_schema: START_EVENT_SCHEMA,
         module_crate: MODULE_CRATE,
     })?;
-    let mut run = harness.start()?;
 
     println!("→ Retry Backoff demo");
     let start = StartWork {
@@ -80,17 +79,17 @@ pub fn run(example_root: &Path) -> Result<()> {
         "     start req_id={} max_attempts={} base_delay_ms={}",
         start.req_id, start.max_attempts, start.base_delay_ms
     );
-    run.submit_event(&start)?;
+    host.send_event(&start)?;
 
-    synthesize_timer_receipts(run.kernel_mut())?;
+    synthesize_timer_receipts(host.kernel_mut())?;
 
-    let final_state: RetryState = run.read_state()?;
+    let final_state: RetryState = host.read_state()?;
     println!(
         "   final state: pc={:?}, attempt={}, req_id={}",
         final_state.pc, final_state.attempt, final_state.req_id
     );
 
-    run.finish()?.verify_replay()?;
+    host.finish()?.verify_replay()?;
     Ok(())
 }
 
