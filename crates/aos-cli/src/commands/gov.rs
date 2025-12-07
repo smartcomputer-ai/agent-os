@@ -14,7 +14,7 @@ use aos_host::{control::ControlClient, manifest_loader::ZERO_HASH_SENTINEL};
 use base64::prelude::*;
 use std::collections::HashMap;
 use aos_host::manifest_loader::load_from_assets;
-use aos_store::FsStore;
+use aos_store::{FsStore, Store};
 use std::sync::Arc;
 
 #[derive(Args, Debug)]
@@ -363,6 +363,25 @@ fn build_patchdoc_from_dir(
         })?;
         Hash::of_bytes(&bytes).to_hex()
     };
+    let base_manifest = {
+        let h = Hash::from_hex_str(&base_manifest_hash).context("parse base manifest hash")?;
+        match store.get_node(h) {
+            Ok(AirNode::Manifest(m)) => m,
+            Ok(_) => anyhow::bail!("base_manifest_hash does not point to a manifest"),
+            Err(_) => {
+                // Fallback: parse manifest bytes directly if node not in store (e.g., test fixture)
+                let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
+                let bytes = fs::read(&manifest_path)?;
+                if let Ok(catalog) =
+                    aos_store::load_manifest_from_bytes(store.as_ref(), &bytes)
+                {
+                    catalog.manifest
+                } else {
+                    serde_json::from_slice(&bytes).context("parse manifest json")?
+                }
+            }
+        }
+    };
 
     // Build add_def ops for all defs in the loaded bundle.
     let mut patches: Vec<serde_json::Value> = Vec::new();
@@ -435,6 +454,17 @@ fn build_patchdoc_from_dir(
             .iter()
             .map(|r| serde_json::json!({"kind":"defeffect","name":r.name,"hash":r.hash.as_str()})),
     );
+    add_refs.extend(
+        loaded
+            .manifest
+            .secrets
+            .iter()
+            .filter_map(|e| match e {
+                aos_air_types::SecretEntry::Ref(nr) => Some(nr),
+                _ => None,
+            })
+            .map(|r| serde_json::json!({"kind":"defsecret","name":r.name,"hash":r.hash.as_str()})),
+    );
 
     if !add_refs.is_empty() {
         patches.push(serde_json::json!({
@@ -450,6 +480,64 @@ fn build_patchdoc_from_dir(
             }
         }));
     }
+
+    // routing.events
+    let base_events = base_manifest
+        .routing
+        .as_ref()
+        .map(|r| &r.events)
+        .cloned()
+        .unwrap_or_default();
+    let pre = Hash::of_cbor(&base_events).context("hash base routing.events")?.to_hex();
+    let new_events = loaded
+        .manifest
+        .routing
+        .as_ref()
+        .map(|r| &r.events)
+        .cloned()
+        .unwrap_or_default();
+    patches.push(serde_json::json!({
+        "set_routing_events": { "pre_hash": pre, "events": new_events }
+    }));
+
+    // routing.inboxes
+    let base_inboxes = base_manifest
+        .routing
+        .as_ref()
+        .map(|r| &r.inboxes)
+        .cloned()
+        .unwrap_or_default();
+    let pre = Hash::of_cbor(&base_inboxes).context("hash base routing.inboxes")?.to_hex();
+    let new_inboxes = loaded
+        .manifest
+        .routing
+        .as_ref()
+        .map(|r| &r.inboxes)
+        .cloned()
+        .unwrap_or_default();
+    patches.push(serde_json::json!({
+        "set_routing_inboxes": { "pre_hash": pre, "inboxes": new_inboxes }
+    }));
+
+    // triggers
+    let pre = Hash::of_cbor(&base_manifest.triggers).context("hash base triggers")?.to_hex();
+    patches.push(serde_json::json!({
+        "set_triggers": { "pre_hash": pre, "triggers": loaded.manifest.triggers }
+    }));
+
+    // module_bindings
+    let pre = Hash::of_cbor(&base_manifest.module_bindings)
+        .context("hash base module_bindings")?
+        .to_hex();
+    patches.push(serde_json::json!({
+        "set_module_bindings": { "pre_hash": pre, "bindings": loaded.manifest.module_bindings }
+    }));
+
+    // secrets block
+    let pre = Hash::of_cbor(&base_manifest.secrets).context("hash base secrets")?.to_hex();
+    patches.push(serde_json::json!({
+        "set_secrets": { "pre_hash": pre, "secrets": loaded.manifest.secrets }
+    }));
 
     Ok(serde_json::json!({
         "version": "1",

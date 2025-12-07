@@ -632,8 +632,12 @@ Patches describe changes to the control plane (design-time modifications).
 - **remove_def**: `{ kind:Kind, name:Name, pre_hash:hash }` — remove a definition
 - **set_manifest_refs**: `{ add:[{kind,name,hash}], remove:[{kind,name}] }` — update manifest references
 - **set_defaults**: `{ policy?:Name, cap_grants?:[CapGrant…] }` — update default policy and grants
-- **Not yet in v1**: manifest blocks `routing`, `triggers`, `module_bindings`, and `secrets` are immutable via patches; they must be changed through privileged init or future patch ops (planned for v1.1+).
-- **defsecret**: `set_manifest_refs` on `defsecret` is rejected in v1; secrets must be provisioned via init or a future secrets patch op.
+- **set_routing_events**: `{ pre_hash:hash, events:[{event, reducer, key_field?}...] }` — replace routing.events block (empty list clears)
+- **set_routing_inboxes**: `{ pre_hash:hash, inboxes:[{source, reducer}...] }` — replace routing.inboxes block
+- **set_triggers**: `{ pre_hash:hash, triggers:[{event, plan, correlate_by?}...] }` — replace triggers block
+- **set_module_bindings**: `{ pre_hash:hash, bindings:{ module → { slots:{slot→cap_grant} } } }` — replace module_bindings block
+- **set_secrets**: `{ pre_hash:hash, secrets:[ SecretEntry… ] }` — replace manifest secrets block (refs/decls); no secret values carried in patches.
+- **defsecret**: `add_def` / `replace_def` / `remove_def` now accept `defsecret`; `set_manifest_refs` can add/remove secret refs. Secret values still live outside patches; `set_secrets` only adjusts manifest entries.
 
 ### Application
 

@@ -1,4 +1,5 @@
 ## 1. Patch schema feedback
+**Status: implemented (P5).** Schema, compiler, CLI, and docs now reflect the changes noted below. Remaining work is deferred to p1 self-upgrade (governance effect adapter + minor CLI/docs polish).
 
 ### 1.1 Shape + concurrency model: 👍
 
@@ -24,44 +25,8 @@ Rationale: catches typos and keeps tooling aligned with the closed def-kind set 
 
 ### 1.3 Manifest coverage: are routing/triggers/module_bindings intentionally out-of-scope?
 
-Manifest shape includes:
-
-* `schemas`, `modules`, `plans`, `effects`, `caps`, `policies`, `secrets`
-* `defaults` (policy + cap_grants)
-* `routing` (events/inboxes)
-* `triggers`
-* `module_bindings`
-
-Patch ops currently give you:
-
-* `add_def` / `replace_def` / `remove_def` – for all the def* nodes
-* `set_manifest_refs` – which can cover refs for schemas/modules/plans/effects/caps/policies/secrets
-* `set_defaults` – for `defaults.policy` and `defaults.cap_grants`
-
-But there are **no** first‑class ops for:
-
-* `routing.events`
-* `routing.inboxes`
-* `triggers`
-* `module_bindings`
-
-So today, governance patches can’t change routes/triggers/bindings except by some out‑of‑band mechanism. That’s slightly at odds with the “all control‑plane changes expressed as AIR patches” story in the architecture/spec.
-
-This might be intentional (v1 patches only for refs+defaults, more ops later), but if you *do* want patch docs to be the one true path for routing changes, I’d consider:
-
-* Adding explicit ops like:
-
-  * `set_routing_events`
-  * `set_routing_inboxes`
-  * `set_triggers`
-  * `set_module_bindings`
-* Or a more generic `replace_manifest_block` with a pre‑hash on the manifest and a limited subset of fields allowed.
-
-At minimum, I’d call this out explicitly in the spec:
-
-> v1 patches can change defs, manifest refs, and defaults; routing/triggers/module_bindings changes are deferred to v1.1 and may use a separate governance surface.
-
-Otherwise people will assume they can govern everything through patches and hit a wall when they need to add a trigger.
+Status: **implemented**. Patch schema now includes block-level ops:
+`set_routing_events`, `set_routing_inboxes`, `set_triggers`, `set_module_bindings`, and `set_secrets` (full replace with `pre_hash`; empty clears). Compiler applies them with optimistic concurrency.
 
 ---
 
@@ -113,10 +78,7 @@ Status: **fixed** in compiler + tests. Semantics are now:
 
 So the manifest is explicitly *not* in scope for `add_def` / `replace_def`. That’s fine, but then the **only** way to mutate the manifest is the dedicated ops (`set_manifest_refs` / `set_defaults`). That makes the omission of routing/triggers/bindings even more significant (see 1.3).
 
-If that’s intentional for v1, I’d:
-
-* Make that boundary explicit in spec/03‑air.md §15 (patches only touch those fields of the manifest for now).
-* Add a small “future work” bullet listing `set_routing` / `set_triggers` / `set_module_bindings` as planned patch ops.
+Update: manifest blocks are now patchable via dedicated ops (routing/triggers/module_bindings/secrets).
 
 ---
 
@@ -215,7 +177,7 @@ Boiling it down to the stuff I’d most seriously consider changing or at least 
 
 1. **Routing/triggers/module_bindings patching**
 
-   * Documented: v1 patches cover defs/refs/defaults only; routing/triggers/module_bindings/secrets are out-of-scope and deferred to a future patch-schema extension.
+   * Implemented via dedicated set_* block ops with pre_hash guard.
 
 2. **Tighten `kind`**
 
@@ -238,10 +200,9 @@ If you do just those, I think the patch + governance story will feel very “fin
 If you want, I can also mock up candidate JSON snippets for `set_routing_*` / `set_triggers` / `set_module_bindings` ops that match the style of the existing patch schema.
 
 ## Action plan (draft)
-**Done in P5**: DefKind enum, patch version field + rejection, tri-state `set_defaults`, remove-only `set_manifest_refs`, approval rationale, base-manifest rule documented, secrets/routing/triggers/module_bindings called out as non-patchable in v1, CLI emits version.
+**Done in P5**: DefKind enum; patch version field + rejection; tri-state `set_defaults`; remove-only `set_manifest_refs`; approval rationale; base-manifest rule documented; block ops for routing events/inboxes, triggers, module_bindings, secrets; defsecret support; CLI emits version and includes new blocks.
 
 **Remaining / deferred (p1 self-upgrade)**  
-- Governance effect adapter: handle `governance.*` intents in-kernel, enforce `manifest_base == base_manifest_hash`, and mirror journal receipts so plans/reducers can drive upgrades.  
-- Decide when to add patch ops for routing/triggers/module_bindings/secrets (or keep explicit “not supported” stance and ensure CLI/help states it).  
-- Add CLI/docs polish: mention patch `version` and approval `reason`; add a remove-only `set_manifest_refs` CLI test.  
-- (Optional) Future patch op for secrets if we ever allow governed secret changes; currently rejected.
+- Governance effect adapter: handle `governance.*` intents in-kernel, enforce `manifest_base == base_manifest_hash`, mirror journal receipts so plans/reducers can drive upgrades.  
+- CLI/docs polish: mention patch `version` and approval `reason`; add remove-only `set_manifest_refs` and block-op coverage tests.  
+- Evaluate if we need per-entry pre_hash granularity or partial-merge ops; current ops are full replace with block pre_hash.

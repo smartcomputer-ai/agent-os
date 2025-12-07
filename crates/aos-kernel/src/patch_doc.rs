@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use indexmap::IndexMap;
 
 use aos_air_types::{AirNode, HashRef, Manifest, ManifestDefaults, NamedRef};
 use aos_cbor::Hash;
@@ -30,6 +31,11 @@ pub enum PatchOp {
     RemoveDef { remove_def: RemoveDef },
     SetManifestRefs { set_manifest_refs: SetManifestRefs },
     SetDefaults { set_defaults: SetDefaults },
+    SetRoutingEvents { set_routing_events: SetRoutingEvents },
+    SetRoutingInboxes { set_routing_inboxes: SetRoutingInboxes },
+    SetTriggers { set_triggers: SetTriggers },
+    SetModuleBindings { set_module_bindings: SetModuleBindings },
+    SetSecrets { set_secrets: SetSecrets },
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,6 +86,36 @@ pub struct SetDefaults {
     pub policy: Option<Option<String>>,
     /// None => omit; Some(vec![]) => clear; Some(non-empty) => replace
     pub cap_grants: Option<Vec<aos_air_types::CapGrant>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetRoutingEvents {
+    pub pre_hash: String,
+    pub events: Vec<aos_air_types::RoutingEvent>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetRoutingInboxes {
+    pub pre_hash: String,
+    pub inboxes: Vec<aos_air_types::InboxRoute>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetTriggers {
+    pub pre_hash: String,
+    pub triggers: Vec<aos_air_types::Trigger>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetModuleBindings {
+    pub pre_hash: String,
+    pub bindings: indexmap::IndexMap<String, aos_air_types::ModuleBinding>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetSecrets {
+    pub pre_hash: String,
+    pub secrets: Vec<aos_air_types::SecretEntry>,
 }
 
 /// Compile a patch document into a canonical ManifestPatch ready for submission.
@@ -150,6 +186,21 @@ pub fn compile_patch_document<S: Store>(
             PatchOp::SetDefaults { set_defaults } => {
                 apply_defaults(&mut manifest, set_defaults);
             }
+            PatchOp::SetRoutingEvents { set_routing_events } => {
+                apply_routing_events(&mut manifest, set_routing_events)?;
+            }
+            PatchOp::SetRoutingInboxes { set_routing_inboxes } => {
+                apply_routing_inboxes(&mut manifest, set_routing_inboxes)?;
+            }
+            PatchOp::SetTriggers { set_triggers } => {
+                apply_triggers(&mut manifest, set_triggers)?;
+            }
+            PatchOp::SetModuleBindings { set_module_bindings } => {
+                apply_module_bindings(&mut manifest, set_module_bindings)?;
+            }
+            PatchOp::SetSecrets { set_secrets } => {
+                apply_secrets(&mut manifest, set_secrets)?;
+            }
         }
     }
 
@@ -208,45 +259,81 @@ fn update_manifest_ref_hash(
     pre_hash: Option<&str>,
     remove: Option<RemoveAction>,
 ) -> Result<(), KernelError> {
-    let refs = refs_for_kind_mut(manifest, kind)?;
-    if let Some(idx) = refs.iter().position(|r| r.name.as_str() == name) {
-        if let Some(pre) = pre_hash {
-            if refs[idx].hash.as_str() != pre {
-                return Err(KernelError::Manifest(format!(
-                    "pre_hash mismatch for {name}"
-                )));
+    if kind == "defsecret" {
+        // operate over SecretEntry::Ref
+        if let Some(pos) = manifest.secrets.iter().position(|e| {
+            matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name)
+        }) {
+            if let aos_air_types::SecretEntry::Ref(nr) = &manifest.secrets[pos] {
+                if let Some(pre) = pre_hash {
+                    if nr.hash.as_str() != pre {
+                        return Err(KernelError::Manifest(format!(
+                            "pre_hash mismatch for {name}"
+                        )));
+                    }
+                }
             }
+            if remove.is_some() {
+                manifest.secrets.remove(pos);
+            }
+        } else if remove.is_none() {
+            manifest.secrets.push(aos_air_types::SecretEntry::Ref(NamedRef {
+                name: name.into(),
+                hash: zero_hash_ref()?,
+            }));
         }
-        if remove.is_some() {
-            refs.remove(idx);
+        Ok(())
+    } else {
+        let refs = refs_for_kind_mut(manifest, kind)?;
+        if let Some(idx) = refs.iter().position(|r| r.name.as_str() == name) {
+            if let Some(pre) = pre_hash {
+                if refs[idx].hash.as_str() != pre {
+                    return Err(KernelError::Manifest(format!(
+                        "pre_hash mismatch for {name}"
+                    )));
+                }
+            }
+            if remove.is_some() {
+                refs.remove(idx);
+            }
+        } else if remove.is_none() {
+            // if replace referenced a non-existent ref, add placeholder so rewrite_manifest_refs updates it
+            refs.push(NamedRef {
+                name: name.into(),
+                hash: zero_hash_ref()?,
+            });
         }
-    } else if remove.is_none() {
-        // if replace referenced a non-existent ref, add placeholder so rewrite_manifest_refs updates it
-        refs.push(NamedRef {
-            name: name.into(),
-            hash: zero_hash_ref()?,
-        });
+        Ok(())
     }
-    Ok(())
 }
 
 fn apply_manifest_refs(manifest: &mut Manifest, refs: SetManifestRefs) -> Result<(), KernelError> {
     for add in refs.add {
-        let target = refs_for_kind_mut(manifest, &add.kind)?;
-        if let Some(pos) = target.iter().position(|r| r.name.as_str() == add.name) {
-            target[pos].hash = aos_air_types::HashRef::new(add.hash)
-                .map_err(|e| KernelError::Manifest(e.to_string()))?;
+        if add.kind == "defsecret" {
+            apply_secret_ref_add(manifest, &add.name, &add.hash)?;
         } else {
-            target.push(NamedRef {
-                name: add.name.clone(),
-                hash: aos_air_types::HashRef::new(add.hash)
-                    .map_err(|e| KernelError::Manifest(e.to_string()))?,
-            });
+            let target = refs_for_kind_mut(manifest, &add.kind)?;
+            if let Some(pos) = target.iter().position(|r| r.name.as_str() == add.name) {
+                target[pos].hash = aos_air_types::HashRef::new(add.hash)
+                    .map_err(|e| KernelError::Manifest(e.to_string()))?;
+            } else {
+                target.push(NamedRef {
+                    name: add.name.clone(),
+                    hash: aos_air_types::HashRef::new(add.hash)
+                        .map_err(|e| KernelError::Manifest(e.to_string()))?,
+                });
+            }
         }
     }
     for rem in refs.remove {
-        let target = refs_for_kind_mut(manifest, &rem.kind)?;
-        target.retain(|r| r.name.as_str() != rem.name);
+        if rem.kind == "defsecret" {
+            manifest
+                .secrets
+                .retain(|e| !matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == rem.name));
+        } else {
+            let target = refs_for_kind_mut(manifest, &rem.kind)?;
+            target.retain(|r| r.name.as_str() != rem.name);
+        }
     }
     Ok(())
 }
@@ -295,6 +382,91 @@ fn rewrite_manifest_refs(manifest: &mut Manifest, hash_map: &HashMap<String, Has
     }
 }
 
+fn apply_routing_events(
+    manifest: &mut Manifest,
+    op: SetRoutingEvents,
+) -> Result<(), KernelError> {
+    let routing = manifest.routing.get_or_insert_with(|| aos_air_types::Routing {
+        events: Vec::new(),
+        inboxes: Vec::new(),
+    });
+    verify_block_pre_hash(&routing.events, &op.pre_hash, "routing.events")?;
+    routing.events = op.events;
+    Ok(())
+}
+
+fn apply_routing_inboxes(
+    manifest: &mut Manifest,
+    op: SetRoutingInboxes,
+) -> Result<(), KernelError> {
+    let routing = manifest.routing.get_or_insert_with(|| aos_air_types::Routing {
+        events: Vec::new(),
+        inboxes: Vec::new(),
+    });
+    verify_block_pre_hash(&routing.inboxes, &op.pre_hash, "routing.inboxes")?;
+    routing.inboxes = op.inboxes;
+    Ok(())
+}
+
+fn apply_triggers(manifest: &mut Manifest, op: SetTriggers) -> Result<(), KernelError> {
+    verify_block_pre_hash(&manifest.triggers, &op.pre_hash, "triggers")?;
+    manifest.triggers = op.triggers;
+    Ok(())
+}
+
+fn apply_module_bindings(
+    manifest: &mut Manifest,
+    op: SetModuleBindings,
+) -> Result<(), KernelError> {
+    let current: IndexMap<String, aos_air_types::ModuleBinding> =
+        manifest.module_bindings.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+    verify_block_pre_hash(&current, &op.pre_hash, "module_bindings")?;
+    manifest.module_bindings = op.bindings;
+    Ok(())
+}
+
+fn apply_secrets(manifest: &mut Manifest, op: SetSecrets) -> Result<(), KernelError> {
+    verify_block_pre_hash(&manifest.secrets, &op.pre_hash, "secrets")?;
+    manifest.secrets = op.secrets;
+    Ok(())
+}
+
+fn apply_secret_ref_add(
+    manifest: &mut Manifest,
+    name: &str,
+    hash: &str,
+) -> Result<(), KernelError> {
+    let hash_ref =
+        aos_air_types::HashRef::new(hash).map_err(|e| KernelError::Manifest(e.to_string()))?;
+    if let Some(entry) = manifest.secrets.iter_mut().find(|e| {
+        matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name)
+    }) {
+        if let aos_air_types::SecretEntry::Ref(nr) = entry {
+            nr.hash = hash_ref;
+        }
+        return Ok(());
+    }
+    manifest
+        .secrets
+        .push(aos_air_types::SecretEntry::Ref(NamedRef { name: name.into(), hash: hash_ref }));
+    Ok(())
+}
+
+fn verify_block_pre_hash<T: serde::Serialize>(
+    block: &T,
+    pre_hash: &str,
+    label: &str,
+) -> Result<(), KernelError> {
+    let current = Hash::of_cbor(block)
+        .map_err(|e| KernelError::Manifest(format!("hash {label}: {e}")))?;
+    if current.to_hex() != pre_hash {
+        return Err(KernelError::Manifest(format!(
+            "pre_hash mismatch for {label}"
+        )));
+    }
+    Ok(())
+}
+
 fn refs_for_kind_mut<'a>(
     manifest: &'a mut Manifest,
     kind: &str,
@@ -307,9 +479,9 @@ fn refs_for_kind_mut<'a>(
         "defcap" => Ok(&mut manifest.caps),
         "defpolicy" => Ok(&mut manifest.policies),
         "defsecret" => {
-            // Only secret refs (not decls) can be addressed here.
+            // Only handled via specialized path.
             Err(KernelError::Manifest(
-                "set_manifest_refs for defsecret not supported yet".into(),
+                "set_manifest_refs for defsecret handled separately".into(),
             ))
         }
         other => Err(KernelError::Manifest(format!(
@@ -319,14 +491,26 @@ fn refs_for_kind_mut<'a>(
 }
 
 fn insert_placeholder_ref(manifest: &mut Manifest, kind: &str, name: &str) -> Result<(), KernelError> {
-    let refs = refs_for_kind_mut(manifest, kind)?;
-    if refs.iter().any(|r| r.name.as_str() == name) {
-        return Ok(());
+    if kind == "defsecret" {
+        if manifest.secrets.iter().any(|e| {
+            matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name)
+        }) {
+            return Ok(());
+        }
+        manifest.secrets.push(aos_air_types::SecretEntry::Ref(NamedRef {
+            name: name.to_string(),
+            hash: zero_hash_ref()?,
+        }));
+    } else {
+        let refs = refs_for_kind_mut(manifest, kind)?;
+        if refs.iter().any(|r| r.name.as_str() == name) {
+            return Ok(());
+        }
+        refs.push(NamedRef {
+            name: name.to_string(),
+            hash: zero_hash_ref()?,
+        });
     }
-    refs.push(NamedRef {
-        name: name.to_string(),
-        hash: zero_hash_ref()?,
-    });
     Ok(())
 }
 
@@ -570,7 +754,90 @@ mod tests {
     }
 
     #[test]
-    fn defsecret_manifest_refs_are_rejected() {
+    fn set_routing_events_replaces_block_with_pre_hash() {
+        let store = MemStore::new();
+        let mut manifest = empty_manifest();
+        manifest.routing = Some(aos_air_types::Routing {
+            events: vec![],
+            inboxes: vec![],
+        });
+        let base_hash = store_manifest(&store, manifest.clone());
+        let pre = Hash::of_cbor(&manifest.routing.as_ref().unwrap().events)
+            .unwrap()
+            .to_hex();
+        let doc = PatchDocument {
+            version: "1".into(),
+            base_manifest_hash: base_hash,
+            patches: vec![PatchOp::SetRoutingEvents {
+                set_routing_events: SetRoutingEvents {
+                    pre_hash: pre,
+                    events: vec![aos_air_types::RoutingEvent {
+                        event: aos_air_types::SchemaRef::new("com.acme/Evt@1").unwrap(),
+                        reducer: "com.acme/Reducer@1".into(),
+                        key_field: Some("id".into()),
+                    }],
+                },
+            }],
+        };
+        let patch = compile_patch_document(&store, doc).expect("compile");
+        let routing = patch.manifest.routing.expect("routing present");
+        assert_eq!(routing.events.len(), 1);
+    }
+
+    #[test]
+    fn set_module_bindings_replaces_map() {
+        let store = MemStore::new();
+        let base_hash = store_manifest(&store, empty_manifest());
+        let pre = Hash::of_cbor(&IndexMap::<String, aos_air_types::ModuleBinding>::new())
+            .unwrap()
+            .to_hex();
+        let mut slots = IndexMap::new();
+        slots.insert("db".into(), "cap/db@1".into());
+        let mut bindings = IndexMap::new();
+        bindings.insert(
+            "com.acme/mod@1".into(),
+            aos_air_types::ModuleBinding { slots },
+        );
+        let doc = PatchDocument {
+            version: "1".into(),
+            base_manifest_hash: base_hash,
+            patches: vec![PatchOp::SetModuleBindings {
+                set_module_bindings: SetModuleBindings {
+                    pre_hash: pre,
+                    bindings,
+                },
+            }],
+        };
+        let patch = compile_patch_document(&store, doc).expect("compile");
+        assert_eq!(patch.manifest.module_bindings.len(), 1);
+    }
+
+    #[test]
+    fn set_secrets_allows_refs() {
+        let store = MemStore::new();
+        let base_hash = store_manifest(&store, empty_manifest());
+        let pre = Hash::of_cbor(&Vec::<aos_air_types::SecretEntry>::new())
+            .unwrap()
+            .to_hex();
+        let doc = PatchDocument {
+            version: "1".into(),
+            base_manifest_hash: base_hash,
+            patches: vec![PatchOp::SetSecrets {
+                set_secrets: SetSecrets {
+                    pre_hash: pre,
+                    secrets: vec![aos_air_types::SecretEntry::Ref(NamedRef {
+                        name: "secret/api@1".into(),
+                        hash: HashRef::new("sha256:1111111111111111111111111111111111111111111111111111111111111111")
+                            .unwrap(),
+                    })],
+                },
+            }],
+        };
+        let patch = compile_patch_document(&store, doc).expect("compile");
+        assert_eq!(patch.manifest.secrets.len(), 1);
+    }
+    #[test]
+    fn defsecret_manifest_refs_are_allowed() {
         let store = MemStore::new();
         let base_hash = store_manifest(&store, empty_manifest());
         let doc = PatchDocument {
@@ -587,10 +854,7 @@ mod tests {
                 },
             }],
         };
-        let err = compile_patch_document(&store, doc).unwrap_err();
-        assert!(
-            format!("{err}").contains("defsecret"),
-            "defsecret patching should be rejected"
-        );
+        let patch = compile_patch_document(&store, doc).expect("compile");
+        assert_eq!(patch.manifest.secrets.len(), 1);
     }
 }
