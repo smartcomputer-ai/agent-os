@@ -40,3 +40,22 @@ Responses include the consistency metadata so clients can log or retry. HTTP is 
 - Reads reuse canonical CBOR decoding and snapshot formats, so replay guarantees hold and reducers remain the single source of truth for state evolution.
 - No new event types or receipts are introduced; observability comes from metrics/logs that include the returned height/hash.
 - Capability gating on the query surface prevents unbounded data exfiltration and aligns with the existing manifest-driven governance model.
+
+
+## Semantic vs Observational Reads (Design Note)
+
+AgentOS distinguishes between:
+
+1. **Observational Reads**
+- Performed via `StateReader` or its HTTP adapter
+- Never append to the journal 
+- Suitable for external clients, dashboards, and inter-world inspection when the consumer does _not_ use the data in world logic 
+- Return consistency metadata (`journal_height`, snapshot/manifest hashes)
+        
+2. **Semantic Reads**
+- Reads whose results influence reducer/plan behavior
+- Must be performed via an effect (e.g., `world.query`)
+- Produce receipts recorded in the journal to maintain deterministic replay
+- Required for cross-world reads that world A depends on
+        
+This separation ensures efficient observability while preserving deterministic semantics.
