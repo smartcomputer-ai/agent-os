@@ -4,6 +4,12 @@
   "title": "AIR v1 Manifest Patch",
   "type": "object",
   "properties": {
+    "version": {
+      "description": "Patch document format version (string major). v1 kernels only accept \"1\".",
+      "type": "string",
+      "enum": ["1"],
+      "default": "1"
+    },
     "base_manifest_hash": { "$ref": "common.schema.json#/$defs/Hash" },
     "patches": {
       "type": "array",
@@ -35,7 +41,7 @@
         "add_def": {
           "type": "object",
           "properties": {
-            "kind": { "type": "string" },
+            "kind": { "$ref": "common.schema.json#/$defs/DefKind" },
             "node": { "$ref": "#/$defs/node_json" }
           },
           "required": ["kind", "node"],
@@ -52,7 +58,7 @@
         "replace_def": {
           "type": "object",
           "properties": {
-            "kind": { "type": "string" },
+            "kind": { "$ref": "common.schema.json#/$defs/DefKind" },
             "name": { "$ref": "common.schema.json#/$defs/Name" },
             "new_node": { "$ref": "#/$defs/node_json" },
             "pre_hash": { "$ref": "common.schema.json#/$defs/Hash" }
@@ -71,7 +77,7 @@
         "remove_def": {
           "type": "object",
           "properties": {
-            "kind": { "type": "string" },
+            "kind": { "$ref": "common.schema.json#/$defs/DefKind" },
             "name": { "$ref": "common.schema.json#/$defs/Name" },
             "pre_hash": { "$ref": "common.schema.json#/$defs/Hash" }
           },
@@ -94,7 +100,7 @@
               "items": {
                 "type": "object",
                 "properties": {
-                  "kind": { "type": "string" },
+                  "kind": { "$ref": "common.schema.json#/$defs/DefKind" },
                   "name": { "$ref": "common.schema.json#/$defs/Name" },
                   "hash": { "$ref": "common.schema.json#/$defs/Hash" }
                 },
@@ -107,7 +113,7 @@
               "items": {
                 "type": "object",
                 "properties": {
-                  "kind": { "type": "string" },
+                  "kind": { "$ref": "common.schema.json#/$defs/DefKind" },
                   "name": { "$ref": "common.schema.json#/$defs/Name" }
                 },
                 "required": ["kind", "name"],
@@ -115,7 +121,10 @@
               }
             }
           },
-          "required": ["add"],
+          "anyOf": [
+            { "required": ["add"] },
+            { "required": ["remove"] }
+          ],
           "additionalProperties": false
         }
       },

@@ -266,7 +266,10 @@
     "type": {
       "record": {
         "patch_hash": { "hash": {} },
-        "manifest_base": { "option": { "hash": {} } },
+        "manifest_base": {
+          "option": { "hash": {} },
+          "$comment": "When present, must equal patch.base_manifest_hash for the proposal."
+        },
         "description": { "option": { "text": {} } }
       }
     }
@@ -361,7 +364,8 @@
             "reject": { "unit": {} }
           }
         },
-        "approver": { "text": {} }
+        "approver": { "text": {} },
+        "reason": { "option": { "text": {} } }
       }
     }
   },
@@ -378,7 +382,8 @@
           }
         },
         "patch_hash": { "hash": {} },
-        "approver": { "text": {} }
+        "approver": { "text": {} },
+        "reason": { "option": { "text": {} } }
       }
     }
   },

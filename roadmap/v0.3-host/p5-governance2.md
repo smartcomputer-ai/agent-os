@@ -16,22 +16,9 @@ If these invariants are already enforced, you’re in good shape.
 
 ### 1.2 `kind` fields could be stricter
 
-Right now every operation carries a `kind` which is just `type: "string"`:
+Status: **fixed**. Patch schema now uses a shared `DefKind` enum in `common.schema.json`; all patch `kind` fields reference it.
 
-* `add_def.add_def.kind`
-* `replace_def.replace_def.kind`
-* `remove_def.remove_def.kind`
-* `set_manifest_refs.set_manifest_refs.add[].kind`
-* `set_manifest_refs.set_manifest_refs.remove[].kind`
-
-Given AIR treats “kind” as a closed set (`defschema`, `defmodule`, `defplan`, `defcap`, `defpolicy`, `defsecret`, `defeffect`, `manifest`), you could catch a lot of typos by tightening this to an enum or a shared `$defs/DefKind` in `common.schema.json`.
-
-**Suggestion**
-
-* Add `DefKind` to `common.schema.json` and reference it from patch.schema.
-* If you want to keep room for `defmigration` later, you can add it to the enum when it lands.
-
-Not critical, but it’s cheap correctness and better tooling autocomplete.
+Rationale: catches typos and keeps tooling aligned with the closed def-kind set (`defschema`, `defmodule`, `defplan`, `defcap`, `defpolicy`, `defsecret`, `defeffect`, `manifest`).
 
 ---
 
@@ -80,36 +67,7 @@ Otherwise people will assume they can govern everything through patches and hit 
 
 ### 1.4 `set_manifest_refs` small ergonomics nit
 
-`set_manifest_refs` requires `add` but makes `remove` optional:
-
-```json
-"properties": {
-  "set_manifest_refs": {
-    "properties": {
-      "add": { ... },
-      "remove": { ... }
-    },
-    "required": ["add"]
-  }
-}
-```
-
-So a remove‑only patch has to be:
-
-```json
-{"set_manifest_refs": { "add": [], "remove": [ ... ] }}
-```
-
-Totally workable, but a bit surprising for hand‑authored docs.
-
-**Suggestion**
-
-* Either:
-
-  * Make both `add` and `remove` optional in the schema and define the “at least one non‑empty” invariant in prose / runtime validation; or
-  * Keep the schema as‑is and explicitly document the “use `add: []` for remove‑only” sugar in the patch section of the spec.
-
-Not a correctness issue, just ergonomics.
+Status: **fixed**. Schema now allows either `add` or `remove` (or both); remove‑only patches no longer need `add: []`. Runtime still expects at least one entry.
 
 ---
 
@@ -136,13 +94,14 @@ Implies the following semantics:
 
 I think that’s exactly what you want, but it would be good to codify that explicitly in the spec text and in the P5 doc, so people don’t treat `null` as “no change”.
 
-Same for `cap_grants`:
+Status: **fixed** in compiler + tests. Semantics are now:
 
-* Omitted → no change
-* Present but `[]` → clear defaults
-* Present and non‑empty → replace with this new list
-
-That gives you a nice “PATCH‑like” semantics; you already have the schema to support it.
+* `policy` omitted → no change
+* `policy` = Name → set
+* `policy` = null → clear
+* `cap_grants` omitted → no change
+* `cap_grants` = [] → clear
+* `cap_grants` = [grants…] → replace
 
 ---
 
@@ -163,14 +122,7 @@ If that’s intentional for v1, I’d:
 
 ### 1.7 Patch versioning & forward‑compat
 
-Since the patch schema is hosted at `air/v1/patch.schema.json` and `patches[].items` is a `oneOf` over the five current ops, older kernels won’t accept newer ops once you add them.
-
-That’s probably fine (governance changes are usually upgrade‑gated anyway), but you may want:
-
-* A `version` or `air_version` field on the patch document itself, mirroring the manifest’s `air_version: "1"` field.
-* A clear rule: “v1 kernels reject patch docs whose `version` they don’t understand”, so you can introduce `v2` later if you need more invasive changes.
-
-Not urgent, but cheap to add now.
+Status: **fixed**. PatchDocument now has `version: "1"` (defaulted); kernels reject unsupported versions. CLI emits it.
 
 ---
 
@@ -193,9 +145,7 @@ This lines up nicely with the constitutional loop already described in the archi
 
 One small tweak I’d consider:
 
-* `GovApproveParams@1` and/or `GovApproveReceipt@1` including an optional `reason?:text` (or `rationale_ref?:hash`) in addition to `approver:text`.
-
-Right now you only capture `decision` and `approver`. Having a place for “why did we approve/reject this?” will be extremely useful for audits later, and it’s much nicer if that’s a first‑class field rather than encoded in some off‑to‑the‑side log.
+Status: **fixed**. `GovApproveParams@1` and `GovApproveReceipt@1` now include optional `reason:text`.
 
 ### 2.2 Governance cap type schema is nice
 
@@ -238,8 +188,7 @@ Your proposed `GovProposeParams@1` also carries `manifest_base?:hash`.
 
 That gives you two fields that can describe the same thing. I’d define a clear rule:
 
-* `GovProposeParams.manifest_base` **must** equal `patch.base_manifest_hash` when present; otherwise the proposal is invalid.
-* If `manifest_base` is omitted, the runtime infers it from the patch doc (and/or fills it into the params in receipts).
+Rule **adopted**: `GovProposeParams.manifest_base`, when supplied, must equal `patch.base_manifest_hash`; proposals should be rejected on mismatch. Documented in spec; enforcement will live in the governance effect adapter/control path.
 
 That keeps the “what manifest was this patch authored against?” answer unambiguous across patch docs and governance entries.
 
@@ -256,96 +205,43 @@ Strong +1 to this. In particular:
 
 I’d make this norm explicit in the AIR spec too: “Governance receipts are a *view* over the canonical governance journal entries; discrepancies are a bug.”
 
----
 
-## 3. CLI / UX & ergonomics
-
-Most of this is already in your “Proposed work” + TODOs, but a few concrete suggestions:
-
-### 3.1 `--patch-dir` + hashless authoring: nail down the rules
-
-The doc mentions:
-
-* Accepting “hashless” assets with ZERO_HASH wasm placeholders and missing manifest ref hashes.
-* CLI path that loads nodes, stores them, fills hashes, patches manifest refs, then canonicalizes & hashes the patch doc before submission.
-
-I’d make the CLI behavior very explicit:
-
-1. `aos world gov propose --patch-dir <dir> --base <hash?>`:
-
-   * Load AIR bundle from `<dir>`.
-   * Canonicalize and store all defs; compute their hashes.
-   * Compute a patch doc against `--base` (or world head) that:
-
-     * Uses `add_def`/`replace_def`/`remove_def` for defs.
-     * Uses `set_manifest_refs` for manifest lists.
-     * Uses `set_defaults` if needed for policy/cap_grants.
-   * Validate patch doc against `patch.schema.json`.
-   * Show a human‑readable summary/diff (like “add 2 defmodule, replace 1 defplan, set_defaults.policy→X, add manifest.refs: com.acme/foo@1”).
-   * On confirmation, submit patch doc.
-
-2. When `--base` is omitted:
-
-   * Fill `base_manifest_hash` from current world head.
-   * Still bake that into the patch doc so it’s replayable later.
-
-3. `--require-hashes`:
-
-   * Forbid ZERO_HASH placeholders and missing manifest entry hashes in inputs; fail fast.
-
-All of this is implied in P5, but putting it in the CLI docs/spec would reduce surprises.
-
-### 3.2 `--dry-run` output: include resolved hashes
-
-For `--dry-run` on `--patch-dir`, it’s really helpful to:
-
-* Print the patch doc *with* all hashes filled in (what will actually be submitted).
-* Optionally print a tiny “manifest head → manifest_new” summary: e.g., `sha256:abc → sha256:def` plus counts of def kinds updated.
-
-This makes it much easier to debug “why did my ZERO_HASH placeholder turn into *this* hash?”
-
-### 3.3 Error reporting: use optional fields on the patch doc sparingly
-
-Your design note says:
-
-> If richer error info is needed, extend the schema with optional fields rather than inventing alternate payload shapes.
-
-I think that’s the right instinct. If you later decide you want to carry, say, an `origin` or `span` for each patch op (e.g., “came from file X:line Y”), I’d recommend:
-
-* Add a generic optional `meta?: { origin?: text, note?: text }` on each op type rather than sprinkling different ad‑hoc fields.
-
-But I wouldn’t add that *now* unless you already have a concrete use for it; it’s easy to extend later without breaking anything.
 
 ---
 
-## 4. “Did we forget anything?” – short list
+## 3. “Did we forget anything?” – short list
 
 Boiling it down to the stuff I’d most seriously consider changing or at least documenting:
 
 1. **Routing/triggers/module_bindings patching**
 
-   * Either:
-
-     * Add explicit patch ops for these manifest fields, or
-     * Clearly document that v1 governance patches can’t touch them and that they’ll be handled by a future patch‑schema extension.
+   * Documented: v1 patches cover defs/refs/defaults only; routing/triggers/module_bindings/secrets are out-of-scope and deferred to a future patch-schema extension.
 
 2. **Tighten `kind`**
 
-   * Add a shared `DefKind` enum and reference it in patch.schema so typos are caught early.
+   * Done via `DefKind` enum in `common.schema.json`; patch.schema now references it.
 
 3. **Clarify `set_defaults` & `set_manifest_refs` semantics**
 
-   * Document the tri‑state (`omit` vs `null` vs `[]`) for defaults.
-   * Decide whether you want to allow remove‑only `set_manifest_refs` without the `add: []` hack, or at least document the hack.
+   * Tri‑state implemented; remove-only allowed; semantics documented here and in spec.
 
 4. **Make patch base vs governance base consistent**
 
-   * Define a single source of truth for base manifest in proposals: `GovProposeParams.manifest_base` must match `patch.base_manifest_hash`, or it’s invalid.
+   * Rule adopted; needs enforcement in governance adapter/control path.
 
 5. **Optional: add `reason` to approvals**
 
-   * Add an optional `reason`/`rationale` field to `GovApproveParams` / `GovApproveReceipt` so you don’t lose human explanations for decisions.
+   * Implemented (`reason:text` optional).
 
 If you do just those, I think the patch + governance story will feel very “finished” and line up tightly with the rest of AIR/AgentOS.
 
 If you want, I can also mock up candidate JSON snippets for `set_routing_*` / `set_triggers` / `set_module_bindings` ops that match the style of the existing patch schema.
+
+## Action plan (draft)
+**Done in P5**: DefKind enum, patch version field + rejection, tri-state `set_defaults`, remove-only `set_manifest_refs`, approval rationale, base-manifest rule documented, secrets/routing/triggers/module_bindings called out as non-patchable in v1, CLI emits version.
+
+**Remaining / deferred (p1 self-upgrade)**  
+- Governance effect adapter: handle `governance.*` intents in-kernel, enforce `manifest_base == base_manifest_hash`, and mirror journal receipts so plans/reducers can drive upgrades.  
+- Decide when to add patch ops for routing/triggers/module_bindings/secrets (or keep explicit “not supported” stance and ensure CLI/help states it).  
+- Add CLI/docs polish: mention patch `version` and approval `reason`; add a remove-only `set_manifest_refs` CLI test.  
+- (Optional) Future patch op for secrets if we ever allow governed secret changes; currently rejected.

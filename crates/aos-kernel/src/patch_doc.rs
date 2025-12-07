@@ -12,8 +12,14 @@ use crate::world::canonicalize_patch;
 /// Patch document as described in spec/03-air.md §15 and patch.schema.json.
 #[derive(Debug, Deserialize)]
 pub struct PatchDocument {
+    #[serde(default = "default_patch_version")]
+    pub version: String,
     pub base_manifest_hash: String,
     pub patches: Vec<PatchOp>,
+}
+
+fn default_patch_version() -> String {
+    "1".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,9 +76,10 @@ pub struct ManifestRefRemove {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct SetDefaults {
-    pub policy: Option<String>,
-    #[serde(default)]
-    pub cap_grants: Vec<aos_air_types::CapGrant>,
+    /// None => omit; Some(None) => clear; Some(Some(name)) => set
+    pub policy: Option<Option<String>>,
+    /// None => omit; Some(vec![]) => clear; Some(non-empty) => replace
+    pub cap_grants: Option<Vec<aos_air_types::CapGrant>>,
 }
 
 /// Compile a patch document into a canonical ManifestPatch ready for submission.
@@ -84,6 +91,12 @@ pub fn compile_patch_document<S: Store>(
     store: &S,
     doc: PatchDocument,
 ) -> Result<ManifestPatch, KernelError> {
+    if doc.version != "1" {
+        return Err(KernelError::Manifest(format!(
+            "unsupported patch document version: {}",
+            doc.version
+        )));
+    }
     // Load base manifest
     let base_hash = Hash::from_hex_str(&doc.base_manifest_hash)
         .map_err(|e| KernelError::Manifest(format!("invalid base_manifest_hash: {e}")))?;
@@ -243,11 +256,13 @@ fn apply_defaults(manifest: &mut Manifest, defaults: SetDefaults) {
         policy: None,
         cap_grants: Vec::new(),
     });
-    if let Some(policy) = defaults.policy {
-        new_defaults.policy = Some(policy);
+    match defaults.policy {
+        Some(Some(policy)) => new_defaults.policy = Some(policy),
+        Some(None) => new_defaults.policy = None,
+        None => {}
     }
-    if !defaults.cap_grants.is_empty() {
-        new_defaults.cap_grants = defaults.cap_grants;
+    if let Some(cap_grants) = defaults.cap_grants {
+        new_defaults.cap_grants = cap_grants;
     }
     manifest.defaults = Some(new_defaults);
 }
@@ -372,10 +387,68 @@ mod tests {
     }
 
     #[test]
+    fn set_defaults_tri_state_policy_and_caps() {
+        let store = MemStore::new();
+        // baseline manifest with defaults populated
+        let mut manifest = empty_manifest();
+        manifest.defaults = Some(ManifestDefaults {
+            policy: Some("policy/Old@1".into()),
+            cap_grants: vec![CapGrant {
+                name: "grant_old".into(),
+                cap: "cap/demo@1".into(),
+                params: ValueLiteral::Null(ValueNull { null: EmptyObject {} }),
+                expiry_ns: None,
+                budget: None,
+            }],
+        });
+        let base_hash = store_manifest(&store, manifest);
+
+        // clear policy, replace caps with empty list
+        let doc = PatchDocument {
+            version: "1".into(),
+            base_manifest_hash: base_hash.clone(),
+            patches: vec![PatchOp::SetDefaults {
+                set_defaults: SetDefaults {
+                    policy: Some(None),       // clear
+                    cap_grants: Some(vec![]), // clear
+                },
+            }],
+        };
+        let patch = compile_patch_document(&store, doc).expect("compile");
+        let defaults = patch.manifest.defaults.expect("defaults present");
+        assert!(defaults.policy.is_none(), "policy cleared");
+        assert!(defaults.cap_grants.is_empty(), "cap_grants cleared");
+
+        // set policy and set cap grants
+        let doc2 = PatchDocument {
+            version: "1".into(),
+            base_manifest_hash: base_hash,
+            patches: vec![PatchOp::SetDefaults {
+                set_defaults: SetDefaults {
+                    policy: Some(Some("policy/New@1".into())),
+                    cap_grants: Some(vec![CapGrant {
+                        name: "grant_new".into(),
+                        cap: "cap/demo@1".into(),
+                        params: ValueLiteral::Null(ValueNull { null: EmptyObject {} }),
+                        expiry_ns: None,
+                        budget: None,
+                    }]),
+                },
+            }],
+        };
+        let patch2 = compile_patch_document(&store, doc2).expect("compile");
+        let defaults2 = patch2.manifest.defaults.expect("defaults present");
+        assert_eq!(defaults2.policy.as_deref(), Some("policy/New@1"));
+        assert_eq!(defaults2.cap_grants.len(), 1);
+        assert_eq!(defaults2.cap_grants[0].name, "grant_new");
+    }
+
+    #[test]
     fn add_def_updates_manifest_refs() {
         let store = MemStore::new();
         let base_hash = store_manifest(&store, empty_manifest());
         let doc = PatchDocument {
+            version: "1".into(),
             base_manifest_hash: base_hash.clone(),
             patches: vec![PatchOp::AddDef {
                 add_def: AddDef {
@@ -409,6 +482,7 @@ mod tests {
         });
         let base_hash = store_manifest(&store, manifest);
         let doc = PatchDocument {
+            version: "1".into(),
             base_manifest_hash: base_hash.clone(),
             patches: vec![PatchOp::RemoveDef {
                 remove_def: RemoveDef {
@@ -438,6 +512,7 @@ mod tests {
         });
         let base_hash = store_manifest(&store, manifest);
         let doc = PatchDocument {
+            version: "1".into(),
             base_manifest_hash: base_hash,
             patches: vec![PatchOp::ReplaceDef {
                 replace_def: ReplaceDef {
@@ -457,17 +532,18 @@ mod tests {
         let store = MemStore::new();
         let base_hash = store_manifest(&store, empty_manifest());
         let doc = PatchDocument {
+            version: "1".into(),
             base_manifest_hash: base_hash,
             patches: vec![PatchOp::SetDefaults {
                 set_defaults: SetDefaults {
-                    policy: Some("demo/policy@1".into()),
-                    cap_grants: vec![CapGrant {
+                    policy: Some(Some("demo/policy@1".into())),
+                    cap_grants: Some(vec![CapGrant {
                         name: "g1".into(),
                         cap: "cap/demo@1".into(),
                         params: ValueLiteral::Null(ValueNull { null: EmptyObject {} }),
                         expiry_ns: None,
                         budget: None,
-                    }],
+                    }]),
                 },
             }],
         };
@@ -475,5 +551,46 @@ mod tests {
         let defaults = patch.manifest.defaults.expect("defaults");
         assert_eq!(defaults.policy.as_deref(), Some("demo/policy@1"));
         assert_eq!(defaults.cap_grants.len(), 1);
+    }
+
+    #[test]
+    fn rejects_unknown_patch_version() {
+        let store = MemStore::new();
+        let base_hash = store_manifest(&store, empty_manifest());
+        let doc = PatchDocument {
+            version: "2".into(),
+            base_manifest_hash: base_hash,
+            patches: vec![],
+        };
+        let err = compile_patch_document(&store, doc).unwrap_err();
+        assert!(
+            format!("{err}").contains("unsupported patch document version"),
+            "version mismatch should error"
+        );
+    }
+
+    #[test]
+    fn defsecret_manifest_refs_are_rejected() {
+        let store = MemStore::new();
+        let base_hash = store_manifest(&store, empty_manifest());
+        let doc = PatchDocument {
+            version: "1".into(),
+            base_manifest_hash: base_hash,
+            patches: vec![PatchOp::SetManifestRefs {
+                set_manifest_refs: SetManifestRefs {
+                    add: vec![ManifestRef {
+                        kind: "defsecret".into(),
+                        name: "secret/api_key@1".into(),
+                        hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
+                    }],
+                    remove: vec![],
+                },
+            }],
+        };
+        let err = compile_patch_document(&store, doc).unwrap_err();
+        assert!(
+            format!("{err}").contains("defsecret"),
+            "defsecret patching should be rejected"
+        );
     }
 }

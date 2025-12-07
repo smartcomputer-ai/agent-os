@@ -611,8 +611,10 @@ Patches describe changes to the control plane (design-time modifications).
 
 ```
 {
+  version: "1",
   base_manifest_hash: hash,
   patches: [<Patch>…]
+  // v1: patches only cover defs, manifest refs, and defaults; routing/triggers/module_bindings/secrets cannot be patched yet.
 }
 ```
 
@@ -630,6 +632,8 @@ Patches describe changes to the control plane (design-time modifications).
 - **remove_def**: `{ kind:Kind, name:Name, pre_hash:hash }` — remove a definition
 - **set_manifest_refs**: `{ add:[{kind,name,hash}], remove:[{kind,name}] }` — update manifest references
 - **set_defaults**: `{ policy?:Name, cap_grants?:[CapGrant…] }` — update default policy and grants
+- **Not yet in v1**: manifest blocks `routing`, `triggers`, `module_bindings`, and `secrets` are immutable via patches; they must be changed through privileged init or future patch ops (planned for v1.1+).
+- **defsecret**: `set_manifest_refs` on `defsecret` is rejected in v1; secrets must be provisioned via init or a future secrets patch op.
 
 ### Application
 
@@ -656,6 +660,7 @@ Notes:
 - `ShadowReport.manifest_hash` is the candidate manifest root produced by applying the patch (not the patch hash).
 - `Applied.manifest_hash_new` is the new manifest root after apply (not the patch hash).
 - Apply is only valid after an `Approved` record whose `decision` is `approve`; a `reject` decision halts the proposal.
+- `GovProposeParams.manifest_base`, when supplied, **must** equal the patch document’s `base_manifest_hash`; handlers should reject proposals where they differ.
 
 ### Plan and Effect Lifecycle (Runtime)
 

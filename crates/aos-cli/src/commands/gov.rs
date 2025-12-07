@@ -452,6 +452,7 @@ fn build_patchdoc_from_dir(
     }
 
     Ok(serde_json::json!({
+        "version": "1",
         "base_manifest_hash": base_manifest_hash,
         "patches": patches,
     }))
