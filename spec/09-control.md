@@ -1,6 +1,6 @@
 # Control Channel Specification (v1)
 
-Status: **experimental, socket-only**. Stdio framing, CBOR framing, governance verbs, and journal streaming are deferred.
+Status: **experimental, socket-only**. Governance verbs are live. Stdio framing, CBOR framing, and journal streaming remain deferred.
 
 ## Goals
 
@@ -63,9 +63,12 @@ Response:
 - `journal-head {}` → returns `{ head: <u64> }` (journal height).
 - `put-blob { data_b64 }` → stores blob in CAS; returns `{ hash: "sha256:..." }`.
 - `shutdown {}` → graceful drain, snapshot, shutdown; server and daemon stop.
+- `propose { patch_b64, description? }` → submits a governance proposal. `patch_b64` is base64 of either (a) `ManifestPatch` CBOR or (b) `PatchDocument` JSON. PatchDocuments are validated against `spec/schemas/patch.schema.json` (with `common.schema.json` embedded) before compilation; ManifestPatch skips schema validation. Returns `{ proposal_id: <u64> }`.
+- `shadow { proposal_id }` → runs shadow for a proposal; returns a JSON `ShadowSummary` `{ manifest_hash, predicted_effects?, pending_receipts?, plan_results?, ledger_deltas? }`.
+- `approve { proposal_id, decision?, approver? }` → records an approval decision. `decision` is `"approve"` (default) or `"reject"`; `approver` defaults to `"control-client"`. Returns `{}`.
+- `apply { proposal_id }` → applies an approved proposal; returns `{}`.
 
 Deferred verbs:
-- Governance (`propose/shadow/approve/apply`).
 - Stdio/streaming uploads for `put-blob`.
 - Journal/event streaming.
 
