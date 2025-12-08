@@ -22,14 +22,6 @@ Implement a `StateReader` trait inside the kernel process that exposes read-only
 
 `consistency` captures caller preference: `Exact(height)`, `AtLeast(height)`, or `Head`. Implementations resolve via the hot path first, then warm path replay, and include the resolved height/hash in the response envelope.
 
-## HTTP adapter (optional)
-Expose the same trait over HTTP when enabled by policy:
-- `GET /state/{module}/{key}?at_least=H` → reducer projection + metadata envelope.
-- `GET /manifest` → manifest view + envelope.
-- `GET /journal/head` → height + hashes only.
-
-Responses include the consistency metadata so clients can log or retry. HTTP is purely an adapter: it performs no writes, relies on the in-process `StateReader`, and is disabled by default.
-
 ## How external callers learn the height
 - **Response metadata**: Every read returns `(journal_height, snapshot_hash, manifest_hash)`; the caller need not know the height beforehand.
 - **Optimistic freshness**: Clients that merely want “latest available” send `Head` and observe the returned height for bookkeeping.
