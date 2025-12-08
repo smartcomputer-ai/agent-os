@@ -12,7 +12,7 @@ aos-store = { path = "../aos-store" }
 aos-air-exec = { path = "../aos-air-exec" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 aos-effects = { path = "../aos-effects" }
-aos-testkit = { path = "../aos-testkit" }
+aos-host = { path = "../aos-host", features = ["test-fixtures"] }
 aos-wasm-build = { path = "../aos-wasm-build" }
 clap = { version = "4", features = ["derive"] }
 indexmap = "2"
@@ -27,6 +27,7 @@ hex = "0.4"
 log = "0.4"
 env_logger = "0.11"
 walkdir = "2"
+tokio = { version = "1", features = ["rt", "time"] }
 
 [dev-dependencies]
 tempfile = "3"

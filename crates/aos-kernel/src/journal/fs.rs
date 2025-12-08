@@ -1,5 +1,5 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use aos_cbor::to_canonical_cbor;
@@ -32,6 +32,34 @@ impl FsJournal {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Lightweight helper to read the current head (`next_seq`) without decoding the full log.
+    /// Scans length prefixes and skips payloads to determine how many entries are present.
+    pub fn head(root: impl AsRef<Path>) -> Result<JournalSeq, JournalError> {
+        let journal_dir = root.as_ref().join(AOS_DIR).join(JOURNAL_SUBDIR);
+        let path = journal_dir.join(JOURNAL_FILE);
+        if !path.exists() {
+            return Ok(0);
+        }
+        let mut file = File::open(&path)?;
+        let mut next_seq: JournalSeq = 0;
+        loop {
+            let mut len_buf = [0u8; 4];
+            let read = file.read(&mut len_buf)?;
+            if read == 0 {
+                break;
+            }
+            if read < len_buf.len() {
+                return Err(JournalError::Corrupt(format!(
+                    "truncated length header (read {read} bytes)"
+                )));
+            }
+            let len = u32::from_le_bytes(len_buf) as i64;
+            file.seek(SeekFrom::Current(len))?;
+            next_seq += 1;
+        }
+        Ok(next_seq)
     }
 }
 
@@ -159,5 +187,28 @@ mod tests {
 
         let err = FsJournal::open(tmp.path()).unwrap_err();
         assert!(matches!(err, JournalError::Corrupt(_)));
+    }
+
+    #[test]
+    fn head_reads_entry_count_without_full_decode() {
+        let tmp = TempDir::new().unwrap();
+        {
+            let mut journal = FsJournal::open(tmp.path()).unwrap();
+            journal
+                .append(JournalEntry::new(JournalKind::EffectIntent, b"a"))
+                .unwrap();
+            journal
+                .append(JournalEntry::new(JournalKind::EffectReceipt, b"b"))
+                .unwrap();
+        }
+        let head = FsJournal::head(tmp.path()).unwrap();
+        assert_eq!(head, 2);
+    }
+
+    #[test]
+    fn head_on_empty_returns_zero() {
+        let tmp = TempDir::new().unwrap();
+        let head = FsJournal::head(tmp.path()).unwrap();
+        assert_eq!(head, 0);
     }
 }

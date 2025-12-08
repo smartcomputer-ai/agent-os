@@ -94,6 +94,7 @@ pub struct Kernel<S: Store> {
     governance: GovernanceManager,
     secret_resolver: Option<SharedSecretResolver>,
     allow_placeholder_secrets: bool,
+    last_snapshot_height: Option<JournalSeq>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +103,32 @@ pub struct PlanResultEntry {
     pub plan_id: u64,
     pub output_schema: String,
     pub value_cbor: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelHeights {
+    pub snapshot: Option<JournalSeq>,
+    pub head: JournalSeq,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TailIntent {
+    pub seq: JournalSeq,
+    pub record: EffectIntentRecord,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TailReceipt {
+    pub seq: JournalSeq,
+    pub record: EffectReceiptRecord,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct TailScan {
+    pub from: JournalSeq,
+    pub to: JournalSeq,
+    pub intents: Vec<TailIntent>,
+    pub receipts: Vec<TailReceipt>,
 }
 
 #[derive(Clone, Debug)]
@@ -213,6 +240,10 @@ impl<S: Store + 'static> KernelBuilder<S> {
         let loaded = ManifestLoader::load_from_path(&*self.store, path)?;
         Kernel::from_loaded_manifest_with_config(self.store, loaded, self.journal, self.config)
     }
+
+    pub fn from_loaded_manifest(self, loaded: LoadedManifest) -> Result<Kernel<S>, KernelError> {
+        Kernel::from_loaded_manifest_with_config(self.store, loaded, self.journal, self.config)
+    }
 }
 
 impl<S: Store + 'static> Kernel<S> {
@@ -297,6 +328,10 @@ impl<S: Store + 'static> Kernel<S> {
             None => Box::new(AllowAllPolicy),
         };
 
+        // Persist the loaded manifest + defs into the store so governance/patch doc
+        // compilation can resolve the base manifest hash from CAS.
+        persist_loaded_manifest(store.as_ref(), &loaded)?;
+
         let mut kernel = Self {
             store: store.clone(),
             manifest: loaded.manifest.clone(),
@@ -334,6 +369,7 @@ impl<S: Store + 'static> Kernel<S> {
             secret_resolver: secret_resolver.clone(),
             allow_placeholder_secrets: config.allow_placeholder_secrets,
             secrets: loaded.secrets,
+            last_snapshot_height: None,
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
@@ -449,6 +485,10 @@ impl<S: Store + 'static> Kernel<S> {
         self.effect_manager.drain()
     }
 
+    pub fn restore_effect_queue(&mut self, intents: Vec<aos_effects::EffectIntent>) {
+        self.effect_manager.restore_queue(intents);
+    }
+
     pub fn create_snapshot(&mut self) -> Result<(), KernelError> {
         self.tick_until_idle()?;
         if !self.scheduler.is_empty() {
@@ -516,6 +556,7 @@ impl<S: Store + 'static> Kernel<S> {
             snapshot_ref: hash.to_hex(),
             height,
         }))?;
+        self.last_snapshot_height = Some(height);
         Ok(())
     }
 
@@ -537,6 +578,7 @@ impl<S: Store + 'static> Kernel<S> {
         }
         if let Some(snapshot) = latest_snapshot {
             resume_seq = Some(snapshot.height);
+            self.last_snapshot_height = Some(snapshot.height);
             self.load_snapshot(&snapshot)?;
         }
         self.suppress_journal = true;
@@ -594,6 +636,7 @@ impl<S: Store + 'static> Kernel<S> {
         let bytes = self.store.get_blob(hash)?;
         let snapshot: KernelSnapshot = serde_cbor::from_slice(&bytes)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
+        self.last_snapshot_height = Some(record.height);
         self.apply_snapshot(snapshot)
     }
 
@@ -662,6 +705,11 @@ impl<S: Store + 'static> Kernel<S> {
         self.push_plan_result_entry(PlanResultEntry::from_record(record));
     }
 
+    /// Access underlying store (Arc clone).
+    pub fn store(&self) -> Arc<S> {
+        self.store.clone()
+    }
+
     fn restore_effect_intent(&mut self, record: EffectIntentRecord) -> Result<(), KernelError> {
         let effect_kind = record.kind.clone();
         let params_cbor = record.params_cbor.clone();
@@ -716,11 +764,86 @@ impl<S: Store + 'static> Kernel<S> {
         self.reducer_state.get(reducer)
     }
 
+    pub fn heights(&self) -> KernelHeights {
+        KernelHeights {
+            snapshot: self.last_snapshot_height,
+            head: self.journal.next_seq(),
+        }
+    }
+
+    pub fn journal_head(&self) -> JournalSeq {
+        self.journal.next_seq()
+    }
+
+    pub fn queued_effects_snapshot(&self) -> Vec<EffectIntentSnapshot> {
+        self.effect_manager
+            .queued()
+            .iter()
+            .map(EffectIntentSnapshot::from_intent)
+            .collect()
+    }
+
+    pub fn pending_reducer_receipts_snapshot(&self) -> Vec<ReducerReceiptSnapshot> {
+        self.pending_reducer_receipts
+            .iter()
+            .map(|(hash, ctx)| ReducerReceiptSnapshot::from_context(*hash, ctx))
+            .collect()
+    }
+
     pub fn pending_plan_receipts(&self) -> Vec<(u64, [u8; 32])> {
         self.pending_receipts
             .iter()
             .map(|(hash, plan_id)| (*plan_id, *hash))
             .collect()
+    }
+
+    pub fn tail_scan_after(&self, height: JournalSeq) -> Result<TailScan, KernelError> {
+        let head = self.journal.next_seq();
+        let from_seq = if self.last_snapshot_height.is_none() && height == 0 {
+            0
+        } else {
+            height.saturating_add(1)
+        };
+        if from_seq >= head {
+            return Ok(TailScan {
+                from: height,
+                to: head,
+                intents: Vec::new(),
+                receipts: Vec::new(),
+            });
+        }
+
+        let entries = self.journal.load_from(from_seq)?;
+        let mut scan = TailScan {
+            from: height,
+            to: head,
+            intents: Vec::new(),
+            receipts: Vec::new(),
+        };
+
+        for entry in entries {
+            match entry.kind {
+                JournalKind::EffectIntent => {
+                    let record: EffectIntentRecord = serde_cbor::from_slice(&entry.payload)
+                        .map_err(|err| KernelError::Journal(err.to_string()))?;
+                    scan.intents.push(TailIntent {
+                        seq: entry.seq,
+                        record,
+                    });
+                }
+                JournalKind::EffectReceipt => {
+                    let record: EffectReceiptRecord = serde_cbor::from_slice(&entry.payload)
+                        .map_err(|err| KernelError::Journal(err.to_string()))?;
+                    scan.receipts.push(TailReceipt {
+                        seq: entry.seq,
+                        record,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        Ok(scan)
     }
 
     pub fn has_plan_instance(&self, id: u64) -> bool {
@@ -1384,7 +1507,7 @@ fn encode_correlation_bytes(value: &ExprValue) -> Vec<u8> {
     }
 }
 
-fn canonicalize_patch<S: Store>(
+pub fn canonicalize_patch<S: Store>(
     store: &S,
     patch: ManifestPatch,
 ) -> Result<ManifestPatch, KernelError> {
@@ -1532,10 +1655,15 @@ fn diff_named_refs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::mem::MemJournal;
+    use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
     use aos_air_types::{HashRef, SecretDecl};
     use aos_store::MemStore;
     use aos_wasm_abi::ReducerEffect;
+    use serde_cbor::ser::to_vec;
+    use std::fs::File;
+    use std::io::Write;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     fn named_ref(name: &str, hash: &str) -> NamedRef {
         NamedRef {
@@ -1564,6 +1692,12 @@ mod tests {
             routing: None,
             triggers: vec![],
         }
+    }
+
+    fn write_manifest(path: &std::path::Path, manifest: &Manifest) {
+        let bytes = to_vec(manifest).expect("serialize manifest");
+        let mut file = File::create(path).expect("create manifest file");
+        file.write_all(&bytes).expect("write manifest");
     }
 
     #[test]
@@ -1665,6 +1799,59 @@ mod tests {
 
         assert!(matches!(result, Err(KernelError::SecretResolverMissing)));
     }
+
+    #[test]
+    fn tail_scan_returns_entries_after_height() {
+        let tmp = TempDir::new().unwrap();
+        let manifest_path = tmp.path().join("manifest.cbor");
+        write_manifest(&manifest_path, &empty_manifest());
+
+        let store = Arc::new(MemStore::new());
+        let mut kernel = KernelBuilder::new(store)
+            .from_manifest_path(&manifest_path)
+            .expect("kernel");
+
+        let intent = EffectIntentRecord {
+            intent_hash: [1u8; 32],
+            kind: "http.request".into(),
+            cap_name: "cap/http@1".into(),
+            params_cbor: vec![1],
+            idempotency_key: [2u8; 32],
+            origin: IntentOriginRecord::Reducer {
+                name: "example/Reducer@1".into(),
+            },
+        };
+        let intent_bytes = serde_cbor::to_vec(&intent).unwrap();
+        kernel
+            .journal
+            .append(JournalEntry::new(JournalKind::EffectIntent, &intent_bytes))
+            .unwrap();
+
+        let receipt = EffectReceiptRecord {
+            intent_hash: [1u8; 32],
+            adapter_id: "stub.http".into(),
+            status: aos_effects::ReceiptStatus::Ok,
+            payload_cbor: vec![],
+            cost_cents: None,
+            signature: vec![],
+        };
+        let receipt_bytes = serde_cbor::to_vec(&receipt).unwrap();
+        kernel
+            .journal
+            .append(JournalEntry::new(
+                JournalKind::EffectReceipt,
+                &receipt_bytes,
+            ))
+            .unwrap();
+
+        let scan = kernel.tail_scan_after(0).expect("tail scan");
+        assert_eq!(scan.intents.len(), 1);
+        assert_eq!(scan.receipts.len(), 1);
+        assert_eq!(scan.intents[0].seq, 0);
+        assert_eq!(scan.receipts[0].seq, 1);
+        assert_eq!(scan.intents[0].record.intent_hash, [1u8; 32]);
+        assert_eq!(scan.receipts[0].record.intent_hash, [1u8; 32]);
+    }
 }
 
 fn format_intent_hash(hash: &[u8; 32]) -> String {
@@ -1763,5 +1950,31 @@ fn ensure_module_capabilities(
             }
         }
     }
+    Ok(())
+}
+
+fn persist_loaded_manifest<S: Store>(
+    store: &S,
+    loaded: &LoadedManifest,
+) -> Result<(), KernelError> {
+    for schema in loaded.schemas.values() {
+        store.put_node(&AirNode::Defschema(schema.clone()))?;
+    }
+    for module in loaded.modules.values() {
+        store.put_node(&AirNode::Defmodule(module.clone()))?;
+    }
+    for plan in loaded.plans.values() {
+        store.put_node(&AirNode::Defplan(plan.clone()))?;
+    }
+    for cap in loaded.caps.values() {
+        store.put_node(&AirNode::Defcap(cap.clone()))?;
+    }
+    for policy in loaded.policies.values() {
+        store.put_node(&AirNode::Defpolicy(policy.clone()))?;
+    }
+    for effect in loaded.effects.values() {
+        store.put_node(&AirNode::Defeffect(effect.clone()))?;
+    }
+    store.put_node(&AirNode::Manifest(loaded.manifest.clone()))?;
     Ok(())
 }

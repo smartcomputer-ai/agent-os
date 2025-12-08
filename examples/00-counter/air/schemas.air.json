@@ -1,0 +1,37 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/CounterPc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Counting": { "unit": {} },
+        "Done": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/CounterState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/CounterPc@1" },
+        "remaining": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/CounterEvent@1",
+    "type": {
+      "variant": {
+        "Start": {
+          "record": {
+            "target": { "nat": {} }
+          }
+        },
+        "Tick": { "unit": {} }
+      }
+    }
+  }
+]

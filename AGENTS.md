@@ -74,7 +74,7 @@ Crates keep deterministic core small and effectful code at the edges:
 - `aos-wasm` — Deterministic Wasmtime wrapper for reducers.
 - `aos-wasm-sdk` — Reducer helper library for `wasm32-unknown-unknown`.
 - `aos-wasm-build` — Deterministic reducer compiler + cache.
-- `aos-testkit` — In-memory store/adapters, deterministic clock/RNG, replay + shadow harness.
+- `aos-host` — WorldHost runtime + TestHost test harness + fixtures (with `test-fixtures` feature).
 - `aos-examples` — CLI runners for numbered demos in `examples/`.
 
 Planned adapters: `aos-adapter-http`, `aos-adapter-llm`, `aos-adapter-fs`, `aos-adapter-timer`.
@@ -82,9 +82,9 @@ Planned adapters: `aos-adapter-http`, `aos-adapter-llm`, `aos-adapter-fs`, `aos-
 ## Test Strategy (Concise, Deterministic)
 
 - Unit tests live next to code: place `mod tests` at the bottom of the same file with `#[cfg(test)]`. Keep them short, one behavior per test.
-- Integration tests go under `tests/` when they cross crate boundaries, hit I/O, spawn the kernel stepper, or involve adapters. Use `aos-testkit` fixtures.
+- Integration tests go under `tests/` when they cross crate boundaries, hit I/O, spawn the kernel stepper, or involve adapters. Use `aos-host` fixtures (enable `test-fixtures` feature).
 - Naming: use `function_under_test_condition_expected()` style; structure as arrange/act/assert. Prefer explicit inputs over shared mutable fixtures.
-- Determinism: no wall-clock or randomness in tests. If needed, use seeded RNG and deterministic clock from `aos-testkit`.
+- Determinism: no wall-clock or randomness in tests. If needed, use seeded RNG and deterministic clock from `aos-host` fixtures.
 - Errors: assert on error kinds/types (e.g., custom errors with `thiserror`) instead of string matching. Prefer `matches!`/`downcast_ref` over brittle text.
 - Parallel-safe: tests run in parallel by default. Avoid global state and temp dirs without unique prefixes. Only serialize when necessary.
 - Property tests (optional): add a small number of targeted property tests (e.g., canonical encoding invariants). Gate heavier fuzzing behind a feature.
@@ -92,6 +92,7 @@ Planned adapters: `aos-adapter-http`, `aos-adapter-llm`, `aos-adapter-fs`, `aos-
 - Snapshots/"goldens": for canonical CBOR and journals, store fixtures under `tests/data/`. Regenerate consciously; diff byte-for-byte to protect determinism.
 - Replay-or-die: for kernel/plan tests, run once to produce a journal, then replay from genesis and assert byte-identical snapshots.
 - Async tests: if needed, use `#[tokio::test(flavor = "current_thread")]` to keep scheduling deterministic.
+- `aos-host` note: integration tests expect fixtures; run with `--features test-fixtures` when invoking `cargo test -p aos-host`.
 
 ## Examples Ladder (index)
 - See `examples/README.md` for the numbered demos.

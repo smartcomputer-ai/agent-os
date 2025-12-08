@@ -15,6 +15,7 @@ pub mod scheduler;
 pub mod secret;
 pub mod shadow;
 pub mod snapshot;
+pub mod patch_doc;
 pub mod world;
 
 pub use effects::{EffectManager, EffectQueue};
@@ -27,4 +28,7 @@ pub use secret::{
     SecretResolverError, SharedSecretResolver,
 };
 pub use shadow::{ShadowConfig, ShadowExecutor, ShadowSummary};
-pub use world::{Kernel, KernelBuilder, KernelConfig, PlanResultEntry};
+pub use world::{
+    Kernel, KernelBuilder, KernelConfig, KernelHeights, PlanResultEntry, TailIntent, TailReceipt,
+    TailScan,
+};

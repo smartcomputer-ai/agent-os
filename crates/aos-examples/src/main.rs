@@ -1,5 +1,14 @@
-mod examples;
-mod support;
+mod aggregator;
+mod blob_echo;
+mod chain_comp;
+mod counter;
+mod fetch_notify;
+mod hello_timer;
+mod llm_summarizer;
+mod example_host;
+mod retry_backoff;
+mod safe_upgrade;
+mod util;
 
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
@@ -62,7 +71,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "CounterSM",
         summary: "Reducer typestate without effects",
         dir: "examples/00-counter",
-        runner: examples::counter::run,
+        runner: counter::run,
     },
     ExampleMeta {
         number: "01",
@@ -70,7 +79,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Hello Timer",
         summary: "Reducer micro-effect timer demo",
         dir: "examples/01-hello-timer",
-        runner: examples::hello_timer::run,
+        runner: hello_timer::run,
     },
     ExampleMeta {
         number: "02",
@@ -78,7 +87,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Blob Echo",
         summary: "Reducer blob.put/get demo",
         dir: "examples/02-blob-echo",
-        runner: examples::blob_echo::run,
+        runner: blob_echo::run,
     },
     ExampleMeta {
         number: "03",
@@ -86,7 +95,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Fetch & Notify",
         summary: "Plan-triggered HTTP orchestration",
         dir: "examples/03-fetch-notify",
-        runner: examples::fetch_notify::run,
+        runner: fetch_notify::run,
     },
     ExampleMeta {
         number: "04",
@@ -94,7 +103,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Aggregator",
         summary: "Fan-out plan with http receipts",
         dir: "examples/04-aggregator",
-        runner: examples::aggregator::run,
+        runner: aggregator::run,
     },
     ExampleMeta {
         number: "05",
@@ -102,7 +111,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Chain + Compensation",
         summary: "Multi-plan saga w/ refund path",
         dir: "examples/05-chain-comp",
-        runner: examples::chain_comp::run,
+        runner: chain_comp::run,
     },
     ExampleMeta {
         number: "06",
@@ -110,7 +119,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Safe Upgrade",
         summary: "Governance shadow/apply demo",
         dir: "examples/06-safe-upgrade",
-        runner: examples::safe_upgrade::run,
+        runner: safe_upgrade::run,
     },
     ExampleMeta {
         number: "07",
@@ -118,7 +127,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "LLM Summarizer",
         summary: "HTTP + LLM with mocked receipt",
         dir: "examples/07-llm-summarizer",
-        runner: examples::llm_summarizer::run,
+        runner: llm_summarizer::run,
     },
     ExampleMeta {
         number: "08",
@@ -126,7 +135,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Retry Backoff",
         summary: "Reducer-driven retries w/ timer.set",
         dir: "examples/08-retry-backoff",
-        runner: examples::retry_backoff::run,
+        runner: retry_backoff::run,
     },
 ];
 
@@ -152,7 +161,7 @@ fn init_logging() {
 
 fn run_cli() -> Result<()> {
     let cli = Cli::parse();
-    crate::support::util::set_force_build(cli.force_build);
+    util::set_force_build(cli.force_build);
     match cli.command {
         Some(Commands::Counter) => run_single("counter"),
         Some(Commands::HelloTimer) => run_single("hello-timer"),
