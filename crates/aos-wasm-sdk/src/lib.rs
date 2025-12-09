@@ -62,6 +62,28 @@ impl<S, A> ReducerCtx<S, A> {
         self.key.as_deref()
     }
 
+    /// Return the key and fail deterministically if the reducer is keyed but no key was supplied.
+    pub fn key_required(&self) -> Result<&[u8], ReduceError> {
+        self.key
+            .as_deref()
+            .ok_or(ReduceError::new("missing reducer key"))
+    }
+
+    /// Return the key interpreted as UTF-8 text (fails if absent or invalid UTF-8).
+    pub fn key_text(&self) -> Result<&str, ReduceError> {
+        let bytes = self.key_required()?;
+        core::str::from_utf8(bytes).map_err(|_| ReduceError::new("key not utf8"))
+    }
+
+    /// Enforce that the provided bytes exactly match the reducer key (when present).
+    pub fn ensure_key_eq(&self, expected: &[u8]) -> Result<(), ReduceError> {
+        match &self.key {
+            Some(actual) if actual.as_slice() == expected => Ok(()),
+            Some(_) => Err(ReduceError::new("key mismatch")),
+            None => Err(ReduceError::new("missing reducer key")),
+        }
+    }
+
     /// Name of the reducer type (for diagnostics).
     pub fn reducer_name(&self) -> &'static str {
         self.reducer_name

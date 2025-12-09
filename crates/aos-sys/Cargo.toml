@@ -1,0 +1,20 @@
+[package]
+name = "aos-sys"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "object_catalog"
+path = "src/bin/object_catalog.rs"
+
+[[bin]]
+name = "agent_registry"
+path = "src/bin/agent_registry.rs"
+
+[dependencies]
+aos-wasm-sdk = { path = "../aos-wasm-sdk" }
+serde = { version = "1", features = ["derive"] }
