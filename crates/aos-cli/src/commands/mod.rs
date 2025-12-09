@@ -1,5 +1,6 @@
 //! CLI command handlers.
 
+pub mod cells;
 pub mod event;
 pub mod gov;
 mod gov_control;

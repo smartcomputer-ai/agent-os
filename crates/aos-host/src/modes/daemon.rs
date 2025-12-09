@@ -19,6 +19,7 @@ use tokio::task::JoinHandle;
 use crate::adapters::timer::TimerScheduler;
 use crate::error::HostError;
 use crate::host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};
+use aos_kernel::cell_index::CellMeta;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::{PatchDocument, compile_patch_document};
@@ -62,6 +63,10 @@ pub enum ControlMsg {
         reducer: String,
         key: Option<Vec<u8>>,
         resp: oneshot::Sender<Result<Option<Vec<u8>>, HostError>>,
+    },
+    ListCells {
+        reducer: String,
+        resp: oneshot::Sender<Result<Vec<CellMeta>, HostError>>,
     },
     Propose {
         patch: GovernancePatchInput,
@@ -307,6 +312,10 @@ impl<S: Store + 'static> WorldDaemon<S> {
             ControlMsg::QueryState { reducer, key, resp } => {
                 let result = self.host.state(&reducer, key.as_deref());
                 let _ = resp.send(Ok(result));
+            }
+            ControlMsg::ListCells { reducer, resp } => {
+                let res = self.host.list_cells(&reducer);
+                let _ = resp.send(res);
             }
             ControlMsg::JournalHead { resp } => {
                 let heights = self.host.heights();

@@ -1,0 +1,142 @@
+//! `aos world cells` command: list keyed reducer cells via CellIndex.
+
+use anyhow::Result;
+use aos_cbor::Hash;
+use aos_kernel::cell_index::CellMeta;
+use base64::Engine;
+use clap::Args;
+use serde::Serialize;
+
+use crate::opts::{WorldOpts, resolve_dirs};
+use crate::util::load_world_env;
+
+use super::{create_host, prepare_world, try_control_client};
+
+#[derive(Args, Debug)]
+pub struct CellsArgs {
+    /// Reducer name (keyed)
+    pub reducer_name: String,
+
+    /// Output raw JSON without formatting
+    #[arg(long)]
+    pub raw: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct CellEntry {
+    key_b64: String,
+    key_display: String,
+    state_hash_hex: String,
+    size: u64,
+    last_active_ns: u64,
+}
+
+pub async fn cmd_cells(opts: &WorldOpts, args: &CellsArgs) -> Result<()> {
+    let dirs = resolve_dirs(opts)?;
+
+    let cells = if let Some(mut client) = try_control_client(&dirs).await {
+        let resp = client
+            .list_cells("cli-list-cells", &args.reducer_name)
+            .await?;
+        if !resp.ok {
+            anyhow::bail!("list-cells failed: {:?}", resp.error);
+        }
+        let Some(result) = resp.result else {
+            println!("(no cells for reducer '{}')", args.reducer_name);
+            return Ok(());
+        };
+        let list = result
+            .get("cells")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        list.into_iter()
+            .map(|item| json_to_entry(item))
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        // Batch mode: load world and inspect store directly via CellIndex.
+        load_world_env(&dirs.world)?;
+        let (store, loaded) = prepare_world(&dirs, opts)?;
+        let host = create_host(store, loaded, &dirs, opts)?;
+        let metas = host.list_cells(&args.reducer_name)?;
+        metas.into_iter().map(meta_to_entry).collect()
+    };
+
+    render_cells(&cells, args.raw, &args.reducer_name);
+    Ok(())
+}
+
+fn json_to_entry(val: serde_json::Value) -> Result<CellEntry> {
+    let key_b64 = val
+        .get("key_b64")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let key_bytes = base64::engine::general_purpose::STANDARD
+        .decode(&key_b64)
+        .unwrap_or_default();
+    let key_display = display_key(&key_bytes);
+
+    let state_hash_hex = val
+        .get("state_hash_hex")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let size = val.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+    let last_active_ns = val
+        .get("last_active_ns")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    Ok(CellEntry {
+        key_b64,
+        key_display,
+        state_hash_hex,
+        size,
+        last_active_ns,
+    })
+}
+
+fn meta_to_entry(meta: CellMeta) -> CellEntry {
+    let key_b64 = base64::engine::general_purpose::STANDARD.encode(&meta.key_bytes);
+    let key_display = display_key(&meta.key_bytes);
+    let state_hash_hex = Hash::from_bytes(&meta.state_hash)
+        .map(|h| h.to_hex())
+        .unwrap_or_else(|_| hex::encode(meta.state_hash));
+
+    CellEntry {
+        key_b64,
+        key_display,
+        state_hash_hex,
+        size: meta.size,
+        last_active_ns: meta.last_active_ns,
+    }
+}
+
+fn display_key(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => format!("0x{}", hex::encode(bytes)),
+    }
+}
+
+fn render_cells(cells: &[CellEntry], raw: bool, reducer: &str) {
+    if cells.is_empty() {
+        println!("(no cells for reducer '{}')", reducer);
+        return;
+    }
+
+    if raw {
+        let json = serde_json::to_string_pretty(cells).unwrap();
+        println!("{}", json);
+        return;
+    }
+
+    println!("Cells for '{}':", reducer);
+    for c in cells {
+        println!(
+            "- key: {} (b64: {}), state: {}, size: {} bytes, last_active_ns: {}",
+            c.key_display, c.key_b64, c.state_hash_hex, c.size, c.last_active_ns
+        );
+    }
+}

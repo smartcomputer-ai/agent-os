@@ -6,6 +6,7 @@ mod util;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 
+use commands::cells::CellsArgs;
 use commands::event::EventArgs;
 use commands::gov::GovArgs;
 use commands::init::InitArgs;
@@ -54,6 +55,9 @@ enum WorldSubcommand {
     /// Query reducer state
     State(StateArgs),
 
+    /// List cells for a keyed reducer
+    Cells(CellsArgs),
+
     /// Force a snapshot
     Snapshot,
 
@@ -90,6 +94,7 @@ async fn main() -> Result<()> {
                 WorldSubcommand::Run(args) => commands::run::cmd_run(opts, &args).await,
                 WorldSubcommand::Event(args) => commands::event::cmd_event(opts, &args).await,
                 WorldSubcommand::State(args) => commands::state::cmd_state(opts, &args).await,
+                WorldSubcommand::Cells(args) => commands::cells::cmd_cells(opts, &args).await,
                 WorldSubcommand::Snapshot => commands::snapshot::cmd_snapshot(opts).await,
                 WorldSubcommand::Replay(args) => commands::replay::cmd_replay(opts, &args).await,
                 WorldSubcommand::Head => commands::head::cmd_head(opts).await,

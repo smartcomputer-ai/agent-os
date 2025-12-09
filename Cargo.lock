@@ -153,6 +153,7 @@ dependencies = [
  "dotenvy",
  "hex",
  "jsonschema",
+ "serde",
  "serde_cbor",
  "serde_json",
  "tempfile",

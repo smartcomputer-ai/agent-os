@@ -7,6 +7,7 @@ use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::{
     Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent, TailScan,
+    cell_index::CellMeta,
 };
 use aos_store::{FsStore, Store};
 
@@ -273,6 +274,11 @@ impl<S: Store + 'static> WorldHost<S> {
         self.kernel
             .reducer_state_bytes(reducer, key)
             .unwrap_or(None)
+    }
+
+    /// List all cells for a keyed reducer. Returns empty if reducer is not keyed or has no cells.
+    pub fn list_cells(&self, reducer: &str) -> Result<Vec<CellMeta>, HostError> {
+        self.kernel.list_cells(reducer).map_err(HostError::from)
     }
 
     pub fn snapshot(&mut self) -> Result<(), HostError> {

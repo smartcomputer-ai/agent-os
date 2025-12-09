@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use aos_cbor::Hash;
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::KernelHeights;
 use aos_kernel::governance::ManifestPatch;
@@ -279,6 +280,38 @@ async fn handle_request(
                     })),
                     None => Ok(serde_json::json!({ "state_b64": null })),
                 }
+            }
+            "list-cells" => {
+                let reducer = req
+                    .payload
+                    .get("reducer")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::ListCells { reducer, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let metas = inner.map_err(ControlError::host)?;
+                let cells: Vec<serde_json::Value> = metas
+                    .into_iter()
+                    .map(|m| {
+                        let key_b64 = BASE64_STANDARD.encode(&m.key_bytes);
+                        let state_hash = Hash::from_bytes(&m.state_hash)
+                            .map(|h| h.to_hex())
+                            .unwrap_or_else(|_| hex::encode(m.state_hash));
+                        serde_json::json!({
+                            "key_b64": key_b64,
+                            "state_hash_hex": state_hash,
+                            "size": m.size,
+                            "last_active_ns": m.last_active_ns,
+                        })
+                    })
+                    .collect();
+                Ok(serde_json::json!({ "cells": cells }))
             }
             "snapshot" => {
                 let (tx, rx) = oneshot::channel();
@@ -589,11 +622,31 @@ impl ControlClient {
         &mut self,
         id: impl Into<String>,
         reducer: &str,
+        key: Option<&[u8]>,
     ) -> std::io::Result<ResponseEnvelope> {
+        let mut payload = serde_json::json!({ "reducer": reducer });
+        if let Some(key) = key {
+            payload["key_b64"] = serde_json::json!(BASE64_STANDARD.encode(key));
+        }
+
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
             cmd: "query-state".into(),
+            payload,
+        };
+        self.request(&env).await
+    }
+
+    pub async fn list_cells(
+        &mut self,
+        id: impl Into<String>,
+        reducer: &str,
+    ) -> std::io::Result<ResponseEnvelope> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "list-cells".into(),
             payload: serde_json::json!({ "reducer": reducer }),
         };
         self.request(&env).await

@@ -1138,6 +1138,21 @@ impl<S: Store + 'static> Kernel<S> {
         }
     }
 
+    /// List all cells for a keyed reducer using the persisted CellIndex.
+    ///
+    /// Returns an empty Vec if the reducer is not keyed or has no cells yet.
+    pub fn list_cells(&self, reducer: &str) -> Result<Vec<CellMeta>, KernelError> {
+        let Some(root) = self.reducer_index_roots.get(reducer) else {
+            return Ok(Vec::new());
+        };
+        let index = CellIndex::new(self.store.as_ref());
+        let mut metas = Vec::new();
+        for meta in index.iter(*root) {
+            metas.push(meta?);
+        }
+        Ok(metas)
+    }
+
     pub fn heights(&self) -> KernelHeights {
         KernelHeights {
             snapshot: self.last_snapshot_height,

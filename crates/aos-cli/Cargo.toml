@@ -23,6 +23,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 dotenvy = "0.15"
 jsonschema = "0.17"
 aos-cbor = { path = "../aos-cbor" }
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 anyhow = "1"

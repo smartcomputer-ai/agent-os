@@ -28,8 +28,12 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
 
     // Try daemon first
+    let key_bytes_opt = args.key.as_ref().map(|k| k.as_bytes());
+
     if let Some(mut client) = try_control_client(&dirs).await {
-        let resp = client.query_state("cli-state", &args.reducer_name).await?;
+        let resp = client
+            .query_state("cli-state", &args.reducer_name, key_bytes_opt)
+            .await?;
         if !resp.ok {
             anyhow::bail!("query-state failed: {:?}", resp.error);
         }
@@ -56,8 +60,7 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
     let host = create_host(store, loaded, &dirs, opts)?;
 
     // Query state directly from host
-    let key_bytes = args.key.as_ref().map(|k| k.as_bytes());
-    if let Some(state) = host.state(&args.reducer_name, key_bytes) {
+    if let Some(state) = host.state(&args.reducer_name, key_bytes_opt) {
         print_state(&state, args.raw)?;
     } else {
         println!("(no state for reducer '{}')", args.reducer_name);
