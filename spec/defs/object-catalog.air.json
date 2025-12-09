@@ -1,0 +1,26 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "sys/ObjectCatalog@1",
+    "module_kind": "reducer",
+    "key_schema": "sys/ObjectKey@1",
+    "state_schema": "sys/ObjectVersions@1",
+    "events": ["sys/ObjectRegistered@1"],
+    "effects": [],
+    "$comment": "Keyed reducer for versioned object catalog. Key = object name (text). Access control: Plans that raise ObjectRegistered events should have catalog.write cap bound via policy."
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/catalog.write@1",
+    "cap_type": "catalog.write",
+    "schema": {
+      "record": {
+        "prefixes": {
+          "set": { "text": {} },
+          "$comment": "Allowed name prefixes (e.g., 'agents/self/'). Empty set = all names."
+        }
+      }
+    },
+    "$comment": "Capability for writing objects to the catalog. Bound in manifest capability_grants; plans raising ObjectRegistered must hold a grant. Enforced by policy rule checking event schema + cap."
+  }
+]

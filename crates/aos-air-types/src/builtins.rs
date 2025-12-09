@@ -105,8 +105,43 @@ mod tests {
             .iter()
             .map(|s| s.schema.name.as_str())
             .collect();
+        // Timer/Blob
+        assert!(names.contains(&"sys/TimerSetParams@1"));
+        assert!(names.contains(&"sys/TimerSetReceipt@1"));
         assert!(names.contains(&"sys/TimerFired@1"));
+        assert!(names.contains(&"sys/BlobPutParams@1"));
+        assert!(names.contains(&"sys/BlobPutReceipt@1"));
         assert!(names.contains(&"sys/BlobPutResult@1"));
+        assert!(names.contains(&"sys/BlobGetParams@1"));
+        assert!(names.contains(&"sys/BlobGetReceipt@1"));
+        assert!(names.contains(&"sys/BlobGetResult@1"));
+        // HTTP/LLM
+        assert!(names.contains(&"sys/HttpRequestParams@1"));
+        assert!(names.contains(&"sys/HttpRequestReceipt@1"));
+        assert!(names.contains(&"sys/LlmGenerateParams@1"));
+        assert!(names.contains(&"sys/LlmGenerateReceipt@1"));
+        // Secrets
+        assert!(names.contains(&"sys/SecretRef@1"));
+        assert!(names.contains(&"sys/TextOrSecretRef@1"));
+        assert!(names.contains(&"sys/BytesOrSecretRef@1"));
+        assert!(names.contains(&"sys/VaultPutParams@1"));
+        assert!(names.contains(&"sys/VaultPutReceipt@1"));
+        assert!(names.contains(&"sys/VaultRotateParams@1"));
+        assert!(names.contains(&"sys/VaultRotateReceipt@1"));
+        // Governance
+        assert!(names.contains(&"sys/GovProposeParams@1"));
+        assert!(names.contains(&"sys/GovProposeReceipt@1"));
+        assert!(names.contains(&"sys/GovShadowParams@1"));
+        assert!(names.contains(&"sys/GovShadowReceipt@1"));
+        assert!(names.contains(&"sys/GovApproveParams@1"));
+        assert!(names.contains(&"sys/GovApproveReceipt@1"));
+        assert!(names.contains(&"sys/GovApplyParams@1"));
+        assert!(names.contains(&"sys/GovApplyReceipt@1"));
+        // ObjectCatalog
+        assert!(names.contains(&"sys/ObjectKey@1"));
+        assert!(names.contains(&"sys/ObjectMeta@1"));
+        assert!(names.contains(&"sys/ObjectVersions@1"));
+        assert!(names.contains(&"sys/ObjectRegistered@1"));
     }
 
     #[test]

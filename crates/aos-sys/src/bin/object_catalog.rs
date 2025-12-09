@@ -1,10 +1,17 @@
-#![crate_type = "cdylib"]
+//! ObjectCatalog reducer (`sys/ObjectCatalog@1`).
+//!
+//! A keyed reducer that maintains a versioned catalog of named objects.
+//! Each object name maps to an append-only history of versions.
 
-use std::string::String;
-use aos_sys::{ObjectMeta, ObjectVersions, Version};
+#![allow(improper_ctypes_definitions)]
+#![no_std]
+
+extern crate alloc;
+
+use aos_sys::{ObjectRegistered, ObjectVersions, Version};
 use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, Value};
-use serde::{Deserialize, Serialize};
 
+// Required for WASM binary entry point
 #[cfg(target_arch = "wasm32")]
 fn main() {}
 
@@ -13,14 +20,14 @@ fn main() {}
 
 aos_reducer!(ObjectCatalog);
 
-/// ObjectCatalog reducer — P1 draft per p3-query-catalog.md.
+/// ObjectCatalog reducer — keyed by object name.
+///
+/// Invariants:
+/// - Key must equal `meta.name` (enforced via `ensure_key_eq`)
+/// - Versions are append-only; `latest` increments monotonically
+/// - No micro-effects; pure state machine
 #[derive(Default)]
 struct ObjectCatalog;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ObjectRegistered {
-    meta: ObjectMeta,
-}
 
 impl Reducer for ObjectCatalog {
     type State = ObjectVersions;
@@ -32,17 +39,13 @@ impl Reducer for ObjectCatalog {
         event: Self::Event,
         ctx: &mut ReducerCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
-        // Basic key invariant: if keyed, the key must equal meta.name bytes.
+        // Enforce key invariant: ctx.key must equal meta.name bytes
         ctx.ensure_key_eq(event.meta.name.as_bytes())?;
 
-        // Append-only version bump.
+        // Append-only version bump (0 → 1 on first registration)
         let next: Version = ctx.state.latest.saturating_add(1);
         ctx.state.latest = next;
         ctx.state.versions.insert(next, event.meta);
         Ok(())
     }
 }
-
-// Placeholder to quiet unused imports when this bin is built standalone.
-#[allow(dead_code)]
-fn _keep_strings(_: &String) {}
