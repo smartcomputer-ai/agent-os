@@ -17,8 +17,8 @@ use aos_effects::builtins::TimerSetParams;
 #[path = "../src/fixtures/mod.rs"]
 pub mod fixtures;
 
-use fixtures::{START_SCHEMA, TestStore, zero_hash};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use fixtures::{START_SCHEMA, TestStore, zero_hash};
 use indexmap::IndexMap;
 use std::sync::Arc;
 

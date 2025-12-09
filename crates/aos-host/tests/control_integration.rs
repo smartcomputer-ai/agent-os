@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
 use aos_air_types::ReducerAbi;
+use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
 use aos_host::{WorldHost, config::HostConfig};
 use aos_kernel::Kernel;
 use aos_kernel::journal::mem::MemJournal;
@@ -135,9 +135,7 @@ async fn control_channel_round_trip() {
     };
     let resp = client.request(&query_key).await.unwrap();
     assert!(resp.ok);
-    let state_b64 = resp
-        .result
-        .and_then(|v| v.get("state_b64").cloned());
+    let state_b64 = resp.result.and_then(|v| v.get("state_b64").cloned());
     assert!(state_b64.is_none() || state_b64 == Some(serde_json::Value::Null));
 
     // shutdown daemon via control

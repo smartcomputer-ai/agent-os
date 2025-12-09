@@ -729,8 +729,7 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
         if let Some(root) = new_index_root {
-            self.reducer_index_roots
-                .insert(reducer_name.clone(), root);
+            self.reducer_index_roots.insert(reducer_name.clone(), root);
         }
         for event in output.domain_events {
             self.process_domain_event(event)?;
@@ -1156,6 +1155,11 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(EffectIntentSnapshot::from_intent)
             .collect()
+    }
+
+    /// Expose reducer index root hash (if present) for keyed reducers; useful for diagnostics/tests.
+    pub fn reducer_index_root(&self, reducer: &str) -> Option<Hash> {
+        self.reducer_index_roots.get(reducer).copied()
     }
 
     pub fn pending_reducer_receipts_snapshot(&self) -> Vec<ReducerReceiptSnapshot> {
@@ -2481,9 +2485,7 @@ mod tests {
             .unwrap();
         let root3 = *kernel.reducer_index_roots.get(&reducer).unwrap();
         assert_ne!(root2, root3);
-        let meta3 = index
-            .get(root3, Hash::of_bytes(&key).as_bytes())
-            .unwrap();
+        let meta3 = index.get(root3, Hash::of_bytes(&key).as_bytes()).unwrap();
         assert!(meta3.is_none());
     }
 
@@ -2510,10 +2512,7 @@ mod tests {
         let root_before = *kernel.reducer_index_roots.get(&reducer).unwrap();
 
         kernel.create_snapshot().unwrap();
-        let entries = kernel
-            .journal
-            .load_from(0)
-            .expect("load journal entries");
+        let entries = kernel.journal.load_from(0).expect("load journal entries");
 
         // Rehydrate kernel from snapshot + shared store.
         let mut kernel2 = {

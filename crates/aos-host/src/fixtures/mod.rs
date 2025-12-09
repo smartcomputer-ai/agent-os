@@ -8,10 +8,11 @@ use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, Expr, ExprConst, ExprRef,
-    HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef,
-    PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr, TypeRecord, ValueLiteral,
-    ValueRecord, catalog::EffectCatalog,
+    CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, EmptyObject, Expr,
+    ExprConst, ExprRef, HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind,
+    Name, NamedRef, PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr,
+    TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord,
+    catalog::EffectCatalog,
 };
 use aos_kernel::manifest::LoadedManifest;
 use aos_store::{MemStore, Store};
@@ -94,6 +95,42 @@ pub fn zero_hash() -> HashRef {
 pub fn fake_hash(byte: u8) -> HashRef {
     let hex = format!("{:02x}", byte);
     HashRef::new(format!("sha256:{}", hex.repeat(32))).unwrap()
+}
+
+/// Convenience: text primitive TypeExpr.
+pub fn text_type() -> TypeExpr {
+    TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+        text: EmptyObject::default(),
+    }))
+}
+
+/// Convenience: defschema for a text record with explicit fields.
+pub fn def_text_record_schema(name: &str, fields: Vec<(&str, TypeExpr)>) -> DefSchema {
+    DefSchema {
+        name: name.into(),
+        ty: TypeExpr::Record(TypeRecord {
+            record: IndexMap::from_iter(fields.into_iter().map(|(k, v)| (k.to_string(), v))),
+        }),
+    }
+}
+
+/// Insert schemas into LoadedManifest (both map and manifest.schemas NamedRefs).
+pub fn insert_test_schemas(loaded: &mut LoadedManifest, schemas: Vec<DefSchema>) {
+    for schema in schemas {
+        let name = schema.name.clone();
+        loaded.schemas.insert(name.clone(), schema);
+        if !loaded
+            .manifest
+            .schemas
+            .iter()
+            .any(|existing| existing.name == name)
+        {
+            loaded.manifest.schemas.push(NamedRef {
+                name,
+                hash: zero_hash(),
+            });
+        }
+    }
 }
 
 /// Builds a `LoadedManifest` from already-parsed plan and module definitions.

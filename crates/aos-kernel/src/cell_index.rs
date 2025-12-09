@@ -278,7 +278,12 @@ mod tests {
 
         let (root_after_delete, removed) = index.delete(root, &meta1.key_hash).unwrap();
         assert!(removed);
-        assert!(index.get(root_after_delete, &meta1.key_hash).unwrap().is_none());
+        assert!(
+            index
+                .get(root_after_delete, &meta1.key_hash)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -329,7 +334,10 @@ mod tests {
         let (root_after_delete, removed) = index.delete(root, missing_hash.as_bytes()).unwrap();
         assert!(!removed);
         // root may remain identical; ensure original entry still present
-        let fetched = index.get(root_after_delete, &meta1.key_hash).unwrap().unwrap();
+        let fetched = index
+            .get(root_after_delete, &meta1.key_hash)
+            .unwrap()
+            .unwrap();
         assert_eq!(fetched.key_bytes, b"a");
     }
 }

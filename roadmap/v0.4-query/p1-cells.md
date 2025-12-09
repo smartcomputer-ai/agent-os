@@ -62,14 +62,14 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 - Version pinning
   - Cells inherit the manifest hash at creation time (era). They continue under that era even if the world upgrades; new cells use the new era.
 
-## Storage Layout and Snapshots (current vs planned)
+## Storage Layout and Snapshots (as implemented)
 
 - CAS stays dumb (`hash → bytes`) and has **no names/refs**.  
-- Cell state is stored per key as CAS blobs; we track `{ state_hash, last_active_ns, size }` per cell (and a monolithic hash for non-keyed reducers).  
-- Snapshots embed per-cell state metadata and include **only the cell-index root hash** for each keyed reducer; that root is the ref that GC pins and replay restores.  
-- Planned (not yet implemented): CAS-backed persistent `CellIndex` per keyed reducer (`key_hash → { key_bytes, state_hash, size, last_active_ns }`). Updates create new index nodes and produce a new **root hash**; the kernel/world state stores that root (Git-like refs), never CAS. Lookup = root → index → `state_hash` → `blob.get`; updates write a fresh root.  
-- GC walks from the snapshot-pinned index roots to reach all cell state blobs; no side-channel CAS refs are roots.  
-- The earlier path-based layout (`world/state/reducers/<module_hash>/cells/...`) is a placeholder; current code uses CAS blobs plus in-memory maps while we add the CAS-backed index.
+- Per-key state is stored as CAS blobs; we track `{ state_hash, last_active_ns, size }` per cell (and a monolithic hash for non-keyed reducers).  
+- CAS‑backed persistent `CellIndex` now exists per keyed reducer: `key_hash → { key_bytes, state_hash, size, last_active_ns }`. Updates create new nodes and return a new **root hash**. The kernel/world state stores only that root (Git-like ref), never inside CAS. Lookup = root → index → `state_hash` → `blob.get`; updates write a fresh root.  
+- Snapshots embed the per-reducer **cell_index_root**; replay restores the root and the index is used for keyed loads. Legacy snapshots without a root are upgraded on load by rebuilding an empty index.  
+- GC (future) will walk from snapshot-pinned index roots to reach all cell state blobs; no side-channel CAS refs are roots.  
+- The earlier path-based layout is superseded by CAS blobs + `CellIndex`; no named blobs in CAS.
 
 ## CAS Semantics and Naming (design decision)
 
@@ -90,19 +90,18 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 ## Status & TODO
 
 Done (in codebase)
-- Keyed routing/ABI: manifests must use `key_field` for keyed reducers; plans support `raise_event.key`; triggers can `correlate_by`.
-- Reducer calls carry `cell_mode` and key; per-cell state stored as CAS blobs with hashes; `state=null` deletes the cell.
-- Snapshots include per-cell state + hash + last_active and a slot for index roots.
+- Keyed routing/ABI: manifests use `key_field`; plans support `raise_event.key`; triggers can `correlate_by`.
+- Reducer calls carry `cell_mode` and key; `state=null` deletes the cell.
+- CAS-backed `CellIndex` per keyed reducer, with only the root hash stored in kernel state/snapshots; keyed load/save/delete go through the index.
+- Snapshots capture index roots; replay restores them. Legacy snapshots rebuild an empty index on load.
+- Tests: CellIndex unit coverage; kernel unit tests for root updates, delete, and snapshot restore; integration test `keyed_reducer_integration_flow` (host) exercises routed keyed events, index iteration, snapshot+replay, and state retrieval.
+- CAS naming decision: CAS remains `{hash→bytes}` only; agent-visible names stay in Query Catalog.
 - Scheduler fairness: round-robin between plan and reducer queues.
 
-In progress / planned
-- Implement CAS-backed `CellIndex` per keyed reducer; store only root hash in kernel state/snapshots; use it for keyed load/save/delete and listing.
-- Expose list/get cell helpers for inspect/CLI (via the index).
-- Tests for index round-trip, keyed write/delete updating root, snapshot/restore preserving index root + cells, listing.
-- GC/TTL for cells (planned after index lands).
-
-Consistency note
-- The earlier file-path layout is not implemented; current storage is CAS blobs plus in-memory maps while the CAS-backed index is being added. CAS has no refs; names/refs live in world state, and agent-visible names stay in Query Catalog, not CAS.
+Planned / TODO
+- List/get cell helper surfaces for inspect/CLI built on `CellIndex::iter`.
+- GC/TTL for cells driven from index roots.
+- Observability: richer why-graph views per cell; exports.
 
 ## Plans and Cells
 
