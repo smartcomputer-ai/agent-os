@@ -89,6 +89,7 @@ pub struct Kernel<S: Store> {
     scheduler: Scheduler,
     effect_manager: EffectManager,
     reducer_state: HashMap<Name, ReducerState>,
+    reducer_index_roots: HashMap<Name, Hash>,
     journal: Box<dyn Journal>,
     suppress_journal: bool,
     governance: GovernanceManager,
@@ -386,6 +387,7 @@ impl<S: Store + 'static> Kernel<S> {
                 secret_resolver.clone(),
             ),
             reducer_state: HashMap::new(),
+            reducer_index_roots: HashMap::new(),
             journal,
             suppress_journal: false,
             governance: GovernanceManager::new(),
@@ -705,6 +707,11 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(EffectIntentSnapshot::from_intent)
             .collect();
+        let reducer_index_roots = self
+            .reducer_index_roots
+            .iter()
+            .map(|(name, hash)| (name.clone(), *hash.as_bytes()))
+            .collect();
         let pending_reducer_receipts = self
             .pending_reducer_receipts
             .iter()
@@ -715,7 +722,7 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(|entry| entry.to_snapshot())
             .collect();
-        let snapshot = KernelSnapshot::new(
+        let mut snapshot = KernelSnapshot::new(
             height,
             reducer_state,
             recent_receipts,
@@ -727,6 +734,7 @@ impl<S: Store + 'static> Kernel<S> {
             pending_reducer_receipts,
             plan_results,
         );
+        snapshot.set_reducer_index_roots(reducer_index_roots);
         let bytes = serde_cbor::to_vec(&snapshot)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
         let hash = self.store.put_blob(&bytes)?;
@@ -844,6 +852,11 @@ impl<S: Store + 'static> Kernel<S> {
             }
         }
         self.reducer_state = restored;
+        self.reducer_index_roots = snapshot
+            .reducer_index_roots()
+            .iter()
+            .filter_map(|(name, bytes)| Hash::from_bytes(bytes).ok().map(|h| (name.clone(), h)))
+            .collect();
         let (deque, set) = receipts_to_vecdeque(snapshot.recent_receipts(), RECENT_RECEIPT_CACHE);
         self.recent_receipts = deque;
         self.recent_receipt_index = set;

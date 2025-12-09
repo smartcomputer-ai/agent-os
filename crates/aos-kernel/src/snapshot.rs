@@ -11,6 +11,7 @@ use crate::receipts::ReducerEffectContext;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelSnapshot {
     reducer_state: Vec<ReducerStateEntry>,
+    reducer_index_roots: Vec<(String, [u8; 32])>,
     recent_receipts: Vec<[u8; 32]>,
     plan_instances: Vec<PlanInstanceSnapshot>,
     pending_plan_receipts: Vec<PendingPlanReceiptSnapshot>,
@@ -38,6 +39,7 @@ impl KernelSnapshot {
     ) -> Self {
         Self {
             reducer_state,
+            reducer_index_roots: Vec::new(),
             recent_receipts,
             plan_instances,
             pending_plan_receipts,
@@ -52,6 +54,14 @@ impl KernelSnapshot {
 
     pub fn reducer_state_entries(&self) -> &[ReducerStateEntry] {
         &self.reducer_state
+    }
+
+    pub fn reducer_index_roots(&self) -> &[(String, [u8; 32])] {
+        &self.reducer_index_roots
+    }
+
+    pub fn set_reducer_index_roots(&mut self, roots: Vec<(String, [u8; 32])>) {
+        self.reducer_index_roots = roots;
     }
 
     pub fn recent_receipts(&self) -> &[[u8; 32]] {
