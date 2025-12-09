@@ -5,12 +5,12 @@ use aos_effects::{EffectIntent, EffectReceipt};
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_store::Store;
 use serde::de::DeserializeOwned;
-use serde_json::Value as JsonValue;
 use serde_cbor;
+use serde_json::Value as JsonValue;
 
 use crate::adapters::registry::AdapterRegistry;
-use crate::adapters::traits::AsyncEffectAdapter;
 use crate::adapters::timer::TimerScheduler;
+use crate::adapters::traits::AsyncEffectAdapter;
 use crate::config::HostConfig;
 use crate::error::HostError;
 use crate::host::{CycleOutcome, ExternalEvent, RunMode, WorldHost};
@@ -140,7 +140,11 @@ impl<S: Store + 'static> TestHost<S> {
     pub async fn drain_and_dispatch(&mut self) -> Result<CycleOutcome, HostError> {
         let intents = self.host.kernel_mut().drain_effects();
         let effects_dispatched = intents.len();
-        let receipts = self.host.adapter_registry_mut().execute_batch(intents).await;
+        let receipts = self
+            .host
+            .adapter_registry_mut()
+            .execute_batch(intents)
+            .await;
         let receipts_applied = receipts.len();
         for receipt in receipts {
             self.host.kernel_mut().handle_receipt(receipt)?;

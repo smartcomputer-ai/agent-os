@@ -4,10 +4,10 @@ use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::KernelHeights;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
-use aos_kernel::shadow::ShadowSummary;
 use aos_kernel::patch_doc::PatchDocument;
-use jsonschema::JSONSchema;
+use aos_kernel::shadow::ShadowSummary;
 use base64::prelude::*;
+use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -344,16 +344,21 @@ async fn handle_request(
                     .decode(payload.patch_b64)
                     .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
                 // Try ManifestPatch CBOR first; fallback to PatchDocument JSON (validated).
-                let patch = if let Ok(manifest) = serde_cbor::from_slice::<ManifestPatch>(&patch_bytes) {
-                    crate::modes::daemon::GovernancePatchInput::Manifest(manifest)
-                } else if let Ok(doc_json) = serde_json::from_slice::<serde_json::Value>(&patch_bytes) {
-                    validate_patch_doc(&doc_json)?;
-                    let doc: PatchDocument = serde_json::from_value(doc_json)
-                        .map_err(|e| ControlError::decode(format!("decode patch doc: {e}")))?;
-                    crate::modes::daemon::GovernancePatchInput::PatchDoc(doc)
-                } else {
-                    return Err(ControlError::decode("patch_b64 is neither ManifestPatch CBOR nor PatchDocument JSON"));
-                };
+                let patch =
+                    if let Ok(manifest) = serde_cbor::from_slice::<ManifestPatch>(&patch_bytes) {
+                        crate::modes::daemon::GovernancePatchInput::Manifest(manifest)
+                    } else if let Ok(doc_json) =
+                        serde_json::from_slice::<serde_json::Value>(&patch_bytes)
+                    {
+                        validate_patch_doc(&doc_json)?;
+                        let doc: PatchDocument = serde_json::from_value(doc_json)
+                            .map_err(|e| ControlError::decode(format!("decode patch doc: {e}")))?;
+                        crate::modes::daemon::GovernancePatchInput::PatchDoc(doc)
+                    } else {
+                        return Err(ControlError::decode(
+                            "patch_b64 is neither ManifestPatch CBOR nor PatchDocument JSON",
+                        ));
+                    };
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
                     .send(ControlMsg::Propose {
@@ -509,7 +514,9 @@ fn validate_patch_doc(doc: &serde_json::Value) -> Result<(), ControlError> {
         .compile(&patch_schema)
         .map_err(|e| ControlError::decode(format!("compile patch schema: {e}")))?;
     if let Err(errors) = compiled.validate(doc) {
-        let msgs: Vec<String> = errors.map(|e| format!("{}: {}", e.instance_path, e)).collect();
+        let msgs: Vec<String> = errors
+            .map(|e| format!("{}: {}", e.instance_path, e))
+            .collect();
         return Err(ControlError::decode(format!(
             "patch schema validation failed: {}",
             msgs.join("; ")

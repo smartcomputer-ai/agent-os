@@ -165,14 +165,13 @@ pub fn run(example_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn load_upgrade_patch(
-    example_root: &Path,
-    host: &ExampleHost,
-) -> Result<ManifestPatch> {
+fn load_upgrade_patch(example_root: &Path, host: &ExampleHost) -> Result<ManifestPatch> {
     let upgrade_root = example_root.join("air.v2");
     let mut loaded = manifest_loader::load_from_assets(host.store(), &upgrade_root)?
         .ok_or_else(|| anyhow!("upgrade manifest missing at {}", upgrade_root.display()))?;
-    aos_host::util::patch_modules(&mut loaded, host.wasm_hash(), |name, _| name == REDUCER_NAME);
+    aos_host::util::patch_modules(&mut loaded, host.wasm_hash(), |name, _| {
+        name == REDUCER_NAME
+    });
     Ok(manifest_loader::manifest_patch_from_loaded(&loaded))
 }
 

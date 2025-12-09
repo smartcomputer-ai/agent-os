@@ -11,12 +11,12 @@ use aos_host::testhost::TestHost;
 use aos_host::util::patch_modules;
 use aos_host::util::reset_journal;
 use aos_kernel::LoadedManifest;
-use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::OwnedJournalEntry;
+use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::{Kernel, KernelConfig};
 use aos_store::{FsStore, Store};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::runtime::{Builder, Runtime};
 
 use crate::util;
@@ -54,10 +54,18 @@ impl ExampleHost {
 
         let assets_root = cfg.assets_root.unwrap_or(cfg.example_root).to_path_buf();
 
-        let loaded_host =
-            load_and_patch(store.clone(), &assets_root, cfg.reducer_name, &wasm_hash_ref)?;
-        let loaded_replay =
-            load_and_patch(store.clone(), &assets_root, cfg.reducer_name, &wasm_hash_ref)?;
+        let loaded_host = load_and_patch(
+            store.clone(),
+            &assets_root,
+            cfg.reducer_name,
+            &wasm_hash_ref,
+        )?;
+        let loaded_replay = load_and_patch(
+            store.clone(),
+            &assets_root,
+            cfg.reducer_name,
+            &wasm_hash_ref,
+        )?;
 
         let host_config = HostConfig::default();
         let kernel_config = util::kernel_config(cfg.example_root)?;

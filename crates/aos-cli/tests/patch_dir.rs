@@ -1,6 +1,6 @@
-use std::fs;
 use aos_cbor::Hash;
 use assert_cmd::prelude::*;
+use std::fs;
 use tempfile::tempdir;
 
 // Uses the built binary to exercise --patch-dir dry-run and inspect output.
@@ -65,9 +65,7 @@ fn patch_dir_dry_run_emits_patchdoc_with_base_and_refs() {
         "should include add_def for schema"
     );
     assert!(
-        patches
-            .iter()
-            .any(|p| p.get("set_manifest_refs").is_some()),
+        patches.iter().any(|p| p.get("set_manifest_refs").is_some()),
         "should include set_manifest_refs"
     );
 }

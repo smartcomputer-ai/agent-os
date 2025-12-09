@@ -21,8 +21,8 @@ use crate::error::HostError;
 use crate::host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
-use aos_kernel::shadow::ShadowSummary;
 use aos_kernel::patch_doc::{PatchDocument, compile_patch_document};
+use aos_kernel::shadow::ShadowSummary;
 
 /// Convert a `std::time::Instant` to a `tokio::time::Instant`.
 ///

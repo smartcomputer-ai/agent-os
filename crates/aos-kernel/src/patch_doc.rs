@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use indexmap::IndexMap;
+use std::collections::HashMap;
 
 use aos_air_types::{AirNode, HashRef, Manifest, ManifestDefaults, NamedRef};
 use aos_cbor::Hash;
@@ -26,16 +26,36 @@ fn default_patch_version() -> String {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum PatchOp {
-    AddDef { add_def: AddDef },
-    ReplaceDef { replace_def: ReplaceDef },
-    RemoveDef { remove_def: RemoveDef },
-    SetManifestRefs { set_manifest_refs: SetManifestRefs },
-    SetDefaults { set_defaults: SetDefaults },
-    SetRoutingEvents { set_routing_events: SetRoutingEvents },
-    SetRoutingInboxes { set_routing_inboxes: SetRoutingInboxes },
-    SetTriggers { set_triggers: SetTriggers },
-    SetModuleBindings { set_module_bindings: SetModuleBindings },
-    SetSecrets { set_secrets: SetSecrets },
+    AddDef {
+        add_def: AddDef,
+    },
+    ReplaceDef {
+        replace_def: ReplaceDef,
+    },
+    RemoveDef {
+        remove_def: RemoveDef,
+    },
+    SetManifestRefs {
+        set_manifest_refs: SetManifestRefs,
+    },
+    SetDefaults {
+        set_defaults: SetDefaults,
+    },
+    SetRoutingEvents {
+        set_routing_events: SetRoutingEvents,
+    },
+    SetRoutingInboxes {
+        set_routing_inboxes: SetRoutingInboxes,
+    },
+    SetTriggers {
+        set_triggers: SetTriggers,
+    },
+    SetModuleBindings {
+        set_module_bindings: SetModuleBindings,
+    },
+    SetSecrets {
+        set_secrets: SetSecrets,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -144,7 +164,7 @@ pub fn compile_patch_document<S: Store>(
         _ => {
             return Err(KernelError::Manifest(
                 "base_manifest_hash did not point to a manifest node".into(),
-            ))
+            ));
         }
     };
 
@@ -189,13 +209,17 @@ pub fn compile_patch_document<S: Store>(
             PatchOp::SetRoutingEvents { set_routing_events } => {
                 apply_routing_events(&mut manifest, set_routing_events)?;
             }
-            PatchOp::SetRoutingInboxes { set_routing_inboxes } => {
+            PatchOp::SetRoutingInboxes {
+                set_routing_inboxes,
+            } => {
                 apply_routing_inboxes(&mut manifest, set_routing_inboxes)?;
             }
             PatchOp::SetTriggers { set_triggers } => {
                 apply_triggers(&mut manifest, set_triggers)?;
             }
-            PatchOp::SetModuleBindings { set_module_bindings } => {
+            PatchOp::SetModuleBindings {
+                set_module_bindings,
+            } => {
                 apply_module_bindings(&mut manifest, set_module_bindings)?;
             }
             PatchOp::SetSecrets { set_secrets } => {
@@ -211,8 +235,8 @@ pub fn compile_patch_document<S: Store>(
     // Compute hashes for new nodes and rewrite manifest refs to match.
     let mut hash_map: HashMap<String, Hash> = HashMap::new();
     for node in &canonical.nodes {
-        let h = Hash::of_cbor(node)
-            .map_err(|e| KernelError::Manifest(format!("hash node: {e}")))?;
+        let h =
+            Hash::of_cbor(node).map_err(|e| KernelError::Manifest(format!("hash node: {e}")))?;
         if let Some(name) = node_name(node) {
             hash_map.insert(name.to_string(), h);
         }
@@ -261,9 +285,9 @@ fn update_manifest_ref_hash(
 ) -> Result<(), KernelError> {
     if kind == "defsecret" {
         // operate over SecretEntry::Ref
-        if let Some(pos) = manifest.secrets.iter().position(|e| {
-            matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name)
-        }) {
+        if let Some(pos) = manifest.secrets.iter().position(
+            |e| matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name),
+        ) {
             if let aos_air_types::SecretEntry::Ref(nr) = &manifest.secrets[pos] {
                 if let Some(pre) = pre_hash {
                     if nr.hash.as_str() != pre {
@@ -277,10 +301,12 @@ fn update_manifest_ref_hash(
                 manifest.secrets.remove(pos);
             }
         } else if remove.is_none() {
-            manifest.secrets.push(aos_air_types::SecretEntry::Ref(NamedRef {
-                name: name.into(),
-                hash: zero_hash_ref()?,
-            }));
+            manifest
+                .secrets
+                .push(aos_air_types::SecretEntry::Ref(NamedRef {
+                    name: name.into(),
+                    hash: zero_hash_ref()?,
+                }));
         }
         Ok(())
     } else {
@@ -382,14 +408,13 @@ fn rewrite_manifest_refs(manifest: &mut Manifest, hash_map: &HashMap<String, Has
     }
 }
 
-fn apply_routing_events(
-    manifest: &mut Manifest,
-    op: SetRoutingEvents,
-) -> Result<(), KernelError> {
-    let routing = manifest.routing.get_or_insert_with(|| aos_air_types::Routing {
-        events: Vec::new(),
-        inboxes: Vec::new(),
-    });
+fn apply_routing_events(manifest: &mut Manifest, op: SetRoutingEvents) -> Result<(), KernelError> {
+    let routing = manifest
+        .routing
+        .get_or_insert_with(|| aos_air_types::Routing {
+            events: Vec::new(),
+            inboxes: Vec::new(),
+        });
     verify_block_pre_hash(&routing.events, &op.pre_hash, "routing.events")?;
     routing.events = op.events;
     Ok(())
@@ -399,10 +424,12 @@ fn apply_routing_inboxes(
     manifest: &mut Manifest,
     op: SetRoutingInboxes,
 ) -> Result<(), KernelError> {
-    let routing = manifest.routing.get_or_insert_with(|| aos_air_types::Routing {
-        events: Vec::new(),
-        inboxes: Vec::new(),
-    });
+    let routing = manifest
+        .routing
+        .get_or_insert_with(|| aos_air_types::Routing {
+            events: Vec::new(),
+            inboxes: Vec::new(),
+        });
     verify_block_pre_hash(&routing.inboxes, &op.pre_hash, "routing.inboxes")?;
     routing.inboxes = op.inboxes;
     Ok(())
@@ -418,8 +445,11 @@ fn apply_module_bindings(
     manifest: &mut Manifest,
     op: SetModuleBindings,
 ) -> Result<(), KernelError> {
-    let current: IndexMap<String, aos_air_types::ModuleBinding> =
-        manifest.module_bindings.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+    let current: IndexMap<String, aos_air_types::ModuleBinding> = manifest
+        .module_bindings
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect();
     verify_block_pre_hash(&current, &op.pre_hash, "module_bindings")?;
     manifest.module_bindings = op.bindings;
     Ok(())
@@ -438,9 +468,11 @@ fn apply_secret_ref_add(
 ) -> Result<(), KernelError> {
     let hash_ref =
         aos_air_types::HashRef::new(hash).map_err(|e| KernelError::Manifest(e.to_string()))?;
-    if let Some(entry) = manifest.secrets.iter_mut().find(|e| {
-        matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name)
-    }) {
+    if let Some(entry) = manifest
+        .secrets
+        .iter_mut()
+        .find(|e| matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name))
+    {
         if let aos_air_types::SecretEntry::Ref(nr) = entry {
             nr.hash = hash_ref;
         }
@@ -448,7 +480,10 @@ fn apply_secret_ref_add(
     }
     manifest
         .secrets
-        .push(aos_air_types::SecretEntry::Ref(NamedRef { name: name.into(), hash: hash_ref }));
+        .push(aos_air_types::SecretEntry::Ref(NamedRef {
+            name: name.into(),
+            hash: hash_ref,
+        }));
     Ok(())
 }
 
@@ -457,8 +492,8 @@ fn verify_block_pre_hash<T: serde::Serialize>(
     pre_hash: &str,
     label: &str,
 ) -> Result<(), KernelError> {
-    let current = Hash::of_cbor(block)
-        .map_err(|e| KernelError::Manifest(format!("hash {label}: {e}")))?;
+    let current =
+        Hash::of_cbor(block).map_err(|e| KernelError::Manifest(format!("hash {label}: {e}")))?;
     if current.to_hex() != pre_hash {
         return Err(KernelError::Manifest(format!(
             "pre_hash mismatch for {label}"
@@ -490,17 +525,25 @@ fn refs_for_kind_mut<'a>(
     }
 }
 
-fn insert_placeholder_ref(manifest: &mut Manifest, kind: &str, name: &str) -> Result<(), KernelError> {
+fn insert_placeholder_ref(
+    manifest: &mut Manifest,
+    kind: &str,
+    name: &str,
+) -> Result<(), KernelError> {
     if kind == "defsecret" {
-        if manifest.secrets.iter().any(|e| {
-            matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name)
-        }) {
+        if manifest
+            .secrets
+            .iter()
+            .any(|e| matches!(e, aos_air_types::SecretEntry::Ref(nr) if nr.name.as_str() == name))
+        {
             return Ok(());
         }
-        manifest.secrets.push(aos_air_types::SecretEntry::Ref(NamedRef {
-            name: name.to_string(),
-            hash: zero_hash_ref()?,
-        }));
+        manifest
+            .secrets
+            .push(aos_air_types::SecretEntry::Ref(NamedRef {
+                name: name.to_string(),
+                hash: zero_hash_ref()?,
+            }));
     } else {
         let refs = refs_for_kind_mut(manifest, kind)?;
         if refs.iter().any(|r| r.name.as_str() == name) {
@@ -559,14 +602,18 @@ mod tests {
     }
 
     fn store_manifest(store: &MemStore, manifest: Manifest) -> String {
-        let hash = store.put_node(&AirNode::Manifest(manifest)).expect("store manifest");
+        let hash = store
+            .put_node(&AirNode::Manifest(manifest))
+            .expect("store manifest");
         hash.to_hex()
     }
 
     fn defschema(name: &str) -> AirNode {
         AirNode::Defschema(DefSchema {
             name: name.to_string(),
-            ty: TypeExpr::Primitive(TypePrimitive::Bool(TypePrimitiveBool { bool: EmptyObject {} })),
+            ty: TypeExpr::Primitive(TypePrimitive::Bool(TypePrimitiveBool {
+                bool: EmptyObject {},
+            })),
         })
     }
 
@@ -580,7 +627,9 @@ mod tests {
             cap_grants: vec![CapGrant {
                 name: "grant_old".into(),
                 cap: "cap/demo@1".into(),
-                params: ValueLiteral::Null(ValueNull { null: EmptyObject {} }),
+                params: ValueLiteral::Null(ValueNull {
+                    null: EmptyObject {},
+                }),
                 expiry_ns: None,
                 budget: None,
             }],
@@ -613,7 +662,9 @@ mod tests {
                     cap_grants: Some(vec![CapGrant {
                         name: "grant_new".into(),
                         cap: "cap/demo@1".into(),
-                        params: ValueLiteral::Null(ValueNull { null: EmptyObject {} }),
+                        params: ValueLiteral::Null(ValueNull {
+                            null: EmptyObject {},
+                        }),
                         expiry_ns: None,
                         budget: None,
                     }]),
@@ -642,15 +693,19 @@ mod tests {
             }],
         };
         let patch = compile_patch_document(&store, doc).expect("compile");
-        assert!(patch
-            .manifest
-            .schemas
-            .iter()
-            .any(|nr| nr.name.as_str() == "demo/Foo@1"));
-        assert!(patch
-            .nodes
-            .iter()
-            .any(|n| matches!(n, AirNode::Defschema(s) if s.name == "demo/Foo@1")));
+        assert!(
+            patch
+                .manifest
+                .schemas
+                .iter()
+                .any(|nr| nr.name.as_str() == "demo/Foo@1")
+        );
+        assert!(
+            patch
+                .nodes
+                .iter()
+                .any(|n| matches!(n, AirNode::Defschema(s) if s.name == "demo/Foo@1"))
+        );
     }
 
     #[test]
@@ -677,11 +732,13 @@ mod tests {
             }],
         };
         let patch = compile_patch_document(&store, doc).expect("compile");
-        assert!(!patch
-            .manifest
-            .schemas
-            .iter()
-            .any(|nr| nr.name.as_str() == "demo/ToRemove@1"));
+        assert!(
+            !patch
+                .manifest
+                .schemas
+                .iter()
+                .any(|nr| nr.name.as_str() == "demo/ToRemove@1")
+        );
     }
 
     #[test]
@@ -724,7 +781,9 @@ mod tests {
                     cap_grants: Some(vec![CapGrant {
                         name: "g1".into(),
                         cap: "cap/demo@1".into(),
-                        params: ValueLiteral::Null(ValueNull { null: EmptyObject {} }),
+                        params: ValueLiteral::Null(ValueNull {
+                            null: EmptyObject {},
+                        }),
                         expiry_ns: None,
                         budget: None,
                     }]),

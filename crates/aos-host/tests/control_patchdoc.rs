@@ -2,26 +2,25 @@
 
 use std::time::Duration;
 
+use aos_cbor::Hash;
+use aos_host::WorldHost;
 use aos_host::config::HostConfig;
 use aos_host::control::{ControlClient, ControlMode, ControlServer, RequestEnvelope};
 use aos_host::fixtures::{self, TestStore};
 use aos_host::modes::daemon::WorldDaemon;
-use aos_host::WorldHost;
-use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::Kernel;
-use aos_cbor::Hash;
+use aos_kernel::journal::mem::MemJournal;
+use aos_store::Store;
 use base64::prelude::*;
 use serde_json::json;
 use tempfile::TempDir;
 use tokio::sync::{broadcast, mpsc};
-use aos_store::Store;
 
 #[path = "helpers.rs"]
 mod helpers;
 use helpers::simple_state_manifest;
 
-async fn setup_daemon_with_control(
-) -> (
+async fn setup_daemon_with_control() -> (
     ControlClient,
     TempDir,
     std::sync::Arc<TestStore>,
@@ -52,9 +51,7 @@ async fn setup_daemon_with_control(
     }
     // Store manifest node so patch-doc base hash resolves.
     let manifest_hash = store
-        .put_node(&aos_air_types::AirNode::Manifest(
-            manifest.manifest.clone(),
-        ))
+        .put_node(&aos_air_types::AirNode::Manifest(manifest.manifest.clone()))
         .unwrap()
         .to_hex();
     // sanity: manifest node retrievable

@@ -65,7 +65,11 @@ pub fn run(example_root: &Path) -> Result<()> {
         "{{\"url\":\"{}\",\"method\":\"{}\",\"demo\":true}}",
         request.params.url, request.params.method
     );
-    http.respond_with(host.kernel_mut(), request, MockHttpResponse::json(200, body))?;
+    http.respond_with(
+        host.kernel_mut(),
+        request,
+        MockHttpResponse::json(200, body),
+    )?;
 
     let state: FetchStateView = host.read_state()?;
     println!(
