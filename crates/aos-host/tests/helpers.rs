@@ -297,7 +297,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         )],
         ann: None,
     };
-    let timer_emitter =
+    let mut timer_emitter =
         fixtures::stub_reducer_module(store, "com.acme/TimerEmitter@1", &timer_output);
 
     let handler_output = ReducerOutput {
@@ -306,13 +306,28 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         effects: vec![],
         ann: None,
     };
-    let timer_handler =
+    let mut timer_handler =
         fixtures::stub_reducer_module(store, "com.acme/TimerHandler@1", &handler_output);
 
     let routing = vec![
         fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
         fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
     ];
+    // Provide minimal reducer ABI so routing succeeds.
+    timer_emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    timer_handler.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(fixtures::SYS_TIMER_FIRED),
+        event: fixtures::schema(fixtures::SYS_TIMER_FIRED),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let mut loaded = fixtures::build_loaded_manifest(
         vec![],
         vec![],

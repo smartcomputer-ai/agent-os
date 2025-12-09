@@ -269,10 +269,10 @@ impl<S: Store + 'static> WorldHost<S> {
         })
     }
 
-    pub fn state(&self, reducer: &str, key: Option<&[u8]>) -> Option<&Vec<u8>> {
-        // keyed state not yet implemented; ignore key
-        let _ = key;
-        self.kernel.reducer_state(reducer)
+    pub fn state(&self, reducer: &str, key: Option<&[u8]>) -> Option<Vec<u8>> {
+        self.kernel
+            .reducer_state_bytes(reducer, key)
+            .unwrap_or(None)
     }
 
     pub fn snapshot(&mut self) -> Result<(), HostError> {

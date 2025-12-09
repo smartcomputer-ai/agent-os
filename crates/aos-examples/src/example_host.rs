@@ -144,7 +144,6 @@ impl ExampleHost {
         let final_state_bytes = self
             .host
             .state_bytes(&self.reducer_name)
-            .cloned()
             .ok_or_else(|| anyhow!("missing reducer state"))?;
         let journal_entries = self.host.kernel().dump_journal()?;
         Ok(ReplayHandle {

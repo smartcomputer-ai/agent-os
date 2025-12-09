@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
+use aos_air_types::ReducerAbi;
 use aos_host::fixtures::{self, START_SCHEMA, TestStore};
 use aos_host::{WorldHost, config::HostConfig};
 use aos_kernel::Kernel;
@@ -27,7 +28,14 @@ async fn control_channel_round_trip() {
         effects: vec![],
         ann: None,
     };
-    let reducer = fixtures::stub_reducer_module(&store, "com.acme/Echo@1", &reducer_output);
+    let mut reducer = fixtures::stub_reducer_module(&store, "com.acme/Echo@1", &reducer_output);
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let mut manifest = fixtures::build_loaded_manifest(
         vec![],
         vec![],

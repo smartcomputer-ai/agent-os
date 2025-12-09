@@ -164,7 +164,7 @@ impl<S: Store + 'static> TestHost<S> {
     }
 
     /// Get reducer state as raw bytes.
-    pub fn state_bytes(&self, reducer: &str) -> Option<&Vec<u8>> {
+    pub fn state_bytes(&self, reducer: &str) -> Option<Vec<u8>> {
         self.host.state(reducer, None)
     }
 
@@ -174,7 +174,7 @@ impl<S: Store + 'static> TestHost<S> {
             .host
             .state(reducer, None)
             .ok_or_else(|| HostError::External(format!("reducer '{reducer}' has no state")))?;
-        serde_cbor::from_slice(bytes).map_err(|e| HostError::External(e.to_string()))
+        serde_cbor::from_slice(&bytes).map_err(|e| HostError::External(e.to_string()))
     }
 
     /// Get reducer state decoded to JSON for quick assertions/logging.
@@ -184,7 +184,7 @@ impl<S: Store + 'static> TestHost<S> {
             .state(reducer, None)
             .ok_or_else(|| HostError::External(format!("reducer '{reducer}' has no state")))?;
         let cbor_value: serde_cbor::Value =
-            serde_cbor::from_slice(bytes).map_err(|e| HostError::External(e.to_string()))?;
+            serde_cbor::from_slice(&bytes).map_err(|e| HostError::External(e.to_string()))?;
         serde_json::to_value(cbor_value).map_err(|e| HostError::External(e.to_string()))
     }
 

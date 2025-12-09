@@ -305,7 +305,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let _ = resp.send(res.map(|_| ()));
             }
             ControlMsg::QueryState { reducer, key, resp } => {
-                let result = self.host.state(&reducer, key.as_deref()).cloned();
+                let result = self.host.state(&reducer, key.as_deref());
                 let _ = resp.send(Ok(result));
             }
             ControlMsg::JournalHead { resp } => {

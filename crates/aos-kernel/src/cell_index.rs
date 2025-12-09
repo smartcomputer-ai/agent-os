@@ -17,6 +17,7 @@ pub struct CellMeta {
 
 /// Internal node representation for the persistent index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "t", content = "c")]
 enum Node {
     Leaf(Vec<CellMeta>),
     /// fan-out on a single byte of the key_hash
@@ -241,5 +242,94 @@ impl<'a, S: Store> Iterator for CellIndexIter<'a, S> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aos_store::MemStore;
+
+    fn meta(key: &[u8], state: &[u8], last_active_ns: u64) -> CellMeta {
+        CellMeta {
+            key_hash: *Hash::of_bytes(key).as_bytes(),
+            key_bytes: key.to_vec(),
+            state_hash: *Hash::of_bytes(state).as_bytes(),
+            size: state.len() as u64,
+            last_active_ns,
+        }
+    }
+
+    #[test]
+    fn upsert_get_delete_roundtrip() {
+        let store = MemStore::default();
+        let index = CellIndex::new(&store);
+        let root = index.empty().unwrap();
+
+        let meta1 = meta(b"a", b"state1", 1);
+        let root = index.upsert(root, meta1.clone()).unwrap();
+        let fetched = index.get(root, &meta1.key_hash).unwrap().unwrap();
+        assert_eq!(fetched, meta1);
+
+        let meta_updated = meta(b"a", b"state2", 3);
+        let root = index.upsert(root, meta_updated.clone()).unwrap();
+        let fetched = index.get(root, &meta1.key_hash).unwrap().unwrap();
+        assert_eq!(fetched, meta_updated);
+
+        let (root_after_delete, removed) = index.delete(root, &meta1.key_hash).unwrap();
+        assert!(removed);
+        assert!(index.get(root_after_delete, &meta1.key_hash).unwrap().is_none());
+    }
+
+    #[test]
+    fn split_and_iterate_many_keys() {
+        let store = MemStore::default();
+        let index = CellIndex::new(&store);
+        let mut root = index.empty().unwrap();
+
+        let count = LEAF_MAX + 6;
+        let mut metas = Vec::new();
+        for i in 0..count {
+            let key = format!("key-{i}").into_bytes();
+            let state = format!("state-{i}").into_bytes();
+            let m = meta(&key, &state, i as u64);
+            metas.push(m.clone());
+            root = index.upsert(root, m).unwrap();
+        }
+
+        // All keys retrievable
+        for m in &metas {
+            let fetched = index.get(root, &m.key_hash).unwrap().unwrap();
+            assert_eq!(fetched.key_bytes, m.key_bytes);
+            assert_eq!(fetched.state_hash, m.state_hash);
+        }
+
+        // Iter collects all metas (order not important)
+        let mut seen = 0;
+        let mut keys = std::collections::HashSet::new();
+        for item in index.iter(root) {
+            let meta = item.unwrap();
+            seen += 1;
+            keys.insert(meta.key_bytes);
+        }
+        assert_eq!(seen, count);
+        assert_eq!(keys.len(), count);
+    }
+
+    #[test]
+    fn delete_nonexistent_is_noop() {
+        let store = MemStore::default();
+        let index = CellIndex::new(&store);
+        let root = index.empty().unwrap();
+
+        let meta1 = meta(b"a", b"state1", 1);
+        let root = index.upsert(root, meta1.clone()).unwrap();
+
+        let missing_hash = Hash::of_bytes(b"missing");
+        let (root_after_delete, removed) = index.delete(root, missing_hash.as_bytes()).unwrap();
+        assert!(!removed);
+        // root may remain identical; ensure original entry still present
+        let fetched = index.get(root_after_delete, &meta1.key_hash).unwrap().unwrap();
+        assert_eq!(fetched.key_bytes, b"a");
     }
 }

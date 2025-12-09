@@ -58,7 +58,7 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
     // Query state directly from host
     let key_bytes = args.key.as_ref().map(|k| k.as_bytes());
     if let Some(state) = host.state(&args.reducer_name, key_bytes) {
-        print_state(state, args.raw)?;
+        print_state(&state, args.raw)?;
     } else {
         println!("(no state for reducer '{}')", args.reducer_name);
     }

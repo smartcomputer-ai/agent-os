@@ -517,19 +517,20 @@ impl<S: Store + 'static> Kernel<S> {
             return Ok(routed);
         };
         for binding in bindings {
-            let reducer_schema = self
-                .reducer_schemas
+            let module_def = self
+                .module_defs
                 .get(&binding.reducer)
                 .ok_or_else(|| KernelError::ReducerNotFound(binding.reducer.clone()))?;
+            let keyed = module_def.key_schema.is_some();
 
-            match (&reducer_schema.key_schema, &binding.key_field) {
-                (Some(_), None) => {
+            match (keyed, &binding.key_field) {
+                (true, None) => {
                     return Err(KernelError::Manifest(format!(
                         "route to keyed reducer '{}' is missing key_field",
                         binding.reducer
                     )));
                 }
-                (None, Some(_)) => {
+                (false, Some(_)) => {
                     return Err(KernelError::Manifest(format!(
                         "route to non-keyed reducer '{}' provided key_field",
                         binding.reducer
@@ -590,9 +591,9 @@ impl<S: Store + 'static> Kernel<S> {
         self.reducers.ensure_loaded(&reducer_name, module_def)?;
 
         let keyed = self
-            .reducer_schemas
+            .module_defs
             .get(&reducer_name)
-            .and_then(|s| s.key_schema.as_ref())
+            .and_then(|m| m.key_schema.as_ref())
             .is_some();
         let key = event.event.key.clone();
         if keyed && key.is_none() {
@@ -1105,6 +1106,34 @@ impl<S: Store + 'static> Kernel<S> {
         self.reducer_state
             .get(reducer)
             .and_then(|state| state.monolithic.as_ref())
+    }
+
+    /// Fetch reducer state bytes. Supports monolithic reducers and keyed reducers (cell state).
+    pub fn reducer_state_bytes(
+        &self,
+        reducer: &str,
+        key: Option<&[u8]>,
+    ) -> Result<Option<Vec<u8>>, KernelError> {
+        if key.is_none() {
+            return Ok(self
+                .reducer_state
+                .get(reducer)
+                .and_then(|state| state.monolithic.clone()));
+        }
+        let key = key.unwrap();
+        let Some(root) = self.reducer_index_roots.get(reducer) else {
+            return Ok(None);
+        };
+        let index = CellIndex::new(self.store.as_ref());
+        let meta = index.get(*root, Hash::of_bytes(key).as_bytes())?;
+        if let Some(meta) = meta {
+            let state_hash = Hash::from_bytes(&meta.state_hash)
+                .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
+            let state = self.store.get_blob(state_hash)?;
+            Ok(Some(state))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn heights(&self) -> KernelHeights {
@@ -2365,6 +2394,144 @@ mod tests {
             name: "policy/new@1".to_string(),
             change: DeltaKind::Added,
         }));
+    }
+
+    fn kernel_with_store_and_journal(
+        store: Arc<MemStore>,
+        journal: Box<dyn Journal>,
+    ) -> Kernel<MemStore> {
+        let manifest = empty_manifest();
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules: HashMap::new(),
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::new(),
+            effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        };
+        Kernel::from_loaded_manifest_with_config(store, loaded, journal, KernelConfig::default())
+            .expect("build kernel")
+    }
+
+    #[test]
+    fn cell_index_root_updates_on_upsert_and_delete() {
+        let store = Arc::new(MemStore::default());
+        let journal = Box::new(MemJournal::new());
+        let mut kernel = kernel_with_store_and_journal(store.clone(), journal);
+        let reducer = "com.acme/Reducer@1".to_string();
+        let key = b"abc".to_vec();
+
+        // initial insert
+        kernel
+            .handle_reducer_output(
+                reducer.clone(),
+                Some(key.clone()),
+                true,
+                ReducerOutput {
+                    state: Some(vec![1]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let root1 = *kernel.reducer_index_roots.get(&reducer).unwrap();
+        let index = CellIndex::new(store.as_ref());
+        let meta1 = index
+            .get(root1, Hash::of_bytes(&key).as_bytes())
+            .unwrap()
+            .expect("meta1");
+        assert_eq!(meta1.state_hash, *Hash::of_bytes(&[1]).as_bytes());
+
+        // update same key
+        kernel
+            .handle_reducer_output(
+                reducer.clone(),
+                Some(key.clone()),
+                true,
+                ReducerOutput {
+                    state: Some(vec![2]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let root2 = *kernel.reducer_index_roots.get(&reducer).unwrap();
+        assert_ne!(root1, root2);
+        let meta2 = index
+            .get(root2, Hash::of_bytes(&key).as_bytes())
+            .unwrap()
+            .expect("meta2");
+        assert_eq!(meta2.state_hash, *Hash::of_bytes(&[2]).as_bytes());
+
+        // delete
+        kernel
+            .handle_reducer_output(
+                reducer.clone(),
+                Some(key.clone()),
+                true,
+                ReducerOutput {
+                    state: None,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let root3 = *kernel.reducer_index_roots.get(&reducer).unwrap();
+        assert_ne!(root2, root3);
+        let meta3 = index
+            .get(root3, Hash::of_bytes(&key).as_bytes())
+            .unwrap();
+        assert!(meta3.is_none());
+    }
+
+    #[test]
+    fn snapshot_restores_cell_index_root_and_cells() {
+        let store = Arc::new(MemStore::default());
+        let journal = Box::new(MemJournal::new());
+        let mut kernel = kernel_with_store_and_journal(store.clone(), journal);
+        let reducer = "com.acme/Reducer@1".to_string();
+        let key = b"k".to_vec();
+        let state_bytes = vec![9u8, 9u8];
+
+        kernel
+            .handle_reducer_output(
+                reducer.clone(),
+                Some(key.clone()),
+                true,
+                ReducerOutput {
+                    state: Some(state_bytes.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let root_before = *kernel.reducer_index_roots.get(&reducer).unwrap();
+
+        kernel.create_snapshot().unwrap();
+        let entries = kernel
+            .journal
+            .load_from(0)
+            .expect("load journal entries");
+
+        // Rehydrate kernel from snapshot + shared store.
+        let mut kernel2 = {
+            let journal = Box::new(MemJournal::from_entries(&entries));
+            kernel_with_store_and_journal(store.clone(), journal)
+        };
+        kernel2.tick_until_idle().unwrap();
+
+        let root_after = *kernel2.reducer_index_roots.get(&reducer).unwrap();
+        assert_eq!(root_before, root_after);
+
+        let index = CellIndex::new(store.as_ref());
+        let meta = index
+            .get(root_after, Hash::of_bytes(&key).as_bytes())
+            .unwrap()
+            .expect("restored meta");
+        assert_eq!(meta.state_hash, *Hash::of_bytes(&state_bytes).as_bytes());
+        let restored_state = store
+            .get_blob(Hash::from_bytes(&meta.state_hash).unwrap())
+            .unwrap();
+        assert_eq!(restored_state, state_bytes);
     }
 
     #[test]
