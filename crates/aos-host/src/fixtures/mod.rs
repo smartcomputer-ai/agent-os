@@ -20,6 +20,7 @@ use aos_wasm_abi::{DomainEvent, ReducerOutput};
 use indexmap::IndexMap;
 use wat::parse_str;
 
+
 /// In-memory store alias used across fixtures.
 pub type TestStore = MemStore;
 
