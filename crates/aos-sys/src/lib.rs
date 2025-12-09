@@ -8,9 +8,8 @@
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
-use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -26,7 +25,7 @@ pub struct ObjectMeta {
     pub name: String,
     pub kind: String,
     pub hash: String,
-    pub tags: Vec<String>,
+    pub tags: BTreeSet<String>,
     pub created_at: u64,
     pub owner: String,
 }

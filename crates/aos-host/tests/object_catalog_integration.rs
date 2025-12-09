@@ -8,7 +8,7 @@
 
 #![cfg(feature = "test-fixtures")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use aos_air_exec::Value as ExprValue;
@@ -26,7 +26,7 @@ struct ObjectMeta {
     name: String,
     kind: String,
     hash: String,
-    tags: Vec<String>,
+    tags: BTreeSet<String>,
     created_at: u64,
     owner: String,
 }
@@ -44,7 +44,7 @@ fn object_registered_event_value(name: &str, kind: &str, hash: &str, owner: &str
         ("name".into(), ExprValue::Text(name.into())),
         ("kind".into(), ExprValue::Text(kind.into())),
         ("hash".into(), ExprValue::Text(hash.into())),
-        ("tags".into(), ExprValue::List(vec![])),
+        ("tags".into(), ExprValue::Set(BTreeSet::new())),
         ("created_at".into(), ExprValue::Nat(1000)),
         ("owner".into(), ExprValue::Text(owner.into())),
     ]));
@@ -70,7 +70,7 @@ fn create_catalog_stub_reducer(
             name: name.to_string(),
             kind: kind.to_string(),
             hash: hash.to_string(),
-            tags: vec![],
+            tags: BTreeSet::new(),
             created_at: 1000,
             owner: owner.to_string(),
         },
