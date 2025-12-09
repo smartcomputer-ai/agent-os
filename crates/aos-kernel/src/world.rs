@@ -495,6 +495,16 @@ impl<S: Store + 'static> Kernel<S> {
         let _ = self.process_domain_event(event);
     }
 
+    /// Submit a domain event and surface routing/validation errors (tests/fixtures helper).
+    pub fn submit_domain_event_result(
+        &mut self,
+        schema: impl Into<String>,
+        value: Vec<u8>,
+    ) -> Result<(), KernelError> {
+        let event = DomainEvent::new(schema.into(), value);
+        self.process_domain_event(event)
+    }
+
     pub fn tick(&mut self) -> Result<(), KernelError> {
         if let Some(task) = self.scheduler.pop() {
             match task {

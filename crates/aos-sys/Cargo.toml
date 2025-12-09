@@ -18,3 +18,4 @@ path = "src/bin/agent_registry.rs"
 [dependencies]
 aos-wasm-sdk = { path = "../aos-wasm-sdk" }
 serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"

@@ -109,8 +109,12 @@ async fn object_catalog_version_increment() {
         "sha256:abc123",
         "sys/self-upgrade@1",
     );
-    kernel.submit_domain_event("sys/ObjectRegistered@1", event_payload);
-    kernel.tick_until_idle().unwrap();
+    kernel
+        .submit_domain_event_result("sys/ObjectRegistered@1", event_payload)
+        .expect("route event");
+    let res = kernel.tick_until_idle();
+    eprintln!("tick result: {:?}", res);
+    res.unwrap();
 
     // Verify state after registration
     let state_bytes = kernel
@@ -174,8 +178,12 @@ async fn object_catalog_keyed_routing() {
     let event_a = object_registered_event_value("path/a", "kind-a", "sha256:aaa", "owner-a");
     let event_b = object_registered_event_value("path/b", "kind-b", "sha256:bbb", "owner-b");
 
-    kernel.submit_domain_event("sys/ObjectRegistered@1", event_a);
-    kernel.submit_domain_event("sys/ObjectRegistered@1", event_b);
+    kernel
+        .submit_domain_event_result("sys/ObjectRegistered@1", event_a)
+        .expect("route a");
+    kernel
+        .submit_domain_event_result("sys/ObjectRegistered@1", event_b)
+        .expect("route b");
     kernel.tick_until_idle().unwrap();
 
     // Verify both keys have separate state
@@ -247,7 +255,9 @@ async fn object_catalog_snapshot_replay() {
     // Submit event and tick using ExprValue format
     let event_payload =
         object_registered_event_value("replay/test", "test", "sha256:replay", "test");
-    kernel.submit_domain_event("sys/ObjectRegistered@1", event_payload);
+    kernel
+        .submit_domain_event_result("sys/ObjectRegistered@1", event_payload)
+        .expect("route event");
     kernel.tick_until_idle().unwrap();
 
     // Capture state before snapshot

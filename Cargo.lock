@@ -296,6 +296,7 @@ version = "0.1.0"
 dependencies = [
  "aos-wasm-sdk",
  "serde",
+ "serde_cbor",
 ]
 
 [[package]]
