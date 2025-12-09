@@ -2,7 +2,6 @@ mod helpers;
 use helpers::fixtures;
 use aos_kernel::{Consistency, StateReader};
 use aos_wasm_abi::ReducerOutput;
-use indexmap::IndexMap;
 
 /// Build a test world with a single stub reducer whose state is set to `payload` on first event.
 fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
@@ -30,11 +29,57 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
     fixtures::TestWorld::with_store(store, loaded).expect("build world")
 }
 
+/// Build a keyed reducer world: reducer expects key and stores payload per key.
+fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
+    let store = fixtures::new_mem_store();
+
+    // Match the keyed manifest setup from keyed_reducer_integration.
+    let mut reducer = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/Keyed@1",
+        &ReducerOutput {
+            state: Some(payload.to_vec()),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+    reducer.key_schema = Some(fixtures::schema("com.acme/Key@1"));
+    reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
+        state: fixtures::schema("com.acme/State@1"),
+        event: fixtures::schema("com.acme/Event@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+
+    let routing = vec![aos_air_types::RoutingEvent {
+        event: fixtures::schema("com.acme/Event@1"),
+        reducer: reducer.name.clone(),
+        key_field: Some(key_field.to_string()),
+    }];
+
+    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            fixtures::def_text_record_schema("com.acme/State@1", vec![]),
+            fixtures::def_text_record_schema("com.acme/Key@1", vec![]),
+            fixtures::def_text_record_schema(
+                "com.acme/Event@1",
+                vec![(key_field, fixtures::text_type())],
+            ),
+        ],
+    );
+
+    fixtures::TestWorld::with_store(store, loaded).expect("build keyed world")
+}
+
 #[test]
 fn head_reads_state_and_meta() {
     let mut world = test_world_with_state(b"hello");
     world.submit_event(fixtures::START_SCHEMA, &fixtures::empty_value_literal());
-    world.tick_n(1).unwrap();
+    world.tick_n(2).unwrap();
 
     let read = world
         .kernel
@@ -78,4 +123,52 @@ fn exact_uses_snapshot_when_available() {
     assert_eq!(read.meta.journal_height, snap_height);
     assert_eq!(read.meta.snapshot_hash, snap_hash);
     assert_eq!(read.meta.manifest_hash.to_hex().len() > 0, true);
+}
+
+#[test]
+fn keyed_head_and_exact_reads_state() {
+    let key_field = "id";
+    let key_val = "k1";
+    let mut world = test_world_keyed(b"cell", key_field);
+
+    // Submit an event with key field so it routes to the keyed reducer instance.
+    let payload = serde_cbor::to_vec(&aos_air_exec::Value::Record(
+        [(key_field.to_string(), aos_air_exec::Value::Text(key_val.to_string()))]
+            .into_iter()
+            .collect(),
+    ))
+    .unwrap();
+    world
+        .kernel
+        .submit_domain_event("com.acme/Event@1".to_string(), payload);
+    world.kernel.tick_until_idle().unwrap();
+
+    let cells = world.kernel.list_cells("com.acme/Keyed@1").unwrap();
+    assert_eq!(cells.len(), 1, "expected one keyed cell, got {cells:?}");
+
+    // Head read
+    let head_read = world
+        .kernel
+        .get_reducer_state(
+            "com.acme/Keyed@1",
+            Some(key_val.as_bytes()),
+            Consistency::Head,
+        )
+        .expect("head read keyed");
+    assert_eq!(head_read.value.as_deref(), Some("cell".as_bytes()));
+
+    // Snapshot for Exact
+    world.kernel.create_snapshot().unwrap();
+    let snap_height = world.kernel.heights().snapshot.unwrap();
+    let exact_read = world
+        .kernel
+        .get_reducer_state(
+            "com.acme/Keyed@1",
+            Some(key_val.as_bytes()),
+            Consistency::Exact(snap_height),
+        )
+        .expect("exact read keyed");
+    assert_eq!(exact_read.value.as_deref(), Some("cell".as_bytes()));
+    assert_eq!(exact_read.meta.journal_height, snap_height);
+    assert!(exact_read.meta.snapshot_hash.is_some());
 }
