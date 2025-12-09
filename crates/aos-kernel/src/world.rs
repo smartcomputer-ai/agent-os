@@ -2124,6 +2124,7 @@ mod tests {
         CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, ReducerAbi, Routing,
         RoutingEvent, SchemaRef, SecretDecl, TypeExpr, TypePrimitive, TypePrimitiveText,
     };
+    use indexmap::IndexMap;
     use aos_store::MemStore;
     use aos_wasm_abi::ReducerEffect;
     use serde_cbor::ser::to_vec;
@@ -2143,6 +2144,98 @@ mod tests {
     fn hash(num: u64) -> String {
         // Produce a valid sha256: prefixed hex string for tests
         format!("sha256:{num:064x}")
+    }
+
+    fn minimal_manifest() -> Manifest {
+        Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            effects: vec![],
+            policies: vec![],
+            secrets: vec![],
+            triggers: vec![],
+            module_bindings: IndexMap::new(),
+            routing: None,
+            defaults: None,
+        }
+    }
+
+    fn kernel_with_snapshot(height: JournalSeq) -> Kernel<MemStore> {
+        let store = Arc::new(MemStore::default());
+        let manifest = minimal_manifest();
+        // Persist manifest node so snapshot reads can resolve it; use its stored hash.
+        let manifest_hash = store
+            .put_node(&AirNode::Manifest(manifest.clone()))
+            .unwrap();
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules: HashMap::new(),
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::new(),
+            effect_catalog: aos_air_types::catalog::EffectCatalog::default(),
+        };
+        let journal: Box<dyn Journal> = Box::new(MemJournal::new());
+        let mut kernel = Kernel::from_loaded_manifest_with_config(
+            store,
+            loaded,
+            journal,
+            KernelConfig::default(),
+        )
+        .unwrap();
+        // Keep manifest hash aligned with stored node hash for tests.
+        kernel.manifest_hash = manifest_hash;
+
+        // Pretend a snapshot exists at the requested height.
+        // Create and store an empty snapshot blob at the requested height.
+        let snapshot = KernelSnapshot::new(
+            height,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            0,
+            vec![],
+            vec![],
+            vec![],
+            Some(*manifest_hash.as_bytes()),
+        );
+        let snap_bytes = serde_cbor::to_vec(&snapshot).unwrap();
+        let snap_hash = kernel.store.put_blob(&snap_bytes).unwrap();
+
+        kernel.last_snapshot_height = Some(height);
+        kernel.last_snapshot_hash = Some(snap_hash);
+        kernel
+            .snapshot_index
+            .insert(height, (snap_hash, Some(manifest_hash)));
+        kernel
+    }
+
+    #[test]
+    fn manifest_exact_from_snapshot() {
+        let kernel = kernel_with_snapshot(5);
+        let expected_snap = kernel.last_snapshot_hash;
+        let read = kernel
+            .get_manifest(Consistency::Exact(5))
+            .expect("manifest read");
+        assert_eq!(read.meta.journal_height, 5);
+        assert_eq!(read.meta.snapshot_hash, expected_snap);
+    }
+
+    #[test]
+    fn reducer_state_exact_missing_snapshot_errors() {
+        let kernel = kernel_with_snapshot(3);
+        let err = kernel
+            .get_reducer_state("missing", None, Consistency::Exact(7))
+            .unwrap_err();
+        assert!(matches!(err, KernelError::SnapshotUnavailable(_)));
     }
 
     #[test]

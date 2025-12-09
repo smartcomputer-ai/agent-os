@@ -19,6 +19,14 @@ pub struct StateArgs {
     #[arg(long)]
     pub key: Option<String>,
 
+    /// Require exact journal height
+    #[arg(long)]
+    pub exact_height: Option<u64>,
+
+    /// Require at least this journal height
+    #[arg(long, conflicts_with = "exact_height")]
+    pub at_least_height: Option<u64>,
+
     /// Output raw JSON without formatting
     #[arg(long)]
     pub raw: bool,
@@ -29,10 +37,22 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
 
     // Try daemon first
     let key_bytes_opt = args.key.as_ref().map(|k| k.as_bytes());
+    let consistency = if let Some(h) = args.exact_height {
+        Some(format!("exact:{h}"))
+    } else if let Some(h) = args.at_least_height {
+        Some(format!("at_least:{h}"))
+    } else {
+        None
+    };
 
     if let Some(mut client) = try_control_client(&dirs).await {
         let resp = client
-            .query_state("cli-state", &args.reducer_name, key_bytes_opt)
+            .query_state(
+                "cli-state",
+                &args.reducer_name,
+                key_bytes_opt,
+                consistency.as_deref(),
+            )
             .await?;
         if !resp.ok {
             anyhow::bail!("query-state failed: {:?}", resp.error);
@@ -40,13 +60,17 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
 
         // Extract state from response
         if let Some(result) = resp.result {
-            if let Some(state_b64) = result.get("state_b64").and_then(|v| v.as_str()) {
-                let state_bytes = base64::engine::general_purpose::STANDARD
-                    .decode(state_b64)
-                    .context("decode state base64")?;
-                print_state(&state_bytes, args.raw)?;
-            } else {
-                println!("(no state)");
+            if let Some(meta) = result.get("meta") {
+                println!("meta: {}", serde_json::to_string_pretty(meta)?);
+            }
+            match result.get("state_b64").and_then(|v| v.as_str()) {
+                Some(state_b64) => {
+                    let state_bytes = base64::engine::general_purpose::STANDARD
+                        .decode(state_b64)
+                        .context("decode state base64")?;
+                    print_state(&state_bytes, args.raw)?;
+                }
+                None => println!("(no state)"),
             }
         } else {
             println!("(no state)");
@@ -60,13 +84,44 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
     let host = create_host(store, loaded, &dirs, opts)?;
 
     // Query state directly from host
-    if let Some(state) = host.state(&args.reducer_name, key_bytes_opt) {
-        print_state(&state, args.raw)?;
+    let read = host.query_state(
+        &args.reducer_name,
+        key_bytes_opt,
+        consistency
+            .as_deref()
+            .map(parse_consistency)
+            .unwrap_or(aos_kernel::Consistency::Head),
+    );
+    if let Some(read) = read {
+        println!(
+            "meta: {}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "journal_height": read.meta.journal_height,
+                "snapshot_hash": read.meta.snapshot_hash.as_ref().map(|h| h.to_hex()),
+                "manifest_hash": read.meta.manifest_hash.to_hex(),
+            }))?
+        );
+        if let Some(state) = read.value {
+            print_state(&state, args.raw)?;
+        } else {
+            println!("(no state for reducer '{}')", args.reducer_name);
+        }
     } else {
-        println!("(no state for reducer '{}')", args.reducer_name);
+        println!("(read failed)");
     }
 
     Ok(())
+}
+
+fn parse_consistency(s: &str) -> aos_kernel::Consistency {
+    if let Some(rest) = s.strip_prefix("exact:") {
+        rest.parse().ok().map(aos_kernel::Consistency::Exact)
+    } else if let Some(rest) = s.strip_prefix("at_least:") {
+        rest.parse().ok().map(aos_kernel::Consistency::AtLeast)
+    } else {
+        None
+    }
+    .unwrap_or(aos_kernel::Consistency::Head)
 }
 
 fn print_state(state: &[u8], raw: bool) -> Result<()> {

@@ -30,6 +30,49 @@ pub struct StateRead<T> {
     pub value: T,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consistency_variants() {
+        let c1 = Consistency::Head;
+        let c2 = Consistency::Exact(5);
+        let c3 = Consistency::AtLeast(10);
+        assert!(matches!(c1, Consistency::Head));
+        assert!(matches!(c2, Consistency::Exact(5)));
+        assert!(matches!(c3, Consistency::AtLeast(10)));
+    }
+
+    #[test]
+    fn read_meta_fields() {
+        let h = Hash::of_bytes(b"abc");
+        let meta = ReadMeta {
+            journal_height: 7,
+            snapshot_hash: Some(h),
+            manifest_hash: h,
+        };
+        assert_eq!(meta.journal_height, 7);
+        assert_eq!(meta.snapshot_hash, Some(h));
+        assert_eq!(meta.manifest_hash, h);
+    }
+
+    #[test]
+    fn state_read_wraps_value() {
+        let meta = ReadMeta {
+            journal_height: 0,
+            snapshot_hash: None,
+            manifest_hash: Hash::of_bytes(b"m"),
+        };
+        let sr = StateRead {
+            meta: meta.clone(),
+            value: Some(vec![1, 2, 3]),
+        };
+        assert_eq!(sr.meta.journal_height, 0);
+        assert_eq!(sr.value, Some(vec![1, 2, 3]));
+    }
+}
+
 /// Read-only surface exposed by the kernel for observational queries.
 pub trait StateReader {
     /// Fetch reducer state (monolithic or keyed cell) according to consistency preference.

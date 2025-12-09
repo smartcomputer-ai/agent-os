@@ -46,6 +46,14 @@ pub struct ResponseEnvelope {
     pub error: Option<ControlError>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsistencyJson {
+    Head,
+    AtLeast,
+    Exact,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ControlError {
     pub code: String,
@@ -263,11 +271,17 @@ async fn handle_request(
                     .get("key_b64")
                     .and_then(|v| v.as_str())
                     .map(|s| BASE64_STANDARD.decode(s).unwrap_or_default());
+                let consistency = req
+                    .payload
+                    .get("consistency")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("head");
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
                     .send(ControlMsg::QueryState {
                         reducer,
                         key,
+                        consistency: consistency.to_string(),
                         resp: tx,
                     })
                     .await;
@@ -275,9 +289,18 @@ async fn handle_request(
                     .await
                     .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
                 match inner.map_err(ControlError::host)? {
-                    Some(bytes) => Ok(serde_json::json!({
-                        "state_b64": BASE64_STANDARD.encode(bytes)
-                    })),
+                    Some((meta, bytes_opt)) => {
+                        let state_b64 = bytes_opt.map(|b| BASE64_STANDARD.encode(b));
+                        let meta_json = serde_json::json!({
+                            "journal_height": meta.journal_height,
+                            "snapshot_hash": meta.snapshot_hash.map(|h| h.to_hex()),
+                            "manifest_hash": meta.manifest_hash.to_hex(),
+                        });
+                        Ok(serde_json::json!({
+                            "state_b64": state_b64,
+                            "meta": meta_json,
+                        }))
+                    }
                     None => Ok(serde_json::json!({ "state_b64": null })),
                 }
             }
@@ -623,10 +646,14 @@ impl ControlClient {
         id: impl Into<String>,
         reducer: &str,
         key: Option<&[u8]>,
+        consistency: Option<&str>,
     ) -> std::io::Result<ResponseEnvelope> {
         let mut payload = serde_json::json!({ "reducer": reducer });
         if let Some(key) = key {
             payload["key_b64"] = serde_json::json!(BASE64_STANDARD.encode(key));
+        }
+        if let Some(consistency) = consistency {
+            payload["consistency"] = serde_json::json!(consistency);
         }
 
         let env = RequestEnvelope {

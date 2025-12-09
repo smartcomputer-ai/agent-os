@@ -62,7 +62,8 @@ pub enum ControlMsg {
     QueryState {
         reducer: String,
         key: Option<Vec<u8>>,
-        resp: oneshot::Sender<Result<Option<Vec<u8>>, HostError>>,
+        consistency: String,
+        resp: oneshot::Sender<Result<Option<(aos_kernel::ReadMeta, Option<Vec<u8>>)>, HostError>>,
     },
     ListCells {
         reducer: String,
@@ -309,8 +310,29 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let res = self.run_daemon_cycle().await;
                 let _ = resp.send(res.map(|_| ()));
             }
-            ControlMsg::QueryState { reducer, key, resp } => {
-                let result = self.host.state(&reducer, key.as_deref());
+            ControlMsg::QueryState {
+                reducer,
+                key,
+                consistency,
+                resp,
+            } => {
+                let consistency = match consistency.as_str() {
+                    s if s.starts_with("exact:") => {
+                        let h = s[6..].parse().unwrap_or(self.host.kernel().journal_head());
+                        aos_kernel::Consistency::Exact(h)
+                    }
+                    s if s.starts_with("at_least:") => {
+                        let h = s[9..].parse().unwrap_or(self.host.kernel().journal_head());
+                        aos_kernel::Consistency::AtLeast(h)
+                    }
+                    "exact" => aos_kernel::Consistency::Exact(self.host.kernel().journal_head()),
+                    "at_least" => aos_kernel::Consistency::AtLeast(self.host.kernel().journal_head()),
+                    _ => aos_kernel::Consistency::Head,
+                };
+                let result = self
+                    .host
+                    .query_state(&reducer, key.as_deref(), consistency)
+                    .map(|read| (read.meta, read.value));
                 let _ = resp.send(Ok(result));
             }
             ControlMsg::ListCells { reducer, resp } => {

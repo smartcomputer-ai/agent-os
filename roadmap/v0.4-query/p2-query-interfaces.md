@@ -14,13 +14,15 @@ This note sketches an opt-in read path for worlds. Reducers still own all mutati
 - **Cold path**: Historical snapshots in CAS for point-in-time queries and debugging.
 - **Contract**: Every response includes `(journal_height, snapshot_hash, manifest_hash)` so callers know what they read. Clients can request `exact_height` (fail if behind) or `at_least_height` (serve newest available ≥ requested or return the cached head).
 
+**Status (impl):** Hot + cold paths are implemented. `Exact` reads succeed when a snapshot exists at that height; otherwise they error. Warm path remains deferred.
+
 ## Entry point: StateReader trait
 Implement a `StateReader` trait inside the kernel process that exposes read-only accessors:
 - `get_reducer_state(module_id, key, consistency)` for keyed reducer state.
 - `get_manifest(consistency)` for control-plane inspection (modules, plans, capabilities, policies).
 - `get_journal_head()` for metadata only (height + hashes).
 
-`consistency` captures caller preference: `Exact(height)`, `AtLeast(height)`, or `Head`. Implementations resolve via the hot path first, then warm path replay, and include the resolved height/hash in the response envelope.
+`consistency` captures caller preference: `Exact(height)`, `AtLeast(height)`, or `Head`. Implementations resolve via the hot path first, then warm path replay (deferred), then cold snapshots, and include the resolved height/hash in the response envelope.
 
 ## How external callers learn the height
 - **Response metadata**: Every read returns `(journal_height, snapshot_hash, manifest_hash)`; the caller need not know the height beforehand.

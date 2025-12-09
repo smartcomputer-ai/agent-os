@@ -22,6 +22,7 @@ use crate::adapters::timer::TimerScheduler;
 use crate::config::HostConfig;
 use crate::error::HostError;
 use crate::manifest_loader;
+use aos_kernel::StateReader;
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
@@ -274,6 +275,18 @@ impl<S: Store + 'static> WorldHost<S> {
         self.kernel
             .reducer_state_bytes(reducer, key)
             .unwrap_or(None)
+    }
+
+    /// Query reducer state with consistency metadata.
+    pub fn query_state(
+        &self,
+        reducer: &str,
+        key: Option<&[u8]>,
+        consistency: aos_kernel::Consistency,
+    ) -> Option<aos_kernel::StateRead<Option<Vec<u8>>>> {
+        self.kernel
+            .get_reducer_state(reducer, key, consistency)
+            .ok()
     }
 
     /// List all cells for a keyed reducer. Returns empty if reducer is not keyed or has no cells.

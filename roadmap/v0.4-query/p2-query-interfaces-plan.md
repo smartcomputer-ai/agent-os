@@ -17,16 +17,16 @@
     - Compute and store manifest_hash on kernel load and after apply/shadow swaps; expose accessor.
     - Extend snapshot creation to record the snapshot hash in memory and persist it (add field to KernelSnapshot and SnapshotRecord), update load/replay to restore it, and adjust tests/decoders.
 3. **Implement hot/warm/cold resolution**
-    
-    - Hot: serve from live Kernel state if it satisfies requested consistency (head or exact/at least within current height).
-    - Warm: when caller requests a height behind/ahead of the in-memory view, load the latest snapshot (with ref) plus replay a bounded tail into a throwaway read-only kernel (suppress_journal=true, mem journal) to materialize the requested height.
-    - Cold: if requested Exact height matches an older snapshot or the tail is missing, load that historical snapshot directly (no replay) and serve from it.
-    - Return StateRead with the resolved height + hashes; include None if reducer/key absent; error on stale Exact/AtLeast that can’t be satisfied.
+
+    - Hot: serve from live Kernel state if it satisfies requested consistency (head or exact/at least within current height). **Done.**
+    - Warm: when caller requests a height behind/ahead of the in-memory view, load the latest snapshot (with ref) plus replay a bounded tail into a throwaway read-only kernel (suppress_journal=true, mem journal) to materialize the requested height. **Deferred.**
+    - Cold: if requested Exact height matches an older snapshot or the tail is missing, load that historical snapshot directly (no replay) and serve from it. **Done (Exact from snapshots).**
+    - Return StateRead with the resolved height + hashes; include None if reducer/key absent; error on stale Exact/AtLeast that can’t be satisfied. **Done for hot+cold.**
 4. **Wire into host surfaces**
-    
-    - Add a WorldHost::state_reader() (or methods) delegating to kernel StateReader.
-    - Replace ControlMsg::QueryState/CLI world state to take a consistency parameter and return {state_b64, meta}.
-    - Add a minimal HTTP query endpoint (opt-in adapter feature flag) that maps to StateReader, returns JSON with metadata, and is off by default.
+
+    - Add a WorldHost::state_reader() (or methods) delegating to kernel StateReader. **Done (`query_state`).**
+    - Replace ControlMsg::QueryState/CLI world state to take a consistency parameter and return {state_b64, meta}. **Done (control + CLI minimal flags).**
+    - Add a minimal HTTP query endpoint (opt-in adapter feature flag) that maps to StateReader, returns JSON with metadata, and is off by default. **Deferred.**
 5. **Capability/policy gating for reads**
     
     - Introduce a lightweight “introspect” capability class and enforce it in the HTTP/control handlers (e.g., require a configured capability name/policy rule before serving). Align policy evaluation with existing PolicyGate where feasible.

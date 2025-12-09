@@ -1,6 +1,6 @@
 # WorldFS View Helpers
 
-**Status**: Ergonomics layer for v0.4-query
+**Status**: Ergonomics layer for v0.4-query (CLI work beyond minimal `aos world state` flags is **deferred here**).
 
 This document defines CLI commands and LLM helper APIs that provide a filesystem-like view over AgentOS introspection surfaces. These are convenience wrappers—they do not add new capabilities.
 
