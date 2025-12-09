@@ -1,5 +1,7 @@
 # Cells (Keyed Reducers) — v1.1 Design
 
+**Complete**
+
 Cells make many parallel instances of the same reducer state machine first‑class. A cell is an instance of a keyed reducer identified by a key (e.g., order_id). The kernel stores state per cell, delivers events per cell, and schedules cells fairly alongside plan runs. This enables Temporal‑like concurrency while preserving determinism, auditability, and homoiconicity.
 
 ## Rationale
@@ -97,11 +99,11 @@ Done (in codebase)
 - Tests: CellIndex unit coverage; kernel unit tests for root updates, delete, and snapshot restore; integration test `keyed_reducer_integration_flow` (host) exercises routed keyed events, index iteration, snapshot+replay, and state retrieval.
 - CAS naming decision: CAS remains `{hash→bytes}` only; agent-visible names stay in Query Catalog.
 - Scheduler fairness: round-robin between plan and reducer queues.
+- Inspect/CLI cell listing built on `CellIndex::iter` (via `aos world cells`).
 
-Planned / TODO
-- List/get cell helper surfaces for inspect/CLI built on `CellIndex::iter`.
-- GC/TTL for cells driven from index roots.
-- Observability: richer why-graph views per cell; exports.
+Deferred
+- GC/TTL for cells driven from index roots (defer).
+- Observability: richer why-graph views per cell; exports (defer).
 
 ## Plans and Cells
 
