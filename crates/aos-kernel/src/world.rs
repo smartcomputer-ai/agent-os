@@ -146,7 +146,15 @@ struct RouteBinding {
 #[derive(Clone, Default)]
 struct ReducerState {
     monolithic: Option<Vec<u8>>,
-    cells: HashMap<Vec<u8>, Vec<u8>>,
+    monolithic_hash: Option<Hash>,
+    cells: HashMap<Vec<u8>, CellEntry>,
+}
+
+#[derive(Clone)]
+struct CellEntry {
+    state: Vec<u8>,
+    state_hash: Hash,
+    last_active_ns: u64,
 }
 
 impl PlanResultEntry {
@@ -531,7 +539,7 @@ impl<S: Store + 'static> Kernel<S> {
             state_entry
                 .cells
                 .get(key.as_ref().expect("keyed requires key"))
-                .cloned()
+                .map(|c| c.state.clone())
         } else {
             state_entry.monolithic.clone()
         };
@@ -564,7 +572,16 @@ impl<S: Store + 'static> Kernel<S> {
         match (keyed, output.state) {
             (true, Some(state)) => {
                 let k = key.clone().expect("key required for keyed reducer");
-                entry.cells.insert(k, state);
+                let hash = Hash::of_bytes(&state);
+                self.store.put_blob(&state)?;
+                entry.cells.insert(
+                    k,
+                    CellEntry {
+                        state,
+                        state_hash: hash,
+                        last_active_ns: self.journal.next_seq() as u64,
+                    },
+                );
             }
             (true, None) => {
                 if let Some(k) = key {
@@ -572,10 +589,14 @@ impl<S: Store + 'static> Kernel<S> {
                 }
             }
             (false, Some(state)) => {
+                let hash = Hash::of_bytes(&state);
+                self.store.put_blob(&state)?;
+                entry.monolithic_hash = Some(hash);
                 entry.monolithic = Some(state);
             }
             (false, None) => {
                 entry.monolithic = None;
+                entry.monolithic_hash = None;
             }
         }
         for event in output.domain_events {
@@ -640,13 +661,20 @@ impl<S: Store + 'static> Kernel<S> {
                         reducer: name.clone(),
                         key: None,
                         state: state_bytes.clone(),
+                        state_hash: state
+                            .monolithic_hash
+                            .unwrap_or_else(|| Hash::of_bytes(state_bytes))
+                            .into(),
+                        last_active_ns: 0,
                     });
                 }
-                for (key, bytes) in state.cells.iter() {
+                for (key, entry) in state.cells.iter() {
                     entries.push(ReducerStateEntry {
                         reducer: name.clone(),
                         key: Some(key.clone()),
-                        state: bytes.clone(),
+                        state: entry.state.clone(),
+                        state_hash: entry.state_hash.into(),
+                        last_active_ns: entry.last_active_ns,
                     });
                 }
                 entries
@@ -793,13 +821,26 @@ impl<S: Store + 'static> Kernel<S> {
     fn apply_snapshot(&mut self, snapshot: KernelSnapshot) -> Result<(), KernelError> {
         let mut restored: HashMap<Name, ReducerState> = HashMap::new();
         for entry in snapshot.reducer_state_entries().iter().cloned() {
+            // Ensure blobs are present in store for deterministic reloads.
+            self.store.put_blob(&entry.state)?;
             let state = restored
                 .entry(entry.reducer.clone())
                 .or_insert_with(ReducerState::default);
             if let Some(key) = entry.key {
-                state.cells.insert(key, entry.state);
+                state.cells.insert(
+                    key,
+                    CellEntry {
+                        state: entry.state.clone(),
+                        state_hash: Hash::from_bytes(&entry.state_hash).unwrap_or_else(|_| Hash::of_bytes(&entry.state)),
+                        last_active_ns: entry.last_active_ns,
+                    },
+                );
             } else {
-                state.monolithic = Some(entry.state);
+                state.monolithic = Some(entry.state.clone());
+                state.monolithic_hash = Some(
+                    Hash::from_bytes(&entry.state_hash)
+                        .unwrap_or_else(|_| Hash::of_bytes(&entry.state)),
+                );
             }
         }
         self.reducer_state = restored;
@@ -1818,8 +1859,8 @@ mod tests {
     use super::*;
     use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
     use aos_air_types::{
-        DefSchema, HashRef, ModuleAbi, ModuleKind, ReducerAbi, Routing, RoutingEvent, SchemaRef,
-        SecretDecl, TypeExpr, TypePrimitive, TypePrimitiveText, CURRENT_AIR_VERSION,
+        CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, ReducerAbi, Routing,
+        RoutingEvent, SchemaRef, SecretDecl, TypeExpr, TypePrimitive, TypePrimitiveText,
     };
     use aos_store::MemStore;
     use aos_wasm_abi::ReducerEffect;
@@ -1848,15 +1889,14 @@ mod tests {
         let event = DomainEvent::new(
             "com.acme/Event@1",
             serde_cbor::to_vec(&aos_air_exec::Value::Record(
-                [("id".to_string(), aos_air_exec::Value::Nat(1))].into_iter().collect(),
+                [("id".to_string(), aos_air_exec::Value::Nat(1))]
+                    .into_iter()
+                    .collect(),
             ))
             .unwrap(),
         );
         let err = kernel.route_event(&event).unwrap_err();
-        assert!(
-            format!("{err:?}").contains("missing key_field"),
-            "{err}"
-        );
+        assert!(format!("{err:?}").contains("missing key_field"), "{err}");
     }
 
     #[test]
@@ -1865,7 +1905,9 @@ mod tests {
         let event = DomainEvent::new(
             "com.acme/Event@1",
             serde_cbor::to_vec(&aos_air_exec::Value::Record(
-                [("id".to_string(), aos_air_exec::Value::Nat(1))].into_iter().collect(),
+                [("id".to_string(), aos_air_exec::Value::Nat(1))]
+                    .into_iter()
+                    .collect(),
             ))
             .unwrap(),
         );
@@ -1894,7 +1936,9 @@ mod tests {
     fn schema_text(name: &str) -> DefSchema {
         DefSchema {
             name: name.into(),
-            ty: TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText { text: Default::default() })),
+            ty: TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                text: Default::default(),
+            })),
         }
     }
 
@@ -1956,7 +2000,12 @@ mod tests {
             schemas,
             effect_catalog: EffectCatalog::from_defs(Vec::new()),
         };
-        Kernel::from_loaded_manifest(Arc::new(store), loaded, Box::new(crate::journal::mem::MemJournal::default())).unwrap()
+        Kernel::from_loaded_manifest(
+            Arc::new(store),
+            loaded,
+            Box::new(crate::journal::mem::MemJournal::default()),
+        )
+        .unwrap()
     }
 
     fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemStore> {
@@ -2016,7 +2065,12 @@ mod tests {
             schemas,
             effect_catalog: EffectCatalog::from_defs(Vec::new()),
         };
-        Kernel::from_loaded_manifest(Arc::new(store), loaded, Box::new(crate::journal::mem::MemJournal::default())).unwrap()
+        Kernel::from_loaded_manifest(
+            Arc::new(store),
+            loaded,
+            Box::new(crate::journal::mem::MemJournal::default()),
+        )
+        .unwrap()
     }
 
     fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemStore> {
@@ -2077,7 +2131,12 @@ mod tests {
             schemas,
             effect_catalog: EffectCatalog::from_defs(Vec::new()),
         };
-        Kernel::from_loaded_manifest(Arc::new(store), loaded, Box::new(crate::journal::mem::MemJournal::default())).unwrap()
+        Kernel::from_loaded_manifest(
+            Arc::new(store),
+            loaded,
+            Box::new(crate::journal::mem::MemJournal::default()),
+        )
+        .unwrap()
     }
 
     fn empty_manifest() -> Manifest {

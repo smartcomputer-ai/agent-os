@@ -410,23 +410,27 @@ pub fn validate_manifest(
     modules: &HashMap<String, DefModule>,
 ) -> Result<(), ValidationError> {
     if let Some(routing) = manifest.routing.as_ref() {
-        for RoutingEvent { reducer, key_field, .. } in &routing.events {
-            let module = modules
-                .get(reducer)
-                .ok_or_else(|| ValidationError::RoutingUnknownReducer {
-                    reducer: reducer.clone(),
-                })?;
+        for RoutingEvent {
+            reducer, key_field, ..
+        } in &routing.events
+        {
+            let module =
+                modules
+                    .get(reducer)
+                    .ok_or_else(|| ValidationError::RoutingUnknownReducer {
+                        reducer: reducer.clone(),
+                    })?;
             let keyed = module.key_schema.is_some();
             match (keyed, key_field.is_some()) {
                 (true, false) => {
                     return Err(ValidationError::RoutingMissingKeyField {
                         reducer: reducer.clone(),
-                    })
+                    });
                 }
                 (false, true) => {
                     return Err(ValidationError::RoutingUnexpectedKeyField {
                         reducer: reducer.clone(),
-                    })
+                    });
                 }
                 _ => {}
             }

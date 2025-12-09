@@ -187,6 +187,9 @@ pub struct ReducerStateEntry {
     pub key: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
     pub state: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    pub state_hash: [u8; 32],
+    pub last_active_ns: u64,
 }
 
 mod serde_bytes_opt {
