@@ -7,7 +7,7 @@ fn main() {}
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {}
 
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, Value};
+use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_reducer};
 use serde::{Deserialize, Serialize};
 
 aos_reducer!(AgentRegistry);

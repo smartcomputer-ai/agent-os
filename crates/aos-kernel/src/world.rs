@@ -2124,9 +2124,9 @@ mod tests {
         CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, ReducerAbi, Routing,
         RoutingEvent, SchemaRef, SecretDecl, TypeExpr, TypePrimitive, TypePrimitiveText,
     };
-    use indexmap::IndexMap;
     use aos_store::MemStore;
     use aos_wasm_abi::ReducerEffect;
+    use indexmap::IndexMap;
     use serde_cbor::ser::to_vec;
     use serde_json::json;
     use std::fs::File;
@@ -2979,10 +2979,7 @@ impl<S: Store + 'static> StateReader for Kernel<S> {
         }
     }
 
-    fn get_manifest(
-        &self,
-        consistency: Consistency,
-    ) -> Result<StateRead<Manifest>, KernelError> {
+    fn get_manifest(&self, consistency: Consistency) -> Result<StateRead<Manifest>, KernelError> {
         let head = self.journal.next_seq();
         match consistency {
             Consistency::Head => {
@@ -3024,7 +3021,10 @@ impl<S: Store + 'static> StateReader for Kernel<S> {
                         snapshot_hash: Some(snap_hash),
                         manifest_hash,
                     };
-                    return Ok(StateRead { meta, value: manifest });
+                    return Ok(StateRead {
+                        meta,
+                        value: manifest,
+                    });
                 }
                 Err(KernelError::SnapshotUnavailable(format!(
                     "exact height {h} not available; no snapshot and head is {head}"

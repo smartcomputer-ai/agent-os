@@ -326,7 +326,9 @@ impl<S: Store + 'static> WorldDaemon<S> {
                         aos_kernel::Consistency::AtLeast(h)
                     }
                     "exact" => aos_kernel::Consistency::Exact(self.host.kernel().journal_head()),
-                    "at_least" => aos_kernel::Consistency::AtLeast(self.host.kernel().journal_head()),
+                    "at_least" => {
+                        aos_kernel::Consistency::AtLeast(self.host.kernel().journal_head())
+                    }
                     _ => aos_kernel::Consistency::Head,
                 };
                 let result = self

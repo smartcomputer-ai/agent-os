@@ -9,7 +9,7 @@
 extern crate alloc;
 
 use aos_sys::{ObjectRegistered, ObjectVersions, Version};
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, Value};
+use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_reducer};
 
 // Required for WASM binary entry point
 #[cfg(target_arch = "wasm32")]

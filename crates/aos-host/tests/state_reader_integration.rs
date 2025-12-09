@@ -1,7 +1,7 @@
 mod helpers;
-use helpers::fixtures;
 use aos_kernel::{Consistency, StateReader};
 use aos_wasm_abi::ReducerOutput;
+use helpers::fixtures;
 
 /// Build a test world with a single stub reducer whose state is set to `payload` on first event.
 fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
@@ -22,7 +22,10 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
     // Simple schema for start event routed to the reducer.
     let start_schema = fixtures::def_text_record_schema(fixtures::START_SCHEMA, vec![]);
 
-    let routing = vec![fixtures::routing_event(fixtures::START_SCHEMA, &module.name)];
+    let routing = vec![fixtures::routing_event(
+        fixtures::START_SCHEMA,
+        &module.name,
+    )];
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![module], routing);
     fixtures::insert_test_schemas(&mut loaded, vec![start_schema]);
 
@@ -133,9 +136,12 @@ fn keyed_head_and_exact_reads_state() {
 
     // Submit an event with key field so it routes to the keyed reducer instance.
     let payload = serde_cbor::to_vec(&aos_air_exec::Value::Record(
-        [(key_field.to_string(), aos_air_exec::Value::Text(key_val.to_string()))]
-            .into_iter()
-            .collect(),
+        [(
+            key_field.to_string(),
+            aos_air_exec::Value::Text(key_val.to_string()),
+        )]
+        .into_iter()
+        .collect(),
     ))
     .unwrap();
     world
