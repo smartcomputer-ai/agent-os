@@ -62,13 +62,14 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 - Version pinning
   - Cells inherit the manifest hash at creation time (era). They continue under that era even if the world upgrades; new cells use the new era.
 
-## Storage Layout and Snapshots
+## Storage Layout and Snapshots (current vs planned)
 
-- Per‑cell state (content‑addressed files):
-  - `world/state/reducers/<module_hash>/cells/<key_hash>.cbor`
-- Cell index (for discovery):
-  - `world/state/reducers/<module_hash>/index.cbor` (key_hash → key_bytes, last_active_ns, size)
-- Snapshots include: control‑plane state, all cell files, run states, and pinned blob roots. GC removes deleted cells before snapshot.
+- CAS stays dumb (`hash → bytes`).  
+- Cell state is stored per key as CAS blobs; we record `state_hash` and `last_active_ns` for each cell (and monolithic hash for non-keyed reducers).  
+- Snapshots embed per-cell state + hash + last_active, and include a slot for a future cell-index root hash.  
+- Planned (not yet implemented): CAS-backed `CellIndex` per keyed reducer (`key_hash → { key_bytes, state_hash, size, last_active_ns }`) with only the root hash kept in kernel/world state and pinned by snapshots. Lookup = root→index→state_hash→`blob.get`; updates write a new index root.  
+- The earlier path-based layout (`world/state/reducers/<module_hash>/cells/...`) is a placeholder; current code uses CAS blobs plus in-memory maps while we add the CAS-backed index.
+
 
 ## Journal and Observability
 
@@ -78,11 +79,30 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 - Why‑graph surfaces per‑cell timelines and correlates receipts/effects via intent_hash and correlate_by keys.
 - CLI/inspect supports: list cells, show cell state, tail cell events, export a single cell’s snapshot.
 
+## Status & TODO
+
+Done (in codebase)
+- Keyed routing/ABI: manifests must use `key_field` for keyed reducers; plans support `raise_event.key`; triggers can `correlate_by`.
+- Reducer calls carry `cell_mode` and key; per-cell state stored as CAS blobs with hashes; `state=null` deletes the cell.
+- Snapshots include per-cell state + hash + last_active and a slot for index roots.
+- Scheduler fairness: round-robin between plan and reducer queues.
+
+In progress / planned
+- Implement CAS-backed `CellIndex` per keyed reducer; store only root hash in kernel state/snapshots; use it for keyed load/save/delete and listing.
+- Expose list/get cell helpers for inspect/CLI (via the index).
+- Tests for index round-trip, keyed write/delete updating root, snapshot/restore preserving index root + cells, listing.
+- GC/TTL for cells (planned after index lands).
+
+Consistency note
+- The earlier file-path layout is not implemented; current storage is CAS blobs plus in-memory maps while the CAS-backed index is being added. Keep CAS immutable; names for agent artifacts stay in Query Catalog, not CAS.
+
 ## Plans and Cells
 
 - Triggers start runs when a reducer emits a DomainIntent; the trigger’s `correlate_by` may copy the event key into run context for filtering.
 - StepRaiseEvent (keyed): plans must supply the key to target the correct cell: `key: Expr`.
 - StepAwaitEvent (optional): plans may await subsequent domain events; the kernel matches against the keyed mailbox using the run’s correlation (e.g., `event.key == @plan.input.key`).
+
+
 
 ## SDK Guidance (Authoring Reducers Once)
 
