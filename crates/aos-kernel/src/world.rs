@@ -1817,10 +1817,14 @@ fn diff_named_refs(
 mod tests {
     use super::*;
     use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
-    use aos_air_types::{HashRef, SecretDecl};
+    use aos_air_types::{
+        DefSchema, HashRef, ModuleAbi, ModuleKind, ReducerAbi, Routing, RoutingEvent, SchemaRef,
+        SecretDecl, TypeExpr, TypePrimitive, TypePrimitiveText, CURRENT_AIR_VERSION,
+    };
     use aos_store::MemStore;
     use aos_wasm_abi::ReducerEffect;
     use serde_cbor::ser::to_vec;
+    use serde_json::json;
     use std::fs::File;
     use std::io::Write;
     use std::sync::Arc;
@@ -1836,6 +1840,244 @@ mod tests {
     fn hash(num: u64) -> String {
         // Produce a valid sha256: prefixed hex string for tests
         format!("sha256:{num:064x}")
+    }
+
+    #[test]
+    fn route_event_requires_key_for_keyed_reducer() {
+        let kernel = minimal_kernel_keyed_missing_key_field();
+        let event = DomainEvent::new(
+            "com.acme/Event@1",
+            serde_cbor::to_vec(&aos_air_exec::Value::Record(
+                [("id".to_string(), aos_air_exec::Value::Nat(1))].into_iter().collect(),
+            ))
+            .unwrap(),
+        );
+        let err = kernel.route_event(&event).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("missing key_field"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn route_event_rejects_key_for_non_keyed_reducer() {
+        let kernel = minimal_kernel_with_router_non_keyed();
+        let event = DomainEvent::new(
+            "com.acme/Event@1",
+            serde_cbor::to_vec(&aos_air_exec::Value::Record(
+                [("id".to_string(), aos_air_exec::Value::Nat(1))].into_iter().collect(),
+            ))
+            .unwrap(),
+        );
+        let err = kernel.route_event(&event).unwrap_err();
+        assert!(format!("{err:?}").contains("provided key_field"), "{err}");
+    }
+
+    #[test]
+    fn route_event_extracts_key_and_passes_to_reducer() {
+        let kernel = minimal_kernel_with_router();
+        let event = DomainEvent::new(
+            "com.acme/Event@1",
+            serde_cbor::to_vec(&aos_air_exec::Value::Record(
+                [("id".to_string(), aos_air_exec::Value::Text("abc".into()))]
+                    .into_iter()
+                    .collect(),
+            ))
+            .unwrap(),
+        );
+        let routed = kernel.route_event(&event).expect("route");
+        assert_eq!(routed.len(), 1);
+        assert_eq!(routed[0].event.key.as_ref().unwrap(), b"abc");
+        assert_eq!(routed[0].reducer, "com.acme/Reducer@1");
+    }
+
+    fn schema_text(name: &str) -> DefSchema {
+        DefSchema {
+            name: name.into(),
+            ty: TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText { text: Default::default() })),
+        }
+    }
+
+    fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
+        let store = aos_store::MemStore::default();
+        let module = DefModule {
+            name: "com.acme/Reducer@1".into(),
+            module_kind: ModuleKind::Reducer,
+            wasm_hash: HashRef::new(hash(1)).unwrap(),
+            key_schema: Some(SchemaRef::new("com.acme/Key@1").unwrap()),
+            abi: ModuleAbi {
+                reducer: Some(ReducerAbi {
+                    state: SchemaRef::new("com.acme/State@1").unwrap(),
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    annotations: None,
+                    effects_emitted: vec![],
+                    cap_slots: Default::default(),
+                }),
+            },
+        };
+        let mut modules = HashMap::new();
+        modules.insert(module.name.clone(), module);
+        let mut schemas = HashMap::new();
+        schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
+        schemas.insert("com.acme/Event@1".into(), schema_text("com.acme/Event@1"));
+        schemas.insert("com.acme/Key@1".into(), schema_text("com.acme/Key@1"));
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![NamedRef {
+                name: "com.acme/Reducer@1".into(),
+                hash: HashRef::new(hash(1)).unwrap(),
+            }],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: Some(Routing {
+                events: vec![RoutingEvent {
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    reducer: "com.acme/Reducer@1".to_string(),
+                    key_field: Some("id".into()),
+                }],
+                inboxes: vec![],
+            }),
+            triggers: vec![],
+        };
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules,
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas,
+            effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        };
+        Kernel::from_loaded_manifest(Arc::new(store), loaded, Box::new(crate::journal::mem::MemJournal::default())).unwrap()
+    }
+
+    fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemStore> {
+        let store = aos_store::MemStore::default();
+        let module = DefModule {
+            name: "com.acme/Reducer@1".into(),
+            module_kind: ModuleKind::Reducer,
+            wasm_hash: HashRef::new(hash(1)).unwrap(),
+            key_schema: None,
+            abi: ModuleAbi {
+                reducer: Some(ReducerAbi {
+                    state: SchemaRef::new("com.acme/State@1").unwrap(),
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    annotations: None,
+                    effects_emitted: vec![],
+                    cap_slots: Default::default(),
+                }),
+            },
+        };
+        let mut modules = HashMap::new();
+        modules.insert(module.name.clone(), module);
+        let mut schemas = HashMap::new();
+        schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
+        schemas.insert("com.acme/Event@1".into(), schema_text("com.acme/Event@1"));
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![NamedRef {
+                name: "com.acme/Reducer@1".into(),
+                hash: HashRef::new(hash(1)).unwrap(),
+            }],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: Some(Routing {
+                events: vec![RoutingEvent {
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    reducer: "com.acme/Reducer@1".to_string(),
+                    key_field: Some("id".into()),
+                }],
+                inboxes: vec![],
+            }),
+            triggers: vec![],
+        };
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules,
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas,
+            effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        };
+        Kernel::from_loaded_manifest(Arc::new(store), loaded, Box::new(crate::journal::mem::MemJournal::default())).unwrap()
+    }
+
+    fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemStore> {
+        let store = aos_store::MemStore::default();
+        let module = DefModule {
+            name: "com.acme/Reducer@1".into(),
+            module_kind: ModuleKind::Reducer,
+            wasm_hash: HashRef::new(hash(1)).unwrap(),
+            key_schema: Some(SchemaRef::new("com.acme/Key@1").unwrap()),
+            abi: ModuleAbi {
+                reducer: Some(ReducerAbi {
+                    state: SchemaRef::new("com.acme/State@1").unwrap(),
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    annotations: None,
+                    effects_emitted: vec![],
+                    cap_slots: Default::default(),
+                }),
+            },
+        };
+        let mut modules = HashMap::new();
+        modules.insert(module.name.clone(), module);
+        let mut schemas = HashMap::new();
+        schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
+        schemas.insert("com.acme/Event@1".into(), schema_text("com.acme/Event@1"));
+        schemas.insert("com.acme/Key@1".into(), schema_text("com.acme/Key@1"));
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![NamedRef {
+                name: "com.acme/Reducer@1".into(),
+                hash: HashRef::new(hash(1)).unwrap(),
+            }],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: Some(Routing {
+                events: vec![RoutingEvent {
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    reducer: "com.acme/Reducer@1".to_string(),
+                    key_field: None,
+                }],
+                inboxes: vec![],
+            }),
+            triggers: vec![],
+        };
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules,
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas,
+            effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        };
+        Kernel::from_loaded_manifest(Arc::new(store), loaded, Box::new(crate::journal::mem::MemJournal::default())).unwrap()
     }
 
     fn empty_manifest() -> Manifest {

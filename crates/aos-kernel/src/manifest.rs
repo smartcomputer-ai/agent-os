@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
-    SecretDecl, catalog::EffectCatalog,
+    SecretDecl, catalog::EffectCatalog, validate_manifest,
 };
 use aos_store::{Catalog, Store, load_manifest_from_path};
 
@@ -62,6 +62,8 @@ impl ManifestLoader {
             }
         }
         let manifest = catalog.manifest;
+        validate_manifest(&manifest, &modules)
+            .map_err(|e| KernelError::ManifestValidation(e.to_string()))?;
         let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
         Ok(LoadedManifest {
             manifest,

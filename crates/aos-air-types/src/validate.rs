@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 use petgraph::{algo::is_cyclic_directed, graphmap::DiGraphMap};
 use thiserror::Error;
 
-use crate::{CapGrantName, DefPlan, EffectKind, Expr, PlanStepKind, StepId};
+use crate::{
+    CapGrantName, DefModule, DefPlan, EffectKind, Expr, Manifest, PlanStepKind, RoutingEvent,
+    StepId,
+};
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ValidationError {
@@ -63,6 +66,12 @@ pub enum ValidationError {
     },
     #[error("plan {plan} invariant {index} may not reference @event")]
     InvariantEventReference { plan: String, index: usize },
+    #[error("route to keyed reducer '{reducer}' must specify key_field")]
+    RoutingMissingKeyField { reducer: String },
+    #[error("route to non-keyed reducer '{reducer}' must not specify key_field")]
+    RoutingUnexpectedKeyField { reducer: String },
+    #[error("route to reducer '{reducer}' references unknown module")]
+    RoutingUnknownReducer { reducer: String },
 }
 
 fn sort_and_dedup_caps(mut caps: Vec<CapGrantName>) -> Vec<CapGrantName> {
@@ -394,6 +403,36 @@ fn collect_expr_refs(expr: &Expr, refs: &mut Vec<String>) {
             }
         }
     }
+}
+
+pub fn validate_manifest(
+    manifest: &Manifest,
+    modules: &HashMap<String, DefModule>,
+) -> Result<(), ValidationError> {
+    if let Some(routing) = manifest.routing.as_ref() {
+        for RoutingEvent { reducer, key_field, .. } in &routing.events {
+            let module = modules
+                .get(reducer)
+                .ok_or_else(|| ValidationError::RoutingUnknownReducer {
+                    reducer: reducer.clone(),
+                })?;
+            let keyed = module.key_schema.is_some();
+            match (keyed, key_field.is_some()) {
+                (true, false) => {
+                    return Err(ValidationError::RoutingMissingKeyField {
+                        reducer: reducer.clone(),
+                    })
+                }
+                (false, true) => {
+                    return Err(ValidationError::RoutingUnexpectedKeyField {
+                        reducer: reducer.clone(),
+                    })
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 enum ReferenceKind {

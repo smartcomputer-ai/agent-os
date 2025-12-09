@@ -36,7 +36,7 @@ fn manifest_with_defaults_routing_and_triggers_validates() {
         "$kind": "manifest",
         "air_version": "1",
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
-        "modules": [{"name": "com.acme/Reducer@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+        "modules": [{"name": "com.acme/Reducer@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "key_schema": "com.acme/Schema@1"}],
         "plans": [{"name": "com.acme/Plan@1", "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],
         "effects": [],
         "caps": [{"name": "com.acme/Cap@1", "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}],

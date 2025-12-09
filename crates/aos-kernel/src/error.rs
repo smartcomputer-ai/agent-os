@@ -83,6 +83,8 @@ pub enum KernelError {
         version: u64,
         reason: String,
     },
+    #[error("manifest validation error: {0}")]
+    ManifestValidation(String),
 }
 
 impl From<crate::journal::JournalError> for KernelError {
