@@ -1,4 +1,4 @@
-# Read-only query surfaces
+# Read-only query surfaces — **Done (v0.4)**
 
 This note sketches an opt-in read path for worlds. Reducers still own all mutations via event→replay, but callers can observe materialized state without emitting new events. The design keeps determinism and auditability while allowing slightly stale reads when callers accept them.
 
@@ -15,6 +15,17 @@ This note sketches an opt-in read path for worlds. Reducers still own all mutati
 - **Contract**: Every response includes `(journal_height, snapshot_hash, manifest_hash)` so callers know what they read. Clients can request `exact_height` (fail if behind) or `at_least_height` (serve newest available ≥ requested or return the cached head).
 
 **Status (impl):** Hot + cold paths are implemented. `Exact` reads succeed when a snapshot exists at that height; otherwise they error. Warm path remains deferred.
+
+**Shipped this milestone**
+- `StateReader` trait with `Head | Exact | AtLeast` and `ReadMeta { journal_height, snapshot_hash, manifest_hash }`.
+- Hot + cold resolution in kernel; manifest/snapshot hashes stored in snapshots and returned in metadata.
+- Kernel/host integration for state reads (head/exact) including keyed reducers; integration tests cover head and cold Exact for keyed/non-keyed.
+- Minimal CLI flagging via `aos world state --exact-height/--at-least-height` showing metadata.
+
+**Deferred**
+- Warm path (tail replay) for `Exact/AtLeast` without a matching snapshot.
+- HTTP read surface and richer CLI/WorldFS UX (see p4-worldfs-cli).
+- Capability/policy gating for observational reads (left to self-upgrade work).
 
 ## Entry point: StateReader trait
 Implement a `StateReader` trait inside the kernel process that exposes read-only accessors:
