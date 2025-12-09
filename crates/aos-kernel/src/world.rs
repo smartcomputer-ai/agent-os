@@ -40,7 +40,7 @@ use crate::shadow::{
 };
 use crate::snapshot::{
     EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanResultSnapshot,
-    ReducerReceiptSnapshot, receipts_to_vecdeque,
+    ReducerReceiptSnapshot, ReducerStateEntry, receipts_to_vecdeque,
 };
 
 const RECENT_RECEIPT_CACHE: usize = 512;
@@ -74,7 +74,7 @@ pub struct Kernel<S: Store> {
     secrets: Vec<SecretDecl>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
     reducers: ReducerRegistry<S>,
-    router: HashMap<String, Vec<Name>>,
+    router: HashMap<String, Vec<RouteBinding>>,
     plan_registry: PlanRegistry,
     schema_index: Arc<SchemaIndex>,
     reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
@@ -88,7 +88,7 @@ pub struct Kernel<S: Store> {
     plan_results: VecDeque<PlanResultEntry>,
     scheduler: Scheduler,
     effect_manager: EffectManager,
-    reducer_state: HashMap<Name, Vec<u8>>,
+    reducer_state: HashMap<Name, ReducerState>,
     journal: Box<dyn Journal>,
     suppress_journal: bool,
     governance: GovernanceManager,
@@ -135,6 +135,18 @@ pub struct TailScan {
 struct PlanTriggerBinding {
     plan: String,
     correlate_by: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct RouteBinding {
+    reducer: Name,
+    key_field: Option<String>,
+}
+
+#[derive(Clone, Default)]
+struct ReducerState {
+    monolithic: Option<Vec<u8>>,
+    cells: HashMap<Vec<u8>, Vec<u8>>,
 }
 
 impl PlanResultEntry {
@@ -277,7 +289,10 @@ impl<S: Store + 'static> Kernel<S> {
                 router
                     .entry(route.event.as_str().to_string())
                     .or_insert_with(Vec::new)
-                    .push(route.reducer.clone());
+                    .push(RouteBinding {
+                        reducer: route.reducer.clone(),
+                        key_field: route.key_field.clone(),
+                    });
             }
         }
         let mut plan_registry = PlanRegistry::default();
@@ -380,16 +395,9 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(kernel)
     }
 
-    pub fn enqueue_event(&mut self, event: KernelEvent) {
-        match event {
-            KernelEvent::Reducer(ev) => self.scheduler.push_reducer(ev),
-        }
-    }
-
     pub fn submit_domain_event(&mut self, schema: impl Into<String>, value: Vec<u8>) {
         let event = DomainEvent::new(schema.into(), value);
-        let _ = self.record_domain_event(&event);
-        self.scheduler.push_reducer(ReducerEvent { event });
+        let _ = self.process_domain_event(event);
     }
 
     pub fn tick(&mut self) -> Result<(), KernelError> {
@@ -402,51 +410,176 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
-    fn handle_reducer_event(&mut self, event: ReducerEvent) -> Result<(), KernelError> {
-        let reducers = self
-            .router
-            .get(&event.event.schema)
-            .cloned()
-            .unwrap_or_default();
-        for reducer_name in reducers {
-            let module_def = self
-                .module_defs
-                .get(&reducer_name)
-                .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.clone()))?;
-            self.reducers.ensure_loaded(&reducer_name, module_def)?;
-
-            let input = ReducerInput {
-                version: ABI_VERSION,
-                state: self.reducer_state.get(&reducer_name).cloned(),
-                event: event.event.clone(),
-                ctx: CallContext::new(false, None),
-            };
-            let output = self.reducers.invoke(&reducer_name, &input)?;
-            self.handle_reducer_output(reducer_name.clone(), output)?;
+    fn process_domain_event(&mut self, event: DomainEvent) -> Result<(), KernelError> {
+        let routed = self.route_event(&event)?;
+        let mut event_for_plans = event.clone();
+        if event_for_plans.key.is_none() {
+            if let Some(key_bytes) = routed.iter().find_map(|ev| ev.event.key.clone()) {
+                event_for_plans.key = Some(key_bytes);
+            }
         }
-        self.start_plans_for_event(&event.event)?;
+        self.record_domain_event(&event_for_plans)?;
+        self.deliver_event_to_waiting_plans(&event_for_plans)?;
+        self.start_plans_for_event(&event_for_plans)?;
+        for ev in routed {
+            self.scheduler.push_reducer(ev);
+        }
+        Ok(())
+    }
+
+    fn route_event(&self, event: &DomainEvent) -> Result<Vec<ReducerEvent>, KernelError> {
+        let mut routed = Vec::new();
+        let Some(bindings) = self.router.get(&event.schema) else {
+            return Ok(routed);
+        };
+        for binding in bindings {
+            let reducer_schema = self
+                .reducer_schemas
+                .get(&binding.reducer)
+                .ok_or_else(|| KernelError::ReducerNotFound(binding.reducer.clone()))?;
+
+            match (&reducer_schema.key_schema, &binding.key_field) {
+                (Some(_), None) => {
+                    return Err(KernelError::Manifest(format!(
+                        "route to keyed reducer '{}' is missing key_field",
+                        binding.reducer
+                    )));
+                }
+                (None, Some(_)) => {
+                    return Err(KernelError::Manifest(format!(
+                        "route to non-keyed reducer '{}' provided key_field",
+                        binding.reducer
+                    )));
+                }
+                _ => {}
+            }
+
+            let key_bytes = if let Some(field) = &binding.key_field {
+                Some(self.extract_key_bytes(event, field)?)
+            } else {
+                None
+            };
+
+            if let (Some(existing), Some(extracted)) = (&event.key, &key_bytes) {
+                if existing != extracted {
+                    return Err(KernelError::Manifest(format!(
+                        "event '{}' carried key that differs from extracted key for reducer '{}'",
+                        event.schema, binding.reducer
+                    )));
+                }
+            }
+
+            let mut routed_event = event.clone();
+            if let Some(bytes) = key_bytes.clone() {
+                routed_event.key = Some(bytes);
+            }
+            routed.push(ReducerEvent {
+                reducer: binding.reducer.clone(),
+                event: routed_event,
+            });
+        }
+        Ok(routed)
+    }
+
+    fn extract_key_bytes(&self, event: &DomainEvent, field: &str) -> Result<Vec<u8>, KernelError> {
+        let value: ExprValue = serde_cbor::from_slice(&event.value).map_err(|err| {
+            KernelError::Manifest(format!(
+                "failed to decode event '{}' payload for key extraction: {err}",
+                event.schema
+            ))
+        })?;
+        let key_value = extract_correlation_value(&value, field).ok_or_else(|| {
+            KernelError::Manifest(format!(
+                "event '{}' missing key field '{}'",
+                event.schema, field
+            ))
+        })?;
+        Ok(encode_correlation_bytes(&key_value))
+    }
+
+    fn handle_reducer_event(&mut self, event: ReducerEvent) -> Result<(), KernelError> {
+        let reducer_name = event.reducer.clone();
+        let module_def = self
+            .module_defs
+            .get(&reducer_name)
+            .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.clone()))?;
+        self.reducers.ensure_loaded(&reducer_name, module_def)?;
+
+        let keyed = self
+            .reducer_schemas
+            .get(&reducer_name)
+            .and_then(|s| s.key_schema.as_ref())
+            .is_some();
+        let key = event.event.key.clone();
+        if keyed && key.is_none() {
+            return Err(KernelError::Manifest(format!(
+                "reducer '{reducer_name}' is keyed but event '{}' lacked a key",
+                event.event.schema
+            )));
+        }
+        if !keyed && key.is_some() {
+            return Err(KernelError::Manifest(format!(
+                "reducer '{reducer_name}' is not keyed but received a keyed event"
+            )));
+        }
+
+        let state_entry = self
+            .reducer_state
+            .entry(reducer_name.clone())
+            .or_insert_with(ReducerState::default);
+        let current_state = if keyed {
+            state_entry
+                .cells
+                .get(key.as_ref().expect("keyed requires key"))
+                .cloned()
+        } else {
+            state_entry.monolithic.clone()
+        };
+
+        let input = ReducerInput {
+            version: ABI_VERSION,
+            state: current_state,
+            event: event.event.clone(),
+            ctx: CallContext::new(keyed, key.clone()),
+        };
+        let output = self.reducers.invoke(&reducer_name, &input)?;
+        self.handle_reducer_output(reducer_name.clone(), key, keyed, output)?;
         Ok(())
     }
 
     fn handle_reducer_output(
         &mut self,
         reducer_name: String,
+        key: Option<Vec<u8>>,
+        keyed: bool,
         output: ReducerOutput,
     ) -> Result<(), KernelError> {
         Self::ensure_single_effect(&output)?;
 
-        match output.state {
-            Some(state) => {
-                self.reducer_state.insert(reducer_name.clone(), state);
+        let entry = self
+            .reducer_state
+            .entry(reducer_name.clone())
+            .or_insert_with(ReducerState::default);
+
+        match (keyed, output.state) {
+            (true, Some(state)) => {
+                let k = key.clone().expect("key required for keyed reducer");
+                entry.cells.insert(k, state);
             }
-            None => {
-                self.reducer_state.remove(&reducer_name);
+            (true, None) => {
+                if let Some(k) = key {
+                    entry.cells.remove(&k);
+                }
+            }
+            (false, Some(state)) => {
+                entry.monolithic = Some(state);
+            }
+            (false, None) => {
+                entry.monolithic = None;
             }
         }
         for event in output.domain_events {
-            self.record_domain_event(&event)?;
-            self.deliver_event_to_waiting_plans(&event)?;
-            self.scheduler.push_reducer(ReducerEvent { event });
+            self.process_domain_event(event)?;
         }
         for effect in &output.effects {
             let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
@@ -497,10 +630,27 @@ impl<S: Store + 'static> Kernel<S> {
             ));
         }
         let height = self.journal.next_seq();
-        let reducer_state = self
+        let reducer_state: Vec<ReducerStateEntry> = self
             .reducer_state
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            .flat_map(|(name, state)| {
+                let mut entries = Vec::new();
+                if let Some(state_bytes) = &state.monolithic {
+                    entries.push(ReducerStateEntry {
+                        reducer: name.clone(),
+                        key: None,
+                        state: state_bytes.clone(),
+                    });
+                }
+                for (key, bytes) in state.cells.iter() {
+                    entries.push(ReducerStateEntry {
+                        reducer: name.clone(),
+                        key: Some(key.clone()),
+                        state: bytes.clone(),
+                    });
+                }
+                entries
+            })
             .collect();
         let recent_receipts: Vec<[u8; 32]> = self.recent_receipts.iter().cloned().collect();
         let plan_instances = self
@@ -641,7 +791,18 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn apply_snapshot(&mut self, snapshot: KernelSnapshot) -> Result<(), KernelError> {
-        self.reducer_state = snapshot.reducer_state_entries().iter().cloned().collect();
+        let mut restored: HashMap<Name, ReducerState> = HashMap::new();
+        for entry in snapshot.reducer_state_entries().iter().cloned() {
+            let state = restored
+                .entry(entry.reducer.clone())
+                .or_insert_with(ReducerState::default);
+            if let Some(key) = entry.key {
+                state.cells.insert(key, entry.state);
+            } else {
+                state.monolithic = Some(entry.state);
+            }
+        }
+        self.reducer_state = restored;
         let (deque, set) = receipts_to_vecdeque(snapshot.recent_receipts(), RECENT_RECEIPT_CACHE);
         self.recent_receipts = deque;
         self.recent_receipt_index = set;
@@ -761,7 +922,9 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     pub fn reducer_state(&self, reducer: &str) -> Option<&Vec<u8>> {
-        self.reducer_state.get(reducer)
+        self.reducer_state
+            .get(reducer)
+            .and_then(|state| state.monolithic.as_ref())
     }
 
     pub fn heights(&self) -> KernelHeights {
@@ -1086,7 +1249,10 @@ impl<S: Store + 'static> Kernel<S> {
                 self.router
                     .entry(route.event.as_str().to_string())
                     .or_insert_with(Vec::new)
-                    .push(route.reducer.clone());
+                    .push(RouteBinding {
+                        reducer: route.reducer.clone(),
+                        key_field: route.key_field.clone(),
+                    });
             }
         }
 
@@ -1221,11 +1387,7 @@ impl<S: Store + 'static> Kernel<S> {
                 (name, outcome, snapshot.step_states)
             };
             for event in &outcome.raised_events {
-                self.record_domain_event(event)?;
-                self.deliver_event_to_waiting_plans(event)?;
-                self.scheduler.push_reducer(ReducerEvent {
-                    event: event.clone(),
-                });
+                self.process_domain_event(event.clone())?;
             }
             for intent in &outcome.intents_enqueued {
                 self.record_effect_intent(
@@ -1313,8 +1475,7 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
-            self.record_domain_event(&event)?;
-            self.scheduler.push_reducer(ReducerEvent { event });
+            self.process_domain_event(event)?;
             self.remember_receipt(receipt.intent_hash);
             return Ok(());
         }

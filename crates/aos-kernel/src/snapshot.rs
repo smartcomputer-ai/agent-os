@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 
 use aos_effects::{EffectIntent, EffectKind as RuntimeEffectKind};
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use crate::receipts::ReducerEffectContext;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelSnapshot {
-    reducer_state: Vec<(String, Vec<u8>)>,
+    reducer_state: Vec<ReducerStateEntry>,
     recent_receipts: Vec<[u8; 32]>,
     plan_instances: Vec<PlanInstanceSnapshot>,
     pending_plan_receipts: Vec<PendingPlanReceiptSnapshot>,
@@ -26,7 +26,7 @@ impl KernelSnapshot {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         height: JournalSeq,
-        reducer_state: HashMap<String, Vec<u8>>,
+        reducer_state: Vec<ReducerStateEntry>,
         recent_receipts: Vec<[u8; 32]>,
         plan_instances: Vec<PlanInstanceSnapshot>,
         pending_plan_receipts: Vec<PendingPlanReceiptSnapshot>,
@@ -37,7 +37,7 @@ impl KernelSnapshot {
         plan_results: Vec<PlanResultSnapshot>,
     ) -> Self {
         Self {
-            reducer_state: reducer_state.into_iter().collect(),
+            reducer_state,
             recent_receipts,
             plan_instances,
             pending_plan_receipts,
@@ -50,11 +50,7 @@ impl KernelSnapshot {
         }
     }
 
-    pub fn into_reducer_state(self) -> HashMap<String, Vec<u8>> {
-        self.reducer_state.into_iter().collect()
-    }
-
-    pub fn reducer_state_entries(&self) -> &[(String, Vec<u8>)] {
+    pub fn reducer_state_entries(&self) -> &[ReducerStateEntry] {
         &self.reducer_state
     }
 
@@ -178,4 +174,39 @@ pub struct PlanResultSnapshot {
     pub output_schema: String,
     #[serde(with = "serde_bytes")]
     pub value_cbor: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReducerStateEntry {
+    pub reducer: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub key: Option<Vec<u8>>,
+    #[serde(with = "serde_bytes")]
+    pub state: Vec<u8>,
+}
+
+mod serde_bytes_opt {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use serde_bytes::{ByteBuf, Bytes};
+
+    pub fn serialize<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(bytes) => serializer.serialize_some(Bytes::new(bytes)),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<ByteBuf>::deserialize(deserializer).map(|opt| opt.map(|buf| buf.into_vec()))
+    }
 }
