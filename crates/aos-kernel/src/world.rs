@@ -919,6 +919,9 @@ impl<S: Store + 'static> Kernel<S> {
                 self.handle_receipt(receipt)?;
                 self.tick_until_idle()?;
             }
+            JournalRecord::Snapshot(_) => {
+                // already handled separately
+            }
             JournalRecord::Governance(record) => {
                 self.governance.apply_record(&record);
             }

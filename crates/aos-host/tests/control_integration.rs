@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
 use aos_air_types::ReducerAbi;
-use aos_host::fixtures::{self, START_SCHEMA, TestStore};
 use aos_host::{WorldHost, config::HostConfig};
 use aos_kernel::Kernel;
 use aos_kernel::journal::mem::MemJournal;
@@ -15,6 +14,8 @@ use tokio::sync::{broadcast, mpsc};
 // Reuse helper utilities
 #[path = "helpers.rs"]
 mod helpers;
+use helpers::fixtures;
+use helpers::fixtures::{START_SCHEMA, TestStore};
 
 /// End-to-end control channel over Unix socket: send-event -> step -> query-state -> shutdown.
 #[tokio::test]
@@ -124,6 +125,20 @@ async fn control_channel_round_trip() {
         .expect("missing state_b64");
     let state = BASE64_STANDARD.decode(state_b64).unwrap();
     assert_eq!(state, vec![0xAA]);
+
+    // query-state with key_b64 on a non-keyed reducer should return null (state keyed lookup unsupported)
+    let query_key = RequestEnvelope {
+        v: 1,
+        id: "3b".into(),
+        cmd: "query-state".into(),
+        payload: json!({ "reducer": "com.acme/Echo@1", "key_b64": BASE64_STANDARD.encode(b"k1") }),
+    };
+    let resp = client.request(&query_key).await.unwrap();
+    assert!(resp.ok);
+    let state_b64 = resp
+        .result
+        .and_then(|v| v.get("state_b64").cloned());
+    assert!(state_b64.is_none() || state_b64 == Some(serde_json::Value::Null));
 
     // shutdown daemon via control
     let shutdown_cmd = RequestEnvelope {
