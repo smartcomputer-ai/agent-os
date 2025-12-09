@@ -1,6 +1,7 @@
 //! Deterministic kernel entry points: load manifests, run reducers, emit intents.
 
 pub mod capability;
+pub mod cell_index;
 pub mod effects;
 pub mod error;
 pub mod event;

@@ -64,11 +64,19 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 
 ## Storage Layout and Snapshots (current vs planned)
 
-- CAS stays dumb (`hash → bytes`).  
-- Cell state is stored per key as CAS blobs; we record `state_hash` and `last_active_ns` for each cell (and monolithic hash for non-keyed reducers).  
-- Snapshots embed per-cell state + hash + last_active, and include a slot for a future cell-index root hash.  
-- Planned (not yet implemented): CAS-backed `CellIndex` per keyed reducer (`key_hash → { key_bytes, state_hash, size, last_active_ns }`) with only the root hash kept in kernel/world state and pinned by snapshots. Lookup = root→index→state_hash→`blob.get`; updates write a new index root.  
+- CAS stays dumb (`hash → bytes`) and has **no names/refs**.  
+- Cell state is stored per key as CAS blobs; we track `{ state_hash, last_active_ns, size }` per cell (and a monolithic hash for non-keyed reducers).  
+- Snapshots embed per-cell state metadata and include **only the cell-index root hash** for each keyed reducer; that root is the ref that GC pins and replay restores.  
+- Planned (not yet implemented): CAS-backed persistent `CellIndex` per keyed reducer (`key_hash → { key_bytes, state_hash, size, last_active_ns }`). Updates create new index nodes and produce a new **root hash**; the kernel/world state stores that root (Git-like refs), never CAS. Lookup = root → index → `state_hash` → `blob.get`; updates write a fresh root.  
+- GC walks from the snapshot-pinned index roots to reach all cell state blobs; no side-channel CAS refs are roots.  
 - The earlier path-based layout (`world/state/reducers/<module_hash>/cells/...`) is a placeholder; current code uses CAS blobs plus in-memory maps while we add the CAS-backed index.
+
+## CAS Semantics and Naming (design decision)
+
+- Do **not** extend CAS with “named blobs” or Git-like refs; CAS is `{ hash → bytes }` only.  
+- All refs live in **world state** (manifest/snapshots/kernel metadata). For cells, the only ref is the per-reducer `cell_index_root`.  
+- Agent-visible named artifacts (code bundles, patches, prompts) use the **Query Catalog** reducer (`name → hash`, metadata) with payloads stored in CAS.  
+- This keeps determinism/replay: refs are journaled and snapshot-pinned; CAS holds immutable content only, shared safely across worlds.
 
 
 ## Journal and Observability
@@ -94,7 +102,7 @@ In progress / planned
 - GC/TTL for cells (planned after index lands).
 
 Consistency note
-- The earlier file-path layout is not implemented; current storage is CAS blobs plus in-memory maps while the CAS-backed index is being added. Keep CAS immutable; names for agent artifacts stay in Query Catalog, not CAS.
+- The earlier file-path layout is not implemented; current storage is CAS blobs plus in-memory maps while the CAS-backed index is being added. CAS has no refs; names/refs live in world state, and agent-visible names stay in Query Catalog, not CAS.
 
 ## Plans and Cells
 
