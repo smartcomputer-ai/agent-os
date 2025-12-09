@@ -18,8 +18,10 @@ use aos_kernel::manifest::LoadedManifest;
 use aos_store::{MemStore, Store};
 use aos_wasm_abi::{DomainEvent, ReducerOutput};
 use indexmap::IndexMap;
+use std::fs;
+use std::path::PathBuf;
+use aos_cbor::Hash;
 use wat::parse_str;
-
 
 /// In-memory store alias used across fixtures.
 pub type TestStore = MemStore;
@@ -432,6 +434,52 @@ pub fn stub_reducer_module<S: Store + ?Sized>(
         wasm_hash: wasm_hash_ref,
         key_schema: None,
         abi: ModuleAbi { reducer: None },
+    }
+}
+
+/// Load a real reducer WASM from `target/wasm32-unknown-unknown/<profile>/<file>` and register
+/// it in the store, returning a fully populated DefModule.
+///
+/// This is useful for integration tests that want to exercise actual reducers instead of stubs.
+pub fn reducer_module_from_target(
+    store: &Arc<TestStore>,
+    name: &str,
+    wasm_file: &str,
+    key_schema: Option<&str>,
+    state_schema: &str,
+    event_schema: &str,
+) -> DefModule {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest_dir
+        .join("../../target/wasm32-unknown-unknown/debug")
+        .join(wasm_file);
+
+    if !path.exists() {
+        panic!(
+            "missing {} — build it first with `cargo build -p aos-sys --target wasm32-unknown-unknown`",
+            path.display()
+        );
+    }
+
+    let bytes = fs::read(&path).expect("read wasm");
+    let wasm_hash = Hash::of_bytes(&bytes);
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
+    store.put_blob(&bytes).expect("store wasm blob");
+
+    DefModule {
+        name: name.to_string(),
+        module_kind: ModuleKind::Reducer,
+        wasm_hash: wasm_hash_ref,
+        key_schema: key_schema.map(schema),
+        abi: ModuleAbi {
+            reducer: Some(aos_air_types::ReducerAbi {
+                state: schema(state_schema),
+                event: schema(event_schema),
+                annotations: None,
+                effects_emitted: vec![],
+                cap_slots: IndexMap::new(),
+            }),
+        },
     }
 }
 

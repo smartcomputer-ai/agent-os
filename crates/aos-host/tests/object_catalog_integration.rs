@@ -1,3 +1,5 @@
+#![cfg(feature = "test-fixtures")]
+
 //! Integration tests for the ObjectCatalog reducer (sys/ObjectCatalog@1).
 //!
 //! Tests verify:
@@ -5,6 +7,10 @@
 //! - Key routing matches meta.name
 //! - Replay determinism
 //! - Previous versions remain accessible
+//!
+//! These tests load the actual reducer WASM built in `crates/aos-sys` from
+//! `target/wasm32-unknown-unknown/debug/object_catalog.wasm`. Build it first with:
+//! `cargo build -p aos-sys --target wasm32-unknown-unknown`.
 
 #![cfg(feature = "test-fixtures")]
 
@@ -14,9 +20,8 @@ use std::sync::Arc;
 use aos_air_exec::Value as ExprValue;
 use aos_host::fixtures::{self, TestStore};
 use aos_kernel::Kernel;
-use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::OwnedJournalEntry;
-use aos_wasm_abi::ReducerOutput;
+use aos_kernel::journal::mem::MemJournal;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -52,62 +57,18 @@ fn object_registered_event_value(name: &str, kind: &str, hash: &str, owner: &str
     serde_cbor::to_vec(&event).unwrap()
 }
 
-/// Helper to create a stub reducer that returns updated ObjectVersions state.
-/// The stub simulates the ObjectCatalog reducer behavior.
-fn create_catalog_stub_reducer(
-    _store: &TestStore,
-    initial_state: Option<ObjectVersions>,
-    name: &str,
-    kind: &str,
-    hash: &str,
-    owner: &str,
-) -> ReducerOutput {
-    let mut state = initial_state.unwrap_or_default();
-    state.latest = state.latest.saturating_add(1);
-    state.versions.insert(
-        state.latest,
-        ObjectMeta {
-            name: name.to_string(),
-            kind: kind.to_string(),
-            hash: hash.to_string(),
-            tags: BTreeSet::new(),
-            created_at: 1000,
-            owner: owner.to_string(),
-        },
-    );
-
-    ReducerOutput {
-        state: Some(serde_cbor::to_vec(&state).unwrap()),
-        domain_events: vec![],
-        effects: vec![],
-        ann: None,
-    }
-}
-
 /// Test that ObjectRegistered events are correctly routed and state is updated.
 #[tokio::test]
 async fn object_catalog_version_increment() {
     let store: Arc<TestStore> = fixtures::new_mem_store();
-
-    // Create stub output for first registration
-    let output = create_catalog_stub_reducer(
+    let reducer = fixtures::reducer_module_from_target(
         &store,
-        None,
-        "artifacts/patch-001",
-        "air.patch",
-        "sha256:abc123",
-        "sys/self-upgrade@1",
+        "sys/ObjectCatalog@1",
+        "object_catalog.wasm",
+        Some("sys/ObjectKey@1"),
+        "sys/ObjectVersions@1",
+        "sys/ObjectRegistered@1",
     );
-
-    let mut reducer = fixtures::stub_reducer_module(&store, "sys/ObjectCatalog@1", &output);
-    reducer.key_schema = Some(fixtures::schema("sys/ObjectKey@1"));
-    reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
-        state: fixtures::schema("sys/ObjectVersions@1"),
-        event: fixtures::schema("sys/ObjectRegistered@1"),
-        annotations: None,
-        effects_emitted: vec![],
-        cap_slots: Default::default(),
-    });
 
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("sys/ObjectRegistered@1"),
@@ -119,10 +80,22 @@ async fn object_catalog_version_increment() {
     fixtures::insert_test_schemas(
         &mut manifest,
         vec![
-            fixtures::def_text_record_schema("sys/ObjectKey@1", vec![]),
-            fixtures::def_text_record_schema("sys/ObjectVersions@1", vec![]),
-            fixtures::def_text_record_schema("sys/ObjectMeta@1", vec![]),
-            fixtures::def_text_record_schema("sys/ObjectRegistered@1", vec![]),
+            aos_air_types::builtins::find_builtin_schema("sys/ObjectKey@1")
+                .unwrap()
+                .schema
+                .clone(),
+            aos_air_types::builtins::find_builtin_schema("sys/ObjectVersions@1")
+                .unwrap()
+                .schema
+                .clone(),
+            aos_air_types::builtins::find_builtin_schema("sys/ObjectMeta@1")
+                .unwrap()
+                .schema
+                .clone(),
+            aos_air_types::builtins::find_builtin_schema("sys/ObjectRegistered@1")
+                .unwrap()
+                .schema
+                .clone(),
         ],
     );
 
@@ -156,19 +129,14 @@ async fn object_catalog_version_increment() {
 async fn object_catalog_keyed_routing() {
     let store: Arc<TestStore> = fixtures::new_mem_store();
 
-    // Create stub that produces state with version 1
-    let output =
-        create_catalog_stub_reducer(&store, None, "test/obj", "test", "sha256:test", "test");
-
-    let mut reducer = fixtures::stub_reducer_module(&store, "sys/ObjectCatalog@1", &output);
-    reducer.key_schema = Some(fixtures::schema("sys/ObjectKey@1"));
-    reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
-        state: fixtures::schema("sys/ObjectVersions@1"),
-        event: fixtures::schema("sys/ObjectRegistered@1"),
-        annotations: None,
-        effects_emitted: vec![],
-        cap_slots: Default::default(),
-    });
+    let reducer = fixtures::reducer_module_from_target(
+        &store,
+        "sys/ObjectCatalog@1",
+        "object_catalog.wasm",
+        Some("sys/ObjectKey@1"),
+        "sys/ObjectVersions@1",
+        "sys/ObjectRegistered@1",
+    );
 
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("sys/ObjectRegistered@1"),
@@ -180,10 +148,22 @@ async fn object_catalog_keyed_routing() {
     fixtures::insert_test_schemas(
         &mut manifest,
         vec![
-            fixtures::def_text_record_schema("sys/ObjectKey@1", vec![]),
-            fixtures::def_text_record_schema("sys/ObjectVersions@1", vec![]),
-            fixtures::def_text_record_schema("sys/ObjectMeta@1", vec![]),
-            fixtures::def_text_record_schema("sys/ObjectRegistered@1", vec![]),
+            aos_air_types::builtins::find_builtin_schema("sys/ObjectKey@1")
+                .unwrap()
+                .schema
+                .clone(),
+            aos_air_types::builtins::find_builtin_schema("sys/ObjectVersions@1")
+                .unwrap()
+                .schema
+                .clone(),
+            aos_air_types::builtins::find_builtin_schema("sys/ObjectMeta@1")
+                .unwrap()
+                .schema
+                .clone(),
+            aos_air_types::builtins::find_builtin_schema("sys/ObjectRegistered@1")
+                .unwrap()
+                .schema
+                .clone(),
         ],
     );
 
@@ -219,25 +199,15 @@ async fn object_catalog_keyed_routing() {
 async fn object_catalog_snapshot_replay() {
     let store: Arc<TestStore> = fixtures::new_mem_store();
 
-    let output = create_catalog_stub_reducer(
-        &store,
-        None,
-        "replay/test",
-        "test",
-        "sha256:replay",
-        "test",
-    );
-
     let build_manifest = || {
-        let mut reducer = fixtures::stub_reducer_module(&store, "sys/ObjectCatalog@1", &output);
-        reducer.key_schema = Some(fixtures::schema("sys/ObjectKey@1"));
-        reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
-            state: fixtures::schema("sys/ObjectVersions@1"),
-            event: fixtures::schema("sys/ObjectRegistered@1"),
-            annotations: None,
-            effects_emitted: vec![],
-            cap_slots: Default::default(),
-        });
+        let reducer = fixtures::reducer_module_from_target(
+            &store,
+            "sys/ObjectCatalog@1",
+            "object_catalog.wasm",
+            Some("sys/ObjectKey@1"),
+            "sys/ObjectVersions@1",
+            "sys/ObjectRegistered@1",
+        );
 
         let routing = vec![aos_air_types::RoutingEvent {
             event: fixtures::schema("sys/ObjectRegistered@1"),
@@ -249,10 +219,22 @@ async fn object_catalog_snapshot_replay() {
         fixtures::insert_test_schemas(
             &mut manifest,
             vec![
-                fixtures::def_text_record_schema("sys/ObjectKey@1", vec![]),
-                fixtures::def_text_record_schema("sys/ObjectVersions@1", vec![]),
-                fixtures::def_text_record_schema("sys/ObjectMeta@1", vec![]),
-                fixtures::def_text_record_schema("sys/ObjectRegistered@1", vec![]),
+                aos_air_types::builtins::find_builtin_schema("sys/ObjectKey@1")
+                    .unwrap()
+                    .schema
+                    .clone(),
+                aos_air_types::builtins::find_builtin_schema("sys/ObjectVersions@1")
+                    .unwrap()
+                    .schema
+                    .clone(),
+                aos_air_types::builtins::find_builtin_schema("sys/ObjectMeta@1")
+                    .unwrap()
+                    .schema
+                    .clone(),
+                aos_air_types::builtins::find_builtin_schema("sys/ObjectRegistered@1")
+                    .unwrap()
+                    .schema
+                    .clone(),
             ],
         );
         manifest
@@ -263,7 +245,8 @@ async fn object_catalog_snapshot_replay() {
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
 
     // Submit event and tick using ExprValue format
-    let event_payload = object_registered_event_value("replay/test", "test", "sha256:replay", "test");
+    let event_payload =
+        object_registered_event_value("replay/test", "test", "sha256:replay", "test");
     kernel.submit_domain_event("sys/ObjectRegistered@1", event_payload);
     kernel.tick_until_idle().unwrap();
 
@@ -296,6 +279,9 @@ async fn object_catalog_snapshot_replay() {
         .unwrap()
         .expect("replay state");
 
-    assert_eq!(root_before, root_after, "index root should match after replay");
+    assert_eq!(
+        root_before, root_after,
+        "index root should match after replay"
+    );
     assert_eq!(state_before, state_after, "state should match after replay");
 }
