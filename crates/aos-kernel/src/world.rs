@@ -32,6 +32,7 @@ use crate::journal::{
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
 use crate::policy::{AllowAllPolicy, RulePolicy};
+use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
@@ -73,6 +74,7 @@ impl fmt::Debug for KernelConfig {
 pub struct Kernel<S: Store> {
     store: Arc<S>,
     manifest: Manifest,
+    manifest_hash: Hash,
     secrets: Vec<SecretDecl>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
     reducers: ReducerRegistry<S>,
@@ -98,6 +100,7 @@ pub struct Kernel<S: Store> {
     secret_resolver: Option<SharedSecretResolver>,
     allow_placeholder_secrets: bool,
     last_snapshot_height: Option<JournalSeq>,
+    last_snapshot_hash: Option<Hash>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -430,9 +433,14 @@ impl<S: Store + 'static> Kernel<S> {
         // compilation can resolve the base manifest hash from CAS.
         persist_loaded_manifest(store.as_ref(), &loaded)?;
 
+        let manifest_bytes = to_canonical_cbor(&loaded.manifest)
+            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
+        let manifest_hash = Hash::of_bytes(&manifest_bytes);
+
         let mut kernel = Self {
             store: store.clone(),
             manifest: loaded.manifest.clone(),
+            manifest_hash,
             module_defs: loaded.modules,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
@@ -469,6 +477,7 @@ impl<S: Store + 'static> Kernel<S> {
             allow_placeholder_secrets: config.allow_placeholder_secrets,
             secrets: loaded.secrets,
             last_snapshot_height: None,
+            last_snapshot_hash: None,
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
@@ -849,6 +858,7 @@ impl<S: Store + 'static> Kernel<S> {
             queued_effects,
             pending_reducer_receipts,
             plan_results,
+            Some(*self.manifest_hash.as_bytes()),
         );
         snapshot.set_reducer_index_roots(reducer_index_roots);
         let bytes = serde_cbor::to_vec(&snapshot)
@@ -857,7 +867,9 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(JournalRecord::Snapshot(SnapshotRecord {
             snapshot_ref: hash.to_hex(),
             height,
+            manifest_hash: Some(self.manifest_hash.to_hex()),
         }))?;
+        self.last_snapshot_hash = Some(hash);
         self.last_snapshot_height = Some(height);
         Ok(())
     }
@@ -942,6 +954,12 @@ impl<S: Store + 'static> Kernel<S> {
         let snapshot: KernelSnapshot = serde_cbor::from_slice(&bytes)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
         self.last_snapshot_height = Some(record.height);
+        self.last_snapshot_hash = Some(hash);
+        if let Some(manifest_hex) = record.manifest_hash.as_ref() {
+            if let Ok(h) = Hash::from_hex_str(manifest_hex) {
+                self.manifest_hash = h;
+            }
+        }
         self.apply_snapshot(snapshot)
     }
 
@@ -951,6 +969,12 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .filter_map(|(name, bytes)| Hash::from_bytes(bytes).ok().map(|h| (name.clone(), h)))
             .collect();
+
+        if let Some(bytes) = snapshot.manifest_hash() {
+            if let Ok(hash) = Hash::from_bytes(bytes) {
+                self.manifest_hash = hash;
+            }
+        }
 
         let mut restored: HashMap<Name, ReducerState> = HashMap::new();
         for entry in snapshot.reducer_state_entries().iter().cloned() {
@@ -1136,6 +1160,24 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             Ok(None)
         }
+    }
+
+    fn read_meta(&self) -> ReadMeta {
+        ReadMeta {
+            journal_height: self.journal.next_seq(),
+            snapshot_hash: self.last_snapshot_hash,
+            manifest_hash: self.manifest_hash,
+        }
+    }
+
+    /// Current manifest hash (canonical CBOR of manifest node).
+    pub fn manifest_hash(&self) -> Hash {
+        self.manifest_hash
+    }
+
+    /// Hash of the most recent snapshot blob, if any.
+    pub fn snapshot_hash(&self) -> Option<Hash> {
+        self.last_snapshot_hash
     }
 
     /// List all cells for a keyed reducer using the persisted CellIndex.
@@ -1468,6 +1510,9 @@ impl<S: Store + 'static> Kernel<S> {
         };
 
         self.manifest = loaded.manifest;
+        let manifest_bytes = to_canonical_cbor(&self.manifest)
+            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
+        self.manifest_hash = Hash::of_bytes(&manifest_bytes);
         self.module_defs = loaded.modules;
         self.plan_registry = PlanRegistry::default();
         for plan in loaded.plans.values() {
@@ -2762,4 +2807,42 @@ fn persist_loaded_manifest<S: Store>(
     }
     store.put_node(&AirNode::Manifest(loaded.manifest.clone()))?;
     Ok(())
+}
+
+impl<S: Store + 'static> StateReader for Kernel<S> {
+    fn get_reducer_state(
+        &self,
+        module: &str,
+        key: Option<&[u8]>,
+        consistency: Consistency,
+    ) -> Result<StateRead<Option<Vec<u8>>>, KernelError> {
+        match consistency {
+            Consistency::Head => Ok(StateRead {
+                meta: self.read_meta(),
+                value: self.reducer_state_bytes(module, key)?,
+            }),
+            _ => Err(KernelError::SnapshotUnavailable(
+                "consistency modes other than Head are not implemented yet".into(),
+            )),
+        }
+    }
+
+    fn get_manifest(
+        &self,
+        consistency: Consistency,
+    ) -> Result<StateRead<Manifest>, KernelError> {
+        match consistency {
+            Consistency::Head => Ok(StateRead {
+                meta: self.read_meta(),
+                value: self.manifest.clone(),
+            }),
+            _ => Err(KernelError::SnapshotUnavailable(
+                "consistency modes other than Head are not implemented yet".into(),
+            )),
+        }
+    }
+
+    fn get_journal_head(&self) -> ReadMeta {
+        self.read_meta()
+    }
 }

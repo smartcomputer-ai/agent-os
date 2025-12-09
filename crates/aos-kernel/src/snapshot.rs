@@ -21,6 +21,12 @@ pub struct KernelSnapshot {
     pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
     plan_results: Vec<PlanResultSnapshot>,
     height: JournalSeq,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    manifest_hash: Option<Vec<u8>>, // CBOR-encoded hash bytes (sha256)
 }
 
 impl KernelSnapshot {
@@ -36,6 +42,7 @@ impl KernelSnapshot {
         queued_effects: Vec<EffectIntentSnapshot>,
         pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
         plan_results: Vec<PlanResultSnapshot>,
+        manifest_hash: Option<[u8; 32]>,
     ) -> Self {
         Self {
             reducer_state,
@@ -49,6 +56,7 @@ impl KernelSnapshot {
             pending_reducer_receipts,
             plan_results,
             height,
+            manifest_hash: manifest_hash.map(|h| h.to_vec()),
         }
     }
 
@@ -98,6 +106,10 @@ impl KernelSnapshot {
 
     pub fn plan_results(&self) -> &[PlanResultSnapshot] {
         &self.plan_results
+    }
+
+    pub fn manifest_hash(&self) -> Option<&[u8]> {
+        self.manifest_hash.as_deref()
     }
 }
 
