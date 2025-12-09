@@ -10,7 +10,7 @@ This note sketches an opt-in read path for worlds. Reducers still own all mutati
 
 ## Data sources and freshness
 - **Hot path**: In-memory cache of the latest replayed snapshot (state hash + manifest hash + journal height). Cheap reads that may be a few events behind if replay is running.
-- **Warm path**: On-disk snapshot plus a small journal tail replayer when callers request `at_least_height` freshness and the tail is available.
+- **Warm path**: On-disk snapshot plus a small journal tail replayer when callers request `at_least_height` freshness and the tail is available. **(Deferred — not implemented yet.)**
 - **Cold path**: Historical snapshots in CAS for point-in-time queries and debugging.
 - **Contract**: Every response includes `(journal_height, snapshot_hash, manifest_hash)` so callers know what they read. Clients can request `exact_height` (fail if behind) or `at_least_height` (serve newest available ≥ requested or return the cached head).
 

@@ -94,6 +94,7 @@ pub struct Kernel<S: Store> {
     effect_manager: EffectManager,
     reducer_state: HashMap<Name, ReducerState>,
     reducer_index_roots: HashMap<Name, Hash>,
+    snapshot_index: HashMap<JournalSeq, (Hash, Option<Hash>)>,
     journal: Box<dyn Journal>,
     suppress_journal: bool,
     governance: GovernanceManager,
@@ -470,6 +471,7 @@ impl<S: Store + 'static> Kernel<S> {
             ),
             reducer_state: HashMap::new(),
             reducer_index_roots: HashMap::new(),
+            snapshot_index: HashMap::new(),
             journal,
             suppress_journal: false,
             governance: GovernanceManager::new(),
@@ -869,6 +871,8 @@ impl<S: Store + 'static> Kernel<S> {
             height,
             manifest_hash: Some(self.manifest_hash.to_hex()),
         }))?;
+        self.snapshot_index
+            .insert(height, (hash, Some(self.manifest_hash)));
         self.last_snapshot_hash = Some(hash);
         self.last_snapshot_height = Some(height);
         Ok(())
@@ -886,6 +890,14 @@ impl<S: Store + 'static> Kernel<S> {
                 let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
                     .map_err(|err| KernelError::Journal(err.to_string()))?;
                 if let JournalRecord::Snapshot(snapshot) = record {
+                    if let Ok(hash) = Hash::from_hex_str(&snapshot.snapshot_ref) {
+                        let manifest_hash = snapshot
+                            .manifest_hash
+                            .as_ref()
+                            .and_then(|s| Hash::from_hex_str(s).ok());
+                        self.snapshot_index
+                            .insert(snapshot.height, (hash, manifest_hash));
+                    }
                     latest_snapshot = Some(snapshot);
                 }
             }
@@ -960,6 +972,16 @@ impl<S: Store + 'static> Kernel<S> {
                 self.manifest_hash = h;
             }
         }
+        self.snapshot_index.insert(
+            record.height,
+            (
+                hash,
+                record
+                    .manifest_hash
+                    .as_ref()
+                    .and_then(|s| Hash::from_hex_str(s).ok()),
+            ),
+        );
         self.apply_snapshot(snapshot)
     }
 
@@ -1200,6 +1222,11 @@ impl<S: Store + 'static> Kernel<S> {
             snapshot: self.last_snapshot_height,
             head: self.journal.next_seq(),
         }
+    }
+
+    /// Return snapshot record (hash + manifest hash) for an exact height, if known.
+    fn snapshot_at_height(&self, height: JournalSeq) -> Option<(Hash, Option<Hash>)> {
+        self.snapshot_index.get(&height).cloned()
     }
 
     pub fn journal_head(&self) -> JournalSeq {
@@ -2816,14 +2843,46 @@ impl<S: Store + 'static> StateReader for Kernel<S> {
         key: Option<&[u8]>,
         consistency: Consistency,
     ) -> Result<StateRead<Option<Vec<u8>>>, KernelError> {
+        let head = self.journal.next_seq();
         match consistency {
-            Consistency::Head => Ok(StateRead {
-                meta: self.read_meta(),
-                value: self.reducer_state_bytes(module, key)?,
-            }),
-            _ => Err(KernelError::SnapshotUnavailable(
-                "consistency modes other than Head are not implemented yet".into(),
-            )),
+            Consistency::Head => {
+                return Ok(StateRead {
+                    meta: self.read_meta(),
+                    value: self.reducer_state_bytes(module, key)?,
+                });
+            }
+            Consistency::AtLeast(h) => {
+                if head < h {
+                    return Err(KernelError::SnapshotUnavailable(format!(
+                        "requested at least height {h}, but head is {head}"
+                    )));
+                }
+                return Ok(StateRead {
+                    meta: self.read_meta(),
+                    value: self.reducer_state_bytes(module, key)?,
+                });
+            }
+            Consistency::Exact(h) => {
+                if h == head {
+                    return Ok(StateRead {
+                        meta: self.read_meta(),
+                        value: self.reducer_state_bytes(module, key)?,
+                    });
+                }
+                if let Some((snap_hash, snap_manifest)) = self.snapshot_at_height(h) {
+                    let snapshot = self.load_snapshot_blob(snap_hash)?;
+                    let value = self.read_reducer_state_from_snapshot(&snapshot, module, key)?;
+                    let meta = ReadMeta {
+                        journal_height: h,
+                        snapshot_hash: Some(snap_hash),
+                        manifest_hash: snap_manifest.unwrap_or(self.manifest_hash),
+                    };
+                    return Ok(StateRead { meta, value });
+                }
+                Err(KernelError::SnapshotUnavailable(format!(
+                    "exact height {h} not available; no snapshot and head is {head}"
+                )))
+            }
         }
     }
 
@@ -2831,18 +2890,104 @@ impl<S: Store + 'static> StateReader for Kernel<S> {
         &self,
         consistency: Consistency,
     ) -> Result<StateRead<Manifest>, KernelError> {
+        let head = self.journal.next_seq();
         match consistency {
-            Consistency::Head => Ok(StateRead {
-                meta: self.read_meta(),
-                value: self.manifest.clone(),
-            }),
-            _ => Err(KernelError::SnapshotUnavailable(
-                "consistency modes other than Head are not implemented yet".into(),
-            )),
+            Consistency::Head => {
+                return Ok(StateRead {
+                    meta: self.read_meta(),
+                    value: self.manifest.clone(),
+                });
+            }
+            Consistency::AtLeast(h) => {
+                if head < h {
+                    return Err(KernelError::SnapshotUnavailable(format!(
+                        "requested at least height {h}, but head is {head}"
+                    )));
+                }
+                return Ok(StateRead {
+                    meta: self.read_meta(),
+                    value: self.manifest.clone(),
+                });
+            }
+            Consistency::Exact(h) => {
+                if h == head {
+                    return Ok(StateRead {
+                        meta: self.read_meta(),
+                        value: self.manifest.clone(),
+                    });
+                }
+                if let Some((snap_hash, snap_manifest)) = self.snapshot_at_height(h) {
+                    let manifest_hash = snap_manifest.ok_or_else(|| {
+                        KernelError::SnapshotUnavailable(
+                            "snapshot missing manifest_hash; cannot serve manifest".into(),
+                        )
+                    })?;
+                    let manifest: Manifest = self
+                        .store
+                        .get_node(manifest_hash)
+                        .map_err(|e| KernelError::SnapshotDecode(e.to_string()))?;
+                    let meta = ReadMeta {
+                        journal_height: h,
+                        snapshot_hash: Some(snap_hash),
+                        manifest_hash,
+                    };
+                    return Ok(StateRead { meta, value: manifest });
+                }
+                Err(KernelError::SnapshotUnavailable(format!(
+                    "exact height {h} not available; no snapshot and head is {head}"
+                )))
+            }
         }
     }
 
     fn get_journal_head(&self) -> ReadMeta {
         self.read_meta()
+    }
+}
+
+impl<S: Store + 'static> Kernel<S> {
+    fn load_snapshot_blob(&self, hash: Hash) -> Result<KernelSnapshot, KernelError> {
+        let bytes = self.store.get_blob(hash)?;
+        let snapshot: KernelSnapshot = serde_cbor::from_slice(&bytes)
+            .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
+        Ok(snapshot)
+    }
+
+    fn read_reducer_state_from_snapshot(
+        &self,
+        snapshot: &KernelSnapshot,
+        reducer: &str,
+        key: Option<&[u8]>,
+    ) -> Result<Option<Vec<u8>>, KernelError> {
+        // Monolithic entries are stored inline in reducer_state_entries.
+        if key.is_none() {
+            for entry in snapshot.reducer_state_entries() {
+                if entry.reducer == reducer && entry.key.is_none() {
+                    return Ok(Some(entry.state.clone()));
+                }
+            }
+            return Ok(None);
+        }
+
+        let key_bytes = key.unwrap();
+        // Keyed reducers: use index root recorded in snapshot to find cell state in CAS.
+        let root = snapshot
+            .reducer_index_roots()
+            .iter()
+            .find(|(name, _)| name == reducer)
+            .and_then(|(_, bytes)| Hash::from_bytes(bytes).ok());
+        let Some(root) = root else {
+            return Ok(None);
+        };
+        let index = CellIndex::new(self.store.as_ref());
+        let meta = index.get(root, Hash::of_bytes(key_bytes).as_bytes())?;
+        if let Some(meta) = meta {
+            let state_hash = Hash::from_bytes(&meta.state_hash)
+                .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
+            let state = self.store.get_blob(state_hash)?;
+            Ok(Some(state))
+        } else {
+            Ok(None)
+        }
     }
 }
