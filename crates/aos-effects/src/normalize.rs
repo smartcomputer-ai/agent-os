@@ -53,6 +53,7 @@ mod tests {
     };
     use std::collections::BTreeMap;
     use std::collections::HashMap;
+    use serde_cbor::Value as CborValue;
     fn header_params(map: Vec<(&str, &str)>) -> CborValue {
         let mut headers = BTreeMap::new();
         for (k, v) in map {

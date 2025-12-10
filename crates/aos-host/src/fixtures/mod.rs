@@ -3,10 +3,10 @@
 //! This module provides utilities for programmatically constructing manifests,
 //! stub WASM reducers, and other test fixtures. Enable with the `test-fixtures` feature.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use aos_air_exec::Value as ExprValue;
+use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
     CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, EmptyObject, Expr,
     ExprConst, ExprRef, HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind,
@@ -302,11 +302,23 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
         {
             continue;
         }
+        let ty = if schema_name == START_SCHEMA {
+            TypeExpr::Record(TypeRecord {
+                record: IndexMap::from([(
+                    "id".into(),
+                    TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                        text: EmptyObject {},
+                    })),
+                )]),
+            })
+        } else {
+            TypeExpr::Record(TypeRecord {
+                record: IndexMap::new(),
+            })
+        };
         let def = DefSchema {
             name: schema_name.clone(),
-            ty: TypeExpr::Record(TypeRecord {
-                record: IndexMap::new(),
-            }),
+            ty,
         };
         loaded.schemas.insert(schema_name.clone(), def);
         if !loaded
@@ -510,10 +522,47 @@ pub fn stub_event_emitting_reducer(
 
 /// Helper for synthesizing domain events by name and an already-materialized value.
 pub fn domain_event(schema: &str, value: &ExprValue) -> DomainEvent {
-    DomainEvent::new(
-        schema.to_string(),
-        serde_cbor::to_vec(value).expect("encode domain event"),
-    )
+    let payload = serde_cbor::to_vec(&expr_value_to_cbor(value)).expect("encode domain event");
+    DomainEvent::new(schema.to_string(), payload)
+}
+
+fn expr_value_key_to_cbor(key: &ExprValueKey) -> serde_cbor::Value {
+    match key {
+        ExprValueKey::Int(v) => serde_cbor::Value::Integer((*v).into()),
+        ExprValueKey::Nat(v) => serde_cbor::Value::Integer((*v).into()),
+        ExprValueKey::Text(v) => serde_cbor::Value::Text(v.clone()),
+        ExprValueKey::Hash(v) => serde_cbor::Value::Text(v.clone()),
+        ExprValueKey::Uuid(v) => serde_cbor::Value::Text(v.clone()),
+    }
+}
+
+fn expr_value_to_cbor(value: &ExprValue) -> serde_cbor::Value {
+    use serde_cbor::Value as CborValue;
+    match value {
+        ExprValue::Unit | ExprValue::Null => CborValue::Null,
+        ExprValue::Bool(v) => CborValue::Bool(*v),
+        ExprValue::Int(v) => CborValue::Integer((*v).into()),
+        ExprValue::Nat(v) => CborValue::Integer((*v).into()),
+        ExprValue::Dec128(v) => CborValue::Text(v.clone()),
+        ExprValue::Bytes(v) => CborValue::Bytes(v.clone()),
+        ExprValue::Text(v) => CborValue::Text(v.clone()),
+        ExprValue::TimeNs(v) => CborValue::Integer((*v).into()),
+        ExprValue::DurationNs(v) => CborValue::Integer((*v).into()),
+        ExprValue::Hash(v) => CborValue::Text(v.to_string()),
+        ExprValue::Uuid(v) => CborValue::Text(v.clone()),
+        ExprValue::List(v) => CborValue::Array(v.iter().map(expr_value_to_cbor).collect()),
+        ExprValue::Set(v) => CborValue::Array(v.iter().map(expr_value_key_to_cbor).collect()),
+        ExprValue::Map(v) => CborValue::Map(
+            v.iter()
+                .map(|(k, v)| (expr_value_key_to_cbor(k), expr_value_to_cbor(v)))
+                .collect::<BTreeMap<_, _>>(),
+        ),
+        ExprValue::Record(v) => CborValue::Map(
+            v.iter()
+                .map(|(k, v)| (CborValue::Text(k.clone()), expr_value_to_cbor(v)))
+                .collect::<BTreeMap<_, _>>(),
+        ),
+    }
 }
 
 /// Utility for building a routing rule from an event schema to a reducer.
