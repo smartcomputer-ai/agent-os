@@ -8,6 +8,7 @@ mod refs;
 pub mod schemas;
 pub mod typecheck;
 pub mod validate;
+pub mod value_normalize;
 
 pub use model::*;
 pub use refs::{HashRef, RefError, SchemaRef};

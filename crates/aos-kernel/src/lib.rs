@@ -15,6 +15,7 @@ pub mod query;
 pub mod receipts;
 pub mod reducer;
 pub mod scheduler;
+pub mod schema_value;
 pub mod secret;
 pub mod shadow;
 pub mod snapshot;

@@ -14,13 +14,13 @@ use aos_air_types::{
     TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord,
     catalog::EffectCatalog,
 };
+use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
 use aos_store::{MemStore, Store};
 use aos_wasm_abi::{DomainEvent, ReducerOutput};
 use indexmap::IndexMap;
 use std::fs;
 use std::path::PathBuf;
-use aos_cbor::Hash;
 use wat::parse_str;
 
 /// In-memory store alias used across fixtures.

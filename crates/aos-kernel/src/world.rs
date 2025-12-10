@@ -8,12 +8,14 @@ use aos_air_types::{
     AirNode, DefModule, Manifest, Name, NamedRef, SecretDecl, SecretEntry, TypeExpr, builtins,
     catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
+    value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
 use serde_cbor;
+use serde_cbor::Value as CborValue;
 
 use crate::capability::CapabilityResolver;
 use crate::cell_index::{CellIndex, CellMeta};
@@ -36,6 +38,7 @@ use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
+use crate::schema_value::cbor_to_expr_value;
 use crate::secret::{PlaceholderSecretResolver, SharedSecretResolver};
 use crate::shadow::{
     DeltaKind, LedgerDelta, LedgerKind, ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary,
@@ -516,6 +519,7 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn process_domain_event(&mut self, event: DomainEvent) -> Result<(), KernelError> {
+        let event = self.normalize_domain_event(event)?;
         let routed = self.route_event(&event)?;
         let mut event_for_plans = event.clone();
         if event_for_plans.key.is_none() {
@@ -532,11 +536,36 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
+    fn normalize_domain_event(&self, event: DomainEvent) -> Result<DomainEvent, KernelError> {
+        let normalized =
+            normalize_cbor_by_name(&self.schema_index, event.schema.as_str(), &event.value)
+                .map_err(|err| {
+                    KernelError::Manifest(format!(
+                        "event '{}' payload failed validation: {err}",
+                        event.schema
+                    ))
+                })?;
+        Ok(DomainEvent {
+            schema: event.schema,
+            value: normalized.bytes,
+            key: event.key,
+        })
+    }
+
     fn route_event(&self, event: &DomainEvent) -> Result<Vec<ReducerEvent>, KernelError> {
         let mut routed = Vec::new();
         let Some(bindings) = self.router.get(&event.schema) else {
             return Ok(routed);
         };
+        let normalized =
+            normalize_cbor_by_name(&self.schema_index, event.schema.as_str(), &event.value)
+                .map_err(|err| {
+                    KernelError::Manifest(format!(
+                        "failed to decode event '{}' payload for routing: {err}",
+                        event.schema
+                    ))
+                })?;
+        let event_value = normalized.value;
         for binding in bindings {
             let module_def = self
                 .module_defs
@@ -561,7 +590,21 @@ impl<S: Store + 'static> Kernel<S> {
             }
 
             let key_bytes = if let Some(field) = &binding.key_field {
-                Some(self.extract_key_bytes(event, field)?)
+                let key_schema_ref = module_def
+                    .key_schema
+                    .as_ref()
+                    .expect("keyed reducers have key_schema");
+                let key_schema =
+                    self.schema_index
+                        .get(key_schema_ref.as_str())
+                        .ok_or_else(|| {
+                            KernelError::Manifest(format!(
+                                "key schema '{}' not found for reducer '{}'",
+                                key_schema_ref.as_str(),
+                                binding.reducer
+                            ))
+                        })?;
+                Some(self.extract_key_bytes(field, key_schema, &event_value, &event.schema)?)
             } else {
                 None
             };
@@ -587,20 +630,26 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(routed)
     }
 
-    fn extract_key_bytes(&self, event: &DomainEvent, field: &str) -> Result<Vec<u8>, KernelError> {
-        let value: ExprValue = serde_cbor::from_slice(&event.value).map_err(|err| {
+    fn extract_key_bytes(
+        &self,
+        field: &str,
+        key_schema: &TypeExpr,
+        event_value: &CborValue,
+        event_schema: &str,
+    ) -> Result<Vec<u8>, KernelError> {
+        let raw_value = extract_cbor_path(event_value, field).ok_or_else(|| {
             KernelError::Manifest(format!(
-                "failed to decode event '{}' payload for key extraction: {err}",
-                event.schema
+                "event '{event_schema}' missing key field '{field}'"
             ))
         })?;
-        let key_value = extract_correlation_value(&value, field).ok_or_else(|| {
-            KernelError::Manifest(format!(
-                "event '{}' missing key field '{}'",
-                event.schema, field
-            ))
-        })?;
-        Ok(encode_correlation_bytes(&key_value))
+        let normalized =
+            normalize_value_with_schema(raw_value.clone(), key_schema, &self.schema_index)
+                .map_err(|err| {
+                    KernelError::Manifest(format!(
+                        "event '{event_schema}' key field '{field}' failed validation: {err}"
+                    ))
+                })?;
+        Ok(normalized.bytes)
     }
 
     fn handle_reducer_event(&mut self, event: ReducerEvent) -> Result<(), KernelError> {
@@ -1654,12 +1703,28 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(plan_bindings) = self.plan_triggers.get(&event.schema) {
             for binding in plan_bindings {
                 if let Some(plan_def) = self.plan_registry.get(&binding.plan) {
-                    let input: ExprValue = serde_cbor::from_slice(&event.value).map_err(|err| {
+                    let normalized = normalize_cbor_by_name(
+                        &self.schema_index,
+                        event.schema.as_str(),
+                        &event.value,
+                    )
+                    .map_err(|err| {
                         KernelError::Manifest(format!(
                             "failed to decode plan input for {}: {err}",
                             binding.plan
                         ))
                     })?;
+                    let input_schema =
+                        self.schema_index
+                            .get(plan_def.input.as_str())
+                            .ok_or_else(|| {
+                                KernelError::Manifest(format!(
+                                    "plan '{}' input schema '{}' not found",
+                                    plan_def.name, plan_def.input
+                                ))
+                            })?;
+                    let input =
+                        cbor_to_expr_value(&normalized.value, input_schema, &self.schema_index)?;
                     let correlation =
                         determine_correlation_value(binding, &input, event.key.as_ref());
                     let instance_id = self.scheduler.alloc_plan_id();
@@ -1957,6 +2022,20 @@ fn determine_correlation_value(
     event_key.map(|key| (key.clone(), ExprValue::Bytes(key.clone())))
 }
 
+fn extract_cbor_path(value: &CborValue, path: &str) -> Option<CborValue> {
+    let mut current = value;
+    for segment in path.split('.') {
+        if segment.is_empty() {
+            continue;
+        }
+        current = match current {
+            CborValue::Map(map) => map.get(&CborValue::Text(segment.to_string()))?,
+            _ => return None,
+        };
+    }
+    Some(current.clone())
+}
+
 fn extract_correlation_value(value: &ExprValue, path: &str) -> Option<ExprValue> {
     let mut current = value;
     for segment in path.split('.') {
@@ -2133,12 +2212,15 @@ mod tests {
     use aos_air_types::{
         CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, ReducerAbi, Routing,
         RoutingEvent, SchemaRef, SecretDecl, TypeExpr, TypePrimitive, TypePrimitiveText,
+        TypeRecord,
     };
+    use aos_cbor::to_canonical_cbor;
     use aos_store::MemStore;
     use aos_wasm_abi::ReducerEffect;
     use indexmap::IndexMap;
     use serde_cbor::ser::to_vec;
     use serde_json::json;
+    use std::collections::BTreeMap;
     use std::fs::File;
     use std::io::Write;
     use std::sync::Arc;
@@ -2251,15 +2333,12 @@ mod tests {
     #[test]
     fn route_event_requires_key_for_keyed_reducer() {
         let kernel = minimal_kernel_keyed_missing_key_field();
-        let event = DomainEvent::new(
-            "com.acme/Event@1",
-            serde_cbor::to_vec(&aos_air_exec::Value::Record(
-                [("id".to_string(), aos_air_exec::Value::Nat(1))]
-                    .into_iter()
-                    .collect(),
-            ))
-            .unwrap(),
-        );
+        let payload = serde_cbor::to_vec(&CborValue::Map(BTreeMap::from([(
+            CborValue::Text("id".into()),
+            CborValue::Text("1".into()),
+        )])))
+        .unwrap();
+        let event = DomainEvent::new("com.acme/Event@1", payload);
         let err = kernel.route_event(&event).unwrap_err();
         assert!(format!("{err:?}").contains("missing key_field"), "{err}");
     }
@@ -2267,15 +2346,12 @@ mod tests {
     #[test]
     fn route_event_rejects_key_for_non_keyed_reducer() {
         let kernel = minimal_kernel_with_router_non_keyed();
-        let event = DomainEvent::new(
-            "com.acme/Event@1",
-            serde_cbor::to_vec(&aos_air_exec::Value::Record(
-                [("id".to_string(), aos_air_exec::Value::Nat(1))]
-                    .into_iter()
-                    .collect(),
-            ))
-            .unwrap(),
-        );
+        let payload = serde_cbor::to_vec(&CborValue::Map(BTreeMap::from([(
+            CborValue::Text("id".into()),
+            CborValue::Text("1".into()),
+        )])))
+        .unwrap();
+        let event = DomainEvent::new("com.acme/Event@1", payload);
         let err = kernel.route_event(&event).unwrap_err();
         assert!(format!("{err:?}").contains("provided key_field"), "{err}");
     }
@@ -2283,19 +2359,29 @@ mod tests {
     #[test]
     fn route_event_extracts_key_and_passes_to_reducer() {
         let kernel = minimal_kernel_with_router();
-        let event = DomainEvent::new(
-            "com.acme/Event@1",
-            serde_cbor::to_vec(&aos_air_exec::Value::Record(
-                [("id".to_string(), aos_air_exec::Value::Text("abc".into()))]
-                    .into_iter()
-                    .collect(),
-            ))
-            .unwrap(),
-        );
+        let payload = serde_cbor::to_vec(&CborValue::Map(BTreeMap::from([(
+            CborValue::Text("id".into()),
+            CborValue::Text("abc".into()),
+        )])))
+        .unwrap();
+        let event = DomainEvent::new("com.acme/Event@1", payload);
         let routed = kernel.route_event(&event).expect("route");
         assert_eq!(routed.len(), 1);
-        assert_eq!(routed[0].event.key.as_ref().unwrap(), b"abc");
+        let expected_key = aos_cbor::to_canonical_cbor(&CborValue::Text("abc".into())).unwrap();
+        assert_eq!(routed[0].event.key.as_ref().unwrap(), &expected_key);
         assert_eq!(routed[0].reducer, "com.acme/Reducer@1");
+    }
+
+    #[test]
+    fn event_normalization_rejects_invalid_payload() {
+        let mut kernel = minimal_kernel_with_router();
+        let payload = serde_cbor::to_vec(&CborValue::Integer(5.into())).unwrap();
+        let err = kernel
+            .submit_domain_event_result("com.acme/Event@1", payload)
+            .unwrap_err();
+        assert!(
+            matches!(err, KernelError::Manifest(msg) if msg.contains("payload failed validation"))
+        );
     }
 
     fn schema_text(name: &str) -> DefSchema {
@@ -2304,6 +2390,20 @@ mod tests {
             ty: TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
                 text: Default::default(),
             })),
+        }
+    }
+
+    fn schema_event_record(name: &str) -> DefSchema {
+        DefSchema {
+            name: name.into(),
+            ty: TypeExpr::Record(TypeRecord {
+                record: IndexMap::from([(
+                    "id".into(),
+                    TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                        text: Default::default(),
+                    })),
+                )]),
+            }),
         }
     }
 
@@ -2328,7 +2428,10 @@ mod tests {
         modules.insert(module.name.clone(), module);
         let mut schemas = HashMap::new();
         schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
-        schemas.insert("com.acme/Event@1".into(), schema_text("com.acme/Event@1"));
+        schemas.insert(
+            "com.acme/Event@1".into(),
+            schema_event_record("com.acme/Event@1"),
+        );
         schemas.insert("com.acme/Key@1".into(), schema_text("com.acme/Key@1"));
         let manifest = Manifest {
             air_version: CURRENT_AIR_VERSION.to_string(),
@@ -2394,7 +2497,10 @@ mod tests {
         modules.insert(module.name.clone(), module);
         let mut schemas = HashMap::new();
         schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
-        schemas.insert("com.acme/Event@1".into(), schema_text("com.acme/Event@1"));
+        schemas.insert(
+            "com.acme/Event@1".into(),
+            schema_event_record("com.acme/Event@1"),
+        );
         let manifest = Manifest {
             air_version: CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
@@ -2459,7 +2565,10 @@ mod tests {
         modules.insert(module.name.clone(), module);
         let mut schemas = HashMap::new();
         schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
-        schemas.insert("com.acme/Event@1".into(), schema_text("com.acme/Event@1"));
+        schemas.insert(
+            "com.acme/Event@1".into(),
+            schema_event_record("com.acme/Event@1"),
+        );
         schemas.insert("com.acme/Key@1".into(), schema_text("com.acme/Key@1"));
         let manifest = Manifest {
             air_version: CURRENT_AIR_VERSION.to_string(),
