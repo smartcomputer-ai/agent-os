@@ -6,6 +6,13 @@ So the question is primarily regarding reducers, both keyed reducers and non-key
 
 Very important: the system is in very early development phase. So we can make these changes without worrying that we break any existing, running system. In other words, we can make breaking changes without issues.
 
+## Status (in progress)
+
+- Added a shared value normalizer (`crates/aos-air-types/src/value_normalize.rs`) and wired kernel ingestion to canonicalize every `DomainEvent` by its schema before routing/journaling; events are stored/replayed as canonical CBOR.
+- Routing/await now uses schema-aware decoding: keyed routes pull `key_field` via the declared key schema, plan `await_event` decodes by schema, and plan triggers build correlation from typed values.
+- Plan `raise_event` keys are emitted as canonical CBOR; reducer-emitted/bad payloads are rejected early; tests updated/added around routing, await_event, and invalid payload rejection.
+- Open: external injections/CLI should require explicit schema + run through the normalizer; receipts/events from adapters should be enforced via the same path; docs/spec updates to reflect “events like effect params” invariant.
+
 ## Context: reducers
 The kernel never rewrites event payloads—keyed or non‑keyed. It only _reads_ them for routing/correlation by decoding as aos_air_exec::Value (externally‑tagged/“Value‑tagged” CBOR). After that, the original bytes are passed straight through to the reducer and stored in the journal unchanged. Because of that, payload shape matters:
 
@@ -273,23 +280,18 @@ If you implement this normalizer once and push *all* event ingress paths through
 # Implementation Plan
 
 
-All events should enter the world through a single schema-driven normalizer, then be stored and replayed as canonical CBOR. Here’s how to implement it:
+All events should enter the world through a single schema-driven normalizer, then be stored and replayed as canonical CBOR. Current implementation status + remaining steps:
 
-**Implementation Plan**
+**Done**
+- Shared normalizer: `value_normalize` added in `aos-air-types`; used by the kernel to canonicalize every `DomainEvent` on ingress.
+- Ingestion wiring: `process_domain_event`/journal replay now store canonical bytes only; reducer outputs/plan raise emit canonical payloads.
+- Routing/correlation: keyed routing pulls `key_field` via schema-aware decode; plan triggers use typed correlation; plan `await_event` decodes by schema for `@event`/where.
+- Reducer ergonomics: reducers receive canonical schema-shaped events; bad payloads are rejected early; tests cover keyed routing, await_event predicates, and invalid payload rejection.
 
-- Enforce schemas: require every domain/receipt event Name in the manifest to resolve to a defschema; extend manifest validation in crates/aos-air-types (and spec updates) so reducer-emitted events without schemas are rejected at load time.
-- Event normalizer: add a helper (similar to normalize_effect_params in crates/aos-effects/src/normalize.rs) that takes a SchemaRef + SchemaIndex + raw CBOR and returns canonical bytes or an error. Handle: reducer→event (DomainEvent.schema), plan→reducer (target reducer’s abi.reducer.event), kernel-built receipts (known built-ins), external injections (require an explicit schema argument).
-- Ingestion wiring: funnel all paths through the normalizer before routing/journaling—submit_domain_event/apply_replay_record/plan raised_events and reducer outputs inside handle_reducer_output (drop/err on malformed payloads instead of poisoning the journal). Persist only the canonical bytes in record_domain_event.
-- Routing/correlation: replace extract_key_bytes in crates/aos-kernel/src/world.rs to decode with the event schema (not ExprValue tagging), walk the key_field path on the typed value, and verify it matches the reducer’s key_schema. Do the same typed decode for determine_correlation_value used by plan triggers.
-- Plan await: in crates/aos-kernel/src/plan.rs::deliver_event, decode using the event schema (already canonical) and project to ExprValue for @event and where predicates, instead of the current best-effort serde_cbor::from_slice::<ExprValue>.
-- Reducer ergonomics: ReducerInput.event is always canonical CBOR matching the declared event schema; keyed reducers just get the key envelope. Domain events emitted by reducers are schema-checked/canonicalized; effect receipts turned into events should already use their built-in schemas (adjust build_reducer_receipt_event if needed).
-- Tooling/API: update CLI/test harnesses (aos-host helpers) to require schema names when injecting events and route them through the normalizer. Snapshots/replay stay unchanged because they now store canonical bytes.
+**Remaining**
+- Enforce at manifest load: fail manifests where domain/receipt event schemas aren’t resolvable (loader + spec/docs update).
+- External ingress: CLI/tests (`aos-host` helpers) should require explicit event schema and run through the normalizer; receipts synthesized by adapters should go through the same path.
+- Spec/docs: update specs/AGENTS with “events like effect params” invariant and the canonical-journal rule.
 
-**Tests to add**
-
-- Keyed routing decodes via schema: event with struct-shaped CBOR routes and extracts key; malformed payload rejected.
-- Plan await_event predicate runs over typed event value; non-matching predicate doesn’t resume.
-- Reducer-emitted bad event payload rejected; good payload stored canonical; replay feeds the same bytes.
-- External injection: tagged ExprValue authoring input is canonicalized to schema-shaped CBOR before journaling.
-
-If you want, I can start by extracting a general “normalize value by schema” helper (factored from normalize_effect_params), then wire process_domain_event/handle_reducer_output to it and update routing + tests.
+**Stretch**
+- Consider re-exporting the normalizer for external tools and adding richer diagnostics (author bytes vs canonical) if needed.
