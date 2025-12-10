@@ -1,5 +1,7 @@
 # P4: Introspection Surface Prerequisites
 
+**Complete**
+
 **Status:** Required foundations for `p4-worldfs-cli` and self-upgrade agents. This doc enumerates what must exist in the platform (effects, caps, control verbs, CLI/SDK wiring) before we can ship the WorldFS UX.
 
 WorldFS is purely a veneer over introspection + catalog + CAS. Right now those primitives are partial or only exposed in-process. We need to standardize and capability-gate them so both CLI callers and in-world plans can read world state with consistency metadata.
