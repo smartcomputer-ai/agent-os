@@ -8,10 +8,12 @@ use std::sync::Arc;
 
 use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
-    CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, EmptyObject, Expr,
-    ExprConst, ExprRef, HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind,
-    Name, NamedRef, PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr, TypeOption,
-    TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord, catalog::EffectCatalog,
+    CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, EffectKind, EmptyObject,
+    Expr, ExprConst, ExprOrValue, ExprRef, HashRef, Manifest,
+    ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef, PlanBind,
+    PlanBindEffect, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepKind, Routing, RoutingEvent,
+    SchemaRef, Trigger, TypeExpr, TypeOption, TypePrimitive, TypePrimitiveText, TypeRecord,
+    ValueLiteral, ValueRecord, ValueText, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
@@ -228,6 +230,54 @@ pub fn build_loaded_manifest(
     };
     ensure_placeholder_schemas(&mut loaded);
     loaded
+}
+
+/// Emit+await plan steps for `introspect.manifest`.
+///
+/// - `consistency`: e.g., "head", "exact:5", "at_least:10"
+/// - `cap_slot`: capability binding slot (usually "query_cap")
+/// - `bind_prefix`: prefix for effect handle/receipt vars (e.g., "manifest")
+pub fn introspect_manifest_steps(
+    consistency: &str,
+    cap_slot: &str,
+    bind_prefix: &str,
+) -> Vec<aos_air_types::PlanStep> {
+    let emit_id = format!("{bind_prefix}_emit");
+    let await_id = format!("{bind_prefix}_await");
+    let effect_var = format!("{bind_prefix}_req");
+    let receipt_var = format!("{bind_prefix}_receipt");
+
+    vec![
+        aos_air_types::PlanStep {
+            id: emit_id,
+            kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                kind: EffectKind::introspect_manifest(),
+                params: ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+                    record: IndexMap::from([(
+                        "consistency".into(),
+                        ValueLiteral::Text(ValueText {
+                            text: consistency.to_string(),
+                        }),
+                    )]),
+                })),
+                cap: cap_slot.into(),
+                bind: PlanBindEffect {
+                    effect_id_as: effect_var.clone(),
+                },
+            }),
+        },
+        aos_air_types::PlanStep {
+            id: await_id,
+            kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
+                for_expr: Expr::Ref(ExprRef {
+                    reference: format!("@{effect_var}"),
+                }),
+                bind: PlanBind {
+                    var: receipt_var,
+                },
+            }),
+        },
+    ]
 }
 
 /// Populates the manifest with default capability grants and module slot bindings so reducers
