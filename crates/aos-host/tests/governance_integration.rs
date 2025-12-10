@@ -14,7 +14,7 @@ use aos_host::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
-use aos_kernel::shadow::{LedgerDelta, LedgerKind, ShadowHarness};
+use aos_kernel::shadow::ShadowHarness;
 use aos_wasm_abi::ReducerOutput;
 use indexmap::IndexMap;
 use serde_cbor;

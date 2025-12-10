@@ -165,6 +165,7 @@ All control verbs should hit the introspection adapter (or CAS for blob-get) so 
 - Control path wired: `WorldHost::run_cycle` intercepts `introspect.*`, `ShadowExecutor` uses the same handler, and control server exposes `manifest-read`, `query-state`, `list-cells`, `journal-head`, and `blob-get` verbs returning consistency metadata.
 - Added control client and CLI helpers for `manifest-read`, `query-state`, `list-cells`, and `blob-get`, decoding payloads and `ReadMeta` for daemon-first flows with batch fallback.
 - Added kernel unit tests for introspection handler + integration tests (non-daemon) covering manifest/state/list-cells/journal-head paths.
+- Policy gating verified: added plan-level tests that deny `introspect.*` via policy and reject missing `query_cap` grants.
 
 ---
 
