@@ -22,7 +22,10 @@ use serde_json::json;
 use std::collections::HashMap;
 
 mod helpers;
-use helpers::{def_text_record_schema, insert_test_schemas, int_type, text_type, timer_manifest};
+use helpers::{
+    def_text_record_schema, insert_test_schemas, int_type, simple_state_manifest, text_type,
+    timer_manifest,
+};
 
 fn builtin_schema_index_with_custom_types() -> SchemaIndex {
     let mut map = HashMap::new();
@@ -72,6 +75,25 @@ fn http_params_literal(tag: &str) -> ExprOrValue {
             ),
         ]),
     }))
+}
+
+#[test]
+fn rejects_event_payload_that_violates_schema() {
+    let store = fixtures::new_mem_store();
+    let loaded = simple_state_manifest(&store);
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+
+    let bad_payload = ExprValue::Record(IndexMap::new());
+    let err = world
+        .submit_event_value_result(START_SCHEMA, &bad_payload)
+        .expect_err("event should fail schema validation");
+    match err {
+        KernelError::Manifest(msg) => {
+            assert!(msg.contains("payload failed validation"));
+            assert!(msg.contains("record missing field 'id'"));
+        }
+        other => panic!("unexpected error: {:?}", other),
+    }
 }
 
 /// Happy-path end-to-end: reducer emits an intent, plan does work, receipt feeds a result event

@@ -583,6 +583,17 @@ impl TestWorld {
             .expect("submit event");
     }
 
+    /// Submit an event and surface normalization/validation errors.
+    pub fn submit_event_value_result(
+        &mut self,
+        schema: &str,
+        value: &ExprValue,
+    ) -> Result<(), KernelError> {
+        let bytes = serde_cbor::to_vec(value).expect("encode event");
+        self.kernel
+            .submit_domain_event_result(schema.to_string(), bytes)
+    }
+
     /// Submit any serializable payload as an event using the schema string, normalized to the schema.
     pub fn submit_event<T>(&mut self, schema: &str, value: &T)
     where
@@ -592,6 +603,16 @@ impl TestWorld {
         self.kernel
             .submit_domain_event_result(schema.to_string(), bytes)
             .expect("submit event");
+    }
+
+    /// Submit any serializable payload as an event, returning the kernel result.
+    pub fn submit_event_result<T>(&mut self, schema: &str, value: &T) -> Result<(), KernelError>
+    where
+        T: Serialize,
+    {
+        let bytes = serde_cbor::to_vec(value).expect("encode event");
+        self.kernel
+            .submit_domain_event_result(schema.to_string(), bytes)
     }
 
     pub fn tick_n(&mut self, n: usize) -> Result<(), KernelError> {
