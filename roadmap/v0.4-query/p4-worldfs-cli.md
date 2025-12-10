@@ -1,8 +1,16 @@
 # WorldFS View Helpers
 
-**Status**: Ergonomics layer for v0.4-query (CLI work beyond minimal `aos world state` flags is **deferred here**).
+**Status**: Ergonomics layer for v0.4-query; **blocked on p4-introspection** (introspect effects/caps/control verbs) and carries the metadata needed for p1-self-upgrade.
 
 This document defines CLI commands and LLM helper APIs that provide a filesystem-like view over AgentOS introspection surfaces. These are convenience wrappers—they do not add new capabilities.
+
+---
+
+## CLI Placement & Flow
+
+- Command form: `aos world fs <op> <path>` (world-scoped like `world gov` / `world state`).
+- Execution: prefer the control socket (daemon path), fall back to batch host + `StateReader` when the daemon is absent.
+- Data sources: `introspect.*` effects + ObjectCatalog + `blob.get`; every response should include `journal_height`, `snapshot_hash`, `manifest_hash` for governance-grade provenance.
 
 ---
 
@@ -53,49 +61,49 @@ Objects use hierarchical path-like names (e.g., `agents/self/patches/0003`).
 
 ## CLI Commands
 
-### `aos fs ls <path>`
+### `aos world fs ls <path>`
 
 List contents at path.
 
 ```bash
 # List reducers
-aos fs ls /sys/reducers
+aos world fs ls /sys/reducers
 
 # List objects by prefix
-aos fs ls /obj/agents/self/
+aos world fs ls /obj/agents/self/
 
 # List all objects of a kind
-aos fs ls /obj --kind=air.patch
+aos world fs ls /obj --kind=air.patch
 ```
 
-**Implementation**: Calls `introspect.*` or queries `ObjectCatalog` reducer.
+**Implementation**: Control verb → `introspect.*` or catalog helper; batch fallback queries `StateReader`/ObjectCatalog directly.
 
-### `aos fs cat <path>`
+### `aos world fs cat <path>`
 
 Read content at path.
 
 ```bash
 # Read manifest
-aos fs cat /sys/manifest
+aos world fs cat /sys/manifest
 
 # Read reducer state
-aos fs cat /sys/reducers/Counter/count
+aos world fs cat /sys/reducers/Counter/count
 
 # Read object payload
-aos fs cat /obj/agents/self/patches/0003/data
+aos world fs cat /obj/agents/self/patches/0003/data
 
 # Read raw blob
-aos fs cat /blob/sha256:abc123...
+aos world fs cat /blob/sha256:abc123...
 ```
 
-**Implementation**: Calls appropriate introspection effect, then `blob.get` for payloads.
+**Implementation**: `introspect.manifest/reducer_state` + `blob.get` (via control); batch host fallback if daemon absent.
 
-### `aos fs stat <path>`
+### `aos world fs stat <path>`
 
 Show metadata without content.
 
 ```bash
-aos fs stat /obj/agents/self/patches/0003
+aos world fs stat /obj/agents/self/patches/0003
 # kind: air.patch
 # hash: sha256:abc123...
 # size: 4096
@@ -106,12 +114,12 @@ aos fs stat /obj/agents/self/patches/0003
 
 **Implementation**: Queries `ObjectCatalog` metadata only.
 
-### `aos fs tree [path]`
+### `aos world fs tree [path]`
 
 Show hierarchical view.
 
 ```bash
-aos fs tree /obj
+aos world fs tree /obj
 # /obj
 # ├── agents/
 # │   └── self/
@@ -124,14 +132,14 @@ aos fs tree /obj
 #     └── schemas/
 ```
 
-**Implementation**: Queries `ObjectCatalog`, formats as tree.
+**Implementation**: Queries `ObjectCatalog`, formats as tree; includes consistency metadata for the catalog read.
 
-### `aos fs grep <pattern> <path>` (optional)
+### `aos world fs grep <pattern> <path>` (optional)
 
 Search within objects.
 
 ```bash
-aos fs grep "error" /obj/agents/self/logs/
+aos world fs grep "error" /obj/agents/self/logs/
 ```
 
 **Implementation**: Lists matching objects, loads payloads via `blob.get`, searches content.
@@ -252,4 +260,4 @@ These helpers are implemented purely in terms of:
 2. `ObjectCatalog` reducer queries — for object metadata
 3. `emit_effect(blob.get, ...)` — for payload retrieval
 
-No new kernel functionality is required. The helpers are sugar over existing primitives.
+No new kernel functionality is required **once p4-introspection lands** (introspect effects + caps + control verbs). The helpers are sugar over existing primitives.
