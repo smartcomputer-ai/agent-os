@@ -11,7 +11,7 @@ use aos_wasm_abi::ReducerEffect;
 use indexmap::IndexMap;
 
 mod helpers;
-use helpers::attach_default_policy;
+use helpers::{attach_default_policy, def_text_record_schema, int_type, text_type};
 
 fn http_reducer_output() -> aos_wasm_abi::ReducerOutput {
     let mut headers = IndexMap::new();
@@ -44,6 +44,13 @@ fn reducer_http_effect_is_denied() {
         &reducer_name,
     )];
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![def_text_record_schema(
+            fixtures::START_SCHEMA,
+            vec![("id", text_type())],
+        )],
+    );
     // Bind the reducer's default slot to the HTTP capability grant.
     if let Some(binding) = loaded.manifest.module_bindings.get_mut(&reducer_name) {
         binding.slots.insert("default".into(), "cap_http".into());
@@ -64,7 +71,7 @@ fn reducer_http_effect_is_denied() {
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
-        .submit_event_value_result(fixtures::START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "start" }))
         .expect("submit start event");
     let err = world.kernel.tick().unwrap_err();
     assert!(
@@ -105,6 +112,19 @@ fn plan_effect_allowed_by_policy() {
         vec![],
         vec![],
     );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+            def_text_record_schema(
+                "com.acme/Input@1",
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+        ],
+    );
 
     let policy = DefPolicy {
         name: "com.acme/plan-policy@1".into(),
@@ -118,11 +138,31 @@ fn plan_effect_allowed_by_policy() {
         }],
     };
     attach_default_policy(&mut loaded, policy);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/Input@1", vec![("id", text_type())]),
+        ],
+    );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+            def_text_record_schema(
+                "com.acme/Input@1",
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+        ],
+    );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    let input = fixtures::plan_input_record(vec![("foo", ExprValue::Nat(1))]);
+    let input = serde_json::json!({ "id": "123", "url": "https://example.com" });
     world
-        .submit_event_value_result(fixtures::START_SCHEMA, &input)
+        .submit_event_result(fixtures::START_SCHEMA, &input)
         .expect("submit start event");
     world.tick_n(2).unwrap();
     assert_eq!(world.drain_effects().len(), 1);
@@ -204,12 +244,24 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
         }],
     };
     attach_default_policy(&mut loaded, policy);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+            def_text_record_schema(
+                "com.acme/Input@1",
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+        ],
+    );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    let input =
-        fixtures::plan_input_record(vec![("url", ExprValue::Text("https://example.com".into()))]);
+    let input = serde_json::json!({ "id": "expr", "url": "https://example.com" });
     world
-        .submit_event_value_result(fixtures::START_SCHEMA, &input)
+        .submit_event_result(fixtures::START_SCHEMA, &input)
         .expect("submit start event");
     world.tick_n(2).unwrap();
     let effects = world.drain_effects();
