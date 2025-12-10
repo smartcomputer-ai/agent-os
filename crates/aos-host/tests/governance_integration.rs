@@ -103,12 +103,13 @@ fn shadow_summary_includes_predictions_and_deltas() {
     assert_eq!(summary.predicted_effects.len(), 1);
     assert_eq!(summary.pending_receipts.len(), 0);
     assert_eq!(summary.plan_results.len(), 1);
-    assert!(summary.ledger_deltas.iter().any(|delta| delta
-        == &LedgerDelta {
-            ledger: LedgerKind::Capability,
-            name: "sys/http.out@1".to_string(),
-            change: aos_kernel::shadow::DeltaKind::Added,
-        }));
+    // Cap was already present in the baseline manifest (fixtures attach defaults),
+    // so this patch should produce no capability deltas.
+    assert!(
+        summary.ledger_deltas.is_empty(),
+        "expected no capability deltas, got {:?}",
+        summary.ledger_deltas
+    );
 }
 
 #[test]
