@@ -772,6 +772,172 @@ impl ControlClient {
         self.request(&env).await
     }
 
+    /// Read manifest via control (returns meta + canonical CBOR bytes).
+    pub async fn manifest_read(
+        &mut self,
+        id: impl Into<String>,
+        consistency: Option<&str>,
+    ) -> std::io::Result<(ReadMeta, Vec<u8>)> {
+        let mut payload = serde_json::json!({});
+        if let Some(c) = consistency {
+            payload["consistency"] = serde_json::json!(c);
+        }
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "manifest-read".into(),
+            payload,
+        };
+        let resp = self.request(&env).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "manifest-read failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("manifest-read missing result"))?;
+        let meta = parse_meta(
+            result
+                .get("meta")
+                .ok_or_else(|| io_err("manifest-read missing meta"))?,
+        )?;
+        let manifest_b64 = result
+            .get("manifest_b64")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| io_err("manifest-read missing manifest_b64"))?;
+        let bytes = BASE64_STANDARD
+            .decode(manifest_b64)
+            .map_err(|e| io_err(format!("decode manifest_b64: {e}")))?;
+        Ok((meta, bytes))
+    }
+
+    /// Query reducer state with meta.
+    pub async fn query_state_decoded(
+        &mut self,
+        id: impl Into<String>,
+        reducer: &str,
+        key: Option<&[u8]>,
+        consistency: Option<&str>,
+    ) -> std::io::Result<(ReadMeta, Option<Vec<u8>>)> {
+        let resp = self.query_state(id, reducer, key, consistency).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "query-state failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("query-state missing result"))?;
+        let meta = parse_meta(
+            result
+                .get("meta")
+                .ok_or_else(|| io_err("query-state missing meta"))?,
+        )?;
+        let state_b64 = result.get("state_b64").and_then(|v| v.as_str());
+        let state = match state_b64 {
+            Some(s) => Some(
+                BASE64_STANDARD
+                    .decode(s)
+                    .map_err(|e| io_err(format!("decode state_b64: {e}")))?,
+            ),
+            None => None,
+        };
+        Ok((meta, state))
+    }
+
+    /// List cells (keyed reducers) with meta.
+    pub async fn list_cells_decoded(
+        &mut self,
+        id: impl Into<String>,
+        reducer: &str,
+    ) -> std::io::Result<(ReadMeta, Vec<ClientCellEntry>)> {
+        let resp = self.list_cells(id, reducer).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "list-cells failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("list-cells missing result"))?;
+        let meta_val = result
+            .get("meta")
+            .ok_or_else(|| io_err("list-cells missing meta"))?;
+        let meta = parse_meta(meta_val)?;
+        let list = result
+            .get("cells")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut cells = Vec::with_capacity(list.len());
+        for item in list {
+            cells.push(parse_cell_entry(item)?);
+        }
+        Ok((meta, cells))
+    }
+
+    /// Blob get helper.
+    pub async fn blob_get(
+        &mut self,
+        id: impl Into<String>,
+        hash_hex: &str,
+    ) -> std::io::Result<Vec<u8>> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "blob-get".into(),
+            payload: serde_json::json!({ "hash_hex": hash_hex }),
+        };
+        let resp = self.request(&env).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "blob-get failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("blob-get missing result"))?;
+        let data_b64 = result
+            .get("data_b64")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| io_err("blob-get missing data_b64"))?;
+        BASE64_STANDARD
+            .decode(data_b64)
+            .map_err(|e| io_err(format!("decode data_b64: {e}")))
+    }
+
+    /// Journal head meta helper.
+    pub async fn journal_head_meta(
+        &mut self,
+        id: impl Into<String>,
+    ) -> std::io::Result<ReadMeta> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "journal-head".into(),
+            payload: serde_json::json!({}),
+        };
+        let resp = self.request(&env).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "journal-head failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("journal-head missing result"))?;
+        let meta_val = result
+            .get("meta")
+            .ok_or_else(|| io_err("journal-head missing meta"))?;
+        parse_meta(meta_val)
+    }
+
     pub async fn request(
         &mut self,
         envelope: &RequestEnvelope,
@@ -806,4 +972,66 @@ impl ControlClient {
 /// Helper for journal-head responses in control server.
 pub fn kernel_head(host: &WorldHost<impl aos_store::Store>) -> KernelHeights {
     host.heights()
+}
+
+#[derive(Debug, Clone)]
+pub struct ClientCellEntry {
+    pub key_b64: String,
+    pub state_hash_hex: String,
+    pub size: u64,
+    pub last_active_ns: u64,
+}
+
+fn parse_cell_entry(val: serde_json::Value) -> std::io::Result<ClientCellEntry> {
+    let key_b64 = val
+        .get("key_b64")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| io_err("cell missing key_b64"))?
+        .to_string();
+    let state_hash_hex = val
+        .get("state_hash_hex")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| io_err("cell missing state_hash_hex"))?
+        .to_string();
+    let size = val
+        .get("size")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| io_err("cell missing size"))?;
+    let last_active_ns = val
+        .get("last_active_ns")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    Ok(ClientCellEntry {
+        key_b64,
+        state_hash_hex,
+        size,
+        last_active_ns,
+    })
+}
+
+fn parse_meta(val: &serde_json::Value) -> std::io::Result<ReadMeta> {
+    let journal_height = val
+        .get("journal_height")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| io_err("meta missing journal_height"))?;
+    let snapshot_hash = val
+        .get("snapshot_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| Hash::from_hex_str(s))
+        .transpose()
+        .map_err(|e| io_err(format!("snapshot_hash decode: {e}")))?;
+    let manifest_hash = val
+        .get("manifest_hash")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| io_err("meta missing manifest_hash"))
+        .and_then(|s| Hash::from_hex_str(s).map_err(|e| io_err(format!("manifest_hash decode: {e}"))))?;
+    Ok(ReadMeta {
+        journal_height,
+        snapshot_hash,
+        manifest_hash,
+    })
+}
+
+fn io_err(msg: impl Into<String>) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, msg.into())
 }

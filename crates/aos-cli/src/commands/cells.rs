@@ -35,23 +35,21 @@ pub async fn cmd_cells(opts: &WorldOpts, args: &CellsArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
 
     let cells = if let Some(mut client) = try_control_client(&dirs).await {
-        let resp = client
-            .list_cells("cli-list-cells", &args.reducer_name)
+        let (_meta, entries) = client
+            .list_cells_decoded("cli-list-cells", &args.reducer_name)
             .await?;
-        if !resp.ok {
-            anyhow::bail!("list-cells failed: {:?}", resp.error);
-        }
-        let Some(result) = resp.result else {
+        if entries.is_empty() {
             println!("(no cells for reducer '{}')", args.reducer_name);
             return Ok(());
-        };
-        let list = result
-            .get("cells")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-        list.into_iter()
-            .map(|item| json_to_entry(item))
+        }
+        entries
+            .into_iter()
+            .map(|entry| json_to_entry(serde_json::json!({
+                "key_b64": entry.key_b64,
+                "state_hash_hex": entry.state_hash_hex,
+                "size": entry.size,
+                "last_active_ns": entry.last_active_ns,
+            })))
             .collect::<Result<Vec<_>>>()?
     } else {
         // Batch mode: load world and inspect store directly via CellIndex.

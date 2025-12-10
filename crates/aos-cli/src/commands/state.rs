@@ -1,7 +1,6 @@
 //! `aos world state` command.
 
-use anyhow::{Context, Result};
-use base64::Engine;
+use anyhow::Result;
 use clap::Args;
 use serde_json::Value as JsonValue;
 
@@ -46,32 +45,24 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
     };
 
     if let Some(mut client) = try_control_client(&dirs).await {
-        let resp = client
-            .query_state(
+        let (meta, state_opt) = client
+            .query_state_decoded(
                 "cli-state",
                 &args.reducer_name,
                 key_bytes_opt,
                 consistency.as_deref(),
             )
             .await?;
-        if !resp.ok {
-            anyhow::bail!("query-state failed: {:?}", resp.error);
-        }
-
-        // Extract state from response
-        if let Some(result) = resp.result {
-            if let Some(meta) = result.get("meta") {
-                println!("meta: {}", serde_json::to_string_pretty(meta)?);
-            }
-            match result.get("state_b64").and_then(|v| v.as_str()) {
-                Some(state_b64) => {
-                    let state_bytes = base64::engine::general_purpose::STANDARD
-                        .decode(state_b64)
-                        .context("decode state base64")?;
-                    print_state(&state_bytes, args.raw)?;
-                }
-                None => println!("(no state)"),
-            }
+        println!(
+            "meta: {}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "journal_height": meta.journal_height,
+                "snapshot_hash": meta.snapshot_hash.as_ref().map(|h| h.to_hex()),
+                "manifest_hash": meta.manifest_hash.to_hex(),
+            }))?
+        );
+        if let Some(state_bytes) = state_opt {
+            print_state(&state_bytes, args.raw)?;
         } else {
             println!("(no state)");
         }
