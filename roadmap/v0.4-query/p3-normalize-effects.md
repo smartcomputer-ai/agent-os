@@ -11,7 +11,8 @@ Very important: the system is in very early development phase. So we can make th
 - Added a shared value normalizer (`crates/aos-air-types/src/value_normalize.rs`) and wired kernel ingestion to canonicalize every `DomainEvent` by its schema before routing/journaling; events are stored/replayed as canonical CBOR.
 - Routing/await now uses schema-aware decoding: keyed routes pull `key_field` via the declared key schema, plan `await_event` decodes by schema, and plan triggers build correlation from typed values.
 - Plan `raise_event` keys are emitted as canonical CBOR; reducer-emitted/bad payloads are rejected early; tests updated/added around routing, await_event, and invalid payload rejection.
-- Open: external injections/CLI should require explicit schema + run through the normalizer; receipts/events from adapters should be enforced via the same path; docs/spec updates to reflect “events like effect params” invariant.
+- External ingress now flows through the same normalizer: host/CLI/test helpers require an explicit schema string and kernel ingestion canonicalizes; adapter receipts that become events likewise pass through schema-based normalization before routing/journaling.
+- Open: docs/spec updates to reflect the “events like effect params; journal stores canonical CBOR” invariant.
 
 ## Context: reducers
 The kernel never rewrites event payloads—keyed or non‑keyed. It only _reads_ them for routing/correlation by decoding as aos_air_exec::Value (externally‑tagged/“Value‑tagged” CBOR). After that, the original bytes are passed straight through to the reducer and stored in the journal unchanged. Because of that, payload shape matters:
@@ -288,10 +289,10 @@ All events should enter the world through a single schema-driven normalizer, the
 - Routing/correlation: keyed routing pulls `key_field` via schema-aware decode; plan triggers use typed correlation; plan `await_event` decodes by schema for `@event`/where.
 - Reducer ergonomics: reducers receive canonical schema-shaped events; bad payloads are rejected early; tests cover keyed routing, await_event predicates, and invalid payload rejection.
 - Manifest validation: loader now fails when event schemas (routing/triggers/reducer ABI) are missing from defschemas/built-ins.
+- External ingress and receipts: host/CLI/test event submission and adapter receipts all use the same schema-driven normalizer before routing/journaling.
 
 **Remaining**
-- External ingress: CLI/tests (`aos-host` helpers) should require explicit event schema and run through the normalizer; receipts synthesized by adapters should go through the same path.
-- Spec/docs: update specs/AGENTS with “events like effect params” invariant and the canonical-journal rule.
+- Spec/docs: update specs/AGENTS with the “events like effect params; journal stores canonical CBOR” invariant.
 
 **Stretch**
 - Consider re-exporting the normalizer for external tools and adding richer diagnostics (author bytes vs canonical) if needed.

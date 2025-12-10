@@ -98,6 +98,15 @@ Canonical CBOR remains the storage and hashing format. The node hash is `sha256(
 
 When hashing a typed value (plan IO, cap params, etc.), always bind the **schema hash** alongside the canonical bytes. This prevents two different schemas that serialize to the same JSON shape from colliding and keeps “schema + value” as the identity pair.
 
+### 3.4 Event Payload Normalization (Journal Invariant)
+
+DomainEvents and ReceiptEvents are treated exactly like effect params:
+
+- **Ingress rule**: Every event payload is decoded against its declared `defschema` (from reducer ABI, trigger/routing entry, or built-in receipt schema), validated, canonicalized, and re-encoded as canonical CBOR. If validation fails, the event is rejected.
+- **Journal rule**: The journal stores and replays only these canonical bytes; replay never rewrites payloads.
+- **Routing/correlation**: Key extraction for routed/correlated events uses the schema-aware decoded value (not ExprValue tagging) and validates against the reducer’s `key_schema`.
+- **Sources**: Reducer-emitted DomainEvents, plan-raised events, adapter receipts synthesized as events, and externally injected/CLI events all flow through the same normalizer.
+
 ## 4) Manifest
 
 The manifest is the root catalog of a world's control plane. It lists all schemas, modules, plans, capabilities, and policies by name and hash, defines event routing and triggers, and specifies defaults.

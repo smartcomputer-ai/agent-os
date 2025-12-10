@@ -42,7 +42,7 @@ All I/O happens via returned effects; reducers cannot perform syscalls. **Replay
 ```
 
 - `state` is canonical CBOR matching the declared state schema
-- `event` is canonical CBOR of a DomainEvent or ReceiptEvent addressed to this reducer
+- `event` is canonical CBOR of a DomainEvent or ReceiptEvent addressed to this reducer; the kernel validates and canonicalizes every event payload against its schema before routing/journaling, so reducers always see schema-shaped canonical CBOR.
 
 ### Output CBOR (canonical)
 
@@ -86,6 +86,8 @@ Reducers consume two kinds of events:
 **ReceiptEvent**: Adapter receipts converted to events by the kernel for micro-effects (e.g., `TimerFired` for `timer.set`). For complex external work, plans raise result DomainEvents instead of relying on raw receipts. Correlate using stable fields in your events/effect params (e.g., a key like `order_id` or an idempotency key). In v1.1 Cells, this key becomes a first-class route; see spec/05-cells.md.
 
 **Important**: Do not embed `$schema` fields inside reducer event payloads. The kernel determines schemas from manifest routing and capability bindings; self-describing payloads are rejected.
+
+**Normalization**: All events—emitted by reducers, raised by plans, synthesized from receipts, or injected externally—are schema-validated and canonicalized on ingress. The journal stores only canonical CBOR, and keyed routing/correlation uses the decoded typed value. Reducers can deserialize directly into their event enum/struct without handling ExprValue tagging.
 
 Reducers should be written as explicit **typestate machines**: a `pc` (program counter) enum plus fences/idempotency to handle duplicates and retries. This makes continuations data-driven and deterministic.
 
