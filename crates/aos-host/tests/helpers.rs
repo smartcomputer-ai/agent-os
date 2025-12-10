@@ -17,6 +17,16 @@ use aos_effects::builtins::TimerSetParams;
 #[path = "../src/fixtures/mod.rs"]
 pub mod fixtures;
 
+/// Compatibility wrapper for decoding ReadMeta via serde_json/serde_cbor in tests.
+/// Mirrors aos_kernel::ReadMeta but uses hex strings for hashes.
+#[derive(Debug, serde::Deserialize)]
+pub struct ReadMetaCompat {
+    pub journal_height: u64,
+    #[serde(default)]
+    pub snapshot_hash: Option<String>,
+    pub manifest_hash: String,
+}
+
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use fixtures::{START_SCHEMA, TestStore, zero_hash};
 use indexmap::IndexMap;

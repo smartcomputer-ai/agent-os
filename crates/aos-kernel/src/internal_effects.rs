@@ -269,4 +269,57 @@ mod tests {
         assert!(decoded.manifest.len() > 0);
         assert_eq!(decoded.meta.journal_height, 0);
     }
+
+    #[test]
+    fn parse_consistency_variants() {
+        assert!(matches!(parse_consistency("head"), Ok(Consistency::Head)));
+        assert_eq!(parse_consistency("exact:5").unwrap(), Consistency::Exact(5));
+        assert_eq!(
+            parse_consistency("at_least:10").unwrap(),
+            Consistency::AtLeast(10)
+        );
+        assert!(parse_consistency("bogus").is_err());
+    }
+
+    #[test]
+    fn invalid_params_returns_error_receipt() {
+        let kernel = open_kernel();
+        // bogus CBOR payload
+        let intent = EffectIntent {
+            kind: EffectKind::introspect_manifest(),
+            cap_name: "sys/query@1".into(),
+            params_cbor: b"\x01\x02\x03".to_vec(),
+            idempotency_key: [0; 32],
+            intent_hash: [9; 32],
+        };
+        let receipt = kernel
+            .handle_internal_intent(&intent)
+            .unwrap()
+            .expect("handled");
+        assert_eq!(receipt.status, ReceiptStatus::Error);
+        assert_eq!(receipt.adapter_id, ADAPTER_ID);
+    }
+
+    #[test]
+    fn list_cells_empty_for_non_keyed() {
+        let kernel = open_kernel();
+        let params = ListCellsParams {
+            reducer: "missing/Reducer@1".into(),
+        };
+        let intent = IntentBuilder::new(
+            EffectKind::introspect_list_cells(),
+            "sys/query@1",
+            &params,
+        )
+        .build()
+        .unwrap();
+
+        let receipt = kernel
+            .handle_internal_intent(&intent)
+            .unwrap()
+            .expect("handled");
+        assert_eq!(receipt.status, ReceiptStatus::Ok);
+        let decoded: ListCellsReceipt = receipt.payload().unwrap();
+        assert!(decoded.cells.is_empty());
+    }
 }

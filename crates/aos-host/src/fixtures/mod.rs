@@ -10,9 +10,8 @@ use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
     CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, EmptyObject, Expr,
     ExprConst, ExprRef, HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind,
-    Name, NamedRef, PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr,
-    TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord,
-    catalog::EffectCatalog,
+    Name, NamedRef, PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr, TypeOption,
+    TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
@@ -445,11 +444,13 @@ pub fn query_defcap() -> DefCap {
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::from([(
                 "scope".into(),
-                TypeExpr::Option(Box::new(TypeExpr::Primitive(TypePrimitive::Text(
-                    TypePrimitiveText {
-                        text: EmptyObject {},
-                    },
-                )))),
+                TypeExpr::Option(TypeOption {
+                    option: Box::new(TypeExpr::Primitive(TypePrimitive::Text(
+                        TypePrimitiveText {
+                            text: EmptyObject {},
+                        },
+                    ))),
+                }),
             )]),
         }),
     }
