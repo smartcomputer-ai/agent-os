@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
     AirNode, CapGrant, CapType, DefCap, DefPlan, EffectKind, EmptyObject, Expr, ExprConst,
     ExprOrValue, ExprRecord, ExprRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
@@ -48,7 +47,7 @@ fn governance_flow_applies_manifest_patch() {
     world.kernel.apply_proposal(proposal_id).unwrap();
 
     world
-        .submit_event_value_result(START_SCHEMA, &ExprValue::Record(Default::default()))
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "start" }))
         .expect("submit start event");
     world.tick_n(1).unwrap();
     let reducer_state = world
@@ -351,7 +350,15 @@ fn manifest_with_reducer(
         },
     );
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)
+    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    helpers::insert_test_schemas(
+        &mut loaded,
+        vec![helpers::def_text_record_schema(
+            START_SCHEMA,
+            vec![("id", helpers::text_type())],
+        )],
+    );
+    loaded
 }
 
 fn sample_plan_json() -> serde_json::Value {
@@ -444,8 +451,7 @@ fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> 
 }
 
 fn start_seed_event() -> (String, Vec<u8>) {
-    let value = fixtures::plan_input_record(vec![]);
-    let bytes = serde_cbor::to_vec(&value).expect("encode start event");
+    let bytes = serde_cbor::to_vec(&serde_json::json!({ "id": "seed" })).expect("encode start event");
     (START_SCHEMA.to_string(), bytes)
 }
 
@@ -536,7 +542,10 @@ fn upgrade_manifest(
 
     helpers::insert_test_schemas(
         &mut loaded,
-        vec![helpers::def_text_record_schema(START_SCHEMA, vec![])],
+        vec![helpers::def_text_record_schema(
+            START_SCHEMA,
+            vec![("id", helpers::text_type())],
+        )],
     );
 
     loaded
@@ -735,10 +744,16 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
 
     helpers::insert_test_schemas(
         &mut loaded,
-        vec![helpers::def_text_record_schema(
-            "com.acme/ShadowOut@1",
-            vec![("value", helpers::text_type())],
-        )],
+        vec![
+            helpers::def_text_record_schema(
+                START_SCHEMA,
+                vec![("id", helpers::text_type())],
+            ),
+            helpers::def_text_record_schema(
+                "com.acme/ShadowOut@1",
+                vec![("value", helpers::text_type())],
+            ),
+        ],
     );
 
     loaded
