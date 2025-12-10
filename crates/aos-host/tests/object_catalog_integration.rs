@@ -14,16 +14,16 @@
 
 #![cfg(feature = "test-fixtures")]
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
 
-use aos_air_exec::Value as ExprValue;
 use aos_host::fixtures::{self, TestStore};
 use aos_kernel::Kernel;
 use aos_kernel::journal::OwnedJournalEntry;
 use aos_kernel::journal::mem::MemJournal;
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use aos_air_types::{builtins, plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name};
+use std::collections::HashMap;
 
 /// Matches aos_sys::ObjectMeta for deserialization
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,18 +43,34 @@ struct ObjectVersions {
     versions: BTreeMap<u64, ObjectMeta>,
 }
 
-/// Helper to build ObjectRegistered event payload as ExprValue (for key extraction).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ObjectRegistered {
+    meta: ObjectMeta,
+}
+
+/// Helper to build ObjectRegistered event payload using canonical schema shape.
 fn object_registered_event_value(name: &str, kind: &str, hash: &str, owner: &str) -> Vec<u8> {
-    let meta = ExprValue::Record(IndexMap::from([
-        ("name".into(), ExprValue::Text(name.into())),
-        ("kind".into(), ExprValue::Text(kind.into())),
-        ("hash".into(), ExprValue::Text(hash.into())),
-        ("tags".into(), ExprValue::Set(BTreeSet::new())),
-        ("created_at".into(), ExprValue::Nat(1000)),
-        ("owner".into(), ExprValue::Text(owner.into())),
-    ]));
-    let event = ExprValue::Record(IndexMap::from([("meta".into(), meta)]));
+    let meta = ObjectMeta {
+        name: name.into(),
+        kind: kind.into(),
+        hash: hash.into(),
+        tags: BTreeSet::new(),
+        created_at: 1000,
+        owner: owner.into(),
+    };
+    let event = ObjectRegistered { meta };
     serde_cbor::to_vec(&event).unwrap()
+}
+
+fn canonical_key_bytes(name: &str) -> Vec<u8> {
+    let mut schemas = HashMap::new();
+    for builtin in builtins::builtin_schemas() {
+        schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
+    }
+    let idx = SchemaIndex::new(schemas);
+    normalize_cbor_by_name(&idx, "sys/ObjectKey@1", &serde_cbor::to_vec(&name.to_string()).unwrap())
+        .unwrap()
+        .bytes
 }
 
 /// Test that ObjectRegistered events are correctly routed and state is updated.
@@ -117,8 +133,9 @@ async fn object_catalog_version_increment() {
     res.unwrap();
 
     // Verify state after registration
+    let key_bytes = canonical_key_bytes("artifacts/patch-001");
     let state_bytes = kernel
-        .reducer_state_bytes("sys/ObjectCatalog@1", Some(b"artifacts/patch-001"))
+        .reducer_state_bytes("sys/ObjectCatalog@1", Some(&key_bytes))
         .unwrap()
         .expect("state exists");
     let state: ObjectVersions = serde_cbor::from_slice(&state_bytes).unwrap();
@@ -188,10 +205,16 @@ async fn object_catalog_keyed_routing() {
 
     // Verify both keys have separate state
     let state_a = kernel
-        .reducer_state_bytes("sys/ObjectCatalog@1", Some(b"path/a"))
+        .reducer_state_bytes(
+            "sys/ObjectCatalog@1",
+            Some(&canonical_key_bytes("path/a")),
+        )
         .unwrap();
     let state_b = kernel
-        .reducer_state_bytes("sys/ObjectCatalog@1", Some(b"path/b"))
+        .reducer_state_bytes(
+            "sys/ObjectCatalog@1",
+            Some(&canonical_key_bytes("path/b")),
+        )
         .unwrap();
 
     assert!(state_a.is_some(), "path/a should have state");
@@ -264,8 +287,9 @@ async fn object_catalog_snapshot_replay() {
     let root_before = kernel
         .reducer_index_root("sys/ObjectCatalog@1")
         .expect("index root");
+    let replay_key = canonical_key_bytes("replay/test");
     let state_before = kernel
-        .reducer_state_bytes("sys/ObjectCatalog@1", Some(b"replay/test"))
+        .reducer_state_bytes("sys/ObjectCatalog@1", Some(&replay_key))
         .unwrap()
         .expect("state");
 
@@ -285,7 +309,7 @@ async fn object_catalog_snapshot_replay() {
         .reducer_index_root("sys/ObjectCatalog@1")
         .expect("replay index root");
     let state_after = kernel_replay
-        .reducer_state_bytes("sys/ObjectCatalog@1", Some(b"replay/test"))
+        .reducer_state_bytes("sys/ObjectCatalog@1", Some(&replay_key))
         .unwrap()
         .expect("replay state");
 

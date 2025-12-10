@@ -18,9 +18,8 @@ fn journal_replay_restores_state() {
     let manifest_run = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest_run).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
     world
-        .submit_event_value_result(START_SCHEMA, &input)
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
@@ -79,7 +78,7 @@ fn reducer_timer_receipt_replays_from_journal() {
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
     world
-        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "timer" }))
         .expect("submit start event");
     world.tick_n(1).unwrap();
 
@@ -126,9 +125,8 @@ fn plan_journal_replay_resumes_waiting_receipt() {
     let manifest = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
     world
-        .submit_event_value_result(START_SCHEMA, &input)
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
@@ -218,9 +216,8 @@ fn fs_journal_persists_across_restarts() {
         )
         .unwrap();
 
-        let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
         world
-            .submit_event_value_result(START_SCHEMA, &input)
+            .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
             .expect("submit start event");
         world.tick_n(2).unwrap();
 

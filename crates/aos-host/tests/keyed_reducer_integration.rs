@@ -53,7 +53,10 @@ async fn keyed_reducer_integration_flow() {
             &mut manifest,
             vec![
                 fixtures::def_text_record_schema("com.acme/State@1", vec![]),
-                fixtures::def_text_record_schema("com.acme/Key@1", vec![]),
+                aos_air_types::DefSchema {
+                    name: "com.acme/Key@1".into(),
+                    ty: fixtures::text_type(),
+                },
                 fixtures::def_text_record_schema(
                     "com.acme/Event@1",
                     vec![("id", fixtures::text_type())],
@@ -68,32 +71,35 @@ async fn keyed_reducer_integration_flow() {
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
 
     // Two keyed events.
-    let evt_payload = |id: &str| {
-        serde_cbor::to_vec(&aos_air_exec::Value::Record(
-            [("id".to_string(), aos_air_exec::Value::Text(id.to_string()))]
-                .into_iter()
-                .collect(),
-        ))
-        .unwrap()
-    };
-    kernel.submit_domain_event("com.acme/Event@1", evt_payload("k1"));
-    kernel.submit_domain_event("com.acme/Event@1", evt_payload("k2"));
+    let evt_payload = |id: &str| serde_cbor::to_vec(&serde_json::json!({ "id": id })).unwrap();
+    kernel
+        .submit_domain_event_result("com.acme/Event@1", evt_payload("k1"))
+        .expect("submit k1");
+    kernel
+        .submit_domain_event_result("com.acme/Event@1", evt_payload("k2"))
+        .expect("submit k2");
     kernel.tick_until_idle().unwrap();
 
     // Index root present and both cells accessible.
     let root = kernel
         .reducer_index_root("com.acme/Keyed@1")
         .expect("index root present");
-    let state_k1 = kernel
-        .reducer_state_bytes("com.acme/Keyed@1", Some(b"k1"))
-        .unwrap()
-        .expect("k1 state");
-    let state_k2 = kernel
-        .reducer_state_bytes("com.acme/Keyed@1", Some(b"k2"))
-        .unwrap()
-        .expect("k2 state");
-    assert_eq!(state_k1, vec![0xAA]);
-    assert_eq!(state_k2, vec![0xAA]);
+    let index = CellIndex::new(store.as_ref());
+    let metas: Vec<_> = index.iter(root).map(|m| m.unwrap()).collect();
+    assert_eq!(metas.len(), 2);
+    let key_strings: Vec<String> = metas
+        .iter()
+        .map(|m| serde_cbor::from_slice(&m.key_bytes).unwrap())
+        .collect();
+    assert!(key_strings.contains(&"k1".to_string()));
+    assert!(key_strings.contains(&"k2".to_string()));
+    for meta in &metas {
+        let state = kernel
+            .reducer_state_bytes("com.acme/Keyed@1", Some(&meta.key_bytes))
+            .unwrap()
+            .expect("cell state");
+        assert_eq!(state, vec![0xAA]);
+    }
 
     // Snapshot to pin index root.
     kernel.create_snapshot().unwrap();
@@ -117,23 +123,15 @@ async fn keyed_reducer_integration_flow() {
     assert_eq!(root, root_replay, "index root should persist across replay");
 
     // Verify cells via API and direct index iteration.
-    let state_k1_re = kernel_replay
-        .reducer_state_bytes("com.acme/Keyed@1", Some(b"k1"))
-        .unwrap()
-        .expect("k1 replay state");
-    let state_k2_re = kernel_replay
-        .reducer_state_bytes("com.acme/Keyed@1", Some(b"k2"))
-        .unwrap()
-        .expect("k2 replay state");
-    assert_eq!(state_k1_re, vec![0xAA]);
-    assert_eq!(state_k2_re, vec![0xAA]);
-
     let index = CellIndex::new(store.as_ref());
     let metas: Vec<_> = index.iter(root_replay).map(|m| m.unwrap()).collect();
     assert_eq!(metas.len(), 2);
-    let keys: Vec<Vec<u8>> = metas.iter().map(|m| m.key_bytes.clone()).collect();
-    assert!(keys.contains(&b"k1".to_vec()));
-    assert!(keys.contains(&b"k2".to_vec()));
+    let keys: Vec<String> = metas
+        .iter()
+        .map(|m| serde_cbor::from_slice(&m.key_bytes).unwrap())
+        .collect();
+    assert!(keys.contains(&"k1".to_string()));
+    assert!(keys.contains(&"k2".to_string()));
     for meta in metas {
         let state_hash = Hash::from_bytes(&meta.state_hash).unwrap();
         let state = store.get_blob(state_hash).unwrap();
