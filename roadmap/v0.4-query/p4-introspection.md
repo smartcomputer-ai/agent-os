@@ -161,3 +161,35 @@ All control verbs should hit the introspection adapter (or CAS for blob-get) so 
 - Added `sys/query@1` `defcap` to built-ins (`spec/defs/builtin-caps.air.json`) and exposed it via `CapType::QUERY` and builtins loader.
 - Extended built-in schema/effect lists to include introspection params/receipts and `introspect.*` effects with `cap_type=query`.
 - Updated test fixtures to grant `sys/query@1` by default and declare it in manifests alongside http/timer/blob caps.
+- Implemented kernel-side internal handler for `introspect.*` with deterministic receipts; host run loop now intercepts and applies these without going through external adapters (preserving replay).
+
+---
+
+## Effect Handler Design (kernel vs host)
+
+### Options considered
+- **Kernel-resident internal handler**: treat `introspect.*` as an in-kernel effect that never leaves the deterministic core. Kernel already owns the state, snapshots, and manifest hashes needed to answer queries without I/O. We can deterministically synthesize receipts straight from the journal/snapshot index, skipping any host plumbing. This keeps read-only paths close to the invariants and avoids lifetime/borrow gymnastics in `aos-host` (the host currently drains effects, drops the mutable borrow on the kernel, then runs async adapters).
+- **Host adapter**: implement `AsyncEffectAdapter` in `aos-host` that calls back into `Kernel::get_manifest/get_reducer_state/list_cells`. This mirrors how HTTP/LLM adapters live today, but requires sharing a `StateReader` handle into the kernel across an async boundary (likely `Arc<Mutex<Kernel>>`), and we would still want deterministic receipts (so no external inputs). The layering becomes awkward because the host would need a privileged handle that can read snapshot metadata safely while the kernel is idle.
+
+### Decision
+Keep introspection (and future kernel-owned readonly utilities) **inside the kernel** as a small “internal adapter” surface. The host remains the orchestrator for external, effectful adapters; the kernel owns deterministic, zero-I/O handlers that can be replayed from receipts. This also generalizes to `p1-self-upgrade` where plans must read the manifest + consistency metadata while preparing patches.
+
+### Implementation sketch
+1) **Internal handler trait**: add a lightweight, synchronous trait (e.g., `InternalEffectHandler`) in `aos-kernel` that takes an `EffectIntent` and returns an `EffectReceipt`. It should never block or touch wall-clock; it’s purely a mapping from normalized params → receipt.
+2) **Kernel dispatch**: extend `Kernel::drain_effects()` (or the host run loop) to intercept intents whose kind is in an `INTERNAL_EFFECTS` set (initially `introspect.manifest|reducer_state|journal_head|list_cells`). For these kinds, call the handler immediately and push the resulting receipt into the list that will be applied this cycle. Preserve intent order when interleaving internal and external receipts so replay alignment stays intact.
+3) **Receipt shape**: use `adapter_id = "kernel.introspect"` (or per-effect ids if we want finer audit). `status = Ok` on success; on errors (e.g., `SnapshotUnavailable`, `ReducerMissing`, `InvalidConsistency`), emit `status = Error` with a structured payload `sys/IntrospectError@1 { code, message }`. Even error receipts carry `meta { journal_height, snapshot_hash?, manifest_hash }` so callers know what was consulted.
+4) **Param decoding**: decode params into typed structs inside the kernel module (mirroring the defeffect schemas). Map textual `consistency` to `Consistency` enum, validate reducer exists, and when `Exact(h)` is requested try snapshot fallback; return `Error` if missing.
+5) **Host integration**: no new `AsyncEffectAdapter` needed. The host run-cycle stays the same except it partitions intents: internal → handled synchronously via kernel, external → `AdapterRegistry::execute_batch`. This avoids adding any `Arc<Mutex<Kernel>>` dance to adapters. Control socket verbs for manifest/state/blob-get still delegate to the kernel entry points so CLI and plans observe identical receipts.
+6) **Signing**: reuse the existing receipt signing stub, but record a distinct `adapter_id` for internal handlers so audits can distinguish them from host adapters.
+
+### Why this fits the layering
+- Effects are the abstraction boundary; receipts are the audit trail. An internal handler still emits receipts, so replay stays deterministic.
+- Kernel already exposes `StateReader` + snapshot index; giving host adapters mutable/async access complicates borrow lifetimes and risks racing with later ticks. Keeping it in-kernel eliminates that class of bugs.
+- Host remains for “side-effectful” adapters (http/llm/blob/timer), while kernel handles “world read” utilities. Future self-upgrade planning uses the same pattern.
+
+### Follow-on tasks
+- Add `internal_effects` registry + handler plumbing to `aos-kernel`.
+- Implement `IntrospectionHandler` covering the four effects with shared helper to build `ReadMeta`.
+- Update `WorldHost::run_cycle` to interleave internal receipts with external adapter receipts in intent order.
+- Add control-socket verbs to call the kernel handler directly (no host adapter); CLI will rely on those.
+- Tests: unit tests for handler error paths; integration tests that emit `introspect.*` intents via plans and assert receipts land in the journal with expected meta.

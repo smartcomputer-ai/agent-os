@@ -8,6 +8,7 @@ pub mod event;
 pub mod governance;
 pub mod journal;
 pub mod manifest;
+pub mod internal_effects;
 pub mod patch_doc;
 pub mod plan;
 pub mod policy;

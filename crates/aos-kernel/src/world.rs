@@ -1243,7 +1243,7 @@ impl<S: Store + 'static> Kernel<S> {
         }
     }
 
-    fn read_meta(&self) -> ReadMeta {
+    pub(crate) fn read_meta(&self) -> ReadMeta {
         ReadMeta {
             journal_height: self.journal.next_seq(),
             snapshot_hash: self.last_snapshot_hash,

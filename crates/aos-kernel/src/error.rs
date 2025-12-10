@@ -85,6 +85,8 @@ pub enum KernelError {
     },
     #[error("manifest validation error: {0}")]
     ManifestValidation(String),
+    #[error("query error: {0}")]
+    Query(String),
 }
 
 impl From<crate::journal::JournalError> for KernelError {

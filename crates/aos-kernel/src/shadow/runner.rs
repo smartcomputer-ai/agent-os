@@ -67,6 +67,12 @@ impl ShadowExecutor {
                     params_json: params_to_json(&intent.params_cbor),
                 });
 
+                // Prefer real internal handling so shadow predictions stay faithful.
+                if let Some(receipt) = kernel.handle_internal_intent(&intent)? {
+                    kernel.handle_receipt(receipt)?;
+                    continue;
+                }
+
                 let receipt = EffectReceipt {
                     intent_hash: intent.intent_hash,
                     adapter_id: "shadow.mock".into(),
