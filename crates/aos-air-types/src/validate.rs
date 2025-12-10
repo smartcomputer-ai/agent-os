@@ -75,9 +75,18 @@ pub enum ValidationError {
     #[error("schema '{schema}' not found")]
     SchemaNotFound { schema: String },
     #[error("effect kind '{kind}' not found in catalog or built-ins")]
-    UnknownEffectKind { kind: String },
+    EffectNotFound { kind: String },
     #[error("capability grant '{cap}' not found")]
     CapabilityNotFound { cap: String },
+    #[error(
+        "capability '{cap}' type '{found}' does not match effect '{effect}' required type '{expected}'"
+    )]
+    CapabilityTypeMismatch {
+        cap: String,
+        effect: String,
+        expected: String,
+        found: String,
+    },
 }
 
 fn sort_and_dedup_caps(mut caps: Vec<CapGrantName>) -> Vec<CapGrantName> {
@@ -417,6 +426,7 @@ pub fn validate_manifest(
     schemas: &HashMap<String, DefSchema>,
     plans: &HashMap<String, DefPlan>,
     effects: &HashMap<String, DefEffect>,
+    caps: &HashMap<String, crate::DefCap>,
     policies: &HashMap<String, DefPolicy>,
 ) -> Result<(), ValidationError> {
     let schema_exists =
@@ -493,7 +503,7 @@ pub fn validate_manifest(
         for step in &plan.steps {
             if let PlanStepKind::EmitEffect(emit) = &step.kind {
                 if !known_effect_kinds.contains(emit.kind.as_str()) {
-                    return Err(ValidationError::UnknownEffectKind {
+                    return Err(ValidationError::EffectNotFound {
                         kind: emit.kind.as_str().to_string(),
                     });
                 }
@@ -502,11 +512,28 @@ pub fn validate_manifest(
                         cap: emit.cap.clone(),
                     });
                 }
+                if let Some(effect_def) = effects
+                    .values()
+                    .find(|def| def.kind.as_str() == emit.kind.as_str())
+                {
+                    if let Some(cap_def) = caps.get(emit.cap.as_str()) {
+                        let found = cap_def.cap_type.as_str().to_string();
+                        let expected = effect_def.cap_type.as_str().to_string();
+                        if found != expected {
+                            return Err(ValidationError::CapabilityTypeMismatch {
+                                cap: emit.cap.clone(),
+                                effect: emit.kind.as_str().to_string(),
+                                expected,
+                                found,
+                            });
+                        }
+                    }
+                }
             }
         }
         for allowed in &plan.allowed_effects {
             if !known_effect_kinds.contains(allowed.as_str()) {
-                return Err(ValidationError::UnknownEffectKind {
+                return Err(ValidationError::EffectNotFound {
                     kind: allowed.as_str().to_string(),
                 });
             }
@@ -532,7 +559,7 @@ pub fn validate_manifest(
         for rule in &policy.rules {
             if let Some(kind) = rule.when.effect_kind.as_ref() {
                 if !known_effect_kinds.contains(kind.as_str()) {
-                    return Err(ValidationError::UnknownEffectKind {
+                    return Err(ValidationError::EffectNotFound {
                         kind: kind.as_str().to_string(),
                     });
                 }
@@ -931,9 +958,12 @@ mod tests {
         let schemas = HashMap::new();
         let plans = HashMap::new();
         let effects = HashMap::new();
+        let caps = HashMap::new();
         let policies = HashMap::new();
-        let err = validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &policies)
-            .unwrap_err();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             ValidationError::SchemaNotFound { schema }
@@ -1005,11 +1035,14 @@ mod tests {
         let schemas = HashMap::new();
         let modules = HashMap::new();
         let effects = HashMap::new();
-        let err = validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &policies)
-            .unwrap_err();
+        let caps = HashMap::new();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
-            ValidationError::UnknownEffectKind { kind }
+            ValidationError::EffectNotFound { kind }
             if kind == bad_kind.as_str()
         ));
     }
@@ -1078,8 +1111,11 @@ mod tests {
         let schemas = HashMap::new();
         let modules = HashMap::new();
         let effects = HashMap::new();
-        let err = validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &policies)
-            .unwrap_err();
+        let caps = HashMap::new();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             ValidationError::CapabilityNotFound { cap }

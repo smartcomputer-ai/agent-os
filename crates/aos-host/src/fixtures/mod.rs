@@ -575,19 +575,23 @@ impl TestWorld {
         Ok(Self { store, kernel })
     }
 
-    /// Submit an event encoded as `ExprValue` under the given schema.
+    /// Submit an event encoded as `ExprValue` under the given schema, normalized to the schema.
     pub fn submit_event_value(&mut self, schema: &str, value: &ExprValue) {
         let bytes = serde_cbor::to_vec(value).expect("encode event");
-        self.kernel.submit_domain_event(schema.to_string(), bytes);
+        self.kernel
+            .submit_domain_event_result(schema.to_string(), bytes)
+            .expect("submit event");
     }
 
-    /// Submit any serializable payload as an event using the schema string.
+    /// Submit any serializable payload as an event using the schema string, normalized to the schema.
     pub fn submit_event<T>(&mut self, schema: &str, value: &T)
     where
         T: Serialize,
     {
         let bytes = serde_cbor::to_vec(value).expect("encode event");
-        self.kernel.submit_domain_event(schema.to_string(), bytes);
+        self.kernel
+            .submit_domain_event_result(schema.to_string(), bytes)
+            .expect("submit event");
     }
 
     pub fn tick_n(&mut self, n: usize) -> Result<(), KernelError> {

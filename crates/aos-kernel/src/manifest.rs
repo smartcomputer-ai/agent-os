@@ -62,8 +62,10 @@ impl ManifestLoader {
             }
         }
         let manifest = catalog.manifest;
-        validate_manifest(&manifest, &modules, &schemas, &plans, &effects)
-            .map_err(|e| KernelError::ManifestValidation(e.to_string()))?;
+        validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .map_err(|e| KernelError::ManifestValidation(e.to_string()))?;
         let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
         Ok(LoadedManifest {
             manifest,
