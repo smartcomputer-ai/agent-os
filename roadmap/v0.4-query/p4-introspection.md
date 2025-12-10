@@ -52,3 +52,112 @@ All are read-only; receipts carry consistency metadata for downstream governance
 ## Dependencies / Tie-ins
 - **p4-worldfs-cli**: blocked until introspection effects + control verbs exist; CLI should be layered on these.
 - **p1-self-upgrade (v0.5)**: governance proposals need the consistency metadata from introspection receipts to attest what was read when preparing patches.
+
+---
+
+## Draft AIR Definitions (sketch)
+
+### Query Capability
+```jsonc
+{
+  "$kind": "defcap",
+  "name": "sys/query@1",
+  "cap_type": "query",
+  "schema": { "record": { "scope": { "text": {}, "$comment": "Optional scope string; empty = all" } } },
+  "$comment": "Grants use of introspect.* effects; policy can further restrict by reducer/name."
+}
+```
+
+### Introspection Effects
+```jsonc
+[
+  {
+    "$kind": "defeffect",
+    "name": "introspect.manifest",
+    "params": { "record": { "consistency": { "text": {}, "$comment": "head | exact:<h> | at_least:<h>" } } },
+    "receipt": { "record": {
+      "manifest": { "ref": "air/Manifest@1" },
+      "journal_height": { "nat": {} },
+      "snapshot_hash": { "maybe": { "hash": {} } },
+      "manifest_hash": { "hash": {} }
+    }},
+    "origin_scope": "plan-only",
+    "cap_type": "query"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "introspect.reducer_state",
+    "params": { "record": {
+      "reducer": { "text": {} },
+      "key_b64": { "maybe": { "text": {} } },
+      "consistency": { "text": {} }
+    }},
+    "receipt": { "record": {
+      "state_b64": { "maybe": { "text": {} } },
+      "meta": { "record": {
+        "journal_height": { "nat": {} },
+        "snapshot_hash": { "maybe": { "hash": {} } },
+        "manifest_hash": { "hash": {} }
+      }}
+    }},
+    "origin_scope": "plan-only",
+    "cap_type": "query"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "introspect.journal_head",
+    "params": { "record": {} },
+    "receipt": { "record": {
+      "journal_height": { "nat": {} },
+      "snapshot_hash": { "maybe": { "hash": {} } },
+      "manifest_hash": { "hash": {} }
+    }},
+    "origin_scope": "plan-only",
+    "cap_type": "query"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "introspect.list_cells",
+    "params": { "record": { "reducer": { "text": {} } } },
+    "receipt": { "record": {
+      "cells": { "list": { "record": {
+        "key_b64": { "text": {} },
+        "state_hash": { "hash": {} },
+        "size": { "nat": {} },
+        "last_active_ns": { "nat": {} }
+      } } },
+      "meta": { "record": {
+        "journal_height": { "nat": {} },
+        "snapshot_hash": { "maybe": { "hash": {} } },
+        "manifest_hash": { "hash": {} }
+      }}
+    }},
+    "origin_scope": "plan-only",
+    "cap_type": "query"
+  }
+]
+```
+
+Notes:
+- `consistency` is a textual envelope to keep params simple; runtime parses to `Head | Exact(u64) | AtLeast(u64)`.
+- Receipts always include consistency metadata even when the payload is empty (e.g., missing reducer key).
+- `cap_type` references the new `query` cap; blob reads still require `blob` cap when the CLI/SDK chains to `blob.get`.
+
+---
+
+## Control Protocol Additions (sketch)
+
+- `manifest-read { consistency?: "head"|"exact:<h>"|"at_least:<h>" }` → `{ manifest, journal_height, snapshot_hash?, manifest_hash }`
+- `query-state { reducer, key_b64?, consistency? }` → `{ state_b64?, meta{...} }` (reuse name but upgrade payload/metadata)
+- `list-cells { reducer }` → `{ cells[], meta{...} }`
+- `journal-head {}` → `{ journal_height, snapshot_hash?, manifest_hash }`
+- `blob-get { hash_hex }` → `{ data_b64 }` (cap-checked; pairs with existing `put-blob`)
+
+All control verbs should hit the introspection adapter (or CAS for blob-get) so daemon and batch paths share semantics and receipts can be replayed deterministically.
+
+---
+
+## Completed so far
+- Added `sys/query@1` `defcap` to built-ins (`spec/defs/builtin-caps.air.json`) and exposed it via `CapType::QUERY` and builtins loader.
+- Extended built-in schema/effect lists to include introspection params/receipts and `introspect.*` effects with `cap_type=query`.
+- Updated test fixtures to grant `sys/query@1` by default and declare it in manifests alongside http/timer/blob caps.

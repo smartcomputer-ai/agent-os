@@ -613,6 +613,7 @@ impl CapType {
     pub const TIMER: &'static str = "timer";
     pub const LLM_BASIC: &'static str = "llm.basic";
     pub const SECRET: &'static str = "secret";
+    pub const QUERY: &'static str = "query";
 
     pub fn new(cap_type: impl Into<String>) -> Self {
         Self(cap_type.into())
@@ -640,6 +641,10 @@ impl CapType {
 
     pub fn secret() -> Self {
         Self::new(Self::SECRET)
+    }
+
+    pub fn query() -> Self {
+        Self::new(Self::QUERY)
     }
 }
 

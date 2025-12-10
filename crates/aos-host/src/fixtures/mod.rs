@@ -239,8 +239,32 @@ where
 {
     manifest.defaults = Some(ManifestDefaults {
         policy: None,
-        cap_grants: vec![cap_http_grant(), timer_cap_grant(), blob_cap_grant()],
+        cap_grants: vec![
+            cap_http_grant(),
+            timer_cap_grant(),
+            blob_cap_grant(),
+            query_cap_grant(),
+        ],
     });
+    // Ensure manifest declares the capabilities we grant.
+    manifest.caps = vec![
+        NamedRef {
+            name: "sys/http.out@1".into(),
+            hash: zero_hash(),
+        },
+        NamedRef {
+            name: "sys/timer@1".into(),
+            hash: zero_hash(),
+        },
+        NamedRef {
+            name: "sys/blob@1".into(),
+            hash: zero_hash(),
+        },
+        NamedRef {
+            name: "sys/query@1".into(),
+            hash: zero_hash(),
+        },
+    ];
     let mut bindings = IndexMap::new();
     for module in modules {
         bindings.insert(
@@ -255,6 +279,7 @@ where
         ("sys/http.out@1".into(), http_defcap()),
         ("sys/timer@1".into(), timer_defcap()),
         ("sys/blob@1".into(), blob_defcap()),
+        ("sys/query@1".into(), query_defcap()),
     ])
 }
 
@@ -368,6 +393,17 @@ pub fn blob_cap_grant() -> CapGrant {
     }
 }
 
+/// Query capability grant for tests (introspection).
+pub fn query_cap_grant() -> CapGrant {
+    CapGrant {
+        name: "query_cap".into(),
+        cap: "sys/query@1".into(),
+        params: empty_value_literal(),
+        expiry_ns: None,
+        budget: None,
+    }
+}
+
 /// Minimal HTTP capability definition used inside tests.
 pub fn http_defcap() -> DefCap {
     DefCap {
@@ -397,6 +433,24 @@ pub fn blob_defcap() -> DefCap {
         cap_type: CapType::blob(),
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
+        }),
+    }
+}
+
+/// Minimal Query capability definition used inside tests (introspection).
+pub fn query_defcap() -> DefCap {
+    DefCap {
+        name: "sys/query@1".into(),
+        cap_type: CapType::query(),
+        schema: TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([(
+                "scope".into(),
+                TypeExpr::Option(Box::new(TypeExpr::Primitive(TypePrimitive::Text(
+                    TypePrimitiveText {
+                        text: EmptyObject {},
+                    },
+                )))),
+            )]),
         }),
     }
 }

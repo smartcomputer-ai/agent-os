@@ -21,6 +21,24 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/TimerFired@1",
+    "type": {
+      "record": {
+        "intent_hash": { "hash": {} },
+        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "effect_kind": { "text": {} },
+        "adapter_id": { "text": {} },
+        "status": { "text": {} },
+        "requested": { "ref": "sys/TimerSetParams@1" },
+        "receipt": { "ref": "sys/TimerSetReceipt@1" },
+        "cost_cents": { "option": { "nat": {} } },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
+
+  {
+    "$kind": "defschema",
     "name": "sys/BlobPutParams@1",
     "type": {
       "record": {
@@ -61,23 +79,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/TimerFired@1",
-    "type": {
-      "record": {
-        "intent_hash": { "hash": {} },
-        "reducer": { "text": {}, "$comment": "Name-formatted string" },
-        "effect_kind": { "text": {} },
-        "adapter_id": { "text": {} },
-        "status": { "text": {} },
-        "requested": { "ref": "sys/TimerSetParams@1" },
-        "receipt": { "ref": "sys/TimerSetReceipt@1" },
-        "cost_cents": { "option": { "nat": {} } },
-        "signature": { "bytes": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "sys/BlobPutResult@1",
     "type": {
       "record": {
@@ -110,6 +111,7 @@
       }
     }
   },
+
   {
     "$kind": "defschema",
     "name": "sys/HttpRequestParams@1",
@@ -150,6 +152,7 @@
       }
     }
   },
+
   {
     "$kind": "defschema",
     "name": "sys/LlmGenerateParams@1",
@@ -182,6 +185,7 @@
       }
     }
   },
+
   {
     "$kind": "defschema",
     "name": "sys/SecretRef@1",
@@ -260,6 +264,7 @@
       }
     }
   },
+
   {
     "$kind": "defschema",
     "name": "sys/GovProposeParams@1",
@@ -407,6 +412,7 @@
       }
     }
   },
+
   {
     "$kind": "defschema",
     "name": "sys/ObjectKey@1",
@@ -447,6 +453,100 @@
     "type": {
       "record": {
         "meta": { "ref": "sys/ObjectMeta@1" }
+      }
+    }
+  },
+
+  {
+    "$kind": "defschema",
+    "name": "sys/ReadMeta@1",
+    "type": {
+      "record": {
+        "journal_height": { "nat": {} },
+        "snapshot_hash": { "option": { "hash": {} } },
+        "manifest_hash": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/IntrospectManifestParams@1",
+    "type": {
+      "record": {
+        "consistency": { "text": {}, "$comment": "head | exact:<height> | at_least:<height>" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/IntrospectManifestReceipt@1",
+    "type": {
+      "record": {
+        "manifest": { "bytes": {} },
+        "meta": { "ref": "sys/ReadMeta@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/IntrospectReducerStateParams@1",
+    "type": {
+      "record": {
+        "reducer": { "text": {} },
+        "key": { "option": { "bytes": {} } },
+        "consistency": { "text": {}, "$comment": "head | exact:<height> | at_least:<height>" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/IntrospectReducerStateReceipt@1",
+    "type": {
+      "record": {
+        "state": { "option": { "bytes": {} } },
+        "meta": { "ref": "sys/ReadMeta@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/IntrospectJournalHeadParams@1",
+    "type": { "record": {} }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/IntrospectJournalHeadReceipt@1",
+    "type": {
+      "record": {
+        "meta": { "ref": "sys/ReadMeta@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/IntrospectListCellsParams@1",
+    "type": {
+      "record": {
+        "reducer": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/IntrospectListCellsReceipt@1",
+    "type": {
+      "record": {
+        "cells": {
+          "list": {
+            "record": {
+              "key": { "bytes": {} },
+              "state_hash": { "hash": {} },
+              "size": { "nat": {} },
+              "last_active_ns": { "nat": {} }
+            }
+          }
+        },
+        "meta": { "ref": "sys/ReadMeta@1" }
       }
     }
   }

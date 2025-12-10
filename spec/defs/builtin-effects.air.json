@@ -35,6 +35,7 @@
     "cap_type": "timer",
     "origin_scope": "reducer"
   },
+
   {
     "$kind": "defeffect",
     "name": "sys/llm.generate@1",
@@ -44,6 +45,7 @@
     "cap_type": "llm.basic",
     "origin_scope": "plan"
   },
+
   {
     "$kind": "defeffect",
     "name": "sys/vault.put@1",
@@ -62,6 +64,7 @@
     "cap_type": "secret",
     "origin_scope": "plan"
   },
+
   {
     "$kind": "defeffect",
     "name": "sys/governance.propose@1",
@@ -96,6 +99,43 @@
     "params_schema": "sys/GovApplyParams@1",
     "receipt_schema": "sys/GovApplyReceipt@1",
     "cap_type": "governance",
+    "origin_scope": "plan"
+  },
+
+  {
+    "$kind": "defeffect",
+    "name": "sys/introspect.manifest@1",
+    "kind": "introspect.manifest",
+    "params_schema": "sys/IntrospectManifestParams@1",
+    "receipt_schema": "sys/IntrospectManifestReceipt@1",
+    "cap_type": "query",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/introspect.reducer_state@1",
+    "kind": "introspect.reducer_state",
+    "params_schema": "sys/IntrospectReducerStateParams@1",
+    "receipt_schema": "sys/IntrospectReducerStateReceipt@1",
+    "cap_type": "query",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/introspect.journal_head@1",
+    "kind": "introspect.journal_head",
+    "params_schema": "sys/IntrospectJournalHeadParams@1",
+    "receipt_schema": "sys/IntrospectJournalHeadReceipt@1",
+    "cap_type": "query",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/introspect.list_cells@1",
+    "kind": "introspect.list_cells",
+    "params_schema": "sys/IntrospectListCellsParams@1",
+    "receipt_schema": "sys/IntrospectListCellsReceipt@1",
+    "cap_type": "query",
     "origin_scope": "plan"
   }
 ]
