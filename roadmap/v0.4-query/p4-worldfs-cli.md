@@ -33,6 +33,8 @@ WorldFS exposes a virtual namespace with three root prefixes:
 | `/sys/reducers/<Name>/<key>` | Specific reducer key | `introspect.reducer_state` |
 | `/sys/journal/head` | Journal height + hashes | `introspect.journal_head` |
 
+**Keyed reducers (cells)**: `ls /sys/reducers/<Name>` enumerates cell keys via `introspect.list_cells`; `cat /sys/reducers/<Name>/<key>` reads a single cell via `introspect.reducer_state` with `key`.
+
 ### `/obj` — ObjectCatalog Artifacts
 
 | Path | Description | Backed by |
@@ -41,7 +43,7 @@ WorldFS exposes a virtual namespace with three root prefixes:
 | `/obj/<path>` | Object metadata | `ObjectCatalog` reducer |
 | `/obj/<path>/data` | Object payload | `blob.get` via stored hash |
 
-Objects use hierarchical path-like names (e.g., `agents/self/patches/0003`).
+Objects use hierarchical path-like names (e.g., `agents/self/patches/0003`). Zero-padding numeric segments is **optional**; it just keeps lexicographic order aligned with numeric order in `ls`/`tree` outputs. Directory nesting is purely lexical: `/obj/foo/bar` is one object name shown under `foo/` in `tree`, but the payload is a single blob at `/obj/foo/bar/data`—no partial or nested payloads inside that object. If you also store `/obj/foo/data`, then `foo` will appear both as a file (with a payload) and as a directory that contains `bar`; this is allowed but discouraged because it complicates listings—prefer distinct prefixes when possible. For versioned series, disambiguate in the name (e.g., `foo/v0001`, `foo/v0002`) and use the `version` field in metadata; `/obj/foo/01/bar` means “object named `foo/01/bar`”, not “bar in version 01 of foo”.
 
 ### `/blob` — Raw CAS Access
 
@@ -61,6 +63,9 @@ List contents at path.
 # List reducers
 aos world fs ls /sys/reducers
 
+# List keyed reducer cells
+aos world fs ls /sys/reducers/Orders
+
 # List objects by prefix
 aos world fs ls /obj/agents/self/
 
@@ -68,7 +73,7 @@ aos world fs ls /obj/agents/self/
 aos world fs ls /obj --kind=air.patch
 ```
 
-**Implementation**: Control verb → `introspect.*` or catalog helper; batch fallback queries `StateReader`/ObjectCatalog directly.
+**Implementation**: Control verb → `introspect.*` or catalog helper; batch fallback queries `StateReader`/ObjectCatalog directly. For keyed reducers, `ls /sys/reducers/<Name>` calls `introspect.list_cells` to return cell keys (and optional size/hash metadata) instead of pulling full state.
 
 ### `aos world fs cat <path>`
 
@@ -124,7 +129,7 @@ aos world fs tree /obj
 #     └── schemas/
 ```
 
-**Implementation**: Queries `ObjectCatalog`, formats as tree; includes consistency metadata for the catalog read.
+**Implementation**: Queries `ObjectCatalog` with a prefix filter, then materializes a virtual tree by splitting object names on `/`, grouping immediate children of the requested prefix, and sorting lexicographically. Only leaf objects have payloads (`.../data`); intermediate “directories” are synthesized from shared prefixes. Includes consistency metadata for the catalog read.
 
 ### `aos world fs grep <pattern> <path>` (optional)
 
@@ -161,10 +166,14 @@ interface Entry {
 **Implementation**:
 ```
 if prefix starts with "/sys/reducers":
-  emit_effect(introspect.reducer_state, {name: extract_name(prefix)})
+  if is_keyed_reducer(prefix):
+    emit_effect(introspect.list_cells, {reducer: extract_name(prefix)})
+  else:
+    emit_effect(introspect.reducer_state, {name: extract_name(prefix)})
 elif prefix starts with "/obj":
   query ObjectCatalog reducer with prefix filter
 ```
+`is_keyed_reducer` is determined from the manifest (`cell_mode`/routing metadata).
 
 ### `fs_read(path: string) -> bytes`
 
