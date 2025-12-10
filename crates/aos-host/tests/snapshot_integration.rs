@@ -43,7 +43,9 @@ fn plan_snapshot_resumes_after_receipt() {
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_value_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let effect = world
@@ -89,7 +91,9 @@ fn plan_snapshot_preserves_effect_queue() {
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_value_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     world.kernel.create_snapshot().unwrap();
@@ -138,7 +142,9 @@ fn plan_snapshot_resumes_after_event() {
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("evt".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_value_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(1).unwrap();
     world.tick_n(1).unwrap();
 
@@ -153,7 +159,9 @@ fn plan_snapshot_resumes_after_event() {
     .unwrap();
 
     let unblock = fixtures::plan_input_record(vec![]);
-    replay_world.submit_event_value("com.acme/EmitUnblock@1", &unblock);
+    replay_world
+        .submit_event_value_result("com.acme/EmitUnblock@1", &unblock)
+        .expect("submit unblock event");
     replay_world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(
@@ -169,7 +177,9 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let effect = world
@@ -214,7 +224,9 @@ fn snapshot_replay_restores_state() {
     let store = fixtures::new_mem_store();
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     world.kernel.create_snapshot().unwrap();
@@ -293,7 +305,9 @@ fn snapshot_creation_quiesces_runtime() {
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     // No manual ticks before snapshot; create_snapshot should quiesce the runtime.
     world.kernel.create_snapshot().unwrap();
     let entries = world.kernel.dump_journal().unwrap();
@@ -319,7 +333,9 @@ fn restored_effects_bypass_new_policy_checks() {
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("first".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_value_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     world.kernel.create_snapshot().unwrap();
@@ -365,7 +381,9 @@ fn restored_effects_bypass_new_policy_checks() {
     // New plan attempts should now be denied by the stricter policy.
     let blocked_input =
         fixtures::plan_input_record(vec![("id", ExprValue::Text("blocked".into()))]);
-    replay_world.submit_event_value(START_SCHEMA, &blocked_input);
+    replay_world
+        .submit_event_value_result(START_SCHEMA, &blocked_input)
+        .expect("submit blocked start event");
     let err = replay_world.kernel.tick_until_idle().unwrap_err();
     assert!(matches!(err, KernelError::PolicyDenied { .. }));
 }

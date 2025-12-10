@@ -216,10 +216,12 @@ fn reducer_params_round_trip_journal_replay() {
 
     // Run kernel to emit effect, record journal, replay, and compare params_cbor.
     let mut world = fixtures::TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(
-        fixtures::START_SCHEMA,
-        &fixtures::plan_input_record(vec![("id", aos_air_exec::Value::Text("1".into()))]),
-    );
+    world
+        .submit_event_value_result(
+            fixtures::START_SCHEMA,
+            &fixtures::plan_input_record(vec![("id", aos_air_exec::Value::Text("1".into()))]),
+        )
+        .expect("submit start event");
     world.tick_n(1).unwrap();
     let mut effects = world.drain_effects();
     assert_eq!(effects.len(), 1);

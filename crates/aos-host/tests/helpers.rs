@@ -339,20 +339,10 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
     );
     insert_test_schemas(
         &mut loaded,
-        vec![
-            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
-            DefSchema {
-                name: fixtures::SYS_TIMER_FIRED.into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([(
-                        "key".into(),
-                        TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
-                            text: EmptyObject {},
-                        })),
-                    )]),
-                }),
-            },
-        ],
+        vec![def_text_record_schema(
+            fixtures::START_SCHEMA,
+            vec![("id", text_type())],
+        )],
     );
     loaded
 }

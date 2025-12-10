@@ -47,7 +47,9 @@ fn governance_flow_applies_manifest_patch() {
         .unwrap();
     world.kernel.apply_proposal(proposal_id).unwrap();
 
-    world.submit_event_value(START_SCHEMA, &ExprValue::Record(Default::default()));
+    world
+        .submit_event_value_result(START_SCHEMA, &ExprValue::Record(Default::default()))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
     let reducer_state = world
         .kernel

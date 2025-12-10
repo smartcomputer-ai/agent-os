@@ -63,7 +63,9 @@ fn reducer_http_effect_is_denied() {
     attach_default_policy(&mut loaded, policy);
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(fixtures::START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(fixtures::START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     let err = world.kernel.tick().unwrap_err();
     assert!(
         matches!(err, KernelError::UnsupportedReducerReceipt(_)),
@@ -119,7 +121,9 @@ fn plan_effect_allowed_by_policy() {
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     let input = fixtures::plan_input_record(vec![("foo", ExprValue::Nat(1))]);
-    world.submit_event_value(fixtures::START_SCHEMA, &input);
+    world
+        .submit_event_value_result(fixtures::START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
     assert_eq!(world.drain_effects().len(), 1);
 }
@@ -204,7 +208,9 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     let input =
         fixtures::plan_input_record(vec![("url", ExprValue::Text("https://example.com".into()))]);
-    world.submit_event_value(fixtures::START_SCHEMA, &input);
+    world
+        .submit_event_value_result(fixtures::START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
     let effects = world.drain_effects();
     assert_eq!(effects.len(), 1);

@@ -212,7 +212,9 @@ fn sugar_literal_plan_executes_http_flow() {
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_value_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
@@ -352,7 +354,9 @@ fn single_plan_orchestration_completes_after_receipt() {
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_value_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
@@ -441,7 +445,9 @@ fn reducer_and_plan_effects_are_enqueued() {
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_value_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let effects = world.drain_effects();
@@ -462,7 +468,9 @@ fn reducer_timer_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store, manifest).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let mut effects = world.drain_effects();
@@ -580,7 +588,9 @@ fn guarded_plan_branches_control_effects() {
 
     let mut world = TestWorld::new(loaded).unwrap();
     let true_input = fixtures::plan_input_record(vec![("flag", ExprValue::Bool(true))]);
-    world.submit_event_value(START_SCHEMA, &true_input);
+    world
+        .submit_event_value_result(START_SCHEMA, &true_input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
     assert_eq!(world.drain_effects().len(), 1);
 
@@ -592,7 +602,9 @@ fn guarded_plan_branches_control_effects() {
     );
     let mut world_false = TestWorld::new(loaded_false).unwrap();
     let false_input = fixtures::plan_input_record(vec![("flag", ExprValue::Bool(false))]);
-    world_false.submit_event_value(START_SCHEMA, &false_input);
+    world_false
+        .submit_event_value_result(START_SCHEMA, &false_input)
+        .expect("submit start event");
     world_false.tick_n(2).unwrap();
     assert_eq!(world_false.drain_effects().len(), 0);
 }
@@ -645,7 +657,9 @@ fn blob_put_receipt_routes_event_to_handler() {
     }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let mut effects = world.drain_effects();
@@ -723,7 +737,9 @@ fn blob_get_receipt_routes_event_to_handler() {
     }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let mut effects = world.drain_effects();
@@ -871,7 +887,9 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
@@ -898,7 +916,9 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
         effect_params_text(&second_intent)
     );
 
-    world.submit_event_value("com.acme/PulseNext@1", &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result("com.acme/PulseNext@1", &fixtures::plan_input_record(vec![]))
+        .expect("submit pulse event");
     world.kernel.tick_until_idle().unwrap();
 
     let mut after_event_effects = world.drain_effects();
@@ -1039,23 +1059,29 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
     assert!(world.drain_effects().is_empty());
 
-    world.submit_event_value(
-        "com.acme/TriggerReady@1",
-        &fixtures::plan_input_record(vec![]),
-    );
+    world
+        .submit_event_value_result(
+            "com.acme/TriggerReady@1",
+            &fixtures::plan_input_record(vec![]),
+        )
+        .expect("submit ready trigger");
     world.kernel.tick_until_idle().unwrap();
     let mut effects = world.drain_effects();
     assert_eq!(effects.len(), 1);
     assert!(effect_params_text(&effects.remove(0)).ends_with("ready"));
 
-    world.submit_event_value(
-        "com.acme/TriggerOther@1",
-        &fixtures::plan_input_record(vec![]),
-    );
+    world
+        .submit_event_value_result(
+            "com.acme/TriggerOther@1",
+            &fixtures::plan_input_record(vec![]),
+        )
+        .expect("submit other trigger");
     world.kernel.tick_until_idle().unwrap();
     let mut more_effects = world.drain_effects();
     assert_eq!(more_effects.len(), 1);
@@ -1120,10 +1146,12 @@ fn plan_outputs_are_journaled_and_replayed() {
 
     let manifest = build_manifest();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(
-        START_SCHEMA,
-        &fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]),
-    );
+    world
+        .submit_event_value_result(
+            START_SCHEMA,
+            &fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]),
+        )
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let results = world.kernel.recent_plan_results();
@@ -1210,10 +1238,12 @@ fn invariant_failure_records_plan_ended_error() {
 
     let manifest = build_manifest();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(
-        START_SCHEMA,
-        &fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]),
-    );
+    world
+        .submit_event_value_result(
+            START_SCHEMA,
+            &fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]),
+        )
+        .expect("submit start event");
     world.kernel.tick_until_idle().unwrap();
 
     let journal_entries = world.kernel.dump_journal().unwrap();
@@ -1334,7 +1364,9 @@ fn raised_events_are_routed_to_reducers() {
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(

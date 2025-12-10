@@ -173,7 +173,7 @@ use aos_host::fixtures;
 ```rust
 // Before (direct kernel access)
 let mut world = TestWorld::with_store(store, loaded).unwrap();
-world.submit_event_value(START_SCHEMA, &input);
+world.submit_event_value_result(START_SCHEMA, &input)?; // use the _result variant to surface kernel errors
 world.tick_n(2).unwrap();
 world.kernel.handle_receipt(receipt).unwrap();
 

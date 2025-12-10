@@ -289,7 +289,11 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
     }
 
     for schema_name in required {
-        if loaded.schemas.contains_key(&schema_name) {
+        if loaded.schemas.contains_key(&schema_name)
+            || aos_air_types::builtins::builtin_schemas()
+                .iter()
+                .any(|b| b.schema.name == schema_name)
+        {
             continue;
         }
         let def = DefSchema {

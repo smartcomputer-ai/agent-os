@@ -19,7 +19,9 @@ fn journal_replay_restores_state() {
     let mut world = TestWorld::with_store(store.clone(), manifest_run).unwrap();
 
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_value_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
@@ -76,7 +78,9 @@ fn reducer_timer_receipt_replays_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let effect = world.drain_effects().pop().expect("timer effect");
@@ -123,7 +127,9 @@ fn plan_journal_replay_resumes_waiting_receipt() {
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_value_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let effect = world
@@ -213,7 +219,9 @@ fn fs_journal_persists_across_restarts() {
         .unwrap();
 
         let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-        world.submit_event_value(START_SCHEMA, &input);
+        world
+            .submit_event_value_result(START_SCHEMA, &input)
+            .expect("submit start event");
         world.tick_n(2).unwrap();
 
         let mut effects = world.drain_effects();
