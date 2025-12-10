@@ -162,6 +162,7 @@ All control verbs should hit the introspection adapter (or CAS for blob-get) so 
 - Extended built-in schema/effect lists to include introspection params/receipts and `introspect.*` effects with `cap_type=query`.
 - Updated test fixtures to grant `sys/query@1` by default and declare it in manifests alongside http/timer/blob caps.
 - Implemented kernel-side internal handler for `introspect.*` with deterministic receipts; host run loop now intercepts and applies these without going through external adapters (preserving replay).
+- Control path wired: `WorldHost::run_cycle` intercepts `introspect.*`, `ShadowExecutor` uses the same handler, and control server exposes `manifest-read`, `query-state`, `list-cells`, `journal-head`, and `blob-get` verbs returning consistency metadata.
 
 ---
 

@@ -7,6 +7,7 @@ use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::PatchDocument;
 use aos_kernel::shadow::ShadowSummary;
+use aos_kernel::ReadMeta;
 use base64::prelude::*;
 use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize};
@@ -291,17 +292,15 @@ async fn handle_request(
                 match inner.map_err(ControlError::host)? {
                     Some((meta, bytes_opt)) => {
                         let state_b64 = bytes_opt.map(|b| BASE64_STANDARD.encode(b));
-                        let meta_json = serde_json::json!({
-                            "journal_height": meta.journal_height,
-                            "snapshot_hash": meta.snapshot_hash.map(|h| h.to_hex()),
-                            "manifest_hash": meta.manifest_hash.to_hex(),
-                        });
                         Ok(serde_json::json!({
                             "state_b64": state_b64,
-                            "meta": meta_json,
+                            "meta": meta_to_json(&meta),
                         }))
                     }
-                    None => Ok(serde_json::json!({ "state_b64": null })),
+                    None => Ok(serde_json::json!({
+                        "state_b64": null,
+                        "meta": meta_to_json(&world_meta(&control_tx).await?),
+                    })),
                 }
             }
             "list-cells" => {
@@ -334,7 +333,31 @@ async fn handle_request(
                         })
                     })
                     .collect();
-                Ok(serde_json::json!({ "cells": cells }))
+                let meta = world_meta(&control_tx).await?;
+                Ok(serde_json::json!({ "cells": cells, "meta": meta_to_json(&meta) }))
+            }
+            "manifest-read" => {
+                let consistency = req
+                    .payload
+                    .get("consistency")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("head")
+                    .to_string();
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::ReadManifest {
+                        consistency,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let (meta, manifest_bytes) = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({
+                    "manifest_b64": BASE64_STANDARD.encode(manifest_bytes),
+                    "meta": meta_to_json(&meta),
+                }))
             }
             "snapshot" => {
                 let (tx, rx) = oneshot::channel();
@@ -374,8 +397,25 @@ async fn handle_request(
                 let inner = rx
                     .await
                     .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                let head = inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({ "head": head }))
+                let meta = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "meta": meta_to_json(&meta) }))
+            }
+            "blob-get" => {
+                let hash_hex = req
+                    .payload
+                    .get("hash_hex")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ControlError::invalid_request("missing hash_hex"))?
+                    .to_string();
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::BlobGet { hash_hex, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let bytes = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "data_b64": BASE64_STANDARD.encode(bytes) }))
             }
             "put-blob" => {
                 let payload: PutBlobPayload = serde_json::from_value(req.payload.clone())
@@ -579,6 +619,25 @@ fn validate_patch_doc(doc: &serde_json::Value) -> Result<(), ControlError> {
         )));
     }
     Ok(())
+}
+
+fn meta_to_json(meta: &ReadMeta) -> serde_json::Value {
+    serde_json::json!({
+        "journal_height": meta.journal_height,
+        "snapshot_hash": meta.snapshot_hash.map(|h| h.to_hex()),
+        "manifest_hash": meta.manifest_hash.to_hex(),
+    })
+}
+
+async fn world_meta(control_tx: &mpsc::Sender<ControlMsg>) -> Result<ReadMeta, ControlError> {
+    let (tx, rx) = oneshot::channel();
+    let _ = control_tx
+        .send(ControlMsg::JournalHead { resp: tx })
+        .await;
+    let inner = rx
+        .await
+        .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+    inner.map_err(ControlError::host)
 }
 
 /// Minimal control client used by tests and CLI helpers.

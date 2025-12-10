@@ -11,7 +11,9 @@
 
 use std::time::Duration;
 
+use aos_cbor::Hash;
 use aos_effects::EffectReceipt;
+use aos_kernel::StateReader;
 use aos_store::Store;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -92,8 +94,16 @@ pub enum ControlMsg {
         data: Vec<u8>,
         resp: oneshot::Sender<Result<String, HostError>>,
     },
+    ReadManifest {
+        consistency: String,
+        resp: oneshot::Sender<Result<(aos_kernel::ReadMeta, Vec<u8>), HostError>>,
+    },
+    BlobGet {
+        hash_hex: String,
+        resp: oneshot::Sender<Result<Vec<u8>, HostError>>,
+    },
     JournalHead {
-        resp: oneshot::Sender<Result<u64, HostError>>,
+        resp: oneshot::Sender<Result<aos_kernel::ReadMeta, HostError>>,
     },
     Shutdown {
         resp: oneshot::Sender<Result<(), HostError>>,
@@ -316,21 +326,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 consistency,
                 resp,
             } => {
-                let consistency = match consistency.as_str() {
-                    s if s.starts_with("exact:") => {
-                        let h = s[6..].parse().unwrap_or(self.host.kernel().journal_head());
-                        aos_kernel::Consistency::Exact(h)
-                    }
-                    s if s.starts_with("at_least:") => {
-                        let h = s[9..].parse().unwrap_or(self.host.kernel().journal_head());
-                        aos_kernel::Consistency::AtLeast(h)
-                    }
-                    "exact" => aos_kernel::Consistency::Exact(self.host.kernel().journal_head()),
-                    "at_least" => {
-                        aos_kernel::Consistency::AtLeast(self.host.kernel().journal_head())
-                    }
-                    _ => aos_kernel::Consistency::Head,
-                };
+                let consistency = parse_consistency(&self.host, &consistency);
                 let result = self
                     .host
                     .query_state(&reducer, key.as_deref(), consistency)
@@ -341,12 +337,41 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let res = self.host.list_cells(&reducer);
                 let _ = resp.send(res);
             }
+            ControlMsg::BlobGet { hash_hex, resp } => {
+                let res = (|| -> Result<Vec<u8>, HostError> {
+                    let hash = Hash::from_hex_str(&hash_hex)
+                        .map_err(|e| HostError::Store(e.to_string()))?;
+                    let bytes = self
+                        .host
+                        .store()
+                        .get_blob(hash)
+                        .map_err(|e| HostError::Store(e.to_string()))?;
+                    Ok(bytes)
+                })();
+                let _ = resp.send(res);
+            }
             ControlMsg::JournalHead { resp } => {
-                let heights = self.host.heights();
-                let _ = resp.send(Ok(heights.head));
+                let meta = self.host.kernel().get_journal_head();
+                let _ = resp.send(Ok(meta));
             }
             ControlMsg::PutBlob { data, resp } => {
                 let res = self.host.put_blob(&data);
+                let _ = resp.send(res);
+            }
+            ControlMsg::ReadManifest { consistency, resp } => {
+                let consistency = parse_consistency(&self.host, &consistency);
+                let res = self
+                    .host
+                    .kernel()
+                    .get_manifest(consistency)
+                    .map_err(HostError::from)
+                    .and_then(|read| {
+                        let bytes =
+                            aos_cbor::to_canonical_cbor(&read.value).map_err(|e| {
+                                HostError::Manifest(format!("encode manifest: {e}"))
+                            })?;
+                        Ok((read.meta, bytes))
+                    });
                 let _ = resp.send(res);
             }
             ControlMsg::Propose {
@@ -429,5 +454,21 @@ impl<S: Store + 'static> WorldDaemon<S> {
     /// Access the timer scheduler.
     pub fn timer_scheduler(&self) -> &TimerScheduler {
         &self.timer_scheduler
+    }
+}
+
+fn parse_consistency<S: Store + 'static>(host: &WorldHost<S>, s: &str) -> aos_kernel::Consistency {
+    match s {
+        v if v.starts_with("exact:") => {
+            let h = v[6..].parse().unwrap_or(host.kernel().journal_head());
+            aos_kernel::Consistency::Exact(h)
+        }
+        v if v.starts_with("at_least:") => {
+            let h = v[9..].parse().unwrap_or(host.kernel().journal_head());
+            aos_kernel::Consistency::AtLeast(h)
+        }
+        "exact" => aos_kernel::Consistency::Exact(host.kernel().journal_head()),
+        "at_least" => aos_kernel::Consistency::AtLeast(host.kernel().journal_head()),
+        _ => aos_kernel::Consistency::Head,
     }
 }
