@@ -70,6 +70,12 @@ pub fn plan_input_record(fields: Vec<(&str, ExprValue)>) -> ExprValue {
     ))
 }
 
+/// Build a canonical start event payload matching the common Start schema
+/// (record with required `id: text` field).
+pub fn start_event(id: &str) -> serde_json::Value {
+    serde_json::json!({ "id": id })
+}
+
 /// Trigger helper that wires the standard `START_SCHEMA` to the provided plan.
 pub fn start_trigger(plan: &str) -> Trigger {
     Trigger {

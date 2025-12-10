@@ -191,8 +191,10 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
     });
-    let unblock_event =
-        fixtures::domain_event("com.acme/Unblock@1", &fixtures::plan_input_record(vec![]));
+    let unblock_event = aos_wasm_abi::DomainEvent::new(
+        "com.acme/Unblock@1".to_string(),
+        serde_cbor::to_vec(&serde_json::json!({})).expect("encode unblock"),
+    );
     let unblock_emitter = fixtures::stub_event_emitting_reducer(
         store,
         "com.acme/UnblockEmitter@1",

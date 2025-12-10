@@ -2,6 +2,8 @@ mod helpers;
 use aos_kernel::{Consistency, StateReader};
 use aos_wasm_abi::ReducerOutput;
 use helpers::fixtures;
+use std::collections::HashMap;
+use aos_air_types::{plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name};
 
 /// Build a test world with a single stub reducer whose state is set to `payload` on first event.
 fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
@@ -20,7 +22,10 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
     );
 
     // Simple schema for start event routed to the reducer.
-    let start_schema = fixtures::def_text_record_schema(fixtures::START_SCHEMA, vec![]);
+    let start_schema = fixtures::def_text_record_schema(
+        fixtures::START_SCHEMA,
+        vec![("id", fixtures::text_type())],
+    );
 
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
@@ -67,21 +72,47 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
         &mut loaded,
         vec![
             fixtures::def_text_record_schema("com.acme/State@1", vec![]),
-            fixtures::def_text_record_schema("com.acme/Key@1", vec![]),
+            // Key schema must be Text to match the key_field extraction and CBOR encoding.
+            aos_air_types::DefSchema {
+                name: "com.acme/Key@1".into(),
+                ty: fixtures::text_type(),
+            },
             fixtures::def_text_record_schema(
                 "com.acme/Event@1",
                 vec![(key_field, fixtures::text_type())],
             ),
+            fixtures::def_text_record_schema(fixtures::START_SCHEMA, vec![("id", fixtures::text_type())]),
         ],
     );
 
     fixtures::TestWorld::with_store(store, loaded).expect("build keyed world")
 }
 
+fn canonical_key_bytes(key: &str) -> Vec<u8> {
+    let mut schemas = HashMap::new();
+    schemas.insert(
+        "com.acme/Key@1".to_string(),
+        fixtures::text_type(),
+    );
+    let idx = SchemaIndex::new(schemas);
+    normalize_cbor_by_name(
+        &idx,
+        "com.acme/Key@1",
+        &serde_cbor::to_vec(&key.to_string()).unwrap(),
+    )
+        .unwrap()
+        .bytes
+}
+
 #[test]
 fn head_reads_state_and_meta() {
     let mut world = test_world_with_state(b"hello");
-    world.submit_event(fixtures::START_SCHEMA, &fixtures::empty_value_literal());
+    world
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let read = world
@@ -97,7 +128,12 @@ fn head_reads_state_and_meta() {
 #[test]
 fn exact_errors_without_snapshot() {
     let mut world = test_world_with_state(b"hi");
-    world.submit_event(fixtures::START_SCHEMA, &fixtures::empty_value_literal());
+    world
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let err = world
@@ -110,7 +146,12 @@ fn exact_errors_without_snapshot() {
 #[test]
 fn exact_uses_snapshot_when_available() {
     let mut world = test_world_with_state(b"snap");
-    world.submit_event(fixtures::START_SCHEMA, &fixtures::empty_value_literal());
+    world
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     world.kernel.create_snapshot().unwrap();
@@ -135,15 +176,7 @@ fn keyed_head_and_exact_reads_state() {
     let mut world = test_world_keyed(b"cell", key_field);
 
     // Submit an event with key field so it routes to the keyed reducer instance.
-    let payload = serde_cbor::to_vec(&aos_air_exec::Value::Record(
-        [(
-            key_field.to_string(),
-            aos_air_exec::Value::Text(key_val.to_string()),
-        )]
-        .into_iter()
-        .collect(),
-    ))
-    .unwrap();
+    let payload = serde_cbor::to_vec(&serde_json::json!({ key_field: key_val })).unwrap();
     world
         .kernel
         .submit_domain_event("com.acme/Event@1".to_string(), payload);
@@ -153,11 +186,12 @@ fn keyed_head_and_exact_reads_state() {
     assert_eq!(cells.len(), 1, "expected one keyed cell, got {cells:?}");
 
     // Head read
+    let key_bytes = canonical_key_bytes(key_val);
     let head_read = world
         .kernel
         .get_reducer_state(
             "com.acme/Keyed@1",
-            Some(key_val.as_bytes()),
+            Some(&key_bytes),
             Consistency::Head,
         )
         .expect("head read keyed");
@@ -170,7 +204,7 @@ fn keyed_head_and_exact_reads_state() {
         .kernel
         .get_reducer_state(
             "com.acme/Keyed@1",
-            Some(key_val.as_bytes()),
+            Some(&key_bytes),
             Consistency::Exact(snap_height),
         )
         .expect("exact read keyed");

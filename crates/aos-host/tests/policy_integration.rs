@@ -1,4 +1,3 @@
-use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
     DefPolicy, EffectKind as AirEffectKind, EmptyObject, Expr, ExprConst, ExprMap, ExprOrValue,
     ExprRecord, ExprRef, OriginKind, PolicyDecision, PolicyMatch, PolicyRule, ValueLiteral,
@@ -11,7 +10,7 @@ use aos_wasm_abi::ReducerEffect;
 use indexmap::IndexMap;
 
 mod helpers;
-use helpers::{attach_default_policy, def_text_record_schema, int_type, text_type};
+use helpers::{attach_default_policy, def_text_record_schema, text_type};
 
 fn http_reducer_output() -> aos_wasm_abi::ReducerOutput {
     let mut headers = IndexMap::new();

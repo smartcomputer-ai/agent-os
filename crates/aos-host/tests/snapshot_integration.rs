@@ -42,9 +42,9 @@ fn plan_snapshot_resumes_after_receipt() {
     let manifest = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
+    let input = fixtures::start_event("123");
     world
-        .submit_event_value_result(START_SCHEMA, &input)
+        .submit_event_result(START_SCHEMA, &input)
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
@@ -90,9 +90,9 @@ fn plan_snapshot_preserves_effect_queue() {
     let manifest = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
+    let input = fixtures::start_event("123");
     world
-        .submit_event_value_result(START_SCHEMA, &input)
+        .submit_event_result(START_SCHEMA, &input)
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
@@ -141,9 +141,9 @@ fn plan_snapshot_resumes_after_event() {
     let manifest = await_event_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("evt".into()))]);
+    let input = fixtures::start_event("evt");
     world
-        .submit_event_value_result(START_SCHEMA, &input)
+        .submit_event_result(START_SCHEMA, &input)
         .expect("submit start event");
     world.tick_n(1).unwrap();
     world.tick_n(1).unwrap();
@@ -158,9 +158,8 @@ fn plan_snapshot_resumes_after_event() {
     )
     .unwrap();
 
-    let unblock = fixtures::plan_input_record(vec![]);
     replay_world
-        .submit_event_value_result("com.acme/EmitUnblock@1", &unblock)
+        .submit_event_result("com.acme/EmitUnblock@1", &serde_json::json!({}))
         .expect("submit unblock event");
     replay_world.kernel.tick_until_idle().unwrap();
 
@@ -178,7 +177,7 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     world
-        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
         .expect("submit start event");
     world.tick_n(1).unwrap();
 
@@ -225,7 +224,7 @@ fn snapshot_replay_restores_state() {
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
     world
-        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("simple"))
         .expect("submit start event");
     world.tick_n(1).unwrap();
 
@@ -263,8 +262,7 @@ fn fs_store_and_journal_restore_snapshot() {
     let mut kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(journal)).unwrap();
 
-    let event = fixtures::plan_input_record(vec![]);
-    let event_bytes = serde_cbor::to_vec(&event).unwrap();
+    let event_bytes = serde_cbor::to_vec(&serde_json::json!({ "id": "fs" })).unwrap();
     kernel.submit_domain_event(START_SCHEMA.to_string(), event_bytes);
     kernel.tick_until_idle().unwrap();
     kernel.create_snapshot().unwrap();
@@ -295,7 +293,15 @@ fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedM
         },
     );
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)
+    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![fixtures::def_text_record_schema(
+            START_SCHEMA,
+            vec![("id", fixtures::text_type())],
+        )],
+    );
+    loaded
 }
 
 /// Snapshot creation should automatically drain pending scheduler work before persisting state.
@@ -306,7 +312,7 @@ fn snapshot_creation_quiesces_runtime() {
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     world
-        .submit_event_value_result(START_SCHEMA, &fixtures::plan_input_record(vec![]))
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("quiesce"))
         .expect("submit start event");
     // No manual ticks before snapshot; create_snapshot should quiesce the runtime.
     world.kernel.create_snapshot().unwrap();
@@ -332,9 +338,9 @@ fn restored_effects_bypass_new_policy_checks() {
     let manifest = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("first".into()))]);
+    let input = serde_json::json!({ "id": "first" });
     world
-        .submit_event_value_result(START_SCHEMA, &input)
+        .submit_event_result(START_SCHEMA, &input)
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
@@ -379,10 +385,8 @@ fn restored_effects_bypass_new_policy_checks() {
     );
 
     // New plan attempts should now be denied by the stricter policy.
-    let blocked_input =
-        fixtures::plan_input_record(vec![("id", ExprValue::Text("blocked".into()))]);
     replay_world
-        .submit_event_value_result(START_SCHEMA, &blocked_input)
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("blocked"))
         .expect("submit blocked start event");
     let err = replay_world.kernel.tick_until_idle().unwrap_err();
     assert!(matches!(err, KernelError::PolicyDenied { .. }));
