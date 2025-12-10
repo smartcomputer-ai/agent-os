@@ -76,6 +76,8 @@ pub enum ValidationError {
     SchemaNotFound { schema: String },
     #[error("effect kind '{kind}' not found in catalog or built-ins")]
     UnknownEffectKind { kind: String },
+    #[error("capability grant '{cap}' not found")]
+    CapabilityNotFound { cap: String },
 }
 
 fn sort_and_dedup_caps(mut caps: Vec<CapGrantName>) -> Vec<CapGrantName> {
@@ -419,6 +421,7 @@ pub fn validate_manifest(
 ) -> Result<(), ValidationError> {
     let schema_exists =
         |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
+    let cap_exists = |name: &str| manifest.caps.iter().any(|cap| cap.name.as_str() == name);
     let mut known_effect_kinds: HashSet<String> = builtins::builtin_effects()
         .iter()
         .map(|e| e.effect.kind.as_str().to_string())
@@ -494,12 +497,24 @@ pub fn validate_manifest(
                         kind: emit.kind.as_str().to_string(),
                     });
                 }
+                if !cap_exists(emit.cap.as_str()) {
+                    return Err(ValidationError::CapabilityNotFound {
+                        cap: emit.cap.clone(),
+                    });
+                }
             }
         }
         for allowed in &plan.allowed_effects {
             if !known_effect_kinds.contains(allowed.as_str()) {
                 return Err(ValidationError::UnknownEffectKind {
                     kind: allowed.as_str().to_string(),
+                });
+            }
+        }
+        for required in &plan.required_caps {
+            if !cap_exists(required.as_str()) {
+                return Err(ValidationError::CapabilityNotFound {
+                    cap: required.clone(),
                 });
             }
         }
@@ -520,6 +535,11 @@ pub fn validate_manifest(
                     return Err(ValidationError::UnknownEffectKind {
                         kind: kind.as_str().to_string(),
                     });
+                }
+            }
+            if let Some(cap) = rule.when.cap_name.as_ref() {
+                if !cap_exists(cap.as_str()) {
+                    return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
                 }
             }
         }
@@ -991,6 +1011,79 @@ mod tests {
             err,
             ValidationError::UnknownEffectKind { kind }
             if kind == bad_kind.as_str()
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_missing_cap_in_plan_and_policy() {
+        let missing_cap = "cap_missing".to_string();
+        let mut plans = HashMap::new();
+        plans.insert(
+            "com.acme/plan@1".into(),
+            DefPlan {
+                name: "com.acme/plan@1".into(),
+                input: SchemaRef::new("sys/TimerFired@1").unwrap(),
+                output: None,
+                locals: IndexMap::new(),
+                steps: vec![PlanStep {
+                    id: "emit".into(),
+                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                        kind: EffectKind::http_request(),
+                        params: Expr::Record(ExprRecord {
+                            record: IndexMap::new(),
+                        })
+                        .into(),
+                        cap: missing_cap.clone(),
+                        bind: PlanBindEffect {
+                            effect_id_as: "id".into(),
+                        },
+                    }),
+                }],
+                edges: vec![],
+                required_caps: vec![missing_cap.clone()],
+                allowed_effects: vec![EffectKind::http_request()],
+                invariants: vec![],
+            },
+        );
+        let mut policies = HashMap::new();
+        policies.insert(
+            "pol".into(),
+            DefPolicy {
+                name: "pol".into(),
+                rules: vec![PolicyRule {
+                    when: PolicyMatch {
+                        effect_kind: None,
+                        cap_name: Some(missing_cap.clone()),
+                        origin_kind: None,
+                        origin_name: None,
+                    },
+                    decision: PolicyDecision::Deny,
+                }],
+            },
+        );
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let schemas = HashMap::new();
+        let modules = HashMap::new();
+        let effects = HashMap::new();
+        let err = validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &policies)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::CapabilityNotFound { cap }
+            if cap == missing_cap
         ));
     }
 }
