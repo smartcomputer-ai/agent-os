@@ -1,7 +1,7 @@
 //! Introspection integration tests against TestWorld/Kernel (no daemon).
 
 mod helpers;
-use helpers::{fixtures, ReadMetaCompat};
+use helpers::fixtures;
 
 use aos_effects::{EffectKind, IntentBuilder, ReceiptStatus};
 use aos_kernel::StateReader;
@@ -63,17 +63,22 @@ fn introspect_manifest_matches_kernel_manifest() {
         .expect("handled");
     assert_eq!(receipt.status, ReceiptStatus::Ok);
 
-    #[derive(Deserialize)]
-    struct ManifestReceipt {
-        manifest: Vec<u8>,
-    }
-
-    let decoded: ManifestReceipt = receipt.payload().unwrap();
-    let manifest: aos_air_types::Manifest = serde_cbor::from_slice(&decoded.manifest).unwrap();
-    let head_manifest = kernel
-        .get_manifest(aos_kernel::Consistency::Head)
-        .unwrap()
-        .value;
+    // Decode payload map and extract manifest bytes.
+    let payload_val: serde_cbor::Value = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    let manifest_bytes = match payload_val {
+        serde_cbor::Value::Map(map) => map
+            .into_iter()
+            .find_map(|(k, v)| match (k, v) {
+                (serde_cbor::Value::Text(t), serde_cbor::Value::Bytes(b)) if t == "manifest" => {
+                    Some(b)
+                }
+                _ => None,
+            })
+            .expect("manifest bytes"),
+        _ => panic!("unexpected payload shape"),
+    };
+    let manifest: aos_air_types::Manifest = serde_cbor::from_slice(&manifest_bytes).unwrap();
+    let head_manifest = kernel.get_manifest(aos_kernel::Consistency::Head).unwrap().value;
     assert_eq!(manifest.air_version, head_manifest.air_version);
 }
 
@@ -163,17 +168,42 @@ fn introspect_journal_head_matches_state_reader() {
     .build()
     .unwrap();
 
-    #[derive(Deserialize)]
-    struct HeadReceipt {
-        meta: ReadMetaCompat,
-    }
-
     let receipt = kernel
         .handle_internal_intent(&intent)
         .unwrap()
         .expect("handled");
     assert_eq!(receipt.status, ReceiptStatus::Ok);
-    let decoded: HeadReceipt = receipt.payload().unwrap();
+    let payload: serde_cbor::Value = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    let meta_map = match payload {
+        serde_cbor::Value::Map(map) => map
+            .into_iter()
+            .find_map(|(k, v)| match (k, v) {
+                (serde_cbor::Value::Text(t), m) if t == "meta" => Some(m),
+                _ => None,
+            })
+            .expect("meta in receipt"),
+        _ => panic!("unexpected payload shape"),
+    };
     let meta = kernel.get_journal_head();
-    assert_eq!(decoded.meta.journal_height, meta.journal_height);
+    let (jh, mh) = match meta_map {
+        serde_cbor::Value::Map(map) => {
+            let mut jh = None;
+            let mut mh = None;
+            for (k, v) in map {
+                match (k, v) {
+                    (serde_cbor::Value::Text(t), serde_cbor::Value::Integer(i)) if t == "journal_height" => {
+                        jh = Some(i as u64);
+                    }
+                    (serde_cbor::Value::Text(t), serde_cbor::Value::Bytes(b)) if t == "manifest_hash" => {
+                        mh = Some(b);
+                    }
+                    _ => {}
+                }
+            }
+            (jh.expect("journal_height"), mh.expect("manifest_hash"))
+        }
+        _ => panic!("meta not a map"),
+    };
+    assert_eq!(jh, meta.journal_height);
+    assert_eq!(mh, meta.manifest_hash.as_bytes());
 }
