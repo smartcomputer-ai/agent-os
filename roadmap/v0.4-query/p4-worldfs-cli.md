@@ -16,13 +16,12 @@ This document defines CLI commands and LLM helper APIs that provide a filesystem
 
 ## Path Model
 
-WorldFS exposes a virtual namespace with four root prefixes:
+WorldFS exposes a virtual namespace with three root prefixes:
 
 ```
 /sys/**      System introspection (manifest, reducers, journal)
 /obj/**      ObjectCatalog artifacts
 /blob/**     Raw CAS blob access
-/agents/**   Agent descriptors and metadata
 ```
 
 ### `/sys` — System Introspection
@@ -49,13 +48,6 @@ Objects use hierarchical path-like names (e.g., `agents/self/patches/0003`).
 | Path | Description | Backed by |
 |------|-------------|-----------|
 | `/blob/<hash>` | Raw blob by content hash | `blob.get` |
-
-### `/agents` — Agent Descriptors
-
-| Path | Description | Backed by |
-|------|-------------|-----------|
-| `/agents/` | List registered agents | Registry reducer or manifest |
-| `/agents/<name>/descriptor` | Agent descriptor | Registry reducer or `/obj` |
 
 ---
 
@@ -172,8 +164,6 @@ if prefix starts with "/sys/reducers":
   emit_effect(introspect.reducer_state, {name: extract_name(prefix)})
 elif prefix starts with "/obj":
   query ObjectCatalog reducer with prefix filter
-elif prefix starts with "/agents":
-  query registry reducer or ObjectCatalog
 ```
 
 ### `fs_read(path: string) -> bytes`
