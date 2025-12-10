@@ -287,9 +287,9 @@ All events should enter the world through a single schema-driven normalizer, the
 - Ingestion wiring: `process_domain_event`/journal replay now store canonical bytes only; reducer outputs/plan raise emit canonical payloads.
 - Routing/correlation: keyed routing pulls `key_field` via schema-aware decode; plan triggers use typed correlation; plan `await_event` decodes by schema for `@event`/where.
 - Reducer ergonomics: reducers receive canonical schema-shaped events; bad payloads are rejected early; tests cover keyed routing, await_event predicates, and invalid payload rejection.
+- Manifest validation: loader now fails when event schemas (routing/triggers/reducer ABI) are missing from defschemas/built-ins.
 
 **Remaining**
-- Enforce at manifest load: fail manifests where domain/receipt event schemas aren’t resolvable (loader + spec/docs update).
 - External ingress: CLI/tests (`aos-host` helpers) should require explicit event schema and run through the normalizer; receipts synthesized by adapters should go through the same path.
 - Spec/docs: update specs/AGENTS with “events like effect params” invariant and the canonical-journal rule.
 

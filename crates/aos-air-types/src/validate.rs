@@ -4,8 +4,8 @@ use petgraph::{algo::is_cyclic_directed, graphmap::DiGraphMap};
 use thiserror::Error;
 
 use crate::{
-    CapGrantName, DefModule, DefPlan, EffectKind, Expr, Manifest, PlanStepKind, RoutingEvent,
-    StepId,
+    CapGrantName, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, EffectKind, Expr, Manifest,
+    PlanStepKind, RoutingEvent, StepId, builtins,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -72,6 +72,10 @@ pub enum ValidationError {
     RoutingUnexpectedKeyField { reducer: String },
     #[error("route to reducer '{reducer}' references unknown module")]
     RoutingUnknownReducer { reducer: String },
+    #[error("schema '{schema}' not found")]
+    SchemaNotFound { schema: String },
+    #[error("effect kind '{kind}' not found in catalog or built-ins")]
+    UnknownEffectKind { kind: String },
 }
 
 fn sort_and_dedup_caps(mut caps: Vec<CapGrantName>) -> Vec<CapGrantName> {
@@ -408,12 +412,31 @@ fn collect_expr_refs(expr: &Expr, refs: &mut Vec<String>) {
 pub fn validate_manifest(
     manifest: &Manifest,
     modules: &HashMap<String, DefModule>,
+    schemas: &HashMap<String, DefSchema>,
+    plans: &HashMap<String, DefPlan>,
+    effects: &HashMap<String, DefEffect>,
+    policies: &HashMap<String, DefPolicy>,
 ) -> Result<(), ValidationError> {
+    let schema_exists =
+        |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
+    let mut known_effect_kinds: HashSet<String> = builtins::builtin_effects()
+        .iter()
+        .map(|e| e.effect.kind.as_str().to_string())
+        .collect();
+    known_effect_kinds.extend(effects.values().map(|def| def.kind.as_str().to_string()));
+
     if let Some(routing) = manifest.routing.as_ref() {
         for RoutingEvent {
-            reducer, key_field, ..
+            event,
+            reducer,
+            key_field,
         } in &routing.events
         {
+            if !schema_exists(event.as_str()) {
+                return Err(ValidationError::SchemaNotFound {
+                    schema: event.as_str().to_string(),
+                });
+            }
             let module =
                 modules
                     .get(reducer)
@@ -436,6 +459,98 @@ pub fn validate_manifest(
             }
         }
     }
+
+    for effect in effects.values() {
+        for schema_ref in [
+            effect.params_schema.as_str(),
+            effect.receipt_schema.as_str(),
+        ] {
+            if !schema_exists(schema_ref) {
+                return Err(ValidationError::SchemaNotFound {
+                    schema: schema_ref.to_string(),
+                });
+            }
+        }
+    }
+
+    for plan in plans.values() {
+        for schema_ref in plan
+            .locals
+            .values()
+            .map(|s| s.as_str())
+            .chain(std::iter::once(plan.input.as_str()))
+            .chain(plan.output.as_ref().map(|s| s.as_str()))
+        {
+            if !schema_exists(schema_ref) {
+                return Err(ValidationError::SchemaNotFound {
+                    schema: schema_ref.to_string(),
+                });
+            }
+        }
+        for step in &plan.steps {
+            if let PlanStepKind::EmitEffect(emit) = &step.kind {
+                if !known_effect_kinds.contains(emit.kind.as_str()) {
+                    return Err(ValidationError::UnknownEffectKind {
+                        kind: emit.kind.as_str().to_string(),
+                    });
+                }
+            }
+        }
+        for allowed in &plan.allowed_effects {
+            if !known_effect_kinds.contains(allowed.as_str()) {
+                return Err(ValidationError::UnknownEffectKind {
+                    kind: allowed.as_str().to_string(),
+                });
+            }
+        }
+    }
+
+    for trigger in &manifest.triggers {
+        if !schema_exists(trigger.event.as_str()) {
+            return Err(ValidationError::SchemaNotFound {
+                schema: trigger.event.as_str().to_string(),
+            });
+        }
+    }
+
+    for policy in policies.values() {
+        for rule in &policy.rules {
+            if let Some(kind) = rule.when.effect_kind.as_ref() {
+                if !known_effect_kinds.contains(kind.as_str()) {
+                    return Err(ValidationError::UnknownEffectKind {
+                        kind: kind.as_str().to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    for module in modules.values() {
+        if let Some(key) = module.key_schema.as_ref() {
+            if !schema_exists(key.as_str()) {
+                return Err(ValidationError::SchemaNotFound {
+                    schema: key.as_str().to_string(),
+                });
+            }
+        }
+        if let Some(abi) = module.abi.reducer.as_ref() {
+            for schema_ref in [
+                abi.state.as_str(),
+                abi.event.as_str(),
+                abi.annotations.as_ref().map(|s| s.as_str()).unwrap_or(""),
+            ]
+            .iter()
+            .filter(|s| !s.is_empty())
+            {
+                if !schema_exists(schema_ref) {
+                    return Err(ValidationError::SchemaNotFound {
+                        schema: schema_ref.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -467,9 +582,10 @@ fn classify_reference(reference: &str) -> ReferenceKind {
 mod tests {
     use super::*;
     use crate::{
-        DefPlan, EffectKind, Expr, ExprConst, ExprRecord, ExprRef, PlanBind, PlanBindEffect,
-        PlanEdge, PlanStep, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect,
-        PlanStepEnd, PlanStepKind, SchemaRef,
+        DefModule, DefPlan, DefPolicy, EffectKind, Expr, ExprConst, ExprRecord, ExprRef, HashRef,
+        Manifest, ModuleAbi, ModuleKind, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
+        PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
+        PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent, SchemaRef,
     };
     use indexmap::IndexMap;
 
@@ -743,6 +859,138 @@ mod tests {
         assert!(matches!(
             err,
             ValidationError::InvariantEventReference { .. }
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_missing_event_schema() {
+        let mut modules = HashMap::new();
+        let reducer_name = "com.acme/Reducer@1".to_string();
+        modules.insert(
+            reducer_name.clone(),
+            DefModule {
+                name: reducer_name.clone(),
+                module_kind: ModuleKind::Reducer,
+                wasm_hash: HashRef::new(
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+                )
+                .unwrap(),
+                key_schema: None,
+                abi: ModuleAbi {
+                    reducer: Some(ReducerAbi {
+                        state: SchemaRef::new("sys/TimerFired@1").unwrap(),
+                        event: SchemaRef::new("sys/TimerFired@1").unwrap(),
+                        annotations: None,
+                        effects_emitted: vec![],
+                        cap_slots: IndexMap::new(),
+                    }),
+                },
+            },
+        );
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: Some(Routing {
+                events: vec![RoutingEvent {
+                    event: SchemaRef::new("com.acme/MissingEvent@1").unwrap(),
+                    reducer: reducer_name.clone(),
+                    key_field: None,
+                }],
+                inboxes: vec![],
+            }),
+            triggers: vec![],
+        };
+        let schemas = HashMap::new();
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let policies = HashMap::new();
+        let err = validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &policies)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::SchemaNotFound { schema }
+            if schema == "com.acme/MissingEvent@1"
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_unknown_effect_kind_in_plan_and_policy() {
+        let mut plans = HashMap::new();
+        let bad_kind = EffectKind::new("com.acme/missing");
+        plans.insert(
+            "com.acme/plan@1".into(),
+            DefPlan {
+                name: "com.acme/plan@1".into(),
+                input: SchemaRef::new("sys/TimerFired@1").unwrap(),
+                output: None,
+                locals: IndexMap::new(),
+                steps: vec![PlanStep {
+                    id: "emit".into(),
+                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                        kind: bad_kind.clone(),
+                        params: Expr::Record(ExprRecord {
+                            record: IndexMap::new(),
+                        })
+                        .into(),
+                        cap: "cap".into(),
+                        bind: PlanBindEffect {
+                            effect_id_as: "id".into(),
+                        },
+                    }),
+                }],
+                edges: vec![],
+                required_caps: vec!["cap".into()],
+                allowed_effects: vec![bad_kind.clone()],
+                invariants: vec![],
+            },
+        );
+        let mut policies = HashMap::new();
+        policies.insert(
+            "pol".into(),
+            DefPolicy {
+                name: "pol".into(),
+                rules: vec![PolicyRule {
+                    when: PolicyMatch {
+                        effect_kind: Some(bad_kind.clone()),
+                        cap_name: None,
+                        origin_kind: None,
+                        origin_name: None,
+                    },
+                    decision: PolicyDecision::Deny,
+                }],
+            },
+        );
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let schemas = HashMap::new();
+        let modules = HashMap::new();
+        let effects = HashMap::new();
+        let err = validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &policies)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::UnknownEffectKind { kind }
+            if kind == bad_kind.as_str()
         ));
     }
 }
