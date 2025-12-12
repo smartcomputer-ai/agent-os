@@ -2,18 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aos.dev/air/v1/defcap.schema.json",
   "title": "AIR v1 defcap",
-  "description": "Capability type definition. Defines parameter constraints enforced at enqueue time. Standard v1 types: sys/http.out@1, sys/llm.basic@1, sys/blob@1, sys/timer@1.",
+  "description": "Capability type definition. Defines parameter constraints enforced at enqueue time. Standard v1 types: sys/http.out@1, sys/llm.basic@1, sys/blob@1, sys/timer@1, sys/query@1, and sys/secret@1.",
   "type": "object",
   "properties": {
     "$kind": { "const": "defcap" },
     "name": { "$ref": "common.schema.json#/$defs/Name" },
     "cap_type": {
       "$ref": "common.schema.json#/$defs/CapType",
-      "description": "Capability type identifier (namespaced string). Built-in v1 types: http.out, blob, timer, llm.basic, secret. Adapters may introduce additional types when supported by the runtime."
+      "description": "Capability type identifier (namespaced string). Built-in v1 types: http.out, blob, timer, llm.basic, secret, query. Adapters may introduce additional types when supported by the runtime."
     },
     "schema": {
       "$ref": "common.schema.json#/$defs/TypeExpr",
-      "description": "Parameter schema defining allowlists and ceilings. Standard v1 schemas: sys/http.out@1 = { hosts: set<text>, verbs: set<text>, path_prefixes?: set<text> }; sys/llm.basic@1 = { providers?: set<text>, models?: set<text>, max_tokens_max?: nat, temperature_max?: dec128, tools_allow?: set<text> }; sys/blob@1 = { namespaces?: set<text> }; sys/timer@1 = {}."
+      "description": "Parameter schema defining allowlists and ceilings. Standard v1 schemas: sys/http.out@1 = { hosts: set<text>, verbs: set<text>, path_prefixes?: set<text> }; sys/llm.basic@1 = { providers?: set<text>, models?: set<text>, max_tokens_max?: nat, temperature_max?: dec128, tools_allow?: set<text> }; sys/blob@1 = { namespaces?: set<text> }; sys/timer@1 = {}; sys/query@1 = { scope: text } (scope optional/opaque)."
     }
   },
   "required": ["$kind","name","cap_type","schema"],

@@ -132,7 +132,7 @@ Modules are content‑addressed WASM artifacts registered in the manifest with d
 
 ### Keyed Reducers (Cells)
 
-Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The unified reducer ABI remains a single `step` export; the kernel provides an envelope with optional key and a `cell_mode` flag. Routing uses `manifest.routing.events[].key_field`; storage keeps per‑cell state files; the scheduler interleaves cells and plan runs. See [spec/05-cells.md](05-cells.md) for details.
+Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with optional `key` and a `cell_mode` flag. Routing uses `manifest.routing.events[].key_field`; plans supply `key` on `raise_event`; triggers may set `correlate_by`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and plan runs. See [spec/06-cells.md](06-cells.md) for the full v1.1 behavior and migration notes.
 
 ### Router and Inbox
 
@@ -142,7 +142,7 @@ Deterministic routing hooks trigger reducers or plans based on event kinds and m
 
 ### Effect Manager
 
-The Effect Manager maintains an outbox of effect intents; each intent is typed and references a capability handle. **Before hashing/enqueueing**, it decodes effect params CBOR using the effect kind's param schema, canonicalizes to the AIR `$tag/$value` form, and re-encodes; the canonical bytes are stored, hashed, and passed to adapters. Non-conforming params are rejected early. Plans, reducers, and internal tooling all traverse this same normalizer so authoring sugar cannot perturb intent identity or policy decisions. The Effect Manager dispatches to adapters with idempotency keys and deadlines, retrying with backoff for transient failures. The final status is captured in a receipt.
+The Effect Manager maintains an outbox of effect intents; each intent is typed and references a capability handle. **Before hashing/enqueueing**, it decodes effect params CBOR using the effect kind's param schema, canonicalizes to the AIR `$tag/$value` form, and re-encodes; the canonical bytes are stored, hashed, and passed to adapters. Non-conforming params are rejected early. Plans, reducers, and internal tooling all traverse this same normalizer so authoring sugar cannot perturb intent identity or policy decisions. The Effect Manager dispatches to adapters with idempotency keys and deadlines, retrying with backoff for transient failures. The final status is captured in a receipt. `introspect.*` effects are handled by an internal kernel adapter that synthesizes receipts deterministically (no I/O) while still passing through the same intent/receipt journal path.
 
 ### Adapters (v1)
 

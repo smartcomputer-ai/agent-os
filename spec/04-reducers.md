@@ -4,11 +4,9 @@ Reducers are deterministic, WASM-compiled state machines that own application/do
 
 **Note on examples**: Plan examples in this chapter use AIR v1's authoring sugar (plain JSON values) for readability. You may also use canonical JSON (tagged) or full `Expr` trees where `ExprOrValue` is accepted. See `spec/03-air.md` §3 for details on JSON lenses and canonicalization. Reducer WASM ABI boundaries always use canonical CBOR regardless of authoring format.
 
-## Scope Note (v1.0)
+## Scope Note (v1.0 → v1.1)
 
-This chapter describes reducers for v1.0, where a reducer has a single state value. If you need many parallel instances of the same FSM, model them as a `map<key, substate>` inside this state (see "Coding Pattern" and "ReceiptEvent And Correlation").
-
-Version 1.1 introduces "Cells," which make per-key instances first-class with per-cell state and mailboxes while keeping the same reducer ABI. See: spec/05-cells.md.
+v1 reducers treat the whole state as a single value. To model many FSM instances, author code as a `map<key, substate>`. Version 1.1 promotes this pattern to **Cells**: keyed reducers with per-cell state/mailboxes, still using the same `step` export. The kernel sets `ctx.cell_mode=true` and supplies `ctx.key`; returning `state=null` deletes the cell. See spec/06-cells.md for routing, storage, and migration details.
 
 ## Role and Boundaries
 
@@ -32,30 +30,33 @@ All I/O happens via returned effects; reducers cannot perform syscalls. **Replay
 
 `step(ptr, len) -> (ptr, len)`
 
-### Input CBOR (canonical)
+### Input CBOR (canonical envelope)
 
 ```
 {
-  state: <bytes>,
-  event: <bytes>
+  version: 1,
+  state: <bytes|null>,
+  event: <bytes>,
+  ctx: { key?: <bytes>, cell_mode: <bool> }
 }
 ```
 
-- `state` is canonical CBOR matching the declared state schema
+- `state` is canonical CBOR matching the declared state schema; `null` is passed when creating a new cell.
 - `event` is canonical CBOR of a DomainEvent or ReceiptEvent addressed to this reducer; the kernel validates and canonicalizes every event payload against its schema before routing/journaling, so reducers always see schema-shaped canonical CBOR.
+- `ctx.cell_mode` is `true` when routed as a keyed reducer; `ctx.key` must be present in that mode and is advisory in v1 compatibility mode.
 
 ### Output CBOR (canonical)
 
 ```
 {
-  state: <bytes>,
+  state: <bytes|null>,
   domain_events?: [{schema: <Name>, value: <Value>}],
   effects?: [<ReducerEffect>],
   ann?: <annotations>
 }
 ```
 
-- `state`: new canonical state bytes
+- `state`: new canonical state bytes; `null` deletes a cell when `cell_mode=true`
 - `domain_events` (optional): zero or more domain events (including DomainIntent); kernel appends them to the journal and routes by manifest
 - `effects` (optional): micro-effects only (as defined by `origin_scope`); see Effect Emission
 - `ann` (optional): structured annotations for observability
@@ -83,7 +84,7 @@ Reducers consume two kinds of events:
 
 **DomainEvent**: Business events and intents. Produced by other reducers or plans via `raise_event`. Versioned by schema Name.
 
-**ReceiptEvent**: Adapter receipts converted to events by the kernel for micro-effects (e.g., `TimerFired` for `timer.set`). For complex external work, plans raise result DomainEvents instead of relying on raw receipts. Correlate using stable fields in your events/effect params (e.g., a key like `order_id` or an idempotency key). In v1.1 Cells, this key becomes a first-class route; see spec/05-cells.md.
+**ReceiptEvent**: Adapter receipts converted to events by the kernel for micro-effects (e.g., `TimerFired` for `timer.set`). For complex external work, plans raise result DomainEvents instead of relying on raw receipts. Correlate using stable fields in your events/effect params (e.g., a key like `order_id` or an idempotency key). In v1.1 Cells, this key becomes a first-class route; see spec/06-cells.md.
 
 **Important**: Do not embed `$schema` fields inside reducer event payloads. The kernel determines schemas from manifest routing and capability bindings; self-describing payloads are rejected.
 

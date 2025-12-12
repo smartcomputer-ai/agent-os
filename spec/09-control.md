@@ -53,15 +53,18 @@ Response:
 - `timeout` — reserved for client-side timeout reporting (client maps tokio timeout to this).
 - `not_running` — reserved for future remote-daemon detection.
 
-## Verbs (v1)
+## Verbs (v1.1 control/introspection)
 
-- `send-event { schema, value_b64 }` → enqueues domain event (no auto-step). `value_b64` is canonical CBOR bytes base64-encoded.
-- `inject-receipt { intent_hash, adapter_id, payload_b64 }` → injects an effect receipt (payload is CBOR base64).
-- `query-state { reducer, key_b64? }` → returns `{ state_b64 }` (base64 CBOR) or `state_b64: null` if missing.
+- `send-event { schema, value_b64 }` → enqueues a DomainEvent (no auto-step). `value_b64` must be canonical CBOR.
+- `inject-receipt { intent_hash, adapter_id, payload_b64 }` → injects an effect receipt (CBOR base64 payload).
+- `manifest-read { consistency?: "head"|"exact:<h>"|"at_least:<h>" }` → returns `{ manifest, journal_height, snapshot_hash?, manifest_hash }`.
+- `query-state { reducer, key_b64?, consistency?: "..."} ` → returns `{ state_b64?, meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
+- `list-cells { reducer }` → returns `{ cells:[{ key_b64, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
+- `journal-head {}` → returns `{ journal_height, snapshot_hash?, manifest_hash }`.
+- `put-blob { data_b64 }` → stores blob in CAS; returns `{ hash: "sha256:..." }`.
+- `blob-get { hash }` → returns `{ data_b64 }` (CAS lookup).
 - `snapshot {}` → forces snapshot; `result` is empty object.
 - `step {}` → runs one daemon cycle (`RunMode::Daemon`); result `{ "stepped": true }`.
-- `journal-head {}` → returns `{ head: <u64> }` (journal height).
-- `put-blob { data_b64 }` → stores blob in CAS; returns `{ hash: "sha256:..." }`.
 - `shutdown {}` → graceful drain, snapshot, shutdown; server and daemon stop.
 - `propose { patch_b64, description? }` → submits a governance proposal. `patch_b64` is base64 of either (a) `ManifestPatch` CBOR or (b) `PatchDocument` JSON. PatchDocuments are validated against `spec/schemas/patch.schema.json` (with `common.schema.json` embedded) before compilation; ManifestPatch skips schema validation. Returns `{ proposal_id: <u64> }`.
 - `shadow { proposal_id }` → runs shadow for a proposal; returns a JSON `ShadowSummary` `{ manifest_hash, predicted_effects?, pending_receipts?, plan_results?, ledger_deltas? }`.
