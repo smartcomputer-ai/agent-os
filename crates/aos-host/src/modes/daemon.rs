@@ -366,10 +366,8 @@ impl<S: Store + 'static> WorldDaemon<S> {
                     .get_manifest(consistency)
                     .map_err(HostError::from)
                     .and_then(|read| {
-                        let bytes =
-                            aos_cbor::to_canonical_cbor(&read.value).map_err(|e| {
-                                HostError::Manifest(format!("encode manifest: {e}"))
-                            })?;
+                        let bytes = aos_cbor::to_canonical_cbor(&read.value)
+                            .map_err(|e| HostError::Manifest(format!("encode manifest: {e}")))?;
                         Ok((read.meta, bytes))
                     });
                 let _ = resp.send(res);

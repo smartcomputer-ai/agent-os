@@ -146,6 +146,7 @@ dependencies = [
  "aos-host",
  "aos-kernel",
  "aos-store",
+ "aos-sys",
  "aos-wasm-build",
  "assert_cmd",
  "base64 0.22.1",

@@ -1,9 +1,9 @@
 mod helpers;
+use aos_air_types::{plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name};
 use aos_kernel::{Consistency, StateReader};
 use aos_wasm_abi::ReducerOutput;
 use helpers::fixtures;
 use std::collections::HashMap;
-use aos_air_types::{plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name};
 
 /// Build a test world with a single stub reducer whose state is set to `payload` on first event.
 fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
@@ -81,7 +81,10 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
                 "com.acme/Event@1",
                 vec![(key_field, fixtures::text_type())],
             ),
-            fixtures::def_text_record_schema(fixtures::START_SCHEMA, vec![("id", fixtures::text_type())]),
+            fixtures::def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", fixtures::text_type())],
+            ),
         ],
     );
 
@@ -90,18 +93,15 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
 
 fn canonical_key_bytes(key: &str) -> Vec<u8> {
     let mut schemas = HashMap::new();
-    schemas.insert(
-        "com.acme/Key@1".to_string(),
-        fixtures::text_type(),
-    );
+    schemas.insert("com.acme/Key@1".to_string(), fixtures::text_type());
     let idx = SchemaIndex::new(schemas);
     normalize_cbor_by_name(
         &idx,
         "com.acme/Key@1",
         &serde_cbor::to_vec(&key.to_string()).unwrap(),
     )
-        .unwrap()
-        .bytes
+    .unwrap()
+    .bytes
 }
 
 #[test]
@@ -189,11 +189,7 @@ fn keyed_head_and_exact_reads_state() {
     let key_bytes = canonical_key_bytes(key_val);
     let head_read = world
         .kernel
-        .get_reducer_state(
-            "com.acme/Keyed@1",
-            Some(&key_bytes),
-            Consistency::Head,
-        )
+        .get_reducer_state("com.acme/Keyed@1", Some(&key_bytes), Consistency::Head)
         .expect("head read keyed");
     assert_eq!(head_read.value.as_deref(), Some("cell".as_bytes()));
 

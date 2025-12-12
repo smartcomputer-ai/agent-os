@@ -70,7 +70,10 @@ fn reducer_http_effect_is_denied() {
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
-        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "start" }))
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
         .expect("submit start event");
     let err = world.kernel.tick().unwrap_err();
     assert!(
@@ -280,23 +283,21 @@ fn plan_introspect_denied_by_policy() {
         locals: IndexMap::new(),
         steps: vec![aos_air_types::PlanStep {
             id: "emit".into(),
-            kind: aos_air_types::PlanStepKind::EmitEffect(
-                aos_air_types::PlanStepEmitEffect {
-                    kind: AirEffectKind::introspect_manifest(),
-                    params: ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
-                        record: IndexMap::from([(
-                            "consistency".into(),
-                            ValueLiteral::Text(ValueText {
-                                text: "head".into(),
-                            }),
-                        )]),
-                    })),
-                    cap: "query_cap".into(),
-                    bind: aos_air_types::PlanBindEffect {
-                        effect_id_as: "req".into(),
-                    },
+            kind: aos_air_types::PlanStepKind::EmitEffect(aos_air_types::PlanStepEmitEffect {
+                kind: AirEffectKind::introspect_manifest(),
+                params: ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+                    record: IndexMap::from([(
+                        "consistency".into(),
+                        ValueLiteral::Text(ValueText {
+                            text: "head".into(),
+                        }),
+                    )]),
+                })),
+                cap: "query_cap".into(),
+                bind: aos_air_types::PlanBindEffect {
+                    effect_id_as: "req".into(),
                 },
-            ),
+            }),
         }],
         edges: vec![],
         required_caps: vec!["query_cap".into()],
@@ -334,7 +335,10 @@ fn plan_introspect_denied_by_policy() {
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
     world
-        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "start" }))
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
         .expect("submit start event");
     let err = world.kernel.tick().unwrap_err();
     assert!(
@@ -354,23 +358,21 @@ fn plan_introspect_missing_capability_is_rejected() {
         locals: IndexMap::new(),
         steps: vec![aos_air_types::PlanStep {
             id: "emit".into(),
-            kind: aos_air_types::PlanStepKind::EmitEffect(
-                aos_air_types::PlanStepEmitEffect {
-                    kind: AirEffectKind::introspect_manifest(),
-                    params: ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
-                        record: IndexMap::from([(
-                            "consistency".into(),
-                            ValueLiteral::Text(ValueText {
-                                text: "head".into(),
-                            }),
-                        )]),
-                    })),
-                    cap: "query_cap".into(),
-                    bind: aos_air_types::PlanBindEffect {
-                        effect_id_as: "req".into(),
-                    },
+            kind: aos_air_types::PlanStepKind::EmitEffect(aos_air_types::PlanStepEmitEffect {
+                kind: AirEffectKind::introspect_manifest(),
+                params: ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+                    record: IndexMap::from([(
+                        "consistency".into(),
+                        ValueLiteral::Text(ValueText {
+                            text: "head".into(),
+                        }),
+                    )]),
+                })),
+                cap: "query_cap".into(),
+                bind: aos_air_types::PlanBindEffect {
+                    effect_id_as: "req".into(),
                 },
-            ),
+            }),
         }],
         edges: vec![],
         required_caps: vec!["query_cap".into()],

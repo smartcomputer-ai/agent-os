@@ -3,11 +3,11 @@ use std::path::Path;
 use aos_cbor::Hash;
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::KernelHeights;
+use aos_kernel::ReadMeta;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::PatchDocument;
 use aos_kernel::shadow::ShadowSummary;
-use aos_kernel::ReadMeta;
 use base64::prelude::*;
 use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize};
@@ -631,9 +631,7 @@ fn meta_to_json(meta: &ReadMeta) -> serde_json::Value {
 
 async fn world_meta(control_tx: &mpsc::Sender<ControlMsg>) -> Result<ReadMeta, ControlError> {
     let (tx, rx) = oneshot::channel();
-    let _ = control_tx
-        .send(ControlMsg::JournalHead { resp: tx })
-        .await;
+    let _ = control_tx.send(ControlMsg::JournalHead { resp: tx }).await;
     let inner = rx
         .await
         .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
@@ -912,10 +910,7 @@ impl ControlClient {
     }
 
     /// Journal head meta helper.
-    pub async fn journal_head_meta(
-        &mut self,
-        id: impl Into<String>,
-    ) -> std::io::Result<ReadMeta> {
+    pub async fn journal_head_meta(&mut self, id: impl Into<String>) -> std::io::Result<ReadMeta> {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
@@ -1024,7 +1019,9 @@ fn parse_meta(val: &serde_json::Value) -> std::io::Result<ReadMeta> {
         .get("manifest_hash")
         .and_then(|v| v.as_str())
         .ok_or_else(|| io_err("meta missing manifest_hash"))
-        .and_then(|s| Hash::from_hex_str(s).map_err(|e| io_err(format!("manifest_hash decode: {e}"))))?;
+        .and_then(|s| {
+            Hash::from_hex_str(s).map_err(|e| io_err(format!("manifest_hash decode: {e}")))
+        })?;
     Ok(ReadMeta {
         journal_height,
         snapshot_hash,

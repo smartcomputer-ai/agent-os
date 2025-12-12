@@ -44,12 +44,14 @@ pub async fn cmd_cells(opts: &WorldOpts, args: &CellsArgs) -> Result<()> {
         }
         entries
             .into_iter()
-            .map(|entry| json_to_entry(serde_json::json!({
-                "key_b64": entry.key_b64,
-                "state_hash_hex": entry.state_hash_hex,
-                "size": entry.size,
-                "last_active_ns": entry.last_active_ns,
-            })))
+            .map(|entry| {
+                json_to_entry(serde_json::json!({
+                    "key_b64": entry.key_b64,
+                    "state_hash_hex": entry.state_hash_hex,
+                    "size": entry.size,
+                    "last_active_ns": entry.last_active_ns,
+                }))
+            })
             .collect::<Result<Vec<_>>>()?
     } else {
         // Batch mode: load world and inspect store directly via CellIndex.

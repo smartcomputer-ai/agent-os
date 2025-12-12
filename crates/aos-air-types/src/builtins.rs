@@ -64,8 +64,8 @@ static BUILTIN_EFFECTS: Lazy<Vec<BuiltinEffect>> = Lazy::new(|| {
 });
 
 static BUILTIN_CAPS: Lazy<Vec<BuiltinCap>> = Lazy::new(|| {
-    let defs: Vec<DefCap> = serde_json::from_str(BUILTIN_CAPS_RAW)
-        .expect("spec/defs/builtin-caps.air.json must parse");
+    let defs: Vec<DefCap> =
+        serde_json::from_str(BUILTIN_CAPS_RAW).expect("spec/defs/builtin-caps.air.json must parse");
     defs.into_iter()
         .map(|cap| {
             let hash = Hash::of_cbor(&cap).expect("canonical hash");
@@ -206,10 +206,7 @@ mod tests {
 
     #[test]
     fn exposes_expected_caps() {
-        let names: Vec<_> = builtin_caps()
-            .iter()
-            .map(|c| c.cap.name.as_str())
-            .collect();
+        let names: Vec<_> = builtin_caps().iter().map(|c| c.cap.name.as_str()).collect();
         assert!(names.contains(&"sys/query@1"));
     }
 }

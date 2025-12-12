@@ -1,5 +1,5 @@
 use aos_cbor::{Hash, to_canonical_cbor};
-use aos_effects::{EffectIntent, EffectReceipt, EffectKind, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use serde::{Deserialize, Serialize};
 
 use crate::cell_index::CellMeta;
@@ -161,7 +161,8 @@ where
             .params()
             .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
         let consistency = parse_consistency(&params.consistency)?;
-        let state_read = self.get_reducer_state(&params.reducer, params.key.as_deref(), consistency)?;
+        let state_read =
+            self.get_reducer_state(&params.reducer, params.key.as_deref(), consistency)?;
         let receipt = ReducerStateReceipt {
             state: state_read.value,
             meta: to_meta(&state_read.meta),
@@ -171,7 +172,9 @@ where
 
     fn handle_journal_head(&self, _intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
         let meta = self.get_journal_head();
-        let receipt = JournalHeadReceipt { meta: to_meta(&meta) };
+        let receipt = JournalHeadReceipt {
+            meta: to_meta(&meta),
+        };
         Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
     }
 
@@ -200,10 +203,7 @@ where
 fn to_meta(meta: &ReadMeta) -> MetaSer {
     MetaSer {
         journal_height: meta.journal_height,
-        snapshot_hash: meta
-            .snapshot_hash
-            .as_ref()
-            .map(|h| h.as_bytes().to_vec()),
+        snapshot_hash: meta.snapshot_hash.as_ref().map(|h| h.as_bytes().to_vec()),
         manifest_hash: meta.manifest_hash.as_bytes().to_vec(),
     }
 }
@@ -211,14 +211,14 @@ fn to_meta(meta: &ReadMeta) -> MetaSer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{KernelBuilder, KernelConfig};
     use aos_effects::IntentBuilder;
     use aos_store::MemStore;
-    use crate::{KernelBuilder, KernelConfig};
     use serde_json::json;
-    use std::sync::Arc;
-    use tempfile::TempDir;
     use std::fs::File;
     use std::io::Write;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     fn write_minimal_manifest(path: &std::path::Path) {
         let manifest = json!({
@@ -252,13 +252,9 @@ mod tests {
         let params = ManifestParams {
             consistency: "head".into(),
         };
-        let intent = IntentBuilder::new(
-            EffectKind::introspect_manifest(),
-            "sys/query@1",
-            &params,
-        )
-        .build()
-        .unwrap();
+        let intent = IntentBuilder::new(EffectKind::introspect_manifest(), "sys/query@1", &params)
+            .build()
+            .unwrap();
 
         let receipt = kernel
             .handle_internal_intent(&intent)
@@ -306,13 +302,10 @@ mod tests {
         let params = ListCellsParams {
             reducer: "missing/Reducer@1".into(),
         };
-        let intent = IntentBuilder::new(
-            EffectKind::introspect_list_cells(),
-            "sys/query@1",
-            &params,
-        )
-        .build()
-        .unwrap();
+        let intent =
+            IntentBuilder::new(EffectKind::introspect_list_cells(), "sys/query@1", &params)
+                .build()
+                .unwrap();
 
         let receipt = kernel
             .handle_internal_intent(&intent)

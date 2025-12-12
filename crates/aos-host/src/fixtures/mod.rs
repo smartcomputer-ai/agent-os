@@ -9,11 +9,11 @@ use std::sync::Arc;
 use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
     CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, EffectKind, EmptyObject,
-    Expr, ExprConst, ExprOrValue, ExprRef, HashRef, Manifest,
-    ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef, PlanBind,
-    PlanBindEffect, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepKind, Routing, RoutingEvent,
-    SchemaRef, Trigger, TypeExpr, TypeOption, TypePrimitive, TypePrimitiveText, TypeRecord,
-    ValueLiteral, ValueRecord, ValueText, catalog::EffectCatalog,
+    Expr, ExprConst, ExprOrValue, ExprRef, HashRef, Manifest, ManifestDefaults, ModuleAbi,
+    ModuleBinding, ModuleKind, Name, NamedRef, PlanBind, PlanBindEffect, PlanStepAwaitReceipt,
+    PlanStepEmitEffect, PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr,
+    TypeOption, TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord, ValueText,
+    catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
@@ -272,9 +272,7 @@ pub fn introspect_manifest_steps(
                 for_expr: Expr::Ref(ExprRef {
                     reference: format!("@{effect_var}"),
                 }),
-                bind: PlanBind {
-                    var: receipt_var,
-                },
+                bind: PlanBind { var: receipt_var },
             }),
         },
     ]

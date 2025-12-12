@@ -41,10 +41,7 @@ fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
 fn introspect_manifest_matches_kernel_manifest() {
     let mut world = world_with_state(b"hello");
     world
-        .submit_event_result(
-            fixtures::START_SCHEMA,
-            &json!({ "id": "start" }),
-        )
+        .submit_event_result(fixtures::START_SCHEMA, &json!({ "id": "start" }))
         .expect("submit");
     world.tick_n(1).unwrap();
 
@@ -78,7 +75,10 @@ fn introspect_manifest_matches_kernel_manifest() {
         _ => panic!("unexpected payload shape"),
     };
     let manifest: aos_air_types::Manifest = serde_cbor::from_slice(&manifest_bytes).unwrap();
-    let head_manifest = kernel.get_manifest(aos_kernel::Consistency::Head).unwrap().value;
+    let head_manifest = kernel
+        .get_manifest(aos_kernel::Consistency::Head)
+        .unwrap()
+        .value;
     assert_eq!(manifest.air_version, head_manifest.air_version);
 }
 
@@ -86,10 +86,7 @@ fn introspect_manifest_matches_kernel_manifest() {
 fn introspect_reducer_state_returns_value_and_meta() {
     let mut world = world_with_state(b"payload");
     world
-        .submit_event_result(
-            fixtures::START_SCHEMA,
-            &json!({ "id": "start" }),
-        )
+        .submit_event_result(fixtures::START_SCHEMA, &json!({ "id": "start" }))
         .expect("submit");
     world.tick_n(1).unwrap();
 
@@ -152,10 +149,7 @@ fn introspect_list_cells_empty_for_non_keyed() {
 fn introspect_journal_head_matches_state_reader() {
     let mut world = world_with_state(b"payload");
     world
-        .submit_event_result(
-            fixtures::START_SCHEMA,
-            &json!({ "id": "start" }),
-        )
+        .submit_event_result(fixtures::START_SCHEMA, &json!({ "id": "start" }))
         .expect("submit");
     world.tick_n(1).unwrap();
 
@@ -191,10 +185,14 @@ fn introspect_journal_head_matches_state_reader() {
             let mut mh = None;
             for (k, v) in map {
                 match (k, v) {
-                    (serde_cbor::Value::Text(t), serde_cbor::Value::Integer(i)) if t == "journal_height" => {
+                    (serde_cbor::Value::Text(t), serde_cbor::Value::Integer(i))
+                        if t == "journal_height" =>
+                    {
                         jh = Some(i as u64);
                     }
-                    (serde_cbor::Value::Text(t), serde_cbor::Value::Bytes(b)) if t == "manifest_hash" => {
+                    (serde_cbor::Value::Text(t), serde_cbor::Value::Bytes(b))
+                        if t == "manifest_hash" =>
+                    {
                         mh = Some(b);
                     }
                     _ => {}

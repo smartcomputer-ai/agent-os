@@ -9,6 +9,7 @@ aos-air-types = { path = "../aos-air-types" }
 aos-kernel = { path = "../aos-kernel" }
 aos-host = { path = "../aos-host" }
 aos-store = { path = "../aos-store" }
+aos-sys = { path = "../aos-sys" }
 aos-wasm-build = { path = "../aos-wasm-build" }
 camino = "1"
 clap = { version = "4", features = ["derive", "env"] }

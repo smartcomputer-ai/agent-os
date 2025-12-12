@@ -452,7 +452,8 @@ fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> 
 }
 
 fn start_seed_event() -> (String, Vec<u8>) {
-    let bytes = serde_cbor::to_vec(&serde_json::json!({ "id": "seed" })).expect("encode start event");
+    let bytes =
+        serde_cbor::to_vec(&serde_json::json!({ "id": "seed" })).expect("encode start event");
     (START_SCHEMA.to_string(), bytes)
 }
 
@@ -746,10 +747,7 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
     helpers::insert_test_schemas(
         &mut loaded,
         vec![
-            helpers::def_text_record_schema(
-                START_SCHEMA,
-                vec![("id", helpers::text_type())],
-            ),
+            helpers::def_text_record_schema(START_SCHEMA, vec![("id", helpers::text_type())]),
             helpers::def_text_record_schema(
                 "com.acme/ShadowOut@1",
                 vec![("value", helpers::text_type())],

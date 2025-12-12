@@ -4,8 +4,8 @@ use aos_air_types::{
     ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
     PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
     PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveBool, TypePrimitiveInt,
-    TypePrimitiveNat, TypePrimitiveText, TypeRecord, ValueLiteral, ValueMap, ValueNull, ValueRecord,
-    ValueText,
+    TypePrimitiveNat, TypePrimitiveText, TypeRecord, ValueLiteral, ValueMap, ValueNull,
+    ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };

@@ -202,12 +202,12 @@ mod tests {
         let event = build_reducer_receipt_event(&ctx, &receipt).expect("event");
         assert_eq!(event.schema, SYS_TIMER_FIRED_SCHEMA);
 
-    #[derive(Deserialize)]
-    struct EventPayload {
-        intent_hash: String,
-        reducer: String,
-        effect_kind: String,
-        adapter_id: String,
+        #[derive(Deserialize)]
+        struct EventPayload {
+            intent_hash: String,
+            reducer: String,
+            effect_kind: String,
+            adapter_id: String,
             status: ReceiptStatus,
             requested: TimerSetParams,
             receipt: TimerSetReceipt,
@@ -219,9 +219,7 @@ mod tests {
         let decoded: EventPayload = serde_cbor::from_slice(&event.value).unwrap();
         assert_eq!(
             decoded.intent_hash,
-            Hash::from_bytes(&receipt.intent_hash)
-                .unwrap()
-                .to_hex()
+            Hash::from_bytes(&receipt.intent_hash).unwrap().to_hex()
         );
         assert_eq!(decoded.reducer, "com.acme/Reducer@1");
         assert_eq!(decoded.effect_kind, aos_effects::EffectKind::TIMER_SET);

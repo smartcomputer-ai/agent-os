@@ -14,15 +14,17 @@
 
 #![cfg(feature = "test-fixtures")]
 
-use std::sync::Arc;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
+use aos_air_types::{
+    builtins, plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name,
+};
 use aos_host::fixtures::{self, TestStore};
 use aos_kernel::Kernel;
 use aos_kernel::journal::OwnedJournalEntry;
 use aos_kernel::journal::mem::MemJournal;
 use serde::{Deserialize, Serialize};
-use aos_air_types::{builtins, plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name};
 use std::collections::HashMap;
 
 /// Matches aos_sys::ObjectMeta for deserialization
@@ -68,9 +70,13 @@ fn canonical_key_bytes(name: &str) -> Vec<u8> {
         schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
     }
     let idx = SchemaIndex::new(schemas);
-    normalize_cbor_by_name(&idx, "sys/ObjectKey@1", &serde_cbor::to_vec(&name.to_string()).unwrap())
-        .unwrap()
-        .bytes
+    normalize_cbor_by_name(
+        &idx,
+        "sys/ObjectKey@1",
+        &serde_cbor::to_vec(&name.to_string()).unwrap(),
+    )
+    .unwrap()
+    .bytes
 }
 
 /// Test that ObjectRegistered events are correctly routed and state is updated.
@@ -205,16 +211,10 @@ async fn object_catalog_keyed_routing() {
 
     // Verify both keys have separate state
     let state_a = kernel
-        .reducer_state_bytes(
-            "sys/ObjectCatalog@1",
-            Some(&canonical_key_bytes("path/a")),
-        )
+        .reducer_state_bytes("sys/ObjectCatalog@1", Some(&canonical_key_bytes("path/a")))
         .unwrap();
     let state_b = kernel
-        .reducer_state_bytes(
-            "sys/ObjectCatalog@1",
-            Some(&canonical_key_bytes("path/b")),
-        )
+        .reducer_state_bytes("sys/ObjectCatalog@1", Some(&canonical_key_bytes("path/b")))
         .unwrap();
 
     assert!(state_a.is_some(), "path/a should have state");
