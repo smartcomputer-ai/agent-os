@@ -86,11 +86,17 @@ pub fn run(example_root: &Path) -> Result<()> {
     seed_world(&mut host, &seeds)?;
     drive_blob_puts(&mut host, &seeds)?;
 
+    let key_cbors: Vec<Vec<u8>> = seeds
+        .iter()
+        .map(|s| serde_cbor::to_vec(&s.id).expect("serialize key"))
+        .collect();
+
     let summary = summarize(&mut host, &seeds)?;
     println!("   notes archived: {}", summary.notes_archived);
     println!("   catalog entries: {}", summary.catalog_entries);
 
-    host.finish()?.verify_replay()?;
+    host.finish_with_keyed_samples(Some(REDUCER_NAME), &key_cbors)?
+        .verify_replay()?;
     Ok(())
 }
 

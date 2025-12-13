@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
+use aos_kernel::cell_index::CellIndex;
 use aos_host::config::HostConfig;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
@@ -141,11 +142,43 @@ impl ExampleHost {
     }
 
     pub fn finish(self) -> Result<ReplayHandle> {
+        self.finish_with_keyed_samples(None, &[])
+    }
+
+    pub fn finish_with_keyed_samples(
+        self,
+        keyed_reducer: Option<&str>,
+        keys: &[Vec<u8>],
+    ) -> Result<ReplayHandle> {
         let final_state_bytes = self
             .host
             .state_bytes(&self.reducer_name)
             .unwrap_or_else(|| Vec::new());
         let journal_entries = self.host.kernel().dump_journal()?;
+        let mut keyed_states = Vec::new();
+        if let Some(name) = keyed_reducer {
+            if let Some(root) = self.host.kernel().reducer_index_root(name) {
+                let index = CellIndex::new(self.store.as_ref());
+                for meta in index.iter(root) {
+                    let meta = meta?;
+                    let state_hash =
+                        Hash::from_bytes(&meta.state_hash).unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
+                    let state = self.store.get_blob(state_hash)?;
+                    keyed_states.push((meta.key_bytes.clone(), state));
+                }
+            } else {
+                // fallback to explicit keys if no root (should not happen)
+                for key in keys {
+                    if let Some(bytes) = self
+                        .host
+                        .kernel()
+                        .reducer_state_bytes(name, Some(key))?
+                    {
+                        keyed_states.push((key.clone(), bytes));
+                    }
+                }
+            }
+        }
         Ok(ReplayHandle {
             store: self.store,
             loaded: self.loaded,
@@ -153,6 +186,8 @@ impl ExampleHost {
             journal_entries,
             reducer_name: self.reducer_name,
             kernel_config: self.kernel_config,
+            keyed_reducer: keyed_reducer.map(str::to_string),
+            keyed_states,
         })
     }
 }
@@ -164,14 +199,12 @@ pub struct ReplayHandle {
     journal_entries: Vec<OwnedJournalEntry>,
     reducer_name: String,
     kernel_config: KernelConfig,
+    keyed_reducer: Option<String>,
+    keyed_states: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 impl ReplayHandle {
     pub fn verify_replay(self) -> Result<Vec<u8>> {
-        if self.final_state_bytes.is_empty() {
-            println!("   replay check: skipped (keyed reducer, no monolithic state)\n");
-            return Ok(Vec::new());
-        }
         let mut kernel = Kernel::from_loaded_manifest_with_config(
             self.store.clone(),
             self.loaded,
@@ -179,15 +212,36 @@ impl ReplayHandle {
             self.kernel_config,
         )?;
         kernel.tick_until_idle()?;
-        let replay_bytes = kernel
-            .reducer_state(&self.reducer_name)
-            .cloned()
-            .ok_or_else(|| anyhow!("missing replay state"))?;
-        if replay_bytes != self.final_state_bytes {
-            return Err(anyhow!("replay mismatch: reducer state diverged"));
+        if !self.final_state_bytes.is_empty() {
+            let replay_bytes = kernel
+                .reducer_state(&self.reducer_name)
+                .cloned()
+                .ok_or_else(|| anyhow!("missing replay state"))?;
+            if replay_bytes != self.final_state_bytes {
+                return Err(anyhow!("replay mismatch: reducer state diverged"));
+            }
+            let state_hash = Hash::of_bytes(&self.final_state_bytes).to_hex();
+            println!("   replay check: OK (state hash {state_hash})");
+        } else {
+            println!("   replay check: no monolithic state captured");
         }
-        let state_hash = Hash::of_bytes(&self.final_state_bytes).to_hex();
-        println!("   replay check: OK (state hash {state_hash})\n");
+
+        if let Some(name) = &self.keyed_reducer {
+            for (key, bytes) in &self.keyed_states {
+                let replayed = kernel
+                    .reducer_state_bytes(name, Some(key))?
+                    .ok_or_else(|| anyhow!("missing keyed state for replay"))?;
+                if replayed != *bytes {
+                    return Err(anyhow!("replay mismatch for keyed reducer {name}"));
+                }
+            }
+            println!(
+                "   replay check (keyed {name}): OK ({} cells)",
+                self.keyed_states.len()
+            );
+        }
+
+        println!();
         Ok(self.final_state_bytes)
     }
 }
