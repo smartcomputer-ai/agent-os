@@ -4,8 +4,7 @@
 extern crate alloc;
 
 use alloc::string::String;
-use aos_air_exec::Value as AirValue;
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx};
+use aos_wasm_sdk::{aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
 use serde::{Deserialize, Serialize};
 
 const FETCH_REQUEST_SCHEMA: &str = "demo/UpgradeFetchRequest@1";
@@ -20,11 +19,13 @@ struct SafeUpgradeState {
     requests_observed: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum SafeUpgradePc {
-    Idle,
-    Fetching,
-    Completed,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum SafeUpgradePc {
+        Idle,
+        Fetching,
+        Completed,
+    }
 }
 
 impl Default for SafeUpgradePc {
@@ -33,14 +34,22 @@ impl Default for SafeUpgradePc {
     }
 }
 
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum SafeUpgradeEvent {
+        Start { url: String },
+        NotifyComplete {
+            primary_status: i64,
+            follow_status: i64,
+            request_count: u64,
+        },
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum SafeUpgradeEvent {
-    Start { url: String },
-    NotifyComplete {
-        primary_status: i64,
-        follow_status: i64,
-        request_count: u64,
-    },
+struct UpgradeFetchRequest {
+    request_id: u64,
+    url: String,
 }
 
 aos_reducer!(SafeUpgradeSm);
@@ -83,10 +92,7 @@ fn handle_start(ctx: &mut ReducerCtx<SafeUpgradeState, ()>, url: String) {
     ctx.state.follow_status = None;
     ctx.state.requests_observed = 0;
 
-    let intent_value = AirValue::record([
-        ("request_id", AirValue::Nat(request_id)),
-        ("url", AirValue::Text(url)),
-    ]);
+    let intent_value = UpgradeFetchRequest { request_id, url };
     let key = request_id.to_be_bytes();
     ctx.intent(FETCH_REQUEST_SCHEMA)
         .key_bytes(&key)

@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::shadow::ShadowHarness;
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
@@ -14,16 +15,16 @@ const REDUCER_NAME: &str = "demo/SafeUpgrade@1";
 const EVENT_SCHEMA: &str = "demo/SafeUpgradeEvent@1";
 const MODULE_PATH: &str = "examples/06-safe-upgrade/reducer";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum UpgradeEventEnvelope {
-    Start {
-        url: String,
-    },
-    NotifyComplete {
-        primary_status: i64,
-        follow_status: i64,
-        request_count: u64,
-    },
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum UpgradeEventEnvelope {
+        Start { url: String },
+        NotifyComplete {
+            primary_status: i64,
+            follow_status: i64,
+            request_count: u64,
+        },
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,11 +36,13 @@ struct UpgradeStateView {
     requests_observed: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum UpgradePcView {
-    Idle,
-    Fetching,
-    Completed,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum UpgradePcView {
+        Idle,
+        Fetching,
+        Completed,
+    }
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
