@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
@@ -10,18 +11,21 @@ const REDUCER_NAME: &str = "demo/ChainComp@1";
 const EVENT_SCHEMA: &str = "demo/ChainEvent@1";
 const MODULE_PATH: &str = "examples/05-chain-comp/reducer";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum ChainEventEnvelope {
-    Start {
-        order_id: String,
-        customer_id: String,
-        amount_cents: u64,
-        reserve_sku: String,
-        charge: ChainTargetEnvelope,
-        reserve: ChainTargetEnvelope,
-        notify: ChainTargetEnvelope,
-        refund: ChainTargetEnvelope,
-    },
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum ChainEventEnvelope {
+        Start {
+            order_id: String,
+            customer_id: String,
+            amount_cents: u64,
+            reserve_sku: String,
+            charge: ChainTargetEnvelope,
+            reserve: ChainTargetEnvelope,
+            notify: ChainTargetEnvelope,
+            refund: ChainTargetEnvelope,
+        },
+        // The reducer can also emit/route completion variants, but the host only sends Start.
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,15 +54,17 @@ struct ChainSagaView {
     last_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-enum ChainPhaseView {
-    Idle,
-    Charging,
-    Reserving,
-    Notifying,
-    Refunding,
-    Completed,
-    Refunded,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+    enum ChainPhaseView {
+        Idle,
+        Charging,
+        Reserving,
+        Notifying,
+        Refunding,
+        Completed,
+        Refunded,
+    }
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
