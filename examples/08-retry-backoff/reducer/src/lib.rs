@@ -4,7 +4,7 @@
 extern crate alloc;
 
 use alloc::string::String;
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, TimerSetParams, Value};
+use aos_wasm_sdk::{aos_reducer, aos_event_union, ReduceError, Reducer, ReducerCtx, TimerSetParams, Value};
 use serde::{Deserialize, Serialize};
 
 const WORK_REQUESTED: &str = "demo/WorkRequested@1";
@@ -85,13 +85,14 @@ struct TimerFired {
     requested: TimerSetParams,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum RetryEvent {
-    Start(StartWork),
-    Ok(WorkOk),
-    Err(WorkErr),
-    Timer(TimerFired),
+aos_event_union! {
+    #[derive(Debug, Clone, Serialize)]
+    enum RetryEvent {
+        Start(StartWork),
+        Ok(WorkOk),
+        Err(WorkErr),
+        Timer(TimerFired)
+    }
 }
 
 fn handle_start(ctx: &mut ReducerCtx<RetryState>, ev: StartWork) {
@@ -135,14 +136,8 @@ fn handle_timer(ctx: &mut ReducerCtx<RetryState>, _timer: TimerFired) {
 fn emit_work_requested(ctx: &mut ReducerCtx<RetryState>) {
     let req_id = ctx.state.req_id.clone();
     let payload = ctx.state.payload.clone();
-    // Emit in canonical lens form so plan input decoding (ExprValue) succeeds.
-    let value = serde_json::json!({
-        "Record": {
-            "req_id": { "Text": req_id },
-            "payload": { "Text": payload }
-        }
-    });
-    ctx.intent(WORK_REQUESTED).payload(&value).send();
+    let event = WorkRequested { req_id, payload };
+    ctx.intent(WORK_REQUESTED).payload(&event).send();
 }
 
 fn schedule_retry(ctx: &mut ReducerCtx<RetryState>) {

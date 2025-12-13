@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
@@ -11,9 +12,11 @@ const EVENT_SCHEMA: &str = "demo/LlmSummarizerEvent@1";
 const MODULE_PATH: &str = "examples/07-llm-summarizer/reducer";
 const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum LlmSummarizerEventEnvelope {
-    Start { url: String },
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum LlmSummarizerEventEnvelope {
+        Start { url: String },
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,11 +30,13 @@ struct LlmSummarizerStateView {
     last_cost_millis: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum StatePcView {
-    Idle,
-    Summarizing,
-    Done,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum StatePcView {
+        Idle,
+        Summarizing,
+        Done,
+    }
 }
 
 pub fn run(example_root: &Path) -> Result<()> {

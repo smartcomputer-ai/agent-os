@@ -517,7 +517,9 @@ macro_rules! aos_event_union {
                     // First, try canonical tagged form: {"$tag":"Variant", "$value": ...}
                     if let serde_cbor::Value::Map(map) = &value {
                         if let Some(serde_cbor::Value::Text(tag)) = map.get(&serde_cbor::Value::Text("$tag".into())) {
-                            if tag == stringify!($variant) {
+                            let expected = stringify!($variant);
+                            let expected_lower = expected.to_ascii_lowercase();
+                            if tag == expected || tag == expected_lower.as_str() {
                                 let inner = map.get(&serde_cbor::Value::Text("$value".into()))
                                     .cloned()
                                     .unwrap_or(serde_cbor::Value::Null);
