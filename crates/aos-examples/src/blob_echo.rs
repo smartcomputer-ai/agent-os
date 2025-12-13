@@ -13,6 +13,7 @@ use aos_effects::builtins::{BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPu
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::FsStore;
+use aos_wasm_sdk::{aos_event_union, aos_variant};
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 use sha2::{Digest, Sha256};
@@ -74,11 +75,11 @@ fn drive_blob_echo(host: &mut ExampleHost, input: BlobEchoInput) -> Result<()> {
         .key_to_blob
         .insert((input.namespace.clone(), input.key.clone()), blob_ref);
 
-    let start_event = StartEvent {
+    let start_event = BlobEchoEvent::Start(StartEvent {
         namespace: input.namespace,
         key: input.key,
         data: input.data,
-    };
+    });
     host.send_event(&start_event)?;
     synthesize_blob_effects(host.kernel_mut(), &mut harness)
 }
@@ -187,12 +188,14 @@ struct ReducerEchoState {
     retrieved_blob_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum ReducerPc {
-    Idle,
-    Putting,
-    Getting,
-    Done,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum ReducerPc {
+        Idle,
+        Putting,
+        Getting,
+        Done,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +204,13 @@ struct StartEvent {
     key: String,
     #[serde(with = "serde_bytes")]
     data: Vec<u8>,
+}
+
+aos_event_union! {
+    #[derive(Debug, Clone, Serialize)]
+    enum BlobEchoEvent {
+        Start(StartEvent),
+    }
 }
 
 fn hash_bytes(data: &[u8]) -> String {

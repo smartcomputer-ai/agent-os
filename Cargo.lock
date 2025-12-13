@@ -194,6 +194,7 @@ dependencies = [
  "aos-store",
  "aos-wasm-abi",
  "aos-wasm-build",
+ "aos-wasm-sdk",
  "assert_cmd",
  "camino",
  "clap",

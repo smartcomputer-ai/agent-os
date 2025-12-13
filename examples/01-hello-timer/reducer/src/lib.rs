@@ -4,7 +4,7 @@
 extern crate alloc;
 
 use alloc::string::String;
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, TimerSetParams, Value};
+use aos_wasm_sdk::{aos_reducer, aos_variant, aos_event_union, ReduceError, Reducer, ReducerCtx, TimerSetParams, Value};
 use serde::{Deserialize, Serialize};
 
 aos_reducer!(TimerSm);
@@ -24,7 +24,7 @@ impl Reducer for TimerSm {
     ) -> Result<(), ReduceError> {
         match event {
             TimerEvent::Start(start) => handle_start(ctx, start),
-            TimerEvent::TimerFired(_fired) => handle_timer_fired(ctx),
+            TimerEvent::Fired(_fired) => handle_timer_fired(ctx),
         }
         Ok(())
     }
@@ -38,12 +38,14 @@ struct TimerState {
     fired_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum TimerPc {
-    Idle,
-    Awaiting,
-    Done,
-    TimedOut,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum TimerPc {
+        Idle,
+        Awaiting,
+        Done,
+        TimedOut,
+    }
 }
 
 impl Default for TimerPc {
@@ -63,11 +65,12 @@ struct TimerFiredEvent {
     requested: TimerSetParams,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum TimerEvent {
-    Start(StartEvent),
-    TimerFired(TimerFiredEvent),
+aos_event_union! {
+    #[derive(Debug, Clone, Serialize)]
+    enum TimerEvent {
+        Start(StartEvent),
+        Fired(TimerFiredEvent)
+    }
 }
 
 fn handle_start(ctx: &mut ReducerCtx<TimerState>, event: StartEvent) {

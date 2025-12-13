@@ -3,10 +3,16 @@
 
 extern crate alloc;
 
-use alloc::{format, string::{String, ToString}, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
 use aos_air_types::HashRef;
 use aos_effects::builtins::{BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt};
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, Value};
+use aos_wasm_sdk::{
+    ReduceError, Reducer, ReducerCtx, Value, aos_event_union, aos_reducer, aos_variant,
+};
 use serde::{Deserialize, Serialize};
 use serde_bytes;
 use sha2::{Digest, Sha256};
@@ -48,12 +54,14 @@ struct EchoState {
     retrieved_blob_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum EchoPc {
-    Idle,
-    Putting,
-    Getting,
-    Done,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum EchoPc {
+        Idle,
+        Putting,
+        Getting,
+        Done,
+    }
 }
 
 impl Default for EchoPc {
@@ -84,13 +92,15 @@ struct BlobGetResultEvent {
     receipt: BlobGetReceipt,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum BlobEchoEvent {
-    Start(StartEvent),
-    PutResult(BlobPutResultEvent),
-    GetResult(BlobGetResultEvent),
+aos_event_union! {
+    #[derive(Debug, Clone, Serialize)]
+    enum BlobEchoEvent {
+        Start(StartEvent),
+        PutResult(BlobPutResultEvent),
+        GetResult(BlobGetResultEvent)
+    }
 }
+
 
 fn handle_start(ctx: &mut ReducerCtx<EchoState>, event: StartEvent) {
     if !matches!(ctx.state.pc, EchoPc::Idle | EchoPc::Done) {

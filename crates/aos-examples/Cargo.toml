@@ -11,6 +11,7 @@ aos-kernel = { path = "../aos-kernel" }
 aos-store = { path = "../aos-store" }
 aos-air-exec = { path = "../aos-air-exec" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
+aos-wasm-sdk = { path = "../aos-wasm-sdk" }
 aos-effects = { path = "../aos-effects" }
 aos-host = { path = "../aos-host", features = ["test-fixtures"] }
 aos-wasm-build = { path = "../aos-wasm-build" }

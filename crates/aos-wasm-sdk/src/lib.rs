@@ -471,6 +471,73 @@ macro_rules! aos_reducer {
     };
 }
 
+/// Helper macro to apply AIR's canonical variant tagging (`$tag`/`$value`) to an enum.
+///
+/// This avoids repeating `#[serde(tag = "$tag", content = "$value")]` on every reducer
+/// event/state enum. Usage:
+///
+/// ```
+/// use serde::{Serialize, Deserialize};
+/// use aos_wasm_sdk::aos_variant;
+///
+/// aos_variant! {
+///     #[derive(Serialize, Deserialize)]
+///     pub enum Event {
+///         Start { target: u64 },
+///         Tick,
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! aos_variant {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident $($rest:tt)*) => {
+        $(#[$meta])*
+        #[serde(tag = "$tag", content = "$value")]
+        $vis enum $name $($rest)*
+    };
+}
+
+/// Helper macro to define an enum that can deserialize either a tagged (canonical `$tag`/`$value`)
+/// variant form or any number of plain record forms (useful for mixing app events with receipt records).
+#[macro_export]
+macro_rules! aos_event_union {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident { $($variant:ident ( $ty:ty )),+ $(,)? }) => {
+        $(#[$meta])*
+        $vis enum $name {
+            $($variant($ty)),+
+        }
+
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = serde_cbor::Value::deserialize(deserializer)?;
+                $(
+                    // First, try canonical tagged form: {"$tag":"Variant", "$value": ...}
+                    if let serde_cbor::Value::Map(map) = &value {
+                        if let Some(serde_cbor::Value::Text(tag)) = map.get(&serde_cbor::Value::Text("$tag".into())) {
+                            if tag == stringify!($variant) {
+                                let inner = map.get(&serde_cbor::Value::Text("$value".into()))
+                                    .cloned()
+                                    .unwrap_or(serde_cbor::Value::Null);
+                                if let Ok(v) = serde_cbor::value::from_value::<$ty>(inner) {
+                                    return Ok(Self::$variant(v));
+                                }
+                            }
+                        }
+                    }
+                    // Fallback: try to deserialize the entire value as the variant payload (record-shaped receipts, legacy untagged Start, etc.)
+                    if let Ok(v) = serde_cbor::value::from_value::<$ty>(value.clone()) {
+                        return Ok(Self::$variant(v));
+                    }
+                )+
+                Err(serde::de::Error::custom("no union variant matched payload"))
+            }
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,6 +9,7 @@ use anyhow::{Result, ensure};
 use aos_effects::{EffectKind as EffectsEffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::FsStore;
+use aos_wasm_sdk::{aos_event_union, aos_variant};
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
@@ -27,12 +28,14 @@ struct TimerState {
     fired_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-enum TimerPc {
-    Idle,
-    Awaiting,
-    Done,
-    TimedOut,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    enum TimerPc {
+        Idle,
+        Awaiting,
+        Done,
+        TimedOut,
+    }
 }
 
 impl Default for TimerPc {
@@ -45,6 +48,20 @@ impl Default for TimerPc {
 struct StartEvent {
     deliver_at_ns: u64,
     key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TimerFiredEvent {
+    requested: TimerSetParams,
+}
+
+// Tagged vs record union: Start is a variant, Fired is a record receipt.
+aos_event_union! {
+    #[derive(Debug, Clone, Serialize)]
+    enum TimerEvent {
+        Start(StartEvent),
+        Fired(TimerFiredEvent)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,10 +89,10 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     println!("→ Hello Timer demo");
     println!("     start key=? deliver_ns={DELIVER_AT_NS}");
-    let start = StartEvent {
+    let start = TimerEvent::Start(StartEvent {
         deliver_at_ns: DELIVER_AT_NS,
         key: None,
-    };
+    });
     host.send_event(&start)?;
     synthesize_timer_receipts(host.kernel_mut())?;
 

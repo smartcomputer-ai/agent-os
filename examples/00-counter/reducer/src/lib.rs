@@ -1,7 +1,7 @@
 #![allow(improper_ctypes_definitions)]
 #![no_std]
 
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx, Value};
+use aos_wasm_sdk::{aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx, Value};
 use serde::{Deserialize, Serialize};
 
 aos_reducer!(CounterSm);
@@ -12,11 +12,13 @@ struct CounterState {
     remaining: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum CounterPc {
-    Idle,
-    Counting,
-    Done,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum CounterPc {
+        Idle,
+        Counting,
+        Done,
+    }
 }
 
 impl Default for CounterPc {
@@ -25,10 +27,12 @@ impl Default for CounterPc {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum CounterEvent {
-    Start { target: u64 },
-    Tick,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum CounterEvent {
+        Start { target: u64 },
+        Tick,
+    }
 }
 
 #[derive(Default)]
