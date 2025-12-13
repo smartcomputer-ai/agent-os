@@ -8,6 +8,7 @@ mod hello_timer;
 mod llm_summarizer;
 mod retry_backoff;
 mod safe_upgrade;
+mod worldfs_lab;
 mod util;
 
 use anyhow::{Result, anyhow};
@@ -50,6 +51,8 @@ enum Commands {
     LlmSummarizer,
     /// Run the reducer-driven retry with backoff example
     RetryBackoff,
+    /// Run the WorldFS lab (notes + catalog)
+    WorldfsLab,
     /// Run every available example sequentially
     All,
 }
@@ -137,6 +140,14 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "examples/08-retry-backoff",
         runner: retry_backoff::run,
     },
+    ExampleMeta {
+        number: "09",
+        slug: "worldfs-lab",
+        title: "WorldFS Lab",
+        summary: "Keyed notes + catalog + world fs",
+        dir: "examples/09-worldfs-lab",
+        runner: worldfs_lab::run,
+    },
 ];
 
 fn main() {
@@ -172,6 +183,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::SafeUpgrade) => run_single("safe-upgrade"),
         Some(Commands::LlmSummarizer) => run_single("llm-summarizer"),
         Some(Commands::RetryBackoff) => run_single("retry-backoff"),
+        Some(Commands::WorldfsLab) => run_single("worldfs-lab"),
         Some(Commands::All) => run_all(),
         None => {
             list_examples();

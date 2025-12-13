@@ -1,0 +1,9 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "notes/allow_all@1",
+    "rules": [
+      { "when": {}, "decision": "allow" }
+    ]
+  }
+]

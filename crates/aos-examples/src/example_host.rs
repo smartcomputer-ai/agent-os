@@ -54,18 +54,13 @@ impl ExampleHost {
 
         let assets_root = cfg.assets_root.unwrap_or(cfg.example_root).to_path_buf();
 
-        let loaded_host = load_and_patch(
-            store.clone(),
-            &assets_root,
-            cfg.reducer_name,
-            &wasm_hash_ref,
-        )?;
-        let loaded_replay = load_and_patch(
-            store.clone(),
-            &assets_root,
-            cfg.reducer_name,
-            &wasm_hash_ref,
-        )?;
+        let mut loaded_host =
+            load_and_patch(store.clone(), &assets_root, cfg.reducer_name, &wasm_hash_ref)?;
+        let mut loaded_replay =
+            load_and_patch(store.clone(), &assets_root, cfg.reducer_name, &wasm_hash_ref)?;
+
+        maybe_patch_object_catalog(cfg.example_root, store.clone(), &mut loaded_host)?;
+        maybe_patch_object_catalog(cfg.example_root, store.clone(), &mut loaded_replay)?;
 
         let host_config = HostConfig::default();
         let kernel_config = util::kernel_config(cfg.example_root)?;
@@ -92,9 +87,14 @@ impl ExampleHost {
     }
 
     pub fn send_event<T: Serialize>(&mut self, event: &T) -> Result<()> {
+        let schema = self.event_schema.clone();
+        self.send_event_as(&schema, event)
+    }
+
+    pub fn send_event_as<T: Serialize>(&mut self, schema: &str, event: &T) -> Result<()> {
         let cbor = serde_cbor::to_vec(event)?;
         self.host
-            .send_event_cbor(&self.event_schema, cbor)
+            .send_event_cbor(schema, cbor)
             .context("send event")?;
         // Mirror the previous harness behavior: advance reducer immediately.
         self.host.run_to_idle().context("drain after event")
@@ -144,7 +144,7 @@ impl ExampleHost {
         let final_state_bytes = self
             .host
             .state_bytes(&self.reducer_name)
-            .ok_or_else(|| anyhow!("missing reducer state"))?;
+            .unwrap_or_else(|| Vec::new());
         let journal_entries = self.host.kernel().dump_journal()?;
         Ok(ReplayHandle {
             store: self.store,
@@ -168,6 +168,10 @@ pub struct ReplayHandle {
 
 impl ReplayHandle {
     pub fn verify_replay(self) -> Result<Vec<u8>> {
+        if self.final_state_bytes.is_empty() {
+            println!("   replay check: skipped (keyed reducer, no monolithic state)\n");
+            return Ok(Vec::new());
+        }
         let mut kernel = Kernel::from_loaded_manifest_with_config(
             self.store.clone(),
             self.loaded,
@@ -211,4 +215,34 @@ fn load_and_patch(
         .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
     patch_module_hash(&mut loaded, reducer_name, wasm_hash)?;
     Ok(loaded)
+}
+
+fn maybe_patch_object_catalog(
+    example_root: &Path,
+    store: Arc<FsStore>,
+    loaded: &mut LoadedManifest,
+) -> Result<()> {
+    let needs_patch = loaded
+        .modules
+        .iter()
+        .any(|(name, module)| name == "sys/ObjectCatalog@1" && aos_host::util::is_placeholder_hash(module));
+    if !needs_patch {
+        return Ok(());
+    }
+    let cache_dir = example_root.join(".aos").join("cache").join("modules");
+    let wasm_bytes = util::compile_wasm_bin(
+        crate::workspace_root(),
+        "aos-sys",
+        "object_catalog",
+        &cache_dir,
+    )?;
+    let wasm_hash = store
+        .put_blob(&wasm_bytes)
+        .context("store object_catalog wasm blob")?;
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash object catalog")?;
+    let patched = patch_modules(loaded, &wasm_hash_ref, |name, _| name == "sys/ObjectCatalog@1");
+    if patched == 0 {
+        anyhow::bail!("object catalog module missing in manifest");
+    }
+    Ok(())
 }

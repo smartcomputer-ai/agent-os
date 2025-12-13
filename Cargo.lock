@@ -298,8 +298,10 @@ name = "aos-sys"
 version = "0.1.0"
 dependencies = [
  "aos-wasm-sdk",
+ "hex",
  "serde",
  "serde_cbor",
+ "sha2",
 ]
 
 [[package]]
