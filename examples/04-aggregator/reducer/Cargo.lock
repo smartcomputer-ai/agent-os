@@ -35,6 +35,7 @@ dependencies = [
  "once_cell",
  "petgraph",
  "serde",
+ "serde_cbor",
  "serde_json",
  "thiserror",
 ]

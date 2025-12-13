@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
@@ -9,9 +10,12 @@ use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 const REDUCER_NAME: &str = "demo/FetchNotify@1";
 const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
 const MODULE_PATH: &str = "examples/03-fetch-notify/reducer";
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum FetchEventEnvelope {
-    Start { url: String, method: String },
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum FetchEventEnvelope {
+        Start { url: String, method: String },
+        NotifyComplete { status: i64, body_preview: String },
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,11 +27,13 @@ struct FetchStateView {
     last_body_preview: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum FetchPcView {
-    Idle,
-    Fetching,
-    Done,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum FetchPcView {
+        Idle,
+        Fetching,
+        Done,
+    }
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
@@ -44,8 +50,9 @@ pub fn run(example_root: &Path) -> Result<()> {
         url: "https://example.com/data.json".into(),
         method: "GET".into(),
     };
-    let FetchEventEnvelope::Start { url, method } = &start_event;
-    println!("     start fetch → url={url} method={method}");
+    if let FetchEventEnvelope::Start { url, method } = &start_event {
+        println!("     start fetch → url={url} method={method}");
+    }
     host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();
