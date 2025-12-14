@@ -3,8 +3,9 @@
 **Goal**: Clean, capability-honest CLI for reads/writes; no faux filesystem. Standardize flags/output, make keyed reducers easy, and unify daemon/batch behavior.
 
 ## Command Surface (proposed)
+- `aos world state ls <reducer> [--json]`  # lists keys for keyed reducers; graceful "not keyed" otherwise
 - `aos world state get <reducer> [--key <utf8>|--key-hex <HEX>|--key-b64 <B64>] [--consistency head|exact:H|at-least:H] [--json|--raw]`
-- `aos world cells ls <reducer> [--json]`
+- Optional: `aos world state get <reducer> --all` (fetch all keys for keyed reducers; JSON/table output)
 - `aos world obj ls [prefix] [--kind K --tag T --depth N --versions --json]`
 - `aos world obj get <name> [--version N] [--raw|--json]`
 - `aos world obj stat <name> [--version N] [--json]`
@@ -34,6 +35,7 @@
 - No POSIX-like `fs/ls/cat/tree` veneer.
 - No deletes/renames; ObjectCatalog remains append-only.
 - No HTTP read surface in this milestone (future).
+- No separate `cells` verb once `state ls`/`state get --all` cover keyed reducers.
 
 ## Migration Notes
 - Mark old `fs` command retired; point users to `obj/blob/state`.
