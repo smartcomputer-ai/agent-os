@@ -1,6 +1,6 @@
 # Example 09 — WorldFS Lab (Notes + Catalog)
 
-A keyed notebook reducer plus ObjectCatalog and a small plan. Finalized notes trigger a plan that writes a report blob and registers it in the catalog, giving `aos world fs` something real to explore under `/sys`, `/obj`, and `/blob`.
+A keyed notebook reducer plus ObjectCatalog and a small plan. Finalized notes trigger a plan that writes a report blob and registers it in the catalog, originally meant to be explored via the `aos world fs` CLI.
 
 ## What it does
 - Keyed reducer `notes/NotebookSM@1` owns one note per key.
@@ -20,22 +20,8 @@ If you change schemas/manifests or rerun after a code edit, wipe any stale journ
 rm -rf .aos
 ```
 
-## Play with WorldFS CLI
-After the run, in `examples/09-worldfs-lab` try:
-```
-aos world fs ls /sys/reducers/NotebookSM@1
-
-aos world fs cat /sys/reducers/NotebookSM@1/alpha
-
-aos world fs ls /obj --long
-
-aos world fs cat /obj/notes/alpha/report/data
-
-aos world fs stat /obj/notes/alpha/report
-
-aos world fs tree /obj
-```
-These exercise `introspect.*`, `list_cells`, `blob.get`, and catalog reads with provenance metadata.
+## Note on CLI
+The experimental `aos world fs` CLI has been removed. The example still builds and runs, but there is currently no supported CLI wrapper to browse the catalog or blobs. You can inspect the journal/store directly or wait for the upcoming replacement commands (object and blob readers) to land.
 
 ## Layout
 ```

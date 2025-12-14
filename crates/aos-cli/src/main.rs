@@ -8,7 +8,6 @@ use clap::{Args, Parser, Subcommand};
 
 use commands::cells::CellsArgs;
 use commands::event::EventArgs;
-use commands::fs::FsArgs;
 use commands::gov::GovArgs;
 use commands::init::InitArgs;
 use commands::manifest::ManifestArgs;
@@ -80,9 +79,6 @@ enum WorldSubcommand {
 
     /// Governance commands
     Gov(GovArgs),
-
-    /// Filesystem-style introspection
-    Fs(FsArgs),
 }
 
 #[tokio::main]
@@ -110,7 +106,6 @@ async fn main() -> Result<()> {
                 }
                 WorldSubcommand::Shutdown => commands::shutdown::cmd_shutdown(opts).await,
                 WorldSubcommand::Gov(args) => commands::gov::cmd_gov(opts, &args).await,
-                WorldSubcommand::Fs(args) => commands::fs::cmd_fs(opts, &args).await,
             }
         }
     }

@@ -1,6 +1,6 @@
 # WorldFS View Helpers
 
-**Status**: Ready to spec/implement for v0.4-query (p4-introspection is DONE); carries the metadata needed for p1-self-upgrade.
+**Status**: Shelved — CLI implementation removed; kept here for reference if we revive the concept later. p4-introspection is DONE and can back future read commands.
 
 This document defines CLI commands and LLM helper APIs that provide a filesystem-like view over AgentOS introspection surfaces. These are convenience wrappers—they do not add new capabilities.
 

@@ -144,7 +144,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "09",
         slug: "worldfs-lab",
         title: "WorldFS Lab",
-        summary: "Keyed notes + catalog + world fs",
+        summary: "Keyed notes + catalog (no fs CLI)",
         dir: "examples/09-worldfs-lab",
         runner: worldfs_lab::run,
     },

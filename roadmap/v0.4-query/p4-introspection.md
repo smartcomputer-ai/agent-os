@@ -42,7 +42,7 @@ All are read-only; receipts carry consistency metadata for downstream governance
   - Add `blob-get` verb returning base64 CAS bytes (needed for `/blob/**` and object payloads).
 
 ### 5) CLI/SDK/LLM helpers
-- CLI commands (`world state`, `world manifest`, new `world fs`) must call control verbs first, batch fallback second, always emitting consistency metadata.
+- CLI commands (`world state`, `world manifest`, and future read helpers) must call control verbs first, batch fallback second, always emitting consistency metadata.
 - Add SDK/LLM helpers `fs_read_manifest`, `fs_read_reducer`, `fs_ls`, `fs_stat`, `fs_read` that translate to `introspect.*` + `blob.get`.
 
 ### 6) Tests/fixtures
