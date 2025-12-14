@@ -1,6 +1,6 @@
 # Task: Module autoload without hardcoded wasm_hashes
 
-**Goal**: Allow worlds (and CLI flows like `aos world fs`) to load required modules referenced in `air/*.json` without embedding concrete `wasm_hash` values in the manifest/defs. Improve DX so placeholder hashes are resolved automatically while avoiding accidental cross-patching.
+**Goal**: Allow worlds (and CLI flows) to load required modules referenced in `air/*.json` without embedding concrete `wasm_hash` values in the manifest/defs. Improve DX so placeholder hashes are resolved automatically while avoiding accidental cross-patching.
 
 ## Problem
 - Today manifests often include placeholder hashes for modules.
@@ -13,7 +13,7 @@
 - Worlds can ship `air/` files with placeholder hashes and have a deterministic resolution path that avoids “wrong module patched” traps.
 
 ## Acceptance Criteria
-- Running `aos world fs ...` (and other world commands) against a world with multiple placeholder modules does not mispatch modules.
+- Running CLI commands against a world with multiple placeholder modules does not mispatch modules.
 - System modules referenced in `air/` load automatically if built locally, or produce a clear error instructing how to build/fetch them; no need to hardcode hashes in example manifests.
 - Regression tests cover multi-module worlds with placeholders, ensuring correct module selection and replay.
 
