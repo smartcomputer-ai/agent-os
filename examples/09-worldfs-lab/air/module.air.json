@@ -19,6 +19,7 @@
     "name": "sys/ObjectCatalog@1",
     "module_kind": "reducer",
     "key_schema": "sys/ObjectKey@1",
+    "wasm_hash": "sha256:cd56d62ba80ae55852d02409f310fc5c5a7a161afae4d8d707bc146527c1a3fa",
     "abi": {
       "reducer": {
         "state": "sys/ObjectVersions@1",

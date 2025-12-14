@@ -15,6 +15,11 @@ A keyed notebook reducer plus ObjectCatalog and a small plan. Finalized notes tr
 cargo run -p aos-examples -- worldfs-lab
 ```
 
+If you change schemas/manifests or rerun after a code edit, wipe any stale journal/store first (old entries won’t match new schemas):
+```
+rm -rf .aos
+```
+
 ## Play with WorldFS CLI
 After the run, in `examples/09-worldfs-lab` try:
 ```
