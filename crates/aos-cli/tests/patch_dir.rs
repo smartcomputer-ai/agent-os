@@ -37,6 +37,7 @@ fn patch_dir_dry_run_emits_patchdoc_with_base_and_refs() {
 
     // Create a dummy current manifest in the store to derive base hash (world/.aos/manifest.air.cbor).
     let manifest_bytes = fs::read(world.join("air/manifest.air.json")).unwrap();
+    // For tests we can just store the JSON bytes; the real CLI patches from the store.
     fs::write(world.join(".aos/manifest.air.cbor"), &manifest_bytes).unwrap();
     let base_hash = Hash::of_bytes(&manifest_bytes).to_hex();
 
