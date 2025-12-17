@@ -7,6 +7,7 @@ pub mod head;
 pub mod info;
 pub mod init;
 pub mod manifest;
+pub mod obj;
 pub mod blob;
 pub mod replay;
 pub mod run;
