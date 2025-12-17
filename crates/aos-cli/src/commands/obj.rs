@@ -7,8 +7,9 @@ use base64::Engine;
 use crate::key::{KeyOverrides, encode_key_for_reducer};
 use crate::opts::{Mode, WorldOpts, resolve_dirs};
 use crate::output::print_success;
+use crate::util::load_world_env;
 
-use super::{should_use_control, try_control_client};
+use super::{create_host, prepare_world, should_use_control, try_control_client};
 
 const OBJECT_CATALOG: &str = "sys/ObjectCatalog@1";
 
@@ -116,11 +117,32 @@ async fn obj_get(opts: &WorldOpts, args: &ObjGetArgs) -> Result<()> {
         }
     }
 
+    // Batch/local read
+    load_world_env(&dirs.world)?;
+    let (store, loaded) = prepare_world(&dirs, opts)?;
+    let host = create_host(store, loaded, &dirs, opts)?;
+    if let Some(read) = host.query_state(
+        OBJECT_CATALOG,
+        Some(&key_bytes),
+        aos_kernel::Consistency::Head,
+    ) {
+        let data = read
+            .value
+            .map(|bytes| serde_cbor::from_slice::<serde_json::Value>(&bytes).unwrap_or_default())
+            .unwrap_or(serde_json::json!(null));
+        return print_success(
+            opts,
+            data,
+            Some(meta_to_json(&read.meta)),
+            vec!["daemon unavailable; read via batch".into()],
+        );
+    }
+
     print_success(
         opts,
         serde_json::json!(null),
         None,
-        vec!["object get requires daemon/control for now".into()],
+        vec!["object not found".into()],
     )
 }
 
@@ -151,11 +173,40 @@ async fn obj_stat(opts: &WorldOpts, args: &ObjStatArgs) -> Result<()> {
         }
     }
 
+    // Batch/local read
+    load_world_env(&dirs.world)?;
+    let (store, loaded) = prepare_world(&dirs, opts)?;
+    let host = create_host(store, loaded, &dirs, opts)?;
+    if let Some(read) = host.query_state(
+        OBJECT_CATALOG,
+        Some(&key_bytes),
+        aos_kernel::Consistency::Head,
+    ) {
+        let (latest, warning) = read
+            .value
+            .map(|bytes| latest_version(&bytes))
+            .transpose()?
+            .unwrap_or((serde_json::json!(null), None));
+        return print_success(
+            opts,
+            latest,
+            Some(meta_to_json(&read.meta)),
+            warning
+                .into_iter()
+                .chain(if opts.quiet {
+                    None
+                } else {
+                    Some("daemon unavailable; read via batch".into())
+                })
+                .collect(),
+        );
+    }
+
     print_success(
         opts,
         serde_json::json!(null),
         None,
-        vec!["object stat requires daemon/control for now".into()],
+        vec!["object not found".into()],
     )
 }
 

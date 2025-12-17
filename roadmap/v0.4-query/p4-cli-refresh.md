@@ -133,6 +133,15 @@ Notes:
 ## Open Follow-ups
 - Control `step` removed; keep CLI surface aligned and ensure no tooling depends on it.
 - Confirm `ObjectCatalog` reducer/API matches the desired `obj` UX (versions, tags, depth view).
+- Routing-based key derivation for `event send` (derive from manifest routing `key_field` + `key_schema`; overrides still honored).
+- Obj local fallback is batch-only via host state read; no daemon-less listing yet.
+
+## Progress to Date
+- CLI flattened to `aos <noun> <verb>` with new nouns: `event`, `state`, `manifest`, `journal`, `snapshot`, `gov`, `defs`, `blob`, `obj`, `run/stop/status/init`.
+- Universal flags wired: `--mode`, `--control`, `--json/--pretty/--quiet/--no-meta`, world walk-up resolution, control timeout. Output contract implemented via shared renderer (data on stdout, meta/notices on stderr; JSON `{data, meta?, warnings?}`).
+- Control-first with batch fallback for state/manifest/journal/snapshot/obj/blob; daemon-required mode errors if socket missing; batch fallback warns unless `--quiet`.
+- Key handling: added key overrides (`--key`, `--key-json`, `--key-hex`, `--key-b64`) with schema-based encoding for keyed reducers; `state get` uses encoded keys. Routing-based derivation for `event send` still TODO.
+- New nouns implemented: `defs get/ls` (control with local manifest fallback), `blob put/get/stat` (safe TTY defaults), `obj ls/get/stat` via ObjectCatalog (control-first; batch fallback for get/stat).
 
 ## Implementation Plan (CLI Refresh)
 1) Control + batch plumbing: finalize verb map (no `step`, no legacy aliases), add `defs get` control/batch paths, ensure `send-event`/`inject-receipt` run a cycle, and align daemon/batch meta payloads.
