@@ -59,7 +59,8 @@ fn print_human(
     warnings: Vec<String>,
 ) -> Result<()> {
     if let Some(m) = meta {
-        if !opts.no_meta {
+        if !opts.no_meta && opts.json {
+            // Only emit meta in human mode when explicitly in JSON output.
             let mut stderr = std::io::stderr();
             writeln!(stderr, "meta: {}", serde_json::to_string_pretty(&m)?)?;
         }

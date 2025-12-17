@@ -9,6 +9,7 @@ pub mod init;
 pub mod manifest;
 pub mod obj;
 pub mod blob;
+pub mod cells;
 pub mod replay;
 pub mod run;
 pub mod stop;

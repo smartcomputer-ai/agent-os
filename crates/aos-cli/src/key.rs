@@ -79,7 +79,8 @@ fn encode_key_value_for_reducer(
 
 fn resolve_key_value(overrides: &KeyOverrides) -> Result<CborValue> {
     if let Some(hex) = &overrides.hex {
-        let bytes = hex::decode(hex).context("decode hex key")?;
+        let trimmed = hex.trim_start_matches("0x").trim_start_matches("0X");
+        let bytes = hex::decode(trimmed).context("decode hex key")?;
         return Ok(CborValue::Bytes(bytes));
     }
     if let Some(b64) = &overrides.b64 {

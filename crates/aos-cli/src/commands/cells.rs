@@ -114,10 +114,18 @@ fn meta_to_entry(meta: CellMeta) -> CellEntry {
 }
 
 fn display_key(bytes: &[u8]) -> String {
-    match std::str::from_utf8(bytes) {
-        Ok(s) => s.to_string(),
-        Err(_) => format!("0x{}", hex::encode(bytes)),
+    // Try decode as CBOR -> JSON string (handles self-describe tags, etc.)
+    if let Ok(val) = serde_cbor::from_slice::<serde_json::Value>(bytes) {
+        if let Some(s) = val.as_str() {
+            return s.to_string();
+        }
     }
+    // Fallback: UTF-8
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    // Otherwise hex
+    format!("0x{}", hex::encode(bytes))
 }
 
 fn render_cells(cells: &[CellEntry], raw: bool, reducer: &str) {

@@ -264,30 +264,84 @@ fn select_version(
     let Some(bytes) = state_bytes else {
         return Ok((serde_json::json!(null), Some("object not found".into())));
     };
-    let value: serde_json::Value = serde_cbor::from_slice(&bytes)?;
-    let warn_missing_versions = || {
-        Some("version selection not available; returned latest if present".into())
+    let cbor_val: serde_cbor::Value = serde_cbor::from_slice(&bytes)?;
+    let value = cbor_to_json_lossy(&cbor_val);
+    let versions_map = value.get("versions").and_then(|v| v.as_object());
+    // Helper to pull a version entry by number/string.
+    let pick_version = |ver: u64, versions_map: &serde_json::Map<String, serde_json::Value>| {
+        versions_map
+            .get(&ver.to_string())
+            .cloned()
+            .ok_or_else(|| format!("version {ver} not found"))
     };
+
+    // If a version is requested, honor it using versions map when present.
     if let Some(v) = version {
-        // Try to select the requested version if present.
-        if let Some(versions) = value.get("versions").and_then(|v| v.as_object()) {
-            if let Some(entry) = versions.get(&v.to_string()).cloned() {
-                return Ok((entry, None));
-            } else {
-                return Ok((
-                    serde_json::json!(null),
-                    Some(format!("version {v} not found; available latest returned")),
-                ));
+        if let Some(versions) = versions_map {
+            match pick_version(v, versions) {
+                Ok(entry) => return Ok((entry, None)),
+                Err(msg) => {
+                    return Ok((
+                        serde_json::json!(null),
+                        Some(format!("{msg}; use obj ls to view available versions")),
+                    ))
+                }
             }
-        } else {
-            return Ok((value, warn_missing_versions()));
         }
+        // No versions map; return whole value with a warning.
+        return Ok((
+            value,
+            Some("version selection unavailable; returned full state".into()),
+        ));
     }
-    // Default to latest field if present.
-    if let Some(latest) = value.get("latest") {
-        Ok((latest.clone(), None))
-    } else {
-        Ok((value, warn_missing_versions()))
+
+    // No version requested: prefer latest entry when versions map exists.
+    if let Some(versions) = versions_map {
+        if let Some(latest_val) = value.get("latest") {
+            if let Some(latest_num) = latest_val.as_u64() {
+                if let Ok(entry) = pick_version(latest_num, versions) {
+                    return Ok((entry, None));
+                }
+            }
+        }
+        // Fallback: return the versions map itself.
+        return Ok((serde_json::json!(versions), None));
+    }
+
+    // No versions map: return the decoded value.
+    Ok((value, None))
+}
+
+fn cbor_to_json_lossy(val: &serde_cbor::Value) -> serde_json::Value {
+    use serde_cbor::Value as Cbor;
+    match val {
+        Cbor::Null => serde_json::Value::Null,
+        Cbor::Bool(b) => serde_json::Value::Bool(*b),
+        Cbor::Integer(i) => {
+            if let Ok(n) = i64::try_from(*i) {
+                serde_json::json!(n)
+            } else {
+                serde_json::json!(i.to_string())
+            }
+        }
+        Cbor::Bytes(b) => serde_json::Value::String(base64::engine::general_purpose::STANDARD.encode(b)),
+        Cbor::Text(t) => serde_json::Value::String(t.clone()),
+        Cbor::Array(a) => serde_json::Value::Array(a.iter().map(cbor_to_json_lossy).collect()),
+        Cbor::Map(m) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in m {
+                let key_str = match k {
+                    Cbor::Text(t) => t.clone(),
+                    Cbor::Integer(i) => i.to_string(),
+                    other => format!("{}", cbor_to_json_lossy(other)),
+                };
+                obj.insert(key_str, cbor_to_json_lossy(v));
+            }
+            serde_json::Value::Object(obj)
+        }
+        Cbor::Tag(_, inner) => cbor_to_json_lossy(inner),
+        Cbor::Float(f) => serde_json::Number::from_f64(*f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+        _ => serde_json::Value::Null,
     }
 }
 

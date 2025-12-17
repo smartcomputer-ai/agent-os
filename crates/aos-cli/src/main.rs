@@ -17,6 +17,7 @@ use commands::defs::DefsArgs;
 use commands::obj::ObjArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
+use commands::cells::CellsArgs;
 use opts::WorldOpts;
 
 #[derive(Parser, Debug)]
@@ -86,6 +87,8 @@ enum EventCommand {
 enum StateCommand {
     /// Get reducer state
     Get(StateArgs),
+    /// List keys (cells) for a keyed reducer
+    Ls(CellsArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -124,6 +127,7 @@ async fn main() -> Result<()> {
         },
         Command::State(cmd) => match cmd {
             StateCommand::Get(args) => commands::state::cmd_state(opts, &args).await,
+            StateCommand::Ls(args) => commands::cells::cmd_cells(opts, &args).await,
         },
         Command::Manifest(cmd) => match cmd {
             ManifestCommand::Get(args) => commands::manifest::cmd_manifest(opts, &args).await,

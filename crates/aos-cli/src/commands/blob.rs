@@ -118,9 +118,10 @@ async fn blob_put(opts: &WorldOpts, args: &BlobPutArgs) -> Result<()> {
 
 async fn blob_get(opts: &WorldOpts, args: &BlobGetArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
+    let hash_text = normalize_hash(&args.hash);
     let data = if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
-            let resp = client.blob_get("cli-blob-get", &args.hash).await?;
+            let resp = client.blob_get("cli-blob-get", &hash_text).await?;
             return output_blob(opts, &resp, args);
         } else if matches!(opts.mode, Mode::Daemon) {
             anyhow::bail!(
@@ -138,8 +139,8 @@ async fn blob_get(opts: &WorldOpts, args: &BlobGetArgs) -> Result<()> {
     } else {
         load_world_env(&dirs.world)?;
         let store = Arc::new(aos_store::FsStore::open(&dirs.store_root)?);
-        let hash = aos_cbor::Hash::from_hex_str(&args.hash)
-            .with_context(|| format!("invalid hash: {}", args.hash))?;
+        let hash = aos_cbor::Hash::from_hex_str(&hash_text)
+            .with_context(|| format!("invalid hash: {}", hash_text))?;
         store.get_blob(hash)?
     };
     output_blob(opts, &data, args)
@@ -172,6 +173,15 @@ fn output_blob(opts: &WorldOpts, data: &[u8], args: &BlobGetArgs) -> Result<()> 
         vec!["blob get default is metadata-only; pass --raw or --out to emit bytes".into()],
     )
 }
+
+fn normalize_hash(input: &str) -> String {
+    if input.starts_with("sha256:") {
+        input.to_string()
+    } else {
+        format!("sha256:{input}")
+    }
+}
+
 
 async fn blob_stat(opts: &WorldOpts, args: &BlobStatArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
