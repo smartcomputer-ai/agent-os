@@ -134,8 +134,8 @@ Notes:
 - Checks world root layout, store/journal/snapshot dirs, manifest load/hash, control socket health/perms; prints remediation hints.
 
 ## Open Follow-ups
-- Confirm `ObjectCatalog` reducer/API matches the desired `obj` UX (versions, tags, depth view).
-- Obj local fallback is batch-only via host state read; no daemon-less listing yet.
+- Confirm `ObjectCatalog` reducer/API matches the desired `obj` UX (versions, tags, depth view). Flags are accepted; batch path supports prefix/depth/limit with notices when filters need daemon/catalog.
+- Obj local fallback is batch-only via host state read; no daemon-less listing yet (batch path now returns keys with a notice).
 
 ## Progress to Date
 - CLI flattened to `aos <noun> <verb>` with new nouns: `event`, `state`, `manifest`, `journal`, `snapshot`, `gov`, `defs`, `blob`, `obj`, `run/stop/status/init`.
@@ -143,11 +143,11 @@ Notes:
 - Control-first with batch fallback for state/manifest/journal/snapshot/obj/blob; daemon-required mode errors if socket missing; batch fallback warns unless `--quiet`.
 - Verb map finalized and legacy control/CLI verbs removed (`step`, old aliases); help/completions aligned to the new surface.
 - Key handling: added key overrides (`--key`, `--key-json`, `--key-hex`, `--key-b64`) with schema-based encoding for keyed reducers; `state get` uses encoded keys; `event send` derives keys from routing `key_field` + reducer `key_schema` with override escape hatches and clear error contracts.
-- New nouns implemented: `defs get/ls` (control with local manifest fallback), `blob put/get/stat` (safe TTY defaults), `obj ls/get/stat` via ObjectCatalog (control-first; batch fallback for get/stat).
+- New nouns implemented: `defs get/ls` (control with local manifest fallback), `blob put/get/stat` (safe TTY defaults), `obj ls/get/stat` via ObjectCatalog (control-first; batch fallback for get/stat; batch ls supports prefix/depth/limit and warns when advanced filters are ignored).
 
 ## Implementation Plan (CLI Refresh)
 1) Control + batch plumbing: finalize verb map (no `step`, no legacy aliases), add `defs get` control/batch paths, ensure `send-event`/`inject-receipt` run a cycle, and align daemon/batch meta payloads. **(done)**
 2) CLI foundation: implement universal flags + world resolution, shared control/batch client wrapper, and unified output rendering (stdout data, stderr meta/notices; JSON envelope with optional meta). **(done)**
 3) Event/state ergonomics: add key derivation/encoding (`key_schema` + routing `key_field`) for `event send`, key parsing for overrides, `state get/ls` consistency handling, and schema-aware state decoding with `--raw`. **(done)**
-4) Object/blob/manifest/defs surfaces: build `obj ls/get/stat` atop `ObjectCatalog` + `blob get` safeguards, implement blob put/get/stat UX defaults, and wire `manifest get/stat` + `defs get` from control/batch with meta where applicable. **(done for blob/manifest/defs; obj UX still to confirm)**
+4) Object/blob/manifest/defs surfaces: build `obj ls/get/stat` atop `ObjectCatalog` + `blob get` safeguards, implement blob put/get/stat UX defaults, and wire `manifest get/stat` + `defs get` from control/batch with meta where applicable. **(done for blob/manifest/defs; obj flags accepted, batch ls supports prefix/depth/limit, richer catalog filters still to confirm)** 
 5) UX polish + coverage: completions, CLI help text, update docs to the new nouns/verbs (no aliases), and golden/control tests for state/obj/blob/manifest/defs flows (daemon-first with batch fallback, provenance asserted). **(partially done: help smoke test + blob/obj basic tests; completions not versioned)**
