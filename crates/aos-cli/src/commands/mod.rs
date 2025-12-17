@@ -110,7 +110,6 @@ pub fn create_host(
     let host_config = util::host_config_from_env_and_overrides(
         opts.http_timeout_ms,
         opts.http_max_body_bytes,
-        opts.no_llm,
     );
     let kernel_config = util::make_kernel_config(&dirs.store_root)?;
     WorldHost::from_loaded_manifest(store, loaded, &dirs.store_root, host_config, kernel_config)

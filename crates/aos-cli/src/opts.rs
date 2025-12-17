@@ -63,17 +63,14 @@ pub struct WorldOpts {
     #[arg(long, global = true)]
     pub force_build: bool,
 
-    /// Override HTTP adapter timeout (milliseconds)
-    #[arg(long, global = true)]
+    /// Override HTTP adapter timeout (milliseconds) (env: AOS_HTTP_TIMEOUT_MS)
+    #[arg(long, global = true, env = "AOS_HTTP_TIMEOUT_MS", hide = true)]
     pub http_timeout_ms: Option<u64>,
 
-    /// Override HTTP adapter max response body size (bytes)
-    #[arg(long, global = true)]
+    /// Override HTTP adapter max response body size (bytes) (env: AOS_HTTP_MAX_BODY_BYTES)
+    #[arg(long, global = true, env = "AOS_HTTP_MAX_BODY_BYTES", hide = true)]
     pub http_max_body_bytes: Option<usize>,
 
-    /// Disable LLM adapter
-    #[arg(long, global = true)]
-    pub no_llm: bool,
 }
 
 /// Execution mode for CLI reads/writes.

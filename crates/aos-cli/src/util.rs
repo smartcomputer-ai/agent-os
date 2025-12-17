@@ -97,7 +97,6 @@ pub fn load_world_env(world_path: &Path) -> Result<()> {
 pub fn host_config_from_env_and_overrides(
     http_timeout_ms: Option<u64>,
     http_max_body_bytes: Option<usize>,
-    no_llm: bool,
 ) -> HostConfig {
     let mut cfg = HostConfig::from_env();
 
@@ -109,7 +108,7 @@ pub fn host_config_from_env_and_overrides(
     }
 
     let disable_llm_env = env_bool("AOS_DISABLE_LLM").unwrap_or(false);
-    if disable_llm_env || no_llm {
+    if disable_llm_env {
         cfg.llm = None;
     }
 
