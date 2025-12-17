@@ -238,6 +238,39 @@ mod tests {
         assert_eq!(key, expected);
     }
 
+    #[test]
+    fn error_when_payload_missing_key_field() {
+        let (_tmp, dirs) = build_test_world();
+        let payload = json!({ "not_id": "abc" });
+        let err = derive_event_key(
+            &dirs,
+            "com.acme/Event@1",
+            &payload,
+            &KeyOverrides::default(),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("missing key field"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn override_requires_route() {
+        let (_tmp, dirs) = build_test_world_without_routing();
+        let overrides = KeyOverrides {
+            utf8: Some("abc".into()),
+            ..Default::default()
+        };
+        let payload = json!({"id":"abc"});
+        let err = derive_event_key(&dirs, "com.acme/Event@1", &payload, &overrides)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("no routing entry"),
+            "unexpected error: {err}"
+        );
+    }
+
     fn build_test_world() -> (TempDir, ResolvedDirs) {
         let tmp = TempDir::new().expect("tmpdir");
         let world = tmp.path();
@@ -257,6 +290,34 @@ mod tests {
             store_root: store_root.clone(),
             control_socket: store_root.join("control.sock"),
         };
+        (tmp, dirs)
+    }
+
+    fn build_test_world_without_routing() -> (TempDir, ResolvedDirs) {
+        let (tmp, dirs) = build_test_world();
+        // Overwrite manifest without routing to exercise error path.
+        fs::write(
+            dirs.air_dir.join("manifest.air.json"),
+            r#"{
+  "$kind":"manifest",
+  "air_version":"1",
+  "schemas": [
+    { "name": "com.acme/Key@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "com.acme/State@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "com.acme/Event@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
+  ],
+  "modules": [ { "name": "com.acme/Reducer@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" } ],
+  "plans": [],
+  "effects": [],
+  "caps": [],
+  "policies": [],
+  "secrets": [],
+  "routing": { "events": [], "inboxes": [] },
+  "triggers": [],
+  "defaults": null
+}"#,
+        )
+        .unwrap();
         (tmp, dirs)
     }
 

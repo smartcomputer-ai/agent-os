@@ -1,7 +1,6 @@
 //! `aos blob` commands.
 
 use std::fs;
-use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -147,7 +146,6 @@ async fn blob_get(opts: &WorldOpts, args: &BlobGetArgs) -> Result<()> {
 }
 
 fn output_blob(opts: &WorldOpts, data: &[u8], args: &BlobGetArgs) -> Result<()> {
-    let is_tty = std::io::stdout().is_terminal();
     if let Some(out) = &args.out {
         fs::write(out, data)?;
         return print_success(
@@ -157,7 +155,7 @@ fn output_blob(opts: &WorldOpts, data: &[u8], args: &BlobGetArgs) -> Result<()> 
             vec![],
         );
     }
-    if args.raw || !is_tty {
+    if args.raw {
         let mut stdout = std::io::stdout();
         use std::io::Write;
         stdout.write_all(data)?;
@@ -171,7 +169,7 @@ fn output_blob(opts: &WorldOpts, data: &[u8], args: &BlobGetArgs) -> Result<()> 
             "hint": "use --raw or --out to write bytes"
         }),
         None,
-        vec![],
+        vec!["blob get default is metadata-only; pass --raw or --out to emit bytes".into()],
     )
 }
 
