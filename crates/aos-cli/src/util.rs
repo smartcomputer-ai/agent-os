@@ -94,43 +94,19 @@ pub fn load_world_env(world_path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn host_config_from_env_and_overrides(
+pub fn host_config_from_opts(
     http_timeout_ms: Option<u64>,
     http_max_body_bytes: Option<usize>,
 ) -> HostConfig {
+    // HostConfig::from_env already applies process env (including .env loaded earlier).
     let mut cfg = HostConfig::from_env();
-
-    if let Some(ms) = env_u64("AOS_HTTP_TIMEOUT_MS").or(http_timeout_ms) {
+    if let Some(ms) = http_timeout_ms {
         cfg.http.timeout = Duration::from_millis(ms);
     }
-    if let Some(bytes) = env_usize("AOS_HTTP_MAX_BODY_BYTES").or(http_max_body_bytes) {
+    if let Some(bytes) = http_max_body_bytes {
         cfg.http.max_body_size = bytes;
     }
-
-    let disable_llm_env = env_bool("AOS_DISABLE_LLM").unwrap_or(false);
-    if disable_llm_env {
-        cfg.llm = None;
-    }
-
     cfg
-}
-
-fn env_u64(key: &str) -> Option<u64> {
-    std::env::var(key).ok().and_then(|v| v.parse().ok())
-}
-
-fn env_usize(key: &str) -> Option<usize> {
-    std::env::var(key).ok().and_then(|v| v.parse().ok())
-}
-
-fn env_bool(key: &str) -> Option<bool> {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| match v.to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Some(true),
-            "0" | "false" | "no" | "off" => Some(false),
-            _ => None,
-        })
 }
 
 /// Validate a patch JSON document against patch.schema.json (and common schema refs).

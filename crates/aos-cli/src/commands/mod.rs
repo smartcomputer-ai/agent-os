@@ -107,7 +107,7 @@ pub fn create_host(
     dirs: &ResolvedDirs,
     opts: &WorldOpts,
 ) -> Result<WorldHost<FsStore>> {
-    let host_config = util::host_config_from_env_and_overrides(
+    let host_config = util::host_config_from_opts(
         opts.http_timeout_ms,
         opts.http_max_body_bytes,
     );
