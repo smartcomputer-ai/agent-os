@@ -93,6 +93,7 @@ Notes:
 ### event send
 - `aos event send <schema> <json|@file|@-> [--key ...] [--wait head|at-least:<H>]`
 - If routing declares `key_field`, CLI derives key, encodes via reducer `key_schema`, and sends without user-provided bytes. Overrides: `--key <utf8>`, `--key-json <json>`, `--key-hex`, `--key-b64`.
+- **Why encode keys client-side?** The CLI already has the manifest; pulling `key_schema` there lets us (1) route deterministically with canonical key bytes before the kernel decodes payloads, (2) keep one canonical envelope across ingress paths, and (3) fail fast when the routing field is missing or ill-typed. Complexity is contained because only `key_schema` (not full payload schema) is needed, it’s cached with the manifest, and explicit overrides remain as escape hatches.
 
 ### state
 - `aos state get <reducer> [--key ...] [--consistency head|exact:<H>|at-least:<H>] [--json|--pretty|--raw]`
@@ -131,7 +132,6 @@ Notes:
 - Checks world root layout, store/journal/snapshot dirs, manifest load/hash, control socket health/perms; prints remediation hints.
 
 ## Open Follow-ups
-- Control `step` removed; keep CLI surface aligned and ensure no tooling depends on it.
 - Confirm `ObjectCatalog` reducer/API matches the desired `obj` UX (versions, tags, depth view).
 - Routing-based key derivation for `event send` (derive from manifest routing `key_field` + `key_schema`; overrides still honored).
 - Obj local fallback is batch-only via host state read; no daemon-less listing yet.
@@ -140,11 +140,12 @@ Notes:
 - CLI flattened to `aos <noun> <verb>` with new nouns: `event`, `state`, `manifest`, `journal`, `snapshot`, `gov`, `defs`, `blob`, `obj`, `run/stop/status/init`.
 - Universal flags wired: `--mode`, `--control`, `--json/--pretty/--quiet/--no-meta`, world walk-up resolution, control timeout. Output contract implemented via shared renderer (data on stdout, meta/notices on stderr; JSON `{data, meta?, warnings?}`).
 - Control-first with batch fallback for state/manifest/journal/snapshot/obj/blob; daemon-required mode errors if socket missing; batch fallback warns unless `--quiet`.
+- Verb map finalized and legacy control/CLI verbs removed (`step`, old aliases); help/completions aligned to the new surface.
 - Key handling: added key overrides (`--key`, `--key-json`, `--key-hex`, `--key-b64`) with schema-based encoding for keyed reducers; `state get` uses encoded keys. Routing-based derivation for `event send` still TODO.
 - New nouns implemented: `defs get/ls` (control with local manifest fallback), `blob put/get/stat` (safe TTY defaults), `obj ls/get/stat` via ObjectCatalog (control-first; batch fallback for get/stat).
 
 ## Implementation Plan (CLI Refresh)
-1) Control + batch plumbing: finalize verb map (no `step`, no legacy aliases), add `defs get` control/batch paths, ensure `send-event`/`inject-receipt` run a cycle, and align daemon/batch meta payloads.
+1) Control + batch plumbing: finalize verb map (no `step`, no legacy aliases), add `defs get` control/batch paths, ensure `send-event`/`inject-receipt` run a cycle, and align daemon/batch meta payloads. **(done)**
 2) CLI foundation: implement universal flags + world resolution, shared control/batch client wrapper, and unified output rendering (stdout data, stderr meta/notices; JSON envelope with optional meta).
 3) Event/state ergonomics: add key derivation/encoding (`key_schema` + routing `key_field`) for `event send`, key parsing for overrides, `state get/ls` consistency handling, and schema-aware state decoding with `--raw`.
 4) Object/blob/manifest/defs surfaces: build `obj ls/get/stat` atop `ObjectCatalog` + `blob get` safeguards, implement blob put/get/stat UX defaults, and wire `manifest get/stat` + `defs get` from control/batch with meta where applicable.
