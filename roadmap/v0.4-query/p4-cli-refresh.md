@@ -1,4 +1,6 @@
-# P4: CLI Refresh (resource-first, no WorldFS)
+# P4: CLI Refresh
+
+**Complete**
 
 **Goal**: Ship a resource-oriented CLI with uniform verbs/flags, daemon-first reads, and sane keyed-reducer ergonomics—without the old `world` prefix or a faux filesystem.
 
