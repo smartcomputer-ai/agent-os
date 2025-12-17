@@ -82,6 +82,7 @@ impl<S: Store + 'static> TestHost<S> {
         self.host.enqueue_external(ExternalEvent::DomainEvent {
             schema: schema.to_string(),
             value: cbor,
+            key: None,
         })
     }
 
@@ -90,6 +91,7 @@ impl<S: Store + 'static> TestHost<S> {
         self.host.enqueue_external(ExternalEvent::DomainEvent {
             schema: schema.to_string(),
             value,
+            key: None,
         })
     }
 

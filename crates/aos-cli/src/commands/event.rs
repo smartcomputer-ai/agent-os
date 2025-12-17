@@ -6,6 +6,7 @@ use aos_host::modes::batch::BatchRunner;
 use clap::Args;
 use serde_json::Value as JsonValue;
 
+use crate::key::{KeyOverrides, derive_event_key};
 use crate::input::parse_input_value;
 use crate::opts::{Mode, WorldOpts, resolve_dirs};
 use crate::output::print_success;
@@ -20,6 +21,22 @@ pub struct EventArgs {
 
     /// Event value: JSON literal, @file, or @- for stdin
     pub value: String,
+
+    /// Key for keyed reducers (UTF-8)
+    #[arg(long)]
+    pub key: Option<String>,
+
+    /// Key as JSON literal
+    #[arg(long)]
+    pub key_json: Option<String>,
+
+    /// Key as hex-encoded bytes
+    #[arg(long)]
+    pub key_hex: Option<String>,
+
+    /// Key as base64-encoded bytes
+    #[arg(long)]
+    pub key_b64: Option<String>,
 }
 
 pub async fn cmd_event(opts: &WorldOpts, args: &EventArgs) -> Result<()> {
@@ -29,11 +46,20 @@ pub async fn cmd_event(opts: &WorldOpts, args: &EventArgs) -> Result<()> {
     let json_str = parse_input_value(&args.value)?;
     let parsed: JsonValue = serde_json::from_str(&json_str).context("parse event value as JSON")?;
     let cbor = serde_cbor::to_vec(&parsed).context("encode event value as CBOR")?;
+    let key_overrides = KeyOverrides {
+        utf8: args.key.clone(),
+        json: args.key_json.clone(),
+        hex: args.key_hex.clone(),
+        b64: args.key_b64.clone(),
+    };
+    let key_bytes = derive_event_key(&dirs, &args.schema, &parsed, &key_overrides)?;
 
     // If daemon is running, send via control channel (enqueue only, daemon processes)
     if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
-            let resp = client.send_event("cli-event", &args.schema, &cbor).await?;
+            let resp = client
+                .send_event("cli-event", &args.schema, key_bytes.as_deref(), &cbor)
+                .await?;
             if !resp.ok {
                 anyhow::bail!("event-send failed: {:?}", resp.error);
             }
@@ -63,6 +89,7 @@ pub async fn cmd_event(opts: &WorldOpts, args: &EventArgs) -> Result<()> {
     let events = vec![ExternalEvent::DomainEvent {
         schema: args.schema.clone(),
         value: cbor,
+        key: key_bytes.clone(),
     }];
     let res = runner.step(events).await?;
     print_success(

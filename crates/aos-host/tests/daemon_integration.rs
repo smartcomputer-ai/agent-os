@@ -43,6 +43,7 @@ async fn daemon_fires_timer_and_routes_event() {
             event: ExternalEvent::DomainEvent {
                 schema: START_SCHEMA.into(),
                 value: start_value,
+                key: None,
             },
             resp: resp_tx,
         })

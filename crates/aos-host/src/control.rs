@@ -252,10 +252,21 @@ async fn handle_request(
                 let bytes = BASE64_STANDARD
                     .decode(value_b64)
                     .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let key = req
+                    .payload
+                    .get("key_b64")
+                    .and_then(|v| v.as_str())
+                    .map(|b64| {
+                        BASE64_STANDARD
+                            .decode(b64)
+                            .map_err(|e| ControlError::decode(format!("invalid key base64: {e}")))
+                    })
+                    .transpose()?;
                 let (tx, rx) = oneshot::channel();
                 let evt = ExternalEvent::DomainEvent {
                     schema,
                     value: bytes,
+                    key,
                 };
                 let _ = control_tx
                     .send(ControlMsg::EventSend {
@@ -718,16 +729,26 @@ impl ControlClient {
         &mut self,
         id: impl Into<String>,
         schema: &str,
+        key: Option<&[u8]>,
         value_cbor: &[u8],
     ) -> std::io::Result<ResponseEnvelope> {
+        let mut payload = serde_json::Map::new();
+        payload.insert("schema".into(), serde_json::Value::String(schema.to_string()));
+        payload.insert(
+            "value_b64".into(),
+            serde_json::Value::String(BASE64_STANDARD.encode(value_cbor)),
+        );
+        if let Some(k) = key {
+            payload.insert(
+                "key_b64".into(),
+                serde_json::Value::String(BASE64_STANDARD.encode(k)),
+            );
+        }
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
             cmd: "event-send".into(),
-            payload: serde_json::json!({
-                "schema": schema,
-                "value_b64": BASE64_STANDARD.encode(value_cbor),
-            }),
+            payload: serde_json::Value::Object(payload),
         };
         self.request(&env).await
     }

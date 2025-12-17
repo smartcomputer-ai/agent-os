@@ -550,6 +550,16 @@ impl<S: Store + 'static> Kernel<S> {
         let _ = self.process_domain_event(event);
     }
 
+    pub fn submit_domain_event_with_key(
+        &mut self,
+        schema: impl Into<String>,
+        value: Vec<u8>,
+        key: Vec<u8>,
+    ) {
+        let event = DomainEvent::with_key(schema.into(), value, key);
+        let _ = self.process_domain_event(event);
+    }
+
     /// Submit a domain event and surface routing/validation errors (tests/fixtures helper).
     pub fn submit_domain_event_result(
         &mut self,

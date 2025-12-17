@@ -43,7 +43,6 @@ fn patch_dir_dry_run_emits_patchdoc_with_base_and_refs() {
     // Run CLI in dry-run mode and capture stdout.
     let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin!("aos"));
     cmd.current_dir(&world)
-        .arg("world")
         .arg("gov")
         .arg("propose")
         .arg("--patch-dir")

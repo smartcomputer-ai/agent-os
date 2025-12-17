@@ -31,6 +31,7 @@ async fn worldhost_snapshot_preserves_effect_queue() {
     host.enqueue_external(ExternalEvent::DomainEvent {
         schema: "demo/TimerEvent@1".into(),
         value: serde_cbor::to_vec(&serde_json::json!({})).unwrap(),
+        key: None,
     })
     .unwrap();
     host.drain().unwrap();

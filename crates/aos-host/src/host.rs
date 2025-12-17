@@ -27,7 +27,7 @@ use aos_kernel::StateReader;
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
-    DomainEvent { schema: String, value: Vec<u8> },
+    DomainEvent { schema: String, value: Vec<u8>, key: Option<Vec<u8>> },
     Receipt(EffectReceipt),
 }
 
@@ -254,8 +254,12 @@ impl<S: Store + 'static> WorldHost<S> {
 
     pub fn enqueue_external(&mut self, evt: ExternalEvent) -> Result<(), HostError> {
         match evt {
-            ExternalEvent::DomainEvent { schema, value } => {
-                self.kernel.submit_domain_event(schema, value);
+            ExternalEvent::DomainEvent { schema, value, key } => {
+                if let Some(key) = key {
+                    self.kernel.submit_domain_event_with_key(schema, value, key);
+                } else {
+                    self.kernel.submit_domain_event(schema, value);
+                }
             }
             ExternalEvent::Receipt(receipt) => {
                 self.kernel.handle_receipt(receipt)?;
@@ -561,6 +565,7 @@ mod tests {
         host.enqueue_external(ExternalEvent::DomainEvent {
             schema: "demo/Event@1".into(),
             value: to_vec(&json!({"x": 1})).unwrap(),
+            key: None,
         })
         .unwrap();
 
