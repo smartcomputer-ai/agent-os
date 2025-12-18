@@ -154,7 +154,11 @@ fn introspect_list_cells_returns_sentinel_for_non_keyed() {
             .unwrap_or_default(),
         _ => Vec::new(),
     };
-    assert_eq!(cells.len(), 1, "expected sentinel cell for non-keyed reducer");
+    assert_eq!(
+        cells.len(),
+        1,
+        "expected sentinel cell for non-keyed reducer"
+    );
     let key_len = match &cells[0] {
         serde_cbor::Value::Map(cell_map) => cell_map
             .iter()

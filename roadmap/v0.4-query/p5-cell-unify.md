@@ -3,6 +3,9 @@
 ## Goal
 - Treat every reducer state as a cell stored in CAS so both keyed and non-keyed reducers can be offloaded/evicted uniformly under memory pressure.
 
+## Status
+- ✅ Implemented in kernel/host: non-keyed reducers now use sentinel cell `MONO_KEY` via `CellIndex`/`CellCache`; monolithic fields removed; snapshots rely on index roots only; tests updated and passing with `--features test-fixtures`.
+
 ## Current behavior (pain)
 - Keyed reducers: per-key state lives in CAS, indexed by `CellIndex`, cached in `CellCache` LRU.
 - Non-keyed reducers: state kept in-memory (`ReducerState.monolithic`); we still `put_blob` but never retain the hash/root, so eviction/offloading is impossible and snapshots inline full bytes.
@@ -35,11 +38,11 @@
 
 5) **Snapshots**
    - Record only `reducer_index_roots` for all reducers; do not inline monolithic bytes.
-   - Snapshot apply relies on `CellIndex` (no backward compat needed per request).
+   - Snapshot apply relies on `CellIndex` (no backward compat needed per request). ✅
 
 6) **Helpers/validation**
    - Ensure router still rejects provided key_field for non-keyed reducers; keyed enforcement unchanged.
-   - Unit tests: 
+   - Unit tests: ✅
      - non-keyed state written → persisted in CAS, retrievable after cache eviction.
      - snapshot round-trip with non-keyed reducer using index root only.
      - cache eviction path keeps keyed and non-keyed working.

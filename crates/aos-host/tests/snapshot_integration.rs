@@ -230,10 +230,7 @@ fn snapshot_replay_restores_state() {
 
     world.kernel.create_snapshot().unwrap();
 
-    let final_state = world
-        .kernel
-        .reducer_state("com.acme/Simple@1")
-        .unwrap();
+    let final_state = world.kernel.reducer_state("com.acme/Simple@1").unwrap();
     let entries = world.kernel.dump_journal().unwrap();
 
     let replay_world = TestWorld::with_store_and_journal(
@@ -274,7 +271,10 @@ fn fs_store_and_journal_restore_snapshot() {
         Kernel::from_loaded_manifest(store.clone(), manifest_reload, Box::new(journal_reload))
             .unwrap();
 
-    assert_eq!(kernel_replay.reducer_state("com.acme/SimpleFs@1"), Some(vec![0xAA]));
+    assert_eq!(
+        kernel_replay.reducer_state("com.acme/SimpleFs@1"),
+        Some(vec![0xAA])
+    );
 }
 
 fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedManifest {
