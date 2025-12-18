@@ -7,7 +7,7 @@
 use std::io::Write;
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::opts::WorldOpts;
 
@@ -40,9 +40,10 @@ fn print_json(
         }
     }
     if !warnings.is_empty() {
-        root.as_object_mut()
-            .unwrap()
-            .insert("warnings".into(), warnings.into_iter().map(Value::String).collect());
+        root.as_object_mut().unwrap().insert(
+            "warnings".into(),
+            warnings.into_iter().map(Value::String).collect(),
+        );
     }
     if opts.pretty {
         println!("{}", serde_json::to_string_pretty(&root)?);

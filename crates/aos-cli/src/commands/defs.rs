@@ -3,8 +3,8 @@
 use anyhow::Result;
 use clap::{Args, Subcommand, ValueEnum};
 
-use crate::output::print_success;
 use crate::opts::{Mode, WorldOpts, resolve_dirs};
+use crate::output::print_success;
 
 use super::{should_use_control, try_control_client};
 
@@ -73,7 +73,10 @@ async fn defs_get(opts: &WorldOpts, args: &DefsGetArgs) -> Result<()> {
                 );
             }
             let result = resp.result.unwrap_or_default();
-            let def = result.get("def").cloned().unwrap_or(serde_json::json!(null));
+            let def = result
+                .get("def")
+                .cloned()
+                .unwrap_or(serde_json::json!(null));
             let meta = result.get("meta").cloned();
             return print_success(opts, def, meta, vec![]);
         } else if matches!(opts.mode, Mode::Daemon) {
@@ -94,20 +97,21 @@ async fn defs_list(opts: &WorldOpts, args: &DefsListArgs) -> Result<()> {
 
     if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
-            let kinds: Option<Vec<String>> =
-                if args.kinds.is_empty() {
-                    None
-                } else {
-                    Some(args.kinds.iter().map(|k| def_kind_str(k).to_string()).collect())
-                };
-            let kind_refs: Option<Vec<&str>> =
-                kinds.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
-            let resp = client
-                .list_defs(
-                    "cli-def-list",
-                    kind_refs.as_deref(),
-                    args.prefix.as_deref(),
+            let kinds: Option<Vec<String>> = if args.kinds.is_empty() {
+                None
+            } else {
+                Some(
+                    args.kinds
+                        .iter()
+                        .map(|k| def_kind_str(k).to_string())
+                        .collect(),
                 )
+            };
+            let kind_refs: Option<Vec<&str>> = kinds
+                .as_ref()
+                .map(|v| v.iter().map(|s| s.as_str()).collect());
+            let resp = client
+                .list_defs("cli-def-list", kind_refs.as_deref(), args.prefix.as_deref())
                 .await?;
             if !resp.ok {
                 anyhow::bail!(

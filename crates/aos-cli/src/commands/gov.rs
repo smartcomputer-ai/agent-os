@@ -8,13 +8,13 @@ use crate::util::validate_patch_json;
 use anyhow::{Context, Result};
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
-use aos_host::manifest_loader::load_from_assets;
 use aos_host::control::{ControlClient, RequestEnvelope, ResponseEnvelope};
-use aos_host::{manifest_loader::ZERO_HASH_SENTINEL};
+use aos_host::manifest_loader::ZERO_HASH_SENTINEL;
+use aos_host::manifest_loader::load_from_assets;
 use aos_store::{FsStore, Store};
 use base64::prelude::*;
-use serde_json::Value;
 use clap::{Args, Subcommand};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -557,7 +557,6 @@ fn build_patchdoc_from_dir(
     }))
 }
 
-
 pub async fn send_req(
     client: &mut ControlClient,
     cmd: &str,
@@ -580,7 +579,6 @@ pub async fn send_req(
     }
     Ok(resp)
 }
-
 
 #[cfg(test)]
 mod tests {

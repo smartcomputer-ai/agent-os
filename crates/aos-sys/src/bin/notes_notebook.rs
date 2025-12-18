@@ -6,7 +6,9 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_event_union, aos_reducer, aos_variant};
+use aos_wasm_sdk::{
+    ReduceError, Reducer, ReducerCtx, Value, aos_event_union, aos_reducer, aos_variant,
+};
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 use sha2::{Digest, Sha256};
@@ -45,7 +47,9 @@ aos_variant! {
 }
 
 impl Default for NotePc {
-    fn default() -> Self { NotePc::Draft }
+    fn default() -> Self {
+        NotePc::Draft
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -180,7 +184,10 @@ fn decode_key(raw: Option<&[u8]>) -> String {
 
 fn build_report(note_id: &str, state: &NoteState) -> Vec<u8> {
     let mut lines = Vec::new();
-    lines.push(format!("Note {note_id}: {} (by {})", state.title, state.author));
+    lines.push(format!(
+        "Note {note_id}: {} (by {})",
+        state.title, state.author
+    ));
     lines.push(format!("Status: {:?}", state.pc));
     lines.push(format!("Lines: {}", state.lines.len()));
     lines.push("--".to_string());

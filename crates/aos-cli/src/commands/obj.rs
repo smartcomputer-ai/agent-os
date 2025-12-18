@@ -1,8 +1,8 @@
 //! `aos obj` commands built on the ObjectCatalog reducer.
 
 use anyhow::Result;
-use clap::{Args, Subcommand};
 use base64::Engine;
+use clap::{Args, Subcommand};
 
 use crate::key::{KeyOverrides, encode_key_for_reducer};
 use crate::opts::{Mode, WorldOpts, resolve_dirs};
@@ -81,7 +81,8 @@ async fn obj_ls(opts: &WorldOpts, args: &ObjListArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
     let mut warnings = Vec::new();
     if args.kind.is_some() || args.tag.is_some() || args.versions {
-        warnings.push("kind/tag/versions filters require daemon-side catalog; ignored in batch".into());
+        warnings
+            .push("kind/tag/versions filters require daemon-side catalog; ignored in batch".into());
     }
     if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
@@ -90,7 +91,11 @@ async fn obj_ls(opts: &WorldOpts, args: &ObjListArgs) -> Result<()> {
                 .await?;
             let mut keys: Vec<String> = cells
                 .into_iter()
-                .filter_map(|c| base64::engine::general_purpose::STANDARD.decode(c.key_b64).ok())
+                .filter_map(|c| {
+                    base64::engine::general_purpose::STANDARD
+                        .decode(c.key_b64)
+                        .ok()
+                })
                 .filter_map(|bytes| serde_cbor::from_slice::<String>(&bytes).ok())
                 .filter(|k| args.prefix.as_ref().map_or(true, |p| k.starts_with(p)))
                 .filter(|k| within_depth(k, args.depth))
@@ -113,12 +118,7 @@ async fn obj_ls(opts: &WorldOpts, args: &ObjListArgs) -> Result<()> {
     }
     // Batch/local read not supported for ObjectCatalog listing yet.
     warnings.push("object listing requires daemon/control; batch mode returns empty".into());
-    print_success(
-        opts,
-        serde_json::json!([]),
-        None,
-        warnings,
-    )
+    print_success(opts, serde_json::json!([]), None, warnings)
 }
 
 async fn obj_get(opts: &WorldOpts, args: &ObjGetArgs) -> Result<()> {
@@ -193,12 +193,7 @@ async fn obj_stat(opts: &WorldOpts, args: &ObjStatArgs) -> Result<()> {
             if let Some(w) = warning {
                 warnings.push(w);
             }
-            return print_success(
-                opts,
-                latest,
-                Some(meta_to_json(&meta)),
-                warnings,
-            );
+            return print_success(opts, latest, Some(meta_to_json(&meta)), warnings);
         } else if matches!(opts.mode, Mode::Daemon) {
             anyhow::bail!(
                 "daemon mode requested but no control socket at {}",
@@ -284,7 +279,7 @@ fn select_version(
                     return Ok((
                         serde_json::json!(null),
                         Some(format!("{msg}; use obj ls to view available versions")),
-                    ))
+                    ));
                 }
             }
         }
@@ -324,7 +319,9 @@ fn cbor_to_json_lossy(val: &serde_cbor::Value) -> serde_json::Value {
                 serde_json::json!(i.to_string())
             }
         }
-        Cbor::Bytes(b) => serde_json::Value::String(base64::engine::general_purpose::STANDARD.encode(b)),
+        Cbor::Bytes(b) => {
+            serde_json::Value::String(base64::engine::general_purpose::STANDARD.encode(b))
+        }
         Cbor::Text(t) => serde_json::Value::String(t.clone()),
         Cbor::Array(a) => serde_json::Value::Array(a.iter().map(cbor_to_json_lossy).collect()),
         Cbor::Map(m) => {
@@ -340,7 +337,9 @@ fn cbor_to_json_lossy(val: &serde_cbor::Value) -> serde_json::Value {
             serde_json::Value::Object(obj)
         }
         Cbor::Tag(_, inner) => cbor_to_json_lossy(inner),
-        Cbor::Float(f) => serde_json::Number::from_f64(*f).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null),
+        Cbor::Float(f) => serde_json::Number::from_f64(*f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         _ => serde_json::Value::Null,
     }
 }

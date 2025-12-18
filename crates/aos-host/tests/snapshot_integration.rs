@@ -79,7 +79,7 @@ fn plan_snapshot_resumes_after_receipt() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -130,7 +130,7 @@ fn plan_snapshot_preserves_effect_queue() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -165,7 +165,7 @@ fn plan_snapshot_resumes_after_event() {
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/EventResult@1"),
-        Some(&vec![0xAB])
+        Some(vec![0xAB])
     );
 }
 
@@ -213,7 +213,7 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/TimerHandler@1"),
-        Some(&vec![0xCC])
+        Some(vec![0xCC])
     );
 }
 
@@ -233,7 +233,6 @@ fn snapshot_replay_restores_state() {
     let final_state = world
         .kernel
         .reducer_state("com.acme/Simple@1")
-        .cloned()
         .unwrap();
     let entries = world.kernel.dump_journal().unwrap();
 
@@ -246,7 +245,7 @@ fn snapshot_replay_restores_state() {
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/Simple@1"),
-        Some(&final_state)
+        Some(final_state)
     );
 }
 
@@ -275,10 +274,7 @@ fn fs_store_and_journal_restore_snapshot() {
         Kernel::from_loaded_manifest(store.clone(), manifest_reload, Box::new(journal_reload))
             .unwrap();
 
-    assert_eq!(
-        kernel_replay.reducer_state("com.acme/SimpleFs@1"),
-        Some(&vec![0xAA])
-    );
+    assert_eq!(kernel_replay.reducer_state("com.acme/SimpleFs@1"), Some(vec![0xAA]));
 }
 
 fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedManifest {
@@ -327,7 +323,7 @@ fn snapshot_creation_quiesces_runtime() {
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/Simple@1"),
-        Some(&vec![0xAA])
+        Some(vec![0xAA])
     );
 }
 
@@ -381,7 +377,7 @@ fn restored_effects_bypass_new_policy_checks() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 
     // New plan attempts should now be denied by the stricter policy.

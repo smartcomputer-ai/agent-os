@@ -53,7 +53,6 @@ fn governance_flow_applies_manifest_patch() {
     let reducer_state = world
         .kernel
         .reducer_state("com.acme/Patched@1")
-        .cloned()
         .expect("reducer state");
     assert_eq!(reducer_state, vec![0xBB]);
 }

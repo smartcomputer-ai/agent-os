@@ -121,7 +121,9 @@ async fn setup_daemon_with_control() -> (
 #[tokio::test]
 async fn propose_rejects_invalid_patch_doc() {
     if !control_socket_allowed() {
-        eprintln!("skipping propose_rejects_invalid_patch_doc: control socket bind/connect not permitted");
+        eprintln!(
+            "skipping propose_rejects_invalid_patch_doc: control socket bind/connect not permitted"
+        );
         return;
     }
 
@@ -154,7 +156,9 @@ async fn propose_rejects_invalid_patch_doc() {
 #[tokio::test]
 async fn propose_accepts_patch_doc_and_compiles() {
     if !control_socket_allowed() {
-        eprintln!("skipping propose_accepts_patch_doc_and_compiles: control socket bind/connect not permitted");
+        eprintln!(
+            "skipping propose_accepts_patch_doc_and_compiles: control socket bind/connect not permitted"
+        );
         return;
     }
 

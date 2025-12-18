@@ -235,7 +235,7 @@ fn sugar_literal_plan_executes_http_flow() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -376,7 +376,7 @@ fn single_plan_orchestration_completes_after_receipt() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -455,7 +455,7 @@ fn reducer_and_plan_effects_are_enqueued() {
     assert!(kinds.contains(&aos_effects::EffectKind::HTTP_REQUEST));
     assert_eq!(
         world.kernel.reducer_state("com.acme/Reducer@1"),
-        Some(&vec![0xAA])
+        Some(vec![0xAA])
     );
 }
 
@@ -492,7 +492,7 @@ fn reducer_timer_receipt_routes_event_to_handler() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/TimerHandler@1"),
-        Some(&vec![0xCC])
+        Some(vec![0xCC])
     );
 
     let duplicate = EffectReceipt {
@@ -739,7 +739,7 @@ fn blob_put_receipt_routes_event_to_handler() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/BlobPutHandler@1"),
-        Some(&vec![0xDD])
+        Some(vec![0xDD])
     );
 }
 
@@ -819,7 +819,7 @@ fn blob_get_receipt_routes_event_to_handler() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/BlobGetHandler@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -1451,6 +1451,6 @@ fn raised_events_are_routed_to_reducers() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/Reducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }

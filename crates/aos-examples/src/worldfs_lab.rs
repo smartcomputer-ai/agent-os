@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Result, anyhow, ensure};
-use aos_effects::{EffectKind, EffectReceipt, ReceiptStatus};
-use aos_effects::builtins::{BlobPutParams, BlobPutReceipt};
 use aos_air_types::HashRef;
+use aos_effects::builtins::{BlobPutParams, BlobPutReceipt};
+use aos_effects::{EffectKind, EffectReceipt, ReceiptStatus};
 use aos_store::Store;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
@@ -155,9 +155,14 @@ fn drive_blob_puts(host: &mut ExampleHost, seeds: &[NoteSeed]) -> Result<()> {
                 params.blob_ref.as_str(),
                 hash
             );
-            let stored_hash = store.put_blob(&report).map_err(|e| anyhow!("store blob: {e}"))?;
+            let stored_hash = store
+                .put_blob(&report)
+                .map_err(|e| anyhow!("store blob: {e}"))?;
             let stored_ref = HashRef::new(stored_hash.to_hex())?;
-            ensure!(stored_ref.as_str() == params.blob_ref.as_str(), "store hash mismatch for note {note_id}");
+            ensure!(
+                stored_ref.as_str() == params.blob_ref.as_str(),
+                "store hash mismatch for note {note_id}"
+            );
 
             let receipt = EffectReceipt {
                 intent_hash: intent.intent_hash,
@@ -225,7 +230,10 @@ fn demo_notes() -> Vec<NoteSeed> {
 
 fn build_report(note_id: &str, state: &NoteState) -> Vec<u8> {
     let mut lines = Vec::new();
-    lines.push(format!("Note {note_id}: {} (by {})", state.title, state.author));
+    lines.push(format!(
+        "Note {note_id}: {} (by {})",
+        state.title, state.author
+    ));
     lines.push(format!("Status: {:?}", state.pc));
     lines.push(format!("Lines: {}", state.lines.len()));
     lines.push("--".to_string());
@@ -237,7 +245,10 @@ fn build_report(note_id: &str, state: &NoteState) -> Vec<u8> {
 
 fn build_report_from_seed(note_id: &str, seed: &NoteSeed) -> Vec<u8> {
     let mut lines = Vec::new();
-    lines.push(format!("Note {note_id}: {} (by {})", seed.title, seed.author));
+    lines.push(format!(
+        "Note {note_id}: {} (by {})",
+        seed.title, seed.author
+    ));
     lines.push("Status: Finalized".to_string());
     lines.push(format!("Lines: {}", seed.lines.len()));
     lines.push("--".to_string());

@@ -118,7 +118,6 @@ pub enum ControlMsg {
         proposal_id: u64,
         resp: oneshot::Sender<Result<(), HostError>>,
     },
-   
 }
 
 #[derive(Debug)]
@@ -346,9 +345,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 prefix,
                 resp,
             } => {
-                let res = self
-                    .host
-                    .list_defs(kinds.as_deref(), prefix.as_deref());
+                let res = self.host.list_defs(kinds.as_deref(), prefix.as_deref());
                 let _ = resp.send(res);
             }
             ControlMsg::StateList { reducer, resp } => {

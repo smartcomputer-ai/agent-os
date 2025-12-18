@@ -4,13 +4,13 @@ use anyhow::{Context, Result, anyhow, bail};
 use aos_air_types::{
     DefSchema,
     plan_literals::SchemaIndex,
-    value_normalize::{normalize_value_with_schema, ValueNormalizeError},
+    value_normalize::{ValueNormalizeError, normalize_value_with_schema},
 };
 use aos_kernel::LoadedManifest;
 use aos_store::FsStore;
 use base64::Engine;
-use serde_json::Value as JsonValue;
 use serde_cbor::value::Value as CborValue;
+use serde_json::Value as JsonValue;
 use std::{collections::HashMap, sync::Arc};
 
 use crate::opts::ResolvedDirs;
@@ -58,10 +58,7 @@ fn encode_key_value_for_reducer(
         .modules
         .get(reducer)
         .ok_or_else(|| anyhow!("reducer '{}' not found in manifest", reducer))?;
-    let key_schema = module
-        .key_schema
-        .as_ref()
-        .map(|s| s.as_str().to_string());
+    let key_schema = module.key_schema.as_ref().map(|s| s.as_str().to_string());
 
     let schemas = schema_index(&loaded.schemas);
     if let Some(schema_name) = key_schema {
@@ -118,14 +115,19 @@ pub fn derive_event_key(
     overrides: &KeyOverrides,
 ) -> Result<Option<Vec<u8>>> {
     let loaded = load_manifest_for_keys(dirs)?;
-    let route = loaded
-        .manifest
-        .routing
-        .as_ref()
-        .and_then(|r| r.events.iter().find(|evt| evt.event.as_str() == event_schema));
+    let route = loaded.manifest.routing.as_ref().and_then(|r| {
+        r.events
+            .iter()
+            .find(|evt| evt.event.as_str() == event_schema)
+    });
 
     let route = if overrides_present(overrides) {
-        route.ok_or_else(|| anyhow!("no routing entry for event '{}' (needed for key overrides)", event_schema))?
+        route.ok_or_else(|| {
+            anyhow!(
+                "no routing entry for event '{}' (needed for key overrides)",
+                event_schema
+            )
+        })?
     } else if let Some(r) = route {
         r
     } else {
@@ -139,7 +141,10 @@ pub fn derive_event_key(
         Some(field) => field,
         None => {
             if overrides_present(overrides) {
-                bail!("reducer '{}' is not keyed; --key overrides are not allowed", reducer);
+                bail!(
+                    "reducer '{}' is not keyed; --key overrides are not allowed",
+                    reducer
+                );
             }
             return Ok(None);
         }
@@ -149,13 +154,8 @@ pub fn derive_event_key(
     let cbor_value = if overrides_present(overrides) {
         resolve_key_value(overrides)?
     } else {
-        let extracted = extract_json_path(payload_json, key_field).ok_or_else(|| {
-            anyhow!(
-                "event '{}' missing key field '{}'",
-                event_schema,
-                key_field
-            )
-        })?;
+        let extracted = extract_json_path(payload_json, key_field)
+            .ok_or_else(|| anyhow!("event '{}' missing key field '{}'", event_schema, key_field))?;
         json_to_cbor(extracted.clone())?
     };
 
@@ -217,8 +217,7 @@ mod tests {
         .unwrap()
         .expect("key derived");
 
-        let expected =
-            aos_cbor::to_canonical_cbor(&CborValue::Text("abc".into())).expect("encode");
+        let expected = aos_cbor::to_canonical_cbor(&CborValue::Text("abc".into())).expect("encode");
         assert_eq!(key, expected);
     }
 
@@ -264,8 +263,7 @@ mod tests {
             ..Default::default()
         };
         let payload = json!({"id":"abc"});
-        let err = derive_event_key(&dirs, "com.acme/Event@1", &payload, &overrides)
-            .unwrap_err();
+        let err = derive_event_key(&dirs, "com.acme/Event@1", &payload, &overrides).unwrap_err();
         assert!(
             err.to_string().contains("no routing entry"),
             "unexpected error: {err}"

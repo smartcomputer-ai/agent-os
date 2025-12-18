@@ -46,7 +46,6 @@
 
 ## Nice-to-haves (optional follow-ups)
 - Configurable sentinel key constant exposed for diagnostics.
-- Metric/trace tags to distinguish keyed vs monolithic cell loads.
 - CLI introspection: list-cells should return the sentinel cell for non-keyed reducers (size/last_active useful).
 
 ## Scope clarification

@@ -41,7 +41,6 @@ fn journal_replay_restores_state() {
     let final_state = world
         .kernel
         .reducer_state("com.acme/ResultReducer@1")
-        .cloned()
         .unwrap();
     let journal_entries = world.kernel.dump_journal().unwrap();
     let start_schema = journal_entries
@@ -67,7 +66,7 @@ fn journal_replay_restores_state() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&final_state)
+        Some(final_state)
     );
 }
 
@@ -101,7 +100,6 @@ fn reducer_timer_receipt_replays_from_journal() {
     let final_state = world
         .kernel
         .reducer_state("com.acme/TimerHandler@1")
-        .cloned()
         .unwrap();
     let journal_entries = world.kernel.dump_journal().unwrap();
 
@@ -114,7 +112,7 @@ fn reducer_timer_receipt_replays_from_journal() {
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/TimerHandler@1"),
-        Some(&final_state)
+        Some(final_state)
     );
 }
 
@@ -198,7 +196,7 @@ fn plan_journal_replay_resumes_waiting_receipt() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -239,7 +237,6 @@ fn fs_journal_persists_across_restarts() {
         world
             .kernel
             .reducer_state("com.acme/ResultReducer@1")
-            .cloned()
             .unwrap()
     };
 
@@ -254,7 +251,7 @@ fn fs_journal_persists_across_restarts() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&final_state)
+        Some(final_state)
     );
     assert!(!replay_world.kernel.dump_journal().unwrap().is_empty());
 }

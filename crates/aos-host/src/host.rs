@@ -27,7 +27,11 @@ use aos_kernel::StateReader;
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
-    DomainEvent { schema: String, value: Vec<u8>, key: Option<Vec<u8>> },
+    DomainEvent {
+        schema: String,
+        value: Vec<u8>,
+        key: Option<Vec<u8>>,
+    },
     Receipt(EffectReceipt),
 }
 
