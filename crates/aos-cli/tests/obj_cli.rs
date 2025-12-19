@@ -11,13 +11,7 @@ fn obj_ls_without_daemon_returns_empty_with_notice() {
 
     let assert = std::process::Command::new(assert_cmd::cargo::cargo_bin!("aos"))
         .current_dir(world)
-        .args([
-            "--world",
-            world.to_str().unwrap(),
-            "obj",
-            "ls",
-            "--json",
-        ])
+        .args(["--world", world.to_str().unwrap(), "obj", "ls", "--json"])
         .assert()
         .success();
 
@@ -28,9 +22,10 @@ fn obj_ls_without_daemon_returns_empty_with_notice() {
     assert_eq!(arr.len(), 0, "objects list should be empty without daemon");
     let warnings = json["warnings"].as_array().cloned().unwrap_or_default();
     assert!(
-        warnings
-            .iter()
-            .any(|w| w.as_str().unwrap_or_default().contains("object listing requires daemon")),
+        warnings.iter().any(|w| w
+            .as_str()
+            .unwrap_or_default()
+            .contains("object listing requires daemon")),
         "expected daemon notice"
     );
 }
@@ -59,12 +54,10 @@ fn obj_ls_versions_flag_ignored_in_batch_with_warning() {
     let json: serde_json::Value = serde_json::from_str(&output).expect("json");
     let warnings = json["warnings"].as_array().cloned().unwrap_or_default();
     assert!(
-        warnings
-            .iter()
-            .any(|w| w
-                .as_str()
-                .unwrap_or_default()
-                .contains("filters require daemon-side catalog")),
+        warnings.iter().any(|w| w
+            .as_str()
+            .unwrap_or_default()
+            .contains("filters require daemon-side catalog")),
         "expected warning about versions filter"
     );
 }

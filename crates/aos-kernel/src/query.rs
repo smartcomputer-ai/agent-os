@@ -75,7 +75,7 @@ mod tests {
 
 /// Read-only surface exposed by the kernel for observational queries.
 pub trait StateReader {
-    /// Fetch reducer state (monolithic or keyed cell) according to consistency preference.
+    /// Fetch reducer state (non-keyed or keyed cell) according to consistency preference.
     fn get_reducer_state(
         &self,
         module: &str,

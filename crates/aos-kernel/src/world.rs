@@ -6,7 +6,8 @@ use std::sync::Arc;
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name, NamedRef,
-    SecretDecl, SecretEntry, TypeExpr, builtins, catalog::EffectCatalog,
+    SecretDecl, SecretEntry, TypeExpr, builtins,
+    catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
 };
@@ -52,6 +53,7 @@ use crate::snapshot::{
 const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
 const CELL_CACHE_SIZE: usize = 128;
+const MONO_KEY: &[u8] = b"";
 
 #[derive(Clone, Default)]
 pub struct KernelConfig {
@@ -197,16 +199,12 @@ struct RouteBinding {
 
 #[derive(Clone)]
 struct ReducerState {
-    monolithic: Option<Vec<u8>>,
-    monolithic_hash: Option<Hash>,
     cell_cache: CellCache,
 }
 
 impl Default for ReducerState {
     fn default() -> Self {
         Self {
-            monolithic: None,
-            monolithic_hash: None,
             cell_cache: CellCache::new(CELL_CACHE_SIZE),
         }
     }
@@ -241,6 +239,10 @@ impl CellCache {
             self.promote(key);
         }
         entry
+    }
+
+    fn get_ref(&self, key: &[u8]) -> Option<&CellEntry> {
+        self.map.get(key)
     }
 
     fn insert(&mut self, key: Vec<u8>, entry: CellEntry) {
@@ -740,43 +742,39 @@ impl<S: Store + 'static> Kernel<S> {
             )));
         }
 
-        let index_root = if keyed {
-            Some(self.ensure_cell_index_root(&reducer_name)?)
-        } else {
-            None
-        };
+        let mut index_root = self.reducer_index_roots.get(&reducer_name).copied();
+        if keyed {
+            index_root = Some(self.ensure_cell_index_root(&reducer_name)?);
+        }
 
         let state_entry = self
             .reducer_state
             .entry(reducer_name.clone())
             .or_insert_with(ReducerState::default);
-        let current_state = if keyed {
-            let key_bytes = key.as_ref().expect("keyed requires key");
-            if let Some(entry) = state_entry.cell_cache.get(key_bytes) {
-                Some(entry.state.clone())
+        let key_bytes: &[u8] = key.as_deref().unwrap_or(MONO_KEY);
+        let current_state = if let Some(entry) = state_entry.cell_cache.get(key_bytes) {
+            Some(entry.state.clone())
+        } else if let Some(root) = index_root {
+            let key_hash = Hash::of_bytes(key_bytes);
+            let index = CellIndex::new(self.store.as_ref());
+            if let Some(meta) = index.get(root, key_hash.as_bytes())? {
+                let state_hash = Hash::from_bytes(&meta.state_hash)
+                    .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
+                let state = self.store.get_blob(state_hash)?;
+                state_entry.cell_cache.insert(
+                    key_bytes.to_vec(),
+                    CellEntry {
+                        state: state.clone(),
+                        state_hash,
+                        last_active_ns: meta.last_active_ns,
+                    },
+                );
+                Some(state)
             } else {
-                let root = index_root.expect("root set for keyed reducer");
-                let key_hash = Hash::of_bytes(key_bytes);
-                let index = CellIndex::new(self.store.as_ref());
-                if let Some(meta) = index.get(root, key_hash.as_bytes())? {
-                    let state_hash = Hash::from_bytes(&meta.state_hash)
-                        .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
-                    let state = self.store.get_blob(state_hash)?;
-                    state_entry.cell_cache.insert(
-                        key_bytes.clone(),
-                        CellEntry {
-                            state: state.clone(),
-                            state_hash,
-                            last_active_ns: meta.last_active_ns,
-                        },
-                    );
-                    Some(state)
-                } else {
-                    None
-                }
+                None
             }
         } else {
-            state_entry.monolithic.clone()
+            None
         };
 
         let input = ReducerInput {
@@ -799,11 +797,7 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<(), KernelError> {
         Self::ensure_single_effect(&output)?;
 
-        let index_root = if keyed {
-            Some(self.ensure_cell_index_root(&reducer_name)?)
-        } else {
-            None
-        };
+        let index_root = self.ensure_cell_index_root(&reducer_name)?;
         let mut new_index_root: Option<Hash> = None;
 
         let entry = self
@@ -811,25 +805,29 @@ impl<S: Store + 'static> Kernel<S> {
             .entry(reducer_name.clone())
             .or_insert_with(ReducerState::default);
 
-        match (keyed, output.state) {
-            (true, Some(state)) => {
-                let k = key.clone().expect("key required for keyed reducer");
-                let key_hash = Hash::of_bytes(&k);
-                let root = index_root.expect("index root set for keyed reducer");
+        let key_bytes = if keyed {
+            key.clone().expect("key required for keyed reducer")
+        } else {
+            MONO_KEY.to_vec()
+        };
+        let key_hash = Hash::of_bytes(&key_bytes);
+
+        match output.state {
+            Some(state) => {
                 let state_hash = self.store.put_blob(&state)?;
                 let last_active_ns = self.journal.next_seq() as u64;
                 let meta = CellMeta {
                     key_hash: *key_hash.as_bytes(),
-                    key_bytes: k.clone(),
+                    key_bytes: key_bytes.clone(),
                     state_hash: *state_hash.as_bytes(),
                     size: state.len() as u64,
                     last_active_ns,
                 };
                 let index = CellIndex::new(self.store.as_ref());
-                let new_root = index.upsert(root, meta)?;
+                let new_root = index.upsert(index_root, meta)?;
                 new_index_root = Some(new_root);
                 entry.cell_cache.insert(
-                    k,
+                    key_bytes,
                     CellEntry {
                         state,
                         state_hash,
@@ -837,27 +835,13 @@ impl<S: Store + 'static> Kernel<S> {
                     },
                 );
             }
-            (true, None) => {
-                if let Some(k) = key {
-                    let key_hash = Hash::of_bytes(&k);
-                    let root = index_root.expect("index root set for keyed reducer");
-                    let index = CellIndex::new(self.store.as_ref());
-                    let (new_root, removed) = index.delete(root, key_hash.as_bytes())?;
-                    if removed {
-                        new_index_root = Some(new_root);
-                        entry.cell_cache.remove(&k);
-                    }
+            None => {
+                let index = CellIndex::new(self.store.as_ref());
+                let (new_root, removed) = index.delete(index_root, key_hash.as_bytes())?;
+                if removed {
+                    new_index_root = Some(new_root);
+                    entry.cell_cache.remove(&key_bytes);
                 }
-            }
-            (false, Some(state)) => {
-                let hash = Hash::of_bytes(&state);
-                self.store.put_blob(&state)?;
-                entry.monolithic_hash = Some(hash);
-                entry.monolithic = Some(state);
-            }
-            (false, None) => {
-                entry.monolithic = None;
-                entry.monolithic_hash = None;
             }
         }
         if let Some(root) = new_index_root {
@@ -915,21 +899,7 @@ impl<S: Store + 'static> Kernel<S> {
             ));
         }
         let height = self.journal.next_seq();
-        let mut reducer_state: Vec<ReducerStateEntry> = Vec::new();
-        for (name, state) in self.reducer_state.iter() {
-            if let Some(state_bytes) = &state.monolithic {
-                reducer_state.push(ReducerStateEntry {
-                    reducer: name.clone(),
-                    key: None,
-                    state: state_bytes.clone(),
-                    state_hash: state
-                        .monolithic_hash
-                        .unwrap_or_else(|| Hash::of_bytes(state_bytes))
-                        .into(),
-                    last_active_ns: 0,
-                });
-            }
-        }
+        let reducer_state: Vec<ReducerStateEntry> = Vec::new();
         let recent_receipts: Vec<[u8; 32]> = self.recent_receipts.iter().cloned().collect();
         let plan_instances = self
             .plan_instances
@@ -1126,31 +1096,30 @@ impl<S: Store + 'static> Kernel<S> {
             let state_entry = restored
                 .entry(entry.reducer.clone())
                 .or_insert_with(ReducerState::default);
-            if let Some(key) = entry.key {
-                let state_hash = Hash::from_bytes(&entry.state_hash)
-                    .unwrap_or_else(|_| Hash::of_bytes(&entry.state));
-                // Rebuild index only if this reducer has no root yet (legacy snapshots).
-                if !self.reducer_index_roots.contains_key(&entry.reducer) {
-                    let root = self.ensure_cell_index_root(&entry.reducer)?;
-                    let meta = CellMeta {
-                        key_hash: *Hash::of_bytes(&key).as_bytes(),
-                        key_bytes: key.clone(),
-                        state_hash: *state_hash.as_bytes(),
-                        size: entry.state.len() as u64,
-                        last_active_ns: entry.last_active_ns,
-                    };
-                    let index = CellIndex::new(self.store.as_ref());
-                    let new_root = index.upsert(root, meta)?;
-                    self.reducer_index_roots
-                        .insert(entry.reducer.clone(), new_root);
-                }
-            } else {
-                state_entry.monolithic = Some(entry.state.clone());
-                state_entry.monolithic_hash = Some(
-                    Hash::from_bytes(&entry.state_hash)
-                        .unwrap_or_else(|_| Hash::of_bytes(&entry.state)),
-                );
-            }
+            let state_hash = Hash::from_bytes(&entry.state_hash)
+                .unwrap_or_else(|_| Hash::of_bytes(&entry.state));
+            let key_bytes = entry.key.unwrap_or_else(|| MONO_KEY.to_vec());
+            let key_hash = Hash::of_bytes(&key_bytes);
+            let root = self.ensure_cell_index_root(&entry.reducer)?;
+            let meta = CellMeta {
+                key_hash: *key_hash.as_bytes(),
+                key_bytes: key_bytes.clone(),
+                state_hash: *state_hash.as_bytes(),
+                size: entry.state.len() as u64,
+                last_active_ns: entry.last_active_ns,
+            };
+            let index = CellIndex::new(self.store.as_ref());
+            let new_root = index.upsert(root, meta)?;
+            self.reducer_index_roots
+                .insert(entry.reducer.clone(), new_root);
+            state_entry.cell_cache.insert(
+                key_bytes,
+                CellEntry {
+                    state: entry.state.clone(),
+                    state_hash,
+                    last_active_ns: entry.last_active_ns,
+                },
+            );
         }
         self.reducer_state = restored;
         let (deque, set) = receipts_to_vecdeque(snapshot.recent_receipts(), RECENT_RECEIPT_CACHE);
@@ -1271,25 +1240,17 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
-    pub fn reducer_state(&self, reducer: &str) -> Option<&Vec<u8>> {
-        self.reducer_state
-            .get(reducer)
-            .and_then(|state| state.monolithic.as_ref())
+    pub fn reducer_state(&self, reducer: &str) -> Option<Vec<u8>> {
+        self.reducer_state_bytes(reducer, None).ok().flatten()
     }
 
-    /// Fetch reducer state bytes. Supports monolithic reducers and keyed reducers (cell state).
+    /// Fetch reducer state bytes via the cell index (non-keyed reducers use the sentinel key).
     pub fn reducer_state_bytes(
         &self,
         reducer: &str,
         key: Option<&[u8]>,
     ) -> Result<Option<Vec<u8>>, KernelError> {
-        if key.is_none() {
-            return Ok(self
-                .reducer_state
-                .get(reducer)
-                .and_then(|state| state.monolithic.clone()));
-        }
-        let key = key.unwrap();
+        let key = key.unwrap_or(MONO_KEY);
         let Some(root) = self.reducer_index_roots.get(reducer) else {
             return Ok(None);
         };
@@ -1494,9 +1455,9 @@ impl<S: Store + 'static> Kernel<S> {
         entries
     }
 
-    /// List all cells for a keyed reducer using the persisted CellIndex.
+    /// List all cells for a reducer using the persisted CellIndex.
     ///
-    /// Returns an empty Vec if the reducer is not keyed or has no cells yet.
+    /// Returns an empty Vec if the reducer has no cells yet.
     pub fn list_cells(&self, reducer: &str) -> Result<Vec<CellMeta>, KernelError> {
         let Some(root) = self.reducer_index_roots.get(reducer) else {
             return Ok(Vec::new());
@@ -2617,6 +2578,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn non_keyed_state_persisted_via_cell_index() {
+        let mut kernel = minimal_kernel_non_keyed();
+        let reducer = "com.acme/Reducer@1".to_string();
+        let state_bytes = b"non-keyed-state".to_vec();
+        let output = ReducerOutput {
+            state: Some(state_bytes.clone()),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        };
+
+        kernel
+            .handle_reducer_output(reducer.clone(), None, false, output)
+            .expect("write state");
+
+        let root = kernel.reducer_index_root(&reducer);
+        assert!(root.is_some(), "expected index root for non-keyed reducer");
+        let cells = kernel.list_cells(&reducer).expect("list cells");
+        assert_eq!(cells.len(), 1, "expected sentinel cell entry");
+        assert!(
+            cells[0].key_bytes.is_empty(),
+            "sentinel key should be empty"
+        );
+
+        // Evict from cache and reload via index/CAS.
+        if let Some(entry) = kernel.reducer_state.get_mut(&reducer) {
+            entry.cell_cache.remove(MONO_KEY);
+        }
+        let reloaded = kernel
+            .reducer_state_bytes(&reducer, None)
+            .expect("read state")
+            .expect("state present");
+        assert_eq!(reloaded, state_bytes);
+    }
+
     fn schema_text(name: &str) -> DefSchema {
         DefSchema {
             name: name.into(),
@@ -2753,6 +2750,74 @@ mod tests {
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
                     reducer: "com.acme/Reducer@1".to_string(),
                     key_field: Some("id".into()),
+                }],
+                inboxes: vec![],
+            }),
+            triggers: vec![],
+        };
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules,
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas,
+            effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        };
+        Kernel::from_loaded_manifest(
+            Arc::new(store),
+            loaded,
+            Box::new(crate::journal::mem::MemJournal::default()),
+        )
+        .unwrap()
+    }
+
+    fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
+        let store = aos_store::MemStore::default();
+        let module = DefModule {
+            name: "com.acme/Reducer@1".into(),
+            module_kind: ModuleKind::Reducer,
+            wasm_hash: HashRef::new(hash(1)).unwrap(),
+            key_schema: None,
+            abi: ModuleAbi {
+                reducer: Some(ReducerAbi {
+                    state: SchemaRef::new("com.acme/State@1").unwrap(),
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    annotations: None,
+                    effects_emitted: vec![],
+                    cap_slots: Default::default(),
+                }),
+            },
+        };
+        let mut modules = HashMap::new();
+        modules.insert(module.name.clone(), module);
+        let mut schemas = HashMap::new();
+        schemas.insert("com.acme/State@1".into(), schema_text("com.acme/State@1"));
+        schemas.insert(
+            "com.acme/Event@1".into(),
+            schema_event_record("com.acme/Event@1"),
+        );
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![NamedRef {
+                name: "com.acme/Reducer@1".into(),
+                hash: HashRef::new(hash(1)).unwrap(),
+            }],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: Some(Routing {
+                events: vec![RoutingEvent {
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    reducer: "com.acme/Reducer@1".to_string(),
+                    key_field: None,
                 }],
                 inboxes: vec![],
             }),
@@ -3404,35 +3469,31 @@ impl<S: Store + 'static> Kernel<S> {
         reducer: &str,
         key: Option<&[u8]>,
     ) -> Result<Option<Vec<u8>>, KernelError> {
-        // Monolithic entries are stored inline in reducer_state_entries.
-        if key.is_none() {
-            for entry in snapshot.reducer_state_entries() {
-                if entry.reducer == reducer && entry.key.is_none() {
-                    return Ok(Some(entry.state.clone()));
-                }
-            }
-            return Ok(None);
-        }
-
-        let key_bytes = key.unwrap();
-        // Keyed reducers: use index root recorded in snapshot to find cell state in CAS.
-        let root = snapshot
+        let key_bytes = key.unwrap_or(MONO_KEY);
+        // Preferred path: use index root recorded in snapshot to find cell state in CAS.
+        if let Some(root) = snapshot
             .reducer_index_roots()
             .iter()
             .find(|(name, _)| name == reducer)
-            .and_then(|(_, bytes)| Hash::from_bytes(bytes).ok());
-        let Some(root) = root else {
-            return Ok(None);
-        };
-        let index = CellIndex::new(self.store.as_ref());
-        let meta = index.get(root, Hash::of_bytes(key_bytes).as_bytes())?;
-        if let Some(meta) = meta {
-            let state_hash = Hash::from_bytes(&meta.state_hash)
-                .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
-            let state = self.store.get_blob(state_hash)?;
-            Ok(Some(state))
-        } else {
-            Ok(None)
+            .and_then(|(_, bytes)| Hash::from_bytes(bytes).ok())
+        {
+            let index = CellIndex::new(self.store.as_ref());
+            let meta = index.get(root, Hash::of_bytes(key_bytes).as_bytes())?;
+            if let Some(meta) = meta {
+                let state_hash = Hash::from_bytes(&meta.state_hash)
+                    .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
+                let state = self.store.get_blob(state_hash)?;
+                return Ok(Some(state));
+            }
         }
+
+        // Legacy snapshots: fall back to inline entries (monolithic or keyed).
+        for entry in snapshot.reducer_state_entries() {
+            let entry_key = entry.key.as_deref().unwrap_or(MONO_KEY);
+            if entry.reducer == reducer && entry_key == key_bytes {
+                return Ok(Some(entry.state.clone()));
+            }
+        }
+        Ok(None)
     }
 }

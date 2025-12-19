@@ -1,20 +1,20 @@
 //! CLI command handlers.
 
-pub mod event;
+pub mod blob;
+pub mod cells;
 pub mod defs;
+pub mod event;
 pub mod gov;
 pub mod head;
 pub mod info;
 pub mod init;
 pub mod manifest;
 pub mod obj;
-pub mod blob;
-pub mod cells;
 pub mod replay;
 pub mod run;
-pub mod stop;
 pub mod snapshot;
 pub mod state;
+pub mod stop;
 
 use std::sync::Arc;
 
@@ -106,10 +106,7 @@ pub fn create_host(
     dirs: &ResolvedDirs,
     opts: &WorldOpts,
 ) -> Result<WorldHost<FsStore>> {
-    let host_config = util::host_config_from_opts(
-        opts.http_timeout_ms,
-        opts.http_max_body_bytes,
-    );
+    let host_config = util::host_config_from_opts(opts.http_timeout_ms, opts.http_max_body_bytes);
     let kernel_config = util::make_kernel_config(&dirs.store_root)?;
     WorldHost::from_loaded_manifest(store, loaded, &dirs.store_root, host_config, kernel_config)
         .context("create world host")

@@ -70,7 +70,6 @@ pub struct WorldOpts {
     /// Override HTTP adapter max response body size (bytes) (env: AOS_HTTP_MAX_BODY_BYTES)
     #[arg(long, global = true, env = "AOS_HTTP_MAX_BODY_BYTES", hide = true)]
     pub http_max_body_bytes: Option<usize>,
-
 }
 
 /// Execution mode for CLI reads/writes.
@@ -148,7 +147,13 @@ pub fn resolve_dirs(opts: &WorldOpts) -> Result<ResolvedDirs> {
     let control_socket = opts
         .control
         .clone()
-        .map(|p| if p.is_relative() { store_root.join(p) } else { p })
+        .map(|p| {
+            if p.is_relative() {
+                store_root.join(p)
+            } else {
+                p
+            }
+        })
         .unwrap_or_else(|| store_root.join(".aos/control.sock"));
 
     Ok(ResolvedDirs {

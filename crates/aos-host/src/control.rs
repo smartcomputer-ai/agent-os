@@ -2,13 +2,13 @@ use std::path::Path;
 
 use aos_cbor::Hash;
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_kernel::DefListing;
 use aos_kernel::KernelHeights;
 use aos_kernel::ReadMeta;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::PatchDocument;
 use aos_kernel::shadow::ShadowSummary;
-use aos_kernel::DefListing;
 use base64::prelude::*;
 use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize};
@@ -335,9 +335,7 @@ async fn handle_request(
                     .map(|s| s.to_string())
                     .ok_or_else(|| ControlError::invalid_request("missing name"))?;
                 let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::DefGet { name, resp: tx })
-                    .await;
+                let _ = control_tx.send(ControlMsg::DefGet { name, resp: tx }).await;
                 let inner = rx
                     .await
                     .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
@@ -454,7 +452,6 @@ async fn handle_request(
                 Ok(serde_json::json!({ "cells": cells, "meta": meta_to_json(&meta) }))
             }
 
-           
             "blob-get" => {
                 let hash_hex = req
                     .payload
@@ -733,7 +730,10 @@ impl ControlClient {
         value_cbor: &[u8],
     ) -> std::io::Result<ResponseEnvelope> {
         let mut payload = serde_json::Map::new();
-        payload.insert("schema".into(), serde_json::Value::String(schema.to_string()));
+        payload.insert(
+            "schema".into(),
+            serde_json::Value::String(schema.to_string()),
+        );
         payload.insert(
             "value_b64".into(),
             serde_json::Value::String(BASE64_STANDARD.encode(value_cbor)),
@@ -773,9 +773,13 @@ impl ControlClient {
         kinds: Option<&[&str]>,
         prefix: Option<&str>,
     ) -> std::io::Result<ResponseEnvelope> {
-        let kinds_val = kinds.map(|ks| serde_json::Value::Array(
-            ks.iter().map(|k| serde_json::Value::String(k.to_string())).collect()
-        ));
+        let kinds_val = kinds.map(|ks| {
+            serde_json::Value::Array(
+                ks.iter()
+                    .map(|k| serde_json::Value::String(k.to_string()))
+                    .collect(),
+            )
+        });
         let mut payload = serde_json::Map::new();
         if let Some(k) = kinds_val {
             payload.insert("kinds".into(), k);

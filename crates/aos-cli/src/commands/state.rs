@@ -4,10 +4,10 @@ use anyhow::Result;
 use clap::Args;
 use serde_json::Value as JsonValue;
 
+use crate::key::{KeyOverrides, encode_key_for_reducer};
 use crate::opts::{Mode, WorldOpts, resolve_dirs};
 use crate::output::print_success;
 use crate::util::load_world_env;
-use crate::key::{KeyOverrides, encode_key_for_reducer};
 
 use super::{create_host, prepare_world, should_use_control, try_control_client};
 
@@ -64,10 +64,10 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
                 .query_state_decoded(
                     "cli-state",
                     &args.reducer_name,
-                key_bytes_opt.as_deref(),
-                consistency.as_deref(),
-            )
-            .await?;
+                    key_bytes_opt.as_deref(),
+                    consistency.as_deref(),
+                )
+                .await?;
             let (data, warning) = state_opt
                 .map(|bytes| decode_state(&bytes, args.raw))
                 .transpose()?
@@ -189,7 +189,10 @@ fn decode_state(state: &[u8], raw: bool) -> Result<(JsonValue, Option<String>)> 
                     "bytes": state.len(),
                 })
             };
-            Ok((value, Some("state is binary; returning hex-encoded data".into())))
+            Ok((
+                value,
+                Some("state is binary; returning hex-encoded data".into()),
+            ))
         }
     }
 }

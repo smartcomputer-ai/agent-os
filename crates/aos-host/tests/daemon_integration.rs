@@ -65,5 +65,5 @@ async fn daemon_fires_timer_and_routes_event() {
         .host()
         .kernel()
         .reducer_state("com.acme/TimerHandler@1");
-    assert_eq!(state, Some(&vec![0xCC]));
+    assert_eq!(state, Some(vec![0xCC]));
 }

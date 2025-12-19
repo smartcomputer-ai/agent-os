@@ -1,5 +1,5 @@
-use assert_cmd::prelude::*;
 use aos_store::{FsStore, Store};
+use assert_cmd::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
@@ -32,10 +32,12 @@ fn blob_get_defaults_to_metadata_without_raw_or_out() {
     let json: serde_json::Value = serde_json::from_str(&output).expect("json");
 
     assert_eq!(json["data"]["bytes"].as_u64(), Some(data.len() as u64));
-    assert!(json["data"]["hint"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("--raw"));
+    assert!(
+        json["data"]["hint"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("--raw")
+    );
     let warnings = json["warnings"].as_array().cloned().unwrap_or_default();
     assert!(
         warnings

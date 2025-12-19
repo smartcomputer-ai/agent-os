@@ -1,23 +1,23 @@
 mod commands;
 mod input;
 mod key;
-mod output;
 mod opts;
+mod output;
 mod util;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use commands::event::EventArgs;
 use commands::blob::BlobArgs;
+use commands::cells::CellsArgs;
+use commands::defs::DefsArgs;
+use commands::event::EventArgs;
 use commands::gov::GovArgs;
 use commands::init::InitArgs;
 use commands::manifest::ManifestArgs;
-use commands::defs::DefsArgs;
 use commands::obj::ObjArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
-use commands::cells::CellsArgs;
 use opts::WorldOpts;
 
 #[derive(Parser, Debug)]

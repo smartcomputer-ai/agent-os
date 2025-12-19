@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use aos_host::manifest_loader;
+use aos_kernel;
 use aos_store::FsStore;
 use clap::Args;
-use aos_kernel;
 
 use crate::commands::try_control_client;
 use crate::opts::{Mode, WorldOpts, resolve_dirs};

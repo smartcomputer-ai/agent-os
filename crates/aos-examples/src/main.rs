@@ -8,8 +8,8 @@ mod hello_timer;
 mod llm_summarizer;
 mod retry_backoff;
 mod safe_upgrade;
-mod worldfs_lab;
 mod util;
+mod worldfs_lab;
 
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};

@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::{Args, Subcommand};
-use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use aos_store::Store;
+use base64::{Engine, engine::general_purpose::STANDARD as B64};
+use clap::{Args, Subcommand};
 
 use crate::input::parse_input_bytes;
 use crate::opts::{Mode, WorldOpts, resolve_dirs};
@@ -89,7 +89,11 @@ async fn blob_put(opts: &WorldOpts, args: &BlobPutArgs) -> Result<()> {
             }
             let hash = resp
                 .result
-                .and_then(|v| v.get("hash").and_then(|h| h.as_str()).map(|s| s.to_string()))
+                .and_then(|v| {
+                    v.get("hash")
+                        .and_then(|h| h.as_str())
+                        .map(|s| s.to_string())
+                })
                 .unwrap_or_default();
             return print_success(opts, serde_json::json!({ "hash": hash }), None, vec![]);
         } else if matches!(opts.mode, Mode::Daemon) {
@@ -182,16 +186,12 @@ fn normalize_hash(input: &str) -> String {
     }
 }
 
-
 async fn blob_stat(opts: &WorldOpts, args: &BlobStatArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
     load_world_env(&dirs.world)?;
     let hash = aos_cbor::Hash::from_hex_str(&args.hash)
         .with_context(|| format!("invalid hash: {}", args.hash))?;
-    let path = dirs
-        .store_root
-        .join(".aos/blobs")
-        .join(hash.to_hex());
+    let path = dirs.store_root.join(".aos/blobs").join(hash.to_hex());
     if !path.exists() {
         return print_success(opts, serde_json::json!({ "exists": false }), None, vec![]);
     }

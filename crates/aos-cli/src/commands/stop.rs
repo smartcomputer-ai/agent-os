@@ -19,10 +19,5 @@ pub async fn cmd_stop(opts: &WorldOpts) -> Result<()> {
     if !resp.ok {
         anyhow::bail!("shutdown failed: {:?}", resp.error);
     }
-    print_success(
-        opts,
-        serde_json::json!({ "stopped": true }),
-        None,
-        vec![],
-    )
+    print_success(opts, serde_json::json!({ "stopped": true }), None, vec![])
 }

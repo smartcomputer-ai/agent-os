@@ -119,8 +119,12 @@ fn introspect_reducer_state_returns_value_and_meta() {
 }
 
 #[test]
-fn introspect_list_cells_empty_for_non_keyed() {
-    let world = world_with_state(b"payload");
+fn introspect_list_cells_returns_sentinel_for_non_keyed() {
+    let mut world = world_with_state(b"payload");
+    world
+        .submit_event_result(fixtures::START_SCHEMA, &json!({ "id": "start" }))
+        .expect("submit");
+    world.tick_n(1).unwrap();
     let kernel = &world.kernel;
 
     let intent = IntentBuilder::new(
@@ -137,12 +141,37 @@ fn introspect_list_cells_empty_for_non_keyed() {
         .expect("handled");
     assert_eq!(receipt.status, ReceiptStatus::Ok);
 
-    #[derive(Deserialize)]
-    struct CellsReceipt {
-        cells: Vec<serde_json::Value>,
-    }
-    let decoded: CellsReceipt = receipt.payload().unwrap();
-    assert!(decoded.cells.is_empty());
+    let payload: serde_cbor::Value = serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
+    let cells = match payload {
+        serde_cbor::Value::Map(map) => map
+            .into_iter()
+            .find_map(|(k, v)| match (k, v) {
+                (serde_cbor::Value::Text(t), serde_cbor::Value::Array(arr)) if t == "cells" => {
+                    Some(arr)
+                }
+                _ => None,
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    assert_eq!(
+        cells.len(),
+        1,
+        "expected sentinel cell for non-keyed reducer"
+    );
+    let key_len = match &cells[0] {
+        serde_cbor::Value::Map(cell_map) => cell_map
+            .iter()
+            .find_map(|(k, v)| match (k, v) {
+                (serde_cbor::Value::Text(t), serde_cbor::Value::Bytes(b)) if t == "key" => {
+                    Some(b.len())
+                }
+                _ => None,
+            })
+            .unwrap_or_default(),
+        _ => 0,
+    };
+    assert_eq!(key_len, 0, "sentinel key should be empty bytes");
 }
 
 #[test]

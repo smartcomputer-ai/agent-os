@@ -4,7 +4,6 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_kernel::cell_index::CellIndex;
 use aos_host::config::HostConfig;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
@@ -12,6 +11,7 @@ use aos_host::testhost::TestHost;
 use aos_host::util::patch_modules;
 use aos_host::util::reset_journal;
 use aos_kernel::LoadedManifest;
+use aos_kernel::cell_index::CellIndex;
 use aos_kernel::journal::OwnedJournalEntry;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::{Kernel, KernelConfig};
@@ -55,10 +55,18 @@ impl ExampleHost {
 
         let assets_root = cfg.assets_root.unwrap_or(cfg.example_root).to_path_buf();
 
-        let mut loaded_host =
-            load_and_patch(store.clone(), &assets_root, cfg.reducer_name, &wasm_hash_ref)?;
-        let mut loaded_replay =
-            load_and_patch(store.clone(), &assets_root, cfg.reducer_name, &wasm_hash_ref)?;
+        let mut loaded_host = load_and_patch(
+            store.clone(),
+            &assets_root,
+            cfg.reducer_name,
+            &wasm_hash_ref,
+        )?;
+        let mut loaded_replay = load_and_patch(
+            store.clone(),
+            &assets_root,
+            cfg.reducer_name,
+            &wasm_hash_ref,
+        )?;
 
         maybe_patch_object_catalog(cfg.example_root, store.clone(), &mut loaded_host)?;
         maybe_patch_object_catalog(cfg.example_root, store.clone(), &mut loaded_replay)?;
@@ -161,19 +169,15 @@ impl ExampleHost {
                 let index = CellIndex::new(self.store.as_ref());
                 for meta in index.iter(root) {
                     let meta = meta?;
-                    let state_hash =
-                        Hash::from_bytes(&meta.state_hash).unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
+                    let state_hash = Hash::from_bytes(&meta.state_hash)
+                        .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
                     let state = self.store.get_blob(state_hash)?;
                     keyed_states.push((meta.key_bytes.clone(), state));
                 }
             } else {
                 // fallback to explicit keys if no root (should not happen)
                 for key in keys {
-                    if let Some(bytes) = self
-                        .host
-                        .kernel()
-                        .reducer_state_bytes(name, Some(key))?
-                    {
+                    if let Some(bytes) = self.host.kernel().reducer_state_bytes(name, Some(key))? {
                         keyed_states.push((key.clone(), bytes));
                     }
                 }
@@ -223,7 +227,7 @@ impl ReplayHandle {
             let state_hash = Hash::of_bytes(&self.final_state_bytes).to_hex();
             println!("   replay check: OK (state hash {state_hash})");
         } else {
-            println!("   replay check: no monolithic state captured");
+            println!("   replay check: no reducer state captured");
         }
 
         if let Some(name) = &self.keyed_reducer {
@@ -276,10 +280,9 @@ fn maybe_patch_object_catalog(
     store: Arc<FsStore>,
     loaded: &mut LoadedManifest,
 ) -> Result<()> {
-    let needs_patch = loaded
-        .modules
-        .iter()
-        .any(|(name, module)| name == "sys/ObjectCatalog@1" && aos_host::util::is_placeholder_hash(module));
+    let needs_patch = loaded.modules.iter().any(|(name, module)| {
+        name == "sys/ObjectCatalog@1" && aos_host::util::is_placeholder_hash(module)
+    });
     if !needs_patch {
         return Ok(());
     }
@@ -294,7 +297,9 @@ fn maybe_patch_object_catalog(
         .put_blob(&wasm_bytes)
         .context("store object_catalog wasm blob")?;
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash object catalog")?;
-    let patched = patch_modules(loaded, &wasm_hash_ref, |name, _| name == "sys/ObjectCatalog@1");
+    let patched = patch_modules(loaded, &wasm_hash_ref, |name, _| {
+        name == "sys/ObjectCatalog@1"
+    });
     if patched == 0 {
         anyhow::bail!("object catalog module missing in manifest");
     }
