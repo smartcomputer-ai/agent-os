@@ -2,6 +2,13 @@
 
 **Goal**: Allow worlds (and CLI flows) to load required modules referenced in `air/*.json` without embedding concrete `wasm_hash` values in the manifest/defs. Improve DX so placeholder hashes are resolved automatically without accidental cross-patching.
 
+**Status**: Complete (implementation landed; tests for multi-module placeholder resolution still to add if desired).
+
+## Progress to Date
+- CLI now resolves placeholder module hashes from `world/modules/`, built system module artifacts, or a compiled local reducer when exactly one non‑system placeholder remains.
+- System modules like `sys/ObjectCatalog@1` autoload from workspace WASM artifacts and are cached into `world/modules/` for repeatable runs.
+- Unresolved placeholders fail with a clear, enumerated error and remediation hints.
+
 ## Problem
 - Today manifests often include placeholder hashes for modules.
 - `aos-cli` currently patches *all* placeholder modules with the single reducer it just compiled from `reducer/`, which breaks worlds that include multiple modules (e.g., system reducers like `sys/ObjectCatalog@1`).

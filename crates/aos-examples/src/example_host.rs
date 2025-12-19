@@ -219,7 +219,6 @@ impl ReplayHandle {
         if !self.final_state_bytes.is_empty() {
             let replay_bytes = kernel
                 .reducer_state(&self.reducer_name)
-                .cloned()
                 .ok_or_else(|| anyhow!("missing replay state"))?;
             if replay_bytes != self.final_state_bytes {
                 return Err(anyhow!("replay mismatch: reducer state diverged"));
