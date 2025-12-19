@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{Result, anyhow};
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::shadow::ShadowHarness;
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
@@ -14,16 +15,16 @@ const REDUCER_NAME: &str = "demo/SafeUpgrade@1";
 const EVENT_SCHEMA: &str = "demo/SafeUpgradeEvent@1";
 const MODULE_PATH: &str = "examples/06-safe-upgrade/reducer";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum UpgradeEventEnvelope {
-    Start {
-        url: String,
-    },
-    NotifyComplete {
-        primary_status: i64,
-        follow_status: i64,
-        request_count: u64,
-    },
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum UpgradeEventEnvelope {
+        Start { url: String },
+        NotifyComplete {
+            primary_status: i64,
+            follow_status: i64,
+            request_count: u64,
+        },
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,11 +36,13 @@ struct UpgradeStateView {
     requests_observed: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum UpgradePcView {
-    Idle,
-    Fetching,
-    Completed,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum UpgradePcView {
+        Idle,
+        Fetching,
+        Completed,
+    }
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
@@ -165,14 +168,13 @@ pub fn run(example_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn load_upgrade_patch(
-    example_root: &Path,
-    host: &ExampleHost,
-) -> Result<ManifestPatch> {
+fn load_upgrade_patch(example_root: &Path, host: &ExampleHost) -> Result<ManifestPatch> {
     let upgrade_root = example_root.join("air.v2");
     let mut loaded = manifest_loader::load_from_assets(host.store(), &upgrade_root)?
         .ok_or_else(|| anyhow!("upgrade manifest missing at {}", upgrade_root.display()))?;
-    aos_host::util::patch_modules(&mut loaded, host.wasm_hash(), |name, _| name == REDUCER_NAME);
+    aos_host::util::patch_modules(&mut loaded, host.wasm_hash(), |name, _| {
+        name == REDUCER_NAME
+    });
     Ok(manifest_loader::manifest_patch_from_loaded(&loaded))
 }
 

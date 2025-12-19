@@ -1,18 +1,20 @@
 //! CLI command handlers.
 
+pub mod blob;
+pub mod cells;
+pub mod defs;
 pub mod event;
 pub mod gov;
-mod gov_control;
 pub mod head;
 pub mod info;
 pub mod init;
 pub mod manifest;
-pub mod put_blob;
+pub mod obj;
 pub mod replay;
 pub mod run;
-pub mod shutdown;
 pub mod snapshot;
 pub mod state;
+pub mod stop;
 
 use std::sync::Arc;
 
@@ -20,21 +22,25 @@ use anyhow::{Context, Result, anyhow};
 use aos_host::control::ControlClient;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
-use aos_host::util::has_placeholder_modules;
 use aos_kernel::LoadedManifest;
 use aos_store::FsStore;
 
-use crate::opts::{ResolvedDirs, WorldOpts};
+use crate::opts::{Mode, ResolvedDirs, WorldOpts};
 use crate::util;
 
 /// Try to connect to a running daemon via control socket.
 pub async fn try_control_client(dirs: &ResolvedDirs) -> Option<ControlClient> {
-    let socket_path = dirs.control_socket();
+    let socket_path = &dirs.control_socket;
     if socket_path.exists() {
         ControlClient::connect(&socket_path).await.ok()
     } else {
         None
     }
+}
+
+/// Decide whether to attempt control based on mode selection.
+pub fn should_use_control(opts: &WorldOpts) -> bool {
+    matches!(opts.mode, Mode::Auto | Mode::Daemon)
 }
 
 /// Prepare the world for running: compile reducer, load manifest, patch modules.
@@ -78,17 +84,16 @@ pub fn prepare_world(
         .context("load manifest from assets")?
         .ok_or_else(|| anyhow!("no manifest found in {}", dirs.air_dir.display()))?;
 
-    // Patch module hashes
-    if let Some(hash) = &wasm_hash {
-        let patched = util::patch_module_hashes(&mut loaded, hash, opts.module.as_deref())?;
-        if patched > 0 {
-            println!("Patched {} module(s) with WASM hash", patched);
-        }
-    } else if has_placeholder_modules(&loaded) {
-        anyhow::bail!(
-            "manifest has modules with placeholder hashes but no reducer/ found; \
-             use --reducer to specify reducer crate"
-        );
+    // Resolve placeholder module hashes
+    let patched = util::resolve_placeholder_modules(
+        &mut loaded,
+        store.as_ref(),
+        &dirs.world,
+        wasm_hash.as_ref(),
+        opts.module.as_deref(),
+    )?;
+    if patched > 0 {
+        println!("Resolved {} module(s) with WASM hash", patched);
     }
 
     Ok((store, loaded))
@@ -101,11 +106,7 @@ pub fn create_host(
     dirs: &ResolvedDirs,
     opts: &WorldOpts,
 ) -> Result<WorldHost<FsStore>> {
-    let host_config = util::host_config_from_env_and_overrides(
-        opts.http_timeout_ms,
-        opts.http_max_body_bytes,
-        opts.no_llm,
-    );
+    let host_config = util::host_config_from_opts(opts.http_timeout_ms, opts.http_max_body_bytes);
     let kernel_config = util::make_kernel_config(&dirs.store_root)?;
     WorldHost::from_loaded_manifest(store, loaded, &dirs.store_root, host_config, kernel_config)
         .context("create world host")

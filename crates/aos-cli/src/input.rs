@@ -28,6 +28,7 @@ pub fn parse_input_value(value: &str) -> Result<String> {
 /// - `@-` reads from stdin
 /// - `@path` reads from the specified file
 /// - Otherwise, returns an error (literal data not supported for binary)
+#[allow(dead_code)]
 pub fn parse_input_bytes(value: &str) -> Result<Vec<u8>> {
     if value == "@-" {
         let mut buf = Vec::new();

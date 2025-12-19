@@ -22,5 +22,6 @@ What the ladder proves (in order):
 | 06  | safe-upgrade  | Governance shadow/apply demo     |
 | 07  | llm-summarizer | HTTP + LLM summarization demo    |
 | 08  | retry-backoff | Reducer-driven retry with timer  |
+| 09  | worldfs-lab   | WorldFS view over notes + catalog |
 
 Use the `aos-examples` CLI to list or run demos. Run them in order—the ladder is deliberate, and later steps assume the earlier capabilities and policies are already in place.

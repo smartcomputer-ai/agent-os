@@ -3,10 +3,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use aos_air_types::AirNode;
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::{
-    Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent, TailScan,
+    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent,
+    TailScan, cell_index::CellMeta,
 };
 use aos_store::{FsStore, Store};
 
@@ -21,10 +23,15 @@ use crate::adapters::timer::TimerScheduler;
 use crate::config::HostConfig;
 use crate::error::HostError;
 use crate::manifest_loader;
+use aos_kernel::StateReader;
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
-    DomainEvent { schema: String, value: Vec<u8> },
+    DomainEvent {
+        schema: String,
+        value: Vec<u8>,
+        key: Option<Vec<u8>>,
+    },
     Receipt(EffectReceipt),
 }
 
@@ -251,8 +258,12 @@ impl<S: Store + 'static> WorldHost<S> {
 
     pub fn enqueue_external(&mut self, evt: ExternalEvent) -> Result<(), HostError> {
         match evt {
-            ExternalEvent::DomainEvent { schema, value } => {
-                self.kernel.submit_domain_event(schema, value);
+            ExternalEvent::DomainEvent { schema, value, key } => {
+                if let Some(key) = key {
+                    self.kernel.submit_domain_event_with_key(schema, value, key);
+                } else {
+                    self.kernel.submit_domain_event(schema, value);
+                }
             }
             ExternalEvent::Receipt(receipt) => {
                 self.kernel.handle_receipt(receipt)?;
@@ -269,10 +280,41 @@ impl<S: Store + 'static> WorldHost<S> {
         })
     }
 
-    pub fn state(&self, reducer: &str, key: Option<&[u8]>) -> Option<&Vec<u8>> {
-        // keyed state not yet implemented; ignore key
-        let _ = key;
-        self.kernel.reducer_state(reducer)
+    pub fn state(&self, reducer: &str, key: Option<&[u8]>) -> Option<Vec<u8>> {
+        self.kernel
+            .reducer_state_bytes(reducer, key)
+            .unwrap_or(None)
+    }
+
+    /// Query reducer state with consistency metadata.
+    pub fn query_state(
+        &self,
+        reducer: &str,
+        key: Option<&[u8]>,
+        consistency: aos_kernel::Consistency,
+    ) -> Option<aos_kernel::StateRead<Option<Vec<u8>>>> {
+        self.kernel
+            .get_reducer_state(reducer, key, consistency)
+            .ok()
+    }
+
+    /// List all cells for a keyed reducer. Returns empty if reducer is not keyed or has no cells.
+    pub fn list_cells(&self, reducer: &str) -> Result<Vec<CellMeta>, HostError> {
+        self.kernel.list_cells(reducer).map_err(HostError::from)
+    }
+
+    pub fn list_defs(
+        &self,
+        kinds: Option<&[String]>,
+        prefix: Option<&str>,
+    ) -> Result<Vec<DefListing>, HostError> {
+        Ok(self.kernel.list_defs(kinds, prefix))
+    }
+
+    pub fn get_def(&self, name: &str) -> Result<AirNode, HostError> {
+        self.kernel
+            .get_def(name)
+            .ok_or_else(|| HostError::Manifest(format!("definition '{name}' not found")))
     }
 
     pub fn snapshot(&mut self) -> Result<(), HostError> {
@@ -284,23 +326,58 @@ impl<S: Store + 'static> WorldHost<S> {
         let intents = self.kernel.drain_effects();
         let effects_dispatched = intents.len();
 
-        let receipts = match mode {
-            RunMode::Batch => self.adapter_registry.execute_batch(intents).await,
-            RunMode::Daemon { scheduler } => {
-                // Partition: timer.set → schedule (no receipt), others → execute
-                let (timer_intents, other_intents): (Vec<_>, Vec<_>) = intents
-                    .into_iter()
-                    .partition(|i| i.kind.as_str() == EffectKind::TIMER_SET);
+        enum Slot {
+            Internal(aos_effects::EffectReceipt),
+            External, // position preserved via iterator order
+            Timer,
+        }
 
-                // Schedule timers without producing receipts
-                for intent in timer_intents {
-                    scheduler.schedule(&intent)?;
+        let mut slots = Vec::with_capacity(intents.len());
+        let mut external_intents = Vec::new();
+
+        match mode {
+            RunMode::Batch => {
+                for intent in intents {
+                    if let Some(receipt) = self.kernel.handle_internal_intent(&intent)? {
+                        slots.push(Slot::Internal(receipt));
+                    } else {
+                        slots.push(Slot::External);
+                        external_intents.push(intent);
+                    }
                 }
-
-                // Execute non-timer effects
-                self.adapter_registry.execute_batch(other_intents).await
             }
-        };
+            RunMode::Daemon { scheduler } => {
+                for intent in intents {
+                    if let Some(receipt) = self.kernel.handle_internal_intent(&intent)? {
+                        slots.push(Slot::Internal(receipt));
+                        continue;
+                    }
+                    if intent.kind.as_str() == EffectKind::TIMER_SET {
+                        scheduler.schedule(&intent)?;
+                        slots.push(Slot::Timer);
+                    } else {
+                        slots.push(Slot::External);
+                        external_intents.push(intent);
+                    }
+                }
+            }
+        }
+
+        let external_receipts = self.adapter_registry.execute_batch(external_intents).await;
+        let mut external_iter = external_receipts.into_iter();
+
+        let mut receipts = Vec::new();
+        for slot in slots {
+            match slot {
+                Slot::Internal(r) => receipts.push(r),
+                Slot::External => receipts.push(
+                    external_iter
+                        .next()
+                        .expect("external receipt for each external slot"),
+                ),
+                Slot::Timer => {}
+            }
+        }
 
         let receipts_applied = receipts.len();
         for receipt in receipts {
@@ -492,6 +569,7 @@ mod tests {
         host.enqueue_external(ExternalEvent::DomainEvent {
             schema: "demo/Event@1".into(),
             value: to_vec(&json!({"x": 1})).unwrap(),
+            key: None,
         })
         .unwrap();
 

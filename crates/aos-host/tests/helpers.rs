@@ -14,8 +14,21 @@ use aos_air_types::{
     TypeRecord, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
 };
 use aos_effects::builtins::TimerSetParams;
-use aos_host::fixtures::{self, START_SCHEMA, TestStore, zero_hash};
+#[path = "../src/fixtures/mod.rs"]
+pub mod fixtures;
+
+/// Compatibility wrapper for decoding ReadMeta via serde_json/serde_cbor in tests.
+/// Mirrors aos_kernel::ReadMeta but uses hex strings for hashes.
+#[derive(Debug, serde::Deserialize)]
+pub struct ReadMetaCompat {
+    pub journal_height: u64,
+    #[serde(default)]
+    pub snapshot_hash: Option<String>,
+    pub manifest_hash: String,
+}
+
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use fixtures::{START_SCHEMA, TestStore, zero_hash};
 use indexmap::IndexMap;
 use std::sync::Arc;
 
@@ -188,8 +201,10 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
     });
-    let unblock_event =
-        fixtures::domain_event("com.acme/Unblock@1", &fixtures::plan_input_record(vec![]));
+    let unblock_event = aos_wasm_abi::DomainEvent::new(
+        "com.acme/Unblock@1".to_string(),
+        serde_cbor::to_vec(&serde_json::json!({})).expect("encode unblock"),
+    );
     let unblock_emitter = fixtures::stub_event_emitting_reducer(
         store,
         "com.acme/UnblockEmitter@1",
@@ -297,7 +312,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         )],
         ann: None,
     };
-    let timer_emitter =
+    let mut timer_emitter =
         fixtures::stub_reducer_module(store, "com.acme/TimerEmitter@1", &timer_output);
 
     let handler_output = ReducerOutput {
@@ -306,13 +321,28 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         effects: vec![],
         ann: None,
     };
-    let timer_handler =
+    let mut timer_handler =
         fixtures::stub_reducer_module(store, "com.acme/TimerHandler@1", &handler_output);
 
     let routing = vec![
         fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
         fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
     ];
+    // Provide minimal reducer ABI so routing succeeds.
+    timer_emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    timer_handler.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(fixtures::SYS_TIMER_FIRED),
+        event: fixtures::schema(fixtures::SYS_TIMER_FIRED),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let mut loaded = fixtures::build_loaded_manifest(
         vec![],
         vec![],
@@ -321,20 +351,10 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
     );
     insert_test_schemas(
         &mut loaded,
-        vec![
-            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
-            DefSchema {
-                name: fixtures::SYS_TIMER_FIRED.into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([(
-                        "key".into(),
-                        TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
-                            text: EmptyObject {},
-                        })),
-                    )]),
-                }),
-            },
-        ],
+        vec![def_text_record_schema(
+            fixtures::START_SCHEMA,
+            vec![("id", text_type())],
+        )],
     );
     loaded
 }

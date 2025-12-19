@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use aos_host::{ExternalEvent, WorldHost};
 use aos_host::config::HostConfig;
 use aos_host::fixtures;
+use aos_host::{ExternalEvent, WorldHost};
 use aos_kernel::KernelConfig;
-use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use aos_store::FsStore;
+use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use serde_cbor;
 use serde_json;
 use tempfile::TempDir;
@@ -31,6 +31,7 @@ async fn worldhost_snapshot_preserves_effect_queue() {
     host.enqueue_external(ExternalEvent::DomainEvent {
         schema: "demo/TimerEvent@1".into(),
         value: serde_cbor::to_vec(&serde_json::json!({})).unwrap(),
+        key: None,
     })
     .unwrap();
     host.drain().unwrap();
@@ -70,8 +71,7 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
         effects: vec![effect],
         ann: None,
     };
-    let module =
-        fixtures::stub_reducer_module(store, "demo/TimerReducer@1", &output);
+    let module = fixtures::stub_reducer_module(store, "demo/TimerReducer@1", &output);
     fixtures::build_loaded_manifest(
         vec![],
         vec![],

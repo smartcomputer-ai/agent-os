@@ -1,4 +1,5 @@
 use aos_air_types::HashRef;
+use aos_cbor::Hash;
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
 };
@@ -32,8 +33,7 @@ impl ReducerEffectContext {
 
 #[derive(Serialize)]
 struct TimerReceiptEvent {
-    #[serde(with = "serde_bytes")]
-    intent_hash: [u8; 32],
+    intent_hash: String,
     reducer: String,
     effect_kind: String,
     adapter_id: String,
@@ -48,8 +48,7 @@ struct TimerReceiptEvent {
 
 #[derive(Serialize)]
 struct BlobReceiptEvent<TParams, TReceipt> {
-    #[serde(with = "serde_bytes")]
-    intent_hash: [u8; 32],
+    intent_hash: String,
     reducer: String,
     effect_kind: String,
     adapter_id: String,
@@ -81,7 +80,7 @@ fn build_timer_event(
     let requested: TimerSetParams = decode(&ctx.params_cbor)?;
     let timer_receipt: TimerSetReceipt = decode(&receipt.payload_cbor)?;
     let payload = TimerReceiptEvent {
-        intent_hash: receipt.intent_hash,
+        intent_hash: hash_to_hex(&receipt.intent_hash),
         reducer: ctx.reducer.clone(),
         effect_kind: ctx.effect_kind.clone(),
         adapter_id: receipt.adapter_id.clone(),
@@ -101,7 +100,7 @@ fn build_blob_put_event(
     let requested: BlobPutParams = decode(&ctx.params_cbor)?;
     let blob_receipt: BlobPutReceipt = decode(&receipt.payload_cbor)?;
     let payload = BlobReceiptEvent {
-        intent_hash: receipt.intent_hash,
+        intent_hash: hash_to_hex(&receipt.intent_hash),
         reducer: ctx.reducer.clone(),
         effect_kind: ctx.effect_kind.clone(),
         adapter_id: receipt.adapter_id.clone(),
@@ -121,7 +120,7 @@ fn build_blob_get_event(
     let requested: BlobGetParams = decode(&ctx.params_cbor)?;
     let blob_receipt: BlobGetReceipt = decode(&receipt.payload_cbor)?;
     let payload = BlobReceiptEvent {
-        intent_hash: receipt.intent_hash,
+        intent_hash: hash_to_hex(&receipt.intent_hash),
         reducer: ctx.reducer.clone(),
         effect_kind: ctx.effect_kind.clone(),
         adapter_id: receipt.adapter_id.clone(),
@@ -138,6 +137,12 @@ fn encode_event<T: Serialize>(schema: &str, payload: T) -> Result<DomainEvent, K
     let value =
         serde_cbor::to_vec(&payload).map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
     Ok(DomainEvent::new(schema, value))
+}
+
+fn hash_to_hex(bytes: &[u8; 32]) -> String {
+    Hash::from_bytes(bytes)
+        .map(|h| h.to_hex())
+        .unwrap_or_else(|_| hex::encode(bytes))
 }
 
 fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, KernelError> {
@@ -199,8 +204,7 @@ mod tests {
 
         #[derive(Deserialize)]
         struct EventPayload {
-            #[serde(with = "serde_bytes")]
-            intent_hash: Vec<u8>,
+            intent_hash: String,
             reducer: String,
             effect_kind: String,
             adapter_id: String,
@@ -213,7 +217,10 @@ mod tests {
         }
 
         let decoded: EventPayload = serde_cbor::from_slice(&event.value).unwrap();
-        assert_eq!(decoded.intent_hash, receipt.intent_hash);
+        assert_eq!(
+            decoded.intent_hash,
+            Hash::from_bytes(&receipt.intent_hash).unwrap().to_hex()
+        );
         assert_eq!(decoded.reducer, "com.acme/Reducer@1");
         assert_eq!(decoded.effect_kind, aos_effects::EffectKind::TIMER_SET);
         assert_eq!(decoded.requested.deliver_at_ns, params.deliver_at_ns);

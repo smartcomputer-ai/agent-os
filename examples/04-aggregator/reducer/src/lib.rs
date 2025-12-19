@@ -4,8 +4,7 @@
 extern crate alloc;
 
 use alloc::{string::String, vec, vec::Vec};
-use aos_air_exec::Value;
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx};
+use aos_wasm_sdk::{aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
 use serde::{Deserialize, Serialize};
 
 const AGGREGATE_REQUEST_SCHEMA: &str = "demo/AggregateRequested@1";
@@ -20,11 +19,13 @@ struct AggregatorState {
     last_responses: Vec<AggregateResponse>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum AggregatorPc {
-    Idle,
-    Running,
-    Done,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum AggregatorPc {
+        Idle,
+        Running,
+        Done,
+    }
 }
 
 impl Default for AggregatorPc {
@@ -48,6 +49,7 @@ struct AggregateResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "$tag", content = "$value")]
 enum AggregatorEvent {
     Start {
         topic: String,
@@ -62,6 +64,15 @@ enum AggregatorEvent {
         secondary: AggregateResponse,
         tertiary: AggregateResponse,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AggregateRequest {
+    request_id: u64,
+    topic: String,
+    primary: AggregationTarget,
+    secondary: AggregationTarget,
+    tertiary: AggregationTarget,
 }
 
 aos_reducer!(AggregatorSm);
@@ -120,13 +131,13 @@ fn handle_start(
     ];
     ctx.state.last_responses.clear();
 
-    let intent_value = Value::record([
-        ("request_id", Value::Nat(request_id)),
-        ("topic", Value::Text(topic)),
-        ("primary", target_to_value(&primary)),
-        ("secondary", target_to_value(&secondary)),
-        ("tertiary", target_to_value(&tertiary)),
-    ]);
+    let intent_value = AggregateRequest {
+        request_id,
+        topic,
+        primary,
+        secondary,
+        tertiary,
+    };
     let key = request_id.to_be_bytes();
     ctx.intent(AGGREGATE_REQUEST_SCHEMA)
         .key_bytes(&key)
@@ -148,12 +159,4 @@ fn handle_complete(
     ctx.state.current_topic = Some(topic);
     ctx.state.pending_targets.clear();
     ctx.state.last_responses = responses.to_vec();
-}
-
-fn target_to_value(target: &AggregationTarget) -> Value {
-    Value::record([
-        ("name", Value::Text(target.name.clone())),
-        ("method", Value::Text(target.method.clone())),
-        ("url", Value::Text(target.url.clone())),
-    ])
 }

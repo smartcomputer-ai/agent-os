@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
@@ -10,14 +11,16 @@ const REDUCER_NAME: &str = "demo/Aggregator@1";
 const EVENT_SCHEMA: &str = "demo/AggregatorEvent@1";
 const MODULE_PATH: &str = "examples/04-aggregator/reducer";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum AggregatorEventEnvelope {
-    Start {
-        topic: String,
-        primary: AggregationTargetEnvelope,
-        secondary: AggregationTargetEnvelope,
-        tertiary: AggregationTargetEnvelope,
-    },
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum AggregatorEventEnvelope {
+        Start {
+            topic: String,
+            primary: AggregationTargetEnvelope,
+            secondary: AggregationTargetEnvelope,
+            tertiary: AggregationTargetEnvelope,
+        },
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,11 +47,13 @@ struct AggregateResponseView {
     body_preview: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum AggregatorPcView {
-    Idle,
-    Running,
-    Done,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum AggregatorPcView {
+        Idle,
+        Running,
+        Done,
+    }
 }
 
 pub fn run(example_root: &Path) -> Result<()> {

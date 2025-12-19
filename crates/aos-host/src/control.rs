@@ -1,13 +1,16 @@
 use std::path::Path;
 
+use aos_cbor::Hash;
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_kernel::DefListing;
 use aos_kernel::KernelHeights;
+use aos_kernel::ReadMeta;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
-use aos_kernel::shadow::ShadowSummary;
 use aos_kernel::patch_doc::PatchDocument;
-use jsonschema::JSONSchema;
+use aos_kernel::shadow::ShadowSummary;
 use base64::prelude::*;
+use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -43,6 +46,14 @@ pub struct ResponseEnvelope {
     pub result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ControlError>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsistencyJson {
+    Head,
+    AtLeast,
+    Exact,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -194,92 +205,6 @@ async fn handle_request(
             ));
         }
         match req.cmd.as_str() {
-            "send-event" => {
-                let schema = req
-                    .payload
-                    .get("schema")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing schema"))?;
-                let value_b64 = req
-                    .payload
-                    .get("value_b64")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ControlError::invalid_request("missing value_b64"))?;
-                let bytes = BASE64_STANDARD
-                    .decode(value_b64)
-                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
-                let (tx, rx) = oneshot::channel();
-                let evt = ExternalEvent::DomainEvent {
-                    schema,
-                    value: bytes,
-                };
-                let _ = control_tx
-                    .send(ControlMsg::SendEvent {
-                        event: evt,
-                        resp: tx,
-                    })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({}))
-            }
-            "inject-receipt" => {
-                let p: InjectReceiptPayload = serde_json::from_value(req.payload.clone())
-                    .map_err(|e| ControlError::decode(format!("{e}")))?;
-                let payload = BASE64_STANDARD
-                    .decode(p.payload_b64)
-                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
-                let receipt = EffectReceipt {
-                    intent_hash: p.intent_hash,
-                    adapter_id: p.adapter_id,
-                    status: ReceiptStatus::Ok,
-                    payload_cbor: payload,
-                    cost_cents: None,
-                    signature: vec![],
-                };
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::InjectReceipt { receipt, resp: tx })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({}))
-            }
-            "query-state" => {
-                let reducer = req
-                    .payload
-                    .get("reducer")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
-                let key = req
-                    .payload
-                    .get("key_b64")
-                    .and_then(|v| v.as_str())
-                    .map(|s| BASE64_STANDARD.decode(s).unwrap_or_default());
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::QueryState {
-                        reducer,
-                        key,
-                        resp: tx,
-                    })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                match inner.map_err(ControlError::host)? {
-                    Some(bytes) => Ok(serde_json::json!({
-                        "state_b64": BASE64_STANDARD.encode(bytes)
-                    })),
-                    None => Ok(serde_json::json!({ "state_b64": null })),
-                }
-            }
             "snapshot" => {
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx.send(ControlMsg::Snapshot { resp: tx }).await;
@@ -288,15 +213,6 @@ async fn handle_request(
                     .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
                 inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({}))
-            }
-            "step" => {
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx.send(ControlMsg::Step { resp: tx }).await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({ "stepped": true }))
             }
             "shutdown" => {
                 let (tx, rx) = oneshot::channel();
@@ -318,10 +234,242 @@ async fn handle_request(
                 let inner = rx
                     .await
                     .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                let head = inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({ "head": head }))
+                let meta = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "meta": meta_to_json(&meta) }))
             }
-            "put-blob" => {
+            "event-send" => {
+                let schema = req
+                    .payload
+                    .get("schema")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing schema"))?;
+                let value_b64 = req
+                    .payload
+                    .get("value_b64")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ControlError::invalid_request("missing value_b64"))?;
+                let bytes = BASE64_STANDARD
+                    .decode(value_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let key = req
+                    .payload
+                    .get("key_b64")
+                    .and_then(|v| v.as_str())
+                    .map(|b64| {
+                        BASE64_STANDARD
+                            .decode(b64)
+                            .map_err(|e| ControlError::decode(format!("invalid key base64: {e}")))
+                    })
+                    .transpose()?;
+                let (tx, rx) = oneshot::channel();
+                let evt = ExternalEvent::DomainEvent {
+                    schema,
+                    value: bytes,
+                    key,
+                };
+                let _ = control_tx
+                    .send(ControlMsg::EventSend {
+                        event: evt,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({}))
+            }
+            "receipt-inject" => {
+                let p: InjectReceiptPayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let payload = BASE64_STANDARD
+                    .decode(p.payload_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let receipt = EffectReceipt {
+                    intent_hash: p.intent_hash,
+                    adapter_id: p.adapter_id,
+                    status: ReceiptStatus::Ok,
+                    payload_cbor: payload,
+                    cost_cents: None,
+                    signature: vec![],
+                };
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::ReceiptInject { receipt, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({}))
+            }
+            "manifest-get" => {
+                let consistency = req
+                    .payload
+                    .get("consistency")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("head")
+                    .to_string();
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::ManifestGet {
+                        consistency,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let (meta, manifest_bytes) = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({
+                    "manifest_b64": BASE64_STANDARD.encode(manifest_bytes),
+                    "meta": meta_to_json(&meta),
+                }))
+            }
+            "def-get" | "defs-get" => {
+                let name = req
+                    .payload
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing name"))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx.send(ControlMsg::DefGet { name, resp: tx }).await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let def = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "def": def }))
+            }
+            "def-list" | "defs-list" => {
+                let kinds: Option<Vec<String>> = req
+                    .payload
+                    .get("kinds")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    });
+                let prefix = req
+                    .payload
+                    .get("prefix")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::DefList {
+                        kinds,
+                        prefix,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let defs: Vec<DefListing> = inner.map_err(ControlError::host)?;
+                let meta = world_meta(&control_tx).await?;
+                Ok(serde_json::json!({
+                    "defs": defs,
+                    "meta": meta_to_json(&meta),
+                }))
+            }
+            "state-get" => {
+                let reducer = req
+                    .payload
+                    .get("reducer")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
+                let key = req
+                    .payload
+                    .get("key_b64")
+                    .and_then(|v| v.as_str())
+                    .map(|s| BASE64_STANDARD.decode(s).unwrap_or_default());
+                let consistency = req
+                    .payload
+                    .get("consistency")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("head");
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::StateGet {
+                        reducer,
+                        key,
+                        consistency: consistency.to_string(),
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                match inner.map_err(ControlError::host)? {
+                    Some((meta, bytes_opt)) => {
+                        let state_b64 = bytes_opt.map(|b| BASE64_STANDARD.encode(b));
+                        Ok(serde_json::json!({
+                            "state_b64": state_b64,
+                            "meta": meta_to_json(&meta),
+                        }))
+                    }
+                    None => Ok(serde_json::json!({
+                        "state_b64": null,
+                        "meta": meta_to_json(&world_meta(&control_tx).await?),
+                    })),
+                }
+            }
+            "state-list" => {
+                let reducer = req
+                    .payload
+                    .get("reducer")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::StateList { reducer, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let metas = inner.map_err(ControlError::host)?;
+                let cells: Vec<serde_json::Value> = metas
+                    .into_iter()
+                    .map(|m| {
+                        let key_b64 = BASE64_STANDARD.encode(&m.key_bytes);
+                        let state_hash = Hash::from_bytes(&m.state_hash)
+                            .map(|h| h.to_hex())
+                            .unwrap_or_else(|_| hex::encode(m.state_hash));
+                        serde_json::json!({
+                            "key_b64": key_b64,
+                            "state_hash_hex": state_hash,
+                            "size": m.size,
+                            "last_active_ns": m.last_active_ns,
+                        })
+                    })
+                    .collect();
+                let meta = world_meta(&control_tx).await?;
+                Ok(serde_json::json!({ "cells": cells, "meta": meta_to_json(&meta) }))
+            }
+
+            "blob-get" => {
+                let hash_hex = req
+                    .payload
+                    .get("hash_hex")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ControlError::invalid_request("missing hash_hex"))?
+                    .to_string();
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::BlobGet { hash_hex, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let bytes = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "data_b64": BASE64_STANDARD.encode(bytes) }))
+            }
+            "blob-put" => {
                 let payload: PutBlobPayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let data = BASE64_STANDARD
@@ -337,26 +485,31 @@ async fn handle_request(
                 let hash_hex = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "hash": hash_hex }))
             }
-            "propose" => {
+            "gov-propose" => {
                 let payload: ProposePayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let patch_bytes = BASE64_STANDARD
                     .decode(payload.patch_b64)
                     .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
                 // Try ManifestPatch CBOR first; fallback to PatchDocument JSON (validated).
-                let patch = if let Ok(manifest) = serde_cbor::from_slice::<ManifestPatch>(&patch_bytes) {
-                    crate::modes::daemon::GovernancePatchInput::Manifest(manifest)
-                } else if let Ok(doc_json) = serde_json::from_slice::<serde_json::Value>(&patch_bytes) {
-                    validate_patch_doc(&doc_json)?;
-                    let doc: PatchDocument = serde_json::from_value(doc_json)
-                        .map_err(|e| ControlError::decode(format!("decode patch doc: {e}")))?;
-                    crate::modes::daemon::GovernancePatchInput::PatchDoc(doc)
-                } else {
-                    return Err(ControlError::decode("patch_b64 is neither ManifestPatch CBOR nor PatchDocument JSON"));
-                };
+                let patch =
+                    if let Ok(manifest) = serde_cbor::from_slice::<ManifestPatch>(&patch_bytes) {
+                        crate::modes::daemon::GovernancePatchInput::Manifest(manifest)
+                    } else if let Ok(doc_json) =
+                        serde_json::from_slice::<serde_json::Value>(&patch_bytes)
+                    {
+                        validate_patch_doc(&doc_json)?;
+                        let doc: PatchDocument = serde_json::from_value(doc_json)
+                            .map_err(|e| ControlError::decode(format!("decode patch doc: {e}")))?;
+                        crate::modes::daemon::GovernancePatchInput::PatchDoc(doc)
+                    } else {
+                        return Err(ControlError::decode(
+                            "patch_b64 is neither ManifestPatch CBOR nor PatchDocument JSON",
+                        ));
+                    };
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::Propose {
+                    .send(ControlMsg::GovPropose {
                         patch,
                         description: payload.description,
                         resp: tx,
@@ -368,12 +521,12 @@ async fn handle_request(
                 let proposal_id = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "proposal_id": proposal_id }))
             }
-            "shadow" => {
+            "gov-shadow" => {
                 let payload: ShadowPayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::Shadow {
+                    .send(ControlMsg::GovShadow {
                         proposal_id: payload.proposal_id,
                         resp: tx,
                     })
@@ -386,7 +539,7 @@ async fn handle_request(
                     .map_err(|e| ControlError::decode(format!("encode summary json: {e}")))?;
                 Ok(value)
             }
-            "approve" => {
+            "gov-approve" => {
                 let payload: ApprovePayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let decision = match payload.decision.as_str() {
@@ -398,7 +551,7 @@ async fn handle_request(
                 };
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::Approve {
+                    .send(ControlMsg::GovApprove {
                         proposal_id: payload.proposal_id,
                         approver: payload.approver,
                         decision,
@@ -411,12 +564,12 @@ async fn handle_request(
                 inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({}))
             }
-            "apply" => {
+            "gov-apply" => {
                 let payload: ApplyPayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::Apply {
+                    .send(ControlMsg::GovApply {
                         proposal_id: payload.proposal_id,
                         resp: tx,
                     })
@@ -509,13 +662,32 @@ fn validate_patch_doc(doc: &serde_json::Value) -> Result<(), ControlError> {
         .compile(&patch_schema)
         .map_err(|e| ControlError::decode(format!("compile patch schema: {e}")))?;
     if let Err(errors) = compiled.validate(doc) {
-        let msgs: Vec<String> = errors.map(|e| format!("{}: {}", e.instance_path, e)).collect();
+        let msgs: Vec<String> = errors
+            .map(|e| format!("{}: {}", e.instance_path, e))
+            .collect();
         return Err(ControlError::decode(format!(
             "patch schema validation failed: {}",
             msgs.join("; ")
         )));
     }
     Ok(())
+}
+
+fn meta_to_json(meta: &ReadMeta) -> serde_json::Value {
+    serde_json::json!({
+        "journal_height": meta.journal_height,
+        "snapshot_hash": meta.snapshot_hash.map(|h| h.to_hex()),
+        "manifest_hash": meta.manifest_hash.to_hex(),
+    })
+}
+
+async fn world_meta(control_tx: &mpsc::Sender<ControlMsg>) -> Result<ReadMeta, ControlError> {
+    let (tx, rx) = oneshot::channel();
+    let _ = control_tx.send(ControlMsg::JournalHead { resp: tx }).await;
+    let inner = rx
+        .await
+        .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+    inner.map_err(ControlError::host)
 }
 
 /// Minimal control client used by tests and CLI helpers.
@@ -554,26 +726,72 @@ impl ControlClient {
         &mut self,
         id: impl Into<String>,
         schema: &str,
+        key: Option<&[u8]>,
         value_cbor: &[u8],
     ) -> std::io::Result<ResponseEnvelope> {
+        let mut payload = serde_json::Map::new();
+        payload.insert(
+            "schema".into(),
+            serde_json::Value::String(schema.to_string()),
+        );
+        payload.insert(
+            "value_b64".into(),
+            serde_json::Value::String(BASE64_STANDARD.encode(value_cbor)),
+        );
+        if let Some(k) = key {
+            payload.insert(
+                "key_b64".into(),
+                serde_json::Value::String(BASE64_STANDARD.encode(k)),
+            );
+        }
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "send-event".into(),
-            payload: serde_json::json!({
-                "schema": schema,
-                "value_b64": BASE64_STANDARD.encode(value_cbor),
-            }),
+            cmd: "event-send".into(),
+            payload: serde_json::Value::Object(payload),
         };
         self.request(&env).await
     }
 
-    pub async fn step(&mut self, id: impl Into<String>) -> std::io::Result<ResponseEnvelope> {
+    pub async fn get_def(
+        &mut self,
+        id: impl Into<String>,
+        name: &str,
+    ) -> std::io::Result<ResponseEnvelope> {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "step".into(),
-            payload: serde_json::json!({}),
+            cmd: "def-get".into(),
+            payload: serde_json::json!({ "name": name }),
+        };
+        self.request(&env).await
+    }
+
+    pub async fn list_defs(
+        &mut self,
+        id: impl Into<String>,
+        kinds: Option<&[&str]>,
+        prefix: Option<&str>,
+    ) -> std::io::Result<ResponseEnvelope> {
+        let kinds_val = kinds.map(|ks| {
+            serde_json::Value::Array(
+                ks.iter()
+                    .map(|k| serde_json::Value::String(k.to_string()))
+                    .collect(),
+            )
+        });
+        let mut payload = serde_json::Map::new();
+        if let Some(k) = kinds_val {
+            payload.insert("kinds".into(), k);
+        }
+        if let Some(p) = prefix {
+            payload.insert("prefix".into(), serde_json::Value::String(p.to_string()));
+        }
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "defs-list".into(),
+            payload: serde_json::Value::Object(payload),
         };
         self.request(&env).await
     }
@@ -582,11 +800,35 @@ impl ControlClient {
         &mut self,
         id: impl Into<String>,
         reducer: &str,
+        key: Option<&[u8]>,
+        consistency: Option<&str>,
+    ) -> std::io::Result<ResponseEnvelope> {
+        let mut payload = serde_json::json!({ "reducer": reducer });
+        if let Some(key) = key {
+            payload["key_b64"] = serde_json::json!(BASE64_STANDARD.encode(key));
+        }
+        if let Some(consistency) = consistency {
+            payload["consistency"] = serde_json::json!(consistency);
+        }
+
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "state-get".into(),
+            payload,
+        };
+        self.request(&env).await
+    }
+
+    pub async fn list_cells(
+        &mut self,
+        id: impl Into<String>,
+        reducer: &str,
     ) -> std::io::Result<ResponseEnvelope> {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "query-state".into(),
+            cmd: "state-list".into(),
             payload: serde_json::json!({ "reducer": reducer }),
         };
         self.request(&env).await
@@ -620,10 +862,173 @@ impl ControlClient {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
-            cmd: "put-blob".into(),
+            cmd: "blob-put".into(),
             payload: serde_json::json!({ "data_b64": BASE64_STANDARD.encode(data) }),
         };
         self.request(&env).await
+    }
+
+    /// Read manifest via control (returns meta + canonical CBOR bytes).
+    pub async fn manifest_read(
+        &mut self,
+        id: impl Into<String>,
+        consistency: Option<&str>,
+    ) -> std::io::Result<(ReadMeta, Vec<u8>)> {
+        let mut payload = serde_json::json!({});
+        if let Some(c) = consistency {
+            payload["consistency"] = serde_json::json!(c);
+        }
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "manifest-get".into(),
+            payload,
+        };
+        let resp = self.request(&env).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "manifest-get failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("manifest-get missing result"))?;
+        let meta = parse_meta(
+            result
+                .get("meta")
+                .ok_or_else(|| io_err("manifest-get missing meta"))?,
+        )?;
+        let manifest_b64 = result
+            .get("manifest_b64")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| io_err("manifest-get missing manifest_b64"))?;
+        let bytes = BASE64_STANDARD
+            .decode(manifest_b64)
+            .map_err(|e| io_err(format!("decode manifest_b64: {e}")))?;
+        Ok((meta, bytes))
+    }
+
+    /// Query reducer state with meta.
+    pub async fn query_state_decoded(
+        &mut self,
+        id: impl Into<String>,
+        reducer: &str,
+        key: Option<&[u8]>,
+        consistency: Option<&str>,
+    ) -> std::io::Result<(ReadMeta, Option<Vec<u8>>)> {
+        let resp = self.query_state(id, reducer, key, consistency).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "state-get failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("state-get missing result"))?;
+        let meta = parse_meta(
+            result
+                .get("meta")
+                .ok_or_else(|| io_err("state-get missing meta"))?,
+        )?;
+        let state_b64 = result.get("state_b64").and_then(|v| v.as_str());
+        let state = match state_b64 {
+            Some(s) => Some(
+                BASE64_STANDARD
+                    .decode(s)
+                    .map_err(|e| io_err(format!("decode state_b64: {e}")))?,
+            ),
+            None => None,
+        };
+        Ok((meta, state))
+    }
+
+    /// List cells (keyed reducers) with meta.
+    pub async fn list_cells_decoded(
+        &mut self,
+        id: impl Into<String>,
+        reducer: &str,
+    ) -> std::io::Result<(ReadMeta, Vec<ClientCellEntry>)> {
+        let resp = self.list_cells(id, reducer).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "state-list failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("state-list missing result"))?;
+        let meta_val = result
+            .get("meta")
+            .ok_or_else(|| io_err("state-list missing meta"))?;
+        let meta = parse_meta(meta_val)?;
+        let list = result
+            .get("cells")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let mut cells = Vec::with_capacity(list.len());
+        for item in list {
+            cells.push(parse_cell_entry(item)?);
+        }
+        Ok((meta, cells))
+    }
+
+    /// Blob get helper.
+    pub async fn blob_get(
+        &mut self,
+        id: impl Into<String>,
+        hash_hex: &str,
+    ) -> std::io::Result<Vec<u8>> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "blob-get".into(),
+            payload: serde_json::json!({ "hash_hex": hash_hex }),
+        };
+        let resp = self.request(&env).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "blob-get failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("blob-get missing result"))?;
+        let data_b64 = result
+            .get("data_b64")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| io_err("blob-get missing data_b64"))?;
+        BASE64_STANDARD
+            .decode(data_b64)
+            .map_err(|e| io_err(format!("decode data_b64: {e}")))
+    }
+
+    /// Journal head meta helper.
+    pub async fn journal_head_meta(&mut self, id: impl Into<String>) -> std::io::Result<ReadMeta> {
+        let env = RequestEnvelope {
+            v: PROTOCOL_VERSION,
+            id: id.into(),
+            cmd: "journal-head".into(),
+            payload: serde_json::json!({}),
+        };
+        let resp = self.request(&env).await?;
+        if !resp.ok {
+            return Err(io_err(format!(
+                "journal-head failed: {:?}",
+                resp.error.map(|e| e.message)
+            )));
+        }
+        let result = resp
+            .result
+            .ok_or_else(|| io_err("journal-head missing result"))?;
+        let meta_val = result
+            .get("meta")
+            .ok_or_else(|| io_err("journal-head missing meta"))?;
+        parse_meta(meta_val)
     }
 
     pub async fn request(
@@ -660,4 +1065,68 @@ impl ControlClient {
 /// Helper for journal-head responses in control server.
 pub fn kernel_head(host: &WorldHost<impl aos_store::Store>) -> KernelHeights {
     host.heights()
+}
+
+#[derive(Debug, Clone)]
+pub struct ClientCellEntry {
+    pub key_b64: String,
+    pub state_hash_hex: String,
+    pub size: u64,
+    pub last_active_ns: u64,
+}
+
+fn parse_cell_entry(val: serde_json::Value) -> std::io::Result<ClientCellEntry> {
+    let key_b64 = val
+        .get("key_b64")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| io_err("cell missing key_b64"))?
+        .to_string();
+    let state_hash_hex = val
+        .get("state_hash_hex")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| io_err("cell missing state_hash_hex"))?
+        .to_string();
+    let size = val
+        .get("size")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| io_err("cell missing size"))?;
+    let last_active_ns = val
+        .get("last_active_ns")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    Ok(ClientCellEntry {
+        key_b64,
+        state_hash_hex,
+        size,
+        last_active_ns,
+    })
+}
+
+fn parse_meta(val: &serde_json::Value) -> std::io::Result<ReadMeta> {
+    let journal_height = val
+        .get("journal_height")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| io_err("meta missing journal_height"))?;
+    let snapshot_hash = val
+        .get("snapshot_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| Hash::from_hex_str(s))
+        .transpose()
+        .map_err(|e| io_err(format!("snapshot_hash decode: {e}")))?;
+    let manifest_hash = val
+        .get("manifest_hash")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| io_err("meta missing manifest_hash"))
+        .and_then(|s| {
+            Hash::from_hex_str(s).map_err(|e| io_err(format!("manifest_hash decode: {e}")))
+        })?;
+    Ok(ReadMeta {
+        journal_height,
+        snapshot_hash,
+        manifest_hash,
+    })
+}
+
+fn io_err(msg: impl Into<String>) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, msg.into())
 }

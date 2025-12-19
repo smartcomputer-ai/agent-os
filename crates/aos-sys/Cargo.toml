@@ -1,0 +1,27 @@
+[package]
+name = "aos-sys"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "object_catalog"
+path = "src/bin/object_catalog.rs"
+
+[[bin]]
+name = "agent_registry"
+path = "src/bin/agent_registry.rs"
+
+[[bin]]
+name = "notes_notebook"
+path = "src/bin/notes_notebook.rs"
+
+[dependencies]
+aos-wasm-sdk = { path = "../aos-wasm-sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
+sha2 = { version = "0.10", default-features = false }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }

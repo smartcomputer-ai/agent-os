@@ -1,0 +1,65 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    { "name": "notes/NoteKey@1" },
+    { "name": "notes/NoteStarted@1" },
+    { "name": "notes/NoteAppended@1" },
+    { "name": "notes/NoteFinalized@1" },
+    { "name": "notes/NoteArchived@1" },
+    { "name": "notes/NoteState@1" },
+    { "name": "notes/NoteEvent@1" },
+    { "name": "notes/SnapshotRequested@1" },
+    { "name": "sys/ObjectKey@1" },
+    { "name": "sys/ObjectMeta@1" },
+    { "name": "sys/ObjectVersions@1" },
+    { "name": "sys/ObjectRegistered@1" },
+    { "name": "sys/BlobPutParams@1" },
+    { "name": "sys/BlobPutReceipt@1" },
+    { "name": "sys/BlobGetParams@1" },
+    { "name": "sys/BlobGetReceipt@1" }
+  ],
+  "modules": [
+    { "name": "notes/NotebookSM@1" },
+    { "name": "sys/ObjectCatalog@1" }
+  ],
+  "plans": [
+    { "name": "notes/SnapshotPlan@1" }
+  ],
+  "effects": [
+    { "name": "sys/blob.put@1" }
+  ],
+  "caps": [
+    { "name": "notes/blob_cap@1" },
+    { "name": "sys/blob@1" },
+    { "name": "sys/query@1" }
+  ],
+  "policies": [
+    { "name": "notes/allow_all@1" }
+  ],
+  "defaults": {
+    "policy": "notes/allow_all@1",
+    "cap_grants": [
+      { "name": "cap_blob", "cap": "notes/blob_cap@1", "params": { "record": {} } },
+      { "name": "cap_sys_blob", "cap": "sys/blob@1", "params": { "record": {} } },
+      { "name": "cap_query", "cap": "sys/query@1", "params": { "record": { "scope": { "text": "*" } } } }
+    ]
+  },
+  "module_bindings": {
+    "notes/NotebookSM@1": { "slots": {} },
+    "sys/ObjectCatalog@1": { "slots": {} }
+  },
+  "routing": {
+    "events": [
+      { "event": "notes/NoteStarted@1", "reducer": "notes/NotebookSM@1", "key_field": "note_id" },
+      { "event": "notes/NoteAppended@1", "reducer": "notes/NotebookSM@1", "key_field": "note_id" },
+      { "event": "notes/NoteFinalized@1", "reducer": "notes/NotebookSM@1", "key_field": "note_id" },
+      { "event": "notes/NoteArchived@1", "reducer": "notes/NotebookSM@1", "key_field": "note_id" },
+      { "event": "sys/ObjectRegistered@1", "reducer": "sys/ObjectCatalog@1", "key_field": "meta.name" }
+    ],
+    "inboxes": []
+  },
+  "triggers": [
+    { "event": "notes/SnapshotRequested@1", "plan": "notes/SnapshotPlan@1", "correlate_by": "note_id" }
+  ]
+}

@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_cbor = "0.11"
 indexmap = { version = "2", features = ["serde"] }
 petgraph = "0.6"
 thiserror = "1"

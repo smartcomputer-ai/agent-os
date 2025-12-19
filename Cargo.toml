@@ -12,6 +12,7 @@ members = [
   "crates/aos-wasm-sdk",
   "crates/aos-cli",
   "crates/aos-examples",
-  "crates/aos-wasm-build"
+  "crates/aos-wasm-build",
+  "crates/aos-sys"
 ]
 resolver = "2"

@@ -1,0 +1,31 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "sys/ObjectCatalog@1",
+    "module_kind": "reducer",
+    "key_schema": "sys/ObjectKey@1",
+    "abi": {
+      "reducer": {
+        "state": "sys/ObjectVersions@1",
+        "event": "sys/ObjectRegistered@1",
+        "effects_emitted": [],
+        "cap_slots": {}
+      }
+    },
+    "$comment": "Keyed reducer for versioned object catalog. Key = meta.name (text)."
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/catalog.write@1",
+    "cap_type": "catalog.write",
+    "schema": {
+      "record": {
+        "prefixes": {
+          "set": { "text": {} },
+          "$comment": "Allowed name prefixes (e.g., 'agents/self/'). Empty set = all names."
+        }
+      }
+    },
+    "$comment": "Capability for writing objects to the catalog. Policy should require this cap for plans emitting sys/ObjectRegistered@1."
+  }
+]

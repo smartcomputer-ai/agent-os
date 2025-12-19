@@ -5,12 +5,12 @@ use aos_effects::{EffectIntent, EffectReceipt};
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_store::Store;
 use serde::de::DeserializeOwned;
-use serde_json::Value as JsonValue;
 use serde_cbor;
+use serde_json::Value as JsonValue;
 
 use crate::adapters::registry::AdapterRegistry;
-use crate::adapters::traits::AsyncEffectAdapter;
 use crate::adapters::timer::TimerScheduler;
+use crate::adapters::traits::AsyncEffectAdapter;
 use crate::config::HostConfig;
 use crate::error::HostError;
 use crate::host::{CycleOutcome, ExternalEvent, RunMode, WorldHost};
@@ -82,6 +82,7 @@ impl<S: Store + 'static> TestHost<S> {
         self.host.enqueue_external(ExternalEvent::DomainEvent {
             schema: schema.to_string(),
             value: cbor,
+            key: None,
         })
     }
 
@@ -90,6 +91,7 @@ impl<S: Store + 'static> TestHost<S> {
         self.host.enqueue_external(ExternalEvent::DomainEvent {
             schema: schema.to_string(),
             value,
+            key: None,
         })
     }
 
@@ -140,7 +142,11 @@ impl<S: Store + 'static> TestHost<S> {
     pub async fn drain_and_dispatch(&mut self) -> Result<CycleOutcome, HostError> {
         let intents = self.host.kernel_mut().drain_effects();
         let effects_dispatched = intents.len();
-        let receipts = self.host.adapter_registry_mut().execute_batch(intents).await;
+        let receipts = self
+            .host
+            .adapter_registry_mut()
+            .execute_batch(intents)
+            .await;
         let receipts_applied = receipts.len();
         for receipt in receipts {
             self.host.kernel_mut().handle_receipt(receipt)?;
@@ -160,7 +166,7 @@ impl<S: Store + 'static> TestHost<S> {
     }
 
     /// Get reducer state as raw bytes.
-    pub fn state_bytes(&self, reducer: &str) -> Option<&Vec<u8>> {
+    pub fn state_bytes(&self, reducer: &str) -> Option<Vec<u8>> {
         self.host.state(reducer, None)
     }
 
@@ -170,7 +176,7 @@ impl<S: Store + 'static> TestHost<S> {
             .host
             .state(reducer, None)
             .ok_or_else(|| HostError::External(format!("reducer '{reducer}' has no state")))?;
-        serde_cbor::from_slice(bytes).map_err(|e| HostError::External(e.to_string()))
+        serde_cbor::from_slice(&bytes).map_err(|e| HostError::External(e.to_string()))
     }
 
     /// Get reducer state decoded to JSON for quick assertions/logging.
@@ -180,7 +186,7 @@ impl<S: Store + 'static> TestHost<S> {
             .state(reducer, None)
             .ok_or_else(|| HostError::External(format!("reducer '{reducer}' has no state")))?;
         let cbor_value: serde_cbor::Value =
-            serde_cbor::from_slice(bytes).map_err(|e| HostError::External(e.to_string()))?;
+            serde_cbor::from_slice(&bytes).map_err(|e| HostError::External(e.to_string()))?;
         serde_json::to_value(cbor_value).map_err(|e| HostError::External(e.to_string()))
     }
 

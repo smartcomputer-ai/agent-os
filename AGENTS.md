@@ -1,4 +1,4 @@
-# CLAUDE.md
+# Agents
 
 This file provides guidance to coding agents when working with code in this repository.
 
@@ -57,6 +57,7 @@ Reference shelves: **spec/schemas/** (JSON Schemas), **spec/defs/** (built-ins: 
 - Validator enforces semantic checks: DAG acyclicity, capability bindings, policy compliance, effect allowlists
 - Plan executor evaluates expressions, guards edges, awaits receipts deterministically
 - Effect manager routes intents through policy gates, invokes adapters, validates receipt signatures
+- Event ingress is normalized like effect params: every DomainEvent/ReceiptEvent is schema-validated, canonicalized once, journaled as canonical CBOR, and routing/correlation uses the schema-decoded value
 - Module build/cache: reducers compiled via `aos-wasm-build`, cached under `.aos/cache/{modules|wasmtime}`; kernel can warm-load cached compiled modules.
 - See `spec/02-architecture.md` for runtime components and `spec/03-air.md` for AIR semantics
 

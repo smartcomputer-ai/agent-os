@@ -1,4 +1,4 @@
-//! `aos world run` command.
+//! `aos run` command.
 
 use anyhow::Result;
 use aos_host::control::{ControlClient, ControlMode, ControlServer, RequestEnvelope};
@@ -8,6 +8,7 @@ use clap::Args;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::opts::{WorldOpts, resolve_dirs};
+use crate::output::print_success;
 use crate::util::load_world_env;
 
 use super::{create_host, prepare_world};
@@ -27,7 +28,7 @@ pub async fn cmd_run(opts: &WorldOpts, args: &RunArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
 
     // Check for existing daemon
-    let control_path = dirs.control_socket();
+    let control_path = dirs.control_socket.clone();
     if control_path.exists() {
         match ControlClient::connect(&control_path).await {
             Ok(mut client) => {
@@ -47,11 +48,15 @@ pub async fn cmd_run(opts: &WorldOpts, args: &RunArgs) -> Result<()> {
                                 control_path.display()
                             );
                         } else {
-                            println!(
-                                "Daemon already running at {}. Reusing existing daemon.",
-                                control_path.display()
+                            return print_success(
+                                opts,
+                                serde_json::json!({
+                                    "daemon": "running",
+                                    "socket": control_path
+                                }),
+                                None,
+                                vec![],
                             );
-                            return Ok(());
                         }
                     }
                 }
@@ -77,7 +82,9 @@ pub async fn cmd_run(opts: &WorldOpts, args: &RunArgs) -> Result<()> {
     // Optionally reset journal
     if args.reset_journal {
         reset_journal(&dirs.store_root)?;
-        println!("Journal cleared");
+        if !opts.quiet {
+            eprintln!("notice: journal cleared");
+        }
     }
 
     if args.batch {
@@ -97,12 +104,16 @@ async fn run_batch(opts: &WorldOpts, dirs: &crate::opts::ResolvedDirs) -> Result
 
     // Run until quiescent (no events to inject)
     let res = runner.step(vec![]).await?;
-    println!(
-        "Batch complete: effects={} receipts={}",
-        res.cycle.effects_dispatched, res.cycle.receipts_applied
-    );
-
-    Ok(())
+    print_success(
+        opts,
+        serde_json::json!({
+            "mode": "batch",
+            "effects": res.cycle.effects_dispatched,
+            "receipts": res.cycle.receipts_applied
+        }),
+        None,
+        vec![],
+    )
 }
 
 /// Run in daemon mode: long-lived with timers and control socket.

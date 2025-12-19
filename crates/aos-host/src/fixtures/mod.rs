@@ -3,20 +3,25 @@
 //! This module provides utilities for programmatically constructing manifests,
 //! stub WASM reducers, and other test fixtures. Enable with the `test-fixtures` feature.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use aos_air_exec::Value as ExprValue;
+use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
-    CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, Expr, ExprConst, ExprRef,
-    HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name, NamedRef,
-    PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr, TypeRecord, ValueLiteral,
-    ValueRecord, catalog::EffectCatalog,
+    CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, EffectKind, EmptyObject,
+    Expr, ExprConst, ExprOrValue, ExprRef, HashRef, Manifest, ManifestDefaults, ModuleAbi,
+    ModuleBinding, ModuleKind, Name, NamedRef, PlanBind, PlanBindEffect, PlanStepAwaitReceipt,
+    PlanStepEmitEffect, PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr,
+    TypeOption, TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord, ValueText,
+    catalog::EffectCatalog,
 };
+use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
 use aos_store::{MemStore, Store};
 use aos_wasm_abi::{DomainEvent, ReducerOutput};
 use indexmap::IndexMap;
+use std::fs;
+use std::path::PathBuf;
 use wat::parse_str;
 
 /// In-memory store alias used across fixtures.
@@ -66,6 +71,12 @@ pub fn plan_input_record(fields: Vec<(&str, ExprValue)>) -> ExprValue {
     ))
 }
 
+/// Build a canonical start event payload matching the common Start schema
+/// (record with required `id: text` field).
+pub fn start_event(id: &str) -> serde_json::Value {
+    serde_json::json!({ "id": id })
+}
+
 /// Trigger helper that wires the standard `START_SCHEMA` to the provided plan.
 pub fn start_trigger(plan: &str) -> Trigger {
     Trigger {
@@ -96,6 +107,42 @@ pub fn fake_hash(byte: u8) -> HashRef {
     HashRef::new(format!("sha256:{}", hex.repeat(32))).unwrap()
 }
 
+/// Convenience: text primitive TypeExpr.
+pub fn text_type() -> TypeExpr {
+    TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+        text: EmptyObject::default(),
+    }))
+}
+
+/// Convenience: defschema for a text record with explicit fields.
+pub fn def_text_record_schema(name: &str, fields: Vec<(&str, TypeExpr)>) -> DefSchema {
+    DefSchema {
+        name: name.into(),
+        ty: TypeExpr::Record(TypeRecord {
+            record: IndexMap::from_iter(fields.into_iter().map(|(k, v)| (k.to_string(), v))),
+        }),
+    }
+}
+
+/// Insert schemas into LoadedManifest (both map and manifest.schemas NamedRefs).
+pub fn insert_test_schemas(loaded: &mut LoadedManifest, schemas: Vec<DefSchema>) {
+    for schema in schemas {
+        let name = schema.name.clone();
+        loaded.schemas.insert(name.clone(), schema);
+        if !loaded
+            .manifest
+            .schemas
+            .iter()
+            .any(|existing| existing.name == name)
+        {
+            loaded.manifest.schemas.push(NamedRef {
+                name,
+                hash: zero_hash(),
+            });
+        }
+    }
+}
+
 /// Builds a `LoadedManifest` from already-parsed plan and module definitions.
 pub fn build_loaded_manifest(
     mut plans: Vec<DefPlan>,
@@ -113,10 +160,9 @@ pub fn build_loaded_manifest(
     let module_refs: Vec<NamedRef> = modules
         .iter()
         .map(|module| {
-            let def_hash = aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defmodule(
-                module.clone(),
-            ))
-            .expect("hash defmodule");
+            let def_hash =
+                aos_cbor::Hash::of_cbor(&aos_air_types::AirNode::Defmodule(module.clone()))
+                    .expect("hash defmodule");
             NamedRef {
                 name: module.name.clone(),
                 hash: HashRef::new(def_hash.to_hex()).expect("hash ref"),
@@ -186,6 +232,52 @@ pub fn build_loaded_manifest(
     loaded
 }
 
+/// Emit+await plan steps for `introspect.manifest`.
+///
+/// - `consistency`: e.g., "head", "exact:5", "at_least:10"
+/// - `cap_slot`: capability binding slot (usually "query_cap")
+/// - `bind_prefix`: prefix for effect handle/receipt vars (e.g., "manifest")
+pub fn introspect_manifest_steps(
+    consistency: &str,
+    cap_slot: &str,
+    bind_prefix: &str,
+) -> Vec<aos_air_types::PlanStep> {
+    let emit_id = format!("{bind_prefix}_emit");
+    let await_id = format!("{bind_prefix}_await");
+    let effect_var = format!("{bind_prefix}_req");
+    let receipt_var = format!("{bind_prefix}_receipt");
+
+    vec![
+        aos_air_types::PlanStep {
+            id: emit_id,
+            kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                kind: EffectKind::introspect_manifest(),
+                params: ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+                    record: IndexMap::from([(
+                        "consistency".into(),
+                        ValueLiteral::Text(ValueText {
+                            text: consistency.to_string(),
+                        }),
+                    )]),
+                })),
+                cap: cap_slot.into(),
+                bind: PlanBindEffect {
+                    effect_id_as: effect_var.clone(),
+                },
+            }),
+        },
+        aos_air_types::PlanStep {
+            id: await_id,
+            kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
+                for_expr: Expr::Ref(ExprRef {
+                    reference: format!("@{effect_var}"),
+                }),
+                bind: PlanBind { var: receipt_var },
+            }),
+        },
+    ]
+}
+
 /// Populates the manifest with default capability grants and module slot bindings so reducers
 /// can emit timer/blob effects without extra ceremony.
 pub fn attach_test_capabilities<'a, I>(manifest: &mut Manifest, modules: I) -> HashMap<Name, DefCap>
@@ -194,8 +286,32 @@ where
 {
     manifest.defaults = Some(ManifestDefaults {
         policy: None,
-        cap_grants: vec![cap_http_grant(), timer_cap_grant(), blob_cap_grant()],
+        cap_grants: vec![
+            cap_http_grant(),
+            timer_cap_grant(),
+            blob_cap_grant(),
+            query_cap_grant(),
+        ],
     });
+    // Ensure manifest declares the capabilities we grant.
+    manifest.caps = vec![
+        NamedRef {
+            name: "sys/http.out@1".into(),
+            hash: zero_hash(),
+        },
+        NamedRef {
+            name: "sys/timer@1".into(),
+            hash: zero_hash(),
+        },
+        NamedRef {
+            name: "sys/blob@1".into(),
+            hash: zero_hash(),
+        },
+        NamedRef {
+            name: "sys/query@1".into(),
+            hash: zero_hash(),
+        },
+    ];
     let mut bindings = IndexMap::new();
     for module in modules {
         bindings.insert(
@@ -210,6 +326,7 @@ where
         ("sys/http.out@1".into(), http_defcap()),
         ("sys/timer@1".into(), timer_defcap()),
         ("sys/blob@1".into(), blob_defcap()),
+        ("sys/query@1".into(), query_defcap()),
     ])
 }
 
@@ -250,14 +367,30 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
     }
 
     for schema_name in required {
-        if loaded.schemas.contains_key(&schema_name) {
+        if loaded.schemas.contains_key(&schema_name)
+            || aos_air_types::builtins::builtin_schemas()
+                .iter()
+                .any(|b| b.schema.name == schema_name)
+        {
             continue;
         }
+        let ty = if schema_name == START_SCHEMA {
+            TypeExpr::Record(TypeRecord {
+                record: IndexMap::from([(
+                    "id".into(),
+                    TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                        text: EmptyObject {},
+                    })),
+                )]),
+            })
+        } else {
+            TypeExpr::Record(TypeRecord {
+                record: IndexMap::new(),
+            })
+        };
         let def = DefSchema {
             name: schema_name.clone(),
-            ty: TypeExpr::Record(TypeRecord {
-                record: IndexMap::new(),
-            }),
+            ty,
         };
         loaded.schemas.insert(schema_name.clone(), def);
         if !loaded
@@ -307,6 +440,17 @@ pub fn blob_cap_grant() -> CapGrant {
     }
 }
 
+/// Query capability grant for tests (introspection).
+pub fn query_cap_grant() -> CapGrant {
+    CapGrant {
+        name: "query_cap".into(),
+        cap: "sys/query@1".into(),
+        params: empty_value_literal(),
+        expiry_ns: None,
+        budget: None,
+    }
+}
+
 /// Minimal HTTP capability definition used inside tests.
 pub fn http_defcap() -> DefCap {
     DefCap {
@@ -336,6 +480,26 @@ pub fn blob_defcap() -> DefCap {
         cap_type: CapType::blob(),
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
+        }),
+    }
+}
+
+/// Minimal Query capability definition used inside tests (introspection).
+pub fn query_defcap() -> DefCap {
+    DefCap {
+        name: "sys/query@1".into(),
+        cap_type: CapType::query(),
+        schema: TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([(
+                "scope".into(),
+                TypeExpr::Option(TypeOption {
+                    option: Box::new(TypeExpr::Primitive(TypePrimitive::Text(
+                        TypePrimitiveText {
+                            text: EmptyObject {},
+                        },
+                    ))),
+                }),
+            )]),
         }),
     }
 }
@@ -398,6 +562,52 @@ pub fn stub_reducer_module<S: Store + ?Sized>(
     }
 }
 
+/// Load a real reducer WASM from `target/wasm32-unknown-unknown/<profile>/<file>` and register
+/// it in the store, returning a fully populated DefModule.
+///
+/// This is useful for integration tests that want to exercise actual reducers instead of stubs.
+pub fn reducer_module_from_target(
+    store: &Arc<TestStore>,
+    name: &str,
+    wasm_file: &str,
+    key_schema: Option<&str>,
+    state_schema: &str,
+    event_schema: &str,
+) -> DefModule {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest_dir
+        .join("../../target/wasm32-unknown-unknown/debug")
+        .join(wasm_file);
+
+    if !path.exists() {
+        panic!(
+            "missing {} — build it first with `cargo build -p aos-sys --target wasm32-unknown-unknown`",
+            path.display()
+        );
+    }
+
+    let bytes = fs::read(&path).expect("read wasm");
+    let wasm_hash = Hash::of_bytes(&bytes);
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
+    store.put_blob(&bytes).expect("store wasm blob");
+
+    DefModule {
+        name: name.to_string(),
+        module_kind: ModuleKind::Reducer,
+        wasm_hash: wasm_hash_ref,
+        key_schema: key_schema.map(schema),
+        abi: ModuleAbi {
+            reducer: Some(aos_air_types::ReducerAbi {
+                state: schema(state_schema),
+                event: schema(event_schema),
+                annotations: None,
+                effects_emitted: vec![],
+                cap_slots: IndexMap::new(),
+            }),
+        },
+    }
+}
+
 /// Convenience: build a reducer module that emits the supplied domain events (and no state).
 pub fn stub_event_emitting_reducer(
     store: &Arc<TestStore>,
@@ -415,10 +625,47 @@ pub fn stub_event_emitting_reducer(
 
 /// Helper for synthesizing domain events by name and an already-materialized value.
 pub fn domain_event(schema: &str, value: &ExprValue) -> DomainEvent {
-    DomainEvent::new(
-        schema.to_string(),
-        serde_cbor::to_vec(value).expect("encode domain event"),
-    )
+    let payload = serde_cbor::to_vec(&expr_value_to_cbor(value)).expect("encode domain event");
+    DomainEvent::new(schema.to_string(), payload)
+}
+
+fn expr_value_key_to_cbor(key: &ExprValueKey) -> serde_cbor::Value {
+    match key {
+        ExprValueKey::Int(v) => serde_cbor::Value::Integer((*v).into()),
+        ExprValueKey::Nat(v) => serde_cbor::Value::Integer((*v).into()),
+        ExprValueKey::Text(v) => serde_cbor::Value::Text(v.clone()),
+        ExprValueKey::Hash(v) => serde_cbor::Value::Text(v.clone()),
+        ExprValueKey::Uuid(v) => serde_cbor::Value::Text(v.clone()),
+    }
+}
+
+fn expr_value_to_cbor(value: &ExprValue) -> serde_cbor::Value {
+    use serde_cbor::Value as CborValue;
+    match value {
+        ExprValue::Unit | ExprValue::Null => CborValue::Null,
+        ExprValue::Bool(v) => CborValue::Bool(*v),
+        ExprValue::Int(v) => CborValue::Integer((*v).into()),
+        ExprValue::Nat(v) => CborValue::Integer((*v).into()),
+        ExprValue::Dec128(v) => CborValue::Text(v.clone()),
+        ExprValue::Bytes(v) => CborValue::Bytes(v.clone()),
+        ExprValue::Text(v) => CborValue::Text(v.clone()),
+        ExprValue::TimeNs(v) => CborValue::Integer((*v).into()),
+        ExprValue::DurationNs(v) => CborValue::Integer((*v).into()),
+        ExprValue::Hash(v) => CborValue::Text(v.to_string()),
+        ExprValue::Uuid(v) => CborValue::Text(v.clone()),
+        ExprValue::List(v) => CborValue::Array(v.iter().map(expr_value_to_cbor).collect()),
+        ExprValue::Set(v) => CborValue::Array(v.iter().map(expr_value_key_to_cbor).collect()),
+        ExprValue::Map(v) => CborValue::Map(
+            v.iter()
+                .map(|(k, v)| (expr_value_key_to_cbor(k), expr_value_to_cbor(v)))
+                .collect::<BTreeMap<_, _>>(),
+        ),
+        ExprValue::Record(v) => CborValue::Map(
+            v.iter()
+                .map(|(k, v)| (CborValue::Text(k.clone()), expr_value_to_cbor(v)))
+                .collect::<BTreeMap<_, _>>(),
+        ),
+    }
 }
 
 /// Utility for building a routing rule from an event schema to a reducer.
@@ -490,19 +737,44 @@ impl TestWorld {
         Ok(Self { store, kernel })
     }
 
-    /// Submit an event encoded as `ExprValue` under the given schema.
+    /// Submit an event encoded as `ExprValue` under the given schema, normalized to the schema.
     pub fn submit_event_value(&mut self, schema: &str, value: &ExprValue) {
         let bytes = serde_cbor::to_vec(value).expect("encode event");
-        self.kernel.submit_domain_event(schema.to_string(), bytes);
+        self.kernel
+            .submit_domain_event_result(schema.to_string(), bytes)
+            .expect("submit event");
     }
 
-    /// Submit any serializable payload as an event using the schema string.
+    /// Submit an event and surface normalization/validation errors.
+    pub fn submit_event_value_result(
+        &mut self,
+        schema: &str,
+        value: &ExprValue,
+    ) -> Result<(), KernelError> {
+        let bytes = serde_cbor::to_vec(value).expect("encode event");
+        self.kernel
+            .submit_domain_event_result(schema.to_string(), bytes)
+    }
+
+    /// Submit any serializable payload as an event using the schema string, normalized to the schema.
     pub fn submit_event<T>(&mut self, schema: &str, value: &T)
     where
         T: Serialize,
     {
         let bytes = serde_cbor::to_vec(value).expect("encode event");
-        self.kernel.submit_domain_event(schema.to_string(), bytes);
+        self.kernel
+            .submit_domain_event_result(schema.to_string(), bytes)
+            .expect("submit event");
+    }
+
+    /// Submit any serializable payload as an event, returning the kernel result.
+    pub fn submit_event_result<T>(&mut self, schema: &str, value: &T) -> Result<(), KernelError>
+    where
+        T: Serialize,
+    {
+        let bytes = serde_cbor::to_vec(value).expect("encode event");
+        self.kernel
+            .submit_domain_event_result(schema.to_string(), bytes)
     }
 
     pub fn tick_n(&mut self, n: usize) -> Result<(), KernelError> {

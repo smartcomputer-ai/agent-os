@@ -18,8 +18,9 @@ fn journal_replay_restores_state() {
     let manifest_run = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest_run).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
@@ -40,7 +41,6 @@ fn journal_replay_restores_state() {
     let final_state = world
         .kernel
         .reducer_state("com.acme/ResultReducer@1")
-        .cloned()
         .unwrap();
     let journal_entries = world.kernel.dump_journal().unwrap();
     let start_schema = journal_entries
@@ -66,7 +66,7 @@ fn journal_replay_restores_state() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&final_state)
+        Some(final_state)
     );
 }
 
@@ -76,7 +76,9 @@ fn reducer_timer_receipt_replays_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "timer" }))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let effect = world.drain_effects().pop().expect("timer effect");
@@ -98,7 +100,6 @@ fn reducer_timer_receipt_replays_from_journal() {
     let final_state = world
         .kernel
         .reducer_state("com.acme/TimerHandler@1")
-        .cloned()
         .unwrap();
     let journal_entries = world.kernel.dump_journal().unwrap();
 
@@ -111,7 +112,7 @@ fn reducer_timer_receipt_replays_from_journal() {
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/TimerHandler@1"),
-        Some(&final_state)
+        Some(final_state)
     );
 }
 
@@ -122,8 +123,9 @@ fn plan_journal_replay_resumes_waiting_receipt() {
     let manifest = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let effect = world
@@ -194,7 +196,7 @@ fn plan_journal_replay_resumes_waiting_receipt() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -212,8 +214,9 @@ fn fs_journal_persists_across_restarts() {
         )
         .unwrap();
 
-        let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-        world.submit_event_value(START_SCHEMA, &input);
+        world
+            .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
+            .expect("submit start event");
         world.tick_n(2).unwrap();
 
         let mut effects = world.drain_effects();
@@ -234,7 +237,6 @@ fn fs_journal_persists_across_restarts() {
         world
             .kernel
             .reducer_state("com.acme/ResultReducer@1")
-            .cloned()
             .unwrap()
     };
 
@@ -249,7 +251,7 @@ fn fs_journal_persists_across_restarts() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&final_state)
+        Some(final_state)
     );
     assert!(!replay_world.kernel.dump_journal().unwrap().is_empty());
 }

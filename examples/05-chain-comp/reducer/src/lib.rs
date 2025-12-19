@@ -3,9 +3,13 @@
 
 extern crate alloc;
 
-use alloc::{format, string::{String, ToString}, vec, vec::Vec};
-use aos_air_exec::Value;
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use aos_wasm_sdk::{aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
 use serde::{Deserialize, Serialize};
 
 const CHARGE_REQUEST_SCHEMA: &str = "demo/ChargeRequested@1";
@@ -20,15 +24,17 @@ struct ChainState {
     current_saga: Option<SagaState>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum ChainPhase {
-    Idle,
-    Charging,
-    Reserving,
-    Notifying,
-    Refunding,
-    Completed,
-    Refunded,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum ChainPhase {
+        Idle,
+        Charging,
+        Reserving,
+        Notifying,
+        Refunding,
+        Completed,
+        Refunded,
+    }
 }
 
 impl Default for ChainPhase {
@@ -62,41 +68,76 @@ struct ChainHttpTarget {
     url: String,
 }
 
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum ChainEvent {
+        Start {
+            order_id: String,
+            customer_id: String,
+            amount_cents: u64,
+            reserve_sku: String,
+            charge: ChainHttpTarget,
+            reserve: ChainHttpTarget,
+            notify: ChainHttpTarget,
+            refund: ChainHttpTarget,
+        },
+        ChargeCompleted {
+            request_id: u64,
+            status: i64,
+            body_preview: String,
+        },
+        ReserveCompleted {
+            request_id: u64,
+            status: i64,
+            body_preview: String,
+        },
+        ReserveFailed {
+            request_id: u64,
+            status: i64,
+            body_preview: String,
+        },
+        NotifyCompleted {
+            request_id: u64,
+            status: i64,
+        },
+        RefundCompleted {
+            request_id: u64,
+            status: i64,
+        },
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum ChainEvent {
-    Start {
-        order_id: String,
-        customer_id: String,
-        amount_cents: u64,
-        reserve_sku: String,
-        charge: ChainHttpTarget,
-        reserve: ChainHttpTarget,
-        notify: ChainHttpTarget,
-        refund: ChainHttpTarget,
-    },
-    ChargeCompleted {
-        request_id: u64,
-        status: i64,
-        body_preview: String,
-    },
-    ReserveCompleted {
-        request_id: u64,
-        status: i64,
-        body_preview: String,
-    },
-    ReserveFailed {
-        request_id: u64,
-        status: i64,
-        body_preview: String,
-    },
-    NotifyCompleted {
-        request_id: u64,
-        status: i64,
-    },
-    RefundCompleted {
-        request_id: u64,
-        status: i64,
-    },
+struct ChargeRequest {
+    request_id: u64,
+    order_id: String,
+    amount_cents: u64,
+    customer_id: String,
+    target: ChainHttpTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReserveRequest {
+    request_id: u64,
+    order_id: String,
+    sku: String,
+    target: ChainHttpTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NotifyRequest {
+    request_id: u64,
+    order_id: String,
+    status_text: String,
+    target: ChainHttpTarget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RefundRequest {
+    request_id: u64,
+    order_id: String,
+    amount_cents: u64,
+    target: ChainHttpTarget,
 }
 
 aos_reducer!(ChainCompSm);
@@ -278,13 +319,13 @@ fn emit_charge_intent(ctx: &mut ReducerCtx<ChainState, ()>) {
     let Some(saga) = ctx.state.current_saga.as_ref() else {
         return;
     };
-    let payload = Value::record([
-        ("request_id", Value::Nat(saga.request_id)),
-        ("order_id", Value::Text(saga.order_id.clone())),
-        ("amount_cents", Value::Nat(saga.amount_cents)),
-        ("customer_id", Value::Text(saga.customer_id.clone())),
-        ("target", target_to_value(&saga.charge_target)),
-    ]);
+    let payload = ChargeRequest {
+        request_id: saga.request_id,
+        order_id: saga.order_id.clone(),
+        amount_cents: saga.amount_cents,
+        customer_id: saga.customer_id.clone(),
+        target: saga.charge_target.clone(),
+    };
     let key = saga.request_id.to_be_bytes();
     ctx.intent(CHARGE_REQUEST_SCHEMA)
         .key_bytes(&key)
@@ -296,13 +337,12 @@ fn emit_reserve_intent(ctx: &mut ReducerCtx<ChainState, ()>, body_preview: &str)
     let Some(saga) = ctx.state.current_saga.as_ref() else {
         return;
     };
-    let payload = Value::record([
-        ("request_id", Value::Nat(saga.request_id)),
-        ("order_id", Value::Text(saga.order_id.clone())),
-        ("reserve_sku", Value::Text(saga.reserve_sku.clone())),
-        ("target", target_to_value(&saga.reserve_target)),
-        ("source_preview", Value::Text(body_preview.to_string())),
-    ]);
+    let payload = ReserveRequest {
+        request_id: saga.request_id,
+        order_id: saga.order_id.clone(),
+        sku: saga.reserve_sku.clone(),
+        target: saga.reserve_target.clone(),
+    };
     let key = saga.request_id.to_be_bytes();
     ctx.intent(RESERVE_REQUEST_SCHEMA)
         .key_bytes(&key)
@@ -314,13 +354,12 @@ fn emit_notify_intent(ctx: &mut ReducerCtx<ChainState, ()>, body_preview: String
     let Some(saga) = ctx.state.current_saga.as_ref() else {
         return;
     };
-    let payload = Value::record([
-        ("request_id", Value::Nat(saga.request_id)),
-        ("order_id", Value::Text(saga.order_id.clone())),
-        ("amount_cents", Value::Nat(saga.amount_cents)),
-        ("target", target_to_value(&saga.notify_target)),
-        ("source_preview", Value::Text(body_preview)),
-    ]);
+    let payload = NotifyRequest {
+        request_id: saga.request_id,
+        order_id: saga.order_id.clone(),
+        status_text: body_preview,
+        target: saga.notify_target.clone(),
+    };
     let key = saga.request_id.to_be_bytes();
     ctx.intent(NOTIFY_REQUEST_SCHEMA)
         .key_bytes(&key)
@@ -332,24 +371,15 @@ fn emit_refund_intent(ctx: &mut ReducerCtx<ChainState, ()>) {
     let Some(saga) = ctx.state.current_saga.as_ref() else {
         return;
     };
-    let payload = Value::record([
-        ("request_id", Value::Nat(saga.request_id)),
-        ("order_id", Value::Text(saga.order_id.clone())),
-        ("amount_cents", Value::Nat(saga.amount_cents)),
-        ("customer_id", Value::Text(saga.customer_id.clone())),
-        ("target", target_to_value(&saga.refund_target)),
-    ]);
+    let payload = RefundRequest {
+        request_id: saga.request_id,
+        order_id: saga.order_id.clone(),
+        amount_cents: saga.amount_cents,
+        target: saga.refund_target.clone(),
+    };
     let key = saga.request_id.to_be_bytes();
     ctx.intent(REFUND_REQUEST_SCHEMA)
         .key_bytes(&key)
         .payload(&payload)
         .send();
-}
-
-fn target_to_value(target: &ChainHttpTarget) -> Value {
-    Value::record([
-        ("name", Value::Text(target.name.clone())),
-        ("method", Value::Text(target.method.clone())),
-        ("url", Value::Text(target.url.clone())),
-    ])
 }

@@ -8,5 +8,6 @@ pub enum KernelEvent {
 
 #[derive(Debug, Clone)]
 pub struct ReducerEvent {
+    pub reducer: String,
     pub event: DomainEvent,
 }

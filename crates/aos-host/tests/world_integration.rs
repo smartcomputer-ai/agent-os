@@ -3,8 +3,9 @@ use aos_air_types::{
     DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprOrValue,
     ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
     PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
-    PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord,
-    ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
+    PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveBool, TypePrimitiveInt,
+    TypePrimitiveNat, TypePrimitiveText, TypeRecord, ValueLiteral, ValueMap, ValueNull,
+    ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
@@ -22,7 +23,10 @@ use serde_json::json;
 use std::collections::HashMap;
 
 mod helpers;
-use helpers::{def_text_record_schema, insert_test_schemas, int_type, text_type, timer_manifest};
+use helpers::{
+    def_text_record_schema, insert_test_schemas, int_type, simple_state_manifest, text_type,
+    timer_manifest,
+};
 
 fn builtin_schema_index_with_custom_types() -> SchemaIndex {
     let mut map = HashMap::new();
@@ -72,6 +76,25 @@ fn http_params_literal(tag: &str) -> ExprOrValue {
             ),
         ]),
     }))
+}
+
+#[test]
+fn rejects_event_payload_that_violates_schema() {
+    let store = fixtures::new_mem_store();
+    let loaded = simple_state_manifest(&store);
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+
+    let bad_payload = ExprValue::Record(IndexMap::new());
+    let err = world
+        .submit_event_value_result(START_SCHEMA, &bad_payload)
+        .expect_err("event should fail schema validation");
+    match err {
+        KernelError::Manifest(msg) => {
+            assert!(msg.contains("payload failed validation"));
+            assert!(msg.contains("record missing field 'id'"));
+        }
+        other => panic!("unexpected error: {:?}", other),
+    }
 }
 
 /// Happy-path end-to-end: reducer emits an intent, plan does work, receipt feeds a result event
@@ -189,8 +212,9 @@ fn sugar_literal_plan_executes_http_flow() {
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("123"))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
@@ -211,7 +235,7 @@ fn sugar_literal_plan_executes_http_flow() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -329,8 +353,9 @@ fn single_plan_orchestration_completes_after_receipt() {
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("123"))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
@@ -351,7 +376,7 @@ fn single_plan_orchestration_completes_after_receipt() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -418,8 +443,9 @@ fn reducer_and_plan_effects_are_enqueued() {
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("123"))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let effects = world.drain_effects();
@@ -429,7 +455,7 @@ fn reducer_and_plan_effects_are_enqueued() {
     assert!(kinds.contains(&aos_effects::EffectKind::HTTP_REQUEST));
     assert_eq!(
         world.kernel.reducer_state("com.acme/Reducer@1"),
-        Some(&vec![0xAA])
+        Some(vec![0xAA])
     );
 }
 
@@ -440,7 +466,9 @@ fn reducer_timer_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store, manifest).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let mut effects = world.drain_effects();
@@ -464,7 +492,7 @@ fn reducer_timer_receipt_routes_event_to_handler() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/TimerHandler@1"),
-        Some(&vec![0xCC])
+        Some(vec![0xCC])
     );
 
     let duplicate = EffectReceipt {
@@ -549,28 +577,89 @@ fn guarded_plan_branches_control_effects() {
         invariants: vec![],
     };
 
-    let loaded = fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan.clone()],
         vec![fixtures::start_trigger(&plan_name)],
         vec![],
         vec![],
     );
 
+    let mut schema_map = IndexMap::new();
+    schema_map.insert("id".into(), text_type());
+    schema_map.insert(
+        "flag".into(),
+        TypeExpr::Primitive(TypePrimitive::Bool(TypePrimitiveBool {
+            bool: EmptyObject::default(),
+        })),
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            DefSchema {
+                name: START_SCHEMA.into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: schema_map.clone(),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/FlagIntent@1".into(),
+                ty: TypeExpr::Record(TypeRecord { record: schema_map }),
+            },
+        ],
+    );
+
     let mut world = TestWorld::new(loaded).unwrap();
-    let true_input = fixtures::plan_input_record(vec![("flag", ExprValue::Bool(true))]);
-    world.submit_event_value(START_SCHEMA, &true_input);
+    let true_input = serde_json::json!({ "id": "1", "flag": true });
+    world
+        .submit_event_result(START_SCHEMA, &true_input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
     assert_eq!(world.drain_effects().len(), 1);
 
-    let loaded_false = fixtures::build_loaded_manifest(
+    let mut loaded_false = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![],
         vec![],
     );
+    insert_test_schemas(
+        &mut loaded_false,
+        vec![
+            DefSchema {
+                name: START_SCHEMA.into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::from([
+                        ("id".into(), text_type()),
+                        (
+                            "flag".into(),
+                            TypeExpr::Primitive(TypePrimitive::Bool(TypePrimitiveBool {
+                                bool: EmptyObject::default(),
+                            })),
+                        ),
+                    ]),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/FlagIntent@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::from([
+                        ("id".into(), text_type()),
+                        (
+                            "flag".into(),
+                            TypeExpr::Primitive(TypePrimitive::Bool(TypePrimitiveBool {
+                                bool: EmptyObject::default(),
+                            })),
+                        ),
+                    ]),
+                }),
+            },
+        ],
+    );
     let mut world_false = TestWorld::new(loaded_false).unwrap();
-    let false_input = fixtures::plan_input_record(vec![("flag", ExprValue::Bool(false))]);
-    world_false.submit_event_value(START_SCHEMA, &false_input);
+    let false_input = serde_json::json!({ "id": "2", "flag": false });
+    world_false
+        .submit_event_result(START_SCHEMA, &false_input)
+        .expect("submit start event");
     world_false.tick_n(2).unwrap();
     assert_eq!(world_false.drain_effects().len(), 0);
 }
@@ -623,7 +712,9 @@ fn blob_put_receipt_routes_event_to_handler() {
     }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("blob-put"))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let mut effects = world.drain_effects();
@@ -648,7 +739,7 @@ fn blob_put_receipt_routes_event_to_handler() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/BlobPutHandler@1"),
-        Some(&vec![0xDD])
+        Some(vec![0xDD])
     );
 }
 
@@ -701,7 +792,9 @@ fn blob_get_receipt_routes_event_to_handler() {
     }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("blob-get"))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let mut effects = world.drain_effects();
@@ -726,7 +819,7 @@ fn blob_get_receipt_routes_event_to_handler() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/BlobGetHandler@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -841,15 +934,36 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
         "com.acme/PulseNext@1",
         &next_emitter.name,
     )];
-    let loaded = fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![next_emitter],
         routing,
     );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/PulseNext@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/Next@1".into(),
+                ty: TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
+                    int: EmptyObject::default(),
+                })),
+            },
+        ],
+    );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("two-stage"))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
@@ -876,7 +990,9 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
         effect_params_text(&second_intent)
     );
 
-    world.submit_event_value("com.acme/PulseNext@1", &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result("com.acme/PulseNext@1", &serde_json::json!({}))
+        .expect("submit pulse event");
     world.kernel.tick_until_idle().unwrap();
 
     let mut after_event_effects = world.drain_effects();
@@ -986,7 +1102,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         invariants: vec![],
     };
 
-    let loaded = fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan_ready.clone(), plan_other.clone()],
         vec![
             fixtures::start_trigger(&plan_ready.name),
@@ -1015,25 +1131,43 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
             fixtures::routing_event("com.acme/TriggerOther@1", "com.acme/OtherEmitter@1"),
         ],
     );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/Ready@1".into(),
+                ty: TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
+                    nat: EmptyObject::default(),
+                })),
+            },
+            DefSchema {
+                name: "com.acme/Other@1".into(),
+                ty: TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
+                    nat: EmptyObject::default(),
+                })),
+            },
+        ],
+    );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("ready-other"))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
     assert!(world.drain_effects().is_empty());
 
-    world.submit_event_value(
-        "com.acme/TriggerReady@1",
-        &fixtures::plan_input_record(vec![]),
-    );
+    world
+        .submit_event_result("com.acme/TriggerReady@1", &serde_json::json!({}))
+        .expect("submit ready trigger");
     world.kernel.tick_until_idle().unwrap();
     let mut effects = world.drain_effects();
     assert_eq!(effects.len(), 1);
     assert!(effect_params_text(&effects.remove(0)).ends_with("ready"));
 
-    world.submit_event_value(
-        "com.acme/TriggerOther@1",
-        &fixtures::plan_input_record(vec![]),
-    );
+    world
+        .submit_event_result("com.acme/TriggerOther@1", &serde_json::json!({}))
+        .expect("submit other trigger");
     world.kernel.tick_until_idle().unwrap();
     let mut more_effects = world.drain_effects();
     assert_eq!(more_effects.len(), 1);
@@ -1098,10 +1232,9 @@ fn plan_outputs_are_journaled_and_replayed() {
 
     let manifest = build_manifest();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(
-        START_SCHEMA,
-        &fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]),
-    );
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("123"))
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let results = world.kernel.recent_plan_results();
@@ -1188,10 +1321,9 @@ fn invariant_failure_records_plan_ended_error() {
 
     let manifest = build_manifest();
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(
-        START_SCHEMA,
-        &fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]),
-    );
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("123"))
+        .expect("submit start event");
     world.kernel.tick_until_idle().unwrap();
 
     let journal_entries = world.kernel.dump_journal().unwrap();
@@ -1312,11 +1444,13 @@ fn raised_events_are_routed_to_reducers() {
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("raise"))
+        .expect("submit start event");
     world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/Reducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }

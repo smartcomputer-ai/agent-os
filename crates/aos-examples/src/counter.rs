@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use anyhow::Result;
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
@@ -20,11 +21,13 @@ struct CounterState {
     remaining: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-enum CounterPc {
-    Idle,
-    Counting,
-    Done,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    enum CounterPc {
+        Idle,
+        Counting,
+        Done,
+    }
 }
 
 impl Default for CounterPc {
@@ -33,10 +36,12 @@ impl Default for CounterPc {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum CounterEvent {
-    Start { target: u64 },
-    Tick,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum CounterEvent {
+        Start { target: u64 },
+        Tick,
+    }
 }
 
 pub fn run(example_root: &Path) -> Result<()> {

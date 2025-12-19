@@ -1,5 +1,7 @@
 # Cells (Keyed Reducers) — v1.1 Design
 
+**Complete**
+
 Cells make many parallel instances of the same reducer state machine first‑class. A cell is an instance of a keyed reducer identified by a key (e.g., order_id). The kernel stores state per cell, delivers events per cell, and schedules cells fairly alongside plan runs. This enables Temporal‑like concurrency while preserving determinism, auditability, and homoiconicity.
 
 ## Rationale
@@ -62,13 +64,22 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 - Version pinning
   - Cells inherit the manifest hash at creation time (era). They continue under that era even if the world upgrades; new cells use the new era.
 
-## Storage Layout and Snapshots
+## Storage Layout and Snapshots (as implemented)
 
-- Per‑cell state (content‑addressed files):
-  - `world/state/reducers/<module_hash>/cells/<key_hash>.cbor`
-- Cell index (for discovery):
-  - `world/state/reducers/<module_hash>/index.cbor` (key_hash → key_bytes, last_active_ns, size)
-- Snapshots include: control‑plane state, all cell files, run states, and pinned blob roots. GC removes deleted cells before snapshot.
+- CAS stays dumb (`hash → bytes`) and has **no names/refs**.  
+- Per-key state is stored as CAS blobs; we track `{ state_hash, last_active_ns, size }` per cell (and a monolithic hash for non-keyed reducers).  
+- CAS‑backed persistent `CellIndex` now exists per keyed reducer: `key_hash → { key_bytes, state_hash, size, last_active_ns }`. Updates create new nodes and return a new **root hash**. The kernel/world state stores only that root (Git-like ref), never inside CAS. Lookup = root → index → `state_hash` → `blob.get`; updates write a fresh root.  
+- Snapshots embed the per-reducer **cell_index_root**; replay restores the root and the index is used for keyed loads. Legacy snapshots without a root are upgraded on load by rebuilding an empty index.  
+- GC (future) will walk from snapshot-pinned index roots to reach all cell state blobs; no side-channel CAS refs are roots.  
+- The earlier path-based layout is superseded by CAS blobs + `CellIndex`; no named blobs in CAS.
+
+## CAS Semantics and Naming (design decision)
+
+- Do **not** extend CAS with “named blobs” or Git-like refs; CAS is `{ hash → bytes }` only.  
+- All refs live in **world state** (manifest/snapshots/kernel metadata). For cells, the only ref is the per-reducer `cell_index_root`.  
+- Agent-visible named artifacts (code bundles, patches, prompts) use the **Query Catalog** reducer (`name → hash`, metadata) with payloads stored in CAS.  
+- This keeps determinism/replay: refs are journaled and snapshot-pinned; CAS holds immutable content only, shared safely across worlds.
+
 
 ## Journal and Observability
 
@@ -78,11 +89,29 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 - Why‑graph surfaces per‑cell timelines and correlates receipts/effects via intent_hash and correlate_by keys.
 - CLI/inspect supports: list cells, show cell state, tail cell events, export a single cell’s snapshot.
 
+## Status & TODO
+
+Done (in codebase)
+- Keyed routing/ABI: manifests use `key_field`; plans support `raise_event.key`; triggers can `correlate_by`.
+- Reducer calls carry `cell_mode` and key; `state=null` deletes the cell.
+- CAS-backed `CellIndex` per keyed reducer, with only the root hash stored in kernel state/snapshots; keyed load/save/delete go through the index.
+- Snapshots capture index roots; replay restores them. Legacy snapshots rebuild an empty index on load.
+- Tests: CellIndex unit coverage; kernel unit tests for root updates, delete, and snapshot restore; integration test `keyed_reducer_integration_flow` (host) exercises routed keyed events, index iteration, snapshot+replay, and state retrieval.
+- CAS naming decision: CAS remains `{hash→bytes}` only; agent-visible names stay in Query Catalog.
+- Scheduler fairness: round-robin between plan and reducer queues.
+- Inspect/CLI cell listing built on `CellIndex::iter` (via `aos world cells`).
+
+Deferred
+- GC/TTL for cells driven from index roots (defer).
+- Observability: richer why-graph views per cell; exports (defer).
+
 ## Plans and Cells
 
 - Triggers start runs when a reducer emits a DomainIntent; the trigger’s `correlate_by` may copy the event key into run context for filtering.
 - StepRaiseEvent (keyed): plans must supply the key to target the correct cell: `key: Expr`.
 - StepAwaitEvent (optional): plans may await subsequent domain events; the kernel matches against the keyed mailbox using the run’s correlation (e.g., `event.key == @plan.input.key`).
+
+
 
 ## SDK Guidance (Authoring Reducers Once)
 

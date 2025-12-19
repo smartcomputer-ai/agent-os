@@ -1,6 +1,6 @@
-use std::fs;
 use aos_cbor::Hash;
 use assert_cmd::prelude::*;
+use std::fs;
 use tempfile::tempdir;
 
 // Uses the built binary to exercise --patch-dir dry-run and inspect output.
@@ -37,13 +37,13 @@ fn patch_dir_dry_run_emits_patchdoc_with_base_and_refs() {
 
     // Create a dummy current manifest in the store to derive base hash (world/.aos/manifest.air.cbor).
     let manifest_bytes = fs::read(world.join("air/manifest.air.json")).unwrap();
+    // For tests we can just store the JSON bytes; the real CLI patches from the store.
     fs::write(world.join(".aos/manifest.air.cbor"), &manifest_bytes).unwrap();
     let base_hash = Hash::of_bytes(&manifest_bytes).to_hex();
 
     // Run CLI in dry-run mode and capture stdout.
     let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin!("aos"));
     cmd.current_dir(&world)
-        .arg("world")
         .arg("gov")
         .arg("propose")
         .arg("--patch-dir")
@@ -65,9 +65,7 @@ fn patch_dir_dry_run_emits_patchdoc_with_base_and_refs() {
         "should include add_def for schema"
     );
     assert!(
-        patches
-            .iter()
-            .any(|p| p.get("set_manifest_refs").is_some()),
+        patches.iter().any(|p| p.get("set_manifest_refs").is_some()),
         "should include set_manifest_refs"
     );
 }

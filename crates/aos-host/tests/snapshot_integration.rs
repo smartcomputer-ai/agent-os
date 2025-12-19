@@ -42,8 +42,10 @@ fn plan_snapshot_resumes_after_receipt() {
     let manifest = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    let input = fixtures::start_event("123");
+    world
+        .submit_event_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     let effect = world
@@ -77,7 +79,7 @@ fn plan_snapshot_resumes_after_receipt() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -88,8 +90,10 @@ fn plan_snapshot_preserves_effect_queue() {
     let manifest = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("123".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    let input = fixtures::start_event("123");
+    world
+        .submit_event_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     world.kernel.create_snapshot().unwrap();
@@ -126,7 +130,7 @@ fn plan_snapshot_preserves_effect_queue() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 }
 
@@ -137,8 +141,10 @@ fn plan_snapshot_resumes_after_event() {
     let manifest = await_event_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("evt".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    let input = fixtures::start_event("evt");
+    world
+        .submit_event_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(1).unwrap();
     world.tick_n(1).unwrap();
 
@@ -152,13 +158,14 @@ fn plan_snapshot_resumes_after_event() {
     )
     .unwrap();
 
-    let unblock = fixtures::plan_input_record(vec![]);
-    replay_world.submit_event_value("com.acme/EmitUnblock@1", &unblock);
+    replay_world
+        .submit_event_result("com.acme/EmitUnblock@1", &serde_json::json!({}))
+        .expect("submit unblock event");
     replay_world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/EventResult@1"),
-        Some(&vec![0xAB])
+        Some(vec![0xAB])
     );
 }
 
@@ -169,7 +176,9 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     let effect = world
@@ -204,7 +213,7 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/TimerHandler@1"),
-        Some(&vec![0xCC])
+        Some(vec![0xCC])
     );
 }
 
@@ -214,16 +223,14 @@ fn snapshot_replay_restores_state() {
     let store = fixtures::new_mem_store();
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("simple"))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
 
     world.kernel.create_snapshot().unwrap();
 
-    let final_state = world
-        .kernel
-        .reducer_state("com.acme/Simple@1")
-        .cloned()
-        .unwrap();
+    let final_state = world.kernel.reducer_state("com.acme/Simple@1").unwrap();
     let entries = world.kernel.dump_journal().unwrap();
 
     let replay_world = TestWorld::with_store_and_journal(
@@ -235,7 +242,7 @@ fn snapshot_replay_restores_state() {
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/Simple@1"),
-        Some(&final_state)
+        Some(final_state)
     );
 }
 
@@ -251,8 +258,7 @@ fn fs_store_and_journal_restore_snapshot() {
     let mut kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(journal)).unwrap();
 
-    let event = fixtures::plan_input_record(vec![]);
-    let event_bytes = serde_cbor::to_vec(&event).unwrap();
+    let event_bytes = serde_cbor::to_vec(&serde_json::json!({ "id": "fs" })).unwrap();
     kernel.submit_domain_event(START_SCHEMA.to_string(), event_bytes);
     kernel.tick_until_idle().unwrap();
     kernel.create_snapshot().unwrap();
@@ -267,7 +273,7 @@ fn fs_store_and_journal_restore_snapshot() {
 
     assert_eq!(
         kernel_replay.reducer_state("com.acme/SimpleFs@1"),
-        Some(&vec![0xAA])
+        Some(vec![0xAA])
     );
 }
 
@@ -283,7 +289,15 @@ fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedM
         },
     );
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)
+    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![fixtures::def_text_record_schema(
+            START_SCHEMA,
+            vec![("id", fixtures::text_type())],
+        )],
+    );
+    loaded
 }
 
 /// Snapshot creation should automatically drain pending scheduler work before persisting state.
@@ -293,7 +307,9 @@ fn snapshot_creation_quiesces_runtime() {
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    world.submit_event_value(START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("quiesce"))
+        .expect("submit start event");
     // No manual ticks before snapshot; create_snapshot should quiesce the runtime.
     world.kernel.create_snapshot().unwrap();
     let entries = world.kernel.dump_journal().unwrap();
@@ -307,7 +323,7 @@ fn snapshot_creation_quiesces_runtime() {
 
     assert_eq!(
         replay_world.kernel.reducer_state("com.acme/Simple@1"),
-        Some(&vec![0xAA])
+        Some(vec![0xAA])
     );
 }
 
@@ -318,8 +334,10 @@ fn restored_effects_bypass_new_policy_checks() {
     let manifest = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let input = fixtures::plan_input_record(vec![("id", ExprValue::Text("first".into()))]);
-    world.submit_event_value(START_SCHEMA, &input);
+    let input = serde_json::json!({ "id": "first" });
+    world
+        .submit_event_result(START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
 
     world.kernel.create_snapshot().unwrap();
@@ -359,13 +377,13 @@ fn restored_effects_bypass_new_policy_checks() {
         replay_world
             .kernel
             .reducer_state("com.acme/ResultReducer@1"),
-        Some(&vec![0xEE])
+        Some(vec![0xEE])
     );
 
     // New plan attempts should now be denied by the stricter policy.
-    let blocked_input =
-        fixtures::plan_input_record(vec![("id", ExprValue::Text("blocked".into()))]);
-    replay_world.submit_event_value(START_SCHEMA, &blocked_input);
+    replay_world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("blocked"))
+        .expect("submit blocked start event");
     let err = replay_world.kernel.tick_until_idle().unwrap_err();
     assert!(matches!(err, KernelError::PolicyDenied { .. }));
 }

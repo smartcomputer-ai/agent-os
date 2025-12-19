@@ -1,52 +1,71 @@
-//! `aos world info` command.
+//! `aos status` command.
 
 use anyhow::{Context, Result};
 use aos_host::manifest_loader;
 use aos_store::FsStore;
+use serde_json;
 
 use crate::opts::{WorldOpts, resolve_dirs};
+use crate::output::print_success;
 
 pub async fn cmd_info(opts: &WorldOpts) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
-
-    println!("World: {}", dirs.world.display());
-    println!("  AIR:      {}", dirs.air_dir.display());
-    println!("  Reducer:  {}", dirs.reducer_dir.display());
-    println!("  Store:    {}", dirs.store_root.display());
+    let mut warnings = vec![];
 
     // Check if store exists
     let store_path = dirs.store_root.join(".aos/store");
     if !store_path.exists() {
-        println!("\n  Status: Not initialized (no store found)");
-        return Ok(());
+        return print_success(
+            opts,
+            serde_json::json!({
+                "world": dirs.world,
+                "air": dirs.air_dir,
+                "reducer": dirs.reducer_dir,
+                "store": dirs.store_root,
+                "status": "not-initialized",
+            }),
+            None,
+            warnings,
+        );
     }
 
     // Try to load manifest
     let store = std::sync::Arc::new(FsStore::open(&dirs.store_root).context("open store")?);
-    match manifest_loader::load_from_assets(store.clone(), &dirs.air_dir) {
-        Ok(Some(loaded)) => {
-            println!("\nManifest:");
-            println!("  Schemas:  {}", loaded.manifest.schemas.len());
-            println!("  Modules:  {}", loaded.manifest.modules.len());
-            println!("  Plans:    {}", loaded.manifest.plans.len());
-            println!("  Effects:  {}", loaded.manifest.effects.len());
-            println!("  Triggers: {}", loaded.manifest.triggers.len());
-        }
+    let manifest_info = match manifest_loader::load_from_assets(store.clone(), &dirs.air_dir) {
+        Ok(Some(loaded)) => serde_json::json!({
+            "schemas": loaded.manifest.schemas.len(),
+            "modules": loaded.manifest.modules.len(),
+            "plans": loaded.manifest.plans.len(),
+            "effects": loaded.manifest.effects.len(),
+            "triggers": loaded.manifest.triggers.len(),
+        }),
         Ok(None) => {
-            println!("\n  Status: No manifest found in AIR directory");
+            warnings.push("no manifest found in AIR directory".into());
+            serde_json::json!(null)
         }
         Err(e) => {
-            println!("\n  Status: Failed to load manifest: {e}");
+            warnings.push(format!("failed to load manifest: {e}"));
+            serde_json::json!(null)
         }
-    }
+    };
 
-    // Check for running daemon
-    let control_path = dirs.control_socket();
-    if control_path.exists() {
-        println!("\nDaemon: Socket exists at {}", control_path.display());
+    let daemon = if dirs.control_socket.exists() {
+        serde_json::json!({ "running": true, "socket": dirs.control_socket })
     } else {
-        println!("\nDaemon: Not running");
-    }
+        serde_json::json!({ "running": false })
+    };
 
-    Ok(())
+    print_success(
+        opts,
+        serde_json::json!({
+            "world": dirs.world,
+            "air": dirs.air_dir,
+            "reducer": dirs.reducer_dir,
+            "store": dirs.store_root,
+            "manifest": manifest_info,
+            "daemon": daemon,
+        }),
+        None,
+        warnings,
+    )
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
@@ -64,6 +65,43 @@ pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
         secret_resolver: secret_resolver.clone(),
         allow_placeholder_secrets: false,
     })
+}
+
+/// Compile a specific binary in a workspace package to wasm32.
+/// Intended for built-in system reducers like sys/ObjectCatalog.
+pub fn compile_wasm_bin(
+    workspace_root: &Path,
+    package: &str,
+    bin: &str,
+    cache_dir: &Path,
+) -> Result<Vec<u8>> {
+    fs::create_dir_all(cache_dir)
+        .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
+    let target_dir = cache_dir;
+    let status = Command::new("cargo")
+        .current_dir(workspace_root)
+        .args([
+            "build",
+            "-p",
+            package,
+            "--bin",
+            bin,
+            "--target",
+            "wasm32-unknown-unknown",
+        ])
+        .env("CARGO_TARGET_DIR", target_dir)
+        .status()
+        .map_err(|e| anyhow!("failed to spawn cargo: {e}"))?;
+    if !status.success() {
+        anyhow::bail!("cargo build -p {package} --bin {bin} failed with status {status}");
+    }
+    let artifact = target_dir
+        .join("wasm32-unknown-unknown")
+        .join("debug")
+        .join(format!("{bin}.wasm"));
+    let bytes = fs::read(&artifact)
+        .with_context(|| format!("read wasm artifact {}", artifact.display()))?;
+    Ok(bytes)
 }
 
 fn load_secret_resolver() -> Option<Arc<dyn SecretResolver>> {

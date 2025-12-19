@@ -1,4 +1,3 @@
-use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
     DefPolicy, EffectKind as AirEffectKind, EmptyObject, Expr, ExprConst, ExprMap, ExprOrValue,
     ExprRecord, ExprRef, OriginKind, PolicyDecision, PolicyMatch, PolicyRule, ValueLiteral,
@@ -11,7 +10,7 @@ use aos_wasm_abi::ReducerEffect;
 use indexmap::IndexMap;
 
 mod helpers;
-use helpers::attach_default_policy;
+use helpers::{attach_default_policy, def_text_record_schema, text_type};
 
 fn http_reducer_output() -> aos_wasm_abi::ReducerOutput {
     let mut headers = IndexMap::new();
@@ -44,6 +43,13 @@ fn reducer_http_effect_is_denied() {
         &reducer_name,
     )];
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![def_text_record_schema(
+            fixtures::START_SCHEMA,
+            vec![("id", text_type())],
+        )],
+    );
     // Bind the reducer's default slot to the HTTP capability grant.
     if let Some(binding) = loaded.manifest.module_bindings.get_mut(&reducer_name) {
         binding.slots.insert("default".into(), "cap_http".into());
@@ -63,7 +69,12 @@ fn reducer_http_effect_is_denied() {
     attach_default_policy(&mut loaded, policy);
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    world.submit_event_value(fixtures::START_SCHEMA, &fixtures::plan_input_record(vec![]));
+    world
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
+        .expect("submit start event");
     let err = world.kernel.tick().unwrap_err();
     assert!(
         matches!(err, KernelError::UnsupportedReducerReceipt(_)),
@@ -103,6 +114,19 @@ fn plan_effect_allowed_by_policy() {
         vec![],
         vec![],
     );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+            def_text_record_schema(
+                "com.acme/Input@1",
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+        ],
+    );
 
     let policy = DefPolicy {
         name: "com.acme/plan-policy@1".into(),
@@ -116,10 +140,32 @@ fn plan_effect_allowed_by_policy() {
         }],
     };
     attach_default_policy(&mut loaded, policy);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/Input@1", vec![("id", text_type())]),
+        ],
+    );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+            def_text_record_schema(
+                "com.acme/Input@1",
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+        ],
+    );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    let input = fixtures::plan_input_record(vec![("foo", ExprValue::Nat(1))]);
-    world.submit_event_value(fixtures::START_SCHEMA, &input);
+    let input = serde_json::json!({ "id": "123", "url": "https://example.com" });
+    world
+        .submit_event_result(fixtures::START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
     assert_eq!(world.drain_effects().len(), 1);
 }
@@ -200,16 +246,172 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
         }],
     };
     attach_default_policy(&mut loaded, policy);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+            def_text_record_schema(
+                "com.acme/Input@1",
+                vec![("id", text_type()), ("url", text_type())],
+            ),
+        ],
+    );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
-    let input =
-        fixtures::plan_input_record(vec![("url", ExprValue::Text("https://example.com".into()))]);
-    world.submit_event_value(fixtures::START_SCHEMA, &input);
+    let input = serde_json::json!({ "id": "expr", "url": "https://example.com" });
+    world
+        .submit_event_result(fixtures::START_SCHEMA, &input)
+        .expect("submit start event");
     world.tick_n(2).unwrap();
     let effects = world.drain_effects();
     assert_eq!(effects.len(), 1);
     let intent = &effects[0];
     assert_eq!(intent.kind.as_str(), aos_effects::EffectKind::HTTP_REQUEST);
+}
+
+#[test]
+fn plan_introspect_denied_by_policy() {
+    let store = fixtures::new_mem_store();
+    let plan_name = "com.acme/IntrospectPlan@1".to_string();
+    let plan = aos_air_types::DefPlan {
+        name: plan_name.clone(),
+        input: fixtures::schema(fixtures::START_SCHEMA),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![aos_air_types::PlanStep {
+            id: "emit".into(),
+            kind: aos_air_types::PlanStepKind::EmitEffect(aos_air_types::PlanStepEmitEffect {
+                kind: AirEffectKind::introspect_manifest(),
+                params: ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+                    record: IndexMap::from([(
+                        "consistency".into(),
+                        ValueLiteral::Text(ValueText {
+                            text: "head".into(),
+                        }),
+                    )]),
+                })),
+                cap: "query_cap".into(),
+                bind: aos_air_types::PlanBindEffect {
+                    effect_id_as: "req".into(),
+                },
+            }),
+        }],
+        edges: vec![],
+        required_caps: vec!["query_cap".into()],
+        allowed_effects: vec![AirEffectKind::introspect_manifest()],
+        invariants: vec![],
+    };
+
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![plan],
+        vec![fixtures::start_trigger(&plan_name)],
+        vec![],
+        vec![],
+    );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![def_text_record_schema(
+            fixtures::START_SCHEMA,
+            vec![("id", text_type())],
+        )],
+    );
+
+    // Policy denies introspect.* from plans.
+    let policy = DefPolicy {
+        name: "com.acme/policy@1".into(),
+        rules: vec![PolicyRule {
+            when: PolicyMatch {
+                effect_kind: Some(AirEffectKind::introspect_manifest()),
+                origin_kind: Some(OriginKind::Plan),
+                ..Default::default()
+            },
+            decision: PolicyDecision::Deny,
+        }],
+    };
+    attach_default_policy(&mut loaded, policy);
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    world
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
+        .expect("submit start event");
+    let err = world.kernel.tick().unwrap_err();
+    assert!(
+        matches!(err, KernelError::PolicyDenied { .. }),
+        "expected policy denial, got {err:?}"
+    );
+}
+
+#[test]
+fn plan_introspect_missing_capability_is_rejected() {
+    let store = fixtures::new_mem_store();
+    let plan_name = "com.acme/IntrospectPlan@1".to_string();
+    let plan = aos_air_types::DefPlan {
+        name: plan_name.clone(),
+        input: fixtures::schema(fixtures::START_SCHEMA),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![aos_air_types::PlanStep {
+            id: "emit".into(),
+            kind: aos_air_types::PlanStepKind::EmitEffect(aos_air_types::PlanStepEmitEffect {
+                kind: AirEffectKind::introspect_manifest(),
+                params: ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+                    record: IndexMap::from([(
+                        "consistency".into(),
+                        ValueLiteral::Text(ValueText {
+                            text: "head".into(),
+                        }),
+                    )]),
+                })),
+                cap: "query_cap".into(),
+                bind: aos_air_types::PlanBindEffect {
+                    effect_id_as: "req".into(),
+                },
+            }),
+        }],
+        edges: vec![],
+        required_caps: vec!["query_cap".into()],
+        allowed_effects: vec![AirEffectKind::introspect_manifest()],
+        invariants: vec![],
+    };
+
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![plan],
+        vec![fixtures::start_trigger(&plan_name)],
+        vec![],
+        vec![],
+    );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![def_text_record_schema(
+            fixtures::START_SCHEMA,
+            vec![("id", text_type())],
+        )],
+    );
+
+    // Remove the query cap grant/def so the resolver fails.
+    if let Some(defaults) = loaded.manifest.defaults.as_mut() {
+        defaults.cap_grants.retain(|g| g.name != "query_cap");
+    }
+    loaded.caps.remove("sys/query@1");
+    loaded
+        .manifest
+        .caps
+        .retain(|c| c.name.as_str() != "sys/query@1");
+
+    let err = match TestWorld::with_store(store, loaded) {
+        Ok(_) => panic!("expected manifest load to fail due to missing query cap"),
+        Err(e) => e,
+    };
+    match err {
+        KernelError::PlanCapabilityMissing { ref cap, .. } if cap == "query_cap" => {}
+        other => panic!("expected missing query cap at manifest load, got {other:?}"),
+    }
 }
 
 fn http_params_literal(url: &str) -> ExprOrValue {

@@ -98,6 +98,15 @@ Canonical CBOR remains the storage and hashing format. The node hash is `sha256(
 
 When hashing a typed value (plan IO, cap params, etc.), always bind the **schema hash** alongside the canonical bytes. This prevents two different schemas that serialize to the same JSON shape from colliding and keeps “schema + value” as the identity pair.
 
+### 3.4 Event Payload Normalization (Journal Invariant)
+
+DomainEvents and ReceiptEvents are treated exactly like effect params:
+
+- **Ingress rule**: Every event payload is decoded against its declared `defschema` (from reducer ABI, trigger/routing entry, or built-in receipt schema), validated, canonicalized, and re-encoded as canonical CBOR. If validation fails, the event is rejected.
+- **Journal rule**: The journal stores and replays only these canonical bytes; replay never rewrites payloads.
+- **Routing/correlation**: Key extraction for routed/correlated events uses the schema-aware decoded value (not ExprValue tagging) and validates against the reducer’s `key_schema`.
+- **Sources**: Reducer-emitted DomainEvents, plan-raised events, adapter receipts synthesized as events, and externally injected/CLI events all flow through the same normalizer.
+
 ## 4) Manifest
 
 The manifest is the root catalog of a world's control plane. It lists all schemas, modules, plans, capabilities, and policies by name and hash, defines event routing and triggers, and specifies defaults.
@@ -126,7 +135,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input. The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-ins are no longer auto-included. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`). The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input; a trigger's optional `correlate_by` copies that field into the run context for later `await_event` filters. The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-ins are no longer auto-included. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
 
 See: spec/schemas/manifest.schema.json
 
@@ -182,6 +191,7 @@ Registers a WASM module with its interface contract.
 `EffectKind` and `CapType` are namespaced strings. The schema no longer hardcodes an enum; v1 ships a built-in catalog listed in §7, and adapters can introduce additional kinds as runtime support lands.
 
 The `key_schema` field (v1.1 addendum) documents the key type when this reducer is routed as keyed. The ABI remains a single `step` export; the kernel provides an envelope with optional key.
+When routed as keyed, the kernel sets `ctx.cell_mode=true` and passes only the targeted cell's state; returning `state=null` deletes the cell instance.
 
 ### ABI
 
@@ -235,7 +245,14 @@ Built-in kinds in v1:
 - params: `{ alias:text, version:nat, binding_id:text, expected_digest:hash }`
 - receipt: `{ alias:text, version:nat, binding_id:text, digest:hash }`
 
-Built-in capability types paired with these effects (v1): `http.out`, `blob`, `timer`, `llm.basic`, and `secret`. The schema stays open to future types even though the kernel ships this curated set today.
+**introspect.manifest / introspect.reducer_state / introspect.journal_head / introspect.list_cells** (plan-only, cap_type `query`)
+- Read-only effects served by an internal kernel adapter; receipts include consistency metadata used by governance and self-upgrade flows.
+- `introspect.manifest`: params `{ consistency: text }` (`head` | `exact:<h>` | `at_least:<h>`); receipt `{ manifest, journal_height, snapshot_hash?, manifest_hash }`
+- `introspect.reducer_state`: params `{ reducer:text, key_b64?:text, consistency:text }`; receipt `{ state_b64?:text, meta:{ journal_height, snapshot_hash?, manifest_hash } }`
+- `introspect.journal_head`: params `{}`; receipt `{ journal_height, snapshot_hash?, manifest_hash }`
+- `introspect.list_cells`: params `{ reducer:text }`; receipt `{ cells:[{ key_b64, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`
+
+Built-in capability types paired with these effects (v1): `http.out`, `blob`, `timer`, `llm.basic`, `secret`, and `query`. The schema stays open to future types even though the kernel ships this curated set today.
 
 ### Built-in reducer receipt events
 
@@ -298,7 +315,7 @@ Capabilities define scoped permissions for effects. A `defcap` declares a capabi
 {
   "$kind": "defcap",
   "name": "namespace/name@version",
-  "cap_type": "http.out" | "blob" | "timer" | "llm.basic",
+  "cap_type": "http.out" | "blob" | "timer" | "llm.basic" | "secret" | "query",
   "schema": <SchemaRef>
 }
 ```
@@ -321,6 +338,10 @@ The schema defines parameter constraints enforced at enqueue time.
 
 **sys/timer@1**
 - Schema: `{}` (no constraints in v1)
+
+**sys/query@1**
+- Schema: `{ scope: text }` (`scope` is optional/semantically freeform; empty string = all)
+- Guards read-only `introspect.*` effects; policy may further restrict by reducer/effect kind.
 
 ### CapGrant (Runtime Instance)
 

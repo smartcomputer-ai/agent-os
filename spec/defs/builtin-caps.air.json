@@ -1,0 +1,16 @@
+[
+  {
+    "$kind": "defcap",
+    "name": "sys/query@1",
+    "cap_type": "query",
+    "schema": {
+      "record": {
+        "scope": {
+          "option": { "text": {} },
+          "$comment": "Optional scope string or prefix hint; empty = all introspection"
+        }
+      }
+    },
+    "$comment": "Grants use of introspect.* effects (read-only world inspection)."
+  }
+]

@@ -287,7 +287,7 @@ async fn testhost_state_bytes_and_typed_state_match() {
     // Compare both access methods
     let bytes = host.state_bytes(REDUCER_NAME).unwrap();
     let typed: CounterState = host.state(REDUCER_NAME).unwrap();
-    let from_bytes: CounterState = serde_cbor::from_slice(bytes).unwrap();
+    let from_bytes: CounterState = serde_cbor::from_slice(&bytes).unwrap();
 
     assert_eq!(typed, from_bytes);
     assert_eq!(typed, expected_state);
@@ -346,7 +346,7 @@ async fn testhost_with_fixtures_build_loaded_manifest() {
 
     // Check state was set
     let bytes = host.state_bytes("test/Reducer@1").unwrap();
-    assert_eq!(bytes, &vec![0xAA, 0xBB]);
+    assert_eq!(bytes, vec![0xAA, 0xBB]);
 }
 
 /// Replay smoke test: open → cycle → snapshot → check heights
@@ -472,7 +472,7 @@ async fn testhost_timer_effect_flow() {
 
     // State should still be accessible after receipt processing
     let state_bytes = host.state_bytes("test/TimerReducer@1").unwrap();
-    assert_eq!(state_bytes, &vec![0x01]);
+    assert_eq!(state_bytes, vec![0x01]);
 }
 
 /// Test that run_cycle_batch handles effects via stub adapters
@@ -524,7 +524,7 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
 
     // State should be set
     let state_bytes = host.state_bytes("test/TimerReducer@1").unwrap();
-    assert_eq!(state_bytes, &vec![0xBB]);
+    assert_eq!(state_bytes, vec![0xBB]);
 }
 
 /// run_cycle_with_timers should schedule timer intents and immediately fire them for tests.
@@ -568,5 +568,5 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
     assert_eq!(cycle.receipts_applied, 1);
 
     let state_bytes = host.state_bytes("test/TimerReducer@1").unwrap();
-    assert_eq!(state_bytes, &vec![0xCC]);
+    assert_eq!(state_bytes, vec![0xCC]);
 }

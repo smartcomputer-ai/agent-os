@@ -1,4 +1,4 @@
-# Read-only query surfaces
+# Read-only query surfaces — **Done (v0.4)**
 
 This note sketches an opt-in read path for worlds. Reducers still own all mutations via event→replay, but callers can observe materialized state without emitting new events. The design keeps determinism and auditability while allowing slightly stale reads when callers accept them.
 
@@ -10,9 +10,22 @@ This note sketches an opt-in read path for worlds. Reducers still own all mutati
 
 ## Data sources and freshness
 - **Hot path**: In-memory cache of the latest replayed snapshot (state hash + manifest hash + journal height). Cheap reads that may be a few events behind if replay is running.
-- **Warm path**: On-disk snapshot plus a small journal tail replayer when callers request `at_least_height` freshness and the tail is available.
+- **Warm path**: On-disk snapshot plus a small journal tail replayer when callers request `at_least_height` freshness and the tail is available. **(Deferred — not implemented yet.)**
 - **Cold path**: Historical snapshots in CAS for point-in-time queries and debugging.
 - **Contract**: Every response includes `(journal_height, snapshot_hash, manifest_hash)` so callers know what they read. Clients can request `exact_height` (fail if behind) or `at_least_height` (serve newest available ≥ requested or return the cached head).
+
+**Status (impl):** Hot + cold paths are implemented. `Exact` reads succeed when a snapshot exists at that height; otherwise they error. Warm path remains deferred.
+
+**Shipped this milestone**
+- `StateReader` trait with `Head | Exact | AtLeast` and `ReadMeta { journal_height, snapshot_hash, manifest_hash }`.
+- Hot + cold resolution in kernel; manifest/snapshot hashes stored in snapshots and returned in metadata.
+- Kernel/host integration for state reads (head/exact) including keyed reducers; integration tests cover head and cold Exact for keyed/non-keyed.
+- Minimal CLI flagging via `aos world state --exact-height/--at-least-height` showing metadata.
+
+**Deferred**
+- Warm path (tail replay) for `Exact/AtLeast` without a matching snapshot.
+- HTTP read surface and richer CLI/WorldFS UX (see p4-worldfs-cli).
+- Capability/policy gating for observational reads (left to self-upgrade work).
 
 ## Entry point: StateReader trait
 Implement a `StateReader` trait inside the kernel process that exposes read-only accessors:
@@ -20,15 +33,7 @@ Implement a `StateReader` trait inside the kernel process that exposes read-only
 - `get_manifest(consistency)` for control-plane inspection (modules, plans, capabilities, policies).
 - `get_journal_head()` for metadata only (height + hashes).
 
-`consistency` captures caller preference: `Exact(height)`, `AtLeast(height)`, or `Head`. Implementations resolve via the hot path first, then warm path replay, and include the resolved height/hash in the response envelope.
-
-## HTTP adapter (optional)
-Expose the same trait over HTTP when enabled by policy:
-- `GET /state/{module}/{key}?at_least=H` → reducer projection + metadata envelope.
-- `GET /manifest` → manifest view + envelope.
-- `GET /journal/head` → height + hashes only.
-
-Responses include the consistency metadata so clients can log or retry. HTTP is purely an adapter: it performs no writes, relies on the in-process `StateReader`, and is disabled by default.
+`consistency` captures caller preference: `Exact(height)`, `AtLeast(height)`, or `Head`. Implementations resolve via the hot path first, then warm path replay (deferred), then cold snapshots, and include the resolved height/hash in the response envelope.
 
 ## How external callers learn the height
 - **Response metadata**: Every read returns `(journal_height, snapshot_hash, manifest_hash)`; the caller need not know the height beforehand.

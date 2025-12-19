@@ -119,6 +119,7 @@ dependencies = [
  "once_cell",
  "petgraph",
  "serde",
+ "serde_cbor",
  "serde_json",
  "thiserror 1.0.69",
 ]
@@ -145,6 +146,7 @@ dependencies = [
  "aos-host",
  "aos-kernel",
  "aos-store",
+ "aos-sys",
  "aos-wasm-build",
  "assert_cmd",
  "base64 0.22.1",
@@ -153,12 +155,14 @@ dependencies = [
  "dotenvy",
  "hex",
  "jsonschema",
+ "serde",
  "serde_cbor",
  "serde_json",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "walkdir",
 ]
 
 [[package]]
@@ -191,6 +195,7 @@ dependencies = [
  "aos-store",
  "aos-wasm-abi",
  "aos-wasm-build",
+ "aos-wasm-sdk",
  "assert_cmd",
  "camino",
  "clap",
@@ -287,6 +292,17 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "aos-sys"
+version = "0.1.0"
+dependencies = [
+ "aos-wasm-sdk",
+ "hex",
+ "serde",
+ "serde_cbor",
+ "sha2",
 ]
 
 [[package]]

@@ -8,10 +8,12 @@ use aos_air_exec::{
 use aos_air_types::plan_literals::{SchemaIndex, canonicalize_literal, validate_literal};
 use aos_air_types::{
     DefPlan, EmptyObject, Expr, ExprOrValue, HashRef, PlanEdge, PlanStep, PlanStepKind, TypeExpr,
-    TypePrimitive, TypePrimitiveInt, ValueBool, ValueBytes, ValueDec128, ValueDurationNs,
-    ValueHash, ValueInt, ValueList, ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull,
-    ValueRecord, ValueSet, ValueText, ValueTimeNs, ValueUuid, ValueVariant, catalog::EffectCatalog,
+    TypePrimitive, TypePrimitiveInt, TypePrimitiveText, TypeRecord, ValueBool, ValueBytes,
+    ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList, ValueLiteral, ValueMap,
+    ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText, ValueTimeNs, ValueUuid,
+    ValueVariant, catalog::EffectCatalog, value_normalize::normalize_cbor_by_name,
 };
+use aos_cbor::to_canonical_cbor;
 use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
 use base64::Engine;
@@ -22,6 +24,7 @@ use serde_cbor::{self, Value as CborValue};
 
 use crate::effects::EffectManager;
 use crate::error::KernelError;
+use crate::schema_value::cbor_to_expr_value;
 
 #[derive(Default)]
 pub struct PlanRegistry {
@@ -444,12 +447,12 @@ impl PlanInstance {
                                         ))
                                     })?;
                                 let canonical_key_cbor = expr_value_to_cbor_value(&canonical_key);
-                                let canonical_key_bytes = serde_cbor::to_vec(&canonical_key_cbor)
+                                let canonical_key_bytes = to_canonical_cbor(&canonical_key_cbor)
                                     .map_err(|err| {
-                                    KernelError::Manifest(format!(
-                                        "plan raise_event key encode error: {err}"
-                                    ))
-                                })?;
+                                        KernelError::Manifest(format!(
+                                            "plan raise_event key encode error: {err}"
+                                        ))
+                                    })?;
                                 (Some(canonical_key_bytes), Some(canonical_key))
                             }
                             (Some(_), None) => {
@@ -707,8 +710,20 @@ impl PlanInstance {
     pub fn deliver_event(&mut self, event: &DomainEvent) -> Result<bool, KernelError> {
         if let Some(wait) = &self.event_wait {
             if wait.schema == event.schema {
-                let value = serde_cbor::from_slice(&event.value)
-                    .unwrap_or(ExprValue::Bytes(event.value.clone()));
+                let normalized =
+                    normalize_cbor_by_name(&self.schema_index, wait.schema.as_str(), &event.value)
+                        .map_err(|err| {
+                            KernelError::Manifest(format!(
+                                "await_event payload decode error: {err}"
+                            ))
+                        })?;
+                let schema = self.schema_index.get(wait.schema.as_str()).ok_or_else(|| {
+                    KernelError::Manifest(format!(
+                        "schema '{}' not found for await_event",
+                        wait.schema
+                    ))
+                })?;
+                let value = cbor_to_expr_value(&normalized.value, schema, &self.schema_index)?;
                 if let Some(predicate) = &wait.where_clause {
                     let prev = self.env.push_event(value.clone());
                     let passes = eval_expr(predicate, &self.env).map_err(|err| {
@@ -1202,6 +1217,13 @@ mod tests {
         Arc::new(SchemaIndex::new(map))
     }
 
+    fn schema_index_with_event(name: &str, schema: TypeExpr) -> Arc<SchemaIndex> {
+        Arc::new(SchemaIndex::new(HashMap::from([(
+            name.to_string(),
+            schema,
+        )])))
+    }
+
     fn new_plan_instance(plan: DefPlan) -> PlanInstance {
         PlanInstance::new(
             1,
@@ -1556,14 +1578,24 @@ mod tests {
                 bind: aos_air_types::PlanBind { var: "evt".into() },
             }),
         }];
-        let mut plan = new_plan_instance(base_plan(steps));
+        let schema_index = schema_index_with_event(
+            "com.test/Evt@1",
+            TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
+                int: EmptyObject {},
+            })),
+        );
+        let mut plan = PlanInstance::new(
+            1,
+            base_plan(steps),
+            default_env(),
+            schema_index,
+            empty_reducer_schemas(),
+            None,
+        );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
-        let event = DomainEvent::new(
-            "com.test/Evt@1",
-            serde_cbor::to_vec(&ExprValue::Int(5)).unwrap(),
-        );
+        let event = DomainEvent::new("com.test/Evt@1", serde_cbor::to_vec(&5i64).unwrap());
         assert!(plan.deliver_event(&event).unwrap());
         let outcome2 = plan.tick(&mut effects).unwrap();
         assert!(outcome2.completed);
@@ -1634,7 +1666,7 @@ mod tests {
         assert_eq!(outcome.raised_events.len(), 1);
         assert_eq!(outcome.raised_events[0].schema, "com.test/Evt@1");
         let expected_key =
-            serde_cbor::to_vec(&CborValue::Text("cell-1".into())).expect("encode key");
+            to_canonical_cbor(&CborValue::Text("cell-1".into())).expect("encode key");
         assert_eq!(outcome.raised_events[0].key.as_ref(), Some(&expected_key));
     }
 
@@ -1755,16 +1787,32 @@ mod tests {
             to: "end".into(),
             when: None,
         });
-        let mut instance = new_plan_instance(plan);
+        let event_schema = TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([(
+                "correlation_id".into(),
+                TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                    text: EmptyObject {},
+                })),
+            )]),
+        });
+        let schema_index = schema_index_with_event("com.test/Evt@1", event_schema);
+        let mut instance = PlanInstance::new(
+            1,
+            plan,
+            default_env(),
+            schema_index,
+            empty_reducer_schemas(),
+            None,
+        );
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
 
         let mismatch_event = DomainEvent::new(
             "com.test/Evt@1",
-            serde_cbor::to_vec(&ExprValue::Record(IndexMap::from([(
-                "correlation_id".into(),
-                ExprValue::Text("nope".into()),
+            serde_cbor::to_vec(&CborValue::Map(BTreeMap::from([(
+                CborValue::Text("correlation_id".into()),
+                CborValue::Text("nope".into()),
             )])))
             .unwrap(),
         );
@@ -1772,9 +1820,9 @@ mod tests {
 
         let match_event = DomainEvent::new(
             "com.test/Evt@1",
-            serde_cbor::to_vec(&ExprValue::Record(IndexMap::from([(
-                "correlation_id".into(),
-                ExprValue::Text("match".into()),
+            serde_cbor::to_vec(&CborValue::Map(BTreeMap::from([(
+                CborValue::Text("correlation_id".into()),
+                CborValue::Text("match".into()),
             )])))
             .unwrap(),
         );

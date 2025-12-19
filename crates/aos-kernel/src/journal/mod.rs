@@ -170,6 +170,8 @@ pub struct SnapshotRecord {
     pub snapshot_ref: String,
     /// Logical height the snapshot represents (number of events applied).
     pub height: JournalSeq,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

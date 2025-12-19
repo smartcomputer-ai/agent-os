@@ -9,7 +9,7 @@ edition = "2024"
 default = ["adapter-http", "adapter-llm"]
 adapter-http = ["reqwest", "url"]
 adapter-llm = ["reqwest"]
-test-fixtures = ["aos-air-exec", "aos-wasm-abi", "indexmap", "wat", "sha2", "hex"]
+test-fixtures = ["aos-air-exec", "aos-wasm-abi", "indexmap", "wat", "sha2"]
 
 [dependencies]
 aos-kernel = { path = "../aos-kernel" }
@@ -27,7 +27,7 @@ aos-wasm-abi = { path = "../aos-wasm-abi", optional = true }
 indexmap = { version = "2", optional = true }
 wat = { version = "1", optional = true }
 sha2 = { version = "0.10", optional = true }
-hex = { version = "0.4", optional = true }
+hex = "0.4"
 
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"

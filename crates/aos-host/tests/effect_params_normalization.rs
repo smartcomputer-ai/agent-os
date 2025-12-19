@@ -6,6 +6,7 @@ use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
 use aos_wasm_abi::ReducerEffect;
 use serde_cbor::Value as CborValue;
+use serde_json;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -23,10 +24,10 @@ fn plan_effect_params_canonicalize_before_hashing() {
         CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::llm_basic())]);
     let mut mgr = mgr_with_cap(cap_gate);
 
-    // Params variant A: temperature as float
-    let params_a = llm_params_cbor(CborValue::Float(0.5));
-    // Params variant B: temperature as string
-    let params_b = llm_params_cbor(CborValue::Text("0.5".into()));
+    // Params variant A: valid dec128 encoded as string
+    let params_a = llm_params_cbor(CborValue::Text("0.5".into()));
+    // Params variant B: same values but inserted in reverse order to test canonicalization
+    let params_b = llm_params_cbor_reordered(CborValue::Text("0.5".into()));
 
     let intent_a = mgr
         .enqueue_plan_effect(
@@ -207,19 +208,25 @@ fn reducer_params_round_trip_journal_replay() {
         fixtures::START_SCHEMA,
         &reducer.name,
     )];
-    let manifest = fixtures::build_loaded_manifest(
+    let mut manifest = fixtures::build_loaded_manifest(
         vec![],
         vec![fixtures::start_trigger("com.acme/Plan@1")],
         vec![reducer],
         routing.clone(),
     );
+    fixtures::insert_test_schemas(
+        &mut manifest,
+        vec![fixtures::def_text_record_schema(
+            fixtures::START_SCHEMA,
+            vec![("id", fixtures::text_type())],
+        )],
+    );
 
     // Run kernel to emit effect, record journal, replay, and compare params_cbor.
     let mut world = fixtures::TestWorld::with_store(store.clone(), manifest).unwrap();
-    world.submit_event_value(
-        fixtures::START_SCHEMA,
-        &fixtures::plan_input_record(vec![("id", aos_air_exec::Value::Text("1".into()))]),
-    );
+    world
+        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "1" }))
+        .expect("submit start event");
     world.tick_n(1).unwrap();
     let mut effects = world.drain_effects();
     assert_eq!(effects.len(), 1);
@@ -228,21 +235,31 @@ fn reducer_params_round_trip_journal_replay() {
 
     let mut replay_world = fixtures::TestWorld::with_store_and_journal(
         store.clone(),
-        fixtures::build_loaded_manifest(
-            vec![],
-            vec![fixtures::start_trigger("com.acme/Plan@1")],
-            vec![fixtures::stub_reducer_module(
-                &store,
-                "com.acme/Reducer@1",
-                &aos_wasm_abi::ReducerOutput {
-                    state: None,
-                    domain_events: vec![],
-                    effects: vec![effect.clone()],
-                    ann: None,
-                },
-            )],
-            routing.clone(),
-        ),
+        {
+            let mut replay_manifest = fixtures::build_loaded_manifest(
+                vec![],
+                vec![fixtures::start_trigger("com.acme/Plan@1")],
+                vec![fixtures::stub_reducer_module(
+                    &store,
+                    "com.acme/Reducer@1",
+                    &aos_wasm_abi::ReducerOutput {
+                        state: None,
+                        domain_events: vec![],
+                        effects: vec![effect.clone()],
+                        ann: None,
+                    },
+                )],
+                routing.clone(),
+            );
+            fixtures::insert_test_schemas(
+                &mut replay_manifest,
+                vec![fixtures::def_text_record_schema(
+                    fixtures::START_SCHEMA,
+                    vec![("id", fixtures::text_type())],
+                )],
+            );
+            replay_manifest
+        },
         Box::new(MemJournal::from_entries(&journal)),
     )
     .unwrap();
@@ -323,5 +340,36 @@ fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
         CborValue::Array(Vec::new()),
     );
     map.insert(CborValue::Text("api_key".into()), CborValue::Null);
+    serde_cbor::to_vec(&CborValue::Map(map)).expect("encode params")
+}
+
+// Same fields as `llm_params_cbor` but inserted in reverse order so that canonicalization
+// must sort the map.
+fn llm_params_cbor_reordered(temp_value: CborValue) -> Vec<u8> {
+    let mut map = BTreeMap::new();
+    map.insert(CborValue::Text("api_key".into()), CborValue::Null);
+    map.insert(
+        CborValue::Text("tools".into()),
+        CborValue::Array(Vec::new()),
+    );
+    map.insert(
+        CborValue::Text("input_ref".into()),
+        CborValue::Text(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
+        ),
+    );
+    map.insert(
+        CborValue::Text("max_tokens".into()),
+        CborValue::Integer(16.into()),
+    );
+    map.insert(CborValue::Text("temperature".into()), temp_value);
+    map.insert(
+        CborValue::Text("model".into()),
+        CborValue::Text("gpt-4".into()),
+    );
+    map.insert(
+        CborValue::Text("provider".into()),
+        CborValue::Text("openai".into()),
+    );
     serde_cbor::to_vec(&CborValue::Map(map)).expect("encode params")
 }

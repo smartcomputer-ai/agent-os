@@ -1,4 +1,4 @@
-//! `aos world replay` command (experimental).
+//! `aos journal replay` command (experimental).
 //!
 //! Opens a world, replays journal + snapshot to head, and reports heights/state hashes.
 
@@ -6,6 +6,7 @@ use anyhow::Result;
 use clap::Args;
 
 use crate::opts::{WorldOpts, resolve_dirs};
+use crate::output::print_success;
 use crate::util::load_world_env;
 
 use super::{create_host, prepare_world};
@@ -24,10 +25,14 @@ pub async fn cmd_replay(opts: &WorldOpts, _args: &ReplayArgs) -> Result<()> {
     let _ = host.drain()?;
 
     let heights = host.heights();
-    println!(
-        "replay ok: head={}, snapshot={:?}",
-        heights.head, heights.snapshot
-    );
-
-    Ok(())
+    print_success(
+        opts,
+        serde_json::json!({
+            "replay": "ok",
+            "head": heights.head,
+            "snapshot": heights.snapshot
+        }),
+        None,
+        vec![],
+    )
 }

@@ -4,8 +4,7 @@
 extern crate alloc;
 
 use alloc::string::String;
-use aos_air_exec::Value as AirValue;
-use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx};
+use aos_wasm_sdk::{aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
 use serde::{Deserialize, Serialize};
 
 const REQUEST_SCHEMA: &str = "demo/SummarizeRequest@1";
@@ -21,11 +20,13 @@ struct SummarizerState {
     last_cost_millis: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum SummarizerPc {
-    Idle,
-    Summarizing,
-    Done,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum SummarizerPc {
+        Idle,
+        Summarizing,
+        Done,
+    }
 }
 
 impl Default for SummarizerPc {
@@ -34,16 +35,24 @@ impl Default for SummarizerPc {
     }
 }
 
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum SummarizerEvent {
+        Start { url: String },
+        SummaryReady {
+            request_id: u64,
+            summary: String,
+            tokens_prompt: u64,
+            tokens_completion: u64,
+            cost_millis: u64,
+        },
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-enum SummarizerEvent {
-    Start { url: String },
-    SummaryReady {
-        request_id: u64,
-        summary: String,
-        tokens_prompt: u64,
-        tokens_completion: u64,
-        cost_millis: u64,
-    },
+struct SummarizeRequest {
+    request_id: u64,
+    url: String,
 }
 
 aos_reducer!(LlmSummarizerSm);
@@ -95,10 +104,7 @@ fn handle_start(ctx: &mut ReducerCtx<SummarizerState, ()>, url: String) {
     ctx.state.last_tokens_completion = None;
     ctx.state.last_cost_millis = None;
 
-    let intent_value = AirValue::record([
-        ("request_id", AirValue::Nat(request_id)),
-        ("url", AirValue::Text(url)),
-    ]);
+    let intent_value = SummarizeRequest { request_id, url };
     let key = request_id.to_be_bytes();
     ctx.intent(REQUEST_SCHEMA)
         .key_bytes(&key)

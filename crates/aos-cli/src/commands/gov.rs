@@ -1,20 +1,21 @@
-//! `aos world gov` governance commands (stubs).
+//! `aos gov` governance commands (stubs).
 
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use clap::{Args, Subcommand};
-use crate::commands::gov_control::send_req;
 use crate::opts::{ResolvedDirs, WorldOpts, resolve_dirs};
 use crate::util::validate_patch_json;
+use anyhow::{Context, Result};
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
-use aos_host::{control::ControlClient, manifest_loader::ZERO_HASH_SENTINEL};
-use base64::prelude::*;
-use std::collections::HashMap;
+use aos_host::control::{ControlClient, RequestEnvelope, ResponseEnvelope};
+use aos_host::manifest_loader::ZERO_HASH_SENTINEL;
 use aos_host::manifest_loader::load_from_assets;
 use aos_store::{FsStore, Store};
+use base64::prelude::*;
+use clap::{Args, Subcommand};
+use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Args, Debug)]
@@ -63,7 +64,11 @@ pub struct ProposeArgs {
     pub description: Option<String>,
 
     /// Require all hashes to be provided (disable auto-fill of zero/missing hashes)
-    #[arg(long, default_value_t = false, help = "Enforce that all manifest refs in patch doc carry non-zero hashes; disable client auto-fill")]
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Enforce that all manifest refs in patch doc carry non-zero hashes; disable client auto-fill"
+    )]
     pub require_hashes: bool,
 
     /// Dry-run: print the generated PatchDocument JSON and exit
@@ -161,12 +166,12 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
                 }
             };
 
-            let mut client = ControlClient::connect(&dirs.control_socket())
+            let mut client = ControlClient::connect(&dirs.control_socket)
                 .await
                 .context("connect control socket")?;
             let resp = send_req(
                 &mut client,
-                "propose",
+                "gov-propose",
                 serde_json::json!({
                     "patch_b64": BASE64_STANDARD.encode(patch_bytes),
                     "description": propose_args.description
@@ -177,12 +182,12 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
         }
         GovSubcommand::Shadow(shadow_args) => {
             let proposal_id: u64 = shadow_args.id.parse().context("proposal id must be u64")?;
-            let mut client = ControlClient::connect(&dirs.control_socket())
+            let mut client = ControlClient::connect(&dirs.control_socket)
                 .await
                 .context("connect control socket")?;
             let resp = send_req(
                 &mut client,
-                "shadow",
+                "gov-shadow",
                 serde_json::json!({ "proposal_id": proposal_id }),
             )
             .await?;
@@ -195,12 +200,12 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
         }
         GovSubcommand::Approve(approve_args) => {
             let proposal_id: u64 = approve_args.id.parse().context("proposal id must be u64")?;
-            let mut client = ControlClient::connect(&dirs.control_socket())
+            let mut client = ControlClient::connect(&dirs.control_socket)
                 .await
                 .context("connect control socket")?;
             let resp = send_req(
                 &mut client,
-                "approve",
+                "gov-approve",
                 serde_json::json!({
                     "proposal_id": proposal_id,
                     "decision": approve_args.decision,
@@ -212,12 +217,12 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
         }
         GovSubcommand::Apply(apply_args) => {
             let proposal_id: u64 = apply_args.id.parse().context("proposal id must be u64")?;
-            let mut client = ControlClient::connect(&dirs.control_socket())
+            let mut client = ControlClient::connect(&dirs.control_socket)
                 .await
                 .context("connect control socket")?;
             let resp = send_req(
                 &mut client,
-                "apply",
+                "gov-apply",
                 serde_json::json!({ "proposal_id": proposal_id }),
             )
             .await?;
@@ -372,9 +377,7 @@ fn build_patchdoc_from_dir(
                 // Fallback: parse manifest bytes directly if node not in store (e.g., test fixture)
                 let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
                 let bytes = fs::read(&manifest_path)?;
-                if let Ok(catalog) =
-                    aos_store::load_manifest_from_bytes(store.as_ref(), &bytes)
-                {
+                if let Ok(catalog) = aos_store::load_manifest_from_bytes(store.as_ref(), &bytes) {
                     catalog.manifest
                 } else {
                     serde_json::from_slice(&bytes).context("parse manifest json")?
@@ -488,7 +491,9 @@ fn build_patchdoc_from_dir(
         .map(|r| &r.events)
         .cloned()
         .unwrap_or_default();
-    let pre = Hash::of_cbor(&base_events).context("hash base routing.events")?.to_hex();
+    let pre = Hash::of_cbor(&base_events)
+        .context("hash base routing.events")?
+        .to_hex();
     let new_events = loaded
         .manifest
         .routing
@@ -507,7 +512,9 @@ fn build_patchdoc_from_dir(
         .map(|r| &r.inboxes)
         .cloned()
         .unwrap_or_default();
-    let pre = Hash::of_cbor(&base_inboxes).context("hash base routing.inboxes")?.to_hex();
+    let pre = Hash::of_cbor(&base_inboxes)
+        .context("hash base routing.inboxes")?
+        .to_hex();
     let new_inboxes = loaded
         .manifest
         .routing
@@ -520,7 +527,9 @@ fn build_patchdoc_from_dir(
     }));
 
     // triggers
-    let pre = Hash::of_cbor(&base_manifest.triggers).context("hash base triggers")?.to_hex();
+    let pre = Hash::of_cbor(&base_manifest.triggers)
+        .context("hash base triggers")?
+        .to_hex();
     patches.push(serde_json::json!({
         "set_triggers": { "pre_hash": pre, "triggers": loaded.manifest.triggers }
     }));
@@ -534,7 +543,9 @@ fn build_patchdoc_from_dir(
     }));
 
     // secrets block
-    let pre = Hash::of_cbor(&base_manifest.secrets).context("hash base secrets")?.to_hex();
+    let pre = Hash::of_cbor(&base_manifest.secrets)
+        .context("hash base secrets")?
+        .to_hex();
     patches.push(serde_json::json!({
         "set_secrets": { "pre_hash": pre, "secrets": loaded.manifest.secrets }
     }));
@@ -544,6 +555,29 @@ fn build_patchdoc_from_dir(
         "base_manifest_hash": base_manifest_hash,
         "patches": patches,
     }))
+}
+
+pub async fn send_req(
+    client: &mut ControlClient,
+    cmd: &str,
+    payload: Value,
+) -> Result<ResponseEnvelope> {
+    let env = RequestEnvelope {
+        v: 1,
+        id: format!("gov-{cmd}"),
+        cmd: cmd.into(),
+        payload,
+    };
+    let resp = client.request(&env).await?;
+    if !resp.ok {
+        let msg = resp
+            .error
+            .as_ref()
+            .map(|e| format!("{}: {}", e.code, e.message))
+            .unwrap_or_else(|| "unknown error".into());
+        anyhow::bail!("control {} failed: {}", cmd, msg);
+    }
+    Ok(resp)
 }
 
 #[cfg(test)]
@@ -582,8 +616,9 @@ mod tests {
 
         let err = autofill_patchdoc_hashes(&mut doc, true)
             .expect_err("should fail when hashes remain zero");
-        assert!(err.to_string().contains("hash missing")
-            || err.to_string().contains("hash still zero"),
-            "require-hashes should error on zero hashes, got {err}");
+        assert!(
+            err.to_string().contains("hash missing") || err.to_string().contains("hash still zero"),
+            "require-hashes should error on zero hashes, got {err}"
+        );
     }
 }

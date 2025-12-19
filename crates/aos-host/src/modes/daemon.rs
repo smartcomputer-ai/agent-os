@@ -11,7 +11,10 @@
 
 use std::time::Duration;
 
+use aos_air_types::AirNode;
+use aos_cbor::Hash;
 use aos_effects::EffectReceipt;
+use aos_kernel::StateReader;
 use aos_store::Store;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -19,10 +22,11 @@ use tokio::task::JoinHandle;
 use crate::adapters::timer::TimerScheduler;
 use crate::error::HostError;
 use crate::host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};
+use aos_kernel::cell_index::CellMeta;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
-use aos_kernel::shadow::ShadowSummary;
 use aos_kernel::patch_doc::{PatchDocument, compile_patch_document};
+use aos_kernel::shadow::ShadowSummary;
 
 /// Convert a `std::time::Instant` to a `tokio::time::Instant`.
 ///
@@ -44,55 +48,75 @@ fn to_tokio_instant(i: std::time::Instant) -> tokio::time::Instant {
 /// these messages.
 #[derive(Debug)]
 pub enum ControlMsg {
-    SendEvent {
-        event: ExternalEvent,
-        resp: oneshot::Sender<Result<(), HostError>>,
-    },
-    InjectReceipt {
-        receipt: EffectReceipt,
-        resp: oneshot::Sender<Result<(), HostError>>,
-    },
     Snapshot {
         resp: oneshot::Sender<Result<(), HostError>>,
-    },
-    Step {
-        resp: oneshot::Sender<Result<(), HostError>>,
-    },
-    QueryState {
-        reducer: String,
-        key: Option<Vec<u8>>,
-        resp: oneshot::Sender<Result<Option<Vec<u8>>, HostError>>,
-    },
-    Propose {
-        patch: GovernancePatchInput,
-        description: Option<String>,
-        resp: oneshot::Sender<Result<u64, HostError>>,
-    },
-    Shadow {
-        proposal_id: u64,
-        resp: oneshot::Sender<Result<ShadowSummary, HostError>>,
-    },
-    Approve {
-        proposal_id: u64,
-        approver: String,
-        decision: ApprovalDecisionRecord,
-        resp: oneshot::Sender<Result<(), HostError>>,
-    },
-    Apply {
-        proposal_id: u64,
-        resp: oneshot::Sender<Result<(), HostError>>,
-    },
-    PutBlob {
-        data: Vec<u8>,
-        resp: oneshot::Sender<Result<String, HostError>>,
-    },
-    JournalHead {
-        resp: oneshot::Sender<Result<u64, HostError>>,
     },
     Shutdown {
         resp: oneshot::Sender<Result<(), HostError>>,
         /// Optional sender to propagate shutdown to the control server.
         shutdown_tx: broadcast::Sender<()>,
+    },
+    JournalHead {
+        resp: oneshot::Sender<Result<aos_kernel::ReadMeta, HostError>>,
+    },
+    EventSend {
+        event: ExternalEvent,
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    ReceiptInject {
+        receipt: EffectReceipt,
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    ManifestGet {
+        consistency: String,
+        resp: oneshot::Sender<Result<(aos_kernel::ReadMeta, Vec<u8>), HostError>>,
+    },
+    DefGet {
+        name: String,
+        resp: oneshot::Sender<Result<AirNode, HostError>>,
+    },
+    DefList {
+        kinds: Option<Vec<String>>,
+        prefix: Option<String>,
+        resp: oneshot::Sender<Result<Vec<aos_kernel::DefListing>, HostError>>,
+    },
+    StateGet {
+        reducer: String,
+        key: Option<Vec<u8>>,
+        consistency: String,
+        resp: oneshot::Sender<Result<Option<(aos_kernel::ReadMeta, Option<Vec<u8>>)>, HostError>>,
+    },
+    StateList {
+        reducer: String,
+        resp: oneshot::Sender<Result<Vec<CellMeta>, HostError>>,
+    },
+    PutBlob {
+        data: Vec<u8>,
+        resp: oneshot::Sender<Result<String, HostError>>,
+    },
+    BlobGet {
+        hash_hex: String,
+        resp: oneshot::Sender<Result<Vec<u8>, HostError>>,
+    },
+
+    GovPropose {
+        patch: GovernancePatchInput,
+        description: Option<String>,
+        resp: oneshot::Sender<Result<u64, HostError>>,
+    },
+    GovShadow {
+        proposal_id: u64,
+        resp: oneshot::Sender<Result<ShadowSummary, HostError>>,
+    },
+    GovApprove {
+        proposal_id: u64,
+        approver: String,
+        decision: ApprovalDecisionRecord,
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    GovApply {
+        proposal_id: u64,
+        resp: oneshot::Sender<Result<(), HostError>>,
     },
 }
 
@@ -270,7 +294,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
     /// Apply a control command.
     async fn apply_control(&mut self, cmd: ControlMsg) -> Result<(), HostError> {
         match cmd {
-            ControlMsg::SendEvent { event: evt, resp } => {
+            ControlMsg::EventSend { event: evt, resp } => {
                 tracing::debug!("Received external event");
                 let res = (|| -> Result<(), HostError> {
                     self.host.enqueue_external(evt)?;
@@ -282,7 +306,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 };
                 let _ = resp.send(res);
             }
-            ControlMsg::InjectReceipt { receipt, resp } => {
+            ControlMsg::ReceiptInject { receipt, resp } => {
                 tracing::debug!("Injecting receipt");
                 let res = (|| -> Result<(), HostError> {
                     self.host.kernel_mut().handle_receipt(receipt)?;
@@ -299,24 +323,71 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let res = self.host.snapshot();
                 let _ = resp.send(res);
             }
-            ControlMsg::Step { resp } => {
-                tracing::debug!("Running step (by request)");
-                let res = self.run_daemon_cycle().await;
-                let _ = resp.send(res.map(|_| ()));
-            }
-            ControlMsg::QueryState { reducer, key, resp } => {
-                let result = self.host.state(&reducer, key.as_deref()).cloned();
+            ControlMsg::StateGet {
+                reducer,
+                key,
+                consistency,
+                resp,
+            } => {
+                let consistency = parse_consistency(&self.host, &consistency);
+                let result = self
+                    .host
+                    .query_state(&reducer, key.as_deref(), consistency)
+                    .map(|read| (read.meta, read.value));
                 let _ = resp.send(Ok(result));
             }
+            ControlMsg::DefGet { name, resp } => {
+                let res = self.host.get_def(&name);
+                let _ = resp.send(res);
+            }
+            ControlMsg::DefList {
+                kinds,
+                prefix,
+                resp,
+            } => {
+                let res = self.host.list_defs(kinds.as_deref(), prefix.as_deref());
+                let _ = resp.send(res);
+            }
+            ControlMsg::StateList { reducer, resp } => {
+                let res = self.host.list_cells(&reducer);
+                let _ = resp.send(res);
+            }
+            ControlMsg::BlobGet { hash_hex, resp } => {
+                let res = (|| -> Result<Vec<u8>, HostError> {
+                    let hash = Hash::from_hex_str(&hash_hex)
+                        .map_err(|e| HostError::Store(e.to_string()))?;
+                    let bytes = self
+                        .host
+                        .store()
+                        .get_blob(hash)
+                        .map_err(|e| HostError::Store(e.to_string()))?;
+                    Ok(bytes)
+                })();
+                let _ = resp.send(res);
+            }
             ControlMsg::JournalHead { resp } => {
-                let heights = self.host.heights();
-                let _ = resp.send(Ok(heights.head));
+                let meta = self.host.kernel().get_journal_head();
+                let _ = resp.send(Ok(meta));
             }
             ControlMsg::PutBlob { data, resp } => {
                 let res = self.host.put_blob(&data);
                 let _ = resp.send(res);
             }
-            ControlMsg::Propose {
+            ControlMsg::ManifestGet { consistency, resp } => {
+                let consistency = parse_consistency(&self.host, &consistency);
+                let res = self
+                    .host
+                    .kernel()
+                    .get_manifest(consistency)
+                    .map_err(HostError::from)
+                    .and_then(|read| {
+                        let bytes = aos_cbor::to_canonical_cbor(&read.value)
+                            .map_err(|e| HostError::Manifest(format!("encode manifest: {e}")))?;
+                        Ok((read.meta, bytes))
+                    });
+                let _ = resp.send(res);
+            }
+            ControlMsg::GovPropose {
                 patch,
                 description,
                 resp,
@@ -336,7 +407,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 };
                 let _ = resp.send(res.map_err(HostError::from));
             }
-            ControlMsg::Shadow { proposal_id, resp } => {
+            ControlMsg::GovShadow { proposal_id, resp } => {
                 tracing::info!("Governance shadow via control");
                 let res = self
                     .host
@@ -345,7 +416,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                     .map_err(HostError::from);
                 let _ = resp.send(res);
             }
-            ControlMsg::Approve {
+            ControlMsg::GovApprove {
                 proposal_id,
                 approver,
                 decision,
@@ -364,7 +435,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 };
                 let _ = resp.send(res.map_err(HostError::from));
             }
-            ControlMsg::Apply { proposal_id, resp } => {
+            ControlMsg::GovApply { proposal_id, resp } => {
                 tracing::info!("Governance apply via control");
                 let res = self
                     .host
@@ -396,5 +467,21 @@ impl<S: Store + 'static> WorldDaemon<S> {
     /// Access the timer scheduler.
     pub fn timer_scheduler(&self) -> &TimerScheduler {
         &self.timer_scheduler
+    }
+}
+
+fn parse_consistency<S: Store + 'static>(host: &WorldHost<S>, s: &str) -> aos_kernel::Consistency {
+    match s {
+        v if v.starts_with("exact:") => {
+            let h = v[6..].parse().unwrap_or(host.kernel().journal_head());
+            aos_kernel::Consistency::Exact(h)
+        }
+        v if v.starts_with("at_least:") => {
+            let h = v[9..].parse().unwrap_or(host.kernel().journal_head());
+            aos_kernel::Consistency::AtLeast(h)
+        }
+        "exact" => aos_kernel::Consistency::Exact(host.kernel().journal_head()),
+        "at_least" => aos_kernel::Consistency::AtLeast(host.kernel().journal_head()),
+        _ => aos_kernel::Consistency::Head,
     }
 }

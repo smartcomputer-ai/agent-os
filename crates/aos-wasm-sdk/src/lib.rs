@@ -62,6 +62,28 @@ impl<S, A> ReducerCtx<S, A> {
         self.key.as_deref()
     }
 
+    /// Return the key and fail deterministically if the reducer is keyed but no key was supplied.
+    pub fn key_required(&self) -> Result<&[u8], ReduceError> {
+        self.key
+            .as_deref()
+            .ok_or(ReduceError::new("missing reducer key"))
+    }
+
+    /// Return the key interpreted as UTF-8 text (fails if absent or invalid UTF-8).
+    pub fn key_text(&self) -> Result<&str, ReduceError> {
+        let bytes = self.key_required()?;
+        core::str::from_utf8(bytes).map_err(|_| ReduceError::new("key not utf8"))
+    }
+
+    /// Enforce that the provided bytes exactly match the reducer key (when present).
+    pub fn ensure_key_eq(&self, expected: &[u8]) -> Result<(), ReduceError> {
+        match &self.key {
+            Some(actual) if actual.as_slice() == expected => Ok(()),
+            Some(_) => Err(ReduceError::new("key mismatch")),
+            None => Err(ReduceError::new("missing reducer key")),
+        }
+    }
+
     /// Name of the reducer type (for diagnostics).
     pub fn reducer_name(&self) -> &'static str {
         self.reducer_name
@@ -445,6 +467,75 @@ macro_rules! aos_reducer {
         #[cfg_attr(target_arch = "wasm32", unsafe(export_name = "step"))]
         pub extern "C" fn aos_wasm_step(ptr: i32, len: i32) -> (i32, i32) {
             $crate::dispatch_reducer::<$ty>(ptr, len)
+        }
+    };
+}
+
+/// Helper macro to apply AIR's canonical variant tagging (`$tag`/`$value`) to an enum.
+///
+/// This avoids repeating `#[serde(tag = "$tag", content = "$value")]` on every reducer
+/// event/state enum. Usage:
+///
+/// ```
+/// use serde::{Serialize, Deserialize};
+/// use aos_wasm_sdk::aos_variant;
+///
+/// aos_variant! {
+///     #[derive(Serialize, Deserialize)]
+///     pub enum Event {
+///         Start { target: u64 },
+///         Tick,
+///     }
+/// }
+/// ```
+#[macro_export]
+macro_rules! aos_variant {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident $($rest:tt)*) => {
+        $(#[$meta])*
+        #[serde(tag = "$tag", content = "$value")]
+        $vis enum $name $($rest)*
+    };
+}
+
+/// Helper macro to define an enum that can deserialize either a tagged (canonical `$tag`/`$value`)
+/// variant form or any number of plain record forms (useful for mixing app events with receipt records).
+#[macro_export]
+macro_rules! aos_event_union {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident { $($variant:ident ( $ty:ty )),+ $(,)? }) => {
+        $(#[$meta])*
+        $vis enum $name {
+            $($variant($ty)),+
+        }
+
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = serde_cbor::Value::deserialize(deserializer)?;
+                $(
+                    // First, try canonical tagged form: {"$tag":"Variant", "$value": ...}
+                    if let serde_cbor::Value::Map(map) = &value {
+                        if let Some(serde_cbor::Value::Text(tag)) = map.get(&serde_cbor::Value::Text("$tag".into())) {
+                            let expected = stringify!($variant);
+                            let expected_lower = expected.to_ascii_lowercase();
+                            if tag == expected || tag == expected_lower.as_str() {
+                                let inner = map.get(&serde_cbor::Value::Text("$value".into()))
+                                    .cloned()
+                                    .unwrap_or(serde_cbor::Value::Null);
+                                if let Ok(v) = serde_cbor::value::from_value::<$ty>(inner) {
+                                    return Ok(Self::$variant(v));
+                                }
+                            }
+                        }
+                    }
+                    // Fallback: try to deserialize the entire value as the variant payload (record-shaped receipts, legacy untagged Start, etc.)
+                    if let Ok(v) = serde_cbor::value::from_value::<$ty>(value.clone()) {
+                        return Ok(Self::$variant(v));
+                    }
+                )+
+                Err(serde::de::Error::custom("no union variant matched payload"))
+            }
         }
     };
 }

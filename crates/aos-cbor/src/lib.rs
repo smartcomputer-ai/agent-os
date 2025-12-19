@@ -177,7 +177,7 @@ mod tests {
             ),
             (
                 "spec/schemas/defcap.schema.json",
-                "sha256:860a76e1de58d91d17de70d234eb83123cee4e4bca64fb9a7596e1e39fcd3af7",
+                "sha256:0e5469a59302346e1a116e8db4f5c1a56849fd8e95cd997ece5b251598dcd115",
             ),
             (
                 "spec/schemas/defpolicy.schema.json",
@@ -193,7 +193,7 @@ mod tests {
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:77fe95cd9d008ee977f64d81f15260b4d79da5da943b82d41fffc85b3b7b9662",
+                "sha256:6a051ddc5a725b553d22609655ca5bdd46b6563f8c810e420051d885cf7decb1",
             ),
         ];
 

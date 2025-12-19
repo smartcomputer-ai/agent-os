@@ -613,6 +613,7 @@ impl CapType {
     pub const TIMER: &'static str = "timer";
     pub const LLM_BASIC: &'static str = "llm.basic";
     pub const SECRET: &'static str = "secret";
+    pub const QUERY: &'static str = "query";
 
     pub fn new(cap_type: impl Into<String>) -> Self {
         Self(cap_type.into())
@@ -640,6 +641,10 @@ impl CapType {
 
     pub fn secret() -> Self {
         Self::new(Self::SECRET)
+    }
+
+    pub fn query() -> Self {
+        Self::new(Self::QUERY)
     }
 }
 
@@ -840,6 +845,10 @@ impl EffectKind {
     pub const LLM_GENERATE: &'static str = "llm.generate";
     pub const VAULT_PUT: &'static str = "vault.put";
     pub const VAULT_ROTATE: &'static str = "vault.rotate";
+    pub const INTROSPECT_MANIFEST: &'static str = "introspect.manifest";
+    pub const INTROSPECT_REDUCER_STATE: &'static str = "introspect.reducer_state";
+    pub const INTROSPECT_JOURNAL_HEAD: &'static str = "introspect.journal_head";
+    pub const INTROSPECT_LIST_CELLS: &'static str = "introspect.list_cells";
 
     pub fn new(kind: impl Into<String>) -> Self {
         Self(kind.into())
@@ -875,6 +884,22 @@ impl EffectKind {
 
     pub fn vault_rotate() -> Self {
         Self::new(Self::VAULT_ROTATE)
+    }
+
+    pub fn introspect_manifest() -> Self {
+        Self::new(Self::INTROSPECT_MANIFEST)
+    }
+
+    pub fn introspect_reducer_state() -> Self {
+        Self::new(Self::INTROSPECT_REDUCER_STATE)
+    }
+
+    pub fn introspect_journal_head() -> Self {
+        Self::new(Self::INTROSPECT_JOURNAL_HEAD)
+    }
+
+    pub fn introspect_list_cells() -> Self {
+        Self::new(Self::INTROSPECT_LIST_CELLS)
     }
 }
 
