@@ -1,6 +1,6 @@
 # Control Channel Specification (v1)
 
-Status: **experimental, socket-only**. Governance verbs are live. Stdio framing, CBOR framing, and journal streaming remain deferred.
+Status: **experimental, socket-only**. Governance verbs are live. Stdio framing, CBOR framing, and journal streaming remain deferred. 
 
 ## Goals
 

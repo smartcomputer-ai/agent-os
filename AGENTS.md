@@ -1,6 +1,6 @@
 # Agents
 
-This file provides guidance to coding agents when working with code in this repository.
+This file provides guidance to coding agents when working with code in this repository. 
 
 ## What This Is
 
