@@ -25,6 +25,7 @@ dotenvy = "0.15"
 jsonschema = "0.17"
 aos-cbor = { path = "../aos-cbor" }
 serde = { version = "1", features = ["derive"] }
+walkdir = "2"
 
 [dev-dependencies]
 anyhow = "1"

@@ -22,7 +22,6 @@ use anyhow::{Context, Result, anyhow};
 use aos_host::control::ControlClient;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
-use aos_host::util::has_placeholder_modules;
 use aos_kernel::LoadedManifest;
 use aos_store::FsStore;
 
@@ -85,17 +84,16 @@ pub fn prepare_world(
         .context("load manifest from assets")?
         .ok_or_else(|| anyhow!("no manifest found in {}", dirs.air_dir.display()))?;
 
-    // Patch module hashes
-    if let Some(hash) = &wasm_hash {
-        let patched = util::patch_module_hashes(&mut loaded, hash, opts.module.as_deref())?;
-        if patched > 0 {
-            println!("Patched {} module(s) with WASM hash", patched);
-        }
-    } else if has_placeholder_modules(&loaded) {
-        anyhow::bail!(
-            "manifest has modules with placeholder hashes but no reducer/ found; \
-             use --reducer to specify reducer crate"
-        );
+    // Resolve placeholder module hashes
+    let patched = util::resolve_placeholder_modules(
+        &mut loaded,
+        store.as_ref(),
+        &dirs.world,
+        wasm_hash.as_ref(),
+        opts.module.as_deref(),
+    )?;
+    if patched > 0 {
+        println!("Resolved {} module(s) with WASM hash", patched);
     }
 
     Ok((store, loaded))

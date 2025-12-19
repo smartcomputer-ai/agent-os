@@ -23,6 +23,7 @@ pub fn cmd_init(args: &InitArgs) -> Result<()> {
     fs::create_dir_all(path)?;
     fs::create_dir_all(path.join(".aos"))?;
     fs::create_dir_all(path.join("air"))?;
+    fs::create_dir_all(path.join("modules"))?;
     fs::create_dir_all(path.join("reducer/src"))?;
 
     // Write minimal manifest
@@ -44,6 +45,7 @@ pub fn cmd_init(args: &InitArgs) -> Result<()> {
     println!("World initialized at {}", path.display());
     println!("  AIR assets: {}", path.join("air").display());
     println!("  Reducer:    {}", path.join("reducer").display());
+    println!("  Modules:    {}", path.join("modules").display());
     println!("  Store:      {}", path.join(".aos").display());
 
     if args.template.is_some() {
