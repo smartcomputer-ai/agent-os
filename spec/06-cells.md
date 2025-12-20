@@ -22,6 +22,14 @@ Status: **implemented** (kernel/storage/control). Cells make many instances of t
 - Plan `raise_event` publishes bus events; keyed routing derives the target key via `key_field` on the routing entry.
 - Triggers may set `correlate_by` so runs inherit a key for later `await_event` filters.
 
+### Future: explicit key override (v1.1+ option)
+
+If we add an explicit key override (e.g., envelope key or a future plan field), it should be **strictly typed and unambiguous**:
+
+- Allowed only when **all routing targets for the event schema share the same `key_schema`**.
+- The provided key must **typecheck to `key_schema`** and **match** any key derived from `key_field` when present.
+- The payload‑derived key remains the source of truth unless an explicit “key‑only route” mode is introduced.
+
 ## Routing, Mailboxes, Scheduling
 - On ingest, kernel extracts `key = event.value[key_field]` (validated against `key_schema`) and targets `(reducer,key)`. For variant payloads, the canonical wrapper is `{"$tag": "...", "$value": ...}` so the key path is usually `$value.<field>`.
 - If the cell is missing, kernel calls reducer with `state=null` (creation). `state=null` on output deletes it.

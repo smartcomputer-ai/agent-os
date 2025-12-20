@@ -10,10 +10,10 @@ use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
     CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, EffectKind, EmptyObject,
     Expr, ExprConst, ExprOrValue, ExprRef, HashRef, Manifest, ManifestDefaults, ModuleAbi,
-    ModuleBinding, ModuleKind, Name, NamedRef, PlanBind, PlanBindEffect, PlanStepAwaitReceipt,
-    PlanStepEmitEffect, PlanStepKind, Routing, RoutingEvent, SchemaRef, Trigger, TypeExpr,
-    TypeOption, TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord, ValueText,
-    catalog::EffectCatalog,
+    ModuleBinding, ModuleKind, Name, NamedRef, OriginScope, PlanBind, PlanBindEffect,
+    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepKind, Routing, RoutingEvent, SchemaRef,
+    Trigger, TypeExpr, TypeOption, TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral,
+    ValueRecord, ValueText, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
@@ -334,6 +334,19 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
     let mut required: HashSet<String> = HashSet::new();
     required.insert(START_SCHEMA.to_string());
 
+    let builtin_schema_map: HashMap<String, TypeExpr> = aos_air_types::builtins::builtin_schemas()
+        .iter()
+        .map(|builtin| (builtin.schema.name.clone(), builtin.schema.ty.clone()))
+        .collect();
+
+    let schema_type = |name: &str, loaded: &LoadedManifest| -> Option<TypeExpr> {
+        loaded
+            .schemas
+            .get(name)
+            .map(|def| def.ty.clone())
+            .or_else(|| builtin_schema_map.get(name).cloned())
+    };
+
     if let Some(routing) = &loaded.manifest.routing {
         for event in &routing.events {
             required.insert(event.event.as_str().to_string());
@@ -354,12 +367,35 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
             if let PlanStepKind::AwaitEvent(step) = &step.kind {
                 required.insert(step.event.as_str().to_string());
             }
+            if let PlanStepKind::RaiseEvent(step) = &step.kind {
+                required.insert(step.event.as_str().to_string());
+            }
         }
     }
     for module in loaded.modules.values() {
         if let Some(reducer) = module.abi.reducer.as_ref() {
             required.insert(reducer.state.as_str().to_string());
             required.insert(reducer.event.as_str().to_string());
+            if let Some(event_schema) = schema_type(reducer.event.as_str(), loaded) {
+                match event_schema {
+                    TypeExpr::Ref(reference) => {
+                        required.insert(reference.reference.as_str().to_string());
+                    }
+                    TypeExpr::Variant(variant) => {
+                        for member in variant.variant.values() {
+                            if let TypeExpr::Ref(reference) = member {
+                                required.insert(reference.reference.as_str().to_string());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for effect in &reducer.effects_emitted {
+                if let Some(receipt_schema) = loaded.effect_catalog.receipt_schema(effect) {
+                    required.insert(receipt_schema.as_str().to_string());
+                }
+            }
         }
         if let Some(key_schema) = &module.key_schema {
             required.insert(key_schema.as_str().to_string());
@@ -368,9 +404,7 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
 
     for schema_name in required {
         if loaded.schemas.contains_key(&schema_name)
-            || aos_air_types::builtins::builtin_schemas()
-                .iter()
-                .any(|b| b.schema.name == schema_name)
+            || builtin_schema_map.contains_key(&schema_name)
         {
             continue;
         }
@@ -675,6 +709,42 @@ pub fn routing_event(schema_name: &str, reducer: &str) -> RoutingEvent {
         reducer: reducer.to_string(),
         key_field: None,
     }
+}
+
+/// Suggest routing entries for reducer-emitted micro-effect receipts.
+///
+/// This does not mutate a manifest; it just returns the recommended routes so tests can opt in.
+pub fn recommended_receipt_routes<'a>(
+    modules: impl IntoIterator<Item = &'a DefModule>,
+) -> Vec<RoutingEvent> {
+    let catalog = EffectCatalog::from_defs(
+        aos_air_types::builtins::builtin_effects()
+            .iter()
+            .map(|e| e.effect.clone()),
+    );
+    let mut routes = Vec::new();
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+
+    for module in modules {
+        let Some(reducer) = module.abi.reducer.as_ref() else {
+            continue;
+        };
+        for effect in &reducer.effects_emitted {
+            let Some(entry) = catalog.get(effect) else {
+                continue;
+            };
+            if entry.origin_scope != OriginScope::Reducer {
+                continue;
+            }
+            let schema_name = entry.receipt_schema.as_str();
+            let key = (schema_name.to_string(), module.name.clone());
+            if seen.insert(key) {
+                routes.push(routing_event(schema_name, module.name.as_str()));
+            }
+        }
+    }
+
+    routes
 }
 
 /// Decodes an effect intent's parameter payload as UTF-8 text, panicking if the payload is not a

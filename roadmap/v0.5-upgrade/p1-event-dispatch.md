@@ -278,7 +278,7 @@ In `plan.rs` (your mention), change `raise_event` so it canonicalizes `value` ag
 
 Then append a DomainEvent (schema, bytes, maybe key) and let routing deliver.
 
-### 5) Tooling/fixtures **[PENDING]**
+### 5) Tooling/fixtures **[DONE]**
 
 Anywhere that assumed “a reducer has exactly one event schema” should be updated to treat `defmodule.abi.reducer.event` as a family:
 
