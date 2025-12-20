@@ -2,7 +2,7 @@
 
 use aos_host::WorldHost;
 use aos_host::config::HostConfig;
-use aos_host::fixtures::{self, TestWorld};
+use helpers::fixtures::{self, TestWorld};
 use aos_host::manifest_loader::manifest_patch_from_loaded;
 use aos_host::modes::daemon::{ControlMsg, WorldDaemon};
 use aos_kernel::Kernel;

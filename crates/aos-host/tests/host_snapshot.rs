@@ -1,7 +1,10 @@
+#[path = "helpers.rs"]
+mod helpers;
+
 use std::sync::Arc;
 
 use aos_host::config::HostConfig;
-use aos_host::fixtures;
+use helpers::fixtures;
 use aos_host::{ExternalEvent, WorldHost};
 use aos_kernel::KernelConfig;
 use aos_store::FsStore;
@@ -10,6 +13,9 @@ use serde_cbor;
 use serde_json;
 use tempfile::TempDir;
 
+use aos_air_types::{DefSchema, ReducerAbi};
+
+use helpers::{def_text_record_schema, insert_test_schemas, text_type};
 /// Ensure WorldHost preserves queued intents across snapshot/reopen.
 #[tokio::test]
 async fn worldhost_snapshot_preserves_effect_queue() {
@@ -71,8 +77,15 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
         effects: vec![effect],
         ann: None,
     };
-    let module = fixtures::stub_reducer_module(store, "demo/TimerReducer@1", &output);
-    fixtures::build_loaded_manifest(
+    let mut module = fixtures::stub_reducer_module(store, "demo/TimerReducer@1", &output);
+    module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("demo/TimerState@1"),
+        event: fixtures::schema("demo/TimerEvent@1"),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        cap_slots: Default::default(),
+    });
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![],
         vec![],
         vec![module],
@@ -80,5 +93,16 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
             "demo/TimerEvent@1",
             "demo/TimerReducer@1",
         )],
-    )
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema("demo/TimerEvent@1", vec![]),
+            DefSchema {
+                name: "demo/TimerState@1".into(),
+                ty: text_type(),
+            },
+        ],
+    );
+    loaded
 }

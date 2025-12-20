@@ -205,11 +205,18 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
         "com.acme/Unblock@1".to_string(),
         serde_cbor::to_vec(&serde_json::json!({})).expect("encode unblock"),
     );
-    let unblock_emitter = fixtures::stub_event_emitting_reducer(
+    let mut unblock_emitter = fixtures::stub_event_emitting_reducer(
         store,
         "com.acme/UnblockEmitter@1",
         vec![unblock_event],
     );
+    unblock_emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/UnblockEmitterState@1"),
+        event: fixtures::schema("com.acme/EmitUnblock@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: IndexMap::new(),
+    });
 
     let plan_name = "com.acme/WaitForEvent@1".to_string();
     let plan = DefPlan {
@@ -291,6 +298,12 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
                     record: IndexMap::new(),
                 }),
             },
+            DefSchema {
+                name: "com.acme/UnblockEmitterState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
         ],
     );
     loaded
@@ -326,8 +339,8 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
 
     let timer_event_schema = "com.acme/TimerEvent@1";
     let routing = vec![
-        fixtures::routing_event(timer_event_schema, &timer_handler.name),
-        fixtures::routing_event(timer_event_schema, &timer_emitter.name),
+        fixtures::routing_event(fixtures::START_SCHEMA, &timer_emitter.name),
+        fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
     ];
     // Provide minimal reducer ABI so routing succeeds.
     timer_emitter.abi.reducer = Some(ReducerAbi {
@@ -380,7 +393,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
 
 /// Builds a simple manifest with a single reducer that sets deterministic state when invoked.
 pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let reducer = fixtures::stub_reducer_module(
+    let mut reducer = fixtures::stub_reducer_module(
         store,
         "com.acme/Simple@1",
         &ReducerOutput {
@@ -390,14 +403,24 @@ pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
             ann: None,
         },
     );
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/SimpleState@1"),
+        event: fixtures::schema(START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
     insert_test_schemas(
         &mut loaded,
-        vec![def_text_record_schema(
-            START_SCHEMA,
-            vec![("id", text_type())],
-        )],
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/SimpleState@1".into(),
+                ty: text_type(),
+            },
+        ],
     );
     loaded
 }

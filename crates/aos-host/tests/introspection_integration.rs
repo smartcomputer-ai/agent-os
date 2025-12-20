@@ -12,7 +12,7 @@ use serde_json::json;
 /// Build a simple world with a monolithic reducer that sets state on the first event.
 fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
     let store = fixtures::new_mem_store();
-    let reducer = fixtures::stub_reducer_module(
+    let mut reducer = fixtures::stub_reducer_module(
         &store,
         "com.acme/Store@1",
         &ReducerOutput {
@@ -22,6 +22,13 @@ fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
             ann: None,
         },
     );
+    reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
+        state: fixtures::schema("com.acme/StoreState@1"),
+        event: fixtures::schema(fixtures::START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
         &reducer.name,
@@ -29,10 +36,16 @@ fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
-        vec![fixtures::def_text_record_schema(
-            fixtures::START_SCHEMA,
-            vec![("id", fixtures::text_type())],
-        )],
+        vec![
+            fixtures::def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", fixtures::text_type())],
+            ),
+            aos_air_types::DefSchema {
+                name: "com.acme/StoreState@1".into(),
+                ty: fixtures::text_type(),
+            },
+        ],
     );
     helpers::fixtures::TestWorld::with_store(store, loaded).expect("world")
 }

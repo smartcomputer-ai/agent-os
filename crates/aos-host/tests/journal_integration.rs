@@ -1,7 +1,7 @@
 use aos_air_exec::Value as ExprValue;
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use aos_host::fixtures::{self, START_SCHEMA, TestWorld};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord};
@@ -76,14 +76,10 @@ fn reducer_timer_receipt_replays_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-    let start_event = serde_json::json!({
-        "$tag": "Start",
-        "$value": { "id": "timer" }
-    });
     world
-        .submit_event_result("com.acme/TimerEvent@1", &start_event)
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
         .expect("submit start event");
-    world.tick_n(1).unwrap();
+    world.tick_n(2).unwrap();
 
     let effect = world.drain_effects().pop().expect("timer effect");
     let receipt = EffectReceipt {

@@ -20,14 +20,6 @@ pub enum KernelError {
     ReceiptDecode(String),
     #[error("unsupported reducer receipt kind '{0}'")]
     UnsupportedReducerReceipt(String),
-    #[error(
-        "reducer receipt schema mismatch (event='{reducer_event_schema}', receipt='{receipt_schema}'): {reason}"
-    )]
-    ReducerReceiptSchemaMismatch {
-        reducer_event_schema: String,
-        receipt_schema: String,
-        reason: String,
-    },
     #[error("capability grant '{0}' not found")]
     CapabilityGrantNotFound(String),
     #[error("capability definition '{0}' not found")]

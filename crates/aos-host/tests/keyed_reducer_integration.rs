@@ -1,9 +1,12 @@
 #![cfg(feature = "test-fixtures")]
 
+#[path = "helpers.rs"]
+mod helpers;
+
 use std::sync::Arc;
 
 use aos_cbor::Hash;
-use aos_host::fixtures::{self, TestStore};
+use helpers::fixtures::{self, TestStore};
 use aos_kernel::Kernel;
 use aos_kernel::cell_index::CellIndex;
 use aos_kernel::journal::mem::MemJournal;

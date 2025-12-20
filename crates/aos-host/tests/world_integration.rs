@@ -14,7 +14,7 @@ use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use aos_host::fixtures::{self, START_SCHEMA, TestWorld, effect_params_text, fake_hash};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld, effect_params_text, fake_hash};
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::{JournalKind, JournalRecord, PlanEndStatus, mem::MemJournal};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
@@ -399,8 +399,15 @@ fn reducer_and_plan_effects_are_enqueued() {
         )],
         ann: None,
     };
-    let reducer_module =
+    let mut reducer_module =
         fixtures::stub_reducer_module(&store, "com.acme/Reducer@1", &reducer_output);
+    reducer_module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/ReducerState@1"),
+        event: fixtures::schema(START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
 
     let plan_name = "com.acme/EmitOnly@1".to_string();
     let plan = DefPlan {
@@ -436,11 +443,22 @@ fn reducer_and_plan_effects_are_enqueued() {
     };
 
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer_module.name)];
-    let loaded = fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![reducer_module],
         routing,
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/ReducerState@1".into(),
+                ty: text_type(),
+            },
+        ],
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
@@ -460,21 +478,18 @@ fn reducer_and_plan_effects_are_enqueued() {
     );
 }
 
-/// Timer receipts emitted by reducers must be wrapped into the reducer event schema and routed
-/// through the normal event pipeline (including duplicate suppression / unknown handling).
+/// Timer receipts emitted by reducers must route through the normal event pipeline
+/// (including duplicate suppression / unknown handling) and wrap at dispatch.
 #[test]
 fn reducer_timer_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store, manifest).unwrap();
-    let start_event = serde_json::json!({
-        "$tag": "Start",
-        "$value": fixtures::start_event("timer"),
-    });
+    let start_event = fixtures::start_event("timer");
     world
-        .submit_event_result("com.acme/TimerEvent@1", &start_event)
+        .submit_event_result(START_SCHEMA, &start_event)
         .expect("submit start event");
-    world.tick_n(1).unwrap();
+    world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
     assert_eq!(effects.len(), 1);
@@ -668,7 +683,7 @@ fn guarded_plan_branches_control_effects() {
     world_false.tick_n(2).unwrap();
     assert_eq!(world_false.drain_effects().len(), 0);
 }
-/// Blob.put receipts should be mapped into `sys/BlobPutResult@1`, wrapped, and delivered to reducers.
+/// Blob.put receipts should map into `sys/BlobPutResult@1`, route through the bus, and wrap at dispatch.
 #[test]
 fn blob_put_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
@@ -793,7 +808,7 @@ fn blob_put_receipt_routes_event_to_handler() {
     );
 }
 
-/// Blob.get receipts should similarly map into `sys/BlobGetResult@1`, wrapped, and wake reducers.
+/// Blob.get receipts should similarly map into `sys/BlobGetResult@1`, route through the bus, and wrap at dispatch.
 #[test]
 fn blob_get_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
@@ -925,7 +940,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/TwoStage@1".to_string();
 
-    let next_emitter = fixtures::stub_event_emitting_reducer(
+    let mut next_emitter = fixtures::stub_event_emitting_reducer(
         &store,
         "com.acme/NextEmitter@1",
         vec![fixtures::domain_event(
@@ -933,6 +948,13 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
             &ExprValue::Int(1),
         )],
     );
+    next_emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/NextEmitterState@1"),
+        event: fixtures::schema("com.acme/PulseNext@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
 
     let plan = DefPlan {
         name: plan_name.clone(),
@@ -1051,6 +1073,12 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                 ty: TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
                     int: EmptyObject::default(),
                 })),
+            },
+            DefSchema {
+                name: "com.acme/NextEmitterState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
             },
         ],
     );
@@ -1197,30 +1225,43 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         invariants: vec![],
     };
 
+    let mut ready_emitter = fixtures::stub_event_emitting_reducer(
+        &store,
+        "com.acme/ReadyEmitter@1",
+        vec![fixtures::domain_event(
+            "com.acme/Ready@1",
+            &ExprValue::Nat(7),
+        )],
+    );
+    ready_emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/ReadyEmitterState@1"),
+        event: fixtures::schema("com.acme/TriggerReady@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    let mut other_emitter = fixtures::stub_event_emitting_reducer(
+        &store,
+        "com.acme/OtherEmitter@1",
+        vec![fixtures::domain_event(
+            "com.acme/Other@1",
+            &ExprValue::Nat(9),
+        )],
+    );
+    other_emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/OtherEmitterState@1"),
+        event: fixtures::schema("com.acme/TriggerOther@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan_ready.clone(), plan_other.clone()],
         vec![
             fixtures::start_trigger(&plan_ready.name),
             fixtures::start_trigger(&plan_other.name),
         ],
-        vec![
-            fixtures::stub_event_emitting_reducer(
-                &store,
-                "com.acme/ReadyEmitter@1",
-                vec![fixtures::domain_event(
-                    "com.acme/Ready@1",
-                    &ExprValue::Nat(7),
-                )],
-            ),
-            fixtures::stub_event_emitting_reducer(
-                &store,
-                "com.acme/OtherEmitter@1",
-                vec![fixtures::domain_event(
-                    "com.acme/Other@1",
-                    &ExprValue::Nat(9),
-                )],
-            ),
-        ],
+        vec![ready_emitter, other_emitter],
         vec![
             fixtures::routing_event("com.acme/TriggerReady@1", "com.acme/ReadyEmitter@1"),
             fixtures::routing_event("com.acme/TriggerOther@1", "com.acme/OtherEmitter@1"),
@@ -1230,6 +1271,8 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         &mut loaded,
         vec![
             def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/TriggerReady@1", vec![]),
+            def_text_record_schema("com.acme/TriggerOther@1", vec![]),
             DefSchema {
                 name: "com.acme/Ready@1".into(),
                 ty: TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
@@ -1241,6 +1284,18 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
                 ty: TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
                     nat: EmptyObject::default(),
                 })),
+            },
+            DefSchema {
+                name: "com.acme/ReadyEmitterState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/OtherEmitterState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
             },
         ],
     );

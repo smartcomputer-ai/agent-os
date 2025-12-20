@@ -1,4 +1,3 @@
-use aos_air_types::{HashRef, TypeExpr};
 use aos_cbor::Hash;
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
@@ -64,19 +63,11 @@ struct BlobReceiptEvent<TParams, TReceipt> {
 pub fn build_reducer_receipt_event(
     ctx: &ReducerEffectContext,
     receipt: &EffectReceipt,
-    reducer_event_schema: &str,
-    reducer_event_type: &TypeExpr,
 ) -> Result<DomainEvent, KernelError> {
     match ctx.effect_kind.as_str() {
-        aos_effects::EffectKind::TIMER_SET => {
-            build_timer_event(ctx, receipt, reducer_event_schema, reducer_event_type)
-        }
-        aos_effects::EffectKind::BLOB_PUT => {
-            build_blob_put_event(ctx, receipt, reducer_event_schema, reducer_event_type)
-        }
-        aos_effects::EffectKind::BLOB_GET => {
-            build_blob_get_event(ctx, receipt, reducer_event_schema, reducer_event_type)
-        }
+        aos_effects::EffectKind::TIMER_SET => build_timer_event(ctx, receipt),
+        aos_effects::EffectKind::BLOB_PUT => build_blob_put_event(ctx, receipt),
+        aos_effects::EffectKind::BLOB_GET => build_blob_get_event(ctx, receipt),
         other => Err(KernelError::UnsupportedReducerReceipt(other.to_string())),
     }
 }
@@ -84,8 +75,6 @@ pub fn build_reducer_receipt_event(
 fn build_timer_event(
     ctx: &ReducerEffectContext,
     receipt: &EffectReceipt,
-    reducer_event_schema: &str,
-    reducer_event_type: &TypeExpr,
 ) -> Result<DomainEvent, KernelError> {
     let requested: TimerSetParams = decode(&ctx.params_cbor)?;
     let timer_receipt: TimerSetReceipt = decode(&receipt.payload_cbor)?;
@@ -100,19 +89,12 @@ fn build_timer_event(
         cost_cents: receipt.cost_cents,
         signature: receipt.signature.clone(),
     };
-    encode_event(
-        SYS_TIMER_FIRED_SCHEMA,
-        payload,
-        reducer_event_schema,
-        reducer_event_type,
-    )
+    encode_event(SYS_TIMER_FIRED_SCHEMA, payload)
 }
 
 fn build_blob_put_event(
     ctx: &ReducerEffectContext,
     receipt: &EffectReceipt,
-    reducer_event_schema: &str,
-    reducer_event_type: &TypeExpr,
 ) -> Result<DomainEvent, KernelError> {
     let requested: BlobPutParams = decode(&ctx.params_cbor)?;
     let blob_receipt: BlobPutReceipt = decode(&receipt.payload_cbor)?;
@@ -127,19 +109,12 @@ fn build_blob_put_event(
         cost_cents: receipt.cost_cents,
         signature: receipt.signature.clone(),
     };
-    encode_event(
-        SYS_BLOB_PUT_RESULT_SCHEMA,
-        payload,
-        reducer_event_schema,
-        reducer_event_type,
-    )
+    encode_event(SYS_BLOB_PUT_RESULT_SCHEMA, payload)
 }
 
 fn build_blob_get_event(
     ctx: &ReducerEffectContext,
     receipt: &EffectReceipt,
-    reducer_event_schema: &str,
-    reducer_event_type: &TypeExpr,
 ) -> Result<DomainEvent, KernelError> {
     let requested: BlobGetParams = decode(&ctx.params_cbor)?;
     let blob_receipt: BlobGetReceipt = decode(&receipt.payload_cbor)?;
@@ -154,79 +129,16 @@ fn build_blob_get_event(
         cost_cents: receipt.cost_cents,
         signature: receipt.signature.clone(),
     };
-    encode_event(
-        SYS_BLOB_GET_RESULT_SCHEMA,
-        payload,
-        reducer_event_schema,
-        reducer_event_type,
-    )
+    encode_event(SYS_BLOB_GET_RESULT_SCHEMA, payload)
 }
 
 fn encode_event<T: Serialize>(
     receipt_schema: &str,
     payload: T,
-    reducer_event_schema: &str,
-    reducer_event_type: &TypeExpr,
 ) -> Result<DomainEvent, KernelError> {
-    let value = serde_cbor::to_value(&payload)
-        .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
-    let bytes = wrap_payload_for_reducer_event(
-        reducer_event_schema,
-        reducer_event_type,
-        receipt_schema,
-        value,
-    )?;
-    Ok(DomainEvent::new(reducer_event_schema, bytes))
-}
-
-fn wrap_payload_for_reducer_event(
-    reducer_event_schema: &str,
-    reducer_event_type: &TypeExpr,
-    receipt_schema: &str,
-    payload: serde_cbor::Value,
-) -> Result<Vec<u8>, KernelError> {
-    if reducer_event_schema == receipt_schema {
-        return serde_cbor::to_vec(&payload)
-            .map_err(|err| KernelError::ReceiptDecode(err.to_string()));
-    }
-    let TypeExpr::Variant(variant) = reducer_event_type else {
-        return Err(KernelError::ReducerReceiptSchemaMismatch {
-            reducer_event_schema: reducer_event_schema.to_string(),
-            receipt_schema: receipt_schema.to_string(),
-            reason: "reducer event schema is not a variant".into(),
-        });
-    };
-    let mut tag = None;
-    for (name, ty) in &variant.variant {
-        if let TypeExpr::Ref(reference) = ty {
-            if reference.reference.as_str() == receipt_schema {
-                if tag.is_some() {
-                    return Err(KernelError::ReducerReceiptSchemaMismatch {
-                        reducer_event_schema: reducer_event_schema.to_string(),
-                        receipt_schema: receipt_schema.to_string(),
-                        reason: "receipt schema appears in multiple variant arms".into(),
-                    });
-                }
-                tag = Some(name.clone());
-            }
-        }
-    }
-    let tag = tag.ok_or_else(|| KernelError::ReducerReceiptSchemaMismatch {
-        reducer_event_schema: reducer_event_schema.to_string(),
-        receipt_schema: receipt_schema.to_string(),
-        reason: "receipt schema not found in variant".into(),
-    })?;
-    let wrapped = serde_cbor::Value::Map(vec![
-        (
-            serde_cbor::Value::Text("$tag".into()),
-            serde_cbor::Value::Text(tag),
-        ),
-        (
-            serde_cbor::Value::Text("$value".into()),
-            payload,
-        ),
-    ]);
-    serde_cbor::to_vec(&wrapped).map_err(|err| KernelError::ReceiptDecode(err.to_string()))
+    let bytes =
+        serde_cbor::to_vec(&payload).map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
+    Ok(DomainEvent::new(receipt_schema, bytes))
 }
 
 fn hash_to_hex(bytes: &[u8; 32]) -> String {
@@ -242,9 +154,8 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, KernelError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aos_air_types::HashRef;
     use aos_effects::EffectReceipt;
-    use aos_air_types::{SchemaRef, TypeRef, TypeVariant};
-    use indexmap::IndexMap;
     use serde::Deserialize;
 
     fn fake_hash(byte: u8) -> HashRef {
@@ -263,32 +174,16 @@ mod tests {
         }
     }
 
-    fn reducer_event_variant(schema: &str, tag: &str) -> (String, TypeExpr) {
-        let mut variants = IndexMap::new();
-        variants.insert(
-            tag.to_string(),
-            TypeExpr::Ref(TypeRef {
-                reference: SchemaRef::new(schema).unwrap(),
-            }),
-        );
-        (
-            "com.acme/ReducerEvent@1".to_string(),
-            TypeExpr::Variant(TypeVariant { variant: variants }),
-        )
-    }
-
     /// Rejects reducer receipts whose effect kind is not part of the built-in micro-effect set.
     #[test]
     fn rejects_unknown_effect_kind() {
         let ctx = ReducerEffectContext::new("reducer".into(), "unknown".into(), vec![]);
         let receipt = base_receipt();
-        let (schema_name, schema_ty) = reducer_event_variant(SYS_TIMER_FIRED_SCHEMA, "Fired");
-        let err =
-            build_reducer_receipt_event(&ctx, &receipt, &schema_name, &schema_ty).unwrap_err();
+        let err = build_reducer_receipt_event(&ctx, &receipt).unwrap_err();
         assert!(matches!(err, KernelError::UnsupportedReducerReceipt(_)));
     }
 
-    /// Verifies timer receipts are wrapped into the reducer's variant schema.
+    /// Verifies timer receipts are encoded as sys/TimerFired@1 events.
     #[test]
     fn timer_receipt_event_is_structured() {
         let params = TimerSetParams {
@@ -307,10 +202,8 @@ mod tests {
         let mut receipt = base_receipt();
         receipt.payload_cbor = serde_cbor::to_vec(&timer_receipt).unwrap();
 
-        let (schema_name, schema_ty) = reducer_event_variant(SYS_TIMER_FIRED_SCHEMA, "Fired");
-        let event =
-            build_reducer_receipt_event(&ctx, &receipt, &schema_name, &schema_ty).expect("event");
-        assert_eq!(event.schema, schema_name);
+        let event = build_reducer_receipt_event(&ctx, &receipt).expect("event");
+        assert_eq!(event.schema, SYS_TIMER_FIRED_SCHEMA);
 
         #[derive(Deserialize)]
         struct EventPayload {
@@ -326,22 +219,7 @@ mod tests {
             signature: Vec<u8>,
         }
 
-        let value: serde_cbor::Value = serde_cbor::from_slice(&event.value).unwrap();
-        let serde_cbor::Value::Map(map) = value else {
-            panic!("expected variant map");
-        };
-        let mut tag = None;
-        let mut payload = None;
-        for (key, val) in map {
-            if key == serde_cbor::Value::Text("$tag".into()) {
-                tag = Some(val);
-            } else if key == serde_cbor::Value::Text("$value".into()) {
-                payload = Some(val);
-            }
-        }
-        assert_eq!(tag, Some(serde_cbor::Value::Text("Fired".into())));
-        let payload = payload.expect("payload");
-        let decoded: EventPayload = serde_cbor::value::from_value(payload).unwrap();
+        let decoded: EventPayload = serde_cbor::from_slice(&event.value).unwrap();
         assert_eq!(
             decoded.intent_hash,
             Hash::from_bytes(&receipt.intent_hash).unwrap().to_hex()
@@ -375,10 +253,8 @@ mod tests {
         let mut receipt = base_receipt();
         receipt.payload_cbor = serde_cbor::to_vec(&receipt_body).unwrap();
 
-        let (schema_name, schema_ty) = reducer_event_variant(SYS_BLOB_PUT_RESULT_SCHEMA, "Put");
-        let event =
-            build_reducer_receipt_event(&ctx, &receipt, &schema_name, &schema_ty).expect("event");
-        assert_eq!(event.schema, schema_name);
+        let event = build_reducer_receipt_event(&ctx, &receipt).expect("event");
+        assert_eq!(event.schema, SYS_BLOB_PUT_RESULT_SCHEMA);
 
         #[derive(Deserialize)]
         struct Payload {
@@ -386,17 +262,7 @@ mod tests {
             receipt: BlobPutReceipt,
         }
 
-        let value: serde_cbor::Value = serde_cbor::from_slice(&event.value).unwrap();
-        let serde_cbor::Value::Map(map) = value else {
-            panic!("expected variant map");
-        };
-        let payload = map
-            .into_iter()
-            .find_map(|(key, val)| {
-                (key == serde_cbor::Value::Text("$value".into())).then_some(val)
-            })
-            .expect("payload");
-        let decoded: Payload = serde_cbor::value::from_value(payload).unwrap();
+        let decoded: Payload = serde_cbor::from_slice(&event.value).unwrap();
         assert_eq!(decoded.requested.namespace, "ns");
         assert_eq!(decoded.receipt.size, 42);
     }
@@ -419,10 +285,8 @@ mod tests {
         let mut receipt = base_receipt();
         receipt.payload_cbor = serde_cbor::to_vec(&receipt_body).unwrap();
 
-        let (schema_name, schema_ty) = reducer_event_variant(SYS_BLOB_GET_RESULT_SCHEMA, "Get");
-        let event =
-            build_reducer_receipt_event(&ctx, &receipt, &schema_name, &schema_ty).expect("event");
-        assert_eq!(event.schema, schema_name);
+        let event = build_reducer_receipt_event(&ctx, &receipt).expect("event");
+        assert_eq!(event.schema, SYS_BLOB_GET_RESULT_SCHEMA);
 
         #[derive(Deserialize)]
         struct Payload {
@@ -430,17 +294,7 @@ mod tests {
             receipt: BlobGetReceipt,
         }
 
-        let value: serde_cbor::Value = serde_cbor::from_slice(&event.value).unwrap();
-        let serde_cbor::Value::Map(map) = value else {
-            panic!("expected variant map");
-        };
-        let payload = map
-            .into_iter()
-            .find_map(|(key, val)| {
-                (key == serde_cbor::Value::Text("$value".into())).then_some(val)
-            })
-            .expect("payload");
-        let decoded: Payload = serde_cbor::value::from_value(payload).unwrap();
+        let decoded: Payload = serde_cbor::from_slice(&event.value).unwrap();
         assert_eq!(decoded.requested.key, "doc");
         assert_eq!(decoded.receipt.blob_ref, receipt_body.blob_ref);
     }

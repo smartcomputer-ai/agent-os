@@ -3,6 +3,9 @@
 //! These tests demonstrate the TestHost API with programmatically built manifests,
 //! mirroring the pattern used by examples/00-counter and similar.
 
+#[path = "helpers.rs"]
+mod helpers;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -12,7 +15,7 @@ use aos_air_types::{
     TypeVariant, catalog::EffectCatalog,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use aos_host::fixtures::{self, TestStore};
+use helpers::fixtures::{self, TestStore};
 use aos_host::testhost::TestHost;
 use aos_kernel::LoadedManifest;
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
@@ -365,14 +368,38 @@ async fn testhost_with_fixtures_build_loaded_manifest() {
         effects: vec![],
         ann: None,
     };
-    let module = fixtures::stub_reducer_module(&store, "test/Reducer@1", &output);
+    let mut module = fixtures::stub_reducer_module(&store, "test/Reducer@1", &output);
+    module.abi.reducer = Some(ReducerAbi {
+        state: SchemaRef::new("test/State@1").unwrap(),
+        event: SchemaRef::new("test/Event@1").unwrap(),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: IndexMap::new(),
+    });
 
     // Build manifest using fixtures helper
-    let loaded = fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![],       // no plans
         vec![],       // no triggers
         vec![module], // one reducer
         vec![fixtures::routing_event("test/Event@1", "test/Reducer@1")],
+    );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            DefSchema {
+                name: "test/State@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+            DefSchema {
+                name: "test/Event@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        ],
     );
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();

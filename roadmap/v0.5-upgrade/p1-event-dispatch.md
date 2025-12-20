@@ -14,6 +14,7 @@ Concretely:
 * `manifest.routing.events` remains the **wiring table** (who gets what).  
 * `defmodule.abi.reducer.event` becomes what it always *wanted* to be: the reducer’s **event-family** schema (one schema), but typically a **variant of refs** to multiple event schemas (domain + receipt).  
 * The kernel **must** enforce at load/validation time that every routing entry is compatible with the reducer’s event family, and at runtime it **must never** deliver an event the reducer can’t decode according to its ABI.
+* Routing may target **either the bus schema E or the reducer family schema F**. If the route uses F directly, dispatch is identity (no wrapping).
 
 This resolves your “Purpose vs routing” tension by turning it into a clean two-layer model:
 
@@ -85,6 +86,10 @@ For every `manifest.routing.events[] = { event: E, reducer: R, ... }`:
    * `{E}` if `F` is a ref to `E`, or
    * `{E_i}` if `F` is a variant and each variant arm is a `ref` to some schema `E_i`
 3. If not, **manifest is invalid**.
+
+Notes:
+* Routes may specify **E or F**. If `event == F`, the route is trivially compatible and no wrapping is needed.
+* Keying (`key_field`) is interpreted against the **routed event schema E**, even if the reducer receives wrapped `F`.
 
 This alone prevents your current inconsistency class.
 
@@ -303,4 +308,3 @@ The effect catalog already defines which effects are reducer-origin scoped.
 * **Plans become clearer**: `raise_event` is symmetric with reducer-emitted events and supports plan→plan choreography without hacks.
 * **Routing is wiring, ABI is contract**: no conflation, no ambiguity.
 * **Cells stay compatible**: `key_field` remains meaningful and can be strictly validated.  
-

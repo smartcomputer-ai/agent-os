@@ -455,6 +455,26 @@ pub fn validate_manifest(
         .collect();
     known_effect_kinds.extend(effects.values().map(|def| def.kind.as_str().to_string()));
 
+    let event_in_family = |event: &str, family_name: &str, family_schema: &TypeExpr| -> bool {
+        if event == family_name {
+            return true;
+        }
+        match family_schema {
+            TypeExpr::Ref(reference) => reference.reference.as_str() == event,
+            TypeExpr::Variant(variant) => variant.variant.values().any(|ty| {
+                matches!(ty, TypeExpr::Ref(reference) if reference.reference.as_str() == event)
+            }),
+            _ => false,
+        }
+    };
+
+    let schema_type = |name: &str| -> Option<&TypeExpr> {
+        schemas
+            .get(name)
+            .map(|schema| &schema.ty)
+            .or_else(|| builtins::find_builtin_schema(name).map(|builtin| &builtin.schema.ty))
+    };
+
     if let Some(routing) = manifest.routing.as_ref() {
         for RoutingEvent {
             event,
@@ -475,7 +495,12 @@ pub fn validate_manifest(
                     })?;
             if let Some(reducer_abi) = module.abi.reducer.as_ref() {
                 let expected = reducer_abi.event.as_str();
-                if event.as_str() != expected {
+                let family_schema = schema_type(expected).ok_or_else(|| {
+                    ValidationError::SchemaNotFound {
+                        schema: expected.to_string(),
+                    }
+                })?;
+                if !event_in_family(event.as_str(), expected, family_schema) {
                     return Err(ValidationError::RoutingSchemaMismatch {
                         reducer: reducer.clone(),
                         event: event.as_str().to_string(),
@@ -500,12 +525,6 @@ pub fn validate_manifest(
         }
     }
 
-    let schema_type = |name: &str| -> Option<&TypeExpr> {
-        schemas
-            .get(name)
-            .map(|schema| &schema.ty)
-            .or_else(|| builtins::find_builtin_schema(name).map(|builtin| &builtin.schema.ty))
-    };
     let receipt_schema_for_effect = |kind: &str| -> Option<&'static str> {
         match kind {
             EffectKind::TIMER_SET => Some("sys/TimerFired@1"),
@@ -532,24 +551,27 @@ pub fn validate_manifest(
             if event_schema_name == receipt_schema {
                 continue;
             }
-            let TypeExpr::Variant(variant) = event_schema else {
-                return Err(ValidationError::ReducerReceiptSchemaMissing {
-                    reducer: reducer_name.clone(),
-                    effect_kind: effect.as_str().to_string(),
-                    event_schema: event_schema_name.to_string(),
-                    receipt_schema: receipt_schema.to_string(),
-                });
-            };
-            let mut found = false;
-            for ty in variant.variant.values() {
-                if let TypeExpr::Ref(reference) = ty {
-                    if reference.reference.as_str() == receipt_schema {
-                        found = true;
-                        break;
+            match event_schema {
+                TypeExpr::Ref(reference) if reference.reference.as_str() == receipt_schema => {
+                    continue;
+                }
+                TypeExpr::Variant(variant) => {
+                    let mut found = false;
+                    for ty in variant.variant.values() {
+                        if let TypeExpr::Ref(reference) = ty {
+                            if reference.reference.as_str() == receipt_schema {
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if found {
+                        continue;
                     }
                 }
+                _ => {}
             }
-            if !found {
+            {
                 return Err(ValidationError::ReducerReceiptSchemaMissing {
                     reducer: reducer_name.clone(),
                     effect_kind: effect.as_str().to_string(),
@@ -1123,7 +1145,25 @@ mod tests {
             }),
             triggers: vec![],
         };
-        let schemas = HashMap::new();
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/Event@1".to_string(),
+            DefSchema {
+                name: "com.acme/Event@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        schemas.insert(
+            "com.acme/Other@1".to_string(),
+            DefSchema {
+                name: "com.acme/Other@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
         let plans = HashMap::new();
         let effects = HashMap::new();
         let caps = HashMap::new();

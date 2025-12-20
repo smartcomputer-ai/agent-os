@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{
-    AirNode, CapGrant, CapType, DefCap, DefPlan, EffectKind, EmptyObject, Expr, ExprConst,
-    ExprOrValue, ExprRecord, ExprRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
+    AirNode, CapGrant, CapType, DefCap, DefPlan, DefSchema, EffectKind, EmptyObject, Expr,
+    ExprConst, ExprOrValue, ExprRecord, ExprRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
     PlanBindEffect, PlanEdge, PlanStep, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
     PlanStepKind, ReducerAbi, TypeExpr, TypeRecord, ValueLiteral, ValueMap, ValueNull, ValueRecord,
     ValueText,
@@ -10,7 +10,7 @@ use aos_air_types::{
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_cbor::{Hash, to_canonical_cbor};
-use aos_host::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
+use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
@@ -339,7 +339,7 @@ fn manifest_with_reducer(
     name: &str,
     state_byte: u8,
 ) -> aos_kernel::manifest::LoadedManifest {
-    let reducer = fixtures::stub_reducer_module(
+    let mut reducer = fixtures::stub_reducer_module(
         store,
         name,
         &ReducerOutput {
@@ -349,14 +349,24 @@ fn manifest_with_reducer(
             ann: None,
         },
     );
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/PatchedState@1"),
+        event: fixtures::schema(START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
     helpers::insert_test_schemas(
         &mut loaded,
-        vec![helpers::def_text_record_schema(
-            START_SCHEMA,
-            vec![("id", helpers::text_type())],
-        )],
+        vec![
+            helpers::def_text_record_schema(START_SCHEMA, vec![("id", helpers::text_type())]),
+            DefSchema {
+                name: "com.acme/PatchedState@1".into(),
+                ty: helpers::text_type(),
+            },
+        ],
     );
     loaded
 }

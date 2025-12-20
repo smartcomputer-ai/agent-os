@@ -1,5 +1,5 @@
 mod helpers;
-use aos_air_types::{plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name};
+use aos_air_types::{DefSchema, ReducerAbi, plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name};
 use aos_kernel::{Consistency, StateReader};
 use aos_wasm_abi::ReducerOutput;
 use helpers::fixtures;
@@ -10,7 +10,7 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
     let store = fixtures::new_mem_store();
 
     // Stub reducer that always returns the provided state.
-    let module = fixtures::stub_reducer_module(
+    let mut module = fixtures::stub_reducer_module(
         &store,
         "com.acme/Store@1",
         &ReducerOutput {
@@ -20,6 +20,13 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
             ann: None,
         },
     );
+    module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/StoreState@1"),
+        event: fixtures::schema(fixtures::START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
 
     // Simple schema for start event routed to the reducer.
     let start_schema = fixtures::def_text_record_schema(
@@ -32,7 +39,16 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
         &module.name,
     )];
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![module], routing);
-    fixtures::insert_test_schemas(&mut loaded, vec![start_schema]);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            start_schema,
+            DefSchema {
+                name: "com.acme/StoreState@1".into(),
+                ty: fixtures::text_type(),
+            },
+        ],
+    );
 
     fixtures::TestWorld::with_store(store, loaded).expect("build world")
 }
