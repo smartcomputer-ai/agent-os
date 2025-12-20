@@ -46,7 +46,7 @@ You don’t need to expand `defmodule.abi.reducer.event` to an array. You keep o
 
 ---
 
-## The key semantic change: dispatch performs a typed conversion
+## The key semantic change: dispatch performs a typed conversion **[DONE]**
 
 ### Bus event (journal) stays:
 
@@ -76,7 +76,7 @@ This is exactly the missing glue implied by calling `abi.reducer.event` a “typ
 
 ## Lock-in rules (these become validator rules)
 
-### Rule A — Routing compatibility (the big fix)
+### Rule A — Routing compatibility (the big fix) **[DONE]**
 
 For every `manifest.routing.events[] = { event: E, reducer: R, ... }`:
 
@@ -93,7 +93,7 @@ Notes:
 
 This alone prevents your current inconsistency class.
 
-### Rule B — Event-family schema shape (make it machine-checkable)
+### Rule B — Event-family schema shape (make it machine-checkable) **[PENDING]**
 
 To keep conversion deterministic and tooling-friendly, constrain event families:
 
@@ -105,7 +105,7 @@ To keep conversion deterministic and tooling-friendly, constrain event families:
 
 This is a purely semantic validation on top of the JSON Schema shape system.  
 
-### Rule C — Keying must be coherent
+### Rule C — Keying must be coherent **[PENDING]**
 
 You already have `key_field` on routing entries for keyed reducers (cells) and mention kernel validation around key usage.  
 
@@ -124,7 +124,7 @@ This keeps both v1 and your v1.1 “cells” direction consistent.
 
 ---
 
-## Plan `raise_event`: I would refactor it now
+## Plan `raise_event`: I would refactor it now **[PENDING]**
 
 Your current ambiguity comes from “plan raise_event payload schema is inferred from reducer ABI schema.” That only works if the reducer ABI event is one schema and not a family/variant.
 
@@ -166,7 +166,7 @@ This cleanly separates “publish” from “deliver.”
 
 ---
 
-## Micro-effect receipts: make them fit naturally
+## Micro-effect receipts: make them fit naturally **[DONE]**
 
 Built-in receipt event schemas already exist (`sys/TimerFired@1`, `sys/BlobPutResult@1`, `sys/BlobGetResult@1`).  
 And built-in micro-effects are reducer-origin scoped (`blob.put/get`, `timer.set`). 
@@ -223,7 +223,7 @@ You no longer need “wrapper event schemas” purely for reducer ergonomics. If
 
 I’ll describe this as a refactor plan you can implement in one pass.
 
-### 1) Loader/validator: build a compiled dispatch map
+### 1) Loader/validator: build a compiled dispatch map **[DONE]**
 
 When loading the manifest, compute:
 
@@ -248,7 +248,7 @@ Then compile:
 
 This is basically turning `manifest.routing.events` into an executable plan, but with full type info.
 
-### 2) Validation: enforce the lock-in rules
+### 2) Validation: enforce the lock-in rules **[PARTIAL]**
 
 In the validator (what you called `validate.rs`), add:
 
@@ -264,7 +264,7 @@ Fail the world load with a precise diagnostic:
 
 This is the critical piece that makes misconfig impossible.
 
-### 3) Dispatch: wrap on delivery
+### 3) Dispatch: wrap on delivery **[DONE]**
 
 In `world.rs route_event` (your mention), use `dispatch_table[E]`:
 
@@ -274,13 +274,13 @@ For each target:
 * wrap `value_cbor(E)` into `value_cbor(F)` if needed
 * invoke reducer with ABI event bytes = canonical CBOR of F
 
-### 4) Plans: change `raise_event` to publish (schema, value)
+### 4) Plans: change `raise_event` to publish (schema, value) **[PENDING]**
 
 In `plan.rs` (your mention), change `raise_event` so it canonicalizes `value` against the explicit `event` schema (not reducer ABI). This matches the AIR “event payload normalization” model. 
 
 Then append a DomainEvent (schema, bytes, maybe key) and let routing deliver.
 
-### 5) Tooling/fixtures
+### 5) Tooling/fixtures **[PENDING]**
 
 Anywhere that assumed “a reducer has exactly one event schema” should be updated to treat `defmodule.abi.reducer.event` as a family:
 
@@ -291,7 +291,7 @@ The effect catalog already defines which effects are reducer-origin scoped.
 
 ---
 
-## Spec/doc updates I would make
+## Spec/doc updates I would make **[PENDING]**
 
 1. **03-air.md**: make the routing/ABI relationship explicit and normative (validator rule). 
 2. **04-reducers.md**: clarify that reducers receive their declared event family, and the kernel wraps bus events into that family. 

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use petgraph::{algo::is_cyclic_directed, graphmap::DiGraphMap};
+use serde_json;
 use thiserror::Error;
 
 use crate::{
@@ -79,6 +80,24 @@ pub enum ValidationError {
         reducer: String,
         event: String,
         expected: String,
+    },
+    #[error(
+        "route to reducer '{reducer}' uses key_field '{key_field}' with schema '{event}', but key schema '{expected}' does not match '{found}'"
+    )]
+    RoutingKeyFieldMismatch {
+        reducer: String,
+        event: String,
+        key_field: String,
+        expected: String,
+        found: String,
+    },
+    #[error(
+        "reducer '{reducer}' event family schema '{event_schema}' is invalid: {reason}"
+    )]
+    ReducerEventFamilyInvalid {
+        reducer: String,
+        event_schema: String,
+        reason: String,
     },
     #[error(
         "reducer '{reducer}' emits '{effect_kind}' but event schema '{event_schema}' lacks receipt '{receipt_schema}'"
@@ -455,6 +474,30 @@ pub fn validate_manifest(
         .collect();
     known_effect_kinds.extend(effects.values().map(|def| def.kind.as_str().to_string()));
 
+    let schema_type = |name: &str| -> Option<TypeExpr> {
+        schemas
+            .get(name)
+            .map(|schema| schema.ty.clone())
+            .or_else(|| builtins::find_builtin_schema(name).map(|builtin| builtin.schema.ty.clone()))
+    };
+    let resolve_type = |ty: &TypeExpr| -> Option<TypeExpr> {
+        match ty {
+            TypeExpr::Ref(reference) => schema_type(reference.reference.as_str()),
+            _ => Some(ty.clone()),
+        }
+    };
+    let type_eq = |left: &TypeExpr, right: &TypeExpr| -> bool {
+        match (serde_json::to_value(left), serde_json::to_value(right)) {
+            (Ok(l), Ok(r)) => l == r,
+            _ => false,
+        }
+    };
+    let type_name = |ty: &TypeExpr| -> String {
+        match ty {
+            TypeExpr::Ref(reference) => reference.reference.as_str().to_string(),
+            _ => format!("{ty:?}"),
+        }
+    };
     let event_in_family = |event: &str, family_name: &str, family_schema: &TypeExpr| -> bool {
         if event == family_name {
             return true;
@@ -467,13 +510,72 @@ pub fn validate_manifest(
             _ => false,
         }
     };
+    let key_field_type = |event_schema: &TypeExpr, key_field: &str| {
+            let segments: Vec<&str> = key_field.split('.').filter(|s| !s.is_empty()).collect();
+            if segments.is_empty() {
+                return None;
+            }
+            let resolved = resolve_type(event_schema)?;
+            if let TypeExpr::Variant(variant) = &resolved {
+                if segments[0] == "$value" {
+                    let remaining = &segments[1..];
+                    if remaining.is_empty() {
+                        return None;
+                    }
+                    let mut found: Option<TypeExpr> = None;
+                    for ty in variant.variant.values() {
+                        let resolved_arm = resolve_type(ty)?;
+                        let mut current = resolved_arm;
+                        for seg in remaining {
+                            current = match current {
+                                TypeExpr::Record(record) => {
+                                    let field_ty = record.record.get(*seg)?;
+                                    resolve_type(field_ty)?
+                                }
+                                _ => return None,
+                            };
+                        }
+                        if let Some(existing) = &found {
+                            let resolved_existing = resolve_type(existing)?;
+                            let resolved_current = resolve_type(&current)?;
+                            if !type_eq(&resolved_existing, &resolved_current) {
+                                return None;
+                            }
+                        } else {
+                            found = Some(current);
+                        }
+                    }
+                    return found;
+                }
+                if segments[0] == "$tag" {
+                    return None;
+                }
+                return None;
+            }
 
-    let schema_type = |name: &str| -> Option<&TypeExpr> {
-        schemas
-            .get(name)
-            .map(|schema| &schema.ty)
-            .or_else(|| builtins::find_builtin_schema(name).map(|builtin| &builtin.schema.ty))
-    };
+            let mut current = resolved;
+            for seg in segments {
+                current = match current {
+                    TypeExpr::Record(record) => {
+                        let field_ty = record.record.get(seg)?;
+                        resolve_type(field_ty)?
+                    }
+                    _ => return None,
+                };
+            }
+            Some(current)
+        };
+    let key_type_matches = |field_ty: &TypeExpr, key_schema: &TypeExpr| {
+            let resolved_field = resolve_type(field_ty)?;
+            let resolved_key = resolve_type(key_schema)?;
+            if type_eq(&resolved_field, &resolved_key) {
+                return Some(true);
+            }
+            if let (TypeExpr::Ref(field_ref), TypeExpr::Ref(key_ref)) = (field_ty, key_schema) {
+                return Some(field_ref.reference == key_ref.reference);
+            }
+            Some(false)
+        };
 
     if let Some(routing) = manifest.routing.as_ref() {
         for RoutingEvent {
@@ -500,7 +602,7 @@ pub fn validate_manifest(
                         schema: expected.to_string(),
                     }
                 })?;
-                if !event_in_family(event.as_str(), expected, family_schema) {
+                if !event_in_family(event.as_str(), expected, &family_schema) {
                     return Err(ValidationError::RoutingSchemaMismatch {
                         reducer: reducer.clone(),
                         event: event.as_str().to_string(),
@@ -521,6 +623,42 @@ pub fn validate_manifest(
                     });
                 }
                 _ => {}
+            }
+            if let (true, Some(field)) = (keyed, key_field.as_ref()) {
+                let key_schema_name = module
+                    .key_schema
+                    .as_ref()
+                    .expect("keyed reducers have key_schema")
+                    .as_str();
+                let key_schema = schema_type(key_schema_name).ok_or_else(|| {
+                    ValidationError::SchemaNotFound {
+                        schema: key_schema_name.to_string(),
+                    }
+                })?;
+                let event_schema = schema_type(event.as_str()).ok_or_else(|| {
+                    ValidationError::SchemaNotFound {
+                        schema: event.as_str().to_string(),
+                    }
+                })?;
+                let field_ty = key_field_type(&event_schema, field).ok_or_else(|| {
+                    ValidationError::RoutingKeyFieldMismatch {
+                        reducer: reducer.clone(),
+                        event: event.as_str().to_string(),
+                        key_field: field.to_string(),
+                        expected: key_schema_name.to_string(),
+                        found: "missing".into(),
+                    }
+                })?;
+                let matches = key_type_matches(&field_ty, &key_schema).unwrap_or(false);
+                if !matches {
+                    return Err(ValidationError::RoutingKeyFieldMismatch {
+                        reducer: reducer.clone(),
+                        event: event.as_str().to_string(),
+                        key_field: field.to_string(),
+                        expected: key_schema_name.to_string(),
+                        found: type_name(&field_ty),
+                    });
+                }
             }
         }
     }
@@ -544,6 +682,37 @@ pub fn validate_manifest(
                 schema: event_schema_name.to_string(),
             }
         })?;
+        match &event_schema {
+            TypeExpr::Ref(_) => {}
+            TypeExpr::Variant(variant) => {
+                let mut seen = HashSet::new();
+                for ty in variant.variant.values() {
+                    let TypeExpr::Ref(reference) = ty else {
+                        return Err(ValidationError::ReducerEventFamilyInvalid {
+                            reducer: reducer_name.clone(),
+                            event_schema: event_schema_name.to_string(),
+                            reason: "variant arm is not a ref".into(),
+                        });
+                    };
+                    let name = reference.reference.as_str().to_string();
+                    if !seen.insert(name) {
+                        return Err(ValidationError::ReducerEventFamilyInvalid {
+                            reducer: reducer_name.clone(),
+                            event_schema: event_schema_name.to_string(),
+                            reason: "duplicate event schema in variant".into(),
+                        });
+                    }
+                }
+            }
+            _ => {
+                return Err(ValidationError::ReducerEventFamilyInvalid {
+                    reducer: reducer_name.clone(),
+                    event_schema: event_schema_name.to_string(),
+                    reason: "event family must be a ref or variant of refs".into(),
+                });
+            }
+        }
+
         for effect in &reducer.effects_emitted {
             let Some(receipt_schema) = receipt_schema_for_effect(effect.as_str()) else {
                 continue;
@@ -551,7 +720,7 @@ pub fn validate_manifest(
             if event_schema_name == receipt_schema {
                 continue;
             }
-            match event_schema {
+            match &event_schema {
                 TypeExpr::Ref(reference) if reference.reference.as_str() == receipt_schema => {
                     continue;
                 }
@@ -742,7 +911,7 @@ mod tests {
         HashRef, Manifest, ModuleAbi, ModuleKind, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
         PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
         PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent, SchemaRef,
-        TypeExpr, TypeRecord,
+        TypeExpr, TypeRecord, TypeRef, TypeVariant,
     };
     use indexmap::IndexMap;
 
@@ -1223,6 +1392,20 @@ mod tests {
             "com.acme/Event@1".to_string(),
             DefSchema {
                 name: "com.acme/Event@1".into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([(
+                        "Start".into(),
+                        TypeExpr::Ref(TypeRef {
+                            reference: SchemaRef::new("com.acme/Start@1").unwrap(),
+                        }),
+                    )]),
+                }),
+            },
+        );
+        schemas.insert(
+            "com.acme/Start@1".to_string(),
+            DefSchema {
+                name: "com.acme/Start@1".into(),
                 ty: TypeExpr::Record(TypeRecord {
                     record: IndexMap::new(),
                 }),
