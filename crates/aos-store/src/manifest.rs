@@ -188,15 +188,11 @@ fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreRe
     use aos_air_types::plan_literals::normalize_plan_literals;
 
     let mut schema_map = HashMap::new();
-    let mut module_map = HashMap::new();
     let mut effect_defs = Vec::new();
     for entry in nodes.values() {
         match &entry.node {
             AirNode::Defschema(schema) => {
                 schema_map.insert(schema.name.clone(), schema.ty.clone());
-            }
-            AirNode::Defmodule(module) => {
-                module_map.insert(module.name.clone(), module.clone());
             }
             AirNode::Defeffect(effect) => effect_defs.push(effect.clone()),
             _ => {}
@@ -211,7 +207,7 @@ fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreRe
     let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(effect_defs);
     for (name, entry) in nodes.iter_mut() {
         if let AirNode::Defplan(plan) = &mut entry.node {
-            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog).map_err(
+            normalize_plan_literals(plan, &schema_index, &effect_catalog).map_err(
                 |source| StoreError::PlanNormalization {
                     name: name.clone(),
                     source,
@@ -470,7 +466,7 @@ fn validate_plan_secrets(
     for step in &plan.steps {
         match &step.kind {
             PlanStepKind::RaiseEvent(step) => {
-                collect_secret_refs_in_expr_or_value(&step.event, &mut refs);
+                collect_secret_refs_in_expr_or_value(&step.value, &mut refs);
             }
             PlanStepKind::EmitEffect(step) => {
                 collect_secret_refs_in_expr_or_value(&step.params, &mut refs);

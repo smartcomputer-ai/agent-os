@@ -1180,7 +1180,6 @@ impl<S: Store + 'static> Kernel<S> {
                 inst_snapshot,
                 plan,
                 self.schema_index.clone(),
-                self.reducer_schemas.clone(),
             );
             self.plan_instances.insert(instance.id, instance);
         }
@@ -1954,7 +1953,6 @@ impl<S: Store + 'static> Kernel<S> {
                         plan_def.clone(),
                         input,
                         self.schema_index.clone(),
-                        self.reducer_schemas.clone(),
                         correlation,
                     );
                     self.plan_instances.insert(instance_id, instance);
@@ -2291,16 +2289,12 @@ pub fn canonicalize_patch<S: Store>(
     for builtin in builtins::builtin_schemas() {
         schema_map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
     }
-    let mut module_map: HashMap<Name, DefModule> = HashMap::new();
     let mut effect_defs = Vec::new();
 
     for node in &canonical.nodes {
         match node {
             AirNode::Defschema(schema) => {
                 schema_map.insert(schema.name.clone(), schema.ty.clone());
-            }
-            AirNode::Defmodule(module) => {
-                module_map.insert(module.name.clone(), module.clone());
             }
             AirNode::Defeffect(effect) => {
                 effect_defs.push(effect.clone());
@@ -2310,8 +2304,6 @@ pub fn canonicalize_patch<S: Store>(
     }
 
     extend_schema_map_from_store(store, &canonical.manifest.schemas, &mut schema_map)?;
-    extend_module_map_from_store(store, &canonical.manifest.modules, &mut module_map)?;
-
     let schema_index = SchemaIndex::new(schema_map);
     if effect_defs.is_empty() {
         effect_defs.extend(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
@@ -2319,14 +2311,12 @@ pub fn canonicalize_patch<S: Store>(
     let effect_catalog = EffectCatalog::from_defs(effect_defs);
     for node in canonical.nodes.iter_mut() {
         if let AirNode::Defplan(plan) = node {
-            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog).map_err(
-                |err| {
-                    KernelError::Manifest(format!(
-                        "plan '{}' literal normalization failed: {err}",
-                        plan.name
-                    ))
-                },
-            )?;
+            normalize_plan_literals(plan, &schema_index, &effect_catalog).map_err(|err| {
+                KernelError::Manifest(format!(
+                    "plan '{}' literal normalization failed: {err}",
+                    plan.name
+                ))
+            })?;
         }
     }
 
@@ -2346,25 +2336,6 @@ fn extend_schema_map_from_store<S: Store>(
             let node: AirNode = store.get_node(hash)?;
             if let AirNode::Defschema(schema) = node {
                 schemas.insert(schema.name.clone(), schema.ty.clone());
-            }
-        }
-    }
-    Ok(())
-}
-
-fn extend_module_map_from_store<S: Store>(
-    store: &S,
-    refs: &[NamedRef],
-    modules: &mut HashMap<Name, DefModule>,
-) -> Result<(), KernelError> {
-    for reference in refs {
-        if modules.contains_key(reference.name.as_str()) {
-            continue;
-        }
-        if let Some(hash) = parse_nonzero_hash(reference.hash.as_str())? {
-            let node: AirNode = store.get_node(hash)?;
-            if let AirNode::Defmodule(module) = node {
-                modules.insert(module.name.clone(), module);
             }
         }
     }

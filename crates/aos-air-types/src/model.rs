@@ -515,10 +515,8 @@ pub enum PlanStepKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStepRaiseEvent {
-    pub reducer: Name,
-    pub event: ExprOrValue,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub key: Option<Expr>,
+    pub event: SchemaRef,
+    pub value: ExprOrValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

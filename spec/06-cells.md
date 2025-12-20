@@ -19,7 +19,7 @@ Status: **implemented** (kernel/storage/control). Cells make many instances of t
 ## Manifest & AIR hooks
 - `defmodule.key_schema` documents the key type when routed as keyed.
 - `manifest.routing.events[].key_field` marks routed events whose value field contains the key to target a cell: `{ event, reducer, key_field }`. For variant event schemas, `key_field` should typically point into the wrapped value (e.g., `$value.note_id`).
-- Plan `raise_event` step gains `key: Expr`; required when targeting a keyed reducer.
+- Plan `raise_event` publishes bus events; keyed routing derives the target key via `key_field` on the routing entry.
 - Triggers may set `correlate_by` so runs inherit a key for later `await_event` filters.
 
 ## Routing, Mailboxes, Scheduling

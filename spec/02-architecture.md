@@ -108,7 +108,7 @@ The typical runtime flow between reducers and plans follows six steps:
 2. **Trigger starts plan** with the event as `@plan.input` and records a correlation id if provided.
 3. **Plan emits effects** under capabilities; the kernel checks: (a) capability grant constraints, (b) conservative budget pre-check, (c) policy decision (origin-aware). The Effect Manager dispatches if allowed.
 4. **Adapter executes** the effect and appends a signed receipt; the plan's `await_receipt` step resumes with the receipt value.
-5. **Plan raises result** via `raise_event`, publishing a DomainEvent (e.g., `PaymentResult`) to the target reducer; the reducer consumes it and advances its typestate.
+5. **Plan raises result** via `raise_event`, publishing a DomainEvent (e.g., `PaymentResult`) to the bus; routing delivers it to reducers, which advance their typestate.
 6. **Optional continuation**: plans may `await_event` for subsequent reducer‑produced events to continue orchestration in one instance. The wait is future-only, first-match-per-waiter, and broadcast (events are not consumed). When a trigger set a `correlate_by` key, `await_event` **must** include a `where` predicate (typically matching that key) to avoid cross-talk between concurrent plan instances.
 
 ### Governance and Observability
@@ -132,7 +132,7 @@ Modules are content‑addressed WASM artifacts registered in the manifest with d
 
 ### Keyed Reducers (Cells)
 
-Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with optional `key` and a `cell_mode` flag. Routing uses `manifest.routing.events[].key_field`; plans supply `key` on `raise_event`; triggers may set `correlate_by`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and plan runs. See [spec/06-cells.md](06-cells.md) for the full v1.1 behavior and migration notes.
+Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with optional `key` and a `cell_mode` flag. Routing uses `manifest.routing.events[].key_field`; triggers may set `correlate_by`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and plan runs. See [spec/06-cells.md](06-cells.md) for the full v1.1 behavior and migration notes.
 
 ### Router and Inbox
 

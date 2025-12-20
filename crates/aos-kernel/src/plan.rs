@@ -79,7 +79,6 @@ pub struct PlanInstance {
     predecessors: HashMap<String, Vec<Dependency>>,
     step_states: HashMap<String, StepState>,
     schema_index: Arc<SchemaIndex>,
-    reducer_schemas: Arc<HashMap<String, ReducerSchema>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -135,7 +134,6 @@ impl PlanInstance {
         plan: DefPlan,
         input: ExprValue,
         schema_index: Arc<SchemaIndex>,
-        reducer_schemas: Arc<HashMap<String, ReducerSchema>>,
         correlation: Option<(Vec<u8>, ExprValue)>,
     ) -> Self {
         let mut step_map = HashMap::new();
@@ -186,7 +184,6 @@ impl PlanInstance {
             predecessors,
             step_states,
             schema_index,
-            reducer_schemas,
         }
     }
 
@@ -363,37 +360,25 @@ impl PlanInstance {
                         return Ok(outcome);
                     }
                     PlanStepKind::RaiseEvent(raise) => {
-                        let metadata =
-                            self.reducer_schemas.get(&raise.reducer).ok_or_else(|| {
-                                KernelError::Manifest(format!(
-                                    "reducer '{}' not found for raise_event",
-                                    raise.reducer
-                                ))
-                            })?;
-                        let value = eval_expr_or_value(
-                            &raise.event,
-                            &self.env,
-                            "plan raise_event eval error",
-                        )?;
+                        let schema_name = raise.event.as_str();
+                        let schema = self.schema_index.get(schema_name).ok_or_else(|| {
+                            KernelError::Manifest(format!(
+                                "event schema '{}' not found for raise_event",
+                                schema_name
+                            ))
+                        })?;
+                        let value =
+                            eval_expr_or_value(&raise.value, &self.env, "plan raise_event eval error")?;
                         let mut event_literal = expr_value_to_literal(&value).map_err(|err| {
                             KernelError::Manifest(format!("plan raise_event literal error: {err}"))
                         })?;
-                        canonicalize_literal(
-                            &mut event_literal,
-                            &metadata.event_schema,
-                            &self.schema_index,
-                        )
+                        canonicalize_literal(&mut event_literal, schema, &self.schema_index)
                         .map_err(|err| {
                             KernelError::Manifest(format!(
                                 "plan raise_event canonicalization error: {err}"
                             ))
                         })?;
-                        validate_literal(
-                            &event_literal,
-                            &metadata.event_schema,
-                            &metadata.event_schema_name,
-                            &self.schema_index,
-                        )
+                        validate_literal(&event_literal, schema, schema_name, &self.schema_index)
                         .map_err(|err| {
                             KernelError::Manifest(format!(
                                 "plan raise_event validation error: {err}"
@@ -409,83 +394,12 @@ impl PlanInstance {
                             KernelError::Manifest(format!("plan raise_event encode error: {err}"))
                         })?;
 
-                        let (key_bytes, key_record_value) = match (&metadata.key_schema, &raise.key)
-                        {
-                            (Some(schema), Some(expr)) => {
-                                let key_value = eval_expr(expr, &self.env).map_err(|err| {
-                                    KernelError::Manifest(format!(
-                                        "plan raise_event key eval error: {err}"
-                                    ))
-                                })?;
-                                let mut key_literal =
-                                    expr_value_to_literal(&key_value).map_err(|err| {
-                                        KernelError::Manifest(format!(
-                                            "plan raise_event key literal error: {err}"
-                                        ))
-                                    })?;
-                                canonicalize_literal(&mut key_literal, schema, &self.schema_index)
-                                    .map_err(|err| {
-                                        KernelError::Manifest(format!(
-                                            "plan raise_event key canonicalization error: {err}"
-                                        ))
-                                    })?;
-                                validate_literal(
-                                    &key_literal,
-                                    schema,
-                                    &metadata.event_schema_name,
-                                    &self.schema_index,
-                                )
-                                .map_err(|err| {
-                                    KernelError::Manifest(format!(
-                                        "plan raise_event key validation error: {err}"
-                                    ))
-                                })?;
-                                let canonical_key =
-                                    literal_to_value(&key_literal).map_err(|err| {
-                                        KernelError::Manifest(format!(
-                                            "plan raise_event key value error: {err}"
-                                        ))
-                                    })?;
-                                let canonical_key_cbor = expr_value_to_cbor_value(&canonical_key);
-                                let canonical_key_bytes = to_canonical_cbor(&canonical_key_cbor)
-                                    .map_err(|err| {
-                                        KernelError::Manifest(format!(
-                                            "plan raise_event key encode error: {err}"
-                                        ))
-                                    })?;
-                                (Some(canonical_key_bytes), Some(canonical_key))
-                            }
-                            (Some(_), None) => {
-                                return Err(KernelError::Manifest(format!(
-                                    "reducer '{}' requires key but raise_event omitted it",
-                                    raise.reducer
-                                )));
-                            }
-                            (None, Some(_)) => {
-                                return Err(KernelError::Manifest(format!(
-                                    "reducer '{}' is not keyed but raise_event provided key",
-                                    raise.reducer
-                                )));
-                            }
-                            (None, None) => (None, None),
-                        };
-
-                        let mut event =
-                            DomainEvent::new(metadata.event_schema_name.clone(), payload_bytes);
-                        if let Some(bytes) = key_bytes {
-                            event.key = Some(bytes);
-                        }
+                        let event = DomainEvent::new(schema_name.to_string(), payload_bytes);
                         outcome.raised_events.push(event);
 
                         let mut record = IndexMap::new();
-                        record.insert(
-                            "schema".into(),
-                            ExprValue::Text(metadata.event_schema_name.clone()),
-                        );
+                        record.insert("schema".into(), ExprValue::Text(schema_name.to_string()));
                         record.insert("value".into(), canonical_value.clone());
-                        if let Some(key_value) = key_record_value {
-                            record.insert("key".into(), key_value);
-                        }
                         self.record_step_value(&step_id, ExprValue::Record(record));
                         match self.complete_step(&step_id)? {
                             Some(err) => {
@@ -633,14 +547,12 @@ impl PlanInstance {
         snapshot: PlanInstanceSnapshot,
         plan: DefPlan,
         schema_index: Arc<SchemaIndex>,
-        reducer_schemas: Arc<HashMap<String, ReducerSchema>>,
     ) -> Self {
         let mut instance = PlanInstance::new(
             snapshot.id,
             plan,
             snapshot.env.plan_input.clone(),
             schema_index,
-            reducer_schemas,
             None,
         );
         instance.env = snapshot.env;
@@ -1202,10 +1114,6 @@ mod tests {
         Arc::new(SchemaIndex::new(map))
     }
 
-    fn empty_reducer_schemas() -> Arc<HashMap<String, ReducerSchema>> {
-        Arc::new(HashMap::new())
-    }
-
     fn schema_index_with_output() -> Arc<SchemaIndex> {
         let mut map = HashMap::new();
         map.insert(
@@ -1230,7 +1138,6 @@ mod tests {
             plan,
             default_env(),
             empty_schema_index(),
-            empty_reducer_schemas(),
             None,
         )
     }
@@ -1272,25 +1179,8 @@ mod tests {
             plan,
             default_env(),
             schema_index,
-            empty_reducer_schemas(),
             None,
         )
-    }
-
-    fn reducer_schema_map(
-        reducer: &str,
-        event_schema_name: &str,
-        event_schema: TypeExpr,
-        key_schema: Option<TypeExpr>,
-    ) -> Arc<HashMap<String, ReducerSchema>> {
-        Arc::new(HashMap::from([(
-            reducer.to_string(),
-            ReducerSchema {
-                event_schema_name: event_schema_name.to_string(),
-                event_schema,
-                key_schema,
-            },
-        )]))
     }
 
     /// Assign steps should synchronously write to the plan environment.
@@ -1589,7 +1479,6 @@ mod tests {
             base_plan(steps),
             default_env(),
             schema_index,
-            empty_reducer_schemas(),
             None,
         );
         let mut effects = test_effect_manager();
@@ -1623,7 +1512,6 @@ mod tests {
     /// Raising an event should surface a DomainEvent with the serialized payload.
     #[test]
     fn raise_event_produces_domain_event() {
-        let reducer = "com.test/Reducer@1";
         let event_schema = TypeExpr::Record(TypeRecord {
             record: IndexMap::from([(
                 "value".into(),
@@ -1632,19 +1520,11 @@ mod tests {
                 })),
             )]),
         });
-        let key_schema = TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
-            text: EmptyObject {},
-        }));
-        let reducer_schemas =
-            reducer_schema_map(reducer, "com.test/Evt@1", event_schema, Some(key_schema));
         let steps = vec![PlanStep {
             id: "raise".into(),
             kind: PlanStepKind::RaiseEvent(aos_air_types::PlanStepRaiseEvent {
-                reducer: reducer.into(),
-                key: Some(Expr::Const(ExprConst::Text {
-                    text: "cell-1".into(),
-                })),
-                event: Expr::Record(aos_air_types::ExprRecord {
+                event: aos_air_types::SchemaRef::new("com.test/Evt@1").unwrap(),
+                value: Expr::Record(aos_air_types::ExprRecord {
                     record: IndexMap::from([(
                         "value".into(),
                         Expr::Const(ExprConst::Int { int: 9 }),
@@ -1657,22 +1537,18 @@ mod tests {
             1,
             base_plan(steps),
             default_env(),
-            empty_schema_index(),
-            reducer_schemas,
+            schema_index_with_event("com.test/Evt@1", event_schema),
             None,
         );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.raised_events.len(), 1);
         assert_eq!(outcome.raised_events[0].schema, "com.test/Evt@1");
-        let expected_key =
-            to_canonical_cbor(&CborValue::Text("cell-1".into())).expect("encode key");
-        assert_eq!(outcome.raised_events[0].key.as_ref(), Some(&expected_key));
+        assert!(outcome.raised_events[0].key.is_none());
     }
 
     #[test]
     fn raise_event_accepts_literal_payload() {
-        let reducer = "com.test/Reducer@1";
         let event_schema = TypeExpr::Record(TypeRecord {
             record: IndexMap::from([(
                 "value".into(),
@@ -1681,24 +1557,21 @@ mod tests {
                 })),
             )]),
         });
-        let reducer_schemas = reducer_schema_map(reducer, "com.test/Literal@1", event_schema, None);
         let literal_event = ValueLiteral::Record(ValueRecord {
             record: IndexMap::from([("value".into(), ValueLiteral::Int(ValueInt { int: 3 }))]),
         });
         let steps = vec![PlanStep {
             id: "raise".into(),
             kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                reducer: reducer.into(),
-                event: literal_event.into(),
-                key: None,
+                event: SchemaRef::new("com.test/Literal@1").unwrap(),
+                value: literal_event.into(),
             }),
         }];
         let mut plan = PlanInstance::new(
             1,
             base_plan(steps),
             default_env(),
-            empty_schema_index(),
-            reducer_schemas,
+            schema_index_with_event("com.test/Literal@1", event_schema),
             None,
         );
         let mut effects = test_effect_manager();
@@ -1801,7 +1674,6 @@ mod tests {
             plan,
             default_env(),
             schema_index,
-            empty_reducer_schemas(),
             None,
         );
         let mut effects = test_effect_manager();
@@ -1856,7 +1728,6 @@ mod tests {
             plan,
             default_env(),
             empty_schema_index(),
-            empty_reducer_schemas(),
             Some((b"corr".to_vec(), correlation_value)),
         );
         let mut effects = test_effect_manager();
@@ -2016,13 +1887,11 @@ mod tests {
             },
         ]);
         let schema_index = empty_schema_index();
-        let reducer_schemas = empty_reducer_schemas();
         let mut instance = PlanInstance::new(
             1,
             plan_def.clone(),
             default_env(),
             schema_index.clone(),
-            reducer_schemas.clone(),
             None,
         );
         let mut effects = test_effect_manager();
@@ -2034,8 +1903,7 @@ mod tests {
             .expect("waiting receipt");
         let snapshot = instance.snapshot();
 
-        let mut restored =
-            PlanInstance::from_snapshot(snapshot, plan_def, schema_index, reducer_schemas);
+        let mut restored = PlanInstance::from_snapshot(snapshot, plan_def, schema_index);
         hash[0] ^= 0xAA;
         restored.override_pending_receipt_hash(hash);
         assert_eq!(restored.pending_receipt_hash(), Some(hash));

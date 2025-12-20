@@ -124,7 +124,7 @@ This keeps both v1 and your v1.1 “cells” direction consistent.
 
 ---
 
-## Plan `raise_event`: I would refactor it now **[PENDING]**
+## Plan `raise_event`: I would refactor it now **[DONE]**
 
 Your current ambiguity comes from “plan raise_event payload schema is inferred from reducer ABI schema.” That only works if the reducer ABI event is one schema and not a family/variant.
 
@@ -138,7 +138,6 @@ To make event families first-class *without* making plans build variant envelope
 
 * `event` is the schema name (SchemaRef)
 * `value` is `ExprOrValue` typed against that schema
-* optional `key` can remain (useful for keyed reducers), but you can also rely on `key_field` extraction
 
 This aligns plan emission with reducer emission: reducers already emit `{schema, value}` for domain events. 
 And it aligns with the AIR plan philosophy that payload schemas are known from context and canonicalized before journaling. 
@@ -158,8 +157,7 @@ This cleanly separates “publish” from “deliver.”
 
 * Update `spec/schemas/defplan.schema.json` `StepRaiseEvent`:
 
-  * replace `{ reducer, event }` with `{ event, value }` (or `{ schema, event }`, naming bikeshed)
-  * keep `key?` if you want
+  * replace `{ reducer, event }` with `{ event, value }`
      
 
 * Update the AIR prose in `03-air.md` accordingly. 
@@ -274,7 +272,7 @@ For each target:
 * wrap `value_cbor(E)` into `value_cbor(F)` if needed
 * invoke reducer with ABI event bytes = canonical CBOR of F
 
-### 4) Plans: change `raise_event` to publish (schema, value) **[PENDING]**
+### 4) Plans: change `raise_event` to publish (schema, value) **[DONE]**
 
 In `plan.rs` (your mention), change `raise_event` so it canonicalizes `value` against the explicit `event` schema (not reducer ABI). This matches the AIR “event payload normalization” model. 
 
@@ -291,7 +289,7 @@ The effect catalog already defines which effects are reducer-origin scoped.
 
 ---
 
-## Spec/doc updates I would make **[PENDING]**
+## Spec/doc updates I would make **[DONE]**
 
 1. **03-air.md**: make the routing/ABI relationship explicit and normative (validator rule). 
 2. **04-reducers.md**: clarify that reducers receive their declared event family, and the kernel wraps bus events into that family. 

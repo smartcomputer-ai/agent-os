@@ -50,8 +50,8 @@
       {
         "id": "raise_result",
         "op": "raise_event",
-        "reducer": "demo/FetchNotify@1",
-        "event": {
+        "event": "demo/FetchNotifyEvent@1",
+        "value": {
           "variant": {
             "tag": "NotifyComplete",
             "value": {

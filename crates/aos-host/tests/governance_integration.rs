@@ -125,12 +125,7 @@ fn patch_hash_is_identical_for_sugar_and_canonical_plans() {
             .iter()
             .map(|e| e.effect.clone()),
     );
-    normalize_plan_literals(
-        &mut canonical_plan,
-        &builtin_schema_index(),
-        &HashMap::new(),
-        &effect_catalog,
-    )
+    normalize_plan_literals(&mut canonical_plan, &builtin_schema_index(), &effect_catalog)
     .expect("normalize canonical plan");
 
     let sugar_patch = plan_patch(sugar_plan);

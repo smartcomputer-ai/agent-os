@@ -26,9 +26,8 @@
       {
         "id": "register_obj",
         "op": "raise_event",
-        "reducer": "sys/ObjectCatalog@1",
-        "key": { "ref": "@plan.input.object_path" },
-        "event": {
+        "event": "sys/ObjectRegistered@1",
+        "value": {
           "record": {
             "meta": {
               "record": {
@@ -46,9 +45,8 @@
       {
         "id": "archive_note",
         "op": "raise_event",
-        "reducer": "notes/NotebookSM@1",
-        "key": { "ref": "@plan.input.note_id" },
-        "event": {
+        "event": "notes/NoteEvent@1",
+        "value": {
           "variant": {
             "tag": "Archived",
             "value": {

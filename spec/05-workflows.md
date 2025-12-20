@@ -15,15 +15,15 @@ This is v1 guidance. Future versions may add higher-level orchestration primitiv
 
 AIR v1 provides four coordination mechanisms:
 
-### 1. Plan → Reducer (raise_event)
+### 1. Plan → Bus (raise_event)
 
-Plans can raise events that are delivered to reducers.
+Plans can publish bus events that are routed to reducers.
 
 ```json
 {
   "op": "raise_event",
-  "reducer": "com.acme/OrderSM@1",
-  "event": {
+  "event": "com.acme/OrderEvent@1",
+  "value": {
     "record": {
       "order_id": {"ref": "@plan.input.order_id"},
       "success": {"ref": "@var:charge_rcpt.ok"},
@@ -33,7 +33,7 @@ Plans can raise events that are delivered to reducers.
 }
 ```
 
-**Semantics**: Kernel serializes the event, appends to journal, delivers to reducer on next tick. The reducer declaration already pins the payload schema, so authors only provide the payload fields.
+**Semantics**: Kernel serializes the event, appends to journal, and routing delivers it to reducers on the next tick. The `event` field supplies the payload schema; authors only provide the `value`.
 
 ### 2. Reducer → Plan (manifest triggers)
 
@@ -140,7 +140,7 @@ Plan internally:
   3. conditional branch on A result
   4. emit_effect B
   5. await_receipt B
-  6. raise_event FinalResult → Reducer
+  6. raise_event FinalResult (published)
   ↓
 Reducer updates state to terminal
 ```
@@ -172,7 +172,7 @@ Plan `fulfillment_plan@1`:
     {"id": "wait_reserve", "op": "await_receipt", "for": {"ref": "@var:reserve_id"}, "bind": {"as": "reserve_rcpt"}},
     {"id": "notify", "op": "emit_effect", "kind": "email.send", "params": {...}, "cap": "mailer_cap", "bind": {"effect_id_as": "email_id"}},
     {"id": "wait_notify", "op": "await_receipt", "for": {"ref": "@var:email_id"}, "bind": {"as": "email_rcpt"}},
-    {"id": "raise_result", "op": "raise_event", "reducer": "com.acme/OrderSM@1", "event": {"record": {"order_id": {"ref": "@plan.input.order_id"}}}},
+    {"id": "raise_result", "op": "raise_event", "event": "com.acme/OrderEvent@1", "value": {"record": {"order_id": {"ref": "@plan.input.order_id"}}}},
     {"id": "done", "op": "end"}
   ],
   "edges": [
@@ -250,7 +250,7 @@ Each plan is small:
   "steps": [
     {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
     {"id": "wait", "op": "await_receipt", ...},
-    {"id": "notify", "op": "raise_event", "reducer": "EventBus@1", "event": {...}},
+    {"id": "notify", "op": "raise_event", "event": "com.acme/ChargeCompleted@1", "value": {...}},
     {"id": "done", "op": "end"}
   ]
 }
@@ -379,7 +379,7 @@ Plans are thin wrappers (one per intent type):
   "steps": [
     {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
     {"id": "wait", "op": "await_receipt", ...},
-    {"id": "result", "op": "raise_event", "reducer": "com.acme/OrderSM@1", "event": {"record": {"success": {"ref": "@var:rcpt.ok"}, ...}}},
+    {"id": "result", "op": "raise_event", "event": "com.acme/OrderEvent@1", "value": {"record": {"success": {"ref": "@var:rcpt.ok"}, ...}}},
     {"id": "done", "op": "end"}
   ]
 }
@@ -417,11 +417,11 @@ Trigger: orchestration_plan
   Plan:
     1. emit effect A
     2. await_receipt A
-    3. raise_event A_Completed → Reducer (tracking)
+    3. raise_event A_Completed (published)
     4. emit effect B
     5. await_receipt B
-    6. raise_event B_Completed → Reducer
-    7. raise_event FinalCompleted → Reducer
+    6. raise_event B_Completed (published)
+    7. raise_event FinalCompleted (published)
   ↓
 Reducer tracks: Pending → A_Done → B_Done → Done
 ```
@@ -460,10 +460,10 @@ Plan:
   "steps": [
     {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
     {"id": "wait_charge", "op": "await_receipt", ...},
-    {"id": "notify_charge", "op": "raise_event", "reducer": "PaymentSM@1", "event": {...}},
+    {"id": "notify_charge", "op": "raise_event", "event": "PaymentEvent@1", "value": {...}},
     {"id": "confirm", "op": "emit_effect", "kind": "payment.confirm", ...},
     {"id": "wait_confirm", "op": "await_receipt", ...},
-    {"id": "notify_confirm", "op": "raise_event", "reducer": "PaymentSM@1", "event": {...}},
+    {"id": "notify_confirm", "op": "raise_event", "event": "PaymentEvent@1", "value": {...}},
     {"id": "done", "op": "end"}
   ]
 }
@@ -487,7 +487,7 @@ Plan:
 
 The runtime now enforces the schema boundaries described in spec/03-air.md at execution time:
 
-- `raise_event` payloads/keys are canonicalized against the reducer's declared schemas, and invalid payloads are rejected before journaling.
+- `raise_event` values are canonicalized against the declared event schema, and invalid payloads are rejected before journaling.
 - `await_receipt` and `await_event` references are validated when the manifest is loaded, so orchestration bugs (missing handles, typos in predicates) fail fast.
 - `end` step results are canonicalized against `plan.output`. When a plan returns a value, the kernel appends a `PlanResult` journal record capturing `{plan_name, plan_id, output_schema, value_cbor}` and caches recent results for operators/CLI tooling.
 
@@ -549,7 +549,7 @@ Plan handles compensation flow, reducer tracks compensating state.
 ```json
 // In plan
 {"from": "wait_reserve", "to": "notify_compensation", "when": "failure"},
-{"id": "notify_compensation", "op": "raise_event", "event": {}},
+{"id": "notify_compensation", "op": "raise_event", "event": "com.acme/CompensationStarted@1", "value": {}},
 {"from": "notify_compensation", "to": "refund"}
 ```
 

@@ -40,8 +40,8 @@
       {
         "id": "raise_result",
         "op": "raise_event",
-        "reducer": "demo/ChainComp@1",
-        "event": {
+        "event": "demo/ChainEvent@1",
+        "value": {
           "variant": {
             "tag": "ChargeCompleted",
             "value": {

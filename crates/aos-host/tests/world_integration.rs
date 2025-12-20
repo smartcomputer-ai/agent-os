@@ -151,8 +151,8 @@ fn sugar_literal_plan_executes_http_flow() {
             {
                 "id": "raise",
                 "op": "raise_event",
-                "reducer": "com.acme/ResultReducer@1",
-                "event": { "message": "done" }
+                "event": "com.acme/ResultEvent@1",
+                "value": { "message": "done" }
             },
             {
                 "id": "end",
@@ -171,25 +171,18 @@ fn sugar_literal_plan_executes_http_flow() {
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
     if let Some(step) = plan.steps.iter_mut().find(|step| step.id == "raise") {
         if let PlanStepKind::RaiseEvent(raise) = &mut step.kind {
-            raise.event = Expr::Record(ExprRecord {
+            raise.value = Expr::Record(ExprRecord {
                 record: IndexMap::from([("message".into(), fixtures::text_expr("done"))]),
             })
             .into();
         }
     }
-    let mut modules = HashMap::new();
-    modules.insert(result_module.name.clone(), result_module.clone());
     let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(
         aos_air_types::builtins::builtin_effects()
             .iter()
             .map(|e| e.effect.clone()),
     );
-    normalize_plan_literals(
-        &mut plan,
-        &builtin_schema_index_with_custom_types(),
-        &modules,
-        &effect_catalog,
-    )
+    normalize_plan_literals(&mut plan, &builtin_schema_index_with_custom_types(), &effect_catalog)
     .expect("normalize literals");
 
     let routing = vec![fixtures::routing_event(
@@ -290,15 +283,14 @@ fn single_plan_orchestration_completes_after_receipt() {
             PlanStep {
                 id: "raise".into(),
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                    reducer: result_module.name.clone(),
-                    event: Expr::Record(ExprRecord {
+                    event: fixtures::schema("com.acme/ResultEvent@1"),
+                    value: Expr::Record(ExprRecord {
                         record: IndexMap::from([(
                             "value".into(),
                             Expr::Const(ExprConst::Int { int: 9 }),
                         )]),
                     })
                     .into(),
-                    key: None,
                 }),
             },
             PlanStep {
@@ -1532,15 +1524,14 @@ fn raised_events_are_routed_to_reducers() {
             PlanStep {
                 id: "raise".into(),
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                    reducer: reducer_name.clone(),
-                    event: Expr::Record(ExprRecord {
+                    event: fixtures::schema("com.acme/Raised@1"),
+                    value: Expr::Record(ExprRecord {
                         record: IndexMap::from([(
                             "value".into(),
                             Expr::Const(ExprConst::Int { int: 9 }),
                         )]),
                     })
                     .into(),
-                    key: None,
                 }),
             },
             PlanStep {

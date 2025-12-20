@@ -518,10 +518,9 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 
 ### Steps (discriminated by `op`)
 
-**raise_event**: Publish an event to a reducer
-- `{ id, op:"raise_event", reducer:Name, key?:Expr, event:ExprOrValue }`
-- If target reducer is keyed, `key` is required and must typecheck to its key schema
-- The kernel infers the payload schema from the reducer's manifest entry and validates/canonicalizes the event (and optional key) before emitting. **Never embed `$schema` fields inside event or effect payloads; self-describing payloads are rejected.**
+**raise_event**: Publish a bus event
+- `{ id, op:"raise_event", event:SchemaRef, value:ExprOrValue }`
+- The kernel validates/canonicalizes `value` against `event` before emitting. **Never embed `$schema` fields inside event or effect payloads; self-describing payloads are rejected.**
 
 **emit_effect**: Request an external effect
 - `{ id, op:"emit_effect", kind:EffectKind, params:ExprOrValue, cap:CapGrantName, bind:{effect_id_as:VarName} }`
@@ -553,7 +552,7 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 
 ### Literals vs. Expressions (`ExprOrValue`)
 
-Authoring ergonomic insight: most plan fields already know the target schema (effect params, event payloads, locals, outputs). Requiring verbose `ExprRecord`/`ExprList` wrappers for simple literals made everyday plans noisy. In v1 we therefore allow `ExprOrValue` in four places (`emit_effect.params`, `raise_event.event`, `assign.expr`, `end.result`). Authors may provide:
+Authoring ergonomic insight: most plan fields already know the target schema (effect params, event payloads, locals, outputs). Requiring verbose `ExprRecord`/`ExprList` wrappers for simple literals made everyday plans noisy. In v1 we therefore allow `ExprOrValue` in four places (`emit_effect.params`, `raise_event.value`, `assign.expr`, `end.result`). Authors may provide:
 
 1. A plain JSON value (in sugar or canonical lens), which the loader interprets via the declared schema.
 2. A fully tagged `Expr` tree when dynamic computation or references are needed.
@@ -616,7 +615,7 @@ The kernel validator enforces these semantic checks:
 
 **defmodule**: `wasm_hash` present; referenced schemas exist; `effects_emitted`/`cap_slots` (if present) are well‑formed.
 
-**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `required_caps`/`allowed_effects` are derived sets of `emit_effect.{cap,kind}` (if provided they must exactly match the derived values); `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.event` must evaluate to a value conforming to a declared schema (and keyed reducers require matching keys); invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
+**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `required_caps`/`allowed_effects` are derived sets of `emit_effect.{cap,kind}` (if provided they must exactly match the derived values); `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.value` must evaluate to a value conforming to the `raise_event.event` schema; invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
 
 **defpolicy**: Rule shapes valid; referenced effect kinds known.
 

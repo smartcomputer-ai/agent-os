@@ -262,8 +262,8 @@
       {
         "id": "raise_result",
         "op": "raise_event",
-        "reducer": "demo/Aggregator@1",
-        "event": {
+        "event": "demo/AggregatorEvent@1",
+        "value": {
           "variant": {
             "tag": "AggregateComplete",
             "value": {

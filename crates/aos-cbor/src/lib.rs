@@ -173,7 +173,7 @@ mod tests {
             ),
             (
                 "spec/schemas/defplan.schema.json",
-                "sha256:17e4c5c9eec58d537c4e95b340c5afd046228eb45b4240a936b89d06fb58b3a5",
+                "sha256:524e85de0526b663db63442c48359be53d686c1186da85ef14b7d8887d0c593f",
             ),
             (
                 "spec/schemas/defcap.schema.json",

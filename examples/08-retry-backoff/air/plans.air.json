@@ -7,8 +7,8 @@
       {
         "id": "fail",
         "op": "raise_event",
-        "reducer": "demo/RetrySM@1",
-        "event": {
+        "event": "demo/RetryEvent@1",
+        "value": {
           "err": {
             "req_id": "req-123",
             "transient": true,

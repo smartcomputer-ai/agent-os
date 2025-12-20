@@ -261,8 +261,8 @@ Note: This example uses v1 authoring sugar. The `params` and `event` fields acce
     {
       "id": "notify_reducer",
       "op": "raise_event",
-      "reducer": "com.acme/OrderSM@1",
-      "event": {
+      "event": "com.acme/OrderEvent@1",
+      "value": {
         "record": {
           "order_id": {"ref": "@plan.input.order_id"},
           "success": {

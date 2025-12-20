@@ -44,8 +44,8 @@ ReducerEffect shape: `{ kind: EffectKind, params: bytes (CBOR), cap_slot?: text 
 - manifest.routing.events: entries targeting a keyed reducer include a `key_field` telling the kernel where to find the key in the event value.
   - Non‑keyed: `{ event: SchemaRef, reducer: Name }`
   - Keyed: `{ event: SchemaRef, reducer: Name, key_field: "key" }`
-- defplan StepRaiseEvent adds a `key: Expr` for keyed reducers:
-  - `{ id, op: "raise_event", reducer: Name, key: Expr, event: Expr }`
+- defplan StepRaiseEvent publishes bus events with an explicit schema:
+  - `{ id, op: "raise_event", event: SchemaRef, value: ExprOrValue }`
 - manifest.triggers (already present): a trigger can specify `correlate_by` (e.g., `"key"`) so runs inherit an id they can use for await_event filters and observability.
 
 Note: v1 can already carry a `key` field in event values without kernel‑managed cells; v1.1 makes the key first‑class for routing/storage.
@@ -92,7 +92,7 @@ Note: v1 can already carry a `key` field in event values without kernel‑manage
 ## Status & TODO
 
 Done (in codebase)
-- Keyed routing/ABI: manifests use `key_field`; plans support `raise_event.key`; triggers can `correlate_by`.
+- Keyed routing/ABI: manifests use `key_field`; plans publish typed `raise_event` payloads; triggers can `correlate_by`.
 - Reducer calls carry `cell_mode` and key; `state=null` deletes the cell.
 - CAS-backed `CellIndex` per keyed reducer, with only the root hash stored in kernel state/snapshots; keyed load/save/delete go through the index.
 - Snapshots capture index roots; replay restores them. Legacy snapshots rebuild an empty index on load.
@@ -141,7 +141,7 @@ Deferred
 - Trigger with correlation:
   - `{ "event": "com.acme/ChargeRequested@1", "plan": "com.acme/charge_flow@3", "correlate_by": "key" }`
 - Plan step targeting a cell:
-  - `{ "id":"apply", "op":"raise_event", "reducer":"com.acme/OrderSM@2", "key": { "ref":"@plan.input.key" }, "event": { "record": { "order_id": { "ref":"@plan.input.order_id" } } } }`
+  - `{ "id":"apply", "op":"raise_event", "event":"com.acme/OrderEvent@2", "value": { "record": { "key": { "ref":"@plan.input.key" }, "order_id": { "ref":"@plan.input.order_id" } } } }`
 
 ## Non‑Goals (v1.1)
 

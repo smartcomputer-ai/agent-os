@@ -10,7 +10,7 @@ Very important: the system is in very early development phase. So we can make th
 
 - Added a shared value normalizer (`crates/aos-air-types/src/value_normalize.rs`) and wired kernel ingestion to canonicalize every `DomainEvent` by its schema before routing/journaling; events are stored/replayed as canonical CBOR.
 - Routing/await now uses schema-aware decoding: keyed routes pull `key_field` via the declared key schema, plan `await_event` decodes by schema, and plan triggers build correlation from typed values.
-- Plan `raise_event` keys are emitted as canonical CBOR; reducer-emitted/bad payloads are rejected early; tests updated/added around routing, await_event, and invalid payload rejection.
+- Plan `raise_event` values are canonicalized against the explicit event schema; invalid payloads are rejected early; tests updated/added around routing, await_event, and invalid payload rejection.
 - External ingress now flows through the same normalizer: host/CLI/test helpers require an explicit schema string and kernel ingestion canonicalizes; adapter receipts that become events likewise pass through schema-based normalization before routing/journaling.
 - Open: docs/spec updates to reflect the “events like effect params; journal stores canonical CBOR” invariant.
 

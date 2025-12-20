@@ -83,15 +83,14 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
             PlanStep {
                 id: "raise".into(),
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                    reducer: result_module.name.clone(),
-                    event: Expr::Record(ExprRecord {
+                    event: result_event_schema.clone(),
+                    value: Expr::Record(ExprRecord {
                         record: IndexMap::from([(
                             "value".into(),
                             Expr::Const(ExprConst::Int { int: 9 }),
                         )]),
                     })
                     .into(),
-                    key: None,
                 }),
             },
             PlanStep {
@@ -236,9 +235,8 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
             PlanStep {
                 id: "raise".into(),
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                    reducer: result_module.name.clone(),
-                    key: None,
-                    event: Expr::Record(ExprRecord {
+                    event: result_event_schema.clone(),
+                    value: Expr::Record(ExprRecord {
                         record: IndexMap::from([(
                             "value".into(),
                             Expr::Const(ExprConst::Int { int: 5 }),

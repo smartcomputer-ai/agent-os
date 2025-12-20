@@ -86,11 +86,10 @@
           "properties": {
             "id": { "$ref": "common.schema.json#/$defs/StepId" },
             "op": { "const": "raise_event" },
-            "reducer": { "$ref": "common.schema.json#/$defs/Name" },
-            "event": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
-            "key": { "$ref": "common.schema.json#/$defs/Expr" }
+            "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+            "value": { "$ref": "common.schema.json#/$defs/ExprOrValue" }
           },
-          "required": ["op","reducer","event"],
+          "required": ["op","event","value"],
           "additionalProperties": false
         }
       ]
