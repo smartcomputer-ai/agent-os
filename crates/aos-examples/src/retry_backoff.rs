@@ -133,6 +133,7 @@ fn synthesize_timer_receipts(kernel: &mut Kernel<FsStore>) -> Result<()> {
                 signature: vec![0; 64],
             };
             kernel.handle_receipt(receipt)?;
+            kernel.tick_until_idle()?;
         }
         safety += 1;
         ensure!(safety < 16, "safety trip: too many retry cycles");
