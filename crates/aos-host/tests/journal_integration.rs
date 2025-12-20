@@ -76,8 +76,12 @@ fn reducer_timer_receipt_replays_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": { "id": "timer" }
+    });
     world
-        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "timer" }))
+        .submit_event_result("com.acme/TimerEvent@1", &start_event)
         .expect("submit start event");
     world.tick_n(1).unwrap();
 

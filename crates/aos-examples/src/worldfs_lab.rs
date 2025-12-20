@@ -8,6 +8,7 @@ use aos_air_types::HashRef;
 use aos_effects::builtins::{BlobPutParams, BlobPutReceipt};
 use aos_effects::{EffectKind, EffectReceipt, ReceiptStatus};
 use aos_store::Store;
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 use sha2::{Digest, Sha256};
@@ -36,6 +37,15 @@ struct NoteAppended {
 struct NoteFinalized {
     note_id: String,
     finalized_at_ns: u64,
+}
+
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum NoteEvent {
+        Start(NoteStarted),
+        Append(NoteAppended),
+        Finalize(NoteFinalized),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,7 +87,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         example_root,
         assets_root: None,
         reducer_name: REDUCER_NAME,
-        event_schema: "notes/NoteStarted@1",
+        event_schema: "notes/NoteEvent@1",
         module_crate: MODULE_CRATE,
     })?;
 
@@ -108,19 +118,19 @@ fn seed_world(host: &mut ExampleHost, seeds: &[NoteSeed]) -> Result<()> {
             author: seed.author.clone(),
             created_at_ns: seed.created_at_ns,
         };
-        host.send_event_as("notes/NoteStarted@1", &start)?;
+        host.send_event(&NoteEvent::Start(start))?;
         for line in &seed.lines {
             let append = NoteAppended {
                 note_id: seed.id.clone(),
                 line: line.clone(),
             };
-            host.send_event_as("notes/NoteAppended@1", &append)?;
+            host.send_event(&NoteEvent::Append(append))?;
         }
         let finalize = NoteFinalized {
             note_id: seed.id.clone(),
             finalized_at_ns: seed.created_at_ns + 5,
         };
-        host.send_event_as("notes/NoteFinalized@1", &finalize)?;
+        host.send_event(&NoteEvent::Finalize(finalize))?;
     }
     Ok(())
 }

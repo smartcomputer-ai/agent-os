@@ -2046,7 +2046,18 @@ impl<S: Store + 'static> Kernel<S> {
 
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
-            let event = build_reducer_receipt_event(&context, &receipt)?;
+            let reducer_schema = self.reducer_schemas.get(&context.reducer).ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "schema for reducer '{}' not found while handling receipt",
+                    context.reducer
+                ))
+            })?;
+            let event = build_reducer_receipt_event(
+                &context,
+                &receipt,
+                &reducer_schema.event_schema_name,
+                &reducer_schema.event_schema,
+            )?;
             self.process_domain_event(event)?;
             self.remember_receipt(receipt.intent_hash);
             return Ok(());

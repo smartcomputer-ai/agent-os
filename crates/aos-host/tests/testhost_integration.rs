@@ -39,6 +39,44 @@ impl Default for CounterPc {
     }
 }
 
+fn timer_event_schema() -> DefSchema {
+    DefSchema {
+        name: "test/TimerEvent@1".into(),
+        ty: TypeExpr::Variant(TypeVariant {
+            variant: IndexMap::from([
+                (
+                    "Start".into(),
+                    TypeExpr::Record(TypeRecord {
+                        record: IndexMap::new(),
+                    }),
+                ),
+                (
+                    "Fired".into(),
+                    TypeExpr::Ref(TypeRef {
+                        reference: SchemaRef::new("sys/TimerFired@1").unwrap(),
+                    }),
+                ),
+            ]),
+        }),
+    }
+}
+
+fn timer_state_schema() -> DefSchema {
+    DefSchema {
+        name: "test/TimerState@1".into(),
+        ty: TypeExpr::Record(TypeRecord {
+            record: IndexMap::new(),
+        }),
+    }
+}
+
+fn timer_start_event() -> serde_json::Value {
+    serde_json::json!({
+        "$tag": "Start",
+        "$value": {}
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum CounterEvent {
     Start { target: u64 },
@@ -420,10 +458,17 @@ async fn testhost_timer_effect_flow() {
         ann: None,
     };
 
-    let module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
+    let mut module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
+    module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("test/TimerState@1"),
+        event: fixtures::schema("test/TimerEvent@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
 
     // Build manifest with routing
-    let loaded = fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![],
         vec![],
         vec![module],
@@ -432,11 +477,12 @@ async fn testhost_timer_effect_flow() {
             "test/TimerReducer@1",
         )],
     );
+    fixtures::insert_test_schemas(&mut loaded, vec![timer_event_schema(), timer_state_schema()]);
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
     // Send event to trigger reducer
-    host.send_event("test/TimerEvent@1", serde_json::json!({}))
+    host.send_event("test/TimerEvent@1", timer_start_event())
         .unwrap();
 
     // Run cycle - this will drain reducer but not dispatch effects yet
@@ -498,8 +544,15 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
         ann: None,
     };
 
-    let module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
-    let loaded = fixtures::build_loaded_manifest(
+    let mut module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
+    module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("test/TimerState@1"),
+        event: fixtures::schema("test/TimerEvent@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![],
         vec![],
         vec![module],
@@ -508,11 +561,12 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
             "test/TimerReducer@1",
         )],
     );
+    fixtures::insert_test_schemas(&mut loaded, vec![timer_event_schema(), timer_state_schema()]);
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
     // Send event
-    host.send_event("test/TimerEvent@1", serde_json::json!({}))
+    host.send_event("test/TimerEvent@1", timer_start_event())
         .unwrap();
 
     // run_cycle_batch should dispatch effects via stub adapters
@@ -548,8 +602,15 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
         effects: vec![effect],
         ann: None,
     };
-    let module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
-    let loaded = fixtures::build_loaded_manifest(
+    let mut module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
+    module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("test/TimerState@1"),
+        event: fixtures::schema("test/TimerEvent@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![],
         vec![],
         vec![module],
@@ -558,9 +619,10 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
             "test/TimerReducer@1",
         )],
     );
+    fixtures::insert_test_schemas(&mut loaded, vec![timer_event_schema(), timer_state_schema()]);
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
-    host.send_event("test/TimerEvent@1", serde_json::json!({}))
+    host.send_event("test/TimerEvent@1", timer_start_event())
         .unwrap();
 
     let cycle = host.run_cycle_with_timers().await.unwrap();

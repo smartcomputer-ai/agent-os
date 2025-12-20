@@ -18,12 +18,12 @@ Status: **implemented** (kernel/storage/control). Cells make many instances of t
 
 ## Manifest & AIR hooks
 - `defmodule.key_schema` documents the key type when routed as keyed.
-- `manifest.routing.events[].key_field` marks routed events whose value field contains the key to target a cell: `{ event, reducer, key_field }`.
+- `manifest.routing.events[].key_field` marks routed events whose value field contains the key to target a cell: `{ event, reducer, key_field }`. For variant event schemas, `key_field` should typically point into the wrapped value (e.g., `$value.note_id`).
 - Plan `raise_event` step gains `key: Expr`; required when targeting a keyed reducer.
 - Triggers may set `correlate_by` so runs inherit a key for later `await_event` filters.
 
 ## Routing, Mailboxes, Scheduling
-- On ingest, kernel extracts `key = event.value[key_field]` (validated against `key_schema`) and targets `(reducer,key)`.
+- On ingest, kernel extracts `key = event.value[key_field]` (validated against `key_schema`) and targets `(reducer,key)`. For variant payloads, the canonical wrapper is `{"$tag": "...", "$value": ...}` so the key path is usually `$value.<field>`.
 - If the cell is missing, kernel calls reducer with `state=null` (creation). `state=null` on output deletes it.
 - Each cell has its own mailbox for DomainEvents and ReceiptEvents; delivery appends to the journal and marks the cell ready.
 - Scheduler uses fair round-robin across ready cells and plan runs: one step per tick, preserving determinism.

@@ -420,7 +420,7 @@ impl<S: Store + 'static> WorldHost<S> {
     /// This is the correct way to fire timers in daemon mode. The kernel will:
     /// 1. Remove context from `pending_reducer_receipts`
     /// 2. Record receipt in journal
-    /// 3. Build `sys/TimerFired@1` via `build_reducer_receipt_event()`
+    /// 3. Build a reducer receipt event (wrapping `sys/TimerFired@1`) via `build_reducer_receipt_event()`
     /// 4. Push reducer event to scheduler
     ///
     /// Returns the number of timers fired.

@@ -35,7 +35,9 @@
             "key": { "text": {} },
             "data": { "bytes": {} }
           }
-        }
+        },
+        "PutResult": { "ref": "sys/BlobPutResult@1" },
+        "GetResult": { "ref": "sys/BlobGetResult@1" }
       }
     }
   }

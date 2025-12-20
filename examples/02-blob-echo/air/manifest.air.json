@@ -69,14 +69,6 @@
       {
         "event": "demo/BlobEchoEvent@1",
         "reducer": "demo/BlobEchoSM@1"
-      },
-      {
-        "event": "sys/BlobPutResult@1",
-        "reducer": "demo/BlobEchoSM@1"
-      },
-      {
-        "event": "sys/BlobGetResult@1",
-        "reducer": "demo/BlobEchoSM@1"
       }
     ],
     "inboxes": []

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aos_host::config::HostConfig;
-use aos_host::fixtures::{self, START_SCHEMA, TestStore};
+use aos_host::fixtures::{self, TestStore};
 use aos_host::modes::daemon::{ControlMsg, WorldDaemon};
 use aos_host::{ExternalEvent, WorldHost};
 use aos_kernel::Kernel;
@@ -36,12 +36,16 @@ async fn daemon_fires_timer_and_routes_event() {
     let handle = tokio::spawn(async move { (daemon.run().await, daemon) });
 
     // Kick off the reducer that emits timer.set.
-    let start_value = serde_cbor::to_vec(&serde_json::json!({ "id": "t1" })).unwrap();
+    let start_value = serde_cbor::to_vec(&serde_json::json!({
+        "$tag": "Start",
+        "$value": { "id": "t1" }
+    }))
+    .unwrap();
     let (resp_tx, resp_rx) = oneshot::channel();
     control_tx
         .send(ControlMsg::EventSend {
             event: ExternalEvent::DomainEvent {
-                schema: START_SCHEMA.into(),
+                schema: "com.acme/TimerEvent@1".into(),
                 value: start_value,
                 key: None,
             },

@@ -86,19 +86,7 @@
   "routing": {
     "events": [
       {
-        "event": "demo/StartWork@1",
-        "reducer": "demo/RetrySM@1"
-      },
-      {
-        "event": "demo/WorkOk@1",
-        "reducer": "demo/RetrySM@1"
-      },
-      {
-        "event": "demo/WorkErr@1",
-        "reducer": "demo/RetrySM@1"
-      },
-      {
-        "event": "sys/TimerFired@1",
+        "event": "demo/RetryEvent@1",
         "reducer": "demo/RetrySM@1"
       }
     ],

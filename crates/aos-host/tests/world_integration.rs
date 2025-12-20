@@ -4,7 +4,8 @@ use aos_air_types::{
     ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
     PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
     PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveBool, TypePrimitiveInt,
-    TypePrimitiveNat, TypePrimitiveText, TypeRecord, ValueLiteral, ValueMap, ValueNull,
+    TypePrimitiveNat, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant, ValueLiteral, ValueMap,
+    ValueNull,
     ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
@@ -459,15 +460,19 @@ fn reducer_and_plan_effects_are_enqueued() {
     );
 }
 
-/// Timer receipts emitted by reducers must be translated into `sys/TimerFired@1` and routed
+/// Timer receipts emitted by reducers must be wrapped into the reducer event schema and routed
 /// through the normal event pipeline (including duplicate suppression / unknown handling).
 #[test]
 fn reducer_timer_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store, manifest).unwrap();
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("timer"),
+    });
     world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
+        .submit_event_result("com.acme/TimerEvent@1", &start_event)
         .expect("submit start event");
     world.tick_n(1).unwrap();
 
@@ -663,12 +668,12 @@ fn guarded_plan_branches_control_effects() {
     world_false.tick_n(2).unwrap();
     assert_eq!(world_false.drain_effects().len(), 0);
 }
-/// Blob.put receipts should be mapped into `sys/BlobPutResult@1` and delivered to reducers.
+/// Blob.put receipts should be mapped into `sys/BlobPutResult@1`, wrapped, and delivered to reducers.
 #[test]
 fn blob_put_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
 
-    let emitter = fixtures::stub_reducer_module(
+    let mut emitter = fixtures::stub_reducer_module(
         &store,
         "com.acme/BlobPutEmitter@1",
         &ReducerOutput {
@@ -686,7 +691,7 @@ fn blob_put_receipt_routes_event_to_handler() {
         },
     );
 
-    let handler = fixtures::stub_reducer_module(
+    let mut handler = fixtures::stub_reducer_module(
         &store,
         "com.acme/BlobPutHandler@1",
         &ReducerOutput {
@@ -697,12 +702,53 @@ fn blob_put_receipt_routes_event_to_handler() {
         },
     );
 
+    let event_schema = "com.acme/BlobPutEvent@1";
+    emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(event_schema),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    handler.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(event_schema),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+
     let routing = vec![
-        fixtures::routing_event(START_SCHEMA, &emitter.name),
-        fixtures::routing_event("sys/BlobPutResult@1", &handler.name),
+        fixtures::routing_event(event_schema, &emitter.name),
+        fixtures::routing_event(event_schema, &handler.name),
     ];
     let mut loaded =
         fixtures::build_loaded_manifest(vec![], vec![], vec![emitter, handler], routing);
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: event_schema.into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(START_SCHEMA),
+                            }),
+                        ),
+                        (
+                            "PutResult".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema("sys/BlobPutResult@1"),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
+        ],
+    );
     if let Some(binding) = loaded
         .manifest
         .module_bindings
@@ -712,8 +758,12 @@ fn blob_put_receipt_routes_event_to_handler() {
     }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
+    let start_event = json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("blob-put"),
+    });
     world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("blob-put"))
+        .submit_event_result(event_schema, &start_event)
         .expect("submit start event");
     world.tick_n(1).unwrap();
 
@@ -743,12 +793,12 @@ fn blob_put_receipt_routes_event_to_handler() {
     );
 }
 
-/// Blob.get receipts should similarly map into `sys/BlobGetResult@1` and wake reducers.
+/// Blob.get receipts should similarly map into `sys/BlobGetResult@1`, wrapped, and wake reducers.
 #[test]
 fn blob_get_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
 
-    let emitter = fixtures::stub_reducer_module(
+    let mut emitter = fixtures::stub_reducer_module(
         &store,
         "com.acme/BlobGetEmitter@1",
         &ReducerOutput {
@@ -766,7 +816,7 @@ fn blob_get_receipt_routes_event_to_handler() {
         },
     );
 
-    let handler = fixtures::stub_reducer_module(
+    let mut handler = fixtures::stub_reducer_module(
         &store,
         "com.acme/BlobGetHandler@1",
         &ReducerOutput {
@@ -777,12 +827,53 @@ fn blob_get_receipt_routes_event_to_handler() {
         },
     );
 
+    let event_schema = "com.acme/BlobGetEvent@1";
+    emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(event_schema),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    handler.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(event_schema),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+
     let routing = vec![
-        fixtures::routing_event(START_SCHEMA, &emitter.name),
-        fixtures::routing_event("sys/BlobGetResult@1", &handler.name),
+        fixtures::routing_event(event_schema, &emitter.name),
+        fixtures::routing_event(event_schema, &handler.name),
     ];
     let mut loaded =
         fixtures::build_loaded_manifest(vec![], vec![], vec![emitter, handler], routing);
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: event_schema.into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(START_SCHEMA),
+                            }),
+                        ),
+                        (
+                            "GetResult".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema("sys/BlobGetResult@1"),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
+        ],
+    );
     if let Some(binding) = loaded
         .manifest
         .module_bindings
@@ -792,8 +883,12 @@ fn blob_get_receipt_routes_event_to_handler() {
     }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
+    let start_event = json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("blob-get"),
+    });
     world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("blob-get"))
+        .submit_event_result(event_schema, &start_event)
         .expect("submit start event");
     world.tick_n(1).unwrap();
 

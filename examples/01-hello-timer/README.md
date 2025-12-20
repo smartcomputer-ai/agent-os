@@ -1,4 +1,4 @@
 # Example 01 — Hello Timer
 
-- Scope: reducer emits `timer.set`, handles `sys/TimerFired@1` receipts.
+- Scope: reducer emits `timer.set`, handles `TimerEvent::Fired` (wrapped `sys/TimerFired@1` receipt).
 - Follow the detailed spec in TODO.MD when populating `air/` and the reducer crate.

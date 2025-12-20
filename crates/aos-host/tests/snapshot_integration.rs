@@ -176,8 +176,12 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("timer"),
+    });
     world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
+        .submit_event_result("com.acme/TimerEvent@1", &start_event)
         .expect("submit start event");
     world.tick_n(1).unwrap();
 

@@ -11,7 +11,7 @@ use aos_air_types::{
     ExprRecord, ManifestDefaults, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
     PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
     PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText,
-    TypeRecord, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
+    TypeRecord, TypeRef, TypeVariant, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
 };
 use aos_effects::builtins::TimerSetParams;
 #[path = "../src/fixtures/mod.rs"]
@@ -324,21 +324,22 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
     let mut timer_handler =
         fixtures::stub_reducer_module(store, "com.acme/TimerHandler@1", &handler_output);
 
+    let timer_event_schema = "com.acme/TimerEvent@1";
     let routing = vec![
-        fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
-        fixtures::routing_event(START_SCHEMA, &timer_emitter.name),
+        fixtures::routing_event(timer_event_schema, &timer_handler.name),
+        fixtures::routing_event(timer_event_schema, &timer_emitter.name),
     ];
     // Provide minimal reducer ABI so routing succeeds.
     timer_emitter.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
-        event: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(timer_event_schema),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
     timer_handler.abi.reducer = Some(ReducerAbi {
-        state: fixtures::schema(fixtures::SYS_TIMER_FIRED),
-        event: fixtures::schema(fixtures::SYS_TIMER_FIRED),
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(timer_event_schema),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -351,10 +352,28 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
     );
     insert_test_schemas(
         &mut loaded,
-        vec![def_text_record_schema(
-            fixtures::START_SCHEMA,
-            vec![("id", text_type())],
-        )],
+        vec![
+            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: timer_event_schema.into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(fixtures::START_SCHEMA),
+                            }),
+                        ),
+                        (
+                            "Fired".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(fixtures::SYS_TIMER_FIRED),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
+        ],
     );
     loaded
 }
