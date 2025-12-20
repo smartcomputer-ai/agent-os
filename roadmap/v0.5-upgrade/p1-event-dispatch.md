@@ -93,7 +93,7 @@ Notes:
 
 This alone prevents your current inconsistency class.
 
-### Rule B — Event-family schema shape (make it machine-checkable) **[PENDING]**
+### Rule B — Event-family schema shape (make it machine-checkable) **[DONE]**
 
 To keep conversion deterministic and tooling-friendly, constrain event families:
 
@@ -105,7 +105,7 @@ To keep conversion deterministic and tooling-friendly, constrain event families:
 
 This is a purely semantic validation on top of the JSON Schema shape system.  
 
-### Rule C — Keying must be coherent **[PENDING]**
+### Rule C — Keying must be coherent **[DONE]**
 
 You already have `key_field` on routing entries for keyed reducers (cells) and mention kernel validation around key usage.  
 
