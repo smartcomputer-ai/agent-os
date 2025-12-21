@@ -1,5 +1,8 @@
+#[path = "helpers.rs"]
+mod helpers;
+
 use aos_effects::CapabilityGrant;
-use aos_host::fixtures;
+use helpers::fixtures;
 use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::mem::MemJournal;
@@ -10,7 +13,9 @@ use serde_json;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use aos_air_types::{EffectKind, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex};
+use aos_air_types::{
+    DefSchema, EffectKind, ReducerAbi, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex,
+};
 
 /// Plan-origin effects with semantically identical params but different CBOR shapes
 /// must canonicalize to the same params bytes and intent hash.
@@ -194,7 +199,7 @@ fn reducer_params_round_trip_journal_replay() {
         "default",
     );
     let store = fixtures::new_mem_store();
-    let reducer = fixtures::stub_reducer_module(
+    let mut reducer = fixtures::stub_reducer_module(
         &store,
         "com.acme/Reducer@1",
         &aos_wasm_abi::ReducerOutput {
@@ -204,6 +209,13 @@ fn reducer_params_round_trip_journal_replay() {
             ann: None,
         },
     );
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/ReducerState@1"),
+        event: fixtures::schema(fixtures::START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        cap_slots: Default::default(),
+    });
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
         &reducer.name,
@@ -216,10 +228,16 @@ fn reducer_params_round_trip_journal_replay() {
     );
     fixtures::insert_test_schemas(
         &mut manifest,
-        vec![fixtures::def_text_record_schema(
-            fixtures::START_SCHEMA,
-            vec![("id", fixtures::text_type())],
-        )],
+        vec![
+            fixtures::def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", fixtures::text_type())],
+            ),
+            DefSchema {
+                name: "com.acme/ReducerState@1".into(),
+                ty: fixtures::text_type(),
+            },
+        ],
     );
 
     // Run kernel to emit effect, record journal, replay, and compare params_cbor.
@@ -239,24 +257,40 @@ fn reducer_params_round_trip_journal_replay() {
             let mut replay_manifest = fixtures::build_loaded_manifest(
                 vec![],
                 vec![fixtures::start_trigger("com.acme/Plan@1")],
-                vec![fixtures::stub_reducer_module(
-                    &store,
-                    "com.acme/Reducer@1",
-                    &aos_wasm_abi::ReducerOutput {
-                        state: None,
-                        domain_events: vec![],
-                        effects: vec![effect.clone()],
-                        ann: None,
-                    },
-                )],
+                {
+                    let mut reducer = fixtures::stub_reducer_module(
+                        &store,
+                        "com.acme/Reducer@1",
+                        &aos_wasm_abi::ReducerOutput {
+                            state: None,
+                            domain_events: vec![],
+                            effects: vec![effect.clone()],
+                            ann: None,
+                        },
+                    );
+                    reducer.abi.reducer = Some(ReducerAbi {
+                        state: fixtures::schema("com.acme/ReducerState@1"),
+                        event: fixtures::schema(fixtures::START_SCHEMA),
+                        annotations: None,
+                        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+                        cap_slots: Default::default(),
+                    });
+                    vec![reducer]
+                },
                 routing.clone(),
             );
             fixtures::insert_test_schemas(
                 &mut replay_manifest,
-                vec![fixtures::def_text_record_schema(
-                    fixtures::START_SCHEMA,
-                    vec![("id", fixtures::text_type())],
-                )],
+                vec![
+                    fixtures::def_text_record_schema(
+                        fixtures::START_SCHEMA,
+                        vec![("id", fixtures::text_type())],
+                    ),
+                    DefSchema {
+                        name: "com.acme/ReducerState@1".into(),
+                        ty: fixtures::text_type(),
+                    },
+                ],
             );
             replay_manifest
         },

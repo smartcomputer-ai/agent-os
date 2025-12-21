@@ -122,8 +122,8 @@
       {
         "id": "raise_result",
         "op": "raise_event",
-        "reducer": "demo/LlmSummarizer@1",
-        "event": {
+        "event": "demo/LlmSummarizerEvent@1",
+        "value": {
           "variant": {
             "tag": "SummaryReady",
             "value": {

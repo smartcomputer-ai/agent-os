@@ -1,10 +1,11 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPolicy, EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch, PolicyRule,
+    DefPolicy, DefSchema, EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch,
+    PolicyRule, ReducerAbi,
 };
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use aos_host::fixtures::{self, START_SCHEMA, TestWorld};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 use aos_kernel::Kernel;
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::fs::FsJournal;
@@ -145,8 +146,8 @@ fn plan_snapshot_resumes_after_event() {
     world
         .submit_event_result(START_SCHEMA, &input)
         .expect("submit start event");
-    world.tick_n(1).unwrap();
-    world.tick_n(1).unwrap();
+    world.tick_n(2).unwrap();
+    world.tick_n(2).unwrap();
 
     world.kernel.create_snapshot().unwrap();
     let entries = world.kernel.dump_journal().unwrap();
@@ -179,7 +180,7 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
     world
         .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
         .expect("submit start event");
-    world.tick_n(1).unwrap();
+    world.tick_n(2).unwrap();
 
     let effect = world
         .drain_effects()
@@ -278,7 +279,7 @@ fn fs_store_and_journal_restore_snapshot() {
 }
 
 fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedManifest {
-    let reducer = fixtures::stub_reducer_module(
+    let mut reducer = fixtures::stub_reducer_module(
         store,
         "com.acme/SimpleFs@1",
         &ReducerOutput {
@@ -288,14 +289,24 @@ fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedM
             ann: None,
         },
     );
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/SimpleFsState@1"),
+        event: fixtures::schema(START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
-        vec![fixtures::def_text_record_schema(
-            START_SCHEMA,
-            vec![("id", fixtures::text_type())],
-        )],
+        vec![
+            fixtures::def_text_record_schema(START_SCHEMA, vec![("id", fixtures::text_type())]),
+            DefSchema {
+                name: "com.acme/SimpleFsState@1".into(),
+                ty: fixtures::text_type(),
+            },
+        ],
     );
     loaded
 }

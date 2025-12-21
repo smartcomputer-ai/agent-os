@@ -4,7 +4,8 @@ use aos_air_types::{
     ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
     PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
     PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveBool, TypePrimitiveInt,
-    TypePrimitiveNat, TypePrimitiveText, TypeRecord, ValueLiteral, ValueMap, ValueNull,
+    TypePrimitiveNat, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant, ValueLiteral, ValueMap,
+    ValueNull,
     ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
@@ -13,7 +14,7 @@ use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use aos_host::fixtures::{self, START_SCHEMA, TestWorld, effect_params_text, fake_hash};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld, effect_params_text, fake_hash};
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::{JournalKind, JournalRecord, PlanEndStatus, mem::MemJournal};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
@@ -150,8 +151,8 @@ fn sugar_literal_plan_executes_http_flow() {
             {
                 "id": "raise",
                 "op": "raise_event",
-                "reducer": "com.acme/ResultReducer@1",
-                "event": { "message": "done" }
+                "event": "com.acme/ResultEvent@1",
+                "value": { "message": "done" }
             },
             {
                 "id": "end",
@@ -170,25 +171,18 @@ fn sugar_literal_plan_executes_http_flow() {
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
     if let Some(step) = plan.steps.iter_mut().find(|step| step.id == "raise") {
         if let PlanStepKind::RaiseEvent(raise) = &mut step.kind {
-            raise.event = Expr::Record(ExprRecord {
+            raise.value = Expr::Record(ExprRecord {
                 record: IndexMap::from([("message".into(), fixtures::text_expr("done"))]),
             })
             .into();
         }
     }
-    let mut modules = HashMap::new();
-    modules.insert(result_module.name.clone(), result_module.clone());
     let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(
         aos_air_types::builtins::builtin_effects()
             .iter()
             .map(|e| e.effect.clone()),
     );
-    normalize_plan_literals(
-        &mut plan,
-        &builtin_schema_index_with_custom_types(),
-        &modules,
-        &effect_catalog,
-    )
+    normalize_plan_literals(&mut plan, &builtin_schema_index_with_custom_types(), &effect_catalog)
     .expect("normalize literals");
 
     let routing = vec![fixtures::routing_event(
@@ -289,15 +283,14 @@ fn single_plan_orchestration_completes_after_receipt() {
             PlanStep {
                 id: "raise".into(),
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                    reducer: result_module.name.clone(),
-                    event: Expr::Record(ExprRecord {
+                    event: fixtures::schema("com.acme/ResultEvent@1"),
+                    value: Expr::Record(ExprRecord {
                         record: IndexMap::from([(
                             "value".into(),
                             Expr::Const(ExprConst::Int { int: 9 }),
                         )]),
                     })
                     .into(),
-                    key: None,
                 }),
             },
             PlanStep {
@@ -398,8 +391,15 @@ fn reducer_and_plan_effects_are_enqueued() {
         )],
         ann: None,
     };
-    let reducer_module =
+    let mut reducer_module =
         fixtures::stub_reducer_module(&store, "com.acme/Reducer@1", &reducer_output);
+    reducer_module.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/ReducerState@1"),
+        event: fixtures::schema(START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
 
     let plan_name = "com.acme/EmitOnly@1".to_string();
     let plan = DefPlan {
@@ -435,11 +435,22 @@ fn reducer_and_plan_effects_are_enqueued() {
     };
 
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer_module.name)];
-    let loaded = fixtures::build_loaded_manifest(
+    let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![reducer_module],
         routing,
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/ReducerState@1".into(),
+                ty: text_type(),
+            },
+        ],
     );
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
@@ -459,17 +470,18 @@ fn reducer_and_plan_effects_are_enqueued() {
     );
 }
 
-/// Timer receipts emitted by reducers must be translated into `sys/TimerFired@1` and routed
-/// through the normal event pipeline (including duplicate suppression / unknown handling).
+/// Timer receipts emitted by reducers must route through the normal event pipeline
+/// (including duplicate suppression / unknown handling) and wrap at dispatch.
 #[test]
 fn reducer_timer_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store, manifest).unwrap();
+    let start_event = fixtures::start_event("timer");
     world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("timer"))
+        .submit_event_result(START_SCHEMA, &start_event)
         .expect("submit start event");
-    world.tick_n(1).unwrap();
+    world.tick_n(2).unwrap();
 
     let mut effects = world.drain_effects();
     assert_eq!(effects.len(), 1);
@@ -663,12 +675,12 @@ fn guarded_plan_branches_control_effects() {
     world_false.tick_n(2).unwrap();
     assert_eq!(world_false.drain_effects().len(), 0);
 }
-/// Blob.put receipts should be mapped into `sys/BlobPutResult@1` and delivered to reducers.
+/// Blob.put receipts should map into `sys/BlobPutResult@1`, route through the bus, and wrap at dispatch.
 #[test]
 fn blob_put_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
 
-    let emitter = fixtures::stub_reducer_module(
+    let mut emitter = fixtures::stub_reducer_module(
         &store,
         "com.acme/BlobPutEmitter@1",
         &ReducerOutput {
@@ -686,7 +698,7 @@ fn blob_put_receipt_routes_event_to_handler() {
         },
     );
 
-    let handler = fixtures::stub_reducer_module(
+    let mut handler = fixtures::stub_reducer_module(
         &store,
         "com.acme/BlobPutHandler@1",
         &ReducerOutput {
@@ -697,12 +709,53 @@ fn blob_put_receipt_routes_event_to_handler() {
         },
     );
 
+    let event_schema = "com.acme/BlobPutEvent@1";
+    emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(event_schema),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    handler.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(event_schema),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+
     let routing = vec![
-        fixtures::routing_event(START_SCHEMA, &emitter.name),
-        fixtures::routing_event("sys/BlobPutResult@1", &handler.name),
+        fixtures::routing_event(event_schema, &emitter.name),
+        fixtures::routing_event(event_schema, &handler.name),
     ];
     let mut loaded =
         fixtures::build_loaded_manifest(vec![], vec![], vec![emitter, handler], routing);
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: event_schema.into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(START_SCHEMA),
+                            }),
+                        ),
+                        (
+                            "PutResult".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema("sys/BlobPutResult@1"),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
+        ],
+    );
     if let Some(binding) = loaded
         .manifest
         .module_bindings
@@ -712,8 +765,12 @@ fn blob_put_receipt_routes_event_to_handler() {
     }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
+    let start_event = json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("blob-put"),
+    });
     world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("blob-put"))
+        .submit_event_result(event_schema, &start_event)
         .expect("submit start event");
     world.tick_n(1).unwrap();
 
@@ -743,12 +800,12 @@ fn blob_put_receipt_routes_event_to_handler() {
     );
 }
 
-/// Blob.get receipts should similarly map into `sys/BlobGetResult@1` and wake reducers.
+/// Blob.get receipts should similarly map into `sys/BlobGetResult@1`, route through the bus, and wrap at dispatch.
 #[test]
 fn blob_get_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
 
-    let emitter = fixtures::stub_reducer_module(
+    let mut emitter = fixtures::stub_reducer_module(
         &store,
         "com.acme/BlobGetEmitter@1",
         &ReducerOutput {
@@ -766,7 +823,7 @@ fn blob_get_receipt_routes_event_to_handler() {
         },
     );
 
-    let handler = fixtures::stub_reducer_module(
+    let mut handler = fixtures::stub_reducer_module(
         &store,
         "com.acme/BlobGetHandler@1",
         &ReducerOutput {
@@ -777,12 +834,53 @@ fn blob_get_receipt_routes_event_to_handler() {
         },
     );
 
+    let event_schema = "com.acme/BlobGetEvent@1";
+    emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(event_schema),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    handler.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(event_schema),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+
     let routing = vec![
-        fixtures::routing_event(START_SCHEMA, &emitter.name),
-        fixtures::routing_event("sys/BlobGetResult@1", &handler.name),
+        fixtures::routing_event(event_schema, &emitter.name),
+        fixtures::routing_event(event_schema, &handler.name),
     ];
     let mut loaded =
         fixtures::build_loaded_manifest(vec![], vec![], vec![emitter, handler], routing);
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: event_schema.into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(START_SCHEMA),
+                            }),
+                        ),
+                        (
+                            "GetResult".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema("sys/BlobGetResult@1"),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
+        ],
+    );
     if let Some(binding) = loaded
         .manifest
         .module_bindings
@@ -792,8 +890,12 @@ fn blob_get_receipt_routes_event_to_handler() {
     }
 
     let mut world = TestWorld::with_store(store, loaded).unwrap();
+    let start_event = json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("blob-get"),
+    });
     world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("blob-get"))
+        .submit_event_result(event_schema, &start_event)
         .expect("submit start event");
     world.tick_n(1).unwrap();
 
@@ -830,7 +932,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/TwoStage@1".to_string();
 
-    let next_emitter = fixtures::stub_event_emitting_reducer(
+    let mut next_emitter = fixtures::stub_event_emitting_reducer(
         &store,
         "com.acme/NextEmitter@1",
         vec![fixtures::domain_event(
@@ -838,6 +940,13 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
             &ExprValue::Int(1),
         )],
     );
+    next_emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/NextEmitterState@1"),
+        event: fixtures::schema("com.acme/PulseNext@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
 
     let plan = DefPlan {
         name: plan_name.clone(),
@@ -956,6 +1065,12 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                 ty: TypeExpr::Primitive(TypePrimitive::Int(TypePrimitiveInt {
                     int: EmptyObject::default(),
                 })),
+            },
+            DefSchema {
+                name: "com.acme/NextEmitterState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
             },
         ],
     );
@@ -1102,30 +1217,43 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         invariants: vec![],
     };
 
+    let mut ready_emitter = fixtures::stub_event_emitting_reducer(
+        &store,
+        "com.acme/ReadyEmitter@1",
+        vec![fixtures::domain_event(
+            "com.acme/Ready@1",
+            &ExprValue::Nat(7),
+        )],
+    );
+    ready_emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/ReadyEmitterState@1"),
+        event: fixtures::schema("com.acme/TriggerReady@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    let mut other_emitter = fixtures::stub_event_emitting_reducer(
+        &store,
+        "com.acme/OtherEmitter@1",
+        vec![fixtures::domain_event(
+            "com.acme/Other@1",
+            &ExprValue::Nat(9),
+        )],
+    );
+    other_emitter.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/OtherEmitterState@1"),
+        event: fixtures::schema("com.acme/TriggerOther@1"),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan_ready.clone(), plan_other.clone()],
         vec![
             fixtures::start_trigger(&plan_ready.name),
             fixtures::start_trigger(&plan_other.name),
         ],
-        vec![
-            fixtures::stub_event_emitting_reducer(
-                &store,
-                "com.acme/ReadyEmitter@1",
-                vec![fixtures::domain_event(
-                    "com.acme/Ready@1",
-                    &ExprValue::Nat(7),
-                )],
-            ),
-            fixtures::stub_event_emitting_reducer(
-                &store,
-                "com.acme/OtherEmitter@1",
-                vec![fixtures::domain_event(
-                    "com.acme/Other@1",
-                    &ExprValue::Nat(9),
-                )],
-            ),
-        ],
+        vec![ready_emitter, other_emitter],
         vec![
             fixtures::routing_event("com.acme/TriggerReady@1", "com.acme/ReadyEmitter@1"),
             fixtures::routing_event("com.acme/TriggerOther@1", "com.acme/OtherEmitter@1"),
@@ -1135,6 +1263,8 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         &mut loaded,
         vec![
             def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/TriggerReady@1", vec![]),
+            def_text_record_schema("com.acme/TriggerOther@1", vec![]),
             DefSchema {
                 name: "com.acme/Ready@1".into(),
                 ty: TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
@@ -1146,6 +1276,18 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
                 ty: TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
                     nat: EmptyObject::default(),
                 })),
+            },
+            DefSchema {
+                name: "com.acme/ReadyEmitterState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/OtherEmitterState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
             },
         ],
     );
@@ -1382,15 +1524,14 @@ fn raised_events_are_routed_to_reducers() {
             PlanStep {
                 id: "raise".into(),
                 kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                    reducer: reducer_name.clone(),
-                    event: Expr::Record(ExprRecord {
+                    event: fixtures::schema("com.acme/Raised@1"),
+                    value: Expr::Record(ExprRecord {
                         record: IndexMap::from([(
                             "value".into(),
                             Expr::Const(ExprConst::Int { int: 9 }),
                         )]),
                     })
                     .into(),
-                    key: None,
                 }),
             },
             PlanStep {

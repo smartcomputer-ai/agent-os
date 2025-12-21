@@ -1,4 +1,3 @@
-use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
@@ -133,10 +132,13 @@ fn build_blob_get_event(
     encode_event(SYS_BLOB_GET_RESULT_SCHEMA, payload)
 }
 
-fn encode_event<T: Serialize>(schema: &str, payload: T) -> Result<DomainEvent, KernelError> {
-    let value =
+fn encode_event<T: Serialize>(
+    receipt_schema: &str,
+    payload: T,
+) -> Result<DomainEvent, KernelError> {
+    let bytes =
         serde_cbor::to_vec(&payload).map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
-    Ok(DomainEvent::new(schema, value))
+    Ok(DomainEvent::new(receipt_schema, bytes))
 }
 
 fn hash_to_hex(bytes: &[u8; 32]) -> String {
@@ -152,6 +154,7 @@ fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, KernelError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aos_air_types::HashRef;
     use aos_effects::EffectReceipt;
     use serde::Deserialize;
 
@@ -180,7 +183,7 @@ mod tests {
         assert!(matches!(err, KernelError::UnsupportedReducerReceipt(_)));
     }
 
-    /// Verifies timer receipts are converted into the canonical `sys/TimerFired@1` payload.
+    /// Verifies timer receipts are encoded as sys/TimerFired@1 events.
     #[test]
     fn timer_receipt_event_is_structured() {
         let params = TimerSetParams {

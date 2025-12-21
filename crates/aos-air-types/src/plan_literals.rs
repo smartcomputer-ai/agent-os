@@ -6,11 +6,11 @@ use serde_json::Value as JsonValue;
 use thiserror::Error;
 
 use crate::{
-    DefModule, DefPlan, EffectKind, ExprOrValue, HashRef, TypeExpr, TypeList, TypeMap,
-    TypeMapEntry, TypeMapKey, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant,
-    ValueBool, ValueBytes, ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList,
-    ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText,
-    ValueTimeNs, ValueUuid, ValueVariant,
+    DefPlan, EffectKind, ExprOrValue, HashRef, TypeExpr, TypeList, TypeMap, TypeMapEntry,
+    TypeMapKey, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueBool,
+    ValueBytes, ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList, ValueLiteral,
+    ValueMap, ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText, ValueTimeNs,
+    ValueUuid, ValueVariant,
 };
 use crate::{Expr, ExprConst, typecheck::validate_value_literal};
 
@@ -37,10 +37,6 @@ impl SchemaIndex {
 pub enum PlanLiteralError {
     #[error("schema '{name}' not found")]
     SchemaNotFound { name: String },
-    #[error("reducer '{name}' not found")]
-    ReducerNotFound { name: String },
-    #[error("reducer '{name}' lacks reducer ABI")]
-    ReducerMissingAbi { name: String },
     #[error("effect {:?} does not have a parameters schema", kind)]
     UnknownEffect { kind: EffectKind },
     #[error("literal requires schema for {context}")]
@@ -54,7 +50,6 @@ pub enum PlanLiteralError {
 pub fn normalize_plan_literals(
     plan: &mut DefPlan,
     schemas: &SchemaIndex,
-    modules: &HashMap<String, DefModule>,
     effects: &crate::catalog::EffectCatalog,
 ) -> Result<(), PlanLiteralError> {
     for step in &mut plan.steps {
@@ -122,7 +117,7 @@ pub fn normalize_plan_literals(
                 }
             }
             crate::PlanStepKind::RaiseEvent(step) => {
-                normalize_raise_event_literal(step, schemas, modules)?;
+                normalize_raise_event_literal(step, schemas)?;
             }
             _ => {}
         }
@@ -739,33 +734,19 @@ fn effect_params_schema<'a>(
 fn normalize_raise_event_literal(
     step: &mut crate::PlanStepRaiseEvent,
     schemas: &SchemaIndex,
-    modules: &HashMap<String, DefModule>,
 ) -> Result<(), PlanLiteralError> {
-    let module = modules
-        .get(&step.reducer)
-        .ok_or_else(|| PlanLiteralError::ReducerNotFound {
-            name: step.reducer.clone(),
-        })?;
-    let reducer_abi =
-        module
-            .abi
-            .reducer
-            .as_ref()
-            .ok_or_else(|| PlanLiteralError::ReducerMissingAbi {
-                name: step.reducer.clone(),
-            })?;
-    let schema_name = reducer_abi.event.as_str();
+    let schema_name = step.event.as_str();
     let schema = schemas
         .get(schema_name)
         .ok_or_else(|| PlanLiteralError::SchemaNotFound {
             name: schema_name.to_string(),
         })?;
     normalize_expr_or_value(
-        &mut step.event,
+        &mut step.value,
         schema,
         schema_name,
         schemas,
-        "raise_event.event",
+        "raise_event.value",
     )
 }
 
@@ -795,32 +776,6 @@ mod tests {
                 .iter()
                 .map(|e| e.effect.clone()),
         )
-    }
-
-    fn reducer_modules() -> HashMap<String, DefModule> {
-        let mut modules = HashMap::new();
-        modules.insert(
-            "com.acme/Reducer@1".into(),
-            DefModule {
-                name: "com.acme/Reducer@1".into(),
-                module_kind: crate::ModuleKind::Reducer,
-                wasm_hash: HashRef::new(
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-                )
-                .unwrap(),
-                key_schema: None,
-                abi: crate::ModuleAbi {
-                    reducer: Some(crate::ReducerAbi {
-                        state: crate::SchemaRef::new("sys/TimerSetParams@1").unwrap(),
-                        event: crate::SchemaRef::new("sys/TimerFired@1").unwrap(),
-                        annotations: None,
-                        effects_emitted: vec![],
-                        cap_slots: IndexMap::new(),
-                    }),
-                },
-            },
-        );
-        modules
     }
 
     #[test]
@@ -857,12 +812,7 @@ mod tests {
             allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         };
-        normalize_plan_literals(
-            &mut plan,
-            &schema_index(),
-            &HashMap::new(),
-            &effect_catalog(),
-        )
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
         .unwrap();
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(matches!(step.params, ExprOrValue::Literal(_)));
@@ -900,12 +850,7 @@ mod tests {
             invariants: vec![],
         };
 
-        let err = normalize_plan_literals(
-            &mut plan,
-            &schema_index(),
-            &HashMap::new(),
-            &effect_catalog(),
-        )
+        let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
         .expect_err("should reject const wrapper in expr");
         assert!(matches!(err, PlanLiteralError::InvalidJson(_)));
     }
@@ -941,12 +886,7 @@ mod tests {
             allowed_effects: vec![EffectKind::llm_generate()],
             invariants: vec![],
         };
-        normalize_plan_literals(
-            &mut plan,
-            &schema_index(),
-            &HashMap::new(),
-            &effect_catalog(),
-        )
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
         .unwrap();
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(matches!(step.params, ExprOrValue::Literal(_)));
@@ -956,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_raise_event_literals_against_reducer_schema() {
+    fn normalizes_raise_event_literals_against_event_schema() {
         let mut plan = DefPlan {
             name: "com.acme/Plan@1".into(),
             input: crate::SchemaRef::new("com.acme/Input@1").unwrap(),
@@ -965,8 +905,8 @@ mod tests {
             steps: vec![crate::PlanStep {
                 id: "raise".into(),
                 kind: crate::PlanStepKind::RaiseEvent(crate::PlanStepRaiseEvent {
-                    reducer: "com.acme/Reducer@1".into(),
-                    event: ExprOrValue::Json(json!({
+                    event: crate::SchemaRef::new("sys/TimerFired@1").unwrap(),
+                    value: ExprOrValue::Json(json!({
                         "intent_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
                         "reducer": "com.acme/Reducer@1",
                         "effect_kind": "timer.set",
@@ -977,7 +917,6 @@ mod tests {
                         "cost_cents": 0,
                         "signature": "AA=="
                     })),
-                    key: None,
                 }),
             }],
             edges: vec![],
@@ -986,23 +925,18 @@ mod tests {
             invariants: vec![],
         };
 
-        normalize_plan_literals(
-            &mut plan,
-            &schema_index(),
-            &reducer_modules(),
-            &effect_catalog(),
-        )
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
         .unwrap();
 
         if let crate::PlanStepKind::RaiseEvent(step) = &plan.steps[0].kind {
-            assert!(matches!(step.event, ExprOrValue::Literal(_)));
+            assert!(matches!(step.value, ExprOrValue::Literal(_)));
         } else {
             panic!("expected raise_event step");
         }
     }
 
     #[test]
-    fn raise_event_literal_without_reducer_errors() {
+    fn raise_event_literal_without_schema_errors() {
         let mut plan = DefPlan {
             name: "com.acme/Plan@1".into(),
             input: crate::SchemaRef::new("com.acme/Input@1").unwrap(),
@@ -1011,9 +945,8 @@ mod tests {
             steps: vec![crate::PlanStep {
                 id: "raise".into(),
                 kind: crate::PlanStepKind::RaiseEvent(crate::PlanStepRaiseEvent {
-                    reducer: "com.acme/Missing@1".into(),
-                    event: ExprOrValue::Json(json!({})),
-                    key: None,
+                    event: crate::SchemaRef::new("com.acme/Missing@1").unwrap(),
+                    value: ExprOrValue::Json(json!({})),
                 }),
             }],
             edges: vec![],
@@ -1022,14 +955,9 @@ mod tests {
             invariants: vec![],
         };
 
-        let err = normalize_plan_literals(
-            &mut plan,
-            &schema_index(),
-            &HashMap::new(),
-            &effect_catalog(),
-        )
+        let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
         .unwrap_err();
-        assert!(matches!(err, PlanLiteralError::ReducerNotFound { .. }));
+        assert!(matches!(err, PlanLiteralError::SchemaNotFound { .. }));
     }
 
     #[test]
@@ -1076,8 +1004,7 @@ mod tests {
             }),
         );
 
-        normalize_plan_literals(&mut plan, &schemas, &HashMap::new(), &effect_catalog())
-            .expect("normalize");
+        normalize_plan_literals(&mut plan, &schemas, &effect_catalog()).expect("normalize");
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(
                 matches!(step.params, ExprOrValue::Expr(_)),
@@ -1119,12 +1046,7 @@ mod tests {
             invariants: vec![],
         };
 
-        normalize_plan_literals(
-            &mut plan,
-            &schema_index(),
-            &HashMap::new(),
-            &effect_catalog(),
-        )
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
         .expect("normalize");
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(

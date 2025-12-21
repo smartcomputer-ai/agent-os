@@ -14,13 +14,16 @@
 
 #![cfg(feature = "test-fixtures")]
 
+#[path = "helpers.rs"]
+mod helpers;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use aos_air_types::{
     builtins, plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name,
 };
-use aos_host::fixtures::{self, TestStore};
+use helpers::fixtures::{self, TestStore};
 use aos_kernel::Kernel;
 use aos_kernel::journal::OwnedJournalEntry;
 use aos_kernel::journal::mem::MemJournal;

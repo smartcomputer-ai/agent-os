@@ -4,6 +4,7 @@ A keyed notebook reducer plus ObjectCatalog and a small plan. Finalized notes tr
 
 ## What it does
 - Keyed reducer `notes/NotebookSM@1` owns one note per key.
+- Runner sends `notes/NoteEvent@1` variants (Start/Append/Finalize) to seed notes.
 - `NoteFinalized` emits `SnapshotRequested`; plan `notes/SnapshotPlan@1` does:
   1. `blob.put` the report (namespace = note_id).
   2. Raise `sys/ObjectRegistered@1` (object `notes/<id>/report`, kind `note.report`, tags `report,worldfs`).

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -192,9 +192,18 @@ struct PlanTriggerBinding {
 }
 
 #[derive(Clone, Debug)]
+enum EventWrap {
+    Identity,
+    Variant { tag: String },
+}
+
+#[derive(Clone, Debug)]
 struct RouteBinding {
     reducer: Name,
     key_field: Option<String>,
+    route_event_schema: String,
+    reducer_event_schema: String,
+    wrap: EventWrap,
 }
 
 #[derive(Clone)]
@@ -417,18 +426,12 @@ impl<S: Store + 'static> Kernel<S> {
         config: KernelConfig,
     ) -> Result<Self, KernelError> {
         let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
-        let mut router = HashMap::new();
-        if let Some(routing) = loaded.manifest.routing.as_ref() {
-            for route in &routing.events {
-                router
-                    .entry(route.event.as_str().to_string())
-                    .or_insert_with(Vec::new)
-                    .push(RouteBinding {
-                        reducer: route.reducer.clone(),
-                        key_field: route.key_field.clone(),
-                    });
-            }
-        }
+        let schema_index = Arc::new(build_schema_index_from_loaded(store.as_ref(), &loaded)?);
+        let reducer_schemas = Arc::new(build_reducer_schemas(
+            &loaded.modules,
+            schema_index.as_ref(),
+        )?);
+        let router = build_router(&loaded.manifest, reducer_schemas.as_ref())?;
         let mut plan_registry = PlanRegistry::default();
         for plan in loaded.plans.values() {
             plan_registry.register(plan.clone());
@@ -446,7 +449,6 @@ impl<S: Store + 'static> Kernel<S> {
         for bindings in plan_triggers.values_mut() {
             bindings.sort_by(|a, b| a.plan.cmp(&b.plan));
         }
-        let schema_index = Arc::new(build_schema_index_from_loaded(store.as_ref(), &loaded)?);
         let effect_catalog = Arc::new(loaded.effect_catalog.clone());
         let capability_resolver = CapabilityResolver::from_manifest(
             &loaded.manifest,
@@ -456,10 +458,6 @@ impl<S: Store + 'static> Kernel<S> {
         )?;
         ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
         ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
-        let reducer_schemas = Arc::new(build_reducer_schemas(
-            &loaded.modules,
-            schema_index.as_ref(),
-        )?);
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
             .defaults
@@ -635,6 +633,13 @@ impl<S: Store + 'static> Kernel<S> {
                 .module_defs
                 .get(&binding.reducer)
                 .ok_or_else(|| KernelError::ReducerNotFound(binding.reducer.clone()))?;
+            let reducer_schema =
+                self.reducer_schemas.get(&binding.reducer).ok_or_else(|| {
+                    KernelError::Manifest(format!(
+                        "schema for reducer '{}' not found while routing event",
+                        binding.reducer
+                    ))
+                })?;
             let keyed = module_def.key_schema.is_some();
 
             match (keyed, &binding.key_field) {
@@ -653,6 +658,25 @@ impl<S: Store + 'static> Kernel<S> {
                 _ => {}
             }
 
+            let wrapped_value = match &binding.wrap {
+                EventWrap::Identity => event_value.clone(),
+                EventWrap::Variant { tag } => CborValue::Map(BTreeMap::from([
+                    (
+                        CborValue::Text("$tag".into()),
+                        CborValue::Text(tag.clone()),
+                    ),
+                    (CborValue::Text("$value".into()), event_value.clone()),
+                ])),
+            };
+            let normalized_for_reducer =
+                normalize_value_with_schema(wrapped_value, &reducer_schema.event_schema, &self.schema_index)
+                    .map_err(|err| {
+                        KernelError::Manifest(format!(
+                            "failed to encode event '{}' for reducer '{}': {err}",
+                            event.schema, binding.reducer
+                        ))
+                    })?;
+
             let key_bytes = if let Some(field) = &binding.key_field {
                 let key_schema_ref = module_def
                     .key_schema
@@ -668,7 +692,17 @@ impl<S: Store + 'static> Kernel<S> {
                                 binding.reducer
                             ))
                         })?;
-                Some(self.extract_key_bytes(field, key_schema, &event_value, &event.schema)?)
+                let value_for_key = if binding.route_event_schema == event.schema {
+                    &event_value
+                } else {
+                    &normalized_for_reducer.value
+                };
+                Some(self.extract_key_bytes(
+                    field,
+                    key_schema,
+                    value_for_key,
+                    binding.route_event_schema.as_str(),
+                )?)
             } else {
                 None
             };
@@ -682,7 +716,11 @@ impl<S: Store + 'static> Kernel<S> {
                 }
             }
 
-            let mut routed_event = event.clone();
+            let mut routed_event = DomainEvent::new(
+                binding.reducer_event_schema.clone(),
+                normalized_for_reducer.bytes,
+            );
+            routed_event.key = event.key.clone();
             if let Some(bytes) = key_bytes.clone() {
                 routed_event.key = Some(bytes);
             }
@@ -1142,7 +1180,6 @@ impl<S: Store + 'static> Kernel<S> {
                 inst_snapshot,
                 plan,
                 self.schema_index.clone(),
-                self.reducer_schemas.clone(),
             );
             self.plan_instances.insert(instance.id, instance);
         }
@@ -1799,18 +1836,7 @@ impl<S: Store + 'static> Kernel<S> {
             self.plan_registry.register(plan.clone());
         }
 
-        self.router.clear();
-        if let Some(routing) = self.manifest.routing.as_ref() {
-            for route in &routing.events {
-                self.router
-                    .entry(route.event.as_str().to_string())
-                    .or_insert_with(Vec::new)
-                    .push(RouteBinding {
-                        reducer: route.reducer.clone(),
-                        key_field: route.key_field.clone(),
-                    });
-            }
-        }
+        self.router = build_router(&self.manifest, reducer_schemas.as_ref())?;
 
         let mut plan_triggers = HashMap::new();
         for trigger in &self.manifest.triggers {
@@ -1927,7 +1953,6 @@ impl<S: Store + 'static> Kernel<S> {
                         plan_def.clone(),
                         input,
                         self.schema_index.clone(),
-                        self.reducer_schemas.clone(),
                         correlation,
                     );
                     self.plan_instances.insert(instance_id, instance);
@@ -2264,16 +2289,12 @@ pub fn canonicalize_patch<S: Store>(
     for builtin in builtins::builtin_schemas() {
         schema_map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
     }
-    let mut module_map: HashMap<Name, DefModule> = HashMap::new();
     let mut effect_defs = Vec::new();
 
     for node in &canonical.nodes {
         match node {
             AirNode::Defschema(schema) => {
                 schema_map.insert(schema.name.clone(), schema.ty.clone());
-            }
-            AirNode::Defmodule(module) => {
-                module_map.insert(module.name.clone(), module.clone());
             }
             AirNode::Defeffect(effect) => {
                 effect_defs.push(effect.clone());
@@ -2283,8 +2304,6 @@ pub fn canonicalize_patch<S: Store>(
     }
 
     extend_schema_map_from_store(store, &canonical.manifest.schemas, &mut schema_map)?;
-    extend_module_map_from_store(store, &canonical.manifest.modules, &mut module_map)?;
-
     let schema_index = SchemaIndex::new(schema_map);
     if effect_defs.is_empty() {
         effect_defs.extend(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
@@ -2292,14 +2311,12 @@ pub fn canonicalize_patch<S: Store>(
     let effect_catalog = EffectCatalog::from_defs(effect_defs);
     for node in canonical.nodes.iter_mut() {
         if let AirNode::Defplan(plan) = node {
-            normalize_plan_literals(plan, &schema_index, &module_map, &effect_catalog).map_err(
-                |err| {
-                    KernelError::Manifest(format!(
-                        "plan '{}' literal normalization failed: {err}",
-                        plan.name
-                    ))
-                },
-            )?;
+            normalize_plan_literals(plan, &schema_index, &effect_catalog).map_err(|err| {
+                KernelError::Manifest(format!(
+                    "plan '{}' literal normalization failed: {err}",
+                    plan.name
+                ))
+            })?;
         }
     }
 
@@ -2319,25 +2336,6 @@ fn extend_schema_map_from_store<S: Store>(
             let node: AirNode = store.get_node(hash)?;
             if let AirNode::Defschema(schema) = node {
                 schemas.insert(schema.name.clone(), schema.ty.clone());
-            }
-        }
-    }
-    Ok(())
-}
-
-fn extend_module_map_from_store<S: Store>(
-    store: &S,
-    refs: &[NamedRef],
-    modules: &mut HashMap<Name, DefModule>,
-) -> Result<(), KernelError> {
-    for reference in refs {
-        if modules.contains_key(reference.name.as_str()) {
-            continue;
-        }
-        if let Some(hash) = parse_nonzero_hash(reference.hash.as_str())? {
-            let node: AirNode = store.get_node(hash)?;
-            if let AirNode::Defmodule(module) = node {
-                modules.insert(module.name.clone(), module);
             }
         }
     }
@@ -3284,6 +3282,145 @@ fn build_reducer_schemas(
         }
     }
     Ok(map)
+}
+
+fn build_router(
+    manifest: &Manifest,
+    reducer_schemas: &HashMap<Name, ReducerSchema>,
+) -> Result<HashMap<String, Vec<RouteBinding>>, KernelError> {
+    let mut router = HashMap::new();
+    let Some(routing) = manifest.routing.as_ref() else {
+        return Ok(router);
+    };
+
+    for route in &routing.events {
+        let reducer_schema =
+            reducer_schemas
+                .get(&route.reducer)
+                .ok_or_else(|| KernelError::Manifest(format!(
+                    "schema for reducer '{}' not found while building router",
+                    route.reducer
+                )))?;
+        let route_event = route.event.as_str();
+        let reducer_event_schema = reducer_schema.event_schema_name.as_str();
+        if route_event == reducer_event_schema {
+            push_route_binding(
+                &mut router,
+                route_event,
+                route_event,
+                reducer_schema,
+                route.key_field.clone(),
+                EventWrap::Identity,
+                &route.reducer,
+            );
+            match &reducer_schema.event_schema {
+                TypeExpr::Ref(reference) => {
+                    let member = reference.reference.as_str();
+                    push_route_binding(
+                        &mut router,
+                        member,
+                        route_event,
+                        reducer_schema,
+                        route.key_field.clone(),
+                        EventWrap::Identity,
+                        &route.reducer,
+                    );
+                }
+                TypeExpr::Variant(variant) => {
+                    for (tag, ty) in &variant.variant {
+                        if let TypeExpr::Ref(reference) = ty {
+                            push_route_binding(
+                                &mut router,
+                                reference.reference.as_str(),
+                                route_event,
+                                reducer_schema,
+                                route.key_field.clone(),
+                                EventWrap::Variant { tag: tag.clone() },
+                                &route.reducer,
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            let wrap = wrap_for_event_schema(route_event, reducer_schema)?;
+            push_route_binding(
+                &mut router,
+                route_event,
+                route_event,
+                reducer_schema,
+                route.key_field.clone(),
+                wrap,
+                &route.reducer,
+            );
+        }
+    }
+
+    Ok(router)
+}
+
+fn push_route_binding(
+    router: &mut HashMap<String, Vec<RouteBinding>>,
+    event_key: &str,
+    route_event_schema: &str,
+    reducer_schema: &ReducerSchema,
+    key_field: Option<String>,
+    wrap: EventWrap,
+    reducer: &str,
+) {
+    router
+        .entry(event_key.to_string())
+        .or_insert_with(Vec::new)
+        .push(RouteBinding {
+            reducer: reducer.to_string(),
+            key_field,
+            route_event_schema: route_event_schema.to_string(),
+            reducer_event_schema: reducer_schema.event_schema_name.clone(),
+            wrap,
+        });
+}
+
+fn wrap_for_event_schema(
+    event_schema: &str,
+    reducer_schema: &ReducerSchema,
+) -> Result<EventWrap, KernelError> {
+    if event_schema == reducer_schema.event_schema_name {
+        return Ok(EventWrap::Identity);
+    }
+    match &reducer_schema.event_schema {
+        TypeExpr::Ref(reference) if reference.reference.as_str() == event_schema => {
+            Ok(EventWrap::Identity)
+        }
+        TypeExpr::Variant(variant) => {
+            let mut found = None;
+            for (tag, ty) in &variant.variant {
+                if let TypeExpr::Ref(reference) = ty {
+                    if reference.reference.as_str() == event_schema {
+                        if found.is_some() {
+                            return Err(KernelError::Manifest(format!(
+                                "event '{event_schema}' appears in multiple variant arms for reducer schema '{}'",
+                                reducer_schema.event_schema_name
+                            )));
+                        }
+                        found = Some(tag.clone());
+                    }
+                }
+            }
+            found
+                .map(|tag| EventWrap::Variant { tag })
+                .ok_or_else(|| {
+                    KernelError::Manifest(format!(
+                        "event '{event_schema}' is not in reducer schema '{}' family",
+                        reducer_schema.event_schema_name
+                    ))
+                })
+        }
+        _ => Err(KernelError::Manifest(format!(
+            "event '{event_schema}' is not in reducer schema '{}' family",
+            reducer_schema.event_schema_name
+        ))),
+    }
 }
 
 fn ensure_plan_capabilities(

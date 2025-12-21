@@ -52,8 +52,8 @@
       {
         "id": "raise_success",
         "op": "raise_event",
-        "reducer": "demo/ChainComp@1",
-        "event": {
+        "event": "demo/ChainEvent@1",
+        "value": {
           "variant": {
             "tag": "ReserveCompleted",
             "value": {
@@ -81,8 +81,8 @@
       {
         "id": "raise_failure",
         "op": "raise_event",
-        "reducer": "demo/ChainComp@1",
-        "event": {
+        "event": "demo/ChainEvent@1",
+        "value": {
           "variant": {
             "tag": "ReserveFailed",
             "value": {

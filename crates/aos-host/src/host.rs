@@ -420,8 +420,8 @@ impl<S: Store + 'static> WorldHost<S> {
     /// This is the correct way to fire timers in daemon mode. The kernel will:
     /// 1. Remove context from `pending_reducer_receipts`
     /// 2. Record receipt in journal
-    /// 3. Build `sys/TimerFired@1` via `build_reducer_receipt_event()`
-    /// 4. Push reducer event to scheduler
+    /// 3. Build a `sys/TimerFired@1` receipt event via `build_reducer_receipt_event()`
+    /// 4. Route/wrap at dispatch and push reducer event to scheduler
     ///
     /// Returns the number of timers fired.
     pub fn fire_due_timers(&mut self, scheduler: &mut TimerScheduler) -> Result<usize, HostError> {

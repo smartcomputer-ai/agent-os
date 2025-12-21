@@ -6,7 +6,7 @@ use aos_cbor::Hash;
 use aos_host::WorldHost;
 use aos_host::config::HostConfig;
 use aos_host::control::{ControlClient, ControlMode, ControlServer, RequestEnvelope};
-use aos_host::fixtures::{self, TestStore};
+use helpers::fixtures::{self, TestStore};
 use aos_host::modes::daemon::WorldDaemon;
 use aos_kernel::Kernel;
 use aos_kernel::journal::mem::MemJournal;

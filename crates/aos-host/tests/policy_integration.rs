@@ -1,10 +1,10 @@
 use aos_air_types::{
-    DefPolicy, EffectKind as AirEffectKind, EmptyObject, Expr, ExprConst, ExprMap, ExprOrValue,
-    ExprRecord, ExprRef, OriginKind, PolicyDecision, PolicyMatch, PolicyRule, ValueLiteral,
-    ValueMap, ValueNull, ValueRecord, ValueText,
+    DefPolicy, DefSchema, EffectKind as AirEffectKind, EmptyObject, Expr, ExprConst, ExprMap,
+    ExprOrValue, ExprRecord, ExprRef, OriginKind, PolicyDecision, PolicyMatch, PolicyRule,
+    ReducerAbi, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
 };
 use aos_effects::builtins::HttpRequestParams;
-use aos_host::fixtures::{self, TestWorld, zero_hash};
+use helpers::fixtures::{self, TestWorld, zero_hash};
 use aos_kernel::error::KernelError;
 use aos_wasm_abi::ReducerEffect;
 use indexmap::IndexMap;
@@ -36,7 +36,14 @@ fn http_reducer_output() -> aos_wasm_abi::ReducerOutput {
 fn reducer_http_effect_is_denied() {
     let store = fixtures::new_mem_store();
     let reducer_name = "com.acme/HttpReducer@1".to_string();
-    let reducer = fixtures::stub_reducer_module(&store, &reducer_name, &http_reducer_output());
+    let mut reducer = fixtures::stub_reducer_module(&store, &reducer_name, &http_reducer_output());
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/HttpState@1"),
+        event: fixtures::schema(fixtures::START_SCHEMA),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        cap_slots: Default::default(),
+    });
 
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
@@ -45,10 +52,13 @@ fn reducer_http_effect_is_denied() {
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
-        vec![def_text_record_schema(
-            fixtures::START_SCHEMA,
-            vec![("id", text_type())],
-        )],
+        vec![
+            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/HttpState@1".into(),
+                ty: text_type(),
+            },
+        ],
     );
     // Bind the reducer's default slot to the HTTP capability grant.
     if let Some(binding) = loaded.manifest.module_bindings.get_mut(&reducer_name) {

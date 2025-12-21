@@ -51,10 +51,7 @@
   },
   "routing": {
     "events": [
-      { "event": "notes/NoteStarted@1", "reducer": "notes/NotebookSM@1", "key_field": "note_id" },
-      { "event": "notes/NoteAppended@1", "reducer": "notes/NotebookSM@1", "key_field": "note_id" },
-      { "event": "notes/NoteFinalized@1", "reducer": "notes/NotebookSM@1", "key_field": "note_id" },
-      { "event": "notes/NoteArchived@1", "reducer": "notes/NotebookSM@1", "key_field": "note_id" },
+      { "event": "notes/NoteEvent@1", "reducer": "notes/NotebookSM@1", "key_field": "$value.note_id" },
       { "event": "sys/ObjectRegistered@1", "reducer": "sys/ObjectCatalog@1", "key_field": "meta.name" }
     ],
     "inboxes": []

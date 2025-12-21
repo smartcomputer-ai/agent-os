@@ -583,8 +583,8 @@ receipt: {
     {
       "id": "on_success",
       "op": "raise_event",
-      "reducer": "com.acme/OrderSM@1",
-      "event": {
+      "event": "com.acme/OrderEvent@1",
+      "value": {
         "record": {
           "order_id": { "ref": "@plan.input.order_id" },
           "txn_id": { "ref": "@var:charge_result.Ok.txn_id" }
@@ -594,8 +594,8 @@ receipt: {
     {
       "id": "on_error",
       "op": "raise_event",
-      "reducer": "com.acme/OrderSM@1",
-      "event": {
+      "event": "com.acme/OrderEvent@1",
+      "value": {
         "record": {
           "order_id": { "ref": "@plan.input.order_id" },
           "error": { "ref": "@var:charge_result.Error.message" }
@@ -689,8 +689,8 @@ receipt: {
     {
       "id": "publish",
       "op": "raise_event",
-      "reducer": "com.acme/ReportSM@1",
-      "event": {
+      "event": "com.acme/ReportEvent@1",
+      "value": {
         "record": {
           "report": { "ref": "@var:report" }
         }
@@ -761,14 +761,14 @@ receipt: {
     {
       "id": "handle_success",
       "op": "raise_event",
-      "reducer": "com.acme/WorkSM@1",
-      "event": { "comment": "child succeeded before timeout" }
+      "event": "com.acme/WorkEvent@1",
+      "value": { "comment": "child succeeded before timeout" }
     },
     {
       "id": "handle_timeout",
       "op": "raise_event",
-      "reducer": "com.acme/WorkSM@1",
-      "event": { "comment": "work timed out" }
+      "event": "com.acme/WorkEvent@1",
+      "value": { "comment": "work timed out" }
     },
     { "id": "done", "op": "end" }
   ],

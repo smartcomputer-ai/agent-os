@@ -6,13 +6,14 @@ use anyhow::{Result, ensure};
 use aos_effects::{EffectKind as EffectsEffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::FsStore;
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 use serde_cbor;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/RetrySM@1";
-const START_EVENT_SCHEMA: &str = "demo/StartWork@1";
+const EVENT_SCHEMA: &str = "demo/RetryEvent@1";
 const MODULE_CRATE: &str = "examples/08-retry-backoff/reducer";
 const ADAPTER_ID: &str = "adapter.timer.fake";
 
@@ -23,6 +24,14 @@ struct StartWork {
     max_attempts: u32,
     base_delay_ms: u64,
     now_ns: u64,
+}
+
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum RetryEvent {
+        #[serde(rename = "start")]
+        Start(StartWork),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,7 +72,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         example_root,
         assets_root: None,
         reducer_name: REDUCER_NAME,
-        event_schema: START_EVENT_SCHEMA,
+        event_schema: EVENT_SCHEMA,
         module_crate: MODULE_CRATE,
     })?;
 
@@ -79,7 +88,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         "     start req_id={} max_attempts={} base_delay_ms={}",
         start.req_id, start.max_attempts, start.base_delay_ms
     );
-    host.send_event(&start)?;
+    host.send_event(&RetryEvent::Start(start))?;
 
     synthesize_timer_receipts(host.kernel_mut())?;
 
@@ -124,6 +133,7 @@ fn synthesize_timer_receipts(kernel: &mut Kernel<FsStore>) -> Result<()> {
                 signature: vec![0; 64],
             };
             kernel.handle_receipt(receipt)?;
+            kernel.tick_until_idle()?;
         }
         safety += 1;
         ensure!(safety < 16, "safety trip: too many retry cycles");

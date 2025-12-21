@@ -73,8 +73,8 @@
       {
         "id": "raise_complete",
         "op": "raise_event",
-        "reducer": "demo/SafeUpgrade@1",
-        "event": {
+        "event": "demo/SafeUpgradeEvent@1",
+        "value": {
           "variant": {
             "tag": "NotifyComplete",
             "value": {

@@ -5,9 +5,8 @@ use serde_json::json;
 
 use super::assert_json_schema;
 use crate::{
-    DefModule, DefPlan, EffectKind, ExprOrValue, HashRef, ModuleAbi, ModuleKind, ReducerAbi,
-    SchemaRef, TypeExpr, TypeMap, TypeMapEntry, TypeMapKey, TypePrimitive, TypePrimitiveNat,
-    TypePrimitiveText, TypePrimitiveUuid, TypeSet,
+    DefPlan, EffectKind, ExprOrValue, TypeExpr, TypeMap, TypeMapEntry, TypeMapKey,
+    TypePrimitive, TypePrimitiveNat, TypePrimitiveText, TypePrimitiveUuid, TypeSet,
     builtins::builtin_schemas,
     plan_literals::{PlanLiteralError, SchemaIndex, normalize_plan_literals},
     validate,
@@ -81,32 +80,6 @@ fn effect_catalog() -> crate::catalog::EffectCatalog {
     )
 }
 
-fn reducer_modules() -> HashMap<String, DefModule> {
-    let mut modules = HashMap::new();
-    modules.insert(
-        "com.acme/Reducer@1".into(),
-        DefModule {
-            name: "com.acme/Reducer@1".into(),
-            module_kind: ModuleKind::Reducer,
-            wasm_hash: HashRef::new(
-                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-            )
-            .unwrap(),
-            key_schema: None,
-            abi: ModuleAbi {
-                reducer: Some(ReducerAbi {
-                    state: SchemaRef::new("com.acme/Text@1").unwrap(),
-                    event: SchemaRef::new("sys/TimerFired@1").unwrap(),
-                    annotations: None,
-                    effects_emitted: vec![EffectKind::http_request()],
-                    cap_slots: indexmap::IndexMap::new(),
-                }),
-            },
-        },
-    );
-    modules
-}
-
 #[test]
 fn normalizes_all_expr_or_value_slots() {
     let plan_json = json!({
@@ -138,8 +111,8 @@ fn normalizes_all_expr_or_value_slots() {
             {
                 "id": "raise",
                 "op": "raise_event",
-                "reducer": "com.acme/Reducer@1",
-                "event": {
+                "event": "sys/TimerFired@1",
+                "value": {
                     "intent_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
                     "reducer": "com.acme/Reducer@1",
                     "effect_kind": "timer.set",
@@ -168,13 +141,7 @@ fn normalizes_all_expr_or_value_slots() {
 
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
-    normalize_plan_literals(
-        &mut plan,
-        &schema_index(),
-        &reducer_modules(),
-        &effect_catalog(),
-    )
-    .expect("normalize");
+    normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).expect("normalize");
 
     // assign literal
     if let crate::PlanStepKind::Assign(step) = &plan.steps[0].kind {
@@ -188,7 +155,7 @@ fn normalizes_all_expr_or_value_slots() {
         panic!("expected emit step");
     }
     if let crate::PlanStepKind::RaiseEvent(step) = &plan.steps[2].kind {
-        assert!(matches!(step.event, ExprOrValue::Literal(_)));
+        assert!(matches!(step.value, ExprOrValue::Literal(_)));
     }
     if let crate::PlanStepKind::End(step) = &plan.steps[3].kind {
         assert!(matches!(step.result, Some(ExprOrValue::Literal(_))));
@@ -220,13 +187,7 @@ fn normalize_fills_derived_caps_and_effects() {
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
     assert!(plan.required_caps.is_empty() && plan.allowed_effects.is_empty());
 
-    normalize_plan_literals(
-        &mut plan,
-        &schema_index(),
-        &reducer_modules(),
-        &effect_catalog(),
-    )
-    .expect("normalize");
+    normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).expect("normalize");
 
     assert_eq!(plan.required_caps, vec!["cap_http".to_string()]);
     assert_eq!(plan.allowed_effects, vec![EffectKind::http_request()]);
@@ -252,12 +213,7 @@ fn literal_without_local_schema_errors() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    let err = normalize_plan_literals(
-        &mut plan,
-        &schema_index(),
-        &reducer_modules(),
-        &effect_catalog(),
-    )
+    let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
     .unwrap_err();
     assert!(matches!(
         err,
@@ -284,13 +240,7 @@ fn end_result_without_output_schema_errors() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    let err = normalize_plan_literals(
-        &mut plan,
-        &schema_index(),
-        &reducer_modules(),
-        &effect_catalog(),
-    )
-    .unwrap_err();
+    let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap_err();
     assert!(matches!(err, PlanLiteralError::MissingSchema { context } if context == "end.result"));
 }
 
@@ -317,8 +267,7 @@ fn emit_effect_requires_known_params_schema() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    let err = normalize_plan_literals(&mut plan, &schemas, &reducer_modules(), &effect_catalog())
-        .unwrap_err();
+    let err = normalize_plan_literals(&mut plan, &schemas, &effect_catalog()).unwrap_err();
     assert!(
         matches!(err, PlanLiteralError::SchemaNotFound { name } if name == "sys/LlmGenerateParams@1")
     );
@@ -343,13 +292,7 @@ fn set_literals_are_sorted_and_deduped() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    normalize_plan_literals(
-        &mut plan,
-        &schema_index(),
-        &reducer_modules(),
-        &effect_catalog(),
-    )
-    .expect("normalize");
+    normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).expect("normalize");
     let crate::PlanStepKind::Assign(step) = &plan.steps[0].kind else {
         panic!("expected assign step");
     };
@@ -392,13 +335,7 @@ fn map_with_non_text_keys_rejects_object_sugar() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    let err = normalize_plan_literals(
-        &mut plan,
-        &schema_index(),
-        &reducer_modules(),
-        &effect_catalog(),
-    )
-    .unwrap_err();
+    let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap_err();
     match err {
         PlanLiteralError::InvalidJson(message) => {
             assert!(
@@ -433,13 +370,7 @@ fn map_literals_with_tuple_syntax_are_sorted_and_deduped() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    normalize_plan_literals(
-        &mut plan,
-        &schema_index(),
-        &reducer_modules(),
-        &effect_catalog(),
-    )
-    .expect("normalize");
+    normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).expect("normalize");
     let crate::PlanStepKind::Assign(step) = &plan.steps[0].kind else {
         panic!("expected assign step");
     };
@@ -537,13 +468,7 @@ fn expr_or_value_accepts_full_expr_trees() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    normalize_plan_literals(
-        &mut plan,
-        &schema_index(),
-        &reducer_modules(),
-        &effect_catalog(),
-    )
-    .expect("normalize");
+    normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).expect("normalize");
     let crate::PlanStepKind::Assign(assign) = &plan.steps[0].kind else {
         panic!("expected assign step");
     };
@@ -596,9 +521,8 @@ fn plan_schema_accepts_all_step_kinds() {
             {
                 "id": "raise",
                 "op": "raise_event",
-                "reducer": "com.acme/Reducer@1",
-                "event": {"status": "ok"},
-                "key": {"ref": "@plan.input.id"}
+                "event": "com.acme/Result@1",
+                "value": {"message": "ok"}
             },
             { "id": "end", "op": "end" }
         ],

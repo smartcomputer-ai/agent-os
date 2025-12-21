@@ -60,10 +60,6 @@
       {
         "event": "demo/TimerEvent@1",
         "reducer": "demo/TimerSM@1"
-      },
-      {
-        "event": "sys/TimerFired@1",
-        "reducer": "demo/TimerSM@1"
       }
     ],
     "inboxes": []

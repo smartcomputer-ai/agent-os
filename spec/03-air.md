@@ -102,7 +102,7 @@ When hashing a typed value (plan IO, cap params, etc.), always bind the **schema
 
 DomainEvents and ReceiptEvents are treated exactly like effect params:
 
-- **Ingress rule**: Every event payload is decoded against its declared `defschema` (from reducer ABI, trigger/routing entry, or built-in receipt schema), validated, canonicalized, and re-encoded as canonical CBOR. If validation fails, the event is rejected.
+- **Ingress rule**: Every event payload is decoded against its declared `defschema` (from reducer ABI for reducer delivery, trigger entry for plan starts, or built-in receipt schema when synthesizing receipts), validated, canonicalized, and re-encoded as canonical CBOR. If validation fails, the event is rejected. For reducer micro-effect receipts, the kernel **wraps** the receipt payload into the reducer’s ABI event schema before routing and journal append.
 - **Journal rule**: The journal stores and replays only these canonical bytes; replay never rewrites payloads.
 - **Routing/correlation**: Key extraction for routed/correlated events uses the schema-aware decoded value (not ExprValue tagging) and validates against the reducer’s `key_schema`.
 - **Sources**: Reducer-emitted DomainEvents, plan-raised events, adapter receipts synthesized as events, and externally injected/CLI events all flow through the same normalizer.
@@ -135,7 +135,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`). The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input; a trigger's optional `correlate_by` copies that field into the run context for later `await_event` filters. The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-ins are no longer auto-included. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; **the routed schema must equal the reducer’s `defmodule.abi.reducer.event`** (use a variant schema to accept multiple event shapes, including receipts). `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`); when the event schema is a variant, `key_field` typically targets the wrapped value (e.g., `$value.note_id`). The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input; a trigger's optional `correlate_by` copies that field into the run context for later `await_event` filters (for variant inputs, use `$value.<field>`). The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-ins are no longer auto-included. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
 
 See: spec/schemas/manifest.schema.json
 
@@ -256,7 +256,7 @@ Built-in capability types paired with these effects (v1): `http.out`, `blob`, `t
 
 ### Built-in reducer receipt events
 
-Reducers that emit micro-effects rely on the kernel to translate adapter receipts into typed DomainEvents. AIR v1 reserves these `defschema` names so manifests can declare routing and reducers can count on stable payloads:
+Reducers that emit micro-effects rely on the kernel to translate adapter receipts into typed DomainEvents. AIR v1 reserves these `defschema` names so reducers can include them in their **ABI event variants** and count on stable payloads:
 
 | Schema | Purpose | Fields |
 | --- | --- | --- |
@@ -264,7 +264,7 @@ Reducers that emit micro-effects rely on the kernel to translate adapter receipt
 | **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 | **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 
-Reducers should add routing entries for these schemas (e.g., `routing.events[].event = sys/TimerFired@1`). Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/budget enforcement can trust the same structures without changing reducer code.
+Reducers should **reference these schemas from their ABI event variant** (e.g., `TimerEvent.Fired -> sys/TimerFired@1`) and route only the reducer’s ABI event schema. The kernel wraps receipt payloads into that variant before routing. Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/budget enforcement can trust the same structures without changing reducer code.
 
 Canonical JSON definitions for these schemas (plus their parameter/receipt companions) live in `spec/defs/builtin-schemas.air.json` so manifests can hash and reference them directly.
 
@@ -518,10 +518,9 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 
 ### Steps (discriminated by `op`)
 
-**raise_event**: Publish an event to a reducer
-- `{ id, op:"raise_event", reducer:Name, key?:Expr, event:ExprOrValue }`
-- If target reducer is keyed, `key` is required and must typecheck to its key schema
-- The kernel infers the payload schema from the reducer's manifest entry and validates/canonicalizes the event (and optional key) before emitting. **Never embed `$schema` fields inside event or effect payloads; self-describing payloads are rejected.**
+**raise_event**: Publish a bus event
+- `{ id, op:"raise_event", event:SchemaRef, value:ExprOrValue }`
+- The kernel validates/canonicalizes `value` against `event` before emitting. **Never embed `$schema` fields inside event or effect payloads; self-describing payloads are rejected.**
 
 **emit_effect**: Request an external effect
 - `{ id, op:"emit_effect", kind:EffectKind, params:ExprOrValue, cap:CapGrantName, bind:{effect_id_as:VarName} }`
@@ -553,7 +552,7 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 
 ### Literals vs. Expressions (`ExprOrValue`)
 
-Authoring ergonomic insight: most plan fields already know the target schema (effect params, event payloads, locals, outputs). Requiring verbose `ExprRecord`/`ExprList` wrappers for simple literals made everyday plans noisy. In v1 we therefore allow `ExprOrValue` in four places (`emit_effect.params`, `raise_event.event`, `assign.expr`, `end.result`). Authors may provide:
+Authoring ergonomic insight: most plan fields already know the target schema (effect params, event payloads, locals, outputs). Requiring verbose `ExprRecord`/`ExprList` wrappers for simple literals made everyday plans noisy. In v1 we therefore allow `ExprOrValue` in four places (`emit_effect.params`, `raise_event.value`, `assign.expr`, `end.result`). Authors may provide:
 
 1. A plain JSON value (in sugar or canonical lens), which the loader interprets via the declared schema.
 2. A fully tagged `Expr` tree when dynamic computation or references are needed.
@@ -616,7 +615,7 @@ The kernel validator enforces these semantic checks:
 
 **defmodule**: `wasm_hash` present; referenced schemas exist; `effects_emitted`/`cap_slots` (if present) are well‑formed.
 
-**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `required_caps`/`allowed_effects` are derived sets of `emit_effect.{cap,kind}` (if provided they must exactly match the derived values); `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.event` must evaluate to a value conforming to a declared schema (and keyed reducers require matching keys); invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
+**defplan**: DAG acyclic; step ids unique; Expr refs resolve; `required_caps`/`allowed_effects` are derived sets of `emit_effect.{cap,kind}` (if provided they must exactly match the derived values); `await_receipt.for` references an emitted handle; `await_event.where` only references declared locals/steps/input; `raise_event.value` must evaluate to a value conforming to the `raise_event.event` schema; invariants may only reference declared locals/steps/input (no `@event`); `end.result` is present iff `output` is declared and must match that schema (canonicalized + recorded as `plan_result`).
 
 **defpolicy**: Rule shapes valid; referenced effect kinds known.
 
