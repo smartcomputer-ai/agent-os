@@ -1,21 +1,39 @@
 # p2-policy: Policy System (Current State + Work Remaining)
 
 ## TL;DR
-Policies exist as a kernel gate that can Allow/Deny effects at enqueue time. The gate is wired and tested, but it is minimal: no approval flow, no budgeting/rate limits, and no journaling of policy decisions. Policies are selected via manifest defaults and apply globally.
+Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time, but the system is minimal: no approvals, no rate limits/budgets, and no journaling of decisions. Policies are selected via manifest defaults and apply globally. To become governance-grade, policies must be journaled, approval-capable, and deterministic.
+
+---
+
+## Diamond Invariants (Design Spine)
+
+1) **One authoritative authorizer, one deterministic transaction**
+   - Kernel authorization is canonical:
+     - canonicalize params -> cap check -> policy check -> journal decisions -> enqueue or deny
+   - Any mutation (counters, approvals, reservations) must be part of the same deterministic, journaled transaction.
+
+2) **Caps and policy stay orthogonal in shape**
+   - Caps answer: "can ever".
+   - Policies answer: "should now".
+   - The kernel composes them in fixed order: cap -> policy.
+
+3) **Every decision is explainable and replayable**
+   - Allow/deny/require-approval outcomes must be derivable from the journal.
+   - Journal the matched rule index and rationale.
 
 ---
 
 ## What Policies Are For (Conceptual Model)
-Policies are **dynamic, governance-controlled gates** that decide whether an otherwise-capable effect should be allowed _right now_. Policies are **orthogonal** to caps:
+Policies are **dynamic, governance-controlled gates** that decide whether an otherwise-capable effect should be allowed _right now_. They are orthogonal to caps:
 
-- **Caps** answer “_can this plan/reducer ever use this kind of effect?_”
-- **Policies** answer “_should we allow this particular effect emission in this world state?_”
+- **Caps**: static authority and constraints.
+- **Policies**: dynamic allow/deny/approval and rate limits.
 
-Policies are the natural place for:
-- Allow/Deny by origin (plan vs reducer), plan name, cap name, or effect kind
-- Rate limits / budgets
-- Approval workflows (RequireApproval)
-- Governance visibility (policy decisions should be journaled)
+Policies are the natural home for:
+- allow/deny by origin (plan/reducer), plan name, cap name, effect kind
+- rate limits and counters
+- approval workflows
+- auditability of governance decisions
 
 ---
 
@@ -35,14 +53,13 @@ Relevant code:
   - cap name
   - origin kind (plan/reducer)
   - origin name
-- First matching rule decides; default is Deny if no rule matches.
+- First match wins; default is Deny.
 
 Relevant code:
 - `crates/aos-kernel/src/policy.rs`
 
 ### 3) Policies are selected via `manifest.defaults.policy`
-- If a policy name is set in defaults, the kernel builds a `RulePolicy` gate from it.
-- Otherwise, the kernel uses `AllowAllPolicy`.
+- If set, kernel builds a `RulePolicy` gate from that defpolicy; otherwise it uses `AllowAllPolicy`.
 
 Relevant code:
 - `crates/aos-kernel/src/world.rs`
@@ -57,97 +74,132 @@ Relevant code:
 
 ## What Is Not Implemented (Gaps)
 
-1) **No approval path (RequireApproval) wired**
-   - Policies can only Allow or Deny. There is no policy outcome that triggers governance approval.
+1) **No approval outcome (RequireApproval)**
+   - Policies can only Allow or Deny.
 
 2) **No policy decision journaling**
-   - There is a `PolicyDecision` journal record type, but decisions are not recorded in the journal.
-   - This makes audit and replayability of policy outcomes incomplete.
+   - A `PolicyDecision` record exists but is never written.
 
 3) **No rate limit / budget counters**
-   - Policies do not track per-cap/per-plan quotas or time-based limits.
+   - No deterministic counters or rate-limit mechanism.
 
 4) **No per-plan policy override**
-   - Policies are only global via defaults. There is no policy selection per plan or per cap grant.
+   - Only a global default policy exists.
 
-5) **No policy evaluation context beyond intent + origin**
-   - The policy gate currently sees intent, grant, and origin; no world state, no governance state, no time source.
+5) **Policy context is minimal**
+   - The gate sees only intent + origin; no deterministic time, plan_id, manifest hash, or correlation.
 
-6) **No policy enforcement for non-effect actions**
-   - Policies only gate effect enqueue; they do not gate plan scheduling or other kernel actions.
-
----
-
-## Interaction With Other Systems
-
-### Caps
-- Policies run **after** cap resolution but before enqueue.
-- This ordering is good: caps establish “can ever do X,” policy says “allow this instance.”
-
-### Secrets
-- Secret ACLs are enforced separately in `effects.rs` before policy.
-- Secret policy is a separate mechanism (allowed_caps/allowed_plans) and is not driven by DefPolicy.
-
-### Governance (propose/shadow/approve/apply)
-- Policies live in the manifest, so shadow runs already apply the candidate policy.
-- There is no policy that gates governance actions themselves (separate TODO in governance caps).
+6) **Denial is fatal by default**
+   - Deny results in enqueue failure rather than a controlled plan-level outcome.
 
 ---
 
-## Minimal “Working Policy System” Requirements
+## Governance-Grade Semantics (Target Behavior)
 
-To make policies meaningful beyond basic allow/deny:
+### 1) Journal every policy decision
+For each attempted emission, record a policy decision with:
+- `intent_hash`
+- `policy_name`
+- matched rule index (or "default")
+- decision (allow/deny/require_approval)
+- rationale / error details
 
-1) **Journal policy decisions**
-   - Record policy decisions in the journal when an effect is enqueued or denied.
-   - This keeps replay deterministic and supports audits.
+This makes decisions explainable without re-running logic.
 
-2) **Add a RequireApproval decision type**
-   - Introduce `PolicyDecision::RequireApproval` (or similar) in both AIR and runtime.
-   - The kernel should enqueue a governance approval request rather than deny.
+### 2) RequireApproval as a third outcome (with suspension)
+Diamond semantics for RequireApproval:
 
-3) **Budget / rate limit enforcement**
-   - Policies should be able to decrement counters (per cap, per plan, per origin).
-   - This may share infrastructure with cap budgets, but conceptually belongs in policy for dynamic limits.
+- `emit_effect` does **not** fail the plan.
+- The plan step transitions to a **blocked** state.
+- The kernel journals an `ApprovalRequested` record keyed by a stable id (often `intent_hash`).
+- An approval event/receipt arrives, is journaled, and unblocks the step.
+- Only then does the kernel enqueue the effect (or deny definitively).
 
-4) **Expose deterministic time/sequence to policy rules**
-   - Policies need a deterministic notion of time (sequence number, logical time window) for rate limits.
+### 3) Rate limits and counters via a deterministic ledger
+Policies should declare counters, but use shared deterministic ledger infrastructure:
+
+- Cap budgets: monotone decreasing, topped up via governance.
+- Policy counters: token buckets or windows, replenished via deterministic time/epoch.
+
+---
+
+## Deterministic Policy Context (Safe Inputs)
+
+Expand the policy context only with deterministic values, e.g.:
+
+- `origin_kind`, `origin_name`
+- `plan_id`, `step_id`
+- `manifest_hash`
+- `journal_height` / `logical_time`
+- `cap_name`, `cap_type`
+- correlation id (if present)
+
+Avoid wallclock or mutable host state inside the policy gate.
+
+---
+
+## Optional Ergonomic Upgrade: Denial as a Synthetic Receipt
+
+Instead of making denial a hard error, treat denial/approval-required as synthetic receipts:
+
+- `emit_effect` returns a receipt-like record `{status: denied | approval_required | ok | error}`
+- `await_receipt` consumes the result and drives plan branching
+
+This keeps governance outcomes explicit and makes flows resilient without weakening security.
+
+---
+
+## Minimal "Working Policy System" Requirements
+
+1) **Policy decision journaling**
+   - Always record allow/deny/approval-required decisions.
+
+2) **RequireApproval outcome**
+   - Suspend the plan step; unblock only after approval event/receipt.
+
+3) **Rate limits / budgets**
+   - Deterministic counters with clear replenishment semantics.
+
+4) **Deterministic context**
+   - Provide logical time/sequence and stable identifiers.
 
 ---
 
 ## Proposed Minimal Use-Cases (Tests/Examples)
 
 1) **Plan allowlist**
-   - Policy allows only `plan == "com.acme/Plan@1"` for `http.request`.
-   - Another plan emitting the same effect is denied.
+   - Policy allows only a named plan for `http.request`.
 
-2) **Rate limit (plan-local)**
-   - Policy allows only N HTTP effects per window per plan.
-   - Exceeding N yields Deny or RequireApproval.
+2) **Rate limit**
+   - Policy allows N HTTP requests per logical window per plan.
 
 3) **Approval-gated effect**
-   - Policy returns RequireApproval for `payment.charge`.
-   - After approval, the plan resumes and effect is enqueued.
+   - `payment.charge` requires approval; plan blocks then resumes on approval.
 
 ---
 
 ## Where Policy Logic Should Live
 
-Policies should be enforced in the **kernel** to preserve determinism and auditability. The policy decision must be:
-- deterministic
-- journaled
-- replayable
+Policies must be enforced **in the kernel** (authoritative, deterministic, journaled). Adapters should never decide policy outcomes; at most they provide operational safety checks.
 
-Adapters should not apply policy logic beyond safety/operational checks.
+---
+
+## Build Order (Minimal to Meaningful)
+
+1) Journal allow/deny policy decisions
+2) Add RequireApproval + plan suspension model
+3) Add deterministic counters / rate limits
+4) Expand deterministic policy context
+5) Optional: denial as synthetic receipts for better ergonomics
 
 ---
 
 ## Summary of Required Work
 
-1) Add **policy decision journaling**.
-2) Add **RequireApproval** outcome and governance flow integration.
-3) Implement **policy budgets/rate limits** with deterministic counters.
-4) Expand policy context (deterministic time/sequence). 
-5) Add tests and fixtures for the minimal use-cases above.
+1) Journal policy decisions with rationale and rule index.
+2) Implement RequireApproval with a blocked-step model.
+3) Implement deterministic counters / rate limits.
+4) Expand deterministic policy context.
+5) Add tests/fixtures for the minimal use-cases.
 
-Once these exist, policies will have clear, enforceable governance value beyond static allow/deny rules.
+Once these exist, policies become governance-grade and auditable rather than a simple filter.

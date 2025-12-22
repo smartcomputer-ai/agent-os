@@ -1,168 +1,210 @@
 # p2-caps: Capability System (Current State + Work Remaining)
 
 ## TL;DR
-Capabilities exist and are enforced at enqueue time in the kernel (cap grant exists, cap type matches effect kind, reducer slot binding exists). However, cap grant **params**, **budgets**, and **expiry** are not enforced, and adapters do not receive or validate cap data. The system is structurally wired but not yet a complete security/budgeting model.
+Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). However, cap **params**, **budgets**, and **expiry** are not enforced, and adapters do not see cap data. The system is structurally correct but not yet a complete authorization/budget model.
+
+---
+
+## Diamond Invariants (Design Spine)
+
+1) **One authoritative authorizer, one deterministic transaction**
+   - Kernel authorization must be the single decision point:
+     - canonicalize params -> cap check -> policy check -> journal decisions -> enqueue or deny
+   - Any mutation (budget reservation/settlement, counters, approvals) must be part of that same deterministic, journaled transaction.
+
+2) **Caps and policy stay orthogonal in shape**
+   - Caps answer: "can ever" and return a structured decision.
+   - Policies answer: "should now" and return a structured decision.
+   - The kernel composes them in fixed order: cap -> policy.
+
+3) **Every decision is explainable and replayable**
+   - Allowed/denied outcomes must be derivable from the journal alone.
+   - Cap denials should record *what constraint failed*.
+   - Budget usage must be ledgered (reservation + settlement).
 
 ---
 
 ## What Caps Are For (Conceptual Model)
-Caps are **static, typed grants** that authorize _which effects_ an agent world may emit, plus **parameters** that constrain how those effects may be used (e.g., allowed HTTP hosts, LLM models, max body size). The core invariant is:
+Caps are **static, typed grants** that authorize which effect kinds a world may emit, plus **parameters** that constrain how those effects may be used (e.g., allowed HTTP hosts, LLM models, max body size). The invariant is:
 
-- If a plan/reducer can emit an effect, it must present a **cap grant** whose **cap type** matches that effect kind, and whose **params** constrain the allowed use of that effect.
+- If a plan/reducer can emit an effect, it must present a **cap grant** whose **cap type** matches that effect kind and whose **params** authorize that specific use.
 
-Caps should be deterministic, auditable, and enforced **before** an effect is enqueued.
+Caps must be deterministic, auditable, and enforced **before** enqueue.
 
 ---
 
 ## Current Implementation (What Works Today)
 
 ### 1) Cap grants are resolved and schema-validated at manifest load
-- The kernel loads `manifest.defaults.cap_grants` and resolves each grant against its `defcap`.
-- Grant params are validated against the defcap schema and encoded to canonical CBOR.
-- Each grant is associated with a **cap type** (from the `defcap`).
+- `manifest.defaults.cap_grants` are resolved against `defcap`.
+- Grant params are validated against the cap schema and canonicalized.
+- Each grant is associated with a **cap type**.
 
 Relevant code:
-- `crates/aos-kernel/src/capability.rs` (resolve_grant, schema expansion/validation)
+- `crates/aos-kernel/src/capability.rs`
 
 ### 2) Cap type must match effect kind at enqueue
-- When any effect is enqueued (plan or reducer), the kernel resolves the **cap grant** by name and verifies that its **cap type** matches the effect kind’s expected cap type (from the effect catalog).
-- This blocks miswired cap/effect pairs.
+- On any effect enqueue, the kernel resolves the grant by name and verifies that its **cap type** matches the effect kind's expected cap type.
 
 Relevant code:
-- `crates/aos-kernel/src/effects.rs` (enqueue_effect)
-- `crates/aos-kernel/src/capability.rs` (expected_cap_type)
+- `crates/aos-kernel/src/effects.rs`
+- `crates/aos-kernel/src/capability.rs`
 
 ### 3) Plans must declare required caps
-- `plan.required_caps` are enforced at manifest load. If a required cap grant is missing, the manifest is rejected.
+- `plan.required_caps` are enforced at manifest load; missing grants reject the manifest.
 
 Relevant code:
-- `crates/aos-kernel/src/world.rs` (ensure_plan_capabilities)
+- `crates/aos-kernel/src/world.rs`
 
 ### 4) Reducer cap slots are wired
-- Reducers emit micro-effects with an optional `cap_slot` (default: `"default"`).
-- The kernel maps that slot to a cap grant name using `manifest.module_bindings[reducer].slots`.
-- Missing binding is an error.
+- Reducer micro-effects include optional `cap_slot` (default: `"default"`).
+- The kernel maps the slot to a cap grant via `manifest.module_bindings`.
 
 Relevant code:
-- `crates/aos-wasm-abi/src/lib.rs` (ReducerEffect.cap_slot)
-- `crates/aos-kernel/src/world.rs` (cap_slot resolution and binding lookup)
+- `crates/aos-wasm-abi/src/lib.rs`
+- `crates/aos-kernel/src/world.rs`
 
 ### 5) Effect intents carry only `cap_name`
-- `EffectIntent` includes `cap_name` but not the grant params, cap type, or any token.
-- Adapters receive only the intent (kind, params, cap_name, hash).
+- `EffectIntent` contains `cap_name` but not cap params or cap type.
+- Adapters see only the intent (kind, params, cap_name, hash).
 
 Relevant code:
 - `crates/aos-effects/src/intent.rs`
-- adapters in `crates/aos-host/src/adapters/*`
+- `crates/aos-host/src/adapters/*`
 
 ---
 
 ## What Is Not Implemented (Gaps)
 
 1) **Cap params are not enforced against effect params**
-   - Caps define param constraints (e.g., allowed hosts/models), but no runtime checks compare cap params to effect params.
-   - This is the largest missing “teeth” in the system.
+   - No runtime comparison of cap constraints (hosts/models/limits) against effect inputs.
 
 2) **Budgets are not enforced**
-   - Cap grants allow `budget` fields (tokens/bytes/cents), but no counter is decremented and no checks occur.
+   - Cap grant budgets (tokens/bytes/cents) are parsed but not decremented or checked.
 
 3) **Expiry is not enforced**
-   - Cap grants can have `expiry_ns`, but it is ignored at runtime.
+   - `expiry_ns` is ignored at runtime.
 
-4) **Adapters do not validate cap grants**
-   - Adapters never see cap params, so they cannot enforce host/model/limit restrictions.
-   - This is intentional today, but means caps have no effect on actual I/O behavior.
+4) **No ledgered budget state**
+   - There is no journaled reservation/settlement or replayable cap usage.
 
-5) **No policy/budget ledger integration**
-   - There is no ledgered cap usage, no journal record for cap consumption, and no replayable budget state.
-
----
-
-## Where Enforcement Should Live (Design Clarification)
-
-**Primary enforcement should be in the kernel before enqueue**, because:
-- It is deterministic and replayable.
-- It is auditable (can be journaled).
-- Adapters may be non-deterministic or environment-specific.
-
-Adapters may still do _safety checks_ (e.g., HTTP timeouts, body size caps for local resources), but **cap compliance** must be enforced in the kernel.
-
-If we want adapters to enforce caps, we must either:
-- Embed cap params into the intent (expands intent hash / audit surface), or
-- Provide a deterministic lookup from intent → cap grant params (store lookup), which the adapter can verify but not mutate.
-
-Given determinism goals, kernel-side enforcement is the safest default.
+5) **Adapters do not validate caps**
+   - Adapters never see cap params, so they cannot enforce constraints. (This is fine as long as the kernel is authoritative.)
 
 ---
 
-## Minimal “Working Cap System” Requirements
+## Where Enforcement Must Live
 
-These are the smallest steps needed for caps to be meaningful:
+**Primary enforcement is in the kernel before enqueue.**
+
+- Determinism and auditability require a single, canonical authorizer.
+- Adapters may still apply safety checks, but must not be authoritative.
+
+If adapters ever need visibility for defense-in-depth, pass **immutable identifiers** (e.g., `cap_type`, `cap_grant_hash`) for logging, not for decision-making.
+
+---
+
+## Cap-Type Enforcement Interface (Proposed Shape)
+
+Make cap enforcement a first-class interface per cap type:
+
+- `validate_constraints(cap_params, effect_kind, effect_params) -> ok | error{path, reason}`
+- `estimate_reservation(cap_params, effect_kind, effect_params) -> {tokens?, bytes?, cents?}`
+- `settle_from_receipt(cap_params, effect_kind, receipt) -> {tokens?, bytes?, cents?}`
+
+This keeps cap logic centralized and makes it easy to add new cap types without leaking policy or budget logic into adapters.
+
+---
+
+## Budgets: Two-Phase Reserve -> Settle (Diamond Upgrade)
+
+To avoid both oversubscription and over-counting:
+
+1) **Reserve at enqueue**
+   - Compute a conservative upper bound reservation.
+   - Deny if insufficient budget.
+   - Journal the reservation.
+
+2) **Settle at receipt**
+   - Compute actual usage from receipt (tokens/bytes/cents where available).
+   - Refund unused reservation or charge additional if actual exceeds reserve.
+   - Journal the settlement.
+
+Practical v1 reservations:
+- `llm.generate`: reserve `max_tokens` (optionally a conservative prompt estimate); settle on receipt usage.
+- `blob.put`: reserve known size (CAS metadata if available); settle on receipt size.
+- `cost_cents`: reserve 0 unless bounded; settle from receipt cost if provided.
+
+---
+
+## Expiry Requires Deterministic "Now"
+
+Expiry must not read wallclock in the kernel. Options:
+
+- **Logical time**: journal height / deterministic epoch counter.
+- **Trusted time receipts**: a timer adapter produces signed receipts, and the kernel updates a deterministic "now" state.
+
+Either way, expiry is enforced against a deterministic, journaled value.
+
+---
+
+## Minimal "Working Cap System" Requirements
 
 1) **Cap param enforcement**
-   - Define a per-cap-type validator that compares cap params with effect params.
-   - Example: `http.out` cap params `{ hosts: ["api.example.com"] }` must be enforced against `http.request.url`.
-   - Enforcement happens inside `EffectManager::enqueue_effect` (or a new `CapPolicy` layer).
+   - Enforce cap constraints against effect params at enqueue.
 
-2) **Budget accounting**
-   - Add a deterministic ledger for cap budgets (tokens/bytes/cents).
-   - Decide when to decrement:
-     - Option A: at enqueue time (predictive) — simple but may over-count on failed effects.
-     - Option B: at receipt time (actual) — more accurate but needs receipt metadata (cost) to be reliable.
-   - Enforce “insufficient budget” as a hard deny at enqueue.
+2) **Two-phase budget ledger**
+   - Reservation at enqueue; settlement at receipt.
 
 3) **Expiry enforcement**
-   - Use a deterministic time source (e.g., journal sequence or deterministic clock) to compare against `expiry_ns`.
-   - Deny use of expired caps at enqueue.
+   - Use deterministic "now" and deny expired caps.
 
 4) **Audit trail**
-   - Record cap decisions (and budget deltas) in the journal to keep replay deterministic.
+   - Journal allow/deny decisions with reasons and budget deltas.
 
 ---
 
-## Proposed Concrete Use-Cases (Minimal Set)
-
-Use cases should be explicit and testable:
+## Proposed Minimal Use-Cases (Tests/Examples)
 
 1) **HTTP allowlist**
    - Cap params include `allowed_hosts`.
-   - Plan emits `http.request` to an allowed host → allowed.
-   - Plan emits to a different host → denied.
+   - Allowed host -> ok, disallowed host -> denied (with reason).
 
 2) **LLM model allowlist + token budget**
-   - Cap params include `allowed_models` and `token_budget`.
-   - Effect with model not in list → denied.
-   - Token budget decremented per receipt or predicted usage.
+   - Cap params include `allowed_models` and budget.
+   - Disallowed model -> denied.
+   - Budget reserved at enqueue, settled on receipt.
 
 3) **Blob size limit**
-   - Cap params include `max_bytes` for blob put.
-   - Blob size exceeds → denied.
-
----
-
-## Tests Needed (Suggested)
-
-- Unit: `cap params vs effect params` validator per cap type.
-- Integration: plan emit denied if cap params disallow host/model.
-- Integration: cap budget decrement + deny on exhaustion.
-- Replay: budget state is deterministic across replay.
+   - Cap params include `max_bytes`.
+   - Oversized put -> denied.
 
 ---
 
 ## Governance Relationship
 
-- Caps are manifest-level objects; **governance patches** add/modify defcaps and grants.
-- Shadow runs already load the patched manifest, so cap wiring is exercised in shadow.
-- However, there is no governance cap/policy to restrict which patches are allowed; this is a separate governance-level capability TODO.
+- Caps are manifest-level objects; governance patches add/modify defcaps and grants.
+- Shadow runs load the patched manifest, so cap wiring is exercised during shadow.
+- Governance-level caps (who can propose what) are separate and still TODO.
+
+---
+
+## Build Order (Minimal to Meaningful)
+
+1) Cap param enforcement
+2) Journaled cap decisions (allow/deny + reasons)
+3) Two-phase budget ledger (reserve/settle)
+4) Expiry enforcement with deterministic "now"
+5) Cap-type interface stabilization + tests/fixtures
 
 ---
 
 ## Summary of Required Work
 
-1) Implement **cap param enforcement** at enqueue time.
-2) Implement **budget ledger + decrement logic**.
-3) Implement **expiry enforcement**.
-4) Add **journal records** for cap decisions or budget deltas.
-5) Add **tests and fixtures** for the minimal use cases.
+1) Implement cap param enforcement at enqueue.
+2) Implement budget reservation + settlement with ledgered deltas.
+3) Implement deterministic expiry enforcement.
+4) Journal cap decisions with rationale.
+5) Add minimal use-case tests and replay checks.
 
-Once the above is done, caps will have real “teeth” beyond structural validation.
+Once these exist, caps are a real security and budget control surface, not just wiring.
