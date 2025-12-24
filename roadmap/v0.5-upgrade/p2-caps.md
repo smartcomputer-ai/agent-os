@@ -114,6 +114,26 @@ Make cap enforcement a first-class interface per cap type:
 
 This keeps cap logic centralized and makes it easy to add new cap types without leaking policy or budget logic into adapters.
 
+### Cap Handler Registry (Clarification)
+Implement cap enforcement via a registry keyed by `cap_type`, similar to effect adapter registration. This keeps the kernel authoritative while making cap logic modular and extensible.
+
+---
+
+## Cap Param Shapes (Updated for v0.5)
+Cap params can be refactored for this milestone. Proposed shapes:
+
+- **sys/http.out@1**: `{ hosts?: set<text>, schemes?: set<text>, methods?: set<text>, ports?: set<nat>, path_prefixes?: set<text> }`
+- **sys/llm.basic@1**: `{ providers?: set<text>, models?: set<text>, max_tokens?: nat, tools_allow?: set<text> }`
+- **sys/blob@1**: `{}` (no constraints in v0.5)
+- **sys/timer@1**: `{}` (no constraints in v0.5)
+- **sys/secret@1**: `{ aliases?: set<text>, binding_ids?: set<text> }`
+- **sys/governance@1**: `{}`
+- **sys/query@1**: `{ scope?: text }`
+
+Notes:
+- Missing/empty fields mean "no restriction"; non-empty fields are allowlists/ceilings.
+- HTTP enforcement can parse URLs in the kernel for now; future option is structured HTTP params to avoid parsing.
+
 ---
 
 ## Budgets: Two-Phase Reserve -> Settle (Diamond Upgrade)
@@ -152,6 +172,7 @@ Either way, expiry is enforced against a deterministic, journaled value.
 
 1) **Cap param enforcement**
    - Enforce cap constraints against effect params at enqueue.
+   - Journal allow/deny decisions with structured reasons (journal is the only log).
 
 2) **Two-phase budget ledger**
    - Reservation at enqueue; settlement at receipt.
@@ -167,7 +188,7 @@ Either way, expiry is enforced against a deterministic, journaled value.
 ## Proposed Minimal Use-Cases (Tests/Examples)
 
 1) **HTTP allowlist**
-   - Cap params include `allowed_hosts`.
+   - Cap params include `hosts` (and optional `methods`, `schemes`, `ports`, `path_prefixes`).
    - Allowed host -> ok, disallowed host -> denied (with reason).
 
 2) **LLM model allowlist + token budget**
@@ -175,9 +196,8 @@ Either way, expiry is enforced against a deterministic, journaled value.
    - Disallowed model -> denied.
    - Budget reserved at enqueue, settled on receipt.
 
-3) **Blob size limit**
-   - Cap params include `max_bytes`.
-   - Oversized put -> denied.
+3) **Blob constraints**
+   - No cap constraints in v0.5 (cap exists to match effect kind only).
 
 ---
 
