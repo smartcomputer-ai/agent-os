@@ -1,5 +1,7 @@
 # Typed Bus + Event-Family Dispatch
 
+**Complete**
+
 Here’s the design I would lock in. It keeps the system **fully typed end‑to‑end**, removes the current ambiguity/mismatch, and still gives you “bigger refactor” headroom without committing you to self‑describing payloads or schema‑aware reducers.
 
 ---

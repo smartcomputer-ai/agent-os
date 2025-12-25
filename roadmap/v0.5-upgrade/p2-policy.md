@@ -1,7 +1,7 @@
 # p2-policy: Policy System (Current State + Work Remaining)
 
 ## TL;DR
-Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time, but the system is minimal: no approvals, no rate limits/budgets, and no journaling of decisions. Policies are selected via manifest defaults and apply globally. To become governance-grade, policies must be journaled, approval-capable, and deterministic.
+Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time, but the system is minimal: no approvals, no rate limits/budgets, and no journaling of decisions. Policies are selected via manifest defaults and apply globally. To become governance-grade **without bloating the kernel**, policy evaluation should be an optional deterministic module (like reducers), with a built-in RulePolicy as the default.
 
 ---
 
@@ -178,6 +178,52 @@ This keeps governance outcomes explicit and makes flows resilient without weaken
 
 ---
 
+## Proposed Direction: Policy Engines as Deterministic Modules
+
+### Extend `defmodule` with a pure kind
+Add a deterministic module kind for pure functions:
+
+- `module_kind: "pure"`
+- ABI: `run(input_bytes) -> output_bytes` using canonical CBOR in/out (schema-pinned).
+
+This is the shared substrate for cap enforcers and policy engines.
+
+### Make `defpolicy` optionally carry an engine
+Allow `defpolicy` to select its evaluator:
+
+```json
+{
+  "$kind": "defpolicy",
+  "name": "com/acme/policy@2",
+  "engine": { "module": "com/acme/PolicyEngine@1" },
+  "rules": [ ... ]
+}
+```
+
+- If `engine` is missing: use the built-in RulePolicy interpreter (today’s behavior).
+- If `engine` is present: call the policy engine module (deterministic, pinned).
+
+This avoids kernel growth as policies become richer (approvals, counters, param-aware decisions).
+
+### Policy Engine ABI (Proposed)
+
+```cbor
+PolicyDecision = "allow" | "deny" | { "require_approval": { request_id, reason } }
+```
+
+The engine returns a decision plus deterministic counter/budget deltas. The kernel applies deltas and journals the decision.
+
+---
+
+### Authorizer Pipeline (Kernel-Owned Ledger)
+1) Canonicalize effect params.
+2) Run cap enforcer module -> returns `{ ok?, reserve_estimate, explain }`.
+3) Kernel checks expiry + ledger budgets + writes reservation.
+4) Run policy engine (rules or module) -> returns `{ allow/deny/require_approval, counter_deltas, explain }`.
+5) Kernel applies counter deltas, journals decisions, then enqueues or blocks.
+
+---
+
 ## Where Policy Logic Should Live
 
 Policies must be enforced **in the kernel** (authoritative, deterministic, journaled). Adapters should never decide policy outcomes; at most they provide operational safety checks.
@@ -203,3 +249,13 @@ Policies must be enforced **in the kernel** (authoritative, deterministic, journ
 5) Add tests/fixtures for the minimal use-cases.
 
 Once these exist, policies become governance-grade and auditable rather than a simple filter.
+
+---
+
+## FAQ (Current Questions)
+
+### If we have cap enforcers, do we still need policy?
+Yes. Caps constrain **delegated authority** (“can ever”). Policy is a **governance gate** (“should now”). Collapsing them would reintroduce cap semantics inside policy and weaken least-privilege reasoning.
+
+### What about performance?
+Policy engines are deterministic pure modules, so they can be lightweight. The incremental cost is tiny compared to canonicalization/journaling and any real external I/O. Optimize later if profiling shows hot paths.

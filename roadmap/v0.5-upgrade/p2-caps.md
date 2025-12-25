@@ -1,7 +1,7 @@
 # p2-caps: Capability System (Current State + Work Remaining)
 
 ## TL;DR
-Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). However, cap **params**, **budgets**, and **expiry** are not enforced, and adapters do not see cap data. The system is structurally correct but not yet a complete authorization/budget model.
+Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). However, cap **params**, **budgets**, and **expiry** are not enforced, and cap semantics are effectively kernel-hardcoded. The system is structurally correct but not yet a complete authorization/budget model, and it is on a path that will not scale once new adapters/cap types ship.
 
 ---
 
@@ -32,6 +32,11 @@ Caps are **static, typed grants** that authorize which effect kinds a world may 
 Caps must be deterministic, auditable, and enforced **before** enqueue.
 
 ---
+
+## Design Smell (Current Trajectory)
+Today, cap semantics live in the kernel. A `defcap` only defines param **shape**, while the **meaning** of those params is hardcoded (hosts mean URL host allowlists, max_tokens mean ceilings, etc.). That makes caps a closed-world enum disguised as open strings, and it will block dynamic adapter/cap addition later.
+
+The diamond invariant already points to the fix: the **kernel is the authoritative transaction boundary**, but the logic executed inside that boundary does not have to be hardcoded. It only needs to be deterministic, pinned, and journaled.
 
 ## Current Implementation (What Works Today)
 
@@ -80,7 +85,7 @@ Relevant code:
    - No runtime comparison of cap constraints (hosts/models/limits) against effect inputs.
 
 2) **Budgets are not enforced**
-   - Cap grant budgets (tokens/bytes/cents) are parsed but not decremented or checked.
+   - Cap grant budgets are parsed but not decremented or checked.
 
 3) **Expiry is not enforced**
    - `expiry_ns` is ignored at runtime.
@@ -104,18 +109,86 @@ If adapters ever need visibility for defense-in-depth, pass **immutable identifi
 
 ---
 
-## Cap-Type Enforcement Interface (Proposed Shape)
+## Proposed Direction: Cap Enforcers as Deterministic Modules
 
-Make cap enforcement a first-class interface per cap type:
+### Key idea
+Make cap enforcement a **deterministic, pinned module** that the kernel runs inside the authorizer transaction. The kernel stays a small interpreter/journaler, while new caps ship as data + modules.
 
-- `validate_constraints(cap_params, effect_kind, effect_params) -> ok | error{path, reason}`
-- `estimate_reservation(cap_params, effect_kind, effect_params) -> {tokens?, bytes?, cents?}`
-- `settle_from_receipt(cap_params, effect_kind, receipt) -> {tokens?, bytes?, cents?}`
+This aligns with the "solid state interpreter" goal:
+- No per-cap kernel code.
+- New cap types are `defcap` + module artifacts.
+- Shadow runs can execute the same enforcer logic for prediction/audit.
+
+### Extend `defmodule` with a pure kind
+Add a deterministic module kind for pure functions:
+
+- `module_kind: "pure"`
+- ABI: `run(input_bytes) -> output_bytes` using canonical CBOR in/out (schema-pinned).
+
+This is the reusable substrate for cap enforcers, policy engines, and param normalizers.
+
+### Make `defcap` carry an enforcer
+Add a required enforcer module reference:
+
+```json
+{
+  "$kind": "defcap",
+  "name": "sys/http.out@1",
+  "cap_type": "http.out",
+  "schema": { ... },
+  "enforcer": { "module": "sys/CapEnforceHttpOut@1" }
+}
+```
+
+Adding a new cap type becomes “ship a new `defcap` + module”, not “edit the kernel”.
+
+---
+
+## Cap Enforcer ABI (Proposed)
+
+Make cap enforcement a first-class, deterministic ABI:
+
+1) **enqueue check** (constraints + reservation estimate)
+2) **receipt settle** (actual usage)
+
+Conceptual input:
+
+```cbor
+CapCheckInput = {
+  cap_def: Name,
+  grant_name: text,
+  cap_params: <typed value>,
+  remaining_budget: map<text,nat>,
+  effect: {
+    kind: text,
+    params: <typed value>,
+    origin: { kind: "plan"|"reducer", name: Name },
+  },
+  ctx: { manifest_hash, journal_height, logical_now }
+}
+```
+
+Output:
+
+```cbor
+CapCheckOutput = {
+  decision: "allow" | { "deny": { code, path?, message? } },
+  reserve: map<text,nat>,
+  explain?: { matched?: ..., failed?: ... }
+}
+```
+
+Settle input includes receipt + reservation; output returns actual usage deltas.
 
 This keeps cap logic centralized and makes it easy to add new cap types without leaking policy or budget logic into adapters.
 
-### Cap Handler Registry (Clarification)
-Implement cap enforcement via a registry keyed by `cap_type`, similar to effect adapter registration. This keeps the kernel authoritative while making cap logic modular and extensible.
+Note: the enforcer module should return *requirements* (constraints + reserve estimate). The kernel MUST own ledger comparisons and mutations. Modules must not read or mutate ledger state; they only interpret cap semantics deterministically.
+
+### Authorizer Pipeline (Kernel-Owned Ledger)
+1) Canonicalize effect params.
+2) Run cap enforcer module -> returns `{ ok?, reserve_estimate, explain }`.
+3) Kernel checks expiry + ledger budgets + writes reservation.
+4) Journal cap decision + reservation deltas.
 
 ---
 
@@ -132,7 +205,7 @@ Cap params can be refactored for this milestone. Proposed shapes:
 
 Notes:
 - Missing/empty fields mean "no restriction"; non-empty fields are allowlists/ceilings.
-- HTTP enforcement can parse URLs in the kernel for now; future option is structured HTTP params to avoid parsing.
+- HTTP enforcement can parse URLs in the enforcer module for now; long-term, move parsing into structured params or a deterministic normalizer.
 
 ---
 
@@ -168,6 +241,22 @@ Either way, expiry is enforced against a deterministic, journaled value.
 
 ---
 
+## Make Budgets Open-Ended (Avoid a Closed-World Trap)
+Budgets should be a `map<text,nat>` (or `map<text,dec128>` later), not a fixed struct. This allows adapters and enforcers to introduce new dimensions (`requests`, `gpu_ms`, `emails_sent`, `usd_micros`) without kernel changes, while still standardizing conventional names (`tokens`, `bytes`, `cents`).
+
+---
+
+## Param Normalization (HTTP URL Parsing without Kernel Semantics)
+
+Two deterministic options:
+
+1) **Structured URL schema**: add `sys/Url@1` and update HTTP params to carry structured fields (scheme/host/port/path). Authoring sugar can still accept strings and normalize at load/canonicalization time.
+2) **Pure normalizer module**: let `defeffect` optionally reference a deterministic normalizer module that rewrites params into canonical form before hashing/enforcement/dispatch.
+
+Parsing inside the enforcer is fine for v0.5, but normalization aligns **intent identity** with **authorization semantics**.
+
+---
+
 ## Minimal "Working Cap System" Requirements
 
 1) **Cap param enforcement**
@@ -198,6 +287,22 @@ Either way, expiry is enforced against a deterministic, journaled value.
 
 3) **Blob constraints**
    - No cap constraints in v0.5 (cap exists to match effect kind only).
+
+---
+
+## FAQ (Current Questions)
+
+### If we have enforcers, do we still need policies?
+Yes. Caps answer **"can ever"** (delegated authority + constraints). Policies answer **"should now"** (governance gates, approvals, counters). Collapsing them pushes cap semantics into policy anyway, losing least-privilege reasoning and composability.
+
+### Why not parse URLs only inside the enforcer?
+You can. The reason to consider a separate normalizer or structured schema is that parsing then affects **authorization** but not **intent identity**. If normalization happens before hashing, the journaled intent matches the semantic URL, which improves explainability and determinism for downstream policy and caching.
+
+### Is running an enforcer module on every effect too slow?
+Likely acceptable: canonicalization, journaling, and external I/O dominate. For hot paths, keep enforcer logic small, return requirements rather than doing ledger checks, or use tiny “always-allow” enforcers for trivial caps.
+
+### Are “pure modules” still pure if we pass ledger state?
+Yes. Passing state explicitly still yields a referentially transparent function (same input → same output). “Pure” here means deterministic and side-effect-free, not stateless.
 
 ---
 
