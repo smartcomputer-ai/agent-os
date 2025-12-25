@@ -2,11 +2,11 @@
 
 use aos_host::WorldHost;
 use aos_host::config::HostConfig;
-use helpers::fixtures::{self, TestWorld};
 use aos_host::manifest_loader::manifest_patch_from_loaded;
 use aos_host::modes::daemon::{ControlMsg, WorldDaemon};
 use aos_kernel::Kernel;
 use aos_kernel::journal::mem::MemJournal;
+use helpers::fixtures::{self, TestWorld};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 #[path = "helpers.rs"]

@@ -367,19 +367,22 @@ impl PlanInstance {
                                 schema_name
                             ))
                         })?;
-                        let value =
-                            eval_expr_or_value(&raise.value, &self.env, "plan raise_event eval error")?;
+                        let value = eval_expr_or_value(
+                            &raise.value,
+                            &self.env,
+                            "plan raise_event eval error",
+                        )?;
                         let mut event_literal = expr_value_to_literal(&value).map_err(|err| {
                             KernelError::Manifest(format!("plan raise_event literal error: {err}"))
                         })?;
                         canonicalize_literal(&mut event_literal, schema, &self.schema_index)
-                        .map_err(|err| {
-                            KernelError::Manifest(format!(
-                                "plan raise_event canonicalization error: {err}"
-                            ))
-                        })?;
+                            .map_err(|err| {
+                                KernelError::Manifest(format!(
+                                    "plan raise_event canonicalization error: {err}"
+                                ))
+                            })?;
                         validate_literal(&event_literal, schema, schema_name, &self.schema_index)
-                        .map_err(|err| {
+                            .map_err(|err| {
                             KernelError::Manifest(format!(
                                 "plan raise_event validation error: {err}"
                             ))
@@ -1133,13 +1136,7 @@ mod tests {
     }
 
     fn new_plan_instance(plan: DefPlan) -> PlanInstance {
-        PlanInstance::new(
-            1,
-            plan,
-            default_env(),
-            empty_schema_index(),
-            None,
-        )
+        PlanInstance::new(1, plan, default_env(), empty_schema_index(), None)
     }
 
     fn http_params_value_literal(tag: &str) -> ValueLiteral {
@@ -1174,13 +1171,7 @@ mod tests {
     }
 
     fn plan_instance_with_schema(plan: DefPlan, schema_index: Arc<SchemaIndex>) -> PlanInstance {
-        PlanInstance::new(
-            1,
-            plan,
-            default_env(),
-            schema_index,
-            None,
-        )
+        PlanInstance::new(1, plan, default_env(), schema_index, None)
     }
 
     /// Assign steps should synchronously write to the plan environment.
@@ -1474,13 +1465,7 @@ mod tests {
                 int: EmptyObject {},
             })),
         );
-        let mut plan = PlanInstance::new(
-            1,
-            base_plan(steps),
-            default_env(),
-            schema_index,
-            None,
-        );
+        let mut plan = PlanInstance::new(1, base_plan(steps), default_env(), schema_index, None);
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
@@ -1669,13 +1654,7 @@ mod tests {
             )]),
         });
         let schema_index = schema_index_with_event("com.test/Evt@1", event_schema);
-        let mut instance = PlanInstance::new(
-            1,
-            plan,
-            default_env(),
-            schema_index,
-            None,
-        );
+        let mut instance = PlanInstance::new(1, plan, default_env(), schema_index, None);
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));

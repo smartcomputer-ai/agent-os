@@ -1,5 +1,7 @@
 mod helpers;
-use aos_air_types::{DefSchema, ReducerAbi, plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name};
+use aos_air_types::{
+    DefSchema, ReducerAbi, plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name,
+};
 use aos_kernel::{Consistency, StateReader};
 use aos_wasm_abi::ReducerOutput;
 use helpers::fixtures;

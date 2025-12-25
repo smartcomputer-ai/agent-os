@@ -38,9 +38,9 @@ use crate::journal::{
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
 use crate::policy::{AllowAllPolicy, RulePolicy};
+use crate::pure::PureRegistry;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
-use crate::pure::PureRegistry;
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
 use crate::schema_value::cbor_to_expr_value;
@@ -582,7 +582,11 @@ impl<S: Store + 'static> Kernel<S> {
         self.process_domain_event(event)
     }
 
-    pub fn invoke_pure(&mut self, name: &str, input: &PureInput) -> Result<PureOutput, KernelError> {
+    pub fn invoke_pure(
+        &mut self,
+        name: &str,
+        input: &PureInput,
+    ) -> Result<PureOutput, KernelError> {
         let module_def = self
             .module_defs
             .get(name)
@@ -659,13 +663,12 @@ impl<S: Store + 'static> Kernel<S> {
                 .module_defs
                 .get(&binding.reducer)
                 .ok_or_else(|| KernelError::ReducerNotFound(binding.reducer.clone()))?;
-            let reducer_schema =
-                self.reducer_schemas.get(&binding.reducer).ok_or_else(|| {
-                    KernelError::Manifest(format!(
-                        "schema for reducer '{}' not found while routing event",
-                        binding.reducer
-                    ))
-                })?;
+            let reducer_schema = self.reducer_schemas.get(&binding.reducer).ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "schema for reducer '{}' not found while routing event",
+                    binding.reducer
+                ))
+            })?;
             let keyed = module_def.key_schema.is_some();
 
             match (keyed, &binding.key_field) {
@@ -687,21 +690,21 @@ impl<S: Store + 'static> Kernel<S> {
             let wrapped_value = match &binding.wrap {
                 EventWrap::Identity => event_value.clone(),
                 EventWrap::Variant { tag } => CborValue::Map(BTreeMap::from([
-                    (
-                        CborValue::Text("$tag".into()),
-                        CborValue::Text(tag.clone()),
-                    ),
+                    (CborValue::Text("$tag".into()), CborValue::Text(tag.clone())),
                     (CborValue::Text("$value".into()), event_value.clone()),
                 ])),
             };
-            let normalized_for_reducer =
-                normalize_value_with_schema(wrapped_value, &reducer_schema.event_schema, &self.schema_index)
-                    .map_err(|err| {
-                        KernelError::Manifest(format!(
-                            "failed to encode event '{}' for reducer '{}': {err}",
-                            event.schema, binding.reducer
-                        ))
-                    })?;
+            let normalized_for_reducer = normalize_value_with_schema(
+                wrapped_value,
+                &reducer_schema.event_schema,
+                &self.schema_index,
+            )
+            .map_err(|err| {
+                KernelError::Manifest(format!(
+                    "failed to encode event '{}' for reducer '{}': {err}",
+                    event.schema, binding.reducer
+                ))
+            })?;
 
             let key_bytes = if let Some(field) = &binding.key_field {
                 let key_schema_ref = module_def
@@ -1202,11 +1205,8 @@ impl<S: Store + 'static> Kernel<S> {
                     ))
                 })?
                 .clone();
-            let instance = PlanInstance::from_snapshot(
-                inst_snapshot,
-                plan,
-                self.schema_index.clone(),
-            );
+            let instance =
+                PlanInstance::from_snapshot(inst_snapshot, plan, self.schema_index.clone());
             self.plan_instances.insert(instance.id, instance);
         }
 
@@ -3324,13 +3324,12 @@ fn build_router(
     };
 
     for route in &routing.events {
-        let reducer_schema =
-            reducer_schemas
-                .get(&route.reducer)
-                .ok_or_else(|| KernelError::Manifest(format!(
-                    "schema for reducer '{}' not found while building router",
-                    route.reducer
-                )))?;
+        let reducer_schema = reducer_schemas.get(&route.reducer).ok_or_else(|| {
+            KernelError::Manifest(format!(
+                "schema for reducer '{}' not found while building router",
+                route.reducer
+            ))
+        })?;
         let route_event = route.event.as_str();
         let reducer_event_schema = reducer_schema.event_schema_name.as_str();
         if route_event == reducer_event_schema {
@@ -3437,14 +3436,12 @@ fn wrap_for_event_schema(
                     }
                 }
             }
-            found
-                .map(|tag| EventWrap::Variant { tag })
-                .ok_or_else(|| {
-                    KernelError::Manifest(format!(
-                        "event '{event_schema}' is not in reducer schema '{}' family",
-                        reducer_schema.event_schema_name
-                    ))
-                })
+            found.map(|tag| EventWrap::Variant { tag }).ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "event '{event_schema}' is not in reducer schema '{}' family",
+                    reducer_schema.event_schema_name
+                ))
+            })
         }
         _ => Err(KernelError::Manifest(format!(
             "event '{event_schema}' is not in reducer schema '{}' family",

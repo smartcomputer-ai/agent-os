@@ -7,10 +7,10 @@ use thiserror::Error;
 
 use crate::{
     DefPlan, EffectKind, ExprOrValue, HashRef, TypeExpr, TypeList, TypeMap, TypeMapEntry,
-    TypeMapKey, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueBool,
-    ValueBytes, ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList, ValueLiteral,
-    ValueMap, ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText, ValueTimeNs,
-    ValueUuid, ValueVariant,
+    TypeMapKey, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueBool, ValueBytes,
+    ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList, ValueLiteral, ValueMap,
+    ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText, ValueTimeNs, ValueUuid,
+    ValueVariant,
 };
 use crate::{Expr, ExprConst, typecheck::validate_value_literal};
 
@@ -812,8 +812,7 @@ mod tests {
             allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         };
-        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .unwrap();
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap();
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(matches!(step.params, ExprOrValue::Literal(_)));
         } else {
@@ -851,7 +850,7 @@ mod tests {
         };
 
         let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .expect_err("should reject const wrapper in expr");
+            .expect_err("should reject const wrapper in expr");
         assert!(matches!(err, PlanLiteralError::InvalidJson(_)));
     }
 
@@ -886,8 +885,7 @@ mod tests {
             allowed_effects: vec![EffectKind::llm_generate()],
             invariants: vec![],
         };
-        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .unwrap();
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap();
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(matches!(step.params, ExprOrValue::Literal(_)));
         } else {
@@ -925,8 +923,7 @@ mod tests {
             invariants: vec![],
         };
 
-        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .unwrap();
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap();
 
         if let crate::PlanStepKind::RaiseEvent(step) = &plan.steps[0].kind {
             assert!(matches!(step.value, ExprOrValue::Literal(_)));
@@ -955,8 +952,8 @@ mod tests {
             invariants: vec![],
         };
 
-        let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .unwrap_err();
+        let err =
+            normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap_err();
         assert!(matches!(err, PlanLiteralError::SchemaNotFound { .. }));
     }
 
@@ -1046,8 +1043,7 @@ mod tests {
             invariants: vec![],
         };
 
-        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .expect("normalize");
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).expect("normalize");
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(
                 matches!(step.params, ExprOrValue::Literal(_)),

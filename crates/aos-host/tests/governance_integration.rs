@@ -10,12 +10,12 @@ use aos_air_types::{
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_cbor::{Hash, to_canonical_cbor};
-use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
 use aos_kernel::shadow::ShadowHarness;
 use aos_wasm_abi::ReducerOutput;
+use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use indexmap::IndexMap;
 use serde_cbor;
 use serde_json::json;
@@ -125,7 +125,11 @@ fn patch_hash_is_identical_for_sugar_and_canonical_plans() {
             .iter()
             .map(|e| e.effect.clone()),
     );
-    normalize_plan_literals(&mut canonical_plan, &builtin_schema_index(), &effect_catalog)
+    normalize_plan_literals(
+        &mut canonical_plan,
+        &builtin_schema_index(),
+        &effect_catalog,
+    )
     .expect("normalize canonical plan");
 
     let sugar_patch = plan_patch(sugar_plan);

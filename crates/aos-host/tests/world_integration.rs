@@ -5,8 +5,7 @@ use aos_air_types::{
     PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
     PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveBool, TypePrimitiveInt,
     TypePrimitiveNat, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant, ValueLiteral, ValueMap,
-    ValueNull,
-    ValueRecord, ValueText,
+    ValueNull, ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
@@ -14,10 +13,10 @@ use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use helpers::fixtures::{self, START_SCHEMA, TestWorld, effect_params_text, fake_hash};
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::{JournalKind, JournalRecord, PlanEndStatus, mem::MemJournal};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld, effect_params_text, fake_hash};
 use indexmap::IndexMap;
 use serde_cbor;
 use serde_json::json;
@@ -182,7 +181,11 @@ fn sugar_literal_plan_executes_http_flow() {
             .iter()
             .map(|e| e.effect.clone()),
     );
-    normalize_plan_literals(&mut plan, &builtin_schema_index_with_custom_types(), &effect_catalog)
+    normalize_plan_literals(
+        &mut plan,
+        &builtin_schema_index_with_custom_types(),
+        &effect_catalog,
+    )
     .expect("normalize literals");
 
     let routing = vec![fixtures::routing_event(

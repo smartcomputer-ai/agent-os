@@ -92,7 +92,7 @@ fn reducer_module_with_annotations_and_key_schema_validates() {
 }
 
 #[test]
-    fn reducer_module_without_abi_is_rejected_by_schema() {
+fn reducer_module_without_abi_is_rejected_by_schema() {
     let module_json = json!({
         "$kind": "defmodule",
         "name": "com.acme/Reducer@1",

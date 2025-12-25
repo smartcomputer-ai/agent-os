@@ -2,12 +2,12 @@
 mod helpers;
 
 use aos_effects::CapabilityGrant;
-use helpers::fixtures;
 use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
 use aos_wasm_abi::ReducerEffect;
+use helpers::fixtures;
 use serde_cbor::Value as CborValue;
 use serde_json;
 use std::collections::{BTreeMap, HashMap};

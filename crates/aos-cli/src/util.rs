@@ -130,7 +130,9 @@ pub fn resolve_placeholder_modules(
             msg.push_str(&format!("  - {name}\n"));
         }
         msg.push_str("\nResolution hints:\n");
-        msg.push_str("  - add content-addressed wasm to <world>/modules/<name>@<ver>-<hash>.wasm\n");
+        msg.push_str(
+            "  - add content-addressed wasm to <world>/modules/<name>@<ver>-<hash>.wasm\n",
+        );
         msg.push_str("  - build system modules with `cargo build -p aos-sys --target wasm32-unknown-unknown`\n");
         if compiled_hash.is_none() {
             msg.push_str("  - or provide a reducer/ to compile local modules\n");
@@ -199,7 +201,10 @@ fn resolve_from_world_modules(
     let prefix = format!("{module_name}-");
     let mut matches: Vec<PathBuf> = Vec::new();
 
-    for entry in WalkDir::new(&modules_dir).into_iter().filter_map(Result::ok) {
+    for entry in WalkDir::new(&modules_dir)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
         if !entry.file_type().is_file() {
             continue;
         }
@@ -242,9 +247,7 @@ fn resolve_from_world_modules(
         .strip_suffix(".wasm")
         .and_then(|s| s.strip_prefix(&prefix))
         .ok_or_else(|| {
-            anyhow!(
-                "wasm filename does not match '{module_name}-<hash>.wasm' under modules/"
-            )
+            anyhow!("wasm filename does not match '{module_name}-<hash>.wasm' under modules/")
         })?;
 
     let expected = normalize_hash_str(hash_str)
@@ -271,12 +274,10 @@ fn sys_module_spec(name: &str) -> Option<&'static SysModuleSpec> {
     SYS_MODULES.iter().find(|spec| spec.name == name)
 }
 
-const SYS_MODULES: &[SysModuleSpec] = &[
-    SysModuleSpec {
-        name: "sys/ObjectCatalog@1",
-        bin: "object_catalog",
-    },
-];
+const SYS_MODULES: &[SysModuleSpec] = &[SysModuleSpec {
+    name: "sys/ObjectCatalog@1",
+    bin: "object_catalog",
+}];
 
 fn resolve_sys_module(
     store: &FsStore,
@@ -291,8 +292,8 @@ fn resolve_sys_module(
             .join(profile)
             .join(format!("{}.wasm", spec.bin));
         if path.exists() {
-            let bytes = fs::read(&path)
-                .with_context(|| format!("read system wasm {}", path.display()))?;
+            let bytes =
+                fs::read(&path).with_context(|| format!("read system wasm {}", path.display()))?;
             let hash = Hash::of_bytes(&bytes).to_hex();
             let stored = store.put_blob(&bytes).context("store system wasm blob")?;
             let hash_ref = HashRef::new(stored.to_hex()).context("create hash ref")?;
@@ -335,8 +336,8 @@ fn persist_world_module(
             .with_context(|| format!("create modules dir {}", parent.display()))?;
     }
     if path.exists() {
-        let existing = fs::read(&path)
-            .with_context(|| format!("read existing module {}", path.display()))?;
+        let existing =
+            fs::read(&path).with_context(|| format!("read existing module {}", path.display()))?;
         let existing_hash = Hash::of_bytes(&existing).to_hex();
         if existing_hash != hash {
             anyhow::bail!(

@@ -4,11 +4,11 @@ mod helpers;
 use std::sync::Arc;
 
 use aos_host::config::HostConfig;
-use helpers::fixtures;
 use aos_host::{ExternalEvent, WorldHost};
 use aos_kernel::KernelConfig;
 use aos_store::FsStore;
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use helpers::fixtures;
 use serde_cbor;
 use serde_json;
 use tempfile::TempDir;

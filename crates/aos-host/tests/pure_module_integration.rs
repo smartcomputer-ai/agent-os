@@ -43,8 +43,7 @@ async fn pure_module_integration_flow() {
     );
 
     let mut kernel =
-        Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new()))
-            .unwrap();
+        Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
 
     let input_payload = serde_cbor::to_vec(&serde_json::json!({ "value": "hi" })).unwrap();
     let input = PureInput {

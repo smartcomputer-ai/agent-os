@@ -15,10 +15,10 @@ use aos_air_types::{
     TypeVariant, catalog::EffectCatalog,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use helpers::fixtures::{self, TestStore};
 use aos_host::testhost::TestHost;
 use aos_kernel::LoadedManifest;
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use helpers::fixtures::{self, TestStore};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -505,7 +505,10 @@ async fn testhost_timer_effect_flow() {
             "test/TimerReducer@1",
         )],
     );
-    fixtures::insert_test_schemas(&mut loaded, vec![timer_event_schema(), timer_state_schema()]);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![timer_event_schema(), timer_state_schema()],
+    );
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
@@ -589,7 +592,10 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
             "test/TimerReducer@1",
         )],
     );
-    fixtures::insert_test_schemas(&mut loaded, vec![timer_event_schema(), timer_state_schema()]);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![timer_event_schema(), timer_state_schema()],
+    );
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
@@ -647,7 +653,10 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
             "test/TimerReducer@1",
         )],
     );
-    fixtures::insert_test_schemas(&mut loaded, vec![timer_event_schema(), timer_state_schema()]);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![timer_event_schema(), timer_state_schema()],
+    );
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
     host.send_event("test/TimerEvent@1", timer_start_event())

@@ -24,7 +24,8 @@ impl<S: Store> PureRegistry<S> {
     pub fn new(store: Arc<S>, module_cache_dir: Option<PathBuf>) -> Result<Self, KernelError> {
         Ok(Self {
             store,
-            runtime: PureRuntime::new_with_disk_cache(module_cache_dir).map_err(KernelError::Wasm)?,
+            runtime: PureRuntime::new_with_disk_cache(module_cache_dir)
+                .map_err(KernelError::Wasm)?,
             modules: HashMap::new(),
         })
     }

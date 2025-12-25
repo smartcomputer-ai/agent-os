@@ -6,7 +6,6 @@ mod helpers;
 use std::sync::Arc;
 
 use aos_cbor::Hash;
-use helpers::fixtures::{self, TestStore};
 use aos_kernel::Kernel;
 use aos_kernel::cell_index::CellIndex;
 use aos_kernel::journal::mem::MemJournal;
@@ -14,6 +13,7 @@ use aos_kernel::journal::{JournalKind, OwnedJournalEntry};
 use aos_kernel::snapshot::KernelSnapshot;
 use aos_store::Store;
 use aos_wasm_abi::ReducerOutput;
+use helpers::fixtures::{self, TestStore};
 
 /// Full-path integration for keyed reducers:
 /// - routes keyed events,

@@ -88,7 +88,9 @@ where
         .run(payload)
         .map_err(|err| RunError::Run(err.message()))?;
     let output_bytes = serde_cbor::to_vec(&output).map_err(RunError::OutputEncode)?;
-    let envelope = PureOutput { output: output_bytes };
+    let envelope = PureOutput {
+        output: output_bytes,
+    };
     envelope.encode().map_err(RunError::OutputEnvelope)
 }
 

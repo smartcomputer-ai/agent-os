@@ -7,8 +7,8 @@ use aos_wasm_abi::{
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use serde_cbor::Value;
 use crate::{read_input, write_back};
+use serde_cbor::Value;
 
 /// Trait implemented by every reducer.
 pub trait Reducer: Default {

@@ -10,7 +10,7 @@ pub use reducers::*;
 
 pub use serde_cbor::Value;
 
-use alloc::alloc::{alloc, Layout};
+use alloc::alloc::{Layout, alloc};
 use core::slice;
 
 #[inline]
