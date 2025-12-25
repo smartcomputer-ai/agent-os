@@ -14,7 +14,9 @@ use aos_air_types::{
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
-use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
+use aos_wasm_abi::{
+    ABI_VERSION, CallContext, DomainEvent, PureInput, PureOutput, ReducerInput, ReducerOutput,
+};
 use serde::Serialize;
 use serde_cbor;
 use serde_cbor::Value as CborValue;
@@ -38,6 +40,7 @@ use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
 use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
+use crate::pure::PureRegistry;
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
 use crate::schema_value::cbor_to_expr_value;
@@ -89,6 +92,7 @@ pub struct Kernel<S: Store> {
     policy_defs: HashMap<Name, DefPolicy>,
     schema_defs: HashMap<Name, DefSchema>,
     reducers: ReducerRegistry<S>,
+    pures: PureRegistry<S>,
     router: HashMap<String, Vec<RouteBinding>>,
     plan_registry: PlanRegistry,
     schema_index: Arc<SchemaIndex>,
@@ -500,7 +504,8 @@ impl<S: Store + 'static> Kernel<S> {
             schema_defs,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
-            reducers: ReducerRegistry::new(store, config.module_cache_dir.clone())?,
+            reducers: ReducerRegistry::new(store.clone(), config.module_cache_dir.clone())?,
+            pures: PureRegistry::new(store, config.module_cache_dir.clone())?,
             router,
             plan_registry,
             plan_instances: HashMap::new(),
@@ -538,7 +543,14 @@ impl<S: Store + 'static> Kernel<S> {
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
-                kernel.reducers.ensure_loaded(name, module_def)?;
+                match module_def.module_kind {
+                    aos_air_types::ModuleKind::Reducer => {
+                        kernel.reducers.ensure_loaded(name, module_def)?;
+                    }
+                    aos_air_types::ModuleKind::Pure => {
+                        kernel.pures.ensure_loaded(name, module_def)?;
+                    }
+                }
             }
         }
         kernel.replay_existing_entries()?;
@@ -568,6 +580,20 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<(), KernelError> {
         let event = DomainEvent::new(schema.into(), value);
         self.process_domain_event(event)
+    }
+
+    pub fn invoke_pure(&mut self, name: &str, input: &PureInput) -> Result<PureOutput, KernelError> {
+        let module_def = self
+            .module_defs
+            .get(name)
+            .ok_or_else(|| KernelError::PureNotFound(name.to_string()))?;
+        if module_def.module_kind != aos_air_types::ModuleKind::Pure {
+            return Err(KernelError::Manifest(format!(
+                "module '{name}' is not a pure module"
+            )));
+        }
+        self.pures.ensure_loaded(name, module_def)?;
+        self.pures.invoke(name, input)
     }
 
     pub fn tick(&mut self) -> Result<(), KernelError> {

@@ -10,6 +10,8 @@ pub enum KernelError {
     Manifest(String),
     #[error("missing reducer '{0}'")]
     ReducerNotFound(String),
+    #[error("missing pure module '{0}'")]
+    PureNotFound(String),
     #[error("invalid reducer output: {0}")]
     ReducerOutput(String),
     #[error("effect manager error: {0}")]

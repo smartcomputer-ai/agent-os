@@ -18,7 +18,7 @@ use aos_air_types::{
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
 use aos_store::{MemStore, Store};
-use aos_wasm_abi::{DomainEvent, ReducerOutput};
+use aos_wasm_abi::{DomainEvent, PureOutput, ReducerOutput};
 use indexmap::IndexMap;
 use std::fs;
 use std::path::PathBuf;
@@ -595,6 +595,60 @@ pub fn stub_reducer_module<S: Store + ?Sized>(
         abi: ModuleAbi {
             reducer: None,
             pure: None,
+        },
+    }
+}
+
+/// Compiles a trivial WAT module whose `run` export always returns the provided
+/// `PureOutput` bytes. Useful for exercising kernel pure-module dispatch.
+pub fn stub_pure_module<S: Store + ?Sized>(
+    store: &Arc<S>,
+    name: impl Into<String>,
+    output: &PureOutput,
+    input_schema: &str,
+    output_schema: &str,
+) -> DefModule {
+    let output_bytes = output.encode().expect("encode pure output");
+    let data_literal = output_bytes
+        .iter()
+        .map(|b| format!("\\{:02x}", b))
+        .collect::<String>();
+    let len = output_bytes.len();
+    let wat = format!(
+        r#"(module
+  (memory (export "memory") 1)
+  (global $heap (mut i32) (i32.const {len}))
+  (data (i32.const 0) "{data}")
+  (func (export "alloc") (param i32) (result i32)
+    (local $old i32)
+    global.get $heap
+    local.tee $old
+    local.get 0
+    i32.add
+    global.set $heap
+    local.get $old)
+  (func (export "run") (param i32 i32) (result i32 i32)
+    (i32.const 0)
+    (i32.const {len}))
+)"#,
+        len = len,
+        data = data_literal
+    );
+    let wasm_bytes = parse_str(&wat).expect("wat compile");
+    let wasm_hash = store.put_blob(&wasm_bytes).expect("store wasm");
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
+
+    DefModule {
+        name: name.into(),
+        module_kind: ModuleKind::Pure,
+        wasm_hash: wasm_hash_ref,
+        key_schema: None,
+        abi: ModuleAbi {
+            reducer: None,
+            pure: Some(aos_air_types::PureAbi {
+                input: schema(input_schema),
+                output: schema(output_schema),
+            }),
         },
     }
 }

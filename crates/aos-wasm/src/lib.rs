@@ -156,7 +156,7 @@ impl ReducerRuntime {
 
         debug!("aos-wasm: cache miss for reducer {key_hex}; compiling module");
         let compiled = Arc::new(self.compile(wasm_bytes)?);
-        self.store_serialized(&key, &key_hex, &compiled).ok();
+        self.store_serialized(&key, &key_hex, compiled.as_ref()).ok();
         self.insert_cached_module(key, compiled.clone());
         Ok(compiled)
     }
