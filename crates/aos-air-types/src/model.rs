@@ -448,12 +448,15 @@ pub struct DefModule {
 #[serde(rename_all = "lowercase")]
 pub enum ModuleKind {
     Reducer,
+    Pure,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleAbi {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reducer: Option<ReducerAbi>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pure: Option<PureAbi>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -466,6 +469,12 @@ pub struct ReducerAbi {
     pub effects_emitted: Vec<EffectKind>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub cap_slots: IndexMap<VarName, CapType>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PureAbi {
+    pub input: SchemaRef,
+    pub output: SchemaRef,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

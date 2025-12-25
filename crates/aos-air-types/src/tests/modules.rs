@@ -52,6 +52,7 @@ fn reducer_abi_struct_round_trip() {
             effects_emitted: vec![crate::EffectKind::http_request()],
             cap_slots: indexmap::IndexMap::new(),
         }),
+        pure: None,
     };
     let json = serde_json::to_value(&abi).expect("serialize");
     let round_trip: ModuleAbi = serde_json::from_value(json).expect("deserialize");
@@ -91,7 +92,7 @@ fn reducer_module_with_annotations_and_key_schema_validates() {
 }
 
 #[test]
-fn reducer_module_without_abi_is_rejected_by_schema() {
+    fn reducer_module_without_abi_is_rejected_by_schema() {
     let module_json = json!({
         "$kind": "defmodule",
         "name": "com.acme/Reducer@1",
@@ -106,6 +107,46 @@ fn reducer_module_without_abi_is_rejected_by_schema() {
         )))
         .is_err(),
         "schema should reject reducer modules missing reducer ABI"
+    );
+}
+
+#[test]
+fn parses_pure_module() {
+    let module_json = json!({
+        "$kind": "defmodule",
+        "name": "com.acme/Pure@1",
+        "module_kind": "pure",
+        "wasm_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "abi": {
+            "pure": {
+                "input": "com.acme/Input@1",
+                "output": "com.acme/Output@1"
+            }
+        }
+    });
+    assert_json_schema(crate::schemas::DEFMODULE, &module_json);
+    let module: DefModule = serde_json::from_value(module_json).expect("parse module");
+    assert!(matches!(module.module_kind, ModuleKind::Pure));
+    let pure = module.abi.pure.expect("pure abi");
+    assert_eq!(pure.input.as_str(), "com.acme/Input@1");
+}
+
+#[test]
+fn pure_module_without_abi_is_rejected_by_schema() {
+    let module_json = json!({
+        "$kind": "defmodule",
+        "name": "com.acme/Pure@1",
+        "module_kind": "pure",
+        "wasm_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        "abi": {}
+    });
+    assert!(
+        panic::catch_unwind(AssertUnwindSafe(|| assert_json_schema(
+            crate::schemas::DEFMODULE,
+            &module_json
+        )))
+        .is_err(),
+        "schema should reject pure modules missing pure ABI"
     );
 }
 

@@ -204,8 +204,8 @@ Reducer export: `step(ptr, len) -> (ptr, len)`
 
 No WASI ambient syscalls, no threads, no clock. All I/O happens via the effect layer. Prefer `dec128` in values; normalize NaNs if floats are used internally.
 
-**Note**: Pure modules (stateless, side-effect-free functions) are deferred to v1.1+. Use reducers for all computation in v1.
-`module_kind` is currently limited to `"reducer"`; future versions may add `"pure"` without breaking existing manifests.
+**Note**: Pure modules (stateless, side-effect-free functions) are now supported as `module_kind: "pure"`.
+Use reducers for stateful logic; use pure modules for deterministic transforms and authorizers.
 
 See: spec/schemas/defmodule.schema.json
 

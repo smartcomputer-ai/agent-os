@@ -595,6 +595,7 @@ mod tests {
                     effects_emitted: Vec::new(),
                     cap_slots: IndexMap::new(),
                 }),
+                pure: None,
             },
         };
 

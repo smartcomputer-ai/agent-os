@@ -115,6 +115,7 @@ fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) ->
                 effects_emitted: Vec::new(),
                 cap_slots: IndexMap::new(),
             }),
+            pure: None,
         },
     };
 

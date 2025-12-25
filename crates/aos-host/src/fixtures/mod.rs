@@ -592,7 +592,10 @@ pub fn stub_reducer_module<S: Store + ?Sized>(
         module_kind: ModuleKind::Reducer,
         wasm_hash: wasm_hash_ref,
         key_schema: None,
-        abi: ModuleAbi { reducer: None },
+        abi: ModuleAbi {
+            reducer: None,
+            pure: None,
+        },
     }
 }
 
@@ -638,6 +641,7 @@ pub fn reducer_module_from_target(
                 effects_emitted: vec![],
                 cap_slots: IndexMap::new(),
             }),
+            pure: None,
         },
     }
 }

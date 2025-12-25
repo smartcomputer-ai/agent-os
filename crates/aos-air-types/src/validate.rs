@@ -874,6 +874,15 @@ pub fn validate_manifest(
                 }
             }
         }
+        if let Some(abi) = module.abi.pure.as_ref() {
+            for schema_ref in [abi.input.as_str(), abi.output.as_str()] {
+                if !schema_exists(schema_ref) {
+                    return Err(ValidationError::SchemaNotFound {
+                        schema: schema_ref.to_string(),
+                    });
+                }
+            }
+        }
     }
 
     Ok(())
@@ -1210,6 +1219,7 @@ mod tests {
                         effects_emitted: vec![],
                         cap_slots: IndexMap::new(),
                     }),
+                    pure: None,
                 },
             },
         );
@@ -1290,6 +1300,7 @@ mod tests {
                         effects_emitted: vec![],
                         cap_slots: IndexMap::new(),
                     }),
+                    pure: None,
                 },
             },
         );
@@ -1370,6 +1381,7 @@ mod tests {
                         effects_emitted: vec![EffectKind::timer_set()],
                         cap_slots: IndexMap::new(),
                     }),
+                    pure: None,
                 },
             },
         );

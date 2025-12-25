@@ -2650,6 +2650,7 @@ mod tests {
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
                 }),
+                pure: None,
             },
         };
         let mut modules = HashMap::new();
@@ -2719,6 +2720,7 @@ mod tests {
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
                 }),
+                pure: None,
             },
         };
         let mut modules = HashMap::new();
@@ -2787,6 +2789,7 @@ mod tests {
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
                 }),
+                pure: None,
             },
         };
         let mut modules = HashMap::new();
@@ -2855,6 +2858,7 @@ mod tests {
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
                 }),
+                pure: None,
             },
         };
         let mut modules = HashMap::new();

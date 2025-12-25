@@ -1,4 +1,4 @@
-//! Reducer ABI envelopes shared by the kernel and WASM SDK.
+//! Reducer/pure ABI envelopes shared by the kernel and WASM SDK.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -46,6 +46,47 @@ pub struct ReducerOutput {
 }
 
 impl ReducerOutput {
+    pub fn decode(bytes: &[u8]) -> Result<Self, AbiDecodeError> {
+        serde_cbor::from_slice(bytes).map_err(AbiDecodeError::Cbor)
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, AbiEncodeError> {
+        serde_cbor::to_vec(self).map_err(AbiEncodeError::Cbor)
+    }
+}
+
+/// Pure module input envelope (kernel → WASM module).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct PureInput {
+    pub version: u8,
+    #[serde(with = "serde_bytes")]
+    pub input: Vec<u8>,
+}
+
+impl PureInput {
+    pub fn decode(bytes: &[u8]) -> Result<Self, AbiDecodeError> {
+        let input: PureInput = serde_cbor::from_slice(bytes)?;
+        if input.version != ABI_VERSION {
+            return Err(AbiDecodeError::UnsupportedVersion {
+                found: input.version,
+            });
+        }
+        Ok(input)
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, AbiEncodeError> {
+        serde_cbor::to_vec(self).map_err(AbiEncodeError::Cbor)
+    }
+}
+
+/// Pure module output envelope (WASM module → kernel).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct PureOutput {
+    #[serde(with = "serde_bytes")]
+    pub output: Vec<u8>,
+}
+
+impl PureOutput {
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiDecodeError> {
         serde_cbor::from_slice(bytes).map_err(AbiDecodeError::Cbor)
     }
@@ -211,5 +252,23 @@ mod tests {
         let bytes = output.encode().expect("encode");
         let decoded = ReducerOutput::decode(&bytes).expect("decode");
         assert_eq!(decoded, output);
+    }
+
+    #[test]
+    fn round_trip_pure_envelopes() {
+        let input = PureInput {
+            version: ABI_VERSION,
+            input: vec![0xaa, 0xbb],
+        };
+        let bytes = input.encode().expect("encode");
+        let decoded = PureInput::decode(&bytes).expect("decode");
+        assert_eq!(decoded, input);
+
+        let output = PureOutput {
+            output: vec![0x01, 0x02],
+        };
+        let out_bytes = output.encode().expect("encode");
+        let out_decoded = PureOutput::decode(&out_bytes).expect("decode");
+        assert_eq!(out_decoded, output);
     }
 }
