@@ -909,6 +909,9 @@ mod tests {
             schema: TypeExpr::Ref(TypeRef {
                 reference: SchemaRef::new("sys/SecretRef@1").unwrap(),
             }),
+            enforcer: aos_air_types::CapEnforcer {
+                module: "sys/CapAllowAll@1".into(),
+            },
         };
         let defcap_hash = store
             .put_node(&AirNode::Defcap(defcap.clone()))
@@ -954,6 +957,9 @@ mod tests {
             schema: TypeExpr::Ref(TypeRef {
                 reference: SchemaRef::new("sys/SecretRef@1").unwrap(),
             }),
+            enforcer: aos_air_types::CapEnforcer {
+                module: "sys/CapAllowAll@1".into(),
+            },
         };
         let defcap_hash = store
             .put_node(&AirNode::Defcap(defcap.clone()))

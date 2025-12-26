@@ -24,6 +24,7 @@ pub struct CapReservation {
     pub cap_name: String,
     pub effect_kind: String,
     pub cap_type: String,
+    pub enforcer_module: String,
     pub reserve: BudgetMap,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_ns: Option<u64>,

@@ -170,6 +170,7 @@ pub struct CapDecisionRecord {
     pub effect_kind: String,
     pub cap_name: String,
     pub cap_type: String,
+    pub enforcer_module: String,
     pub decision: CapDecisionOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny: Option<CapDenyReason>,

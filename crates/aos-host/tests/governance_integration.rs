@@ -675,6 +675,9 @@ fn test_http_cap(name: &str) -> DefCap {
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapEnforceHttpOut@1".into(),
+        },
     }
 }
 

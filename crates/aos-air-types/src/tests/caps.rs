@@ -27,6 +27,7 @@ fn parses_cap_definition_and_grant() {
         "$kind": "defcap",
         "name": "com.acme/http@1",
         "cap_type": "http.out",
+        "enforcer": { "module": "sys/CapAllowAll@1" },
         "schema": {
             "record": {
                 "hosts": {"set": {"text": {}}}
@@ -68,6 +69,7 @@ fn supports_all_cap_types() {
             "$kind": "defcap",
             "name": format!("com.acme/{cap_type}@1"),
             "cap_type": cap_type,
+            "enforcer": { "module": "sys/CapAllowAll@1" },
             "schema": {"record": {}}
         });
         assert_json_schema(crate::schemas::DEFCAP, &cap_json);
@@ -82,6 +84,7 @@ fn accepts_custom_cap_type_strings() {
         "$kind": "defcap",
         "name": "com.acme/unknown@1",
         "cap_type": "email.outbound",
+        "enforcer": { "module": "sys/CapAllowAll@1" },
         "schema": {"record": {}}
     });
     assert_json_schema(crate::schemas::DEFCAP, &cap_json);

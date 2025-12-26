@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{
-    CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, TypeExpr, TypeList, TypeMap,
-    TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, builtins,
+    CapEnforcer, CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, TypeExpr, TypeList,
+    TypeMap, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, builtins,
     catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
 };
 use aos_cbor::to_canonical_cbor;
@@ -14,7 +14,11 @@ use indexmap::IndexMap;
 use crate::error::KernelError;
 
 pub trait CapabilityGate {
-    fn resolve(&self, cap_name: &str, effect_kind: &str) -> Result<CapabilityGrant, KernelError>;
+    fn resolve(
+        &self,
+        cap_name: &str,
+        effect_kind: &str,
+    ) -> Result<CapGrantResolution, KernelError>;
 }
 
 #[derive(Clone)]
@@ -27,7 +31,19 @@ pub struct CapabilityResolver {
 struct ResolvedGrant {
     grant: CapabilityGrant,
     cap_type: CapType,
+    enforcer: CapEnforcer,
 }
+
+#[derive(Clone)]
+pub struct CapGrantResolution {
+    pub grant: CapabilityGrant,
+    pub cap_type: CapType,
+    pub enforcer: CapEnforcer,
+}
+
+const CAP_ALLOW_ALL_ENFORCER: &str = "sys/CapAllowAll@1";
+const CAP_HTTP_ENFORCER: &str = "sys/CapEnforceHttpOut@1";
+const CAP_LLM_ENFORCER: &str = "sys/CapEnforceLlmBasic@1";
 
 impl CapabilityResolver {
     fn new(grants: HashMap<String, ResolvedGrant>, effect_catalog: Arc<EffectCatalog>) -> Self {
@@ -43,7 +59,17 @@ impl CapabilityResolver {
     {
         let map = grants
             .into_iter()
-            .map(|(grant, cap_type)| (grant.name.clone(), ResolvedGrant { grant, cap_type }))
+            .map(|(grant, cap_type)| {
+                let enforcer = default_enforcer_for_cap_type(&cap_type);
+                (
+                    grant.name.clone(),
+                    ResolvedGrant {
+                        grant,
+                        cap_type,
+                        enforcer,
+                    },
+                )
+            })
             .collect();
         let catalog =
             EffectCatalog::from_defs(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
@@ -65,7 +91,7 @@ impl CapabilityResolver {
         &self,
         cap_name: &str,
         effect_kind: &str,
-    ) -> Result<CapabilityGrant, KernelError> {
+    ) -> Result<CapGrantResolution, KernelError> {
         let resolved = self
             .grants
             .get(cap_name)
@@ -79,7 +105,11 @@ impl CapabilityResolver {
                 effect_kind: effect_kind.to_string(),
             });
         }
-        Ok(resolved.grant.clone())
+        Ok(CapGrantResolution {
+            grant: resolved.grant.clone(),
+            cap_type: resolved.cap_type.clone(),
+            enforcer: resolved.enforcer.clone(),
+        })
     }
 
     pub fn from_manifest(
@@ -129,6 +159,7 @@ fn resolve_grant(
     Ok(ResolvedGrant {
         grant: capability_grant,
         cap_type: defcap.cap_type.clone(),
+        enforcer: defcap.enforcer.clone(),
     })
 }
 
@@ -222,6 +253,17 @@ fn expected_cap_type(catalog: &EffectCatalog, effect_kind: &str) -> Result<CapTy
 
 fn cap_type_as_str(cap_type: &CapType) -> &str {
     cap_type.as_str()
+}
+
+fn default_enforcer_for_cap_type(cap_type: &CapType) -> CapEnforcer {
+    let module = match cap_type.as_str() {
+        CapType::HTTP_OUT => CAP_HTTP_ENFORCER,
+        CapType::LLM_BASIC => CAP_LLM_ENFORCER,
+        _ => CAP_ALLOW_ALL_ENFORCER,
+    };
+    CapEnforcer {
+        module: module.to_string(),
+    }
 }
 
 fn expand_cap_schema(
@@ -336,6 +378,9 @@ mod tests {
             name: "sys/http.out@1".into(),
             cap_type: CapType::http_out(),
             schema: hosts_schema(),
+            enforcer: aos_air_types::CapEnforcer {
+                module: "sys/CapEnforceHttpOut@1".into(),
+            },
         }
     }
 
@@ -400,6 +445,9 @@ mod tests {
             schema: TypeExpr::Ref(TypeRef {
                 reference: SchemaRef::new(referenced_schema).expect("schema ref"),
             }),
+            enforcer: aos_air_types::CapEnforcer {
+                module: "sys/CapEnforceHttpOut@1".into(),
+            },
         };
         let schema_index =
             SchemaIndex::new(HashMap::from([(referenced_schema.to_string(), ref_schema)]));

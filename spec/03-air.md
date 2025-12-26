@@ -318,11 +318,12 @@ Capabilities define scoped permissions for effects. A `defcap` declares a capabi
   "$kind": "defcap",
   "name": "namespace/name@version",
   "cap_type": "http.out" | "blob" | "timer" | "llm.basic" | "secret" | "query",
-  "schema": <SchemaRef>
+  "schema": <SchemaRef>,
+  "enforcer": { "module": "sys/CapAllowAll@1" }
 }
 ```
 
-The schema defines parameter constraints enforced at enqueue time.
+The schema defines parameter constraints enforced at enqueue time. The enforcer is a deterministic module invoked by the kernel during authorization; `sys/CapAllowAll@1` is a built-in allow-all enforcer.
 
 ### Standard v1 Capability Types (built-in)
 
@@ -744,7 +745,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 20.2 defcap (http.out@1)
 
 ```json
-{ "$kind":"defcap", "name":"sys/http.out@1", "cap_type":"http.out", "schema": { "record": { "hosts": { "set": { "text": {} } }, "verbs": { "set": { "text": {} } }, "rpm": { "nat": {} } } } }
+{ "$kind":"defcap", "name":"sys/http.out@1", "cap_type":"http.out", "schema": { "record": { "hosts": { "set": { "text": {} } }, "verbs": { "set": { "text": {} } }, "rpm": { "nat": {} } } }, "enforcer": { "module": "sys/CapEnforceHttpOut@1" } }
 ```
 
 20.3 defpolicy (allow google rss; deny LLM from reducers)

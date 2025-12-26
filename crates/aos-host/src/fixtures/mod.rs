@@ -494,6 +494,9 @@ pub fn http_defcap() -> DefCap {
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapEnforceHttpOut@1".into(),
+        },
     }
 }
 
@@ -505,6 +508,9 @@ pub fn timer_defcap() -> DefCap {
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapAllowAll@1".into(),
+        },
     }
 }
 
@@ -516,6 +522,9 @@ pub fn blob_defcap() -> DefCap {
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapAllowAll@1".into(),
+        },
     }
 }
 
@@ -536,6 +545,9 @@ pub fn query_defcap() -> DefCap {
                 }),
             )]),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapAllowAll@1".into(),
+        },
     }
 }
 

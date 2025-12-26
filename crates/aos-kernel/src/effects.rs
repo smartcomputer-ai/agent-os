@@ -154,9 +154,11 @@ impl EffectManager {
         .map_err(|err| KernelError::EffectManager(err.to_string()))?;
         let canonical_params = normalize_secret_variants(&canonical_params)
             .map_err(|err| KernelError::SecretResolution(err.to_string()))?;
-        let grant = self
+        let resolved = self
             .capability_gate
             .resolve(cap_name, runtime_kind.as_str())?;
+        let grant = resolved.grant;
+        let enforcer_module = resolved.enforcer.module;
         let intent = EffectIntent::from_raw_params(
             runtime_kind.clone(),
             cap_name.to_string(),
@@ -170,7 +172,12 @@ impl EffectManager {
             .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?
             .as_str()
             .to_string();
-        let reserve = match cap_constraints_and_reserve(&runtime_kind, &grant, &canonical_params) {
+        let reserve = match cap_constraints_and_reserve(
+            enforcer_module.as_str(),
+            &runtime_kind,
+            &grant,
+            &canonical_params,
+        ) {
             Ok(reserve) => reserve,
             Err(reason) => {
                 let message = reason.message.clone();
@@ -179,6 +186,7 @@ impl EffectManager {
                     runtime_kind.as_str(),
                     cap_name,
                     &cap_type,
+                    enforcer_module.as_str(),
                     grant.expiry_ns,
                     BudgetMap::new(),
                     reason,
@@ -197,6 +205,7 @@ impl EffectManager {
                     runtime_kind.as_str(),
                     cap_name,
                     &cap_type,
+                    enforcer_module.as_str(),
                     grant.expiry_ns,
                     reserve.clone(),
                     CapDenyReason {
@@ -217,6 +226,7 @@ impl EffectManager {
                 runtime_kind.as_str(),
                 cap_name,
                 &cap_type,
+                enforcer_module.as_str(),
                 grant.expiry_ns,
                 reserve.clone(),
                 CapDenyReason {
@@ -241,6 +251,7 @@ impl EffectManager {
                         runtime_kind.as_str(),
                         cap_name,
                         &cap_type,
+                        enforcer_module.as_str(),
                         grant.expiry_ns,
                         reserve.clone(),
                         CapDenyReason {
@@ -261,6 +272,7 @@ impl EffectManager {
                         cap_name: cap_name.to_string(),
                         effect_kind: runtime_kind.as_str().to_string(),
                         cap_type: cap_type.clone(),
+                        enforcer_module: enforcer_module.clone(),
                         reserve: reserve.clone(),
                         expiry_ns: grant.expiry_ns,
                     },
@@ -270,6 +282,7 @@ impl EffectManager {
                     runtime_kind.as_str(),
                     cap_name,
                     &cap_type,
+                    enforcer_module.as_str(),
                     grant.expiry_ns,
                     reserve,
                 );
@@ -371,6 +384,7 @@ impl EffectManager {
                             cap_name: record.cap_name.clone(),
                             effect_kind: record.effect_kind.clone(),
                             cap_type: record.cap_type.clone(),
+                            enforcer_module: record.enforcer_module.clone(),
                             reserve: record.reserve.clone(),
                             expiry_ns: record.expiry_ns,
                         },
@@ -421,6 +435,7 @@ impl EffectManager {
             effect_kind: reservation.effect_kind,
             cap_name: reservation.cap_name,
             cap_type: reservation.cap_type,
+            enforcer_module: reservation.enforcer_module,
             decision: CapDecisionOutcome::Allow,
             deny: None,
             reserve: reservation.reserve,
@@ -437,6 +452,7 @@ impl EffectManager {
         effect_kind: &str,
         cap_name: &str,
         cap_type: &str,
+        enforcer_module: &str,
         expiry_ns: Option<u64>,
         reserve: BudgetMap,
         reason: CapDenyReason,
@@ -447,6 +463,7 @@ impl EffectManager {
             effect_kind: effect_kind.to_string(),
             cap_name: cap_name.to_string(),
             cap_type: cap_type.to_string(),
+            enforcer_module: enforcer_module.to_string(),
             decision: CapDecisionOutcome::Deny,
             deny: Some(reason),
             reserve,
@@ -462,6 +479,7 @@ impl EffectManager {
         effect_kind: &str,
         cap_name: &str,
         cap_type: &str,
+        enforcer_module: &str,
         expiry_ns: Option<u64>,
         reserve: BudgetMap,
     ) {
@@ -471,6 +489,7 @@ impl EffectManager {
             effect_kind: effect_kind.to_string(),
             cap_name: cap_name.to_string(),
             cap_type: cap_type.to_string(),
+            enforcer_module: enforcer_module.to_string(),
             decision: CapDecisionOutcome::Allow,
             deny: None,
             reserve,
@@ -526,13 +545,28 @@ struct LlmGenerateParamsView {
     tools: Option<Vec<String>>,
 }
 
+const CAP_ALLOW_ALL_ENFORCER: &str = "sys/CapAllowAll@1";
+const CAP_HTTP_ENFORCER: &str = "sys/CapEnforceHttpOut@1";
+const CAP_LLM_ENFORCER: &str = "sys/CapEnforceLlmBasic@1";
+
 fn cap_constraints_and_reserve(
+    enforcer_module: &str,
     kind: &EffectKind,
     grant: &CapabilityGrant,
     params_cbor: &[u8],
 ) -> Result<BudgetMap, CapDenyReason> {
-    match kind.as_str() {
-        aos_effects::EffectKind::HTTP_REQUEST => {
+    match enforcer_module {
+        CAP_ALLOW_ALL_ENFORCER => Ok(BudgetMap::new()),
+        CAP_HTTP_ENFORCER => {
+            if kind.as_str() != aos_effects::EffectKind::HTTP_REQUEST {
+                return Err(CapDenyReason {
+                    code: "effect_kind_mismatch".into(),
+                    message: format!(
+                        "enforcer '{CAP_HTTP_ENFORCER}' cannot handle '{}'",
+                        kind.as_str()
+                    ),
+                });
+            }
             let cap_params: HttpCapParams = decode_cbor(&grant.params_cbor).map_err(|err| {
                 CapDenyReason {
                     code: "cap_params_invalid".into(),
@@ -601,7 +635,16 @@ fn cap_constraints_and_reserve(
             }
             Ok(BudgetMap::new())
         }
-        aos_effects::EffectKind::LLM_GENERATE => {
+        CAP_LLM_ENFORCER => {
+            if kind.as_str() != aos_effects::EffectKind::LLM_GENERATE {
+                return Err(CapDenyReason {
+                    code: "effect_kind_mismatch".into(),
+                    message: format!(
+                        "enforcer '{CAP_LLM_ENFORCER}' cannot handle '{}'",
+                        kind.as_str()
+                    ),
+                });
+            }
             let cap_params: LlmCapParams = decode_cbor(&grant.params_cbor).map_err(|err| {
                 CapDenyReason {
                     code: "cap_params_invalid".into(),
@@ -656,7 +699,10 @@ fn cap_constraints_and_reserve(
             }
             Ok(reserve)
         }
-        _ => Ok(BudgetMap::new()),
+        _ => Err(CapDenyReason {
+            code: "enforcer_not_found".into(),
+            message: format!("enforcer module '{enforcer_module}' not available"),
+        }),
     }
 }
 

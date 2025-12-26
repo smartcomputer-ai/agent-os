@@ -18,6 +18,7 @@
     "$kind": "defcap",
     "name": "sys/catalog.write@1",
     "cap_type": "catalog.write",
+    "enforcer": { "module": "sys/CapAllowAll@1" },
     "schema": {
       "record": {
         "prefixes": {

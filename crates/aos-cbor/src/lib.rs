@@ -177,7 +177,7 @@ mod tests {
             ),
             (
                 "spec/schemas/defcap.schema.json",
-                "sha256:0e5469a59302346e1a116e8db4f5c1a56849fd8e95cd997ece5b251598dcd115",
+                "sha256:e0f597974800cbb03645c09139515b3aa62ea7a16caaf659cbcc48c836461f4a",
             ),
             (
                 "spec/schemas/defpolicy.schema.json",

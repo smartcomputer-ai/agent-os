@@ -3,6 +3,7 @@
     "$kind": "defcap",
     "name": "sys/query@1",
     "cap_type": "query",
+    "enforcer": { "module": "sys/CapAllowAll@1" },
     "schema": {
       "record": {
         "scope": {

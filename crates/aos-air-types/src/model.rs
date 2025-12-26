@@ -582,6 +582,12 @@ pub struct DefCap {
     pub name: Name,
     pub cap_type: CapType,
     pub schema: TypeExpr,
+    pub enforcer: CapEnforcer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapEnforcer {
+    pub module: Name,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
