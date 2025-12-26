@@ -18,6 +18,10 @@ We are explicitly removing budgets from v0.5. Caps become constraints-only autho
 5) Update tests/examples/docs to remove budget language.
 6) Preserve budget design in `roadmap/vX-future/p4-budgets.md`.
 
+**Authoring/runtime alignment (make “grant is the boundary” enforceable):**
+- Normalize all cap references at load into a resolved grant handle (grant_name -> grant_hash -> defcap + params_cbor + expiry + cap_type).
+- Standardize cap error taxonomy (missing grant / cap_type mismatch / schema mismatch / expired) so journals and tooling can classify failures deterministically.
+
 ---
 
 ## Diamond Invariants (Design Spine)
@@ -110,7 +114,7 @@ Two small changes make grant usage more evolvable and auditable:
 
 2) **Stable grant hash**
    - Keep human-friendly names, but compute:
-     `grant_hash = sha256(cbor({defcap_ref, params_cbor, expiry}))`.
+     `grant_hash = sha256(canonical_cbor({defcap_ref, cap_type, params_cbor, expiry}))`.
    - Journal the hash alongside decisions. This makes "same name, changed meaning"
      detectable and gives adapters/logs a stable identifier without exposing params.
 
@@ -280,6 +284,8 @@ The budget-aware ABI (reserve/settle) is preserved in `roadmap/vX-future/p4-budg
 4) Kernel journals decision + enforcer identity.
 5) Kernel enqueues or denies the effect.
 
+**Intent identity (idempotency):** `intent_hash = sha256(cbor(kind, canonical_params, cap_name, idempotency_key))`. Callers that need concurrent identical intents must provide a unique `idempotency_key` (or embed a unique `request_id` in params).
+
 The enforcer must see the same canonical input that is hashed as the intent identity, so authorization matches what is journaled.
 
 Journal record for an authorization should include (at minimum):
@@ -288,6 +294,21 @@ Journal record for an authorization should include (at minimum):
 - grant name (or grant hash)
 - enforcer output (or a hash of it), including `constraints_ok`
 - expiry check result
+
+**Deterministic time pinning:** record (or hash-pin) the exact `logical_now_ns` used for expiry checks. Expiry decisions must be replayable without wallclock access.
+
+### Cap Authorization Record (Proposed)
+Define a canonical record shape (e.g., `CapAuthorizationRecord@1`) so replay/tooling can rely on a stable schema:
+
+- `intent_hash`
+- `grant_name`
+- `grant_hash`
+- `defcap_ref`
+- `cap_type`
+- `enforcer_id` (module hash or manifest-hash+module-name resolved at that height)
+- `enforcer_output_hash` (or inline `deny.code` + `deny.message`)
+- `expiry_ok` and `logical_now_ns`
+- `final_decision` (allow/deny) + reason enum
 
 ---
 
@@ -304,8 +325,11 @@ Cap params can be refactored for this milestone. Proposed shapes:
 
 Notes:
 - Missing/empty fields mean "no restriction"; non-empty fields are allowlists/ceilings.
-- `max_tokens` is a constraint, not a budget. No usage accounting in v0.5.
+- `max_tokens` is a constraint on the requested generation limit, not total token usage. No usage accounting in v0.5.
 - HTTP enforcement can parse URLs in the enforcer module for now; long-term, move parsing into structured params or a deterministic normalizer.
+
+### URL Normalization (v0.5 choice)
+For v0.5, URL parsing inside the enforcer is allowed, but **intent identity** remains based on the canonical effect params as provided. In vNext, introduce either a structured URL schema or a deterministic normalizer step *before* intent hashing so authorization and intent identity align more closely.
 
 ---
 
@@ -354,7 +378,7 @@ Baseline rule:
 Yes. Caps answer **"can ever"** (delegated authority + constraints). Policies answer **"should now"** (governance gates, approvals, counters). Collapsing them pushes cap semantics into policy anyway, losing least-privilege reasoning and composability.
 
 ### Do identical effects collide on intent hash today?
-Yes. The kernel computes `intent_hash = sha256(cbor(kind, params, cap, idempotency_key))`, and currently uses a zero idempotency key everywhere. If you emit the same effect (same kind/params/cap) twice, it shares an intent hash and cannot be safely in-flight concurrently. Until idempotency keys are exposed in AIR/ABI, callers must include a unique field in params (e.g., `request_id`) when they need distinct in-flight intents.
+Yes. If you emit the same effect (same kind/params/cap/idempotency_key) twice, it shares an intent hash and cannot be safely in-flight concurrently. Use a unique `idempotency_key` (or a unique field in params) when distinct in-flight intents are required.
 
 ### Why not parse URLs only inside the enforcer?
 You can. The reason to consider a separate normalizer or structured schema is that parsing then affects **authorization** but not **intent identity**. If normalization happens before hashing, the journaled intent matches the semantic URL, which improves explainability and determinism for downstream policy and caching.
@@ -410,4 +434,3 @@ Once these exist, caps are a real security surface with deterministic constraint
 7) **Plan-level cap slots**: add `plan_bindings` (or equivalent) to manifest and `cap_slot` to plan emit steps. (PENDING)
 8) **Policy engine reference**: add `defpolicy.engine` (or equivalent) if policy is module-based. (PENDING)
 9) **Grant hash**: standardize `grant_hash` in cap decision journals and explainers. (PENDING)
-
