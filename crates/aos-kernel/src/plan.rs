@@ -1080,7 +1080,8 @@ mod tests {
         ValueInt, ValueLiteral, ValueRecord, ValueText,
     };
     use aos_effects::CapabilityGrant;
-    use std::collections::HashMap;
+    use serde_cbor::Value as CborValue;
+    use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
 
     fn base_plan(steps: Vec<PlanStep>) -> DefPlan {
@@ -1102,12 +1103,14 @@ mod tests {
     }
 
     fn test_effect_manager() -> EffectManager {
+        let cap_params = aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new()))
+            .expect("cap params");
         let grants = vec![
             (
                 CapabilityGrant {
                     name: "cap".into(),
                     cap: "sys/http.out@1".into(),
-                    params_cbor: Vec::new(),
+                    params_cbor: cap_params.clone(),
                     expiry_ns: None,
                     budget: None,
                 },
@@ -1117,7 +1120,7 @@ mod tests {
                 CapabilityGrant {
                     name: "cap_http".into(),
                     cap: "sys/http.out@1".into(),
-                    params_cbor: Vec::new(),
+                    params_cbor: cap_params,
                     expiry_ns: None,
                     budget: None,
                 },

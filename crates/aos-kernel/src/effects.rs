@@ -9,6 +9,8 @@ use aos_effects::{
     CapabilityGrant, EffectIntent, EffectKind, EffectReceipt, EffectSource, normalize_effect_params,
 };
 use aos_wasm_abi::ReducerEffect;
+use serde::de::DeserializeOwned;
+use serde_cbor::Value as CborValue;
 use url::Url;
 
 use crate::cap_ledger::{BudgetLedger, BudgetMap, CapReservation};
@@ -515,6 +517,15 @@ struct LlmCapParams {
     tools_allow: Option<Vec<String>>,
 }
 
+#[derive(serde::Deserialize)]
+struct LlmGenerateParamsView {
+    provider: String,
+    model: String,
+    max_tokens: u64,
+    #[serde(default)]
+    tools: Option<Vec<String>>,
+}
+
 fn cap_constraints_and_reserve(
     kind: &EffectKind,
     grant: &CapabilityGrant,
@@ -522,16 +533,18 @@ fn cap_constraints_and_reserve(
 ) -> Result<BudgetMap, CapDenyReason> {
     match kind.as_str() {
         aos_effects::EffectKind::HTTP_REQUEST => {
-            let cap_params: HttpCapParams =
-                serde_cbor::from_slice(&grant.params_cbor).map_err(|err| CapDenyReason {
+            let cap_params: HttpCapParams = decode_cbor(&grant.params_cbor).map_err(|err| {
+                CapDenyReason {
                     code: "cap_params_invalid".into(),
                     message: err.to_string(),
-                })?;
-            let effect_params: HttpRequestParams =
-                serde_cbor::from_slice(params_cbor).map_err(|err| CapDenyReason {
+                }
+            })?;
+            let effect_params: HttpRequestParams = decode_cbor(params_cbor).map_err(|err| {
+                CapDenyReason {
                     code: "effect_params_invalid".into(),
                     message: err.to_string(),
-                })?;
+                }
+            })?;
             let url = Url::parse(&effect_params.url).map_err(|err| CapDenyReason {
                 code: "invalid_url".into(),
                 message: err.to_string(),
@@ -589,16 +602,18 @@ fn cap_constraints_and_reserve(
             Ok(BudgetMap::new())
         }
         aos_effects::EffectKind::LLM_GENERATE => {
-            let cap_params: LlmCapParams =
-                serde_cbor::from_slice(&grant.params_cbor).map_err(|err| CapDenyReason {
+            let cap_params: LlmCapParams = decode_cbor(&grant.params_cbor).map_err(|err| {
+                CapDenyReason {
                     code: "cap_params_invalid".into(),
                     message: err.to_string(),
-                })?;
-            let effect_params: LlmGenerateParams =
-                serde_cbor::from_slice(params_cbor).map_err(|err| CapDenyReason {
+                }
+            })?;
+            let effect_params: LlmGenerateParamsView = decode_cbor(params_cbor).map_err(|err| {
+                CapDenyReason {
                     code: "effect_params_invalid".into(),
                     message: err.to_string(),
-                })?;
+                }
+            })?;
             if !allowlist_contains(&cap_params.providers, &effect_params.provider, |v| {
                 v.to_string()
             }) {
@@ -625,11 +640,9 @@ fn cap_constraints_and_reserve(
                 }
             }
             if let Some(allowed) = &cap_params.tools_allow {
+                let tools = effect_params.tools.as_deref().unwrap_or(&[]);
                 if !allowed.is_empty()
-                    && !effect_params
-                        .tools
-                        .iter()
-                        .all(|tool| allowed.iter().any(|t| t == tool))
+                    && !tools.iter().all(|tool| allowed.iter().any(|t| t == tool))
                 {
                     return Err(CapDenyReason {
                         code: "tool_not_allowed".into(),
@@ -645,6 +658,16 @@ fn cap_constraints_and_reserve(
         }
         _ => Ok(BudgetMap::new()),
     }
+}
+
+fn decode_cbor<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, serde_cbor::Error> {
+    const CBOR_SELF_DESCRIBE_TAG: u64 = 55799;
+    let value: CborValue = serde_cbor::from_slice(bytes)?;
+    let value = match value {
+        CborValue::Tag(tag, inner) if tag == CBOR_SELF_DESCRIBE_TAG => *inner,
+        other => other,
+    };
+    serde_cbor::value::from_value(value)
 }
 
 fn allowlist_contains(
@@ -753,15 +776,14 @@ mod tests {
             body_ref: None,
         };
         let params_cbor = serde_cbor::to_vec(&params).expect("encode params");
-        assert!(mgr
-            .enqueue_plan_effect(
-                "plan",
-                &EffectKind::http_request(),
-                "cap_http",
-                params_cbor,
-                [0u8; 32],
-            )
-            .is_ok());
+        let res = mgr.enqueue_plan_effect(
+            "plan",
+            &EffectKind::http_request(),
+            "cap_http",
+            params_cbor,
+            [0u8; 32],
+        );
+        assert!(res.is_ok(), "enqueue failed: {:?}", res.err());
 
         let deny_params = HttpRequestParams {
             method: "GET".into(),
@@ -779,7 +801,10 @@ mod tests {
                 [0u8; 32],
             )
             .expect_err("expected denial");
-        assert!(matches!(err, KernelError::CapabilityDenied { .. }));
+        assert!(
+            matches!(err, KernelError::CapabilityDenied { .. }),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
@@ -805,7 +830,7 @@ mod tests {
                 "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )
             .expect("hash ref"),
-            tools: vec![],
+            tools: None,
             api_key: None,
         };
         let params_cbor = serde_cbor::to_vec(&params).expect("encode params");

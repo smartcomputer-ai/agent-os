@@ -9,7 +9,7 @@ pub type HeaderMap = IndexMap<String, String>;
 pub struct HttpRequestParams {
     pub method: String,
     pub url: String,
-    #[serde(default, skip_serializing_if = "HeaderMap::is_empty")]
+    #[serde(default)]
     pub headers: HeaderMap,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_ref: Option<HashRef>,
@@ -18,7 +18,7 @@ pub struct HttpRequestParams {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HttpRequestReceipt {
     pub status: i32,
-    #[serde(default, skip_serializing_if = "HeaderMap::is_empty")]
+    #[serde(default)]
     pub headers: HeaderMap,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_ref: Option<HashRef>,
@@ -77,8 +77,8 @@ pub struct LlmGenerateParams {
     pub temperature: String,
     pub max_tokens: u64,
     pub input_ref: HashRef,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
 }

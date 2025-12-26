@@ -6,6 +6,8 @@ use aos_air_types::{
     catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
 };
 use aos_cbor::to_canonical_cbor;
+use base64::engine::general_purpose::STANDARD as Base64Engine;
+use base64::Engine;
 use aos_effects::{CapabilityBudget, CapabilityGrant};
 use indexmap::IndexMap;
 
@@ -155,7 +157,8 @@ fn literal_to_cbor_value(value: &ValueLiteral) -> Result<serde_cbor::Value, Kern
         ValueLiteral::Nat(v) => CborValue::Integer(v.nat as i128),
         ValueLiteral::Dec128(v) => CborValue::Text(v.dec128.clone()),
         ValueLiteral::Bytes(v) => {
-            let bytes = base64::decode(&v.bytes_b64)
+            let bytes = Base64Engine
+                .decode(&v.bytes_b64)
                 .map_err(|err| KernelError::CapabilityEncoding(err.to_string()))?;
             CborValue::Bytes(bytes)
         }

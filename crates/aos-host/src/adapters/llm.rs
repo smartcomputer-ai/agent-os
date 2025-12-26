@@ -141,8 +141,10 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             "temperature": temperature,
         });
 
-        if !params.tools.is_empty() {
-            body["tools"] = serde_json::json!(params.tools);
+        if let Some(tools) = params.tools.as_ref() {
+            if !tools.is_empty() {
+                body["tools"] = serde_json::json!(tools);
+            }
         }
 
         let url = format!(
