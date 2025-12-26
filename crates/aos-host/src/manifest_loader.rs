@@ -517,7 +517,7 @@ mod tests {
     use super::*;
     use aos_air_types::{
         HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef, TypeExpr, TypePrimitive,
-        TypePrimitiveNat,
+        TypePrimitiveNat, TypeRef, TypeVariant,
     };
     use aos_cbor::Hash;
     use indexmap::IndexMap;
@@ -590,9 +590,20 @@ mod tests {
             name: "demo/State@1".into(),
             ty: nat_type(),
         };
+        let event_payload_schema = DefSchema {
+            name: "demo/EventPayload@1".into(),
+            ty: nat_type(),
+        };
         let event_schema = DefSchema {
             name: "demo/Event@1".into(),
-            ty: nat_type(),
+            ty: TypeExpr::Variant(TypeVariant {
+                variant: IndexMap::from([(
+                    "Payload".to_string(),
+                    TypeExpr::Ref(TypeRef {
+                        reference: SchemaRef::new(&event_payload_schema.name).unwrap(),
+                    }),
+                )]),
+            }),
         };
 
         let module = DefModule {
@@ -613,11 +624,16 @@ mod tests {
         };
 
         let state_node = AirNode::Defschema(state_schema.clone());
+        let event_payload_node = AirNode::Defschema(event_payload_schema.clone());
         let event_node = AirNode::Defschema(event_schema.clone());
         let module_node = AirNode::Defmodule(module.clone());
         write_node(
             &air_dir.join("schemas.air.json"),
-            &[state_node.clone(), event_node.clone()],
+            &[
+                state_node.clone(),
+                event_payload_node.clone(),
+                event_node.clone(),
+            ],
         );
         write_node(&air_dir.join("module.air.json"), &[module_node.clone()]);
 
@@ -625,6 +641,7 @@ mod tests {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![
                 named_ref_from_node(&state_node),
+                named_ref_from_node(&event_payload_node),
                 named_ref_from_node(&event_node),
             ],
             modules: vec![named_ref_from_node(&module_node)],
@@ -665,6 +682,7 @@ mod tests {
         let loaded = loaded.expect("manifest present");
         assert!(loaded.modules.contains_key("demo/Reducer@1"));
         assert!(loaded.schemas.contains_key("demo/State@1"));
+        assert!(loaded.schemas.contains_key("demo/EventPayload@1"));
         assert!(loaded.schemas.contains_key("demo/Event@1"));
     }
 

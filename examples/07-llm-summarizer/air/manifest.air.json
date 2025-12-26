@@ -8,6 +8,12 @@
       "name": "demo/LlmSummarizerState@1"
     },
     {
+      "name": "demo/LlmSummarizerStart@1"
+    },
+    {
+      "name": "demo/LlmSummarizerSummaryReady@1"
+    },
+    {
       "name": "demo/LlmSummarizerEvent@1"
     },
     {

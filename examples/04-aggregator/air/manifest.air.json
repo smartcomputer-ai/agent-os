@@ -8,6 +8,12 @@
       "name": "demo/AggregatorState@1"
     },
     {
+      "name": "demo/AggregatorStart@1"
+    },
+    {
+      "name": "demo/AggregateComplete@1"
+    },
+    {
       "name": "demo/AggregatorEvent@1"
     },
     {

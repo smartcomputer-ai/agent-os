@@ -487,12 +487,17 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ObjectRegistered@1",
+    "name": "sys/ObjectRegisteredPayload@1",
     "type": {
       "record": {
         "meta": { "ref": "sys/ObjectMeta@1" }
       }
     }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ObjectRegistered@1",
+    "type": { "ref": "sys/ObjectRegisteredPayload@1" }
   },
 
   {

@@ -25,15 +25,20 @@
   },
   {
     "$kind": "defschema",
+    "name": "demo/TimerStart@1",
+    "type": {
+      "record": {
+        "deliver_at_ns": { "nat": {} },
+        "key": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demo/TimerEvent@1",
     "type": {
       "variant": {
-        "Start": {
-          "record": {
-            "deliver_at_ns": { "nat": {} },
-            "key": { "option": { "text": {} } }
-          }
-        },
+        "Start": { "ref": "demo/TimerStart@1" },
         "Fired": { "ref": "sys/TimerFired@1" }
       }
     }

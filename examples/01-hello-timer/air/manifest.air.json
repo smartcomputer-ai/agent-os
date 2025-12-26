@@ -8,6 +8,9 @@
       "name": "demo/TimerState@1"
     },
     {
+      "name": "demo/TimerStart@1"
+    },
+    {
       "name": "demo/TimerEvent@1"
     },
     {

@@ -13,6 +13,7 @@
     { "name": "sys/ObjectKey@1" },
     { "name": "sys/ObjectMeta@1" },
     { "name": "sys/ObjectVersions@1" },
+    { "name": "sys/ObjectRegisteredPayload@1" },
     { "name": "sys/ObjectRegistered@1" },
     { "name": "sys/BlobPutParams@1" },
     { "name": "sys/BlobPutReceipt@1" },

@@ -8,6 +8,12 @@
       "name": "demo/FetchNotifyState@1"
     },
     {
+      "name": "demo/FetchNotifyStart@1"
+    },
+    {
+      "name": "demo/FetchNotifyComplete@1"
+    },
+    {
       "name": "demo/FetchNotifyEvent@1"
     },
     {

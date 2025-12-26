@@ -14,6 +14,24 @@
       "name": "demo/ChainState@1"
     },
     {
+      "name": "demo/ChainStart@1"
+    },
+    {
+      "name": "demo/ChainChargeCompleted@1"
+    },
+    {
+      "name": "demo/ChainReserveCompleted@1"
+    },
+    {
+      "name": "demo/ChainReserveFailed@1"
+    },
+    {
+      "name": "demo/ChainNotifyCompleted@1"
+    },
+    {
+      "name": "demo/ChainRefundCompleted@1"
+    },
+    {
       "name": "demo/ChainEvent@1"
     },
     {

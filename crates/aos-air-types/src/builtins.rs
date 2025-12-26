@@ -185,6 +185,7 @@ mod tests {
         assert!(names.contains(&"sys/ObjectKey@1"));
         assert!(names.contains(&"sys/ObjectMeta@1"));
         assert!(names.contains(&"sys/ObjectVersions@1"));
+        assert!(names.contains(&"sys/ObjectRegisteredPayload@1"));
         assert!(names.contains(&"sys/ObjectRegistered@1"));
         // Introspection
         assert!(names.contains(&"sys/ReadMeta@1"));

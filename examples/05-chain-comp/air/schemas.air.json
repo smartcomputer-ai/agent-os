@@ -60,54 +60,84 @@
   },
   {
     "$kind": "defschema",
+    "name": "demo/ChainStart@1",
+    "type": {
+      "record": {
+        "order_id": { "text": {} },
+        "customer_id": { "text": {} },
+        "amount_cents": { "nat": {} },
+        "reserve_sku": { "text": {} },
+        "charge": { "ref": "demo/ChainHttpTarget@1" },
+        "reserve": { "ref": "demo/ChainHttpTarget@1" },
+        "notify": { "ref": "demo/ChainHttpTarget@1" },
+        "refund": { "ref": "demo/ChainHttpTarget@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainChargeCompleted@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "status": { "int": {} },
+        "body_preview": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainReserveCompleted@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "status": { "int": {} },
+        "body_preview": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainReserveFailed@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "status": { "int": {} },
+        "body_preview": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainNotifyCompleted@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "status": { "int": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ChainRefundCompleted@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "status": { "int": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demo/ChainEvent@1",
     "type": {
       "variant": {
-        "Start": {
-          "record": {
-            "order_id": { "text": {} },
-            "customer_id": { "text": {} },
-            "amount_cents": { "nat": {} },
-            "reserve_sku": { "text": {} },
-            "charge": { "ref": "demo/ChainHttpTarget@1" },
-            "reserve": { "ref": "demo/ChainHttpTarget@1" },
-            "notify": { "ref": "demo/ChainHttpTarget@1" },
-            "refund": { "ref": "demo/ChainHttpTarget@1" }
-          }
-        },
-        "ChargeCompleted": {
-          "record": {
-            "request_id": { "nat": {} },
-            "status": { "int": {} },
-            "body_preview": { "text": {} }
-          }
-        },
-        "ReserveCompleted": {
-          "record": {
-            "request_id": { "nat": {} },
-            "status": { "int": {} },
-            "body_preview": { "text": {} }
-          }
-        },
-        "ReserveFailed": {
-          "record": {
-            "request_id": { "nat": {} },
-            "status": { "int": {} },
-            "body_preview": { "text": {} }
-          }
-        },
-        "NotifyCompleted": {
-          "record": {
-            "request_id": { "nat": {} },
-            "status": { "int": {} }
-          }
-        },
-        "RefundCompleted": {
-          "record": {
-            "request_id": { "nat": {} },
-            "status": { "int": {} }
-          }
-        }
+        "Start": { "ref": "demo/ChainStart@1" },
+        "ChargeCompleted": { "ref": "demo/ChainChargeCompleted@1" },
+        "ReserveCompleted": { "ref": "demo/ChainReserveCompleted@1" },
+        "ReserveFailed": { "ref": "demo/ChainReserveFailed@1" },
+        "NotifyCompleted": { "ref": "demo/ChainNotifyCompleted@1" },
+        "RefundCompleted": { "ref": "demo/ChainRefundCompleted@1" }
       }
     }
   },
