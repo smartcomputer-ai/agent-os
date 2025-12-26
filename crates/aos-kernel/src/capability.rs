@@ -41,9 +41,9 @@ pub struct CapGrantResolution {
     pub enforcer: CapEnforcer,
 }
 
-const CAP_ALLOW_ALL_ENFORCER: &str = "sys/CapAllowAll@1";
-const CAP_HTTP_ENFORCER: &str = "sys/CapEnforceHttpOut@1";
-const CAP_LLM_ENFORCER: &str = "sys/CapEnforceLlmBasic@1";
+pub const CAP_ALLOW_ALL_ENFORCER: &str = "sys/CapAllowAll@1";
+pub const CAP_HTTP_ENFORCER: &str = "sys/CapEnforceHttpOut@1";
+pub const CAP_LLM_ENFORCER: &str = "sys/CapEnforceLlmBasic@1";
 
 impl CapabilityResolver {
     fn new(grants: HashMap<String, ResolvedGrant>, effect_catalog: Arc<EffectCatalog>) -> Self {

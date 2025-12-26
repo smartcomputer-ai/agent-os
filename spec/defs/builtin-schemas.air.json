@@ -188,6 +188,100 @@
 
   {
     "$kind": "defschema",
+    "name": "sys/CapCheckInput@1",
+    "type": {
+      "record": {
+        "cap_def": { "text": {}, "$comment": "Name-formatted string" },
+        "grant_name": { "text": {} },
+        "cap_params": { "bytes": {}, "$comment": "Canonical CBOR" },
+        "effect_kind": { "text": {} },
+        "effect_params": { "bytes": {}, "$comment": "Canonical CBOR" },
+        "origin": {
+          "record": {
+            "kind": { "text": {} },
+            "name": { "text": {}, "$comment": "Name-formatted string" }
+          }
+        },
+        "logical_now_ns": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/CapCheckOutput@1",
+    "type": {
+      "record": {
+        "constraints_ok": { "bool": {} },
+        "deny": {
+          "option": {
+            "record": {
+              "code": { "text": {} },
+              "message": { "text": {} }
+            }
+          }
+        },
+        "reserve_estimate": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "nat": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/CapSettleInput@1",
+    "type": {
+      "record": {
+        "cap_def": { "text": {}, "$comment": "Name-formatted string" },
+        "grant_name": { "text": {} },
+        "cap_params": { "bytes": {}, "$comment": "Canonical CBOR" },
+        "effect_kind": { "text": {} },
+        "effect_params": { "bytes": {}, "$comment": "Canonical CBOR" },
+        "origin": {
+          "record": {
+            "kind": { "text": {} },
+            "name": { "text": {}, "$comment": "Name-formatted string" }
+          }
+        },
+        "reserve": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "nat": {} }
+          }
+        },
+        "receipt": {
+          "record": {
+            "intent_hash": { "hash": {} },
+            "adapter_id": { "text": {} },
+            "status": { "text": {} },
+            "payload_cbor": { "bytes": {} },
+            "cost_cents": { "option": { "nat": {} } },
+            "signature": { "bytes": {} }
+          }
+        },
+        "logical_now_ns": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/CapSettleOutput@1",
+    "type": {
+      "record": {
+        "usage": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "nat": {} }
+          }
+        }
+      }
+    }
+  },
+
+  {
+    "$kind": "defschema",
     "name": "sys/SecretRef@1",
     "type": {
       "record": {

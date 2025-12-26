@@ -1,7 +1,7 @@
 # p2-caps: Capability System (Current State + Work Remaining)
 
 ## TL;DR
-Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). Cap **params**, **budgets**, **expiry**, and cap decisions are now enforced/journaled. Remaining gaps: cap enforcer modules (pure), built-in cap defs/schemas, and broader host-level integration/replay coverage. Cap semantics are still kernel-hardcoded.
+Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). Cap **params**, **budgets**, **expiry**, and cap decisions are now enforced/journaled. Remaining gaps: pure enforcer module implementations and broader host-level integration/replay coverage. Cap semantics are still kernel-hardcoded.
 
 ---
 
@@ -176,13 +176,11 @@ Conceptual input:
 CapCheckInput = {
   cap_def: Name,
   grant_name: text,
-  cap_params: <typed value>,
-  effect: {
-    kind: text,
-    params: <typed value>,
-    origin: { kind: "plan"|"reducer", name: Name },
-  },
-  ctx: { manifest_hash, journal_height, logical_now }
+  cap_params: bytes,        // canonical CBOR
+  effect_kind: text,
+  effect_params: bytes,     // canonical CBOR
+  origin: { kind: "plan"|"reducer", name: Name },
+  logical_now_ns: nat
 }
 ```
 
@@ -191,9 +189,8 @@ Output:
 ```cbor
 CapCheckOutput = {
   constraints_ok: bool,
-  deny?: { code, path?, message? },   // only if constraints_ok=false
-  reserve_estimate: map<text,nat>,
-  explain?: { matched?: ..., failed?: ... }
+  deny?: { code, message },           // only if constraints_ok=false
+  reserve_estimate: map<text,nat>
 }
 ```
 
@@ -391,8 +388,8 @@ Once these exist, caps are a real security and budget control surface, not just 
 
 The following changes were required to make the design enforceable in AIR; status noted:
 
-1) **defcap**: add `enforcer` module reference (pure module). (NOT DONE)
-2) **Built-in schemas**: add `sys/CapCheckInput@1`, `sys/CapCheckOutput@1`, `sys/CapSettleInput@1`, `sys/CapSettleOutput@1`. (NOT DONE)
+1) **defcap**: add `enforcer` module reference (pure module). (DONE)
+2) **Built-in schemas**: add `sys/CapCheckInput@1`, `sys/CapCheckOutput@1`, `sys/CapSettleInput@1`, `sys/CapSettleOutput@1`. (DONE)
 3) **Journal records**: define a canonical cap decision record that pins intent hash, enforcer identity, constraints result, reservation delta, and expiry/budget check outcomes. (PARTIAL: kernel record exists; spec update pending)
 4) **Deterministic time inputs**: standardize `journal_height` + `logical_now_ns` in cap authorizer context (see `roadmap/v0.5-caps-policy/p3-time.md`). (PARTIAL: kernel uses `logical_now_ns`; spec update pending)
 5) **Effect idempotency keys**: add optional `idempotency_key` to plan emit effects and reducer effects (AIR schema + WASM ABI), and thread it into `EffectIntent` hashing. (DONE)

@@ -340,6 +340,7 @@ fn mgr_with_cap(cap_gate: CapabilityResolver) -> EffectManager {
         cap_ledger,
         None,
         None,
+        None,
     )
 }
 

@@ -21,6 +21,7 @@ use serde::Serialize;
 use serde_cbor;
 use serde_cbor::Value as CborValue;
 
+use crate::cap_enforcer::PureCapEnforcer;
 use crate::capability::CapabilityResolver;
 use crate::cap_ledger::BudgetLedger;
 use crate::cell_index::{CellIndex, CellMeta};
@@ -40,6 +41,7 @@ use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
 use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::pure::PureRegistry;
+use std::sync::Mutex;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
@@ -93,7 +95,7 @@ pub struct Kernel<S: Store> {
     policy_defs: HashMap<Name, DefPolicy>,
     schema_defs: HashMap<Name, DefSchema>,
     reducers: ReducerRegistry<S>,
-    pures: PureRegistry<S>,
+    pures: Arc<Mutex<PureRegistry<S>>>,
     router: HashMap<String, Vec<RouteBinding>>,
     plan_registry: PlanRegistry,
     schema_index: Arc<SchemaIndex>,
@@ -480,6 +482,10 @@ impl<S: Store + 'static> Kernel<S> {
             }
             None => Box::new(AllowAllPolicy),
         };
+        let enforcer_invoker = Some(Arc::new(PureCapEnforcer::new(
+            Arc::new(loaded.modules.clone()),
+            self.pures.clone(),
+        )));
         let plan_defs = loaded.plans.clone();
         let cap_defs = loaded.caps.clone();
         let effect_defs = loaded.effects.clone();
@@ -494,6 +500,15 @@ impl<S: Store + 'static> Kernel<S> {
             .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
         let manifest_hash = Hash::of_bytes(&manifest_bytes);
 
+        let pures = Arc::new(Mutex::new(PureRegistry::new(
+            store.clone(),
+            config.module_cache_dir.clone(),
+        )?));
+        let enforcer_invoker = Some(Arc::new(PureCapEnforcer::new(
+            Arc::new(loaded.modules.clone()),
+            pures.clone(),
+        )));
+
         let mut kernel = Self {
             store: store.clone(),
             manifest: loaded.manifest.clone(),
@@ -507,7 +522,7 @@ impl<S: Store + 'static> Kernel<S> {
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
             reducers: ReducerRegistry::new(store.clone(), config.module_cache_dir.clone())?,
-            pures: PureRegistry::new(store, config.module_cache_dir.clone())?,
+            pures,
             router,
             plan_registry,
             plan_instances: HashMap::new(),
@@ -525,6 +540,7 @@ impl<S: Store + 'static> Kernel<S> {
                 effect_catalog.clone(),
                 schema_index.clone(),
                 cap_ledger,
+                enforcer_invoker,
                 if loaded.secrets.is_empty() {
                     None
                 } else {
@@ -551,7 +567,11 @@ impl<S: Store + 'static> Kernel<S> {
                         kernel.reducers.ensure_loaded(name, module_def)?;
                     }
                     aos_air_types::ModuleKind::Pure => {
-                        kernel.pures.ensure_loaded(name, module_def)?;
+                        let mut pures = kernel
+                            .pures
+                            .lock()
+                            .map_err(|_| KernelError::Manifest("pure registry lock poisoned".into()))?;
+                        pures.ensure_loaded(name, module_def)?;
                     }
                 }
             }
@@ -599,8 +619,12 @@ impl<S: Store + 'static> Kernel<S> {
                 "module '{name}' is not a pure module"
             )));
         }
-        self.pures.ensure_loaded(name, module_def)?;
-        self.pures.invoke(name, input)
+        let mut pures = self
+            .pures
+            .lock()
+            .map_err(|_| KernelError::Manifest("pure registry lock poisoned".into()))?;
+        pures.ensure_loaded(name, module_def)?;
+        pures.invoke(name, input)
     }
 
     pub fn tick(&mut self) -> Result<(), KernelError> {
@@ -1931,6 +1955,7 @@ impl<S: Store + 'static> Kernel<S> {
             effect_catalog,
             schema_index.clone(),
             cap_ledger,
+            enforcer_invoker,
             secret_catalog,
             self.secret_resolver.clone(),
         );

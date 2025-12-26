@@ -13,8 +13,11 @@ use serde::de::DeserializeOwned;
 use serde_cbor::Value as CborValue;
 use url::Url;
 
+use crate::cap_enforcer::{CapCheckInput, CapEffectOrigin, CapEnforcerInvoker};
 use crate::cap_ledger::{BudgetLedger, BudgetMap, CapReservation};
-use crate::capability::CapabilityResolver;
+use crate::capability::{
+    CapabilityResolver, CAP_ALLOW_ALL_ENFORCER, CAP_HTTP_ENFORCER, CAP_LLM_ENFORCER,
+};
 use crate::error::KernelError;
 use crate::journal::{
     CapDecisionOutcome, CapDecisionRecord, CapDecisionStage, CapDenyReason,
@@ -57,6 +60,7 @@ pub struct EffectManager {
     cap_reservations: HashMap<[u8; 32], CapReservation>,
     cap_decisions: Vec<CapDecisionRecord>,
     logical_now_ns: u64,
+    enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>>,
     secret_catalog: Option<crate::secret::SecretCatalog>,
     secret_resolver: Option<Arc<dyn SecretResolver>>,
 }
@@ -68,6 +72,7 @@ impl EffectManager {
         effect_catalog: Arc<EffectCatalog>,
         schema_index: Arc<SchemaIndex>,
         cap_ledger: BudgetLedger,
+        enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>>,
         secret_catalog: Option<crate::secret::SecretCatalog>,
         secret_resolver: Option<Arc<dyn SecretResolver>>,
     ) -> Self {
@@ -81,6 +86,7 @@ impl EffectManager {
             cap_reservations: HashMap::new(),
             cap_decisions: Vec::new(),
             logical_now_ns: 0,
+            enforcer_invoker,
             secret_catalog,
             secret_resolver,
         }
@@ -177,6 +183,9 @@ impl EffectManager {
             &runtime_kind,
             &grant,
             &canonical_params,
+            self.enforcer_invoker.as_ref(),
+            &source,
+            self.logical_now_ns,
         ) {
             Ok(reserve) => reserve,
             Err(reason) => {
@@ -545,15 +554,14 @@ struct LlmGenerateParamsView {
     tools: Option<Vec<String>>,
 }
 
-const CAP_ALLOW_ALL_ENFORCER: &str = "sys/CapAllowAll@1";
-const CAP_HTTP_ENFORCER: &str = "sys/CapEnforceHttpOut@1";
-const CAP_LLM_ENFORCER: &str = "sys/CapEnforceLlmBasic@1";
-
 fn cap_constraints_and_reserve(
     enforcer_module: &str,
     kind: &EffectKind,
     grant: &CapabilityGrant,
     params_cbor: &[u8],
+    enforcer_invoker: Option<&Arc<dyn CapEnforcerInvoker>>,
+    origin: &EffectSource,
+    logical_now_ns: u64,
 ) -> Result<BudgetMap, CapDenyReason> {
     match enforcer_module {
         CAP_ALLOW_ALL_ENFORCER => Ok(BudgetMap::new()),
@@ -699,10 +707,45 @@ fn cap_constraints_and_reserve(
             }
             Ok(reserve)
         }
-        _ => Err(CapDenyReason {
-            code: "enforcer_not_found".into(),
-            message: format!("enforcer module '{enforcer_module}' not available"),
-        }),
+        _ => {
+            let Some(invoker) = enforcer_invoker else {
+                return Err(CapDenyReason {
+                    code: "enforcer_not_found".into(),
+                    message: format!("enforcer module '{enforcer_module}' not available"),
+                });
+            };
+            let origin = match origin {
+                EffectSource::Reducer { name } => CapEffectOrigin {
+                    kind: "reducer".into(),
+                    name: name.clone(),
+                },
+                EffectSource::Plan { name } => CapEffectOrigin {
+                    kind: "plan".into(),
+                    name: name.clone(),
+                },
+            };
+            let input = CapCheckInput {
+                cap_def: grant.cap.clone(),
+                grant_name: grant.name.clone(),
+                cap_params: grant.params_cbor.clone(),
+                effect_kind: kind.as_str().to_string(),
+                effect_params: params_cbor.to_vec(),
+                origin,
+                logical_now_ns,
+            };
+            let output = invoker.check(enforcer_module, input).map_err(|err| CapDenyReason {
+                code: "enforcer_error".into(),
+                message: err.to_string(),
+            })?;
+            if output.constraints_ok {
+                Ok(output.reserve_estimate)
+            } else {
+                Err(output.deny.unwrap_or(CapDenyReason {
+                    code: "constraints_failed".into(),
+                    message: "cap enforcer denied request".into(),
+                }))
+            }
+        }
     }
 }
 
@@ -799,6 +842,7 @@ mod tests {
             effect_catalog,
             schema_index,
             cap_ledger,
+            None,
             None,
             None,
         )
