@@ -68,6 +68,7 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
                     kind: EffectKind::http_request(),
                     params: http_params_literal("https://example.com"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },

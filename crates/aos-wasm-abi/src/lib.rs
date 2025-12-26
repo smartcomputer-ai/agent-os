@@ -172,6 +172,12 @@ pub struct ReducerEffect {
     pub params_cbor: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap_slot: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub idempotency_key: Option<Vec<u8>>,
 }
 
 impl ReducerEffect {
@@ -180,6 +186,7 @@ impl ReducerEffect {
             kind: kind.into(),
             params_cbor,
             cap_slot: None,
+            idempotency_key: None,
         }
     }
 
@@ -192,6 +199,7 @@ impl ReducerEffect {
             kind: kind.into(),
             params_cbor,
             cap_slot: Some(slot.into()),
+            idempotency_key: None,
         }
     }
 }

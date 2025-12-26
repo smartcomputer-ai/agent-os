@@ -230,14 +230,27 @@ impl<'ctx, S, A> Effects<'ctx, S, A> {
         params: &impl Serialize,
         cap_slot: Option<&str>,
     ) {
+        self.emit_raw_with_idempotency(kind, params, cap_slot, None);
+    }
+
+    /// Emit a micro-effect with an explicit idempotency key (32 bytes).
+    pub fn emit_raw_with_idempotency(
+        &mut self,
+        kind: &'static str,
+        params: &impl Serialize,
+        cap_slot: Option<&str>,
+        idempotency_key: Option<&[u8]>,
+    ) {
         let payload = match serde_cbor::to_vec(params) {
             Ok(bytes) => bytes,
             Err(err) => self.ctx.trap(StepError::EffectPayload(err)),
         };
+        let key = idempotency_key.map(|bytes| bytes.to_vec());
         self.ctx.emit_effect(PendingEffect {
             kind,
             params: payload,
             cap_slot: cap_slot.map(|s| s.to_string()),
+            idempotency_key: key,
         });
     }
 }
@@ -296,6 +309,7 @@ struct PendingEffect {
     kind: &'static str,
     params: Vec<u8>,
     cap_slot: Option<String>,
+    idempotency_key: Option<Vec<u8>>,
 }
 
 impl PendingEffect {
@@ -303,6 +317,9 @@ impl PendingEffect {
         let mut eff = AbiReducerEffect::new(self.kind, self.params);
         if let Some(slot) = self.cap_slot {
             eff.cap_slot = Some(slot);
+        }
+        if let Some(key) = self.idempotency_key {
+            eff.idempotency_key = Some(key);
         }
         eff
     }

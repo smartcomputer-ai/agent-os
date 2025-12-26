@@ -271,6 +271,7 @@ fn single_plan_orchestration_completes_after_receipt() {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("body"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -417,6 +418,7 @@ fn reducer_and_plan_effects_are_enqueued() {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("plan"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -565,6 +567,7 @@ fn guarded_plan_branches_control_effects() {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("do-it"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -963,6 +966,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("first"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -981,6 +985,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("after-receipt"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "second".into(),
                     },
@@ -1000,6 +1005,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("after-event"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "third".into(),
                     },
@@ -1146,6 +1152,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("ready"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -1193,6 +1200,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("other"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },

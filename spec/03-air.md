@@ -288,6 +288,8 @@ The `intent_hash` = `sha256(cbor(kind, params, cap, idempotency_key))` is comput
 
 **Canonical params**: Before hashing or enqueue, the kernel **decodes → schema‑checks → canonicalizes → re‑encodes** `params` using the effect kind's parameter schema (same AIR canonical rules as the loader: `$tag/$value` variants, canonical map/set/option shapes, numeric normalization). The canonical CBOR bytes become `params_cbor` and are the **only** form stored, hashed, and dispatched; non‑conforming params are rejected. This path runs for *every* origin (plans, reducers, injected tooling) so authoring sugar or reducer ABI quirks cannot change intent identity.
 
+**Idempotency key**: plans and reducers may supply an explicit `idempotency_key`; when omitted, the kernel uses the all‑zero key. Re‑emitting an identical effect with the same key yields the same `intent_hash`.
+
 ### Receipt
 
 A receipt is the signed result of executing an effect:
@@ -353,7 +355,7 @@ A grant is kernel state referenced by name:
   cap: Name(defcap),
   params: Value,
   expiry_ns?: nat,
-  budget?: {tokens?: nat, bytes?: nat, cents?: nat}
+  budget?: map<text,nat>
 }
 ```
 

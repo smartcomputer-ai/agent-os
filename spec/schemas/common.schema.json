@@ -329,25 +329,11 @@
         },
         "budget": {
           "type": "object",
-          "description": "Optional spending/usage limits. Pre-checked conservatively for variable-cost effects (llm.generate max_tokens, blob.put size); settled on receipt.",
-          "properties": {
-            "tokens": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Token budget for LLM effects (prompt + completion)"
-            },
-            "bytes": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Byte budget for blob/http effects"
-            },
-            "cents": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Cost budget in cents"
-            }
-          },
-          "additionalProperties": false
+          "description": "Optional spending/usage limits keyed by dimension name. Pre-checked conservatively for variable-cost effects; settled on receipt.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "required": ["name", "cap", "params"],

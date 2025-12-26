@@ -574,6 +574,7 @@ fn upgrade_plan_v1(name: &str) -> DefPlan {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("v1"),
                     cap: "cap_http_primary".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -622,6 +623,7 @@ fn upgrade_plan_v2(name: &str) -> DefPlan {
                 kind: EffectKind::http_request(),
                 params: http_params_literal("v2"),
                 cap: "cap_http_followup".into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: "req_follow".into(),
                 },
@@ -697,6 +699,7 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
                     kind: EffectKind::http_request(),
                     params: http_params_literal("shadow"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },

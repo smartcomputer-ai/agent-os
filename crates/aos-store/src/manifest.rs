@@ -695,6 +695,7 @@ mod tests {
                         kind: EffectKind::http_request(),
                         params: http_params.clone().into(),
                         cap: "http_cap".into(),
+                        idempotency_key: None,
                         bind: PlanBindEffect {
                             effect_id_as: "req".into(),
                         },

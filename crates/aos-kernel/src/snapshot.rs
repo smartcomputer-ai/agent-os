@@ -4,6 +4,7 @@ use aos_effects::{EffectIntent, EffectKind as RuntimeEffectKind};
 use serde::{Deserialize, Serialize};
 use serde_bytes;
 
+use crate::cap_ledger::{BudgetLedger, CapReservation};
 use crate::journal::JournalSeq;
 use crate::plan::PlanInstanceSnapshot;
 use crate::receipts::ReducerEffectContext;
@@ -21,6 +22,12 @@ pub struct KernelSnapshot {
     pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
     plan_results: Vec<PlanResultSnapshot>,
     height: JournalSeq,
+    #[serde(default)]
+    cap_ledger: BudgetLedger,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    cap_reservations: Vec<CapReservation>,
+    #[serde(default)]
+    logical_now_ns: u64,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -42,6 +49,9 @@ impl KernelSnapshot {
         queued_effects: Vec<EffectIntentSnapshot>,
         pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
         plan_results: Vec<PlanResultSnapshot>,
+        cap_ledger: BudgetLedger,
+        cap_reservations: Vec<CapReservation>,
+        logical_now_ns: u64,
         manifest_hash: Option<[u8; 32]>,
     ) -> Self {
         Self {
@@ -56,6 +66,9 @@ impl KernelSnapshot {
             pending_reducer_receipts,
             plan_results,
             height,
+            cap_ledger,
+            cap_reservations,
+            logical_now_ns,
             manifest_hash: manifest_hash.map(|h| h.to_vec()),
         }
     }
@@ -106,6 +119,18 @@ impl KernelSnapshot {
 
     pub fn plan_results(&self) -> &[PlanResultSnapshot] {
         &self.plan_results
+    }
+
+    pub fn cap_ledger(&self) -> &BudgetLedger {
+        &self.cap_ledger
+    }
+
+    pub fn cap_reservations(&self) -> &[CapReservation] {
+        &self.cap_reservations
+    }
+
+    pub fn logical_now_ns(&self) -> u64 {
+        self.logical_now_ns
     }
 
     pub fn manifest_hash(&self) -> Option<&[u8]> {

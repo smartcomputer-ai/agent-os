@@ -104,8 +104,8 @@ fn cap_grant_may_include_budget_and_expiry() {
     });
     let grant: CapGrant = serde_json::from_value(grant_json).expect("grant json");
     let budget = grant.budget.expect("budget");
-    assert_eq!(budget.tokens, Some(1000));
-    assert_eq!(budget.bytes, Some(2048));
-    assert_eq!(budget.cents, Some(50));
+    assert_eq!(budget.0.get("tokens"), Some(&1000));
+    assert_eq!(budget.0.get("bytes"), Some(&2048));
+    assert_eq!(budget.0.get("cents"), Some(&50));
     assert_eq!(grant.expiry_ns, Some(99));
 }

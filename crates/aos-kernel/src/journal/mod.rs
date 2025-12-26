@@ -38,6 +38,7 @@ pub enum JournalKind {
     DomainEvent,
     EffectIntent,
     EffectReceipt,
+    CapDecision,
     Snapshot,
     PolicyDecision,
     Governance,
@@ -55,6 +56,7 @@ pub enum JournalRecord {
     DomainEvent(DomainEventRecord),
     EffectIntent(EffectIntentRecord),
     EffectReceipt(EffectReceiptRecord),
+    CapDecision(CapDecisionRecord),
     PolicyDecision(PolicyDecisionRecord),
     Snapshot(SnapshotRecord),
     Governance(GovernanceRecord),
@@ -69,6 +71,7 @@ impl JournalRecord {
             JournalRecord::DomainEvent(_) => JournalKind::DomainEvent,
             JournalRecord::EffectIntent(_) => JournalKind::EffectIntent,
             JournalRecord::EffectReceipt(_) => JournalKind::EffectReceipt,
+            JournalRecord::CapDecision(_) => JournalKind::CapDecision,
             JournalRecord::PolicyDecision(_) => JournalKind::PolicyDecision,
             JournalRecord::Snapshot(_) => JournalKind::Snapshot,
             JournalRecord::Governance(_) => JournalKind::Governance,
@@ -138,6 +141,45 @@ pub struct EffectReceiptRecord {
     pub cost_cents: Option<u64>,
     #[serde(with = "serde_bytes")]
     pub signature: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CapDecisionStage {
+    Enqueue,
+    Settle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CapDecisionOutcome {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapDenyReason {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapDecisionRecord {
+    pub intent_hash: [u8; 32],
+    pub stage: CapDecisionStage,
+    pub effect_kind: String,
+    pub cap_name: String,
+    pub cap_type: String,
+    pub decision: CapDecisionOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deny: Option<CapDenyReason>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub reserve: crate::cap_ledger::BudgetMap,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub usage: crate::cap_ledger::BudgetMap,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_ns: Option<u64>,
+    pub logical_now_ns: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

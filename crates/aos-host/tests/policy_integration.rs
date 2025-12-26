@@ -107,6 +107,7 @@ fn plan_effect_allowed_by_policy() {
                 kind: AirEffectKind::http_request(),
                 params: http_params_literal("https://example.com"),
                 cap: "cap_http".into(),
+                idempotency_key: None,
                 bind: aos_air_types::PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -217,6 +218,7 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
                     kind: AirEffectKind::http_request(),
                     params: ExprOrValue::Expr(params_expr),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: aos_air_types::PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -304,6 +306,7 @@ fn plan_introspect_denied_by_policy() {
                     )]),
                 })),
                 cap: "query_cap".into(),
+                idempotency_key: None,
                 bind: aos_air_types::PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -379,6 +382,7 @@ fn plan_introspect_missing_capability_is_rejected() {
                     )]),
                 })),
                 cap: "query_cap".into(),
+                idempotency_key: None,
                 bind: aos_air_types::PlanBindEffect {
                     effect_id_as: "req".into(),
                 },

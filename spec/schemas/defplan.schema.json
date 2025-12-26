@@ -105,6 +105,7 @@
             "kind": { "$ref": "common.schema.json#/$defs/EffectKind" },
             "params": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
             "cap": { "$ref": "common.schema.json#/$defs/CapGrantName" },
+            "idempotency_key": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
             "bind": {
               "type": "object",
               "properties": {

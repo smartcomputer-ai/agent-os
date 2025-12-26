@@ -22,6 +22,7 @@ use serde_cbor;
 use serde_cbor::Value as CborValue;
 
 use crate::capability::CapabilityResolver;
+use crate::cap_ledger::BudgetLedger;
 use crate::cell_index::{CellIndex, CellMeta};
 use crate::effects::EffectManager;
 use crate::error::KernelError;
@@ -460,6 +461,7 @@ impl<S: Store + 'static> Kernel<S> {
             schema_index.as_ref(),
             effect_catalog.clone(),
         )?;
+        let cap_ledger = BudgetLedger::from_grants(capability_resolver.grant_budgets());
         ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
         ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
@@ -522,6 +524,7 @@ impl<S: Store + 'static> Kernel<S> {
                 policy_gate,
                 effect_catalog.clone(),
                 schema_index.clone(),
+                cap_ledger,
                 if loaded.secrets.is_empty() {
                     None
                 } else {
@@ -929,9 +932,17 @@ impl<S: Store + 'static> Kernel<S> {
                     slot: slot.clone(),
                 })?
                 .clone();
-            let intent =
-                self.effect_manager
-                    .enqueue_reducer_effect(&reducer_name, &cap_name, effect)?;
+            let intent = match self
+                .effect_manager
+                .enqueue_reducer_effect(&reducer_name, &cap_name, effect)
+            {
+                Ok(intent) => intent,
+                Err(err) => {
+                    self.record_cap_decisions()?;
+                    return Err(err);
+                }
+            };
+            self.record_cap_decisions()?;
             self.record_effect_intent(
                 &intent,
                 IntentOriginRecord::Reducer {
@@ -1007,6 +1018,9 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(|entry| entry.to_snapshot())
             .collect();
+        let cap_ledger = self.effect_manager.cap_ledger_snapshot();
+        let cap_reservations = self.effect_manager.cap_reservations_snapshot();
+        let logical_now_ns = self.effect_manager.logical_now_ns();
         let mut snapshot = KernelSnapshot::new(
             height,
             reducer_state,
@@ -1018,6 +1032,9 @@ impl<S: Store + 'static> Kernel<S> {
             queued_effects,
             pending_reducer_receipts,
             plan_results,
+            cap_ledger,
+            cap_reservations,
+            logical_now_ns,
             Some(*self.manifest_hash.as_bytes()),
         );
         snapshot.set_reducer_index_roots(reducer_index_roots);
@@ -1099,6 +1116,9 @@ impl<S: Store + 'static> Kernel<S> {
                 };
                 self.handle_receipt(receipt)?;
                 self.tick_until_idle()?;
+            }
+            JournalRecord::CapDecision(_) => {
+                // Cap decisions are audit-only; runtime state is rebuilt via replay.
             }
             JournalRecord::Snapshot(_) => {
                 // already handled separately
@@ -1231,6 +1251,11 @@ impl<S: Store + 'static> Kernel<S> {
                 .cloned()
                 .map(|snap| snap.into_intent())
                 .collect(),
+        );
+        self.effect_manager.restore_cap_state(
+            snapshot.cap_ledger().clone(),
+            snapshot.cap_reservations().to_vec(),
+            snapshot.logical_now_ns(),
         );
 
         self.plan_results.clear();
@@ -1835,6 +1860,7 @@ impl<S: Store + 'static> Kernel<S> {
             schema_index.as_ref(),
             effect_catalog.clone(),
         )?;
+        let cap_ledger = BudgetLedger::from_grants(capability_resolver.grant_budgets());
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
             .defaults
@@ -1904,6 +1930,7 @@ impl<S: Store + 'static> Kernel<S> {
             policy_gate,
             effect_catalog,
             schema_index.clone(),
+            cap_ledger,
             secret_catalog,
             self.secret_resolver.clone(),
         );
@@ -2006,9 +2033,16 @@ impl<S: Store + 'static> Kernel<S> {
                     .expect("instance must exist");
                 let name = instance.name.clone();
                 let snapshot = instance.snapshot();
-                let outcome = instance.tick(&mut self.effect_manager)?;
+                let outcome = match instance.tick(&mut self.effect_manager) {
+                    Ok(outcome) => outcome,
+                    Err(err) => {
+                        self.record_cap_decisions()?;
+                        return Err(err);
+                    }
+                };
                 (name, outcome, snapshot.step_states)
             };
+            self.record_cap_decisions()?;
             for event in &outcome.raised_events {
                 self.process_domain_event(event.clone())?;
             }
@@ -2070,6 +2104,8 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<(), KernelError> {
         if let Some(plan_id) = self.pending_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
+            self.effect_manager.settle_receipt(&receipt)?;
+            self.record_cap_decisions()?;
             if let Some(instance) = self.plan_instances.get_mut(&plan_id) {
                 if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
                     self.scheduler.push_plan(plan_id);
@@ -2097,6 +2133,8 @@ impl<S: Store + 'static> Kernel<S> {
 
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
+            self.effect_manager.settle_receipt(&receipt)?;
+            self.record_cap_decisions()?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
             self.process_domain_event(event)?;
             self.remember_receipt(receipt.intent_hash);
@@ -2222,6 +2260,14 @@ impl<S: Store + 'static> Kernel<S> {
             signature: receipt.signature.clone(),
         });
         self.append_record(record)
+    }
+
+    fn record_cap_decisions(&mut self) -> Result<(), KernelError> {
+        let records = self.effect_manager.drain_cap_decisions();
+        for record in records {
+            self.append_record(JournalRecord::CapDecision(record))?;
+        }
+        Ok(())
     }
 }
 
@@ -2515,6 +2561,9 @@ mod tests {
             vec![],
             vec![],
             vec![],
+            BudgetLedger::default(),
+            vec![],
+            0,
             Some(*manifest_hash.as_bytes()),
         );
         let snap_bytes = serde_cbor::to_vec(&snapshot).unwrap();

@@ -931,6 +931,7 @@ mod tests {
                 })
                 .into(),
                 cap: "http_cap".into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -1087,6 +1088,7 @@ mod tests {
                 })
                 .into(),
                 cap: "http_cap".into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -1467,6 +1469,7 @@ mod tests {
                         })
                         .into(),
                         cap: "cap".into(),
+                        idempotency_key: None,
                         bind: PlanBindEffect {
                             effect_id_as: "id".into(),
                         },
@@ -1543,6 +1546,7 @@ mod tests {
                         })
                         .into(),
                         cap: missing_cap.clone(),
+                        idempotency_key: None,
                         bind: PlanBindEffect {
                             effect_id_as: "id".into(),
                         },

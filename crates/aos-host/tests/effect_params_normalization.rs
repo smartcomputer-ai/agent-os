@@ -3,6 +3,7 @@ mod helpers;
 
 use aos_effects::CapabilityGrant;
 use aos_kernel::capability::CapabilityResolver;
+use aos_kernel::cap_ledger::BudgetLedger;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
@@ -40,6 +41,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
             &EffectKind::llm_generate(),
             "cap_llm",
             params_a.clone(),
+            [0u8; 32],
         )
         .expect("enqueue A");
     let intent_b = mgr
@@ -48,6 +50,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
             &EffectKind::llm_generate(),
             "cap_llm",
             params_b.clone(),
+            [0u8; 32],
         )
         .expect("enqueue B");
 
@@ -168,6 +171,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
             &EffectKind::http_request(),
             "cap_http",
             params_a.clone(),
+            [0u8; 32],
         )
         .expect("enqueue A");
     let intent_b = mgr
@@ -176,6 +180,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
             &EffectKind::http_request(),
             "cap_http",
             params_b.clone(),
+            [0u8; 32],
         )
         .expect("enqueue B");
 
@@ -326,11 +331,13 @@ fn builtin_effect_context() -> (Arc<EffectCatalog>, Arc<SchemaIndex>) {
 
 fn mgr_with_cap(cap_gate: CapabilityResolver) -> EffectManager {
     let (effects, schemas) = builtin_effect_context();
+    let cap_ledger = BudgetLedger::from_grants(cap_gate.grant_budgets());
     EffectManager::new(
         cap_gate,
         Box::new(AllowAllPolicy),
         effects,
         schemas,
+        cap_ledger,
         None,
         None,
     )

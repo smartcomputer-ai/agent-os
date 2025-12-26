@@ -273,6 +273,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "url",
  "walkdir",
  "wasmtime",
  "wat",

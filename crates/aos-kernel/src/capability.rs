@@ -52,6 +52,13 @@ impl CapabilityResolver {
         self.grants.contains_key(name)
     }
 
+    pub fn grant_budgets(&self) -> Vec<(String, Option<CapabilityBudget>)> {
+        self.grants
+            .values()
+            .map(|resolved| (resolved.grant.name.clone(), resolved.grant.budget.clone()))
+            .collect()
+    }
+
     pub fn resolve(
         &self,
         cap_name: &str,
@@ -109,7 +116,7 @@ fn resolve_grant(
             reason: err.to_string(),
         }
     })?;
-    let params_cbor = encode_value_literal(&grant.params)?;
+    let params_cbor = encode_value_literal(&grant.params, &expanded_schema, schema_index)?;
     let capability_grant = CapabilityGrant {
         name: grant.name.clone(),
         cap: grant.cap.clone(),
@@ -124,15 +131,82 @@ fn resolve_grant(
 }
 
 fn convert_budget(budget: &CapGrantBudget) -> CapabilityBudget {
-    CapabilityBudget {
-        tokens: budget.tokens,
-        bytes: budget.bytes,
-        cents: budget.cents,
-    }
+    CapabilityBudget(budget.0.clone())
 }
 
-fn encode_value_literal(value: &ValueLiteral) -> Result<Vec<u8>, KernelError> {
-    to_canonical_cbor(value).map_err(|err| KernelError::CapabilityEncoding(err.to_string()))
+fn encode_value_literal(
+    value: &ValueLiteral,
+    schema: &TypeExpr,
+    schemas: &SchemaIndex,
+) -> Result<Vec<u8>, KernelError> {
+    let cbor_value = literal_to_cbor_value(value)?;
+    let normalized =
+        aos_air_types::value_normalize::normalize_value_with_schema(cbor_value, schema, schemas)
+            .map_err(|err| KernelError::CapabilityEncoding(err.to_string()))?;
+    Ok(normalized.bytes)
+}
+
+fn literal_to_cbor_value(value: &ValueLiteral) -> Result<serde_cbor::Value, KernelError> {
+    use serde_cbor::Value as CborValue;
+    Ok(match value {
+        ValueLiteral::Null(_) => CborValue::Null,
+        ValueLiteral::Bool(v) => CborValue::Bool(v.bool),
+        ValueLiteral::Int(v) => CborValue::Integer(v.int as i128),
+        ValueLiteral::Nat(v) => CborValue::Integer(v.nat as i128),
+        ValueLiteral::Dec128(v) => CborValue::Text(v.dec128.clone()),
+        ValueLiteral::Bytes(v) => {
+            let bytes = base64::decode(&v.bytes_b64)
+                .map_err(|err| KernelError::CapabilityEncoding(err.to_string()))?;
+            CborValue::Bytes(bytes)
+        }
+        ValueLiteral::Text(v) => CborValue::Text(v.text.clone()),
+        ValueLiteral::TimeNs(v) => CborValue::Integer(v.time_ns as i128),
+        ValueLiteral::DurationNs(v) => CborValue::Integer(v.duration_ns as i128),
+        ValueLiteral::Hash(v) => CborValue::Text(v.hash.as_str().to_string()),
+        ValueLiteral::Uuid(v) => CborValue::Text(v.uuid.clone()),
+        ValueLiteral::List(v) => CborValue::Array(
+            v.list
+                .iter()
+                .map(literal_to_cbor_value)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        ValueLiteral::Set(v) => CborValue::Array(
+            v.set
+                .iter()
+                .map(literal_to_cbor_value)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        ValueLiteral::Map(v) => {
+            let mut map = std::collections::BTreeMap::new();
+            for entry in &v.map {
+                let key = literal_to_cbor_value(&entry.key)?;
+                let value = literal_to_cbor_value(&entry.value)?;
+                map.insert(key, value);
+            }
+            CborValue::Map(map)
+        }
+        ValueLiteral::Record(v) => {
+            let mut map = std::collections::BTreeMap::new();
+            for (key, value) in &v.record {
+                map.insert(CborValue::Text(key.clone()), literal_to_cbor_value(value)?);
+            }
+            CborValue::Map(map)
+        }
+        ValueLiteral::Variant(v) => {
+            let mut map = std::collections::BTreeMap::new();
+            let value = match &v.value {
+                Some(inner) => literal_to_cbor_value(inner)?,
+                None => CborValue::Null,
+            };
+            map.insert(CborValue::Text(v.tag.clone()), value);
+            CborValue::Map(map)
+        }
+        ValueLiteral::SecretRef(_) => {
+            return Err(KernelError::CapabilityEncoding(
+                "secret_ref literals are not supported in capability params".into(),
+            ))
+        }
+    })
 }
 
 fn expected_cap_type(catalog: &EffectCatalog, effect_kind: &str) -> Result<CapType, KernelError> {

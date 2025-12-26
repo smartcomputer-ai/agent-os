@@ -533,6 +533,8 @@ pub struct PlanStepEmitEffect {
     pub kind: EffectKind,
     pub params: ExprOrValue,
     pub cap: CapGrantName,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<ExprOrValue>,
     pub bind: PlanBindEffect,
 }
 
@@ -830,15 +832,9 @@ pub struct CapGrant {
     pub budget: Option<CapGrantBudget>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapGrantBudget {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tokens: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bytes: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cents: Option<u64>,
-}
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct CapGrantBudget(pub std::collections::BTreeMap<String, u64>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]

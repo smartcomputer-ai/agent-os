@@ -55,6 +55,14 @@ pub enum KernelError {
         cap: String,
         reason: String,
     },
+    #[error("capability denied for '{cap}' on effect '{effect_kind}': {reason}")]
+    CapabilityDenied {
+        cap: String,
+        effect_kind: String,
+        reason: String,
+    },
+    #[error("invalid idempotency key: {0}")]
+    IdempotencyKeyInvalid(String),
     #[error("journal error: {0}")]
     Journal(String),
     #[error("snapshot unavailable: {0}")]

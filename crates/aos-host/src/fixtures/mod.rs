@@ -261,6 +261,7 @@ pub fn introspect_manifest_steps(
                     )]),
                 })),
                 cap: cap_slot.into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: effect_var.clone(),
                 },
