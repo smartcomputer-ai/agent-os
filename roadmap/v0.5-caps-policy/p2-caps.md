@@ -1,7 +1,7 @@
 # p2-caps: Capability System (Current State + Work Remaining)
 
 ## TL;DR
-Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). However, cap **params**, **budgets**, and **expiry** are not enforced, and cap semantics are effectively kernel-hardcoded. The system is structurally correct but not yet a complete authorization/budget model, and it is on a path that will not scale once new adapters/cap types ship.
+Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). Cap **params**, **budgets**, **expiry**, and cap decisions are now enforced/journaled. Remaining gaps: cap enforcer modules (pure), built-in cap defs/schemas, and broader host-level integration/replay coverage. Cap semantics are still kernel-hardcoded.
 
 ---
 
@@ -96,22 +96,22 @@ Relevant code:
 
 ---
 
-## What Is Not Implemented (Gaps)
+## Gap Status (as of p2 implementation)
 
-1) **Cap params are not enforced against effect params**
-   - No runtime comparison of cap constraints (hosts/models/limits) against effect inputs.
+1) **Cap params are enforced against effect params**
+   - DONE: runtime comparison of cap constraints (hosts/models/limits) against effect inputs.
 
-2) **Budgets are not enforced**
-   - Cap grant budgets are parsed but not decremented or checked.
+2) **Budgets are enforced**
+   - DONE: grant budgets are reserved at enqueue and settled on receipt.
 
-3) **Expiry is not enforced**
-   - `expiry_ns` is ignored at runtime.
+3) **Expiry is enforced**
+   - DONE: `expiry_ns` checked against deterministic `logical_now_ns`.
 
-4) **No ledgered budget state**
-   - There is no journaled reservation/settlement or replayable cap usage.
+4) **Ledgered budget state exists**
+   - DONE: reservation/settlement stored and cap decisions journaled.
 
 5) **Adapters do not validate caps**
-   - Adapters never see cap params, so they cannot enforce constraints. (This is fine as long as the kernel is authoritative.)
+   - REMAINS: adapters never see cap params; kernel remains authoritative.
 
 ---
 
@@ -303,17 +303,17 @@ Parsing inside the enforcer is fine for v0.5. Normalization is tracked separatel
 
 ## Minimal "Working Cap System" Requirements
 
-1) **Cap param enforcement**
+1) [x] **Cap param enforcement**
    - Enforce cap constraints against effect params at enqueue.
    - Journal allow/deny decisions with structured reasons (journal is the only log).
 
-2) **Two-phase budget ledger**
+2) [x] **Two-phase budget ledger**
    - Reservation at enqueue; settlement at receipt.
 
-3) **Expiry enforcement**
+3) [x] **Expiry enforcement**
    - Use deterministic "now" and deny expired caps.
 
-4) **Audit trail**
+4) [x] **Audit trail**
    - Journal allow/deny decisions with reasons and budget deltas.
    - Include enforcer module identity and output (or a hash) for replay determinism.
 
@@ -377,22 +377,22 @@ Policy stays data-only (`RulePolicy`) for v0.5; it is effectively a built-in pol
 
 ## Summary of Required Work
 
-1) Implement cap param enforcement at enqueue.
-2) Implement budget reservation + settlement with ledgered deltas.
-3) Implement deterministic expiry enforcement.
-4) Journal cap decisions with rationale.
-5) Add minimal use-case tests and replay checks.
+1) [x] Implement cap param enforcement at enqueue.
+2) [x] Implement budget reservation + settlement with ledgered deltas.
+3) [x] Implement deterministic expiry enforcement.
+4) [x] Journal cap decisions with rationale.
+5) [~] Add minimal use-case tests and replay checks (kernel unit tests added; host-level replay coverage pending).
 
 Once these exist, caps are a real security and budget control surface, not just wiring.
 
 ---
 
-## Required Spec/Schema Updates (Documented Only)
+## Required Spec/Schema Updates (Status)
 
-The following changes are required to make the design enforceable in AIR, but are **not** made in this doc set:
+The following changes were required to make the design enforceable in AIR; status noted:
 
-1) **defcap**: add `enforcer` module reference (pure module).
-2) **Built-in schemas**: add `sys/CapCheckInput@1`, `sys/CapCheckOutput@1`, `sys/CapSettleInput@1`, `sys/CapSettleOutput@1`.
-3) **Journal records**: define a canonical cap decision record that pins intent hash, enforcer identity, constraints result, reservation delta, and expiry/budget check outcomes.
-4) **Deterministic time inputs**: standardize `journal_height` + `logical_now_ns` in cap authorizer context (see `roadmap/v0.5-caps-policy/p3-time.md`).
-5) **Effect idempotency keys**: add optional `idempotency_key` to plan emit effects and reducer effects (AIR schema + WASM ABI), and thread it into `EffectIntent` hashing. Without this, identical effects share an intent hash and cannot be safely in-flight concurrently.
+1) **defcap**: add `enforcer` module reference (pure module). (NOT DONE)
+2) **Built-in schemas**: add `sys/CapCheckInput@1`, `sys/CapCheckOutput@1`, `sys/CapSettleInput@1`, `sys/CapSettleOutput@1`. (NOT DONE)
+3) **Journal records**: define a canonical cap decision record that pins intent hash, enforcer identity, constraints result, reservation delta, and expiry/budget check outcomes. (PARTIAL: kernel record exists; spec update pending)
+4) **Deterministic time inputs**: standardize `journal_height` + `logical_now_ns` in cap authorizer context (see `roadmap/v0.5-caps-policy/p3-time.md`). (PARTIAL: kernel uses `logical_now_ns`; spec update pending)
+5) **Effect idempotency keys**: add optional `idempotency_key` to plan emit effects and reducer effects (AIR schema + WASM ABI), and thread it into `EffectIntent` hashing. (DONE)
