@@ -33,6 +33,56 @@ Caps are **static, typed grants** that authorize which effect kinds a world may 
 
 Caps must be deterministic, auditable, and enforced **before** enqueue.
 
+### Cap Grants vs DefCaps (Clarification)
+**Defcaps** define the *type* of capability: cap type, param schema, and enforcer module.  
+**Cap grants** are concrete, named instances of a defcap with fixed params/budget/expiry.
+
+Key rules:
+- Plans and reducers reference **cap grants** (grant names), not defcap names.
+- Enforcers do **not** mint grants; they evaluate a request against an existing grant.
+- A grant’s `cap` field points to the defcap that defines its schema + enforcer.
+
+Put differently: defcap = template, grant = instantiated authority, enforcer = checker.
+
+### Call-Trace: Grant Params → Enforcer Check (Fetch-Notify)
+This is the concrete data path for the `example.com` allowlist:
+
+```
+manifest.defaults.cap_grants["cap_http_fetch"].params
+  -> resolve_grant(): validate + canonicalize params to CBOR
+  -> CapabilityGrant.params_cbor
+  -> enqueue_effect(): cap_constraints_and_reserve(...)
+  -> CapCheckInput.cap_params = params_cbor
+  -> sys/CapEnforceHttpOut@1 decodes cap_params.hosts
+  -> compare URL host from effect_params.url against hosts allowlist
+```
+
+So the enforcer doesn’t “know” about `example.com` magically; it is fed the grant
+params every time, in canonical CBOR form, and compares them to the effect’s URL.
+
+### Cap Reference Validation (How It Should Work)
+Cap references must be validated against **grants**, not defcaps. Validation should enforce:
+
+1) **Grant existence**
+   - Every `emit.cap` in a plan, every `required_caps`, every module `cap_slots` binding,
+     and every `secret.allowed_caps` entry must reference a **grant name** in
+     `manifest.defaults.cap_grants`.
+
+2) **Grant → defcap correctness**
+   - Each grant’s `cap` must reference a defcap in `manifest.caps`.
+   - Grant params must validate against the defcap schema (already enforced in kernel load).
+
+3) **Effect kind ↔ cap type match (via the grant)**
+   - For each `emit_effect` step, look up its grant, then the grant’s defcap,
+     and verify `defcap.cap_type` matches the effect kind’s required cap type.
+   - This check should use grants as the primary lookup key; defcaps are only templates.
+
+4) **Uniqueness + consistency**
+   - Grant names must be unique.
+   - A single grant may be referenced in multiple plans/modules, but all uses must be
+     compatible with its defcap cap type.
+
+This makes the authoring model consistent with runtime: **grants are the capability boundary**, and defcaps are the templates.
 ---
 
 ## Design Smell (Current Trajectory)
@@ -209,7 +259,72 @@ CapCheckOutput = {
 }
 ```
 
+### Tagged union wrapper (single-input ABI)
+Pure modules expose a single `run(input_bytes) -> output_bytes`. To support **both**
+check + settle in one module, wrap them in a tagged union:
+
+```cbor
+CapEnforcerInput = variant {
+  Check: CapCheckInput,
+  Settle: CapSettleInput
+}
+
+CapEnforcerOutput = variant {
+  Check: CapCheckOutput,
+  Settle: CapSettleOutput
+}
+```
+
+The kernel chooses the variant (`Check` at enqueue, `Settle` on receipt). The module
+returns the matching variant. This keeps a single ABI surface while allowing
+separate logic for reserve vs settle.
+
+### Settle ABI (Proposed)
+
 Settle input includes receipt + reservation; output returns actual usage deltas.
+
+```cbor
+CapSettleInput = {
+  cap_def: Name,
+  grant_name: text,
+  cap_params: bytes,          // canonical CBOR
+  effect_kind: text,
+  effect_params: bytes,       // canonical CBOR (from enqueue)
+  origin: { kind: "plan"|"reducer", name: Name },
+  logical_now_ns: nat,
+  intent_hash: bytes,         // 32 bytes
+  reserve_estimate: map<text,nat>,
+  receipt: {
+    status: text,             // "ok" | "error"
+    adapter_id: text,
+    payload: bytes,           // receipt payload CBOR
+    cost_cents?: nat
+  }
+}
+
+CapSettleOutput = {
+  usage: map<text,nat>,
+  violation?: { code, message }  // e.g., usage > reserve or receipt mismatch
+}
+```
+
+**Semantics:**
+- `usage` is authoritative for ledger settlement (kernel still applies deltas).
+- `violation` indicates receipt/usage contract failure (policy for handling is kernel-owned).
+- Enforcers may return empty usage maps when a cap has no budget dimensions.
+
+### Wiring Plan (Kernel)
+1) **Capture enqueue context**: store `effect_params` (canonical CBOR), `cap_params`, and `origin` in `CapReservation` so settle has deterministic inputs.
+2) **Add settle hook to enforcer invoker**:
+   - Extend `CapEnforcerInvoker` with `settle(module, CapSettleInput) -> CapSettleOutput`.
+   - Implement in `PureCapEnforcer`.
+3) **Invoke on receipt** (`EffectManager::settle_receipt`):
+   - If `enforcer_module == sys/CapAllowAll@1`, skip and return empty usage.
+   - Else if enforcer invoker present, call `settle` and use its `usage`.
+   - Else fallback to built-in usage extraction for known effects (LLM, blob), or empty usage.
+4) **Decision/journal**:
+   - Record settle usage (and violation if present).
+   - Decide policy for `violation` (error vs warning + ledger update).
 
 This keeps cap logic centralized and makes it easy to add new cap types without leaking policy or budget logic into adapters.
 
@@ -383,7 +498,8 @@ Policy stays data-only (`RulePolicy`) for v0.5; it is effectively a built-in pol
 2) Journaled cap decisions (allow/deny + reasons)
 3) Two-phase budget ledger (reserve/settle)
 4) Expiry enforcement with deterministic "now"
-5) Cap-type interface stabilization + tests/fixtures
+5) Settle ABI wiring (enforcer settle invocation + ledger/journal)
+6) Cap-type interface stabilization + tests/fixtures
 
 ---
 
@@ -393,7 +509,8 @@ Policy stays data-only (`RulePolicy`) for v0.5; it is effectively a built-in pol
 2) [x] Implement budget reservation + settlement with ledgered deltas.
 3) [x] Implement deterministic expiry enforcement.
 4) [x] Journal cap decisions with rationale.
-5) [~] Add minimal use-case tests and replay checks (kernel unit tests + enforcer integration tests added; host-level replay coverage pending).
+5) [~] Wire settle ABI to enforcers (schemas exist; invocation + usage flow pending).
+6) [~] Add minimal use-case tests and replay checks (kernel unit tests + enforcer integration tests added; host-level replay coverage pending).
 
 Once these exist, caps are a real security and budget control surface, not just wiring.
 
@@ -405,6 +522,6 @@ The following changes were required to make the design enforceable in AIR; statu
 
 1) **defcap**: add `enforcer` module reference (pure module). (DONE)
 2) **Built-in schemas**: add `sys/CapCheckInput@1`, `sys/CapCheckOutput@1`, `sys/CapSettleInput@1`, `sys/CapSettleOutput@1`. (DONE)
-3) **Journal records**: define a canonical cap decision record that pins intent hash, enforcer identity, constraints result, reservation delta, and expiry/budget check outcomes. (PARTIAL: kernel record exists; spec update pending)
+3) **Journal records**: define canonical cap decision + settle records that pin intent hash, enforcer identity, constraints result, reservation delta, usage deltas, and expiry/budget check outcomes. (PARTIAL: kernel record exists; spec update pending)
 4) **Deterministic time inputs**: standardize `journal_height` + `logical_now_ns` in cap authorizer context (see `roadmap/v0.5-caps-policy/p3-time.md`). (PARTIAL: kernel uses `logical_now_ns`; spec update pending)
 5) **Effect idempotency keys**: add optional `idempotency_key` to plan emit effects and reducer effects (AIR schema + WASM ABI), and thread it into `EffectIntent` hashing. (DONE)
