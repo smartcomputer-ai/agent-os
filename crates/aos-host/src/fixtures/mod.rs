@@ -713,6 +713,47 @@ pub fn reducer_module_from_target(
     }
 }
 
+/// Load a real pure WASM module from `target/wasm32-unknown-unknown/<profile>/<file>` and register
+/// it in the store, returning a fully populated DefModule.
+pub fn pure_module_from_target(
+    store: &Arc<TestStore>,
+    name: &str,
+    wasm_file: &str,
+    input_schema: &str,
+    output_schema: &str,
+) -> DefModule {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest_dir
+        .join("../../target/wasm32-unknown-unknown/debug")
+        .join(wasm_file);
+
+    if !path.exists() {
+        panic!(
+            "missing {} — build it first with `cargo build -p aos-sys --target wasm32-unknown-unknown`",
+            path.display()
+        );
+    }
+
+    let bytes = fs::read(&path).expect("read wasm");
+    let wasm_hash = Hash::of_bytes(&bytes);
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
+    store.put_blob(&bytes).expect("store wasm blob");
+
+    DefModule {
+        name: name.to_string(),
+        module_kind: ModuleKind::Pure,
+        wasm_hash: wasm_hash_ref,
+        key_schema: None,
+        abi: ModuleAbi {
+            reducer: None,
+            pure: Some(aos_air_types::PureAbi {
+                input: schema(input_schema),
+                output: schema(output_schema),
+            }),
+        },
+    }
+}
+
 /// Convenience: build a reducer module that emits the supplied domain events (and no state).
 pub fn stub_event_emitting_reducer(
     store: &Arc<TestStore>,

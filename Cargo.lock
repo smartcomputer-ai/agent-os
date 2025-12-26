@@ -302,6 +302,7 @@ dependencies = [
  "aos-wasm-sdk",
  "hex",
  "serde",
+ "serde_bytes",
  "serde_cbor",
  "sha2",
 ]

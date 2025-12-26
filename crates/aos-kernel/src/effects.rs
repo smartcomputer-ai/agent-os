@@ -563,190 +563,216 @@ fn cap_constraints_and_reserve(
     origin: &EffectSource,
     logical_now_ns: u64,
 ) -> Result<BudgetMap, CapDenyReason> {
+    if enforcer_module == CAP_ALLOW_ALL_ENFORCER {
+        return Ok(BudgetMap::new());
+    }
+    if let Some(invoker) = enforcer_invoker {
+        return invoke_enforcer(
+            invoker,
+            enforcer_module,
+            kind,
+            grant,
+            params_cbor,
+            origin,
+            logical_now_ns,
+        );
+    }
     match enforcer_module {
-        CAP_ALLOW_ALL_ENFORCER => Ok(BudgetMap::new()),
-        CAP_HTTP_ENFORCER => {
-            if kind.as_str() != aos_effects::EffectKind::HTTP_REQUEST {
-                return Err(CapDenyReason {
-                    code: "effect_kind_mismatch".into(),
-                    message: format!(
-                        "enforcer '{CAP_HTTP_ENFORCER}' cannot handle '{}'",
-                        kind.as_str()
-                    ),
-                });
-            }
-            let cap_params: HttpCapParams = decode_cbor(&grant.params_cbor).map_err(|err| {
-                CapDenyReason {
-                    code: "cap_params_invalid".into(),
-                    message: err.to_string(),
-                }
-            })?;
-            let effect_params: HttpRequestParams = decode_cbor(params_cbor).map_err(|err| {
-                CapDenyReason {
-                    code: "effect_params_invalid".into(),
-                    message: err.to_string(),
-                }
-            })?;
-            let url = Url::parse(&effect_params.url).map_err(|err| CapDenyReason {
-                code: "invalid_url".into(),
-                message: err.to_string(),
-            })?;
-            let host = url.host_str().ok_or_else(|| CapDenyReason {
-                code: "invalid_url".into(),
-                message: "missing host".into(),
-            })?;
-            let scheme = url.scheme();
-            let port = url.port_or_known_default();
-            let path = url.path();
+        CAP_HTTP_ENFORCER => builtin_http_enforcer(kind, grant, params_cbor),
+        CAP_LLM_ENFORCER => builtin_llm_enforcer(kind, grant, params_cbor),
+        _ => Err(CapDenyReason {
+            code: "enforcer_not_found".into(),
+            message: format!("enforcer module '{enforcer_module}' not available"),
+        }),
+    }
+}
 
-            if !allowlist_contains(&cap_params.hosts, host, |v| v.to_lowercase()) {
-                return Err(CapDenyReason {
-                    code: "host_not_allowed".into(),
-                    message: format!("host '{host}' not allowed"),
-                });
-            }
-            if !allowlist_contains(&cap_params.schemes, scheme, |v| v.to_lowercase()) {
-                return Err(CapDenyReason {
-                    code: "scheme_not_allowed".into(),
-                    message: format!("scheme '{scheme}' not allowed"),
-                });
-            }
-            if !allowlist_contains(&cap_params.methods, &effect_params.method, |v| {
-                v.to_uppercase()
-            }) {
-                return Err(CapDenyReason {
-                    code: "method_not_allowed".into(),
-                    message: format!("method '{}' not allowed", effect_params.method),
-                });
-            }
-            if let Some(ports) = &cap_params.ports {
-                if !ports.is_empty() {
-                    let port = port.ok_or_else(|| CapDenyReason {
-                        code: "port_not_allowed".into(),
-                        message: "missing port".into(),
-                    })?;
-                    if !ports.iter().any(|p| *p == port as u64) {
-                        return Err(CapDenyReason {
-                            code: "port_not_allowed".into(),
-                            message: format!("port '{port}' not allowed"),
-                        });
-                    }
-                }
-            }
-            if let Some(prefixes) = &cap_params.path_prefixes {
-                if !prefixes.is_empty() && !prefixes.iter().any(|p| path.starts_with(p)) {
-                    return Err(CapDenyReason {
-                        code: "path_not_allowed".into(),
-                        message: format!("path '{path}' not allowed"),
-                    });
-                }
-            }
-            Ok(BudgetMap::new())
-        }
-        CAP_LLM_ENFORCER => {
-            if kind.as_str() != aos_effects::EffectKind::LLM_GENERATE {
-                return Err(CapDenyReason {
-                    code: "effect_kind_mismatch".into(),
-                    message: format!(
-                        "enforcer '{CAP_LLM_ENFORCER}' cannot handle '{}'",
-                        kind.as_str()
-                    ),
-                });
-            }
-            let cap_params: LlmCapParams = decode_cbor(&grant.params_cbor).map_err(|err| {
-                CapDenyReason {
-                    code: "cap_params_invalid".into(),
-                    message: err.to_string(),
-                }
+fn invoke_enforcer(
+    invoker: &Arc<dyn CapEnforcerInvoker>,
+    enforcer_module: &str,
+    kind: &EffectKind,
+    grant: &CapabilityGrant,
+    params_cbor: &[u8],
+    origin: &EffectSource,
+    logical_now_ns: u64,
+) -> Result<BudgetMap, CapDenyReason> {
+    let origin = match origin {
+        EffectSource::Reducer { name } => CapEffectOrigin {
+            kind: "reducer".into(),
+            name: name.clone(),
+        },
+        EffectSource::Plan { name } => CapEffectOrigin {
+            kind: "plan".into(),
+            name: name.clone(),
+        },
+    };
+    let input = CapCheckInput {
+        cap_def: grant.cap.clone(),
+        grant_name: grant.name.clone(),
+        cap_params: grant.params_cbor.clone(),
+        effect_kind: kind.as_str().to_string(),
+        effect_params: params_cbor.to_vec(),
+        origin,
+        logical_now_ns,
+    };
+    let output = invoker
+        .check(enforcer_module, input)
+        .map_err(|err| CapDenyReason {
+            code: "enforcer_error".into(),
+            message: err.to_string(),
+        })?;
+    if output.constraints_ok {
+        Ok(output.reserve_estimate)
+    } else {
+        Err(output.deny.unwrap_or(CapDenyReason {
+            code: "constraints_failed".into(),
+            message: "cap enforcer denied request".into(),
+        }))
+    }
+}
+
+fn builtin_http_enforcer(
+    kind: &EffectKind,
+    grant: &CapabilityGrant,
+    params_cbor: &[u8],
+) -> Result<BudgetMap, CapDenyReason> {
+    if kind.as_str() != aos_effects::EffectKind::HTTP_REQUEST {
+        return Err(CapDenyReason {
+            code: "effect_kind_mismatch".into(),
+            message: format!(
+                "enforcer '{CAP_HTTP_ENFORCER}' cannot handle '{}'",
+                kind.as_str()
+            ),
+        });
+    }
+    let cap_params: HttpCapParams = decode_cbor(&grant.params_cbor).map_err(|err| CapDenyReason {
+        code: "cap_params_invalid".into(),
+        message: err.to_string(),
+    })?;
+    let effect_params: HttpRequestParams = decode_cbor(params_cbor).map_err(|err| CapDenyReason {
+        code: "effect_params_invalid".into(),
+        message: err.to_string(),
+    })?;
+    let url = Url::parse(&effect_params.url).map_err(|err| CapDenyReason {
+        code: "invalid_url".into(),
+        message: err.to_string(),
+    })?;
+    let host = url.host_str().ok_or_else(|| CapDenyReason {
+        code: "invalid_url".into(),
+        message: "missing host".into(),
+    })?;
+    let scheme = url.scheme();
+    let port = url.port_or_known_default();
+    let path = url.path();
+
+    if !allowlist_contains(&cap_params.hosts, host, |v| v.to_lowercase()) {
+        return Err(CapDenyReason {
+            code: "host_not_allowed".into(),
+            message: format!("host '{host}' not allowed"),
+        });
+    }
+    if !allowlist_contains(&cap_params.schemes, scheme, |v| v.to_lowercase()) {
+        return Err(CapDenyReason {
+            code: "scheme_not_allowed".into(),
+            message: format!("scheme '{scheme}' not allowed"),
+        });
+    }
+    if !allowlist_contains(&cap_params.methods, &effect_params.method, |v| {
+        v.to_uppercase()
+    }) {
+        return Err(CapDenyReason {
+            code: "method_not_allowed".into(),
+            message: format!("method '{}' not allowed", effect_params.method),
+        });
+    }
+    if let Some(ports) = &cap_params.ports {
+        if !ports.is_empty() {
+            let port = port.ok_or_else(|| CapDenyReason {
+                code: "port_not_allowed".into(),
+                message: "missing port".into(),
             })?;
-            let effect_params: LlmGenerateParamsView = decode_cbor(params_cbor).map_err(|err| {
-                CapDenyReason {
-                    code: "effect_params_invalid".into(),
-                    message: err.to_string(),
-                }
-            })?;
-            if !allowlist_contains(&cap_params.providers, &effect_params.provider, |v| {
-                v.to_string()
-            }) {
+            if !ports.iter().any(|p| *p == port as u64) {
                 return Err(CapDenyReason {
-                    code: "provider_not_allowed".into(),
-                    message: format!("provider '{}' not allowed", effect_params.provider),
+                    code: "port_not_allowed".into(),
+                    message: format!("port '{port}' not allowed"),
                 });
-            }
-            if !allowlist_contains(&cap_params.models, &effect_params.model, |v| v.to_string()) {
-                return Err(CapDenyReason {
-                    code: "model_not_allowed".into(),
-                    message: format!("model '{}' not allowed", effect_params.model),
-                });
-            }
-            if let Some(limit) = cap_params.max_tokens {
-                if effect_params.max_tokens > limit {
-                    return Err(CapDenyReason {
-                        code: "max_tokens_exceeded".into(),
-                        message: format!(
-                            "max_tokens {} exceeds cap {limit}",
-                            effect_params.max_tokens
-                        ),
-                    });
-                }
-            }
-            if let Some(allowed) = &cap_params.tools_allow {
-                let tools = effect_params.tools.as_deref().unwrap_or(&[]);
-                if !allowed.is_empty()
-                    && !tools.iter().all(|tool| allowed.iter().any(|t| t == tool))
-                {
-                    return Err(CapDenyReason {
-                        code: "tool_not_allowed".into(),
-                        message: "tool not allowed".into(),
-                    });
-                }
-            }
-            let mut reserve = BudgetMap::new();
-            if effect_params.max_tokens > 0 {
-                reserve.insert("tokens".into(), effect_params.max_tokens);
-            }
-            Ok(reserve)
-        }
-        _ => {
-            let Some(invoker) = enforcer_invoker else {
-                return Err(CapDenyReason {
-                    code: "enforcer_not_found".into(),
-                    message: format!("enforcer module '{enforcer_module}' not available"),
-                });
-            };
-            let origin = match origin {
-                EffectSource::Reducer { name } => CapEffectOrigin {
-                    kind: "reducer".into(),
-                    name: name.clone(),
-                },
-                EffectSource::Plan { name } => CapEffectOrigin {
-                    kind: "plan".into(),
-                    name: name.clone(),
-                },
-            };
-            let input = CapCheckInput {
-                cap_def: grant.cap.clone(),
-                grant_name: grant.name.clone(),
-                cap_params: grant.params_cbor.clone(),
-                effect_kind: kind.as_str().to_string(),
-                effect_params: params_cbor.to_vec(),
-                origin,
-                logical_now_ns,
-            };
-            let output = invoker.check(enforcer_module, input).map_err(|err| CapDenyReason {
-                code: "enforcer_error".into(),
-                message: err.to_string(),
-            })?;
-            if output.constraints_ok {
-                Ok(output.reserve_estimate)
-            } else {
-                Err(output.deny.unwrap_or(CapDenyReason {
-                    code: "constraints_failed".into(),
-                    message: "cap enforcer denied request".into(),
-                }))
             }
         }
     }
+    if let Some(prefixes) = &cap_params.path_prefixes {
+        if !prefixes.is_empty() && !prefixes.iter().any(|p| path.starts_with(p)) {
+            return Err(CapDenyReason {
+                code: "path_not_allowed".into(),
+                message: format!("path '{path}' not allowed"),
+            });
+        }
+    }
+    Ok(BudgetMap::new())
+}
+
+fn builtin_llm_enforcer(
+    kind: &EffectKind,
+    grant: &CapabilityGrant,
+    params_cbor: &[u8],
+) -> Result<BudgetMap, CapDenyReason> {
+    if kind.as_str() != aos_effects::EffectKind::LLM_GENERATE {
+        return Err(CapDenyReason {
+            code: "effect_kind_mismatch".into(),
+            message: format!(
+                "enforcer '{CAP_LLM_ENFORCER}' cannot handle '{}'",
+                kind.as_str()
+            ),
+        });
+    }
+    let cap_params: LlmCapParams = decode_cbor(&grant.params_cbor).map_err(|err| CapDenyReason {
+        code: "cap_params_invalid".into(),
+        message: err.to_string(),
+    })?;
+    let effect_params: LlmGenerateParamsView = decode_cbor(params_cbor).map_err(|err| {
+        CapDenyReason {
+            code: "effect_params_invalid".into(),
+            message: err.to_string(),
+        }
+    })?;
+    if !allowlist_contains(&cap_params.providers, &effect_params.provider, |v| {
+        v.to_string()
+    }) {
+        return Err(CapDenyReason {
+            code: "provider_not_allowed".into(),
+            message: format!("provider '{}' not allowed", effect_params.provider),
+        });
+    }
+    if !allowlist_contains(&cap_params.models, &effect_params.model, |v| v.to_string()) {
+        return Err(CapDenyReason {
+            code: "model_not_allowed".into(),
+            message: format!("model '{}' not allowed", effect_params.model),
+        });
+    }
+    if let Some(limit) = cap_params.max_tokens {
+        if effect_params.max_tokens > limit {
+            return Err(CapDenyReason {
+                code: "max_tokens_exceeded".into(),
+                message: format!(
+                    "max_tokens {} exceeds cap {limit}",
+                    effect_params.max_tokens
+                ),
+            });
+        }
+    }
+    if let Some(allowed) = &cap_params.tools_allow {
+        let tools = effect_params.tools.as_deref().unwrap_or(&[]);
+        if !allowed.is_empty() && !tools.iter().all(|tool| allowed.iter().any(|t| t == tool)) {
+            return Err(CapDenyReason {
+                code: "tool_not_allowed".into(),
+                message: "tool not allowed".into(),
+            });
+        }
+    }
+    let mut reserve = BudgetMap::new();
+    if effect_params.max_tokens > 0 {
+        reserve.insert("tokens".into(), effect_params.max_tokens);
+    }
+    Ok(reserve)
 }
 
 fn decode_cbor<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, serde_cbor::Error> {

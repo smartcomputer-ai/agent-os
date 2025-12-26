@@ -1,7 +1,7 @@
 # p2-caps: Capability System (Current State + Work Remaining)
 
 ## TL;DR
-Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). Cap **params**, **budgets**, **expiry**, and cap decisions are now enforced/journaled. Remaining gaps: pure enforcer module implementations and broader host-level integration/replay coverage. Cap semantics are still kernel-hardcoded.
+Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). Cap **params**, **budgets**, **expiry**, and cap decisions are now enforced/journaled. Remaining gaps: broader host-level integration/replay coverage. Cap semantics are still kernel-hardcoded.
 
 ---
 
@@ -378,7 +378,7 @@ Policy stays data-only (`RulePolicy`) for v0.5; it is effectively a built-in pol
 2) [x] Implement budget reservation + settlement with ledgered deltas.
 3) [x] Implement deterministic expiry enforcement.
 4) [x] Journal cap decisions with rationale.
-5) [~] Add minimal use-case tests and replay checks (kernel unit tests added; host-level replay coverage pending).
+5) [~] Add minimal use-case tests and replay checks (kernel unit tests + enforcer integration tests added; host-level replay coverage pending).
 
 Once these exist, caps are a real security and budget control surface, not just wiring.
 

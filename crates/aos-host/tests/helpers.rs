@@ -14,6 +14,7 @@ use aos_air_types::{
     TypeRecord, TypeRef, TypeVariant, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
 };
 use aos_effects::builtins::TimerSetParams;
+use aos_kernel::cap_enforcer::CapCheckOutput;
 #[path = "../src/fixtures/mod.rs"]
 pub mod fixtures;
 
@@ -27,7 +28,7 @@ pub struct ReadMetaCompat {
     pub manifest_hash: String,
 }
 
-use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use aos_wasm_abi::{PureOutput, ReducerEffect, ReducerOutput};
 use fixtures::{START_SCHEMA, TestStore, zero_hash};
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -54,6 +55,23 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
     });
+
+    let allow_output = CapCheckOutput {
+        constraints_ok: true,
+        deny: None,
+        reserve_estimate: Default::default(),
+    };
+    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
+    let pure_output = PureOutput {
+        output: output_bytes,
+    };
+    let enforcer = fixtures::stub_pure_module(
+        store,
+        "sys/CapEnforceHttpOut@1",
+        &pure_output,
+        "sys/CapCheckInput@1",
+        "sys/CapCheckOutput@1",
+    );
 
     let plan_name = "com.acme/Fulfill@1".to_string();
     let plan = DefPlan {
@@ -128,7 +146,7 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
-        vec![result_module],
+        vec![result_module, enforcer],
         routing,
     );
 

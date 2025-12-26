@@ -19,9 +19,18 @@ path = "src/bin/agent_registry.rs"
 name = "notes_notebook"
 path = "src/bin/notes_notebook.rs"
 
+[[bin]]
+name = "cap_enforce_http_out"
+path = "src/bin/cap_enforce_http_out.rs"
+
+[[bin]]
+name = "cap_enforce_llm_basic"
+path = "src/bin/cap_enforce_llm_basic.rs"
+
 [dependencies]
 aos-wasm-sdk = { path = "../aos-wasm-sdk" }
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
+serde_bytes = "0.11"
 sha2 = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }

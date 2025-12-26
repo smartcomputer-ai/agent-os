@@ -1,11 +1,11 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprOrValue,
-    ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
+    DefModule, DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode,
+    ExprOrValue, ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
     PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
-    PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveBool, TypePrimitiveInt,
-    TypePrimitiveNat, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant, ValueLiteral, ValueMap,
-    ValueNull, ValueRecord, ValueText,
+    PlanStepRaiseEvent, ReducerAbi, RoutingEvent, Trigger, TypeExpr, TypePrimitive,
+    TypePrimitiveBool, TypePrimitiveInt, TypePrimitiveNat, TypePrimitiveText, TypeRecord, TypeRef,
+    TypeVariant, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
@@ -13,14 +13,16 @@ use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::{JournalKind, JournalRecord, PlanEndStatus, mem::MemJournal};
-use aos_wasm_abi::{ReducerEffect, ReducerOutput};
-use helpers::fixtures::{self, START_SCHEMA, TestWorld, effect_params_text, fake_hash};
+use aos_wasm_abi::{PureOutput, ReducerEffect, ReducerOutput};
+use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld, effect_params_text, fake_hash};
 use indexmap::IndexMap;
 use serde_cbor;
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 mod helpers;
 use helpers::{
@@ -76,6 +78,41 @@ fn http_params_literal(tag: &str) -> ExprOrValue {
             ),
         ]),
     }))
+}
+
+fn allow_http_enforcer(store: &Arc<TestStore>) -> DefModule {
+    let allow_output = CapCheckOutput {
+        constraints_ok: true,
+        deny: None,
+        reserve_estimate: Default::default(),
+    };
+    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
+    let pure_output = PureOutput {
+        output: output_bytes,
+    };
+    fixtures::stub_pure_module(
+        store,
+        "sys/CapEnforceHttpOut@1",
+        &pure_output,
+        "sys/CapCheckInput@1",
+        "sys/CapCheckOutput@1",
+    )
+}
+
+fn build_loaded_manifest_with_http_enforcer(
+    store: &Arc<TestStore>,
+    plans: Vec<DefPlan>,
+    triggers: Vec<Trigger>,
+    mut modules: Vec<DefModule>,
+    routing: Vec<RoutingEvent>,
+) -> aos_kernel::manifest::LoadedManifest {
+    if !modules
+        .iter()
+        .any(|module| module.name == "sys/CapEnforceHttpOut@1")
+    {
+        modules.push(allow_http_enforcer(store));
+    }
+    fixtures::build_loaded_manifest(plans, triggers, modules, routing)
 }
 
 #[test]
@@ -192,7 +229,8 @@ fn sugar_literal_plan_executes_http_flow() {
         "com.acme/ResultEvent@1",
         &result_module.name,
     )];
-    let mut loaded = fixtures::build_loaded_manifest(
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
         vec![plan],
         vec![fixtures::start_trigger(plan_name)],
         vec![result_module.clone()],
@@ -328,7 +366,8 @@ fn single_plan_orchestration_completes_after_receipt() {
         "com.acme/ResultEvent@1",
         &result_module.name,
     )];
-    let mut loaded = fixtures::build_loaded_manifest(
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![result_module],
@@ -440,7 +479,8 @@ fn reducer_and_plan_effects_are_enqueued() {
     };
 
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer_module.name)];
-    let mut loaded = fixtures::build_loaded_manifest(
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![reducer_module],
@@ -547,6 +587,7 @@ fn reducer_timer_receipt_routes_event_to_handler() {
 /// Guards on plan edges should gate side-effects and completion state.
 #[test]
 fn guarded_plan_branches_control_effects() {
+    let store = fixtures::new_mem_store();
     let plan_name = "com.acme/Guarded@1".to_string();
     let plan = DefPlan {
         name: plan_name.clone(),
@@ -595,7 +636,8 @@ fn guarded_plan_branches_control_effects() {
         invariants: vec![],
     };
 
-    let mut loaded = fixtures::build_loaded_manifest(
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
         vec![plan.clone()],
         vec![fixtures::start_trigger(&plan_name)],
         vec![],
@@ -626,7 +668,7 @@ fn guarded_plan_branches_control_effects() {
         ],
     );
 
-    let mut world = TestWorld::new(loaded).unwrap();
+    let mut world = TestWorld::with_store(store.clone(), loaded).unwrap();
     let true_input = serde_json::json!({ "id": "1", "flag": true });
     world
         .submit_event_result(START_SCHEMA, &true_input)
@@ -634,7 +676,8 @@ fn guarded_plan_branches_control_effects() {
     world.tick_n(2).unwrap();
     assert_eq!(world.drain_effects().len(), 1);
 
-    let mut loaded_false = fixtures::build_loaded_manifest(
+    let mut loaded_false = build_loaded_manifest_with_http_enforcer(
+        &store,
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![],
@@ -673,7 +716,7 @@ fn guarded_plan_branches_control_effects() {
             },
         ],
     );
-    let mut world_false = TestWorld::new(loaded_false).unwrap();
+    let mut world_false = TestWorld::with_store(store.clone(), loaded_false).unwrap();
     let false_input = serde_json::json!({ "id": "2", "flag": false });
     world_false
         .submit_event_result(START_SCHEMA, &false_input)
@@ -735,8 +778,13 @@ fn blob_put_receipt_routes_event_to_handler() {
         fixtures::routing_event(event_schema, &emitter.name),
         fixtures::routing_event(event_schema, &handler.name),
     ];
-    let mut loaded =
-        fixtures::build_loaded_manifest(vec![], vec![], vec![emitter, handler], routing);
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
+        vec![],
+        vec![],
+        vec![emitter, handler],
+        routing,
+    );
     insert_test_schemas(
         &mut loaded,
         vec![
@@ -860,8 +908,13 @@ fn blob_get_receipt_routes_event_to_handler() {
         fixtures::routing_event(event_schema, &emitter.name),
         fixtures::routing_event(event_schema, &handler.name),
     ];
-    let mut loaded =
-        fixtures::build_loaded_manifest(vec![], vec![], vec![emitter, handler], routing);
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
+        vec![],
+        vec![],
+        vec![emitter, handler],
+        routing,
+    );
     insert_test_schemas(
         &mut loaded,
         vec![
@@ -1052,7 +1105,8 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
         "com.acme/PulseNext@1",
         &next_emitter.name,
     )];
-    let mut loaded = fixtures::build_loaded_manifest(
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
         vec![next_emitter],
@@ -1258,7 +1312,8 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let mut loaded = fixtures::build_loaded_manifest(
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
         vec![plan_ready.clone(), plan_other.clone()],
         vec![
             fixtures::start_trigger(&plan_ready.name),

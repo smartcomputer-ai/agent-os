@@ -4,9 +4,10 @@ use aos_air_types::{
     ReducerAbi, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
 };
 use aos_effects::builtins::HttpRequestParams;
+use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
-use aos_wasm_abi::ReducerEffect;
-use helpers::fixtures::{self, TestWorld, zero_hash};
+use aos_wasm_abi::{PureOutput, ReducerEffect};
+use helpers::fixtures::{self, TestStore, TestWorld, zero_hash};
 use indexmap::IndexMap;
 
 mod helpers;
@@ -119,10 +120,11 @@ fn plan_effect_allowed_by_policy() {
         invariants: vec![],
     };
 
+    let enforcer = allow_http_enforcer(&store);
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
-        vec![],
+        vec![enforcer],
         vec![],
     );
     fixtures::insert_test_schemas(
@@ -239,10 +241,11 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
         invariants: vec![],
     };
 
+    let enforcer = allow_http_enforcer(&store);
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
-        vec![],
+        vec![enforcer],
         vec![],
     );
 
@@ -358,6 +361,25 @@ fn plan_introspect_denied_by_policy() {
         matches!(err, KernelError::PolicyDenied { .. }),
         "expected policy denial, got {err:?}"
     );
+}
+
+fn allow_http_enforcer(store: &std::sync::Arc<TestStore>) -> aos_air_types::DefModule {
+    let allow_output = CapCheckOutput {
+        constraints_ok: true,
+        deny: None,
+        reserve_estimate: Default::default(),
+    };
+    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
+    let pure_output = PureOutput {
+        output: output_bytes,
+    };
+    fixtures::stub_pure_module(
+        store,
+        "sys/CapEnforceHttpOut@1",
+        &pure_output,
+        "sys/CapCheckInput@1",
+        "sys/CapCheckOutput@1",
+    )
 }
 
 #[test]

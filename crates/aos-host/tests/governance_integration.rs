@@ -10,11 +10,12 @@ use aos_air_types::{
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_cbor::{Hash, to_canonical_cbor};
+use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
 use aos_kernel::shadow::ShadowHarness;
-use aos_wasm_abi::ReducerOutput;
+use aos_wasm_abi::{PureOutput, ReducerOutput};
 use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use indexmap::IndexMap;
 use serde_cbor;
@@ -751,10 +752,27 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
         invariants: vec![],
     };
 
+    let allow_output = CapCheckOutput {
+        constraints_ok: true,
+        deny: None,
+        reserve_estimate: Default::default(),
+    };
+    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
+    let pure_output = PureOutput {
+        output: output_bytes,
+    };
+    let enforcer = fixtures::stub_pure_module(
+        store,
+        "sys/CapEnforceHttpOut@1",
+        &pure_output,
+        "sys/CapCheckInput@1",
+        "sys/CapCheckOutput@1",
+    );
+
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
-        vec![],
+        vec![enforcer],
         vec![],
     );
 

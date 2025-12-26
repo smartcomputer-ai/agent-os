@@ -21,7 +21,7 @@ use serde::Serialize;
 use serde_cbor;
 use serde_cbor::Value as CborValue;
 
-use crate::cap_enforcer::PureCapEnforcer;
+use crate::cap_enforcer::{CapEnforcerInvoker, PureCapEnforcer};
 use crate::capability::CapabilityResolver;
 use crate::cap_ledger::BudgetLedger;
 use crate::cell_index::{CellIndex, CellMeta};
@@ -482,10 +482,6 @@ impl<S: Store + 'static> Kernel<S> {
             }
             None => Box::new(AllowAllPolicy),
         };
-        let enforcer_invoker = Some(Arc::new(PureCapEnforcer::new(
-            Arc::new(loaded.modules.clone()),
-            self.pures.clone(),
-        )));
         let plan_defs = loaded.plans.clone();
         let cap_defs = loaded.caps.clone();
         let effect_defs = loaded.effects.clone();
@@ -504,10 +500,11 @@ impl<S: Store + 'static> Kernel<S> {
             store.clone(),
             config.module_cache_dir.clone(),
         )?));
-        let enforcer_invoker = Some(Arc::new(PureCapEnforcer::new(
-            Arc::new(loaded.modules.clone()),
-            pures.clone(),
-        )));
+        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> =
+            Some(Arc::new(PureCapEnforcer::new(
+                Arc::new(loaded.modules.clone()),
+                pures.clone(),
+            )));
 
         let mut kernel = Self {
             store: store.clone(),
@@ -1949,6 +1946,11 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             Some(crate::secret::SecretCatalog::new(&self.secrets))
         };
+        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> =
+            Some(Arc::new(PureCapEnforcer::new(
+                Arc::new(self.module_defs.clone()),
+                self.pures.clone(),
+            )));
         self.effect_manager = EffectManager::new(
             capability_resolver,
             policy_gate,
