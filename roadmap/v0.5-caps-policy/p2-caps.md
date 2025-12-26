@@ -1,7 +1,7 @@
 # p2-caps: Capability System (Current State + Work Remaining)
 
 ## TL;DR
-Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). Cap **params**, **budgets**, **expiry**, and cap decisions are now enforced/journaled. Remaining gaps: broader host-level integration/replay coverage. Cap semantics are still kernel-hardcoded.
+Capabilities are wired and enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). Cap **params**, **budgets**, **expiry**, and cap decisions are now enforced/journaled. Cap semantics now live in pure enforcer modules (with builtin allow-all fallback). Remaining gaps: settle ABI wiring (CapSettleInput/Output), broader host-level integration/replay coverage, and spec updates for cap decision records + deterministic time.
 
 ---
 
@@ -36,7 +36,9 @@ Caps must be deterministic, auditable, and enforced **before** enqueue.
 ---
 
 ## Design Smell (Current Trajectory)
-Today, cap semantics live in the kernel. A `defcap` only defines param **shape**, while the **meaning** of those params is hardcoded (hosts mean URL host allowlists, max_tokens mean ceilings, etc.). That makes caps a closed-world enum disguised as open strings, and it will block dynamic adapter/cap addition later.
+Previously, cap semantics lived in the kernel. A `defcap` only defined param **shape**, while the **meaning** of those params was hardcoded (hosts mean URL host allowlists, max_tokens mean ceilings, etc.). That made caps a closed-world enum disguised as open strings, and would block dynamic adapter/cap addition.
+
+This is now addressed by pure enforcer modules, with builtin allow-all fallback for simple caps.
 
 The diamond invariant already points to the fix: the **kernel is the authoritative transaction boundary**, but the logic executed inside that boundary does not have to be hardcoded. It only needs to be deterministic, pinned, and journaled.
 
@@ -86,13 +88,15 @@ Relevant code:
 Relevant code:
 - `crates/aos-kernel/src/effects.rs`
 
-### 7) Pure modules already exist but are not wired into auth
-- `defmodule` supports `module_kind: "pure"` with `input`/`output` schemas.
-- The kernel has a `PureRegistry` and `invoke_pure`, but no cap/policy wiring yet.
+### 7) Cap enforcers are wired via pure modules
+- `defcap.enforcer` references a pure module; the kernel invokes it during authorization.
+- sys enforcers live in `aos-sys` (`sys/CapEnforceHttpOut@1`, `sys/CapEnforceLlmBasic@1`).
 
 Relevant code:
-- `spec/schemas/defmodule.schema.json`
-- `crates/aos-kernel/src/pure.rs`
+- `crates/aos-kernel/src/cap_enforcer.rs`
+- `crates/aos-kernel/src/effects.rs`
+- `crates/aos-sys/src/bin/cap_enforce_http_out.rs`
+- `crates/aos-sys/src/bin/cap_enforce_llm_basic.rs`
 
 ---
 
@@ -113,6 +117,15 @@ Relevant code:
 5) **Adapters do not validate caps**
    - REMAINS: adapters never see cap params; kernel remains authoritative.
 
+6) **Enforcer modules are wired into auth**
+   - DONE: kernel invokes pure enforcers when present.
+
+7) **Settle ABI is wired**
+   - REMAINS: `sys/CapSettleInput@1` / `sys/CapSettleOutput@1` schemas exist, but no settle invocation yet.
+
+8) **Host-level replay coverage**
+   - REMAINS: expand integration tests that replay cap decisions across journal/snapshot boundaries.
+
 ---
 
 ## Where Enforcement Must Live
@@ -127,6 +140,7 @@ If adapters ever need visibility for defense-in-depth, pass **immutable identifi
 ---
 
 ## Proposed Direction: Cap Enforcers as Deterministic Modules
+Status: DONE (wired; sys enforcers implemented in `aos-sys`).
 
 ### Key idea
 Make cap enforcement a **deterministic, pinned module** that the kernel runs inside the authorizer transaction. The kernel stays a small interpreter/journaler, while new caps ship as data + modules.
@@ -164,6 +178,7 @@ Adding a new cap type becomes “ship a new `defcap` + module”, not “edit th
 ---
 
 ## Cap Enforcer ABI (Proposed)
+Status: enqueue check implemented; settle ABI not wired yet.
 
 Make cap enforcement a first-class, deterministic ABI:
 
@@ -318,16 +333,16 @@ Parsing inside the enforcer is fine for v0.5. Normalization is tracked separatel
 
 ## Proposed Minimal Use-Cases (Tests/Examples)
 
-1) **HTTP allowlist**
+1) [x] **HTTP allowlist**
    - Cap params include `hosts` (and optional `methods`, `schemes`, `ports`, `path_prefixes`).
    - Allowed host -> ok, disallowed host -> denied (with reason).
 
-2) **LLM model allowlist + token budget**
+2) [x] **LLM model allowlist + token budget**
    - Cap params include `allowed_models` and budget.
    - Disallowed model -> denied.
    - Budget reserved at enqueue, settled on receipt.
 
-3) **Blob constraints**
+3) [x] **Blob constraints**
    - No cap constraints in v0.5 (cap exists to match effect kind only).
 
 ---
