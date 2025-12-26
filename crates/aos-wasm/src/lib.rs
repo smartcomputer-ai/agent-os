@@ -289,19 +289,52 @@ impl PureRuntime {
         let alloc = instance
             .get_typed_func::<i32, i32>(&mut store, ALLOC_EXPORT)
             .context("wasm export 'alloc' not found")?;
-        let run = instance
-            .get_typed_func::<(i32, i32), (i32, i32)>(&mut store, RUN_EXPORT)
-            .context("wasm export 'run' not found")?;
+        let legacy_run = instance.get_typed_func::<(i32, i32), (i32, i32)>(&mut store, RUN_EXPORT);
+        let run = match legacy_run {
+            Ok(run) => RunImpl::Legacy(run),
+            Err(_) => RunImpl::Modern(
+                instance
+                    .get_typed_func::<(i32, i32, i32), ()>(&mut store, RUN_EXPORT)
+                    .context("wasm export 'run' not found")?,
+            ),
+        };
 
         let input_bytes = input.encode()?;
         let input_len = i32::try_from(input_bytes.len()).context("input too large for wasm32")?;
         let input_ptr = alloc.call(&mut store, input_len)?;
         memory.write(&mut store, input_ptr as usize, &input_bytes)?;
 
-        let (out_ptr, out_len) = run.call(&mut store, (input_ptr, input_len))?;
-        let output_len = usize::try_from(out_len).context("negative output length")?;
-        let mut output = vec![0u8; output_len];
-        memory.read(&mut store, out_ptr as usize, &mut output)?;
+        let output = match run {
+            RunImpl::Legacy(run) => {
+                let (out_ptr, out_len) = run.call(&mut store, (input_ptr, input_len))?;
+                let output_len = usize::try_from(out_len).context("negative output length")?;
+                let mut output = vec![0u8; output_len];
+                memory.read(&mut store, out_ptr as usize, &mut output)?;
+                output
+            }
+            RunImpl::Modern(run) => {
+                let result_ptr = alloc.call(&mut store, 8)?;
+                run.call(&mut store, (result_ptr, input_ptr, input_len))?;
+                let mut result_buf = [0u8; 8];
+                memory.read(&mut store, result_ptr as usize, &mut result_buf)?;
+                let out_ptr = i32::from_le_bytes([
+                    result_buf[0],
+                    result_buf[1],
+                    result_buf[2],
+                    result_buf[3],
+                ]);
+                let out_len = i32::from_le_bytes([
+                    result_buf[4],
+                    result_buf[5],
+                    result_buf[6],
+                    result_buf[7],
+                ]);
+                let output_len = usize::try_from(out_len).context("negative output length")?;
+                let mut output = vec![0u8; output_len];
+                memory.read(&mut store, out_ptr as usize, &mut output)?;
+                output
+            }
+        };
 
         let pure_output = PureOutput::decode(&output)?;
         Ok(pure_output)
@@ -390,6 +423,11 @@ impl PureRuntime {
 }
 
 enum StepImpl {
+    Legacy(wasmtime::TypedFunc<(i32, i32), (i32, i32)>),
+    Modern(wasmtime::TypedFunc<(i32, i32, i32), ()>),
+}
+
+enum RunImpl {
     Legacy(wasmtime::TypedFunc<(i32, i32), (i32, i32)>),
     Modern(wasmtime::TypedFunc<(i32, i32, i32), ()>),
 }

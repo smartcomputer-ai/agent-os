@@ -21,6 +21,6 @@
         "max_tokens": { "nat": {} }
       }
     },
-    "enforcer": { "module": "sys/CapAllowAll@1" }
+    "enforcer": { "module": "sys/CapEnforceLlmBasic@1" }
   }
 ]

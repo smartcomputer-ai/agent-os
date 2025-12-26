@@ -41,6 +41,9 @@
   "modules": [
     {
       "name": "demo/FetchNotify@1"
+    },
+    {
+      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
   "plans": [
@@ -73,7 +76,7 @@
                 }
               ]
             },
-            "verbs": {
+            "methods": {
               "set": [
                 {
                   "text": "GET"
