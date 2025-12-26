@@ -1,5 +1,9 @@
 # p1-pure-modules: Deterministic Pure Modules (Work + Rationale)
 
+**Complete**
+
+Status: complete (core pure module support shipped; downstream cap/policy/plan usage tracked in their own tasks).
+
 ## TL;DR
 AgentOS already anticipates "pure components" (deterministic WASM functions) in the architecture/spec, but v1 only ships reducers. We should pull pure modules forward in v0.5 as a first-class module kind so that cap enforcers, policy engines, and plan compute helpers are all **data + modules**, not kernel code.
 

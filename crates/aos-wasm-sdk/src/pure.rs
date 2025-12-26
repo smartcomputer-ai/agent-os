@@ -81,7 +81,7 @@ fn run_module<M: PureModule>(input: PureInput) -> Result<Vec<u8>, RunError>
 where
     M::Output: Serialize,
 {
-    let module_name = core::any::type_name::<M>();
+    let _module_name = core::any::type_name::<M>();
     let payload = serde_cbor::from_slice(&input.input).map_err(RunError::InputDecode)?;
     let mut module = M::default();
     let output = module
