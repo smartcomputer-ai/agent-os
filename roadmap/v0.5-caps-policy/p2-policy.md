@@ -130,7 +130,7 @@ Expand the policy context only with deterministic values, e.g.:
 - `origin_kind`, `origin_name`
 - `plan_id`, `step_id`
 - `manifest_hash`
-- `journal_height` / `logical_time`
+- `journal_height` / `logical_now_ns` (see `roadmap/v0.5-caps-policy/p3-time.md`)
 - `cap_name`, `cap_type`
 - correlation id (if present)
 
@@ -237,6 +237,19 @@ Policies must be enforced **in the kernel** (authoritative, deterministic, journ
 3) Add deterministic counters / rate limits
 4) Expand deterministic policy context
 5) Optional: denial as synthetic receipts for better ergonomics
+
+---
+
+## Required Spec/Schema Updates (Documented Only)
+
+The following changes are required to make the design enforceable in AIR, but are **not** made in this doc set:
+
+1) **defpolicy**: add optional `engine` module reference (pure module).
+2) **Policy decisions**: extend to `allow | deny | require_approval` and document stable approval request IDs (default: `intent_hash`).
+3) **Built-in schemas**: add `sys/PolicyEvalInput@1` and `sys/PolicyEvalOutput@1` with deterministic context fields (`journal_height`, `logical_now_ns`, origin info, cap identifiers).
+4) **Journal records**: define a canonical policy decision record with evaluator identity, matched rule index, decision, explain codes, and counter delta hash.
+5) **Approval records**: define a canonical approval request/decision record and require an authenticated approval ingress path (control-plane or approval adapter).
+6) **Rule matching**: consider adding optional `cap_type` match for `RulePolicy` to reduce rule explosion.
 
 ---
 

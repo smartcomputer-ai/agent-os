@@ -267,12 +267,11 @@ Practical v1 reservations:
 
 ## Expiry Requires Deterministic "Now"
 
-Expiry must not read wallclock in the kernel. Options:
+Expiry must not read wallclock in the kernel. See `roadmap/v0.5-caps-policy/p3-time.md` for the deterministic clock model.
 
-- **Logical time**: journal height / deterministic epoch counter.
-- **Trusted time receipts**: a timer adapter produces signed receipts, and the kernel updates a deterministic "now" state.
-
-For v0.5, use **journal height as logical time** and interpret `expiry_ns` as a logical-time scalar (not host wallclock). This keeps expiry deterministic without trusted time receipts. Either way, expiry is enforced against a deterministic, journaled value.
+Baseline rule:
+- Use `logical_now_ns` (advanced only by trusted receipts) to evaluate `expiry_ns`.
+- Do **not** reinterpret `expiry_ns` as journal height. If height-based expiry is required, treat it as a policy rule or introduce an explicit field (documented as a required spec change below).
 
 ---
 
@@ -291,14 +290,14 @@ Ledger invariant (per grant, per dimension):
 
 ---
 
-## Param Normalization (HTTP URL Parsing without Kernel Semantics)
+## Param Normalization (Out of Scope for v0.5)
 
 Two deterministic options:
 
 1) **Structured URL schema**: add `sys/Url@1` and update HTTP params to carry structured fields (scheme/host/port/path). Authoring sugar can still accept strings and normalize at load/canonicalization time.
 2) **Pure normalizer module**: let `defeffect` optionally reference a deterministic normalizer module that rewrites params into canonical form before hashing/enforcement/dispatch.
 
-Parsing inside the enforcer is fine for v0.5, but normalization aligns **intent identity** with **authorization semantics**.
+Parsing inside the enforcer is fine for v0.5. Normalization is tracked separately and is not part of this milestone.
 
 ---
 
@@ -382,3 +381,14 @@ Policy stays data-only (`RulePolicy`) for v0.5; it is effectively a built-in pol
 5) Add minimal use-case tests and replay checks.
 
 Once these exist, caps are a real security and budget control surface, not just wiring.
+
+---
+
+## Required Spec/Schema Updates (Documented Only)
+
+The following changes are required to make the design enforceable in AIR, but are **not** made in this doc set:
+
+1) **defcap**: add `enforcer` module reference (pure module).
+2) **Built-in schemas**: add `sys/CapCheckInput@1`, `sys/CapCheckOutput@1`, `sys/CapSettleInput@1`, `sys/CapSettleOutput@1`.
+3) **Journal records**: define a canonical cap decision record that pins intent hash, enforcer identity, constraints result, reservation delta, and expiry/budget check outcomes.
+4) **Deterministic time inputs**: standardize `journal_height` + `logical_now_ns` in cap authorizer context (see `roadmap/v0.5-caps-policy/p3-time.md`).
