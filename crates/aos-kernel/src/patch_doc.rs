@@ -631,7 +631,6 @@ mod tests {
                     null: EmptyObject {},
                 }),
                 expiry_ns: None,
-                budget: None,
             }],
         });
         let base_hash = store_manifest(&store, manifest);
@@ -666,7 +665,6 @@ mod tests {
                             null: EmptyObject {},
                         }),
                         expiry_ns: None,
-                        budget: None,
                     }]),
                 },
             }],
@@ -785,7 +783,6 @@ mod tests {
                             null: EmptyObject {},
                         }),
                         expiry_ns: None,
-                        budget: None,
                     }]),
                 },
             }],

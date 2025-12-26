@@ -308,7 +308,7 @@
 
     "CapGrant": {
       "type": "object",
-      "description": "Capability grant instance. References a defcap and provides concrete parameter values (allowlists/ceilings) and optional budgets.",
+      "description": "Capability grant instance. References a defcap and provides concrete parameter values (allowlists/ceilings) and optional expiry.",
       "properties": {
         "name": {
           "$ref": "#/$defs/CapGrantName",
@@ -326,14 +326,6 @@
           "type": "integer",
           "minimum": 0,
           "description": "Optional expiration time (nanoseconds since epoch). Grant denied after expiry."
-        },
-        "budget": {
-          "type": "object",
-          "description": "Optional spending/usage limits keyed by dimension name. Pre-checked conservatively for variable-cost effects; settled on receipt.",
-          "additionalProperties": {
-            "type": "integer",
-            "minimum": 0
-          }
         }
       },
       "required": ["name", "cap", "params"],

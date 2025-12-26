@@ -1,14 +1,14 @@
 use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{
-    CapEnforcer, CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, TypeExpr, TypeList,
-    TypeMap, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, builtins,
+    CapEnforcer, CapGrant, CapType, DefCap, Manifest, Name, TypeExpr, TypeList, TypeMap,
+    TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, builtins,
     catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
 };
 use aos_cbor::to_canonical_cbor;
 use base64::engine::general_purpose::STANDARD as Base64Engine;
 use base64::Engine;
-use aos_effects::{CapabilityBudget, CapabilityGrant};
+use aos_effects::CapabilityGrant;
 use indexmap::IndexMap;
 
 use crate::error::KernelError;
@@ -80,13 +80,6 @@ impl CapabilityResolver {
         self.grants.contains_key(name)
     }
 
-    pub fn grant_budgets(&self) -> Vec<(String, Option<CapabilityBudget>)> {
-        self.grants
-            .values()
-            .map(|resolved| (resolved.grant.name.clone(), resolved.grant.budget.clone()))
-            .collect()
-    }
-
     pub fn resolve(
         &self,
         cap_name: &str,
@@ -154,17 +147,12 @@ fn resolve_grant(
         cap: grant.cap.clone(),
         params_cbor,
         expiry_ns: grant.expiry_ns,
-        budget: grant.budget.as_ref().map(convert_budget),
     };
     Ok(ResolvedGrant {
         grant: capability_grant,
         cap_type: defcap.cap_type.clone(),
         enforcer: defcap.enforcer.clone(),
     })
-}
-
-fn convert_budget(budget: &CapGrantBudget) -> CapabilityBudget {
-    CapabilityBudget(budget.0.clone())
 }
 
 fn encode_value_literal(
@@ -364,7 +352,6 @@ mod tests {
                     cap: "sys/http.out@1".into(),
                     params,
                     expiry_ns: None,
-                    budget: None,
                 }],
             }),
             module_bindings: IndexMap::new(),

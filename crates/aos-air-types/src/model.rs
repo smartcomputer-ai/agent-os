@@ -834,13 +834,7 @@ pub struct CapGrant {
     pub params: ValueLiteral,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_ns: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget: Option<CapGrantBudget>,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-#[serde(transparent)]
-pub struct CapGrantBudget(pub std::collections::BTreeMap<String, u64>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(transparent)]

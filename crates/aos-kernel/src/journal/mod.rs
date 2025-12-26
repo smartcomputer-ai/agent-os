@@ -174,10 +174,6 @@ pub struct CapDecisionRecord {
     pub decision: CapDecisionOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny: Option<CapDenyReason>,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub reserve: crate::cap_ledger::BudgetMap,
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub usage: crate::cap_ledger::BudgetMap,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_ns: Option<u64>,
     pub logical_now_ns: u64,

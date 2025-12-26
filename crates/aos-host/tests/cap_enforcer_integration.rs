@@ -122,7 +122,6 @@ fn llm_enforcer_module_denies_model() {
             cap: "sys/llm.basic@1".into(),
             params: models_param(&["gpt-3.5"]),
             expiry_ns: None,
-            budget: None,
         });
     }
     loaded.manifest.caps.push(NamedRef {

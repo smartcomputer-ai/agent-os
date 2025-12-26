@@ -367,7 +367,6 @@ fn allow_http_enforcer(store: &std::sync::Arc<TestStore>) -> aos_air_types::DefM
     let allow_output = CapCheckOutput {
         constraints_ok: true,
         deny: None,
-        reserve_estimate: Default::default(),
     };
     let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
     let pure_output = PureOutput {

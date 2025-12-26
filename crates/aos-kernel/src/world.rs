@@ -12,6 +12,7 @@ use aos_air_types::{
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
+use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
 use aos_wasm_abi::{
@@ -23,7 +24,6 @@ use serde_cbor::Value as CborValue;
 
 use crate::cap_enforcer::{CapEnforcerInvoker, PureCapEnforcer};
 use crate::capability::CapabilityResolver;
-use crate::cap_ledger::BudgetLedger;
 use crate::cell_index::{CellIndex, CellMeta};
 use crate::effects::EffectManager;
 use crate::error::KernelError;
@@ -103,7 +103,7 @@ pub struct Kernel<S: Store> {
     plan_instances: HashMap<u64, PlanInstance>,
     plan_triggers: HashMap<String, Vec<PlanTriggerBinding>>,
     waiting_events: HashMap<String, Vec<u64>>,
-    pending_receipts: HashMap<[u8; 32], u64>,
+    pending_receipts: HashMap<[u8; 32], PendingPlanReceiptInfo>,
     pending_reducer_receipts: HashMap<[u8; 32], ReducerEffectContext>,
     recent_receipts: VecDeque<[u8; 32]>,
     recent_receipt_index: HashSet<[u8; 32]>,
@@ -128,6 +128,12 @@ pub struct PlanResultEntry {
     pub plan_id: u64,
     pub output_schema: String,
     pub value_cbor: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingPlanReceiptInfo {
+    plan_id: u64,
+    effect_kind: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -463,7 +469,6 @@ impl<S: Store + 'static> Kernel<S> {
             schema_index.as_ref(),
             effect_catalog.clone(),
         )?;
-        let cap_ledger = BudgetLedger::from_grants(capability_resolver.grant_budgets());
         ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
         ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
@@ -536,7 +541,6 @@ impl<S: Store + 'static> Kernel<S> {
                 policy_gate,
                 effect_catalog.clone(),
                 schema_index.clone(),
-                cap_ledger,
                 enforcer_invoker,
                 if loaded.secrets.is_empty() {
                     None
@@ -1008,9 +1012,10 @@ impl<S: Store + 'static> Kernel<S> {
         let pending_plan_receipts = self
             .pending_receipts
             .iter()
-            .map(|(hash, plan_id)| PendingPlanReceiptSnapshot {
-                plan_id: *plan_id,
+            .map(|(hash, entry)| PendingPlanReceiptSnapshot {
+                plan_id: entry.plan_id,
                 intent_hash: *hash,
+                effect_kind: entry.effect_kind.clone(),
             })
             .collect();
         let waiting_events = self
@@ -1039,8 +1044,6 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(|entry| entry.to_snapshot())
             .collect();
-        let cap_ledger = self.effect_manager.cap_ledger_snapshot();
-        let cap_reservations = self.effect_manager.cap_reservations_snapshot();
         let logical_now_ns = self.effect_manager.logical_now_ns();
         let mut snapshot = KernelSnapshot::new(
             height,
@@ -1053,8 +1056,6 @@ impl<S: Store + 'static> Kernel<S> {
             queued_effects,
             pending_reducer_receipts,
             plan_results,
-            cap_ledger,
-            cap_reservations,
             logical_now_ns,
             Some(*self.manifest_hash.as_bytes()),
         );
@@ -1255,7 +1256,15 @@ impl<S: Store + 'static> Kernel<S> {
             .pending_plan_receipts()
             .iter()
             .cloned()
-            .map(|snap| (snap.intent_hash, snap.plan_id))
+            .map(|snap| {
+                (
+                    snap.intent_hash,
+                    PendingPlanReceiptInfo {
+                        plan_id: snap.plan_id,
+                        effect_kind: snap.effect_kind,
+                    },
+                )
+            })
             .collect();
         self.pending_reducer_receipts = snapshot
             .pending_reducer_receipts()
@@ -1273,11 +1282,8 @@ impl<S: Store + 'static> Kernel<S> {
                 .map(|snap| snap.into_intent())
                 .collect(),
         );
-        self.effect_manager.restore_cap_state(
-            snapshot.cap_ledger().clone(),
-            snapshot.cap_reservations().to_vec(),
-            snapshot.logical_now_ns(),
-        );
+        self.effect_manager
+            .update_logical_now_ns(snapshot.logical_now_ns());
 
         self.plan_results.clear();
         for result_snapshot in snapshot.plan_results().iter().cloned() {
@@ -1316,7 +1322,13 @@ impl<S: Store + 'static> Kernel<S> {
             }
             IntentOriginRecord::Plan { name: _, plan_id } => {
                 self.reconcile_plan_replay_identity(plan_id, record.intent_hash);
-                self.pending_receipts.insert(record.intent_hash, plan_id);
+                self.pending_receipts.insert(
+                    record.intent_hash,
+                    PendingPlanReceiptInfo {
+                        plan_id,
+                        effect_kind,
+                    },
+                );
             }
         }
         Ok(())
@@ -1618,7 +1630,7 @@ impl<S: Store + 'static> Kernel<S> {
     pub fn pending_plan_receipts(&self) -> Vec<(u64, [u8; 32])> {
         self.pending_receipts
             .iter()
-            .map(|(hash, plan_id)| (*plan_id, *hash))
+            .map(|(hash, entry)| (entry.plan_id, *hash))
             .collect()
     }
 
@@ -1881,7 +1893,6 @@ impl<S: Store + 'static> Kernel<S> {
             schema_index.as_ref(),
             effect_catalog.clone(),
         )?;
-        let cap_ledger = BudgetLedger::from_grants(capability_resolver.grant_budgets());
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
             .defaults
@@ -1956,7 +1967,6 @@ impl<S: Store + 'static> Kernel<S> {
             policy_gate,
             effect_catalog,
             schema_index.clone(),
-            cap_ledger,
             enforcer_invoker,
             secret_catalog,
             self.secret_resolver.clone(),
@@ -2073,6 +2083,7 @@ impl<S: Store + 'static> Kernel<S> {
             for event in &outcome.raised_events {
                 self.process_domain_event(event.clone())?;
             }
+            let mut intent_kinds = HashMap::new();
             for intent in &outcome.intents_enqueued {
                 self.record_effect_intent(
                     intent,
@@ -2081,9 +2092,23 @@ impl<S: Store + 'static> Kernel<S> {
                         plan_id: id,
                     },
                 )?;
+                intent_kinds.insert(intent.intent_hash, intent.kind.as_str().to_string());
             }
             for hash in &outcome.waiting_receipts {
-                self.pending_receipts.insert(*hash, id);
+                let kind = intent_kinds.get(hash).cloned().or_else(|| {
+                    self.effect_manager
+                        .queued()
+                        .iter()
+                        .find(|intent| intent.intent_hash == *hash)
+                        .map(|intent| intent.kind.as_str().to_string())
+                });
+                self.pending_receipts.insert(
+                    *hash,
+                    PendingPlanReceiptInfo {
+                        plan_id: id,
+                        effect_kind: kind.unwrap_or_else(|| "unknown".into()),
+                    },
+                );
             }
             if let Some(schema) = outcome.waiting_event.clone() {
                 self.waiting_events.entry(schema).or_default().push(id);
@@ -2129,13 +2154,13 @@ impl<S: Store + 'static> Kernel<S> {
         &mut self,
         receipt: aos_effects::EffectReceipt,
     ) -> Result<(), KernelError> {
-        if let Some(plan_id) = self.pending_receipts.remove(&receipt.intent_hash) {
+        if let Some(pending) = self.pending_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
-            self.effect_manager.settle_receipt(&receipt)?;
+            self.update_logical_now_from_receipt(&pending.effect_kind, &receipt)?;
             self.record_cap_decisions()?;
-            if let Some(instance) = self.plan_instances.get_mut(&plan_id) {
+            if let Some(instance) = self.plan_instances.get_mut(&pending.plan_id) {
                 if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
-                    self.scheduler.push_plan(plan_id);
+                    self.scheduler.push_plan(pending.plan_id);
                 }
                 self.remember_receipt(receipt.intent_hash);
                 return Ok(());
@@ -2143,7 +2168,7 @@ impl<S: Store + 'static> Kernel<S> {
                 log::warn!(
                     "receipt {} arrived for completed plan {}",
                     format_intent_hash(&receipt.intent_hash),
-                    plan_id
+                    pending.plan_id
                 );
                 self.remember_receipt(receipt.intent_hash);
                 return Ok(());
@@ -2160,7 +2185,7 @@ impl<S: Store + 'static> Kernel<S> {
 
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
-            self.effect_manager.settle_receipt(&receipt)?;
+            self.update_logical_now_from_receipt(&context.effect_kind, &receipt)?;
             self.record_cap_decisions()?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
             self.process_domain_event(event)?;
@@ -2179,6 +2204,20 @@ impl<S: Store + 'static> Kernel<S> {
         Err(KernelError::UnknownReceipt(format_intent_hash(
             &receipt.intent_hash,
         )))
+    }
+
+    fn update_logical_now_from_receipt(
+        &mut self,
+        effect_kind: &str,
+        receipt: &EffectReceipt,
+    ) -> Result<(), KernelError> {
+        if effect_kind == aos_effects::EffectKind::TIMER_SET {
+            let timer_receipt: TimerSetReceipt = serde_cbor::from_slice(&receipt.payload_cbor)
+                .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
+            self.effect_manager
+                .update_logical_now_ns(timer_receipt.delivered_at_ns);
+        }
+        Ok(())
     }
 
     fn deliver_event_to_waiting_plans(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
@@ -2587,8 +2626,6 @@ mod tests {
             0,
             vec![],
             vec![],
-            vec![],
-            BudgetLedger::default(),
             vec![],
             0,
             Some(*manifest_hash.as_bytes()),

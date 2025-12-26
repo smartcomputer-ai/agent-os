@@ -3,7 +3,6 @@ mod helpers;
 
 use aos_effects::CapabilityGrant;
 use aos_kernel::capability::CapabilityResolver;
-use aos_kernel::cap_ledger::BudgetLedger;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
@@ -331,13 +330,11 @@ fn builtin_effect_context() -> (Arc<EffectCatalog>, Arc<SchemaIndex>) {
 
 fn mgr_with_cap(cap_gate: CapabilityResolver) -> EffectManager {
     let (effects, schemas) = builtin_effect_context();
-    let cap_ledger = BudgetLedger::from_grants(cap_gate.grant_budgets());
     EffectManager::new(
         cap_gate,
         Box::new(AllowAllPolicy),
         effects,
         schemas,
-        cap_ledger,
         None,
         None,
         None,

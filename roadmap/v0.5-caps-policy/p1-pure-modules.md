@@ -83,8 +83,8 @@ If the computation has no stateful side effects and can be expressed as a pure f
 ### 1) Cap Enforcers
 
 Add `defcap.enforcer.module`, pointing to a pure module.
-Kernel calls it during authorization; module returns constraints + reserve estimates.
-Kernel owns ledger checks and mutations.
+Kernel calls it during authorization; module returns constraint checks.
+The kernel remains the authoritative decision point (expiry + policy + journaling).
 
 ### 2) Policy Engines
 
@@ -145,7 +145,7 @@ This can be a dedicated plan op (e.g., `call_module`) or a pure "compute" step t
 ### Tests
 
 1) Pure module runner unit tests (determinism, CBOR IO).
-2) Cap enforcer integration test (allow/deny + budget reservation).
+2) Cap enforcer integration test (allow/deny constraints).
 3) Policy engine integration test (allow/deny + counter deltas).
 4) Plan call (if implemented) with deterministic transform.
 

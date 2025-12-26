@@ -210,7 +210,6 @@ mod tests {
             cap: "sys/http.out@1".into(),
             params_cbor: vec![],
             expiry_ns: None,
-            budget: None,
         }
     }
 }

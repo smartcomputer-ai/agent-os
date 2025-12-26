@@ -449,7 +449,6 @@ pub fn cap_http_grant() -> CapGrant {
         cap: "sys/http.out@1".into(),
         params: empty_value_literal(),
         expiry_ns: None,
-        budget: None,
     }
 }
 
@@ -460,7 +459,6 @@ pub fn timer_cap_grant() -> CapGrant {
         cap: "sys/timer@1".into(),
         params: empty_value_literal(),
         expiry_ns: None,
-        budget: None,
     }
 }
 
@@ -471,7 +469,6 @@ pub fn blob_cap_grant() -> CapGrant {
         cap: "sys/blob@1".into(),
         params: empty_value_literal(),
         expiry_ns: None,
-        budget: None,
     }
 }
 
@@ -482,7 +479,6 @@ pub fn query_cap_grant() -> CapGrant {
         cap: "sys/query@1".into(),
         params: empty_value_literal(),
         expiry_ns: None,
-        budget: None,
     }
 }
 

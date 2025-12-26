@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use alloc::format;
-use aos_sys::{BudgetMap, CapCheckInput, CapCheckOutput, CapDenyReason};
+use aos_sys::{CapCheckInput, CapCheckOutput, CapDenyReason};
 use aos_wasm_sdk::{PureError, PureModule, aos_pure};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -81,7 +81,6 @@ impl PureModule for CapEnforceHttpOut {
                 return Ok(CapCheckOutput {
                     constraints_ok: false,
                     deny: Some(reason),
-                    reserve_estimate: BudgetMap::new(),
                 });
             }
         };
@@ -136,7 +135,6 @@ impl PureModule for CapEnforceHttpOut {
         Ok(CapCheckOutput {
             constraints_ok: true,
             deny: None,
-            reserve_estimate: BudgetMap::new(),
         })
     }
 }
@@ -148,7 +146,6 @@ fn deny(code: &str, message: impl Into<String>) -> CapCheckOutput {
             code: code.into(),
             message: message.into(),
         }),
-        reserve_estimate: BudgetMap::new(),
     }
 }
 

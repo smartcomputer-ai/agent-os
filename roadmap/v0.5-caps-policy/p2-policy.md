@@ -1,7 +1,7 @@
 # p2-policy: Policy System (Current State + Work Remaining)
 
 ## TL;DR
-Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time, but the system is minimal: no approvals, no rate limits/budgets, and no journaling of decisions. Policies are selected via manifest defaults and apply globally. To become governance-grade **without bloating the kernel**, policy evaluation should be an optional deterministic module (like reducers), with a built-in RulePolicy as the default.
+Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time, but the system is minimal: no approvals, no rate limit counters, and no journaling of decisions. Policies are selected via manifest defaults and apply globally. To become governance-grade **without bloating the kernel**, policy evaluation should be an optional deterministic module (like reducers), with a built-in RulePolicy as the default.
 
 ---
 
@@ -27,7 +27,7 @@ Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time,
 Policies are **dynamic, governance-controlled gates** that decide whether an otherwise-capable effect should be allowed _right now_. They are orthogonal to caps:
 
 - **Caps**: static authority and constraints.
-- **Policies**: dynamic allow/deny/approval and rate limits.
+- **Policies**: dynamic allow/deny/approval and counters.
 
 Policies are the natural home for:
 - allow/deny by origin (plan/reducer), plan name, cap name, effect kind
@@ -80,7 +80,7 @@ Relevant code:
 2) **No policy decision journaling**
    - A `PolicyDecision` record exists but is never written.
 
-3) **No rate limit / budget counters**
+3) **No rate limit counters**
    - No deterministic counters or rate-limit mechanism.
 
 4) **No per-plan policy override**
@@ -116,9 +116,8 @@ Diamond semantics for RequireApproval:
 - Only then does the kernel enqueue the effect (or deny definitively).
 
 ### 3) Rate limits and counters via a deterministic ledger
-Policies should declare counters, but use shared deterministic ledger infrastructure:
+Policies should declare counters and use shared deterministic ledger infrastructure:
 
-- Cap budgets: monotone decreasing, topped up via governance.
 - Policy counters: token buckets or windows, replenished via deterministic time/epoch.
 
 ---
@@ -157,7 +156,7 @@ This keeps governance outcomes explicit and makes flows resilient without weaken
 2) **RequireApproval outcome**
    - Suspend the plan step; unblock only after approval event/receipt.
 
-3) **Rate limits / budgets**
+3) **Rate limits**
    - Deterministic counters with clear replenishment semantics.
 
 4) **Deterministic context**
@@ -211,14 +210,14 @@ This avoids kernel growth as policies become richer (approvals, counters, param-
 PolicyDecision = "allow" | "deny" | { "require_approval": { request_id, reason } }
 ```
 
-The engine returns a decision plus deterministic counter/budget deltas. The kernel applies deltas and journals the decision.
+The engine returns a decision plus deterministic counter deltas. The kernel applies deltas and journals the decision.
 
 ---
 
-### Authorizer Pipeline (Kernel-Owned Ledger)
+### Authorizer Pipeline (Constraints-Only Caps)
 1) Canonicalize effect params.
-2) Run cap enforcer module -> returns `{ ok?, reserve_estimate, explain }`.
-3) Kernel checks expiry + ledger budgets + writes reservation.
+2) Run cap enforcer module -> returns `{ ok?, explain }`.
+3) Kernel checks expiry.
 4) Run policy engine (rules or module) -> returns `{ allow/deny/require_approval, counter_deltas, explain }`.
 5) Kernel applies counter deltas, journals decisions, then enqueues or blocks.
 

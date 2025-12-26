@@ -1,17 +1,6 @@
 use aos_cbor::to_canonical_cbor;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use thiserror::Error;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(transparent)]
-pub struct CapabilityBudget(pub BTreeMap<String, u64>);
-
-impl CapabilityBudget {
-    pub fn is_zero(&self) -> bool {
-        self.0.values().all(|value| *value == 0)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CapabilityGrant {
@@ -21,8 +10,6 @@ pub struct CapabilityGrant {
     pub params_cbor: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_ns: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget: Option<CapabilityBudget>,
 }
 
 impl CapabilityGrant {
@@ -44,7 +31,6 @@ pub struct CapabilityGrantBuilder<'a, P> {
     cap: String,
     params: &'a P,
     expiry_ns: Option<u64>,
-    budget: Option<CapabilityBudget>,
 }
 
 impl<'a, P: Serialize> CapabilityGrantBuilder<'a, P> {
@@ -54,17 +40,11 @@ impl<'a, P: Serialize> CapabilityGrantBuilder<'a, P> {
             cap,
             params,
             expiry_ns: None,
-            budget: None,
         }
     }
 
     pub fn expiry_ns(mut self, expiry: u64) -> Self {
         self.expiry_ns = Some(expiry);
-        self
-    }
-
-    pub fn budget(mut self, budget: CapabilityBudget) -> Self {
-        self.budget = Some(budget);
         self
     }
 
@@ -75,7 +55,6 @@ impl<'a, P: Serialize> CapabilityGrantBuilder<'a, P> {
             cap: self.cap,
             params_cbor,
             expiry_ns: self.expiry_ns,
-            budget: self.budget,
         })
     }
 }
@@ -102,13 +81,9 @@ mod tests {
             hosts: vec!["example.com".into()],
         };
         let grant = CapabilityGrant::builder("cap1", "sys/http.out@1", &params)
-            .budget(CapabilityBudget(
-                [("bytes".to_string(), 1024)].into_iter().collect(),
-            ))
             .build()
             .unwrap();
         let decoded: HttpGrantParams = grant.params().unwrap();
         assert_eq!(decoded.hosts[0], "example.com");
-        assert_eq!(grant.budget.unwrap().0.get("bytes"), Some(&1024));
     }
 }

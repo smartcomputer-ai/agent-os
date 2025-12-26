@@ -189,7 +189,7 @@ Plan `fulfillment_plan@1`:
 
 **Pros**:
 - Shadow-run shows entire flow up front
-- Governance reviews all effects together (budgets, approvals)
+- Governance reviews all effects together (approvals)
 - Clear audit trail in single plan instance
 - Easy to add compensations as conditional branches
 

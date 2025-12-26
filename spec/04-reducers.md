@@ -402,7 +402,7 @@ Provide a small helper (aos-saga) to reduce boilerplate:
 
 ## Operational Guidance
 
-- Capabilities: bind reducer cap slots in manifest; keep scopes tight; budgets enforced on receipts with conservative pre-checks for variable-cost effects (LLM tokens, blob sizes).
+- Capabilities: bind reducer cap slots in manifest; keep scopes tight; constraints and expiry are enforced at enqueue. Budget enforcement is deferred.
 - Policy (v1): use origin-aware rules to deny high-risk effect kinds from reducers (origin_kind="reducer") and allow them from plans (origin_kind="plan"). Default-deny posture recommended.
 - Tracing: include correlation ids (e.g., order_id) in events and annotate outputs for observability.
 - Upgrades: pin schema versions; treat changes as new module versions; let in-flight instances finish under old semantics.

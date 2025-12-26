@@ -8,7 +8,6 @@ use aos_wasm_abi::{ABI_VERSION, PureInput, PureOutput};
 use serde::{Deserialize, Serialize};
 use serde_bytes;
 
-use crate::cap_ledger::BudgetMap;
 use crate::error::KernelError;
 use crate::journal::CapDenyReason;
 use crate::pure::PureRegistry;
@@ -37,8 +36,6 @@ pub struct CapCheckOutput {
     pub constraints_ok: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny: Option<CapDenyReason>,
-    #[serde(default)]
-    pub reserve_estimate: BudgetMap,
 }
 
 pub trait CapEnforcerInvoker: Send + Sync {

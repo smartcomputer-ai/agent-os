@@ -59,7 +59,6 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     let allow_output = CapCheckOutput {
         constraints_ok: true,
         deny: None,
-        reserve_estimate: Default::default(),
     };
     let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
     let pure_output = PureOutput {

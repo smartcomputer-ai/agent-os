@@ -4,7 +4,7 @@ AgentOS is a computing substrate for AI agents and humans to co‑author reliabl
 
 ## Who It's For
 
-AgentOS is for teams building governed automations and agentic workflows that must be auditable and reversible. It's for individual developers who want portable, forkable "worlds" they can share and replay. And it's for organizations that need least‑privilege capability gating and cost/budget controls for LLMs and APIs.
+AgentOS is for teams building governed automations and agentic workflows that must be auditable and reversible. It's for individual developers who want portable, forkable "worlds" they can share and replay. And it's for organizations that need least‑privilege capability gating and deterministic audit trails for LLMs and APIs.
 
 AgentOS is currently in early development. The architecture is being designed in the open, and we invite feedback, contributions, and collaboration from anyone interested in building deterministic substrates for agents. _If this vision resonates with you, join us in shaping what agent-native computing should look like._
 
@@ -31,7 +31,7 @@ The question is: **what if the runtime itself were designed for agents?** What i
 
 Modern "agent systems" are an accumulation of scripts, queues, functions, and SaaS APIs with ambient authority. The result is a mess of interrelated problems.
 
-**Non‑deterministic execution** means time, randomness, and network IO leak into core logic, making replay unreliable. **State fragmentation** scatters code, config, schemas, and policies across different tools and formats, so upgrades risk data drift. **Weak audit trails** mean effects happen without durable receipts, turning incident forensics into guesswork. And **governance fatigue** sets in because approvals and budgets are out‑of‑band and hard to enforce consistently.
+**Non‑deterministic execution** means time, randomness, and network IO leak into core logic, making replay unreliable. **State fragmentation** scatters code, config, schemas, and policies across different tools and formats, so upgrades risk data drift. **Weak audit trails** mean effects happen without durable receipts, turning incident forensics into guesswork. And **governance fatigue** sets in because approvals and controls are out‑of‑band and hard to enforce consistently.
 
 Agents deserve better. They need a substrate that is deterministic by default, unified in its control plane, auditable at every boundary, and safe to evolve.
 
@@ -49,7 +49,7 @@ AgentOS is designed around six core principles that enable safe, governed self�
 
 2. **Homoiconic in spirit.** Everything that defines the world, such as code, schemas, policies, UI, capabilities, is represented as structured data the system can inspect and modify. AIR is a canonical, typed representation for modules, plans, schemas, policies, and capabilities that agents can read and edit programmatically.
 
-3. **Capability security.** No ambient authority. All effects are scoped by explicit capability tokens, budgeted, and policy‑gated. Least‑privilege is enforced mechanically, not by convention.
+3. **Capability security.** No ambient authority. All effects are scoped by explicit capability tokens and policy‑gated. Least‑privilege is enforced mechanically, not by convention.
 
 4. **Receipts everywhere.** Every external effect yields a signed receipt. Audits can reconstruct complete cause→effect chains from log to receipt to state change. Incident forensics become deterministic replay rather than guesswork.
 
@@ -79,7 +79,7 @@ AgentOS **is not** a general‑purpose programming language, compute lives in yo
 
 - **Effects and adapters**: Explicit external actions—sending an email, calling an API, invoking an LLM, storing a blob. Each effect type is declared in the capability catalog and implemented by an external adapter. When an effect executes, the adapter produces a **receipt**—a signed record of what happened (parameters, response hash, timestamp, cost). Receipts are appended as events to the world log, preserving determinism on replay.
 
-- **Policy and capabilities**: Declarative rules and scoped tokens that gate effects and plans. Capabilities define what kinds of effects are allowed (HTTP to specific hosts, LLM with model/token constraints, blob storage). Policies evaluate allow/deny decisions based on effect kind, capability, and origin (plan vs reducer). Budgets are checked conservatively before dispatch and settle precisely on receipt.
+- **Policy and capabilities**: Declarative rules and scoped tokens that gate effects and plans. Capabilities define what kinds of effects are allowed (HTTP to specific hosts, LLM with model/token constraints, blob storage). Policies evaluate allow/deny decisions based on effect kind, capability, and origin (plan vs reducer). Budget enforcement is deferred to a future milestone.
 
 - **Agents**: Interact with the world through the same protocol as humans: they read the current AIR and state, generate new code (reducers, plans, or even policies), compile to WASM, draft a plan describing the changes and new module hashes, and submit the plan as a proposal. Agents can live outside the world (simpler) or inside it as privileged modules that can propose but not unilaterally apply plans.
 
@@ -88,4 +88,3 @@ AgentOS **is not** a general‑purpose programming language, compute lives in yo
 The first version ships with a single‑threaded world with an append‑only journal and snapshots. AIR v1 defines five core forms: **defschema**, **defmodule**, **defplan**, **defcap**, and **defpolicy**, along with canonical encoding and typed patches. Deterministic WASM execution powers reducers. Pure modules are planned for v1.1+; `module_kind` is `"reducer"` only in v1. Built-in adapters cover HTTP, blob/FS, timer, LLM, and kernel-resident introspection (`introspect.*`) guarded by the `query` capability. Each comes with capabilities and signed receipts. Version 1.1 adds first-class Cells (keyed reducers) with per-key state and mailboxes. The constitutional loop and shadow runs protect the apply step, and a provenance "why graph" connects effects to state.
 
 Migrations, multi‑world fabric, and complex policy engines are deferred to later versions. The architecture leaves clean hooks for them.
-

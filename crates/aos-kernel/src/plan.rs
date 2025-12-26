@@ -1069,7 +1069,6 @@ fn expr_value_to_literal(value: &ExprValue) -> Result<ValueLiteral, String> {
 mod tests {
     use super::*;
     use crate::capability::CapabilityResolver;
-    use crate::cap_ledger::BudgetLedger;
     use crate::policy::AllowAllPolicy;
     use aos_air_types::plan_literals::SchemaIndex;
     use aos_air_types::{
@@ -1112,7 +1111,6 @@ mod tests {
                     cap: "sys/http.out@1".into(),
                     params_cbor: cap_params.clone(),
                     expiry_ns: None,
-                    budget: None,
                 },
                 CapType::http_out(),
             ),
@@ -1122,7 +1120,6 @@ mod tests {
                     cap: "sys/http.out@1".into(),
                     params_cbor: cap_params,
                     expiry_ns: None,
-                    budget: None,
                 },
                 CapType::http_out(),
             ),
@@ -1133,13 +1130,11 @@ mod tests {
                 .iter()
                 .map(|b| b.effect.clone()),
         ));
-        let cap_ledger = BudgetLedger::from_grants(resolver.grant_budgets());
         EffectManager::new(
             resolver,
             Box::new(AllowAllPolicy),
             effect_catalog,
             builtin_schema_index(),
-            cap_ledger,
             None,
             None,
             None,

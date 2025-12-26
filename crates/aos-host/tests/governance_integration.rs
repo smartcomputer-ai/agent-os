@@ -528,7 +528,6 @@ fn upgrade_manifest(
         cap: primary_cap.name.clone(),
         params: empty_literal(),
         expiry_ns: None,
-        budget: None,
     });
     if followup {
         loaded.manifest.caps.push(NamedRef {
@@ -543,7 +542,6 @@ fn upgrade_manifest(
             cap: followup_cap.name,
             params: empty_literal(),
             expiry_ns: None,
-            budget: None,
         });
     }
     loaded.manifest.defaults = Some(ManifestDefaults {
@@ -755,7 +753,6 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
     let allow_output = CapCheckOutput {
         constraints_ok: true,
         deny: None,
-        reserve_estimate: Default::default(),
     };
     let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
     let pure_output = PureOutput {

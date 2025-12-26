@@ -1,13 +1,8 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use aos_air_exec::Value as ExprValue;
-use aos_effects::builtins::{
-    BlobGetReceipt, BlobPutReceipt, HttpRequestParams, LlmGenerateParams, LlmGenerateReceipt,
-    TimerSetReceipt,
-};
+use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams};
 use aos_effects::{
-    CapabilityGrant, EffectIntent, EffectKind, EffectReceipt, EffectSource, normalize_effect_params,
+    CapabilityGrant, EffectIntent, EffectKind, EffectSource, normalize_effect_params,
 };
 use aos_wasm_abi::ReducerEffect;
 use serde::de::DeserializeOwned;
@@ -15,7 +10,6 @@ use serde_cbor::Value as CborValue;
 use url::Url;
 
 use crate::cap_enforcer::{CapCheckInput, CapEffectOrigin, CapEnforcerInvoker};
-use crate::cap_ledger::{BudgetLedger, BudgetMap, CapReservation};
 use crate::capability::{
     CapabilityResolver, CAP_ALLOW_ALL_ENFORCER, CAP_HTTP_ENFORCER, CAP_LLM_ENFORCER,
 };
@@ -57,8 +51,6 @@ pub struct EffectManager {
     policy_gate: Box<dyn PolicyGate>,
     effect_catalog: Arc<EffectCatalog>,
     schema_index: Arc<SchemaIndex>,
-    cap_ledger: BudgetLedger,
-    cap_reservations: HashMap<[u8; 32], CapReservation>,
     cap_decisions: Vec<CapDecisionRecord>,
     logical_now_ns: u64,
     enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>>,
@@ -72,7 +64,6 @@ impl EffectManager {
         policy_gate: Box<dyn PolicyGate>,
         effect_catalog: Arc<EffectCatalog>,
         schema_index: Arc<SchemaIndex>,
-        cap_ledger: BudgetLedger,
         enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>>,
         secret_catalog: Option<crate::secret::SecretCatalog>,
         secret_resolver: Option<Arc<dyn SecretResolver>>,
@@ -83,8 +74,6 @@ impl EffectManager {
             policy_gate,
             effect_catalog,
             schema_index,
-            cap_ledger,
-            cap_reservations: HashMap::new(),
             cap_decisions: Vec::new(),
             logical_now_ns: 0,
             enforcer_invoker,
@@ -179,7 +168,7 @@ impl EffectManager {
             .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?
             .as_str()
             .to_string();
-        let reserve = match cap_constraints_and_reserve(
+        if let Err(reason) = cap_constraints_only(
             enforcer_module.as_str(),
             &runtime_kind,
             &grant,
@@ -188,26 +177,22 @@ impl EffectManager {
             &source,
             self.logical_now_ns,
         ) {
-            Ok(reserve) => reserve,
-            Err(reason) => {
-                let message = reason.message.clone();
-                self.record_cap_deny(
-                    intent.intent_hash,
-                    runtime_kind.as_str(),
-                    cap_name,
-                    &cap_type,
-                    enforcer_module.as_str(),
-                    grant.expiry_ns,
-                    BudgetMap::new(),
-                    reason,
-                );
-                return Err(KernelError::CapabilityDenied {
-                    cap: cap_name.to_string(),
-                    effect_kind: runtime_kind.as_str().to_string(),
-                    reason: message,
-                });
-            }
-        };
+            let message = reason.message.clone();
+            self.record_cap_deny(
+                intent.intent_hash,
+                runtime_kind.as_str(),
+                cap_name,
+                &cap_type,
+                enforcer_module.as_str(),
+                grant.expiry_ns,
+                reason,
+            );
+            return Err(KernelError::CapabilityDenied {
+                cap: cap_name.to_string(),
+                effect_kind: runtime_kind.as_str().to_string(),
+                reason: message,
+            });
+        }
         if let Some(expiry_ns) = grant.expiry_ns {
             if self.logical_now_ns >= expiry_ns {
                 self.record_cap_deny(
@@ -217,7 +202,6 @@ impl EffectManager {
                     &cap_type,
                     enforcer_module.as_str(),
                     grant.expiry_ns,
-                    reserve.clone(),
                     CapDenyReason {
                         code: "expired".into(),
                         message: format!("grant expired at {expiry_ns}"),
@@ -230,63 +214,11 @@ impl EffectManager {
                 });
             }
         }
-        if let Err(err) = self.cap_ledger.check_reserve(&grant.name, &reserve) {
-            self.record_cap_deny(
-                intent.intent_hash,
-                runtime_kind.as_str(),
-                cap_name,
-                &cap_type,
-                enforcer_module.as_str(),
-                grant.expiry_ns,
-                reserve.clone(),
-                CapDenyReason {
-                    code: "budget_exceeded".into(),
-                    message: err.to_string(),
-                },
-            );
-            return Err(KernelError::CapabilityDenied {
-                cap: cap_name.to_string(),
-                effect_kind: runtime_kind.as_str().to_string(),
-                reason: "cap budget exceeded".into(),
-            });
-        }
         if let Some(catalog) = &self.secret_catalog {
             crate::secret::enforce_secret_policy(&canonical_params, catalog, &source, cap_name)?;
         }
         match self.policy_gate.decide(&intent, &grant, &source)? {
             aos_effects::traits::PolicyDecision::Allow => {
-                if let Err(err) = self.cap_ledger.apply_reserve(&grant.name, &reserve) {
-                    self.record_cap_deny(
-                        intent.intent_hash,
-                        runtime_kind.as_str(),
-                        cap_name,
-                        &cap_type,
-                        enforcer_module.as_str(),
-                        grant.expiry_ns,
-                        reserve.clone(),
-                        CapDenyReason {
-                            code: "budget_exceeded".into(),
-                            message: err.to_string(),
-                        },
-                    );
-                    return Err(KernelError::CapabilityDenied {
-                        cap: cap_name.to_string(),
-                        effect_kind: runtime_kind.as_str().to_string(),
-                        reason: "cap budget exceeded".into(),
-                    });
-                }
-                self.cap_reservations.insert(
-                    intent.intent_hash,
-                    CapReservation {
-                        intent_hash: intent.intent_hash,
-                        cap_name: cap_name.to_string(),
-                        effect_kind: runtime_kind.as_str().to_string(),
-                        cap_type: cap_type.clone(),
-                        enforcer_module: enforcer_module.clone(),
-                        reserve: reserve.clone(),
-                        expiry_ns: grant.expiry_ns,
-                    },
-                );
                 self.record_cap_allow(
                     intent.intent_hash,
                     runtime_kind.as_str(),
@@ -294,7 +226,6 @@ impl EffectManager {
                     &cap_type,
                     enforcer_module.as_str(),
                     grant.expiry_ns,
-                    reserve,
                 );
                 self.queue.push(intent.clone());
                 Ok(intent)
@@ -336,125 +267,14 @@ impl EffectManager {
         std::mem::take(&mut self.cap_decisions)
     }
 
-    pub fn cap_ledger_snapshot(&self) -> BudgetLedger {
-        self.cap_ledger.clone()
-    }
-
-    pub fn cap_reservations_snapshot(&self) -> Vec<CapReservation> {
-        let mut reservations: Vec<CapReservation> =
-            self.cap_reservations.values().cloned().collect();
-        reservations.sort_by_key(|entry| entry.intent_hash);
-        reservations
-    }
-
     pub fn logical_now_ns(&self) -> u64 {
         self.logical_now_ns
     }
 
-    pub fn restore_cap_state(
-        &mut self,
-        ledger: BudgetLedger,
-        reservations: Vec<CapReservation>,
-        logical_now_ns: u64,
-    ) {
-        self.cap_ledger = ledger;
-        self.cap_reservations = reservations
-            .into_iter()
-            .map(|entry| (entry.intent_hash, entry))
-            .collect();
-        self.logical_now_ns = logical_now_ns;
+    pub fn update_logical_now_ns(&mut self, logical_now_ns: u64) {
+        self.logical_now_ns = self.logical_now_ns.max(logical_now_ns);
     }
 
-    pub fn update_cap_grants<I>(&mut self, grants: I)
-    where
-        I: IntoIterator<Item = (String, Option<aos_effects::CapabilityBudget>)>,
-    {
-        self.cap_ledger.update_from_grants(grants);
-        self.cap_reservations.clear();
-    }
-
-    pub fn apply_cap_decision(&mut self, record: &CapDecisionRecord) -> Result<(), KernelError> {
-        if record.logical_now_ns > self.logical_now_ns {
-            self.logical_now_ns = record.logical_now_ns;
-        }
-        match record.stage {
-            CapDecisionStage::Enqueue => {
-                if record.decision == CapDecisionOutcome::Allow {
-                    self.cap_ledger
-                        .apply_reserve(&record.cap_name, &record.reserve)
-                        .map_err(|err| KernelError::CapabilityDenied {
-                            cap: record.cap_name.clone(),
-                            effect_kind: record.effect_kind.clone(),
-                            reason: err.to_string(),
-                        })?;
-                    self.cap_reservations.insert(
-                        record.intent_hash,
-                        CapReservation {
-                            intent_hash: record.intent_hash,
-                            cap_name: record.cap_name.clone(),
-                            effect_kind: record.effect_kind.clone(),
-                            cap_type: record.cap_type.clone(),
-                            enforcer_module: record.enforcer_module.clone(),
-                            reserve: record.reserve.clone(),
-                            expiry_ns: record.expiry_ns,
-                        },
-                    );
-                }
-            }
-            CapDecisionStage::Settle => {
-                if record.decision == CapDecisionOutcome::Allow {
-                    self.cap_ledger
-                        .apply_settle(&record.cap_name, &record.reserve, &record.usage)
-                        .map_err(|err| KernelError::CapabilityDenied {
-                            cap: record.cap_name.clone(),
-                            effect_kind: record.effect_kind.clone(),
-                            reason: err.to_string(),
-                        })?;
-                    self.cap_reservations.remove(&record.intent_hash);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn settle_receipt(&mut self, receipt: &EffectReceipt) -> Result<(), KernelError> {
-        let Some(reservation) = self.cap_reservations.get(&receipt.intent_hash).cloned() else {
-            return Ok(());
-        };
-        if reservation.effect_kind.as_str() == aos_effects::EffectKind::TIMER_SET {
-            if let Ok(timer_receipt) = serde_cbor::from_slice::<TimerSetReceipt>(&receipt.payload_cbor)
-            {
-                self.logical_now_ns = self.logical_now_ns.max(timer_receipt.delivered_at_ns);
-            }
-        }
-        let usage =
-            usage_from_receipt(&reservation.effect_kind, receipt).map_err(|err| {
-                KernelError::ReceiptDecode(err.to_string())
-            })?;
-        self.cap_ledger
-            .apply_settle(&reservation.cap_name, &reservation.reserve, &usage)
-            .map_err(|err| KernelError::CapabilityDenied {
-                cap: reservation.cap_name.clone(),
-                effect_kind: reservation.effect_kind.clone(),
-                reason: err.to_string(),
-            })?;
-        self.cap_reservations.remove(&receipt.intent_hash);
-        self.cap_decisions.push(CapDecisionRecord {
-            intent_hash: receipt.intent_hash,
-            stage: CapDecisionStage::Settle,
-            effect_kind: reservation.effect_kind,
-            cap_name: reservation.cap_name,
-            cap_type: reservation.cap_type,
-            enforcer_module: reservation.enforcer_module,
-            decision: CapDecisionOutcome::Allow,
-            deny: None,
-            reserve: reservation.reserve,
-            usage,
-            expiry_ns: reservation.expiry_ns,
-            logical_now_ns: self.logical_now_ns,
-        });
-        Ok(())
-    }
 
     fn record_cap_deny(
         &mut self,
@@ -464,7 +284,6 @@ impl EffectManager {
         cap_type: &str,
         enforcer_module: &str,
         expiry_ns: Option<u64>,
-        reserve: BudgetMap,
         reason: CapDenyReason,
     ) {
         self.cap_decisions.push(CapDecisionRecord {
@@ -476,8 +295,6 @@ impl EffectManager {
             enforcer_module: enforcer_module.to_string(),
             decision: CapDecisionOutcome::Deny,
             deny: Some(reason),
-            reserve,
-            usage: BudgetMap::new(),
             expiry_ns,
             logical_now_ns: self.logical_now_ns,
         });
@@ -491,7 +308,6 @@ impl EffectManager {
         cap_type: &str,
         enforcer_module: &str,
         expiry_ns: Option<u64>,
-        reserve: BudgetMap,
     ) {
         self.cap_decisions.push(CapDecisionRecord {
             intent_hash,
@@ -502,8 +318,6 @@ impl EffectManager {
             enforcer_module: enforcer_module.to_string(),
             decision: CapDecisionOutcome::Allow,
             deny: None,
-            reserve,
-            usage: BudgetMap::new(),
             expiry_ns,
             logical_now_ns: self.logical_now_ns,
         });
@@ -555,7 +369,7 @@ struct LlmGenerateParamsView {
     tools: Option<Vec<String>>,
 }
 
-fn cap_constraints_and_reserve(
+fn cap_constraints_only(
     enforcer_module: &str,
     kind: &EffectKind,
     grant: &CapabilityGrant,
@@ -563,9 +377,9 @@ fn cap_constraints_and_reserve(
     enforcer_invoker: Option<&Arc<dyn CapEnforcerInvoker>>,
     origin: &EffectSource,
     logical_now_ns: u64,
-) -> Result<BudgetMap, CapDenyReason> {
+) -> Result<(), CapDenyReason> {
     if enforcer_module == CAP_ALLOW_ALL_ENFORCER {
-        return Ok(BudgetMap::new());
+        return Ok(());
     }
     if let Some(invoker) = enforcer_invoker {
         return invoke_enforcer(
@@ -596,7 +410,7 @@ fn invoke_enforcer(
     params_cbor: &[u8],
     origin: &EffectSource,
     logical_now_ns: u64,
-) -> Result<BudgetMap, CapDenyReason> {
+) -> Result<(), CapDenyReason> {
     let origin = match origin {
         EffectSource::Reducer { name } => CapEffectOrigin {
             kind: "reducer".into(),
@@ -623,7 +437,7 @@ fn invoke_enforcer(
             message: err.to_string(),
         })?;
     if output.constraints_ok {
-        Ok(output.reserve_estimate)
+        Ok(())
     } else {
         Err(output.deny.unwrap_or(CapDenyReason {
             code: "constraints_failed".into(),
@@ -636,7 +450,7 @@ fn builtin_http_enforcer(
     kind: &EffectKind,
     grant: &CapabilityGrant,
     params_cbor: &[u8],
-) -> Result<BudgetMap, CapDenyReason> {
+) -> Result<(), CapDenyReason> {
     if kind.as_str() != aos_effects::EffectKind::HTTP_REQUEST {
         return Err(CapDenyReason {
             code: "effect_kind_mismatch".into(),
@@ -708,14 +522,14 @@ fn builtin_http_enforcer(
             });
         }
     }
-    Ok(BudgetMap::new())
+    Ok(())
 }
 
 fn builtin_llm_enforcer(
     kind: &EffectKind,
     grant: &CapabilityGrant,
     params_cbor: &[u8],
-) -> Result<BudgetMap, CapDenyReason> {
+) -> Result<(), CapDenyReason> {
     if kind.as_str() != aos_effects::EffectKind::LLM_GENERATE {
         return Err(CapDenyReason {
             code: "effect_kind_mismatch".into(),
@@ -769,11 +583,7 @@ fn builtin_llm_enforcer(
             });
         }
     }
-    let mut reserve = BudgetMap::new();
-    if effect_params.max_tokens > 0 {
-        reserve.insert("tokens".into(), effect_params.max_tokens);
-    }
-    Ok(reserve)
+    Ok(())
 }
 
 fn decode_cbor<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, serde_cbor::Error> {
@@ -801,92 +611,12 @@ fn allowlist_contains(
     list.iter().any(|entry| normalize(entry) == value)
 }
 
-fn nat_from_expr(value: &ExprValue) -> Option<u64> {
-    match value {
-        ExprValue::Nat(n) => Some(*n),
-        ExprValue::Int(n) if *n >= 0 => Some(*n as u64),
-        _ => None,
-    }
-}
-
-fn tokens_from_llm_expr(value: &ExprValue) -> Option<u64> {
-    let ExprValue::Record(map) = value else {
-        return None;
-    };
-    let token_usage = map.get("token_usage").and_then(|entry| match entry {
-        ExprValue::Record(inner) => Some(inner),
-        _ => None,
-    });
-    if let Some(token_usage) = token_usage {
-        let prompt = token_usage.get("prompt").and_then(nat_from_expr)?;
-        let completion = token_usage.get("completion").and_then(nat_from_expr)?;
-        return Some(prompt + completion);
-    }
-    let prompt = map.get("tokens_prompt").and_then(nat_from_expr)?;
-    let completion = map.get("tokens_completion").and_then(nat_from_expr)?;
-    Some(prompt + completion)
-}
-
-fn usage_from_receipt(kind: &str, receipt: &EffectReceipt) -> Result<BudgetMap, serde_cbor::Error> {
-    let mut usage = BudgetMap::new();
-    match kind {
-        aos_effects::EffectKind::LLM_GENERATE => {
-            match serde_cbor::from_slice::<LlmGenerateReceipt>(&receipt.payload_cbor) {
-                Ok(payload) => {
-                    let tokens = payload.token_usage.prompt + payload.token_usage.completion;
-                    if tokens > 0 {
-                        usage.insert("tokens".into(), tokens);
-                    }
-                    if let Some(cost) = receipt.cost_cents.or(payload.cost_cents) {
-                        usage.insert("cents".into(), cost);
-                    }
-                }
-                Err(_) => {
-                    let payload: ExprValue = serde_cbor::from_slice(&receipt.payload_cbor)?;
-                    if let Some(tokens) = tokens_from_llm_expr(&payload) {
-                        if tokens > 0 {
-                            usage.insert("tokens".into(), tokens);
-                        }
-                    }
-                    if let Some(cost) = receipt.cost_cents {
-                        usage.insert("cents".into(), cost);
-                    }
-                }
-            }
-        }
-        aos_effects::EffectKind::BLOB_PUT => {
-            let payload: BlobPutReceipt = serde_cbor::from_slice(&receipt.payload_cbor)?;
-            if payload.size > 0 {
-                usage.insert("bytes".into(), payload.size);
-            }
-            if let Some(cost) = receipt.cost_cents {
-                usage.insert("cents".into(), cost);
-            }
-        }
-        aos_effects::EffectKind::BLOB_GET => {
-            let payload: BlobGetReceipt = serde_cbor::from_slice(&receipt.payload_cbor)?;
-            if payload.size > 0 {
-                usage.insert("bytes".into(), payload.size);
-            }
-            if let Some(cost) = receipt.cost_cents {
-                usage.insert("cents".into(), cost);
-            }
-        }
-        _ => {
-            if let Some(cost) = receipt.cost_cents {
-                usage.insert("cents".into(), cost);
-            }
-        }
-    }
-    Ok(usage)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use aos_air_types::{CapType, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex};
-    use aos_effects::builtins::{HeaderMap, HttpRequestParams, LlmGenerateParams, LlmGenerateReceipt, TokenUsage};
-    use aos_effects::{CapabilityGrant, EffectReceipt, EffectKind, ReceiptStatus};
+    use aos_effects::builtins::{HeaderMap, HttpRequestParams, LlmGenerateParams};
+    use aos_effects::{CapabilityGrant, EffectKind};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -894,7 +624,6 @@ mod tests {
         grants: Vec<(CapabilityGrant, CapType)>,
     ) -> EffectManager {
         let resolver = CapabilityResolver::from_runtime_grants(grants);
-        let cap_ledger = BudgetLedger::from_grants(resolver.grant_budgets());
         let effect_catalog = Arc::new(
             EffectCatalog::from_defs(builtins::builtin_effects().iter().map(|b| b.effect.clone())),
         );
@@ -908,7 +637,6 @@ mod tests {
             Box::new(crate::policy::AllowAllPolicy),
             effect_catalog,
             schema_index,
-            cap_ledger,
             None,
             None,
             None,
@@ -965,15 +693,12 @@ mod tests {
     }
 
     #[test]
-    fn llm_tokens_reserve_and_settle() {
+    fn llm_max_tokens_constraint_is_enforced() {
         let grant = CapabilityGrant::builder(
             "cap_llm",
             "sys/llm.basic@1",
             &serde_json::json!({ "models": ["gpt-4"], "max_tokens": 50 }),
         )
-        .budget(aos_effects::CapabilityBudget(
-            [("tokens".to_string(), 100)].into_iter().collect(),
-        ))
         .build()
         .expect("grant");
         let mut mgr = effect_manager_with_grants(vec![(grant, CapType::llm_basic())]);
@@ -991,54 +716,38 @@ mod tests {
             api_key: None,
         };
         let params_cbor = serde_cbor::to_vec(&params).expect("encode params");
-        let intent = mgr
+        let res = mgr.enqueue_plan_effect(
+            "plan",
+            &EffectKind::llm_generate(),
+            "cap_llm",
+            params_cbor,
+            [0u8; 32],
+        );
+        assert!(res.is_ok(), "enqueue failed: {:?}", res.err());
+
+        let over_limit = LlmGenerateParams {
+            provider: "openai".into(),
+            model: "gpt-4".into(),
+            temperature: "0.5".into(),
+            max_tokens: 55,
+            input_ref: aos_air_types::HashRef::new(
+                "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            )
+            .expect("hash ref"),
+            tools: None,
+            api_key: None,
+        };
+        let over_cbor = serde_cbor::to_vec(&over_limit).expect("encode params");
+        let err = mgr
             .enqueue_plan_effect(
                 "plan",
                 &EffectKind::llm_generate(),
                 "cap_llm",
-                params_cbor,
+                over_cbor,
                 [0u8; 32],
             )
-            .expect("enqueue");
-
-        let ledger = mgr.cap_ledger_snapshot();
-        let entry = ledger
-            .grants
-            .get("cap_llm")
-            .and_then(|dims| dims.get("tokens"))
-            .expect("tokens entry");
-        assert_eq!(entry.reserved, 50);
-
-        let receipt_payload = LlmGenerateReceipt {
-            output_ref: aos_air_types::HashRef::new(
-                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            )
-            .expect("hash ref"),
-            token_usage: TokenUsage {
-                prompt: 10,
-                completion: 20,
-            },
-            cost_cents: None,
-            provider_id: "openai".into(),
-        };
-        let receipt = EffectReceipt {
-            intent_hash: intent.intent_hash,
-            adapter_id: "adapter.llm".into(),
-            status: ReceiptStatus::Ok,
-            payload_cbor: serde_cbor::to_vec(&receipt_payload).expect("encode receipt"),
-            cost_cents: None,
-            signature: vec![],
-        };
-        mgr.settle_receipt(&receipt).expect("settle");
-
-        let ledger = mgr.cap_ledger_snapshot();
-        let entry = ledger
-            .grants
-            .get("cap_llm")
-            .and_then(|dims| dims.get("tokens"))
-            .expect("tokens entry");
-        assert_eq!(entry.reserved, 0);
-        assert_eq!(entry.spent, 30);
+            .expect_err("expected max_tokens denial");
+        assert!(matches!(err, KernelError::CapabilityDenied { .. }));
     }
 
     #[test]
@@ -1052,8 +761,7 @@ mod tests {
         .build()
         .expect("grant");
         let mut mgr = effect_manager_with_grants(vec![(grant, CapType::http_out())]);
-        let cap_ledger = mgr.cap_ledger_snapshot();
-        mgr.restore_cap_state(cap_ledger, vec![], 20);
+        mgr.update_logical_now_ns(20);
 
         let params = HttpRequestParams {
             method: "GET".into(),

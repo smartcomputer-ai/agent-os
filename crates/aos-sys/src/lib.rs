@@ -73,13 +73,9 @@ pub struct CapDenyReason {
     pub message: String,
 }
 
-pub type BudgetMap = BTreeMap<String, u64>;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapCheckOutput {
     pub constraints_ok: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deny: Option<CapDenyReason>,
-    #[serde(default)]
-    pub reserve_estimate: BudgetMap,
 }

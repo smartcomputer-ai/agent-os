@@ -8,7 +8,7 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use alloc::format;
-use aos_sys::{BudgetMap, CapCheckInput, CapCheckOutput, CapDenyReason};
+use aos_sys::{CapCheckInput, CapCheckOutput, CapDenyReason};
 use aos_wasm_sdk::{PureError, PureModule, aos_pure};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -102,14 +102,9 @@ impl PureModule for CapEnforceLlmBasic {
             }
         }
 
-        let mut reserve = BudgetMap::new();
-        if effect_params.max_tokens > 0 {
-            reserve.insert("tokens".into(), effect_params.max_tokens);
-        }
         Ok(CapCheckOutput {
             constraints_ok: true,
             deny: None,
-            reserve_estimate: reserve,
         })
     }
 }
@@ -121,7 +116,6 @@ fn deny(code: &str, message: impl Into<String>) -> CapCheckOutput {
             code: code.into(),
             message: message.into(),
         }),
-        reserve_estimate: BudgetMap::new(),
     }
 }
 

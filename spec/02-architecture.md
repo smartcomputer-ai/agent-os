@@ -22,8 +22,8 @@ Application logic runs inside sandboxed WASM modules (reducers and pure componen
 - Store (CAS): content‑addressed object store for AIR nodes, WASM modules, blobs, receipts, and snapshots.
 - AIR Loader/Validator: loads the manifest, validates forms, resolves references, and exposes a typed view to the kernel.
 - Plan Engine: executes AIR plans deterministically (evaluates guards, emits effects, raises/awaits events), supports shadow runs.
-- Capability Ledger: scoped capability tokens (type, scope, budget, expiry) bound to principals and plans.
-- Policy Gate: declarative allow/deny/require‑approval rules over effects and plans; budgets settle on receipts.
+- Capability Resolver: scoped capability grants (type, scope, expiry) bound to plans and reducers.
+- Policy Gate: declarative allow/deny/require‑approval rules over effects and plans.
 - WASM Runtime: deterministic sandbox (Wasmtime profile) for reducers and pure components.
 - Effect Manager: queues effect intents, dispatches to adapters, ingests receipts, enforces idempotency.
 - Adapters: host‑side executors for effect kinds (HTTP, Blob/FS, Timer, LLM ship in v1; custom adapters can register additional kinds/cap types) with signing.
@@ -34,7 +34,7 @@ Application logic runs inside sandboxed WASM modules (reducers and pure componen
 
 ### Deterministic Stepper
 
-The kernel processes exactly one event at a time per world. It applies events to both control‑plane state (AIR manifest, ledger, policies) and data‑plane state (reducer states) in a fixed order. When appropriate, the stepper produces derived events such as PolicyDecisionRecorded, Applied, or SnapshotCreated.
+The kernel processes exactly one event at a time per world. It applies events to both control‑plane state (AIR manifest and policies) and data‑plane state (reducer states) in a fixed order. When appropriate, the stepper produces derived events such as PolicyDecisionRecorded, Applied, or SnapshotCreated.
 
 ### Event Kinds (v1)
 
@@ -82,15 +82,15 @@ Authoring ergonomics and determinism meet here. The loader accepts either JSON l
 
 After canonicalization, the loader validates references, shapes, capability declarations, and plan graphs, then exposes a typed view for the kernel. Tooling hooks (`air fmt`, `air diff`, `air patch`) operate on the same canonical CBOR but can render either lens for humans.
 
-### Capability Ledger
+### Capabilities (Constraints-Only)
 
-The capability ledger records grant/revoke events and tracks current balances/budgets per capability token. Capabilities are passed to plans and modules by handle; no ambient authority exists. The ledger enforces parameter constraints (hosts, models, max_tokens ceilings) at enqueue time and performs conservative budget pre-checks for variable-cost effects such as LLM token usage and blob sizes.
+Capabilities are passed to plans and modules by grant name; no ambient authority exists. At enqueue time the kernel enforces parameter constraints (hosts, models, max_tokens ceilings) and expiry using deterministic inputs. Budgets and ledger accounting are deferred to a future milestone.
 
 ### Policy Gate (v1)
 
 The policy gate evaluates allow/deny decisions for effects based on origin-aware rules. Origin metadata (origin_kind: plan or reducer, origin_name) is attached to all effect intents. Rule evaluation is first-match-wins; if no rule matches, the default is deny. Decisions are journaled as PolicyDecisionRecorded events.
 
-Budgets settle on receipts; a grant is marked exhausted if any dimension goes negative. Deferred to v1.1+: approvals (require_approval), rate limits (rpm), and identity/principal support.
+Deferred to v1.1+: approvals (require_approval), rate limits (rpm), and identity/principal support.
 
 ## Triggers and Events (Runtime)
 
@@ -106,7 +106,7 @@ The typical runtime flow between reducers and plans follows six steps:
 
 1. **Reducer emits DomainIntent** (e.g., `ChargeRequested`) as a domain event.
 2. **Trigger starts plan** with the event as `@plan.input` and records a correlation id if provided.
-3. **Plan emits effects** under capabilities; the kernel checks: (a) capability grant constraints, (b) conservative budget pre-check, (c) policy decision (origin-aware). The Effect Manager dispatches if allowed.
+3. **Plan emits effects** under capabilities; the kernel checks: (a) capability grant constraints, (b) policy decision (origin-aware). The Effect Manager dispatches if allowed.
 4. **Adapter executes** the effect and appends a signed receipt; the plan's `await_receipt` step resumes with the receipt value.
 5. **Plan raises result** via `raise_event`, publishing a DomainEvent (e.g., `PaymentResult`) to the bus; routing delivers it to reducers, which advance their typestate.
 6. **Optional continuation**: plans may `await_event` for subsequent reducer‑produced events to continue orchestration in one instance. The wait is future-only, first-match-per-waiter, and broadcast (events are not consumed). When a trigger set a `correlate_by` key, `await_event` **must** include a `where` predicate (typically matching that key) to avoid cross-talk between concurrent plan instances.
@@ -187,9 +187,9 @@ Modules have no access to time or randomness; all nondeterminism is isolated to 
 
 ### Safety
 
-**Capability scoping**: Tokens encode scope, expiry, and budgets; they are passed explicitly.
+**Capability scoping**: Tokens encode scope and expiry; they are passed explicitly.
 
-**Policy gates**: Enforce allow/deny/approval decisions and quotas before dispatch; budgets settle on receipt.
+**Policy gates**: Enforce allow/deny/approval decisions and quotas before dispatch.
 
 **Rollback**: Move the head to a prior snapshot; receipts include fences to ignore late arrivals after a rollback.
 
@@ -240,7 +240,7 @@ Here's how all the pieces fit together in a typical **design‑time** change wor
 3. **Shadow**: A shadow run quantifies diffs and predicted costs.
 4. **Approve**: Approval grants least‑privilege capabilities based on shadow results.
 5. **Apply**: The kernel commits the new manifest root; routing tables and capability bindings update atomically.
-6. **Execute**: Execution proceeds; effects produce signed receipts; budgets decrement; snapshots capture state.
+6. **Execute**: Execution proceeds; effects produce signed receipts; snapshots capture state.
 7. **Replay**: Replay from journal and receipts reproduces the exact same state.
 
 Once applied, changes become **runtime** behavior: reducers emit domain intents, triggers start plans, plans orchestrate effects under policy and capabilities, adapters produce signed receipts, and results flow back as events. Both modes—design time and runtime—share the same deterministic kernel and journal. The homoiconic control plane (AIR) is what makes this possible: the system can inspect, simulate, and safely modify its own definition using the same event‑sourced substrate it uses for application logic.

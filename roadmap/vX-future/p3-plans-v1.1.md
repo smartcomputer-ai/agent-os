@@ -794,13 +794,13 @@ receipt: {
 ### Capabilities
 
 - Children do not inherit ad-hoc privileges
-- Each child's `emit_effect` evaluated against current cap ledger
+- Each child's `emit_effect` evaluated against current cap constraints
 - Keep `required_caps` explicit on child plans
 
-### Budgets and rate limits
+### Rate limits and counters
 
 - Fan-out creates bursty effect emission
-- Rely on policy rpm/daily budgets to throttle
+- Rely on policy rpm/daily counters to throttle
 - Use `max_fanout` on `spawn_for_each` as a static brake
 
 ### Observability

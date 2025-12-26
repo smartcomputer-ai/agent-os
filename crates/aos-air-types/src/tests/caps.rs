@@ -93,22 +93,13 @@ fn accepts_custom_cap_type_strings() {
 }
 
 #[test]
-fn cap_grant_may_include_budget_and_expiry() {
+fn cap_grant_may_include_expiry() {
     let grant_json = json!({
         "name": "cap_llm",
         "cap": "com.acme/llm@1",
         "params": {"record": {}},
-        "expiry_ns": 99,
-        "budget": {
-            "tokens": 1000,
-            "bytes": 2048,
-            "cents": 50
-        }
+        "expiry_ns": 99
     });
     let grant: CapGrant = serde_json::from_value(grant_json).expect("grant json");
-    let budget = grant.budget.expect("budget");
-    assert_eq!(budget.0.get("tokens"), Some(&1000));
-    assert_eq!(budget.0.get("bytes"), Some(&2048));
-    assert_eq!(budget.0.get("cents"), Some(&50));
     assert_eq!(grant.expiry_ns, Some(99));
 }

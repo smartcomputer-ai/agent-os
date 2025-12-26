@@ -1,6 +1,6 @@
 # AOS Examples Ladder
 
-These demos are a rung-by-rung ladder from a deterministic core to a self-upgrading world. Each example is a tiny, runnable integration test that forces the path the architecture cares about—deterministic replay, micro-effects, plan orchestration, governance, and finally LLM with budgets. The north star is a world an agent can safely modify via the constitutional loop (propose → shadow → approve → apply) while staying on the same deterministic journal.
+These demos are a rung-by-rung ladder from a deterministic core to a self-upgrading world. Each example is a tiny, runnable integration test that forces the path the architecture cares about—deterministic replay, micro-effects, plan orchestration, governance, and finally LLM with caps/policy. The north star is a world an agent can safely modify via the constitutional loop (propose → shadow → approve → apply) while staying on the same deterministic journal.
 
 What the ladder proves (in order):
 - Deterministic reducer execution and replay on a journal.
@@ -9,7 +9,7 @@ What the ladder proves (in order):
 - Deterministic fan-out/fan-in inside a plan.
 - Multi-plan choreography and reducer-driven compensations.
 - Governance loop with shadowed diffs and manifest swaps.
-- Plans invoking LLM with capability budgets and policy gates, nd secrets injection for llm based effects (e.g. API keys).
+- Plans invoking LLM with capability constraints and policy gates, and secrets injection for LLM-based effects (e.g. API keys).
 
 | No. | Slug          | Summary                         |
 | --- | ------------- | -------------------------------- |

@@ -924,7 +924,6 @@ mod tests {
                 version: 1,
             }),
             expiry_ns: None,
-            budget: None,
         };
         let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
         let mut manifest = empty_manifest_with_builtins();
@@ -972,7 +971,6 @@ mod tests {
                 version: 0,
             }),
             expiry_ns: None,
-            budget: None,
         };
         let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
         let mut manifest = empty_manifest_with_builtins();
@@ -1058,7 +1056,6 @@ mod tests {
                     version: 1,
                 }),
                 expiry_ns: None,
-                budget: None,
             }],
         });
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();

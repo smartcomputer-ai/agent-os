@@ -20,7 +20,7 @@ AIR v1 provides one canonical, typed control plane the kernel can load, validate
 
 AIR is **control‑plane only**. It defines schemas, modules, plans, capabilities, policies, and the manifest. Application state lives in reducer state (deterministic WASM), encoded as canonical CBOR.
 
-The policy engine is minimal: ordered allow/deny rules with budgets enforced on receipts. Hooks are reserved for richer policy later. The effects set in v1 is also minimal: `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`. Migrations are deferred; `defmigration` is reserved.
+The policy engine is minimal: ordered allow/deny rules. Hooks are reserved for richer policy later. The effects set in v1 is also minimal: `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`. Migrations are deferred; `defmigration` is reserved.
 
 ## 1) Vocabulary and Identity
 
@@ -264,7 +264,7 @@ Reducers that emit micro-effects rely on the kernel to translate adapter receipt
 | **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 | **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 
-Reducers should **reference these schemas from their ABI event variant** (e.g., `TimerEvent.Fired -> sys/TimerFired@1`) and route only the reducer’s ABI event schema. The kernel wraps receipt payloads into that variant before routing. Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/budget enforcement can trust the same structures without changing reducer code.
+Reducers should **reference these schemas from their ABI event variant** (e.g., `TimerEvent.Fired -> sys/TimerFired@1`) and route only the reducer’s ABI event schema. The kernel wraps receipt payloads into that variant before routing. Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/cost analysis can trust the same structures without changing reducer code.
 
 Canonical JSON definitions for these schemas (plus their parameter/receipt companions) live in `spec/defs/builtin-schemas.air.json` so manifests can hash and reference them directly.
 
@@ -309,7 +309,7 @@ The kernel validates the signature (ed25519/HMAC), binds the receipt to its inte
 
 ## 9) defcap (Capability Types) and Grants
 
-Capabilities define scoped permissions for effects. A `defcap` declares a capability type; a `CapGrant` is a runtime instance of that capability with concrete constraints and budgets.
+Capabilities define scoped permissions for effects. A `defcap` declares a capability type; a `CapGrant` is a runtime instance of that capability with concrete constraints and optional expiry.
 
 ### defcap Definition
 
@@ -355,8 +355,7 @@ A grant is kernel state referenced by name:
   name: text,
   cap: Name(defcap),
   params: Value,
-  expiry_ns?: nat,
-  budget?: map<text,nat>
+  expiry_ns?: nat
 }
 ```
 
@@ -368,14 +367,9 @@ The `params` must conform to the defcap's schema and encode concrete allowlists/
 1. Grant exists and has not expired.
 2. Capability type matches effect kind.
 3. Effect params satisfy grant constraints (hosts, models, max_tokens_max, etc.).
-4. Conservative budget pre-check for variable-cost effects:
-   - `llm.generate`: if `max_tokens` declared, check `max_tokens ≤ remaining tokens budget`; deny if insufficient.
-   - `blob.put`: if blob_ref size known from CAS, check `size ≤ remaining bytes budget`; deny if insufficient.
-5. Policy decision (see defpolicy).
+4. Policy decision (see defpolicy).
 
-**At receipt, the kernel settles budgets:**
-- Decrements actual usage (`token_usage`, blob `size`, `cost_cents`) from grant.
-- If a dimension goes negative, mark grant exhausted; future enqueues using that grant are denied until replenished.
+Budget enforcement is deferred to a future milestone; see `roadmap/vX-future/p4-budgets.md`.
 
 See: spec/schemas/defcap.schema.json
 
@@ -608,7 +602,7 @@ Plans can start in two ways:
 
 **Manual start**: `{ plan:Name, input:ValueCBORRef, bind_locals?:{VarName:ValueCBORRef…} }`
 
-The kernel pins the manifest hash for the instance, checks input/locals against schemas, and executes under the current policy/cap ledger. Effects always check live grants at enqueue time.
+The kernel pins the manifest hash for the instance, checks input/locals against schemas, and executes under the current policy and capability grants. Effects always check live grants at enqueue time.
 
 ## 14) Validation Rules (Semantic)
 
@@ -703,7 +697,6 @@ Runtime journal entries are canonical CBOR enums; the important ones for AIR pla
 ### Budget and Capability (Optional, for Observability)
 
 - **BudgetExceeded** `{ grant_name, dimension:"tokens"|"bytes"|"cents", delta:nat, new_balance:int }`
-  - Appended when a receipt settlement drives a budget dimension negative; grant marked exhausted
 
 ## 17) Determinism and Replay
 
@@ -717,7 +710,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 **Runtime**: Invalid module IO → instance error; `emit_effect` denied → step fails (v1: fail instance) unless guarded; no timeouts in v1 (await persists); cancellation is a governance action.
 
-**Budgets**: Decrement on receipts; over‑budget → policy denial at enqueue.
+**Budgets**: Deferred to a future milestone; see `roadmap/vX-future/p4-budgets.md`.
 
 ## 19) On‑Disk Expectations
 
@@ -783,7 +776,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 ## 21) Implementation Guidance (Engineering Notes)
 
-- Build order: canonical CBOR + hashing → store/loader/validator → Wasmtime reducer/pure ABIs + schema checks → effect manager + adapters (http/fs/timer/llm) + cap ledger + receipts → plan executor (DAG + Expr) → patcher + governance loop → shadow‑run.
+- Build order: canonical CBOR + hashing → store/loader/validator → Wasmtime reducer/pure ABIs + schema checks → effect manager + adapters (http/fs/timer/llm) + receipts → plan executor (DAG + Expr) → patcher + governance loop → shadow‑run.
 - Determinism tests: golden “replay or die” snapshots; fuzz Expr evaluator and CBOR canonicalizer.
 - Errors: precise validator diagnostics (name, step id, path). Journal policy decisions and validation failures with structured details for explainers.
 
