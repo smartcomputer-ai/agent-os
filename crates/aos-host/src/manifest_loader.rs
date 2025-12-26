@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail};
 use aos_air_types::{
     self as air_types, AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema,
     DefSecret, HashRef, Manifest, Name, NamedRef, SecretEntry, catalog::EffectCatalog,
+    validate_manifest,
 };
 use aos_kernel::{LoadedManifest, governance::ManifestPatch};
 use aos_store::{Catalog, FsStore, Store, load_manifest_from_bytes};
@@ -76,7 +77,19 @@ pub fn load_from_assets(store: Arc<FsStore>, asset_root: &Path) -> Result<Option
     )?;
     patch_manifest_refs(&mut manifest, &hashes)?;
     let catalog = manifest_catalog(&store, manifest)?;
-    Ok(Some(catalog_to_loaded(catalog)))
+    let loaded = catalog_to_loaded(catalog);
+    if let Err(err) = validate_manifest(
+        &loaded.manifest,
+        &loaded.modules,
+        &loaded.schemas,
+        &loaded.plans,
+        &loaded.effects,
+        &loaded.caps,
+        &loaded.policies,
+    ) {
+        bail!("manifest validation failed: {err}");
+    }
+    Ok(Some(loaded))
 }
 
 pub fn manifest_patch_from_loaded(loaded: &LoadedManifest) -> ManifestPatch {
