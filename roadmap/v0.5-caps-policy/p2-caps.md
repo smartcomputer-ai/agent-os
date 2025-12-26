@@ -11,6 +11,7 @@ Capabilities are wired and enforced in the kernel at enqueue time (grant exists,
    - Kernel authorization must be the single decision point:
      - canonicalize params -> cap check -> policy check -> journal decisions -> enqueue or deny
    - Any mutation (budget reservation/settlement, counters, approvals) must be part of that same deterministic, journaled transaction.
+   - The enforcer never makes the final allow/deny decision. It only returns semantic constraint results and resource requirements; the kernel performs expiry + ledger checks and records the final decision.
 
 2) **Caps and policy stay orthogonal in shape**
    - Caps answer: "can ever" by returning constraints + reserve requirements.
@@ -215,6 +216,9 @@ Journal record for an authorization should include (at minimum):
 - effect intent hash (derived from the canonical params)
 - grant name (or grant hash)
 - enforcer output (or a hash of it), including `constraints_ok` and `reserve_estimate`
+- expiry check result
+- ledger check result
+- reservation delta (or settlement delta on receipt)
 
 ---
 
@@ -232,6 +236,7 @@ Cap params can be refactored for this milestone. Proposed shapes:
 Notes:
 - Missing/empty fields mean "no restriction"; non-empty fields are allowlists/ceilings.
 - HTTP enforcement can parse URLs in the enforcer module for now; long-term, move parsing into structured params or a deterministic normalizer.
+- **Bounded vs unbounded dimensions:** For bounded dimensions (e.g., `tokens` reserved as `max_tokens`), enforce `actual <= reserved` at settle. For unbounded dimensions, reserve `0` and allow spend at settle.
 
 ---
 
@@ -246,8 +251,12 @@ To avoid both oversubscription and over-counting:
 
 2) **Settle at receipt**
    - Compute actual usage from receipt (tokens/bytes/cents where available).
-   - Refund unused reservation or charge additional if actual exceeds reserve.
+   - Refund unused reservation.
    - Journal the settlement.
+
+Default settle rule for bounded dimensions:
+- For dimensions where the reserve is intended to be an upper bound (e.g., `tokens` reserved as `max_tokens`), require `actual_usage <= reserved`. If violated, treat it as an adapter/receipt contract failure.
+- For unbounded dimensions, reserve `0` and allow settle to add spent. This does not prevent oversubscription and should be used only when bounding is impossible.
 
 Practical v1 reservations:
 - `llm.generate`: reserve `max_tokens` (optionally a conservative prompt estimate); settle on receipt usage.
@@ -263,7 +272,7 @@ Expiry must not read wallclock in the kernel. Options:
 - **Logical time**: journal height / deterministic epoch counter.
 - **Trusted time receipts**: a timer adapter produces signed receipts, and the kernel updates a deterministic "now" state.
 
-Either way, expiry is enforced against a deterministic, journaled value.
+For v0.5, use **journal height as logical time** and interpret `expiry_ns` as a logical-time scalar (not host wallclock). This keeps expiry deterministic without trusted time receipts. Either way, expiry is enforced against a deterministic, journaled value.
 
 ---
 
@@ -275,6 +284,10 @@ Ledger modeling stays generic and opaque to the kernel:
 - The kernel only performs arithmetic (compare/add/subtract) on these counters; it never interprets dimension names.
 - Enforcers emit `reserve_estimate` and `actual_usage` as open-ended maps; the kernel applies deltas by key.
 - Missing dimensions in a grant mean **unlimited** (no ledger check or reservation for that dimension).
+
+Ledger invariant (per grant, per dimension):
+- At enqueue: require `spent + reserved + reserve_estimate <= limit`.
+- On settle: `reserved -= reserve_estimate`; `spent += actual_usage`.
 
 ---
 
@@ -338,7 +351,7 @@ Likely acceptable: canonicalization, journaling, and external I/O dominate. For 
 Yes. Passing state explicitly still yields a referentially transparent function (same input → same output). “Pure” here means deterministic and side-effect-free, not stateless.
 
 ### What is the policy model in v0.5?
-Policy stays data-only (`RulePolicy`) for v0.5; later, policy can optionally be a pure module engine (or a built-in `RulePolicyEngine@1` module) without changing the kernel boundary.
+Policy stays data-only (`RulePolicy`) for v0.5; it is effectively a built-in policy engine. Later, policy can optionally be a pure module engine (or a built-in `RulePolicyEngine@1` module) without changing the kernel boundary.
 
 ---
 
