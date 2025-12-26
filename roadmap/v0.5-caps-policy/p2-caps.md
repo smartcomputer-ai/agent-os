@@ -340,6 +340,9 @@ Parsing inside the enforcer is fine for v0.5. Normalization is tracked separatel
 ### If we have enforcers, do we still need policies?
 Yes. Caps answer **"can ever"** (delegated authority + constraints). Policies answer **"should now"** (governance gates, approvals, counters). Collapsing them pushes cap semantics into policy anyway, losing least-privilege reasoning and composability.
 
+### Do identical effects collide on intent hash today?
+Yes. The kernel computes `intent_hash = sha256(cbor(kind, params, cap, idempotency_key))`, and currently uses a zero idempotency key everywhere. If you emit the same effect (same kind/params/cap) twice, it shares an intent hash and cannot be safely in-flight concurrently. Until idempotency keys are exposed in AIR/ABI, callers must include a unique field in params (e.g., `request_id`) when they need distinct in-flight intents.
+
 ### Why not parse URLs only inside the enforcer?
 You can. The reason to consider a separate normalizer or structured schema is that parsing then affects **authorization** but not **intent identity**. If normalization happens before hashing, the journaled intent matches the semantic URL, which improves explainability and determinism for downstream policy and caching.
 
@@ -392,3 +395,4 @@ The following changes are required to make the design enforceable in AIR, but ar
 2) **Built-in schemas**: add `sys/CapCheckInput@1`, `sys/CapCheckOutput@1`, `sys/CapSettleInput@1`, `sys/CapSettleOutput@1`.
 3) **Journal records**: define a canonical cap decision record that pins intent hash, enforcer identity, constraints result, reservation delta, and expiry/budget check outcomes.
 4) **Deterministic time inputs**: standardize `journal_height` + `logical_now_ns` in cap authorizer context (see `roadmap/v0.5-caps-policy/p3-time.md`).
+5) **Effect idempotency keys**: add optional `idempotency_key` to plan emit effects and reducer effects (AIR schema + WASM ABI), and thread it into `EffectIntent` hashing. Without this, identical effects share an intent hash and cannot be safely in-flight concurrently.
