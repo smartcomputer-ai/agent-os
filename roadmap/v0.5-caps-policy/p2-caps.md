@@ -23,6 +23,7 @@ Capabilities are wired and enforced in the kernel at enqueue time (grant exists,
    - Cap denials should record *what constraint failed*.
    - Budget usage must be ledgered (reservation + settlement).
    - Journal entries must pin determinism: enforcer module identity, intent/grant identity, and enforcer output (or hash).
+   - Reservations are per-intent and idempotent: a receipt can only settle the reservation it created.
 
 ---
 
@@ -83,6 +84,23 @@ Cap references must be validated against **grants**, not defcaps. Validation sho
      compatible with its defcap cap type.
 
 This makes the authoring model consistent with runtime: **grants are the capability boundary**, and defcaps are the templates.
+
+### Cap Grants: Practical Improvements (Ergonomics + Audit)
+Two small changes make grant usage more evolvable and auditable:
+
+1) **Plan-level cap slots (mirror reducer slots)**
+   - Today: reducers use `cap_slot` → manifest binds slots to grants; plans reference grants directly.
+   - Proposed: allow plans to declare `cap_slot: "http_default"` and add
+     `manifest.plan_bindings[plan_name].slots.http_default = "grant_name"`.
+   - Benefit: governance can swap grants without touching plan defs; same plan can be wired
+     differently across worlds.
+
+2) **Stable grant hash**
+   - Keep human-friendly names, but compute:
+     `grant_hash = sha256(cbor({defcap_ref, params_cbor, budget, expiry}))`.
+   - Journal the hash alongside decisions. This makes “same name, changed meaning”
+     detectable and gives adapters/logs a stable identifier without exposing params.
+
 ---
 
 ## Design Smell (Current Trajectory)
@@ -175,6 +193,21 @@ Relevant code:
 
 8) **Host-level replay coverage**
    - REMAINS: expand integration tests that replay cap decisions across journal/snapshot boundaries.
+
+9) **Per-intent reservation records**
+   - REMAINS: represent reservations as first-class records keyed by `intent_hash`, not only aggregate counters.
+
+10) **Release path for stuck intents**
+   - REMAINS: deterministic "release reservation" path (cancel/expiry/governance) + introspection tooling.
+
+11) **Plan-level cap slots**
+   - REMAINS: allow plans to use slots that are bound to grants via `manifest.plan_bindings`.
+
+12) **Stable grant hash in journals**
+   - REMAINS: compute + record a `grant_hash` alongside cap decisions.
+
+13) **Policy decision journaling**
+   - REMAINS: journal allow/deny/require-approval decisions for replay/audit.
 
 ---
 
@@ -313,6 +346,48 @@ CapSettleOutput = {
 - `violation` indicates receipt/usage contract failure (policy for handling is kernel-owned).
 - Enforcers may return empty usage maps when a cap has no budget dimensions.
 
+### Ledger Invariants (Correctness Over Time)
+Two-phase accounting only stays correct if reservations are tracked per intent, not just
+as aggregate counters. Model reservations as first-class records keyed by `intent_hash`:
+
+```
+Reservation = {
+  intent_hash,
+  grant_name,
+  enforcer_ref,           // hash or {manifest_hash, module_name}
+  reserve: map<text,nat>,
+  status: "reserved"|"settled"|"released"
+}
+```
+
+Derived aggregates:
+- `reserved_total[dim] = sum(reserve[dim]) over status="reserved"`
+- `spent_total[dim]` is monotone-increasing based on settle usage.
+
+This makes settlement idempotent: if a duplicate receipt arrives, the kernel can skip
+settle when status != "reserved". It also makes ledger replay robust.
+
+### Pin Enforcer Identity for Settlement
+When a reservation is created, record the enforcer identity used for the check
+(module hash or `{manifest_hash, module_name}`). On settle, use the same identity
+to interpret receipts. This prevents semantic drift across upgrades while intents
+are in flight.
+
+### Intent Outcomes (Must Be Explicit)
+Every reserved intent should end in exactly one of:
+1) **Receipt arrives → settle**
+2) **Explicit release → reservation released** (cancel/expiry/governance)
+3) **No receipt → reservation remains reserved** (correct but operationally visible)
+
+This implies a deterministic release path (even if vNext) and introspection tooling
+to see outstanding reservations by grant + dimension.
+
+### Settlement Semantics for Failure/Timeout
+Receipts should always settle:
+- If receipt lacks usage for a dimension, treat usage as `0` for that dimension.
+- Always release the reservation, even on error/timeout.
+- Policy may still count attempts separately; cap budgets should charge actual usage.
+
 ### Wiring Plan (Kernel)
 1) **Capture enqueue context**: store `effect_params` (canonical CBOR), `cap_params`, and `origin` in `CapReservation` so settle has deterministic inputs.
 2) **Add settle hook to enforcer invoker**:
@@ -324,6 +399,7 @@ CapSettleOutput = {
    - Else fallback to built-in usage extraction for known effects (LLM, blob), or empty usage.
 4) **Decision/journal**:
    - Record settle usage (and violation if present).
+   - Pin the enforcer identity used for reserve/settle (module hash or manifest+name).
    - Decide policy for `violation` (error vs warning + ledger update).
 
 This keeps cap logic centralized and makes it easy to add new cap types without leaking policy or budget logic into adapters.
@@ -346,6 +422,31 @@ Journal record for an authorization should include (at minimum):
 - expiry check result
 - ledger check result
 - reservation delta (or settlement delta on receipt)
+
+### Policy Ordering and Ledger Interaction
+Policy should be evaluated **after** cap constraints and **before** committing reservations:
+
+1) canonicalize params
+2) cap enforcer → `{constraints_ok, reserve_estimate}`
+3) policy → allow/deny/require_approval
+4) if allow/require_approval: commit reservation + policy deltas
+5) else: no ledger mutation
+
+This preserves “cap before policy” semantics without a reserve→deny→refund cycle.
+
+**RequireApproval** should hold the reservation once created. That prevents “approved but
+now out of budget” outcomes and provides governance-grade backpressure.
+
+**Policy decisions must be journaled** the same way cap decisions are, or approvals and
+counters become non-replayable.
+
+### Spec/Process Consistency (Avoid Hidden Kernel Magic)
+If pure modules are part of the authority boundary, the AIR surface must reflect it:
+- `defcap.enforcer` must be representable (already in spec).
+- `defpolicy.engine` (or equivalent) must be representable if policy engines become modules.
+- `defmodule.module_kind = "pure"` must be canonically expressible.
+
+This keeps the system homoiconic: “data + modules,” not kernel-only behavior.
 
 ---
 
@@ -499,7 +600,10 @@ Policy stays data-only (`RulePolicy`) for v0.5; it is effectively a built-in pol
 3) Two-phase budget ledger (reserve/settle)
 4) Expiry enforcement with deterministic "now"
 5) Settle ABI wiring (enforcer settle invocation + ledger/journal)
-6) Cap-type interface stabilization + tests/fixtures
+6) Policy decision journaling + approval hold semantics
+7) Per-intent reservation records + release path
+8) Plan-level cap slots + grant hash
+9) Cap-type interface stabilization + tests/fixtures
 
 ---
 
@@ -510,7 +614,10 @@ Policy stays data-only (`RulePolicy`) for v0.5; it is effectively a built-in pol
 3) [x] Implement deterministic expiry enforcement.
 4) [x] Journal cap decisions with rationale.
 5) [~] Wire settle ABI to enforcers (schemas exist; invocation + usage flow pending).
-6) [~] Add minimal use-case tests and replay checks (kernel unit tests + enforcer integration tests added; host-level replay coverage pending).
+6) [~] Journal policy decisions + define approval hold behavior.
+7) [~] Add per-intent reservation records + deterministic release path.
+8) [~] Add plan-level cap slots + grant hash journaling.
+9) [~] Add minimal use-case tests and replay checks (kernel unit tests + enforcer integration tests added; host-level replay coverage pending).
 
 Once these exist, caps are a real security and budget control surface, not just wiring.
 
@@ -525,3 +632,6 @@ The following changes were required to make the design enforceable in AIR; statu
 3) **Journal records**: define canonical cap decision + settle records that pin intent hash, enforcer identity, constraints result, reservation delta, usage deltas, and expiry/budget check outcomes. (PARTIAL: kernel record exists; spec update pending)
 4) **Deterministic time inputs**: standardize `journal_height` + `logical_now_ns` in cap authorizer context (see `roadmap/v0.5-caps-policy/p3-time.md`). (PARTIAL: kernel uses `logical_now_ns`; spec update pending)
 5) **Effect idempotency keys**: add optional `idempotency_key` to plan emit effects and reducer effects (AIR schema + WASM ABI), and thread it into `EffectIntent` hashing. (DONE)
+6) **Plan-level cap slots**: add `plan_bindings` (or equivalent) to manifest and `cap_slot` to plan emit steps. (PENDING)
+7) **Policy engine reference**: add `defpolicy.engine` (or equivalent) if policy is module-based. (PENDING)
+8) **Grant hash**: standardize `grant_hash` in cap decision journals and explainers. (PENDING)
