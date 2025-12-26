@@ -13,7 +13,7 @@ Capabilities are wired and enforced in the kernel at enqueue time (grant exists,
    - Any mutation (budget reservation/settlement, counters, approvals) must be part of that same deterministic, journaled transaction.
 
 2) **Caps and policy stay orthogonal in shape**
-   - Caps answer: "can ever" and return a structured decision.
+   - Caps answer: "can ever" by returning constraints + reserve requirements.
    - Policies answer: "should now" and return a structured decision.
    - The kernel composes them in fixed order: cap -> policy.
 
@@ -21,6 +21,7 @@ Capabilities are wired and enforced in the kernel at enqueue time (grant exists,
    - Allowed/denied outcomes must be derivable from the journal alone.
    - Cap denials should record *what constraint failed*.
    - Budget usage must be ledgered (reservation + settlement).
+   - Journal entries must pin determinism: enforcer module identity, intent/grant identity, and enforcer output (or hash).
 
 ---
 
@@ -77,6 +78,21 @@ Relevant code:
 - `crates/aos-effects/src/intent.rs`
 - `crates/aos-host/src/adapters/*`
 
+### 6) Effect params are canonicalized before policy
+- Effect params are canonicalized via the effect schema, then secret variants are normalized.
+- This happens before any policy decision, and would also be before cap enforcement.
+
+Relevant code:
+- `crates/aos-kernel/src/effects.rs`
+
+### 7) Pure modules already exist but are not wired into auth
+- `defmodule` supports `module_kind: "pure"` with `input`/`output` schemas.
+- The kernel has a `PureRegistry` and `invoke_pure`, but no cap/policy wiring yet.
+
+Relevant code:
+- `spec/schemas/defmodule.schema.json`
+- `crates/aos-kernel/src/pure.rs`
+
 ---
 
 ## What Is Not Implemented (Gaps)
@@ -119,13 +135,15 @@ This aligns with the "solid state interpreter" goal:
 - New cap types are `defcap` + module artifacts.
 - Shadow runs can execute the same enforcer logic for prediction/audit.
 
-### Extend `defmodule` with a pure kind
-Add a deterministic module kind for pure functions:
+### Use the existing `module_kind: "pure"` ABI
+The schema already supports deterministic pure modules and the kernel can invoke them. The missing piece is to wire them into authorization. The ABI remains:
 
 - `module_kind: "pure"`
-- ABI: `run(input_bytes) -> output_bytes` using canonical CBOR in/out (schema-pinned).
+- `run(input_bytes) -> output_bytes` using canonical CBOR in/out (schema-pinned).
 
 This is the reusable substrate for cap enforcers, policy engines, and param normalizers.
+
+**Pure module determinism profile:** pure modules are deterministic and side-effect-free (no wallclock, randomness, or ambient I/O). They may receive state snapshots as explicit inputs and return deltas as outputs.
 
 ### Make `defcap` carry an enforcer
 Add a required enforcer module reference:
@@ -158,7 +176,6 @@ CapCheckInput = {
   cap_def: Name,
   grant_name: text,
   cap_params: <typed value>,
-  remaining_budget: map<text,nat>,
   effect: {
     kind: text,
     params: <typed value>,
@@ -172,8 +189,9 @@ Output:
 
 ```cbor
 CapCheckOutput = {
-  decision: "allow" | { "deny": { code, path?, message? } },
-  reserve: map<text,nat>,
+  constraints_ok: bool,
+  deny?: { code, path?, message? },   // only if constraints_ok=false
+  reserve_estimate: map<text,nat>,
   explain?: { matched?: ..., failed?: ... }
 }
 ```
@@ -182,13 +200,21 @@ Settle input includes receipt + reservation; output returns actual usage deltas.
 
 This keeps cap logic centralized and makes it easy to add new cap types without leaking policy or budget logic into adapters.
 
-Note: the enforcer module should return *requirements* (constraints + reserve estimate). The kernel MUST own ledger comparisons and mutations. Modules must not read or mutate ledger state; they only interpret cap semantics deterministically.
+Note: the enforcer module returns *requirements* (constraints + reserve estimate). The kernel MUST own ledger comparisons and mutations. Modules must not read or mutate ledger state; they only interpret cap semantics deterministically. If budget context is ever passed for estimation, name it `budget_hint` and state in the ABI that it is non-authoritative.
 
 ### Authorizer Pipeline (Kernel-Owned Ledger)
-1) Canonicalize effect params.
-2) Run cap enforcer module -> returns `{ ok?, reserve_estimate, explain }`.
+1) Canonicalize effect params (schema + secret normalization) into the exact CBOR bytes used for intent hashing/journaling.
+2) Run cap enforcer module on those canonical values -> returns `{ constraints_ok, reserve_estimate, explain }`.
 3) Kernel checks expiry + ledger budgets + writes reservation.
-4) Journal cap decision + reservation deltas.
+4) Kernel decides allow/deny and journals decision + reservation deltas.
+
+The enforcer must see the same canonical input that is hashed as the intent identity, so authorization matches what is journaled.
+
+Journal record for an authorization should include (at minimum):
+- enforcer module identity (module hash, or manifest hash + module name resolved at that height)
+- effect intent hash (derived from the canonical params)
+- grant name (or grant hash)
+- enforcer output (or a hash of it), including `constraints_ok` and `reserve_estimate`
 
 ---
 
@@ -244,6 +270,12 @@ Either way, expiry is enforced against a deterministic, journaled value.
 ## Make Budgets Open-Ended (Avoid a Closed-World Trap)
 Budgets should be a `map<text,nat>` (or `map<text,dec128>` later), not a fixed struct. This allows adapters and enforcers to introduce new dimensions (`requests`, `gpu_ms`, `emails_sent`, `usd_micros`) without kernel changes, while still standardizing conventional names (`tokens`, `bytes`, `cents`).
 
+Ledger modeling stays generic and opaque to the kernel:
+- The kernel stores per-grant ledger state as `map<dimension, {limit,reserved,spent}>` (or equivalent), where `dimension` is just a string key.
+- The kernel only performs arithmetic (compare/add/subtract) on these counters; it never interprets dimension names.
+- Enforcers emit `reserve_estimate` and `actual_usage` as open-ended maps; the kernel applies deltas by key.
+- Missing dimensions in a grant mean **unlimited** (no ledger check or reservation for that dimension).
+
 ---
 
 ## Param Normalization (HTTP URL Parsing without Kernel Semantics)
@@ -271,6 +303,7 @@ Parsing inside the enforcer is fine for v0.5, but normalization aligns **intent 
 
 4) **Audit trail**
    - Journal allow/deny decisions with reasons and budget deltas.
+   - Include enforcer module identity and output (or a hash) for replay determinism.
 
 ---
 
@@ -303,6 +336,9 @@ Likely acceptable: canonicalization, journaling, and external I/O dominate. For 
 
 ### Are “pure modules” still pure if we pass ledger state?
 Yes. Passing state explicitly still yields a referentially transparent function (same input → same output). “Pure” here means deterministic and side-effect-free, not stateless.
+
+### What is the policy model in v0.5?
+Policy stays data-only (`RulePolicy`) for v0.5; later, policy can optionally be a pure module engine (or a built-in `RulePolicyEngine@1` module) without changing the kernel boundary.
 
 ---
 
