@@ -3,6 +3,7 @@
     "$kind": "defcap",
     "name": "sys/timer@1",
     "cap_type": "timer",
-    "schema": { "record": {} }
+    "schema": { "record": {} },
+    "enforcer": { "module": "sys/CapAllowAll@1" }
   }
 ]

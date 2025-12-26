@@ -3,13 +3,15 @@
     "$kind": "defcap",
     "name": "notes/blob_cap@1",
     "cap_type": "blob",
-    "schema": { "record": {} }
+    "schema": { "record": {} },
+    "enforcer": { "module": "sys/CapAllowAll@1" }
   },
   {
     "$kind": "defcap",
     "name": "sys/blob@1",
     "cap_type": "blob",
-    "schema": { "record": {} }
+    "schema": { "record": {} },
+    "enforcer": { "module": "sys/CapAllowAll@1" }
   },
   {
     "$kind": "defcap",
@@ -19,6 +21,7 @@
       "record": {
         "scope": { "option": { "text": {} } }
       }
-    }
+    },
+    "enforcer": { "module": "sys/CapAllowAll@1" }
   }
 ]

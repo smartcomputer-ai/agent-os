@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use aos_air_exec::Value as ExprValue;
 use aos_effects::builtins::{
     BlobGetReceipt, BlobPutReceipt, HttpRequestParams, LlmGenerateParams, LlmGenerateReceipt,
     TimerSetReceipt,
@@ -800,17 +801,57 @@ fn allowlist_contains(
     list.iter().any(|entry| normalize(entry) == value)
 }
 
+fn nat_from_expr(value: &ExprValue) -> Option<u64> {
+    match value {
+        ExprValue::Nat(n) => Some(*n),
+        ExprValue::Int(n) if *n >= 0 => Some(*n as u64),
+        _ => None,
+    }
+}
+
+fn tokens_from_llm_expr(value: &ExprValue) -> Option<u64> {
+    let ExprValue::Record(map) = value else {
+        return None;
+    };
+    let token_usage = map.get("token_usage").and_then(|entry| match entry {
+        ExprValue::Record(inner) => Some(inner),
+        _ => None,
+    });
+    if let Some(token_usage) = token_usage {
+        let prompt = token_usage.get("prompt").and_then(nat_from_expr)?;
+        let completion = token_usage.get("completion").and_then(nat_from_expr)?;
+        return Some(prompt + completion);
+    }
+    let prompt = map.get("tokens_prompt").and_then(nat_from_expr)?;
+    let completion = map.get("tokens_completion").and_then(nat_from_expr)?;
+    Some(prompt + completion)
+}
+
 fn usage_from_receipt(kind: &str, receipt: &EffectReceipt) -> Result<BudgetMap, serde_cbor::Error> {
     let mut usage = BudgetMap::new();
     match kind {
         aos_effects::EffectKind::LLM_GENERATE => {
-            let payload: LlmGenerateReceipt = serde_cbor::from_slice(&receipt.payload_cbor)?;
-            let tokens = payload.token_usage.prompt + payload.token_usage.completion;
-            if tokens > 0 {
-                usage.insert("tokens".into(), tokens);
-            }
-            if let Some(cost) = receipt.cost_cents.or(payload.cost_cents) {
-                usage.insert("cents".into(), cost);
+            match serde_cbor::from_slice::<LlmGenerateReceipt>(&receipt.payload_cbor) {
+                Ok(payload) => {
+                    let tokens = payload.token_usage.prompt + payload.token_usage.completion;
+                    if tokens > 0 {
+                        usage.insert("tokens".into(), tokens);
+                    }
+                    if let Some(cost) = receipt.cost_cents.or(payload.cost_cents) {
+                        usage.insert("cents".into(), cost);
+                    }
+                }
+                Err(_) => {
+                    let payload: ExprValue = serde_cbor::from_slice(&receipt.payload_cbor)?;
+                    if let Some(tokens) = tokens_from_llm_expr(&payload) {
+                        if tokens > 0 {
+                            usage.insert("tokens".into(), tokens);
+                        }
+                    }
+                    if let Some(cost) = receipt.cost_cents {
+                        usage.insert("cents".into(), cost);
+                    }
+                }
             }
         }
         aos_effects::EffectKind::BLOB_PUT => {

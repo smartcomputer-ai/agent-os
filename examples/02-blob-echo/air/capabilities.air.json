@@ -3,6 +3,7 @@
     "$kind": "defcap",
     "name": "sys/blob@1",
     "cap_type": "blob",
-    "schema": { "record": {} }
+    "schema": { "record": {} },
+    "enforcer": { "module": "sys/CapAllowAll@1" }
   }
 ]
