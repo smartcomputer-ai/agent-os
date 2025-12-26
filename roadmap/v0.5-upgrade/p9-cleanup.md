@@ -1,1 +1,0 @@
-- remove "namespace" params in blob put effects. They are not used.
