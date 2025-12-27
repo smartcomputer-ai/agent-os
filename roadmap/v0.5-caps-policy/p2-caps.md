@@ -3,20 +3,20 @@
 ## TL;DR
 Caps are enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). Cap params and expiry are enforced and decisions are journaled. Cap semantics live in pure enforcer modules (builtin allow-all fallback). Budgets and the ledger/settlement pipeline are removed from v0.5; see `roadmap/vX-future/p4-budgets.md` for the preserved budget design.
 
-Remaining work is now focused on: removing budget fields and ledger/settle code, tightening cap decision journaling, spec updates, and tests/host-level replay coverage.
+Remaining work is now focused on: tightening cap decision journaling, host-level replay coverage, and optional ergonomics (plan-level cap slots, grant hash).
 
 ---
 
 ## Direction Change (v0.5): Caps Without Budgets
 We are explicitly removing budgets from v0.5. Caps become constraints-only authority handles with optional expiry, and enforcers become pure constraint checkers. The kernel no longer owns a cap ledger or settlement pipeline.
 
-**Required changes to make this real:**
-1) Remove `budget` from `CapGrant` in AIR schema + Rust types.
-2) Remove the cap ledger, reservations, and settlement logic from the kernel.
-3) Simplify the cap enforcer ABI: drop `reserve_estimate` and remove `CapSettleInput/Output`.
-4) Remove reserve/usage fields from cap decision journals and snapshots.
-5) Update tests/examples/docs to remove budget language.
-6) Preserve budget design in `roadmap/vX-future/p4-budgets.md`.
+**Required changes to make this real (DONE):**
+1) ✅ Remove `budget` from `CapGrant` in AIR schema + Rust types.
+2) ✅ Remove the cap ledger, reservations, and settlement logic from the kernel.
+3) ✅ Simplify the cap enforcer ABI: drop `reserve_estimate` and remove `CapSettleInput/Output`.
+4) ✅ Remove reserve/usage fields from cap decision journals and snapshots.
+5) ✅ Update tests/examples/docs to remove budget language.
+6) ✅ Preserve budget design in `roadmap/vX-future/p4-budgets.md`.
 
 **Authoring/runtime alignment (make “grant is the boundary” enforceable):**
 - Normalize all cap references at load into a resolved grant handle (grant_name -> grant_hash -> defcap + params_cbor + expiry + cap_type).
@@ -195,25 +195,25 @@ Relevant code:
 
 ## Gap Status (Constraints-Only)
 
-1) **Remove budgeted-cap machinery**
+1) ✅ **Remove budgeted-cap machinery**
    - Remove the ledger/reservation/settle path in the kernel.
    - Remove budget fields from AIR schemas and Rust types.
    - Remove reserve/usage from cap decision records and snapshots.
 
-2) **Simplify cap enforcer ABI**
+2) ✅ **Simplify cap enforcer ABI**
    - Drop `reserve_estimate` and remove the `CapSettle*` schemas.
    - Keep a constraints-only `CapCheckOutput`.
 
-3) **Policy decision journaling**
+3) ⏳ **Policy decision journaling**
    - Journal allow/deny decisions for replay/audit.
 
-4) **Host-level replay coverage**
+4) ⏳ **Host-level replay coverage**
    - Expand integration tests that replay cap decisions across journal/snapshot boundaries.
 
-5) **Plan-level cap slots**
+5) ⏳ **Plan-level cap slots**
    - Allow plans to use slots that are bound to grants via `manifest.plan_bindings`.
 
-6) **Stable grant hash in journals**
+6) ⏳ **Stable grant hash in journals**
    - Compute + record a `grant_hash` alongside cap decisions.
 
 ---
