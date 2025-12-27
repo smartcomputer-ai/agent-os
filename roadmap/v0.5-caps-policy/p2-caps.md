@@ -3,7 +3,7 @@
 ## TL;DR
 Caps are enforced in the kernel at enqueue time (grant exists, cap type matches effect kind, reducer slot binding exists). Cap params and expiry are enforced and decisions are journaled. Cap semantics live in pure enforcer modules (builtin allow-all fallback). Budgets and the ledger/settlement pipeline are removed from v0.5; see `roadmap/vX-future/p4-budgets.md` for the preserved budget design.
 
-Remaining work is now focused on: tightening cap decision journaling, host-level replay coverage, and optional ergonomics (plan-level cap slots, grant hash).
+Remaining work is now focused on: normalizing cap references into resolved grant handles at load time, plus optional ergonomics (plan-level cap slots if we still want them).
 
 ---
 
@@ -20,7 +20,7 @@ We are explicitly removing budgets from v0.5. Caps become constraints-only autho
 
 **Authoring/runtime alignment (make “grant is the boundary” enforceable):**
 - Normalize all cap references at load into a resolved grant handle (grant_name -> grant_hash -> defcap + params_cbor + expiry + cap_type).
-- Standardize cap error taxonomy (missing grant / cap_type mismatch / schema mismatch / expired) so journals and tooling can classify failures deterministically.
+- ✅ Standardize cap error taxonomy (missing grant / cap_type mismatch / schema mismatch / expired) so journals and tooling can classify failures deterministically.
 
 ---
 

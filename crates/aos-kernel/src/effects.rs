@@ -181,7 +181,6 @@ impl EffectManager {
             &source,
             self.logical_now_ns,
         ) {
-            let message = reason.message.clone();
             self.record_cap_deny(
                 intent.intent_hash,
                 runtime_kind.as_str(),
@@ -190,16 +189,20 @@ impl EffectManager {
                 grant_hash,
                 enforcer_module.as_str(),
                 grant.expiry_ns,
-                reason,
+                reason.clone(),
             );
             return Err(KernelError::CapabilityDenied {
                 cap: cap_name.to_string(),
                 effect_kind: runtime_kind.as_str().to_string(),
-                reason: message,
+                reason,
             });
         }
         if let Some(expiry_ns) = grant.expiry_ns {
             if self.logical_now_ns >= expiry_ns {
+                let reason = CapDenyReason {
+                    code: "expired".into(),
+                    message: format!("grant expired at {expiry_ns}"),
+                };
                 self.record_cap_deny(
                     intent.intent_hash,
                     runtime_kind.as_str(),
@@ -208,15 +211,12 @@ impl EffectManager {
                     grant_hash,
                     enforcer_module.as_str(),
                     grant.expiry_ns,
-                    CapDenyReason {
-                        code: "expired".into(),
-                        message: format!("grant expired at {expiry_ns}"),
-                    },
+                    reason.clone(),
                 );
                 return Err(KernelError::CapabilityDenied {
                     cap: cap_name.to_string(),
                     effect_kind: runtime_kind.as_str().to_string(),
-                    reason: "cap grant expired".into(),
+                    reason,
                 });
             }
         }
@@ -225,7 +225,7 @@ impl EffectManager {
         }
         let policy_detail = self.policy_gate.decide(&intent, &grant, &source)?;
         let policy_decision = policy_detail.decision;
-        self.record_policy_decision(intent.intent_hash, policy_detail);
+        self.record_policy_decision(intent.intent_hash, &policy_detail);
         match policy_decision {
             aos_effects::traits::PolicyDecision::Allow => {
                 self.record_cap_allow(
@@ -243,6 +243,8 @@ impl EffectManager {
             aos_effects::traits::PolicyDecision::Deny => Err(KernelError::PolicyDenied {
                 effect_kind: runtime_kind.as_str().to_string(),
                 origin: format_effect_origin(&source),
+                policy_name: policy_detail.policy_name,
+                rule_index: policy_detail.rule_index,
             }),
         }
     }
@@ -343,7 +345,7 @@ impl EffectManager {
     fn record_policy_decision(
         &mut self,
         intent_hash: [u8; 32],
-        detail: PolicyDecisionDetail,
+        detail: &PolicyDecisionDetail,
     ) {
         let outcome = match detail.decision {
             aos_effects::traits::PolicyDecision::Allow => PolicyDecisionOutcome::Allow,
@@ -351,7 +353,7 @@ impl EffectManager {
         };
         self.policy_decisions.push(PolicyDecisionRecord {
             intent_hash,
-            policy_name: detail.policy_name,
+            policy_name: detail.policy_name.clone(),
             rule_index: detail.rule_index,
             decision: outcome,
         });

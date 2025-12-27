@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::journal::CapDenyReason;
+
 #[derive(Debug, Error)]
 pub enum KernelError {
     #[error("store error: {0}")]
@@ -47,8 +49,15 @@ pub enum KernelError {
     PlanCapabilityMissing { plan: String, cap: String },
     #[error("module '{module}' binding references missing capability '{cap}'")]
     ModuleCapabilityMissing { module: String, cap: String },
-    #[error("policy denied effect '{effect_kind}' from {origin}")]
-    PolicyDenied { effect_kind: String, origin: String },
+    #[error(
+        "policy '{policy_name}' denied effect '{effect_kind}' from {origin} (rule_index={rule_index:?})"
+    )]
+    PolicyDenied {
+        effect_kind: String,
+        origin: String,
+        policy_name: String,
+        rule_index: Option<u32>,
+    },
     #[error("capability grant '{grant}' params do not match schema for '{cap}': {reason}")]
     CapabilityParamInvalid {
         grant: String,
@@ -59,7 +68,7 @@ pub enum KernelError {
     CapabilityDenied {
         cap: String,
         effect_kind: String,
-        reason: String,
+        reason: CapDenyReason,
     },
     #[error("invalid idempotency key: {0}")]
     IdempotencyKeyInvalid(String),
@@ -97,6 +106,50 @@ pub enum KernelError {
     ManifestValidation(String),
     #[error("query error: {0}")]
     Query(String),
+}
+
+impl KernelError {
+    /// Stable error taxonomy code for diagnostics and tooling.
+    pub fn code(&self) -> &str {
+        match self {
+            KernelError::Store(_) => "store.error",
+            KernelError::Wasm(_) => "wasm.error",
+            KernelError::Manifest(_) => "manifest.error",
+            KernelError::ReducerNotFound(_) => "reducer.missing",
+            KernelError::PureNotFound(_) => "pure.missing",
+            KernelError::ReducerOutput(_) => "reducer.output_invalid",
+            KernelError::EffectManager(_) => "effect.manager",
+            KernelError::UnknownReceipt(_) => "receipt.unknown",
+            KernelError::ReceiptDecode(_) => "receipt.decode",
+            KernelError::UnsupportedReducerReceipt(_) => "receipt.reducer_unsupported",
+            KernelError::CapabilityGrantNotFound(_) => "cap.grant_missing",
+            KernelError::CapabilityDefinitionNotFound(_) => "cap.def_missing",
+            KernelError::DuplicateCapabilityGrant(_) => "cap.grant_duplicate",
+            KernelError::CapabilityEncoding(_) => "cap.params_encode",
+            KernelError::CapabilityTypeMismatch { .. } => "cap.type_mismatch",
+            KernelError::UnsupportedEffectKind(_) => "effect.kind_unsupported",
+            KernelError::CapabilityBindingMissing { .. } => "cap.binding_missing",
+            KernelError::PlanCapabilityMissing { .. } => "cap.plan_missing",
+            KernelError::ModuleCapabilityMissing { .. } => "cap.module_missing",
+            KernelError::PolicyDenied { .. } => "policy.denied",
+            KernelError::CapabilityParamInvalid { .. } => "cap.params_invalid",
+            KernelError::CapabilityDenied { reason, .. } => reason.code.as_str(),
+            KernelError::IdempotencyKeyInvalid(_) => "idempotency.invalid",
+            KernelError::Journal(_) => "journal.error",
+            KernelError::SnapshotUnavailable(_) => "snapshot.unavailable",
+            KernelError::SnapshotDecode(_) => "snapshot.decode",
+            KernelError::ProposalNotFound(_) => "governance.proposal_missing",
+            KernelError::ProposalStateInvalid { .. } => "governance.proposal_state",
+            KernelError::ProposalAlreadyApplied(_) => "governance.proposal_applied",
+            KernelError::ShadowPatchMismatch { .. } => "governance.shadow_mismatch",
+            KernelError::SecretResolverMissing => "secret.resolver_missing",
+            KernelError::SecretResolver(_) => "secret.resolver_error",
+            KernelError::SecretResolution(_) => "secret.resolve_error",
+            KernelError::SecretPolicyDenied { .. } => "secret.policy_denied",
+            KernelError::ManifestValidation(_) => "manifest.validation",
+            KernelError::Query(_) => "query.error",
+        }
+    }
 }
 
 impl From<crate::journal::JournalError> for KernelError {

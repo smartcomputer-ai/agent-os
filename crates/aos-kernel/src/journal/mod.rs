@@ -163,6 +163,12 @@ pub struct CapDenyReason {
     pub message: String,
 }
 
+impl std::fmt::Display for CapDenyReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.code, self.message)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CapDecisionRecord {
     pub intent_hash: [u8; 32],

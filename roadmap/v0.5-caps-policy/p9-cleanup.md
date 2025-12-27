@@ -1,3 +1,4 @@
 - remove "namespace" params in blob put effects. They are not used.
 - http params (explicit instead of single string)
 - consider allowing inline variant arms in event schemas (relax "variant of refs" validation), or keep current rule for named payload identity
+- make caps or enforcers optional
