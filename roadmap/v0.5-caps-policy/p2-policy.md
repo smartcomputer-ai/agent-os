@@ -1,7 +1,7 @@
-# p2-policy: Policy System (Current State + Work Remaining)
+# p2-policy: Policy System (Constraints-Only, v0.5)
 
 ## TL;DR
-Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time, but the system is minimal: no approvals, no rate limit counters, and no journaling of decisions. Policies are selected via manifest defaults and apply globally. To become governance-grade **without bloating the kernel**, policy evaluation should be an optional deterministic module (like reducers), with a built-in RulePolicy as the default.
+Policies are a kernel gate that can Allow/Deny effects at enqueue time. Decisions are journaled. Policies are selected via manifest defaults and apply globally; if no default is set, the kernel allows all. v0.5 policy scope is deliberately small: **no approvals, no counters/limits, no external policy engines**. The only remaining scope item is adding `cap_type` matching to reduce rule explosion.
 
 ---
 
@@ -10,7 +10,7 @@ Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time,
 1) **One authoritative authorizer, one deterministic transaction**
    - Kernel authorization is canonical:
      - canonicalize params -> cap check -> policy check -> journal decisions -> enqueue or deny
-   - Any mutation (counters, approvals, reservations) must be part of the same deterministic, journaled transaction.
+   - Any future mutation (approvals, counters) must be part of the same deterministic, journaled transaction.
 
 2) **Caps and policy stay orthogonal in shape**
    - Caps answer: "can ever".
@@ -18,8 +18,8 @@ Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time,
    - The kernel composes them in fixed order: cap -> policy.
 
 3) **Every decision is explainable and replayable**
-   - Allow/deny/require-approval outcomes must be derivable from the journal.
-   - Journal the matched rule index and rationale.
+   - Allow/deny outcomes must be derivable from the journal.
+   - Journal the matched rule index.
 
 ---
 
@@ -27,13 +27,13 @@ Policies are wired as a kernel gate that can Allow/Deny effects at enqueue time,
 Policies are **dynamic, governance-controlled gates** that decide whether an otherwise-capable effect should be allowed _right now_. They are orthogonal to caps:
 
 - **Caps**: static authority and constraints.
-- **Policies**: dynamic allow/deny/approval and counters.
+- **Policies**: dynamic allow/deny.
 
 Policies are the natural home for:
 - allow/deny by origin (plan/reducer), plan name, cap name, effect kind
-- rate limits and counters
-- approval workflows
 - auditability of governance decisions
+
+For v0.5, policy is constraints-only: allow/deny only, no approvals, no counters.
 
 ---
 
@@ -64,7 +64,14 @@ Relevant code:
 Relevant code:
 - `crates/aos-kernel/src/world.rs`
 
-### 4) Tests exist for allow/deny paths
+### 4) Policy decisions are journaled
+- Each decision records `{intent_hash, policy_name, rule_index, decision}`.
+
+Relevant code:
+- `crates/aos-kernel/src/effects.rs`
+- `crates/aos-kernel/src/journal/mod.rs`
+
+### 5) Tests exist for allow/deny paths
 - Integration tests cover reducer/plan allow/deny cases.
 
 Relevant code:
@@ -74,57 +81,20 @@ Relevant code:
 
 ## What Is Not Implemented (Gaps)
 
-1) **No approval outcome (RequireApproval)**
-   - Policies can only Allow or Deny.
-
-2) **No policy decision journaling**
-   - A `PolicyDecision` record exists but is never written.
-
-3) **No rate limit counters**
-   - No deterministic counters or rate-limit mechanism.
-
-4) **No per-plan policy override**
+1) **No per-plan policy override**
    - Only a global default policy exists.
 
-5) **Policy context is minimal**
+2) **Policy context is minimal**
    - The gate sees only intent + origin; no deterministic time, plan_id, manifest hash, or correlation.
 
-6) **Denial is fatal by default**
+3) **Denial is fatal by default**
    - Deny results in enqueue failure rather than a controlled plan-level outcome.
-
----
-
-## Governance-Grade Semantics (Target Behavior)
-
-### 1) Journal every policy decision
-For each attempted emission, record a policy decision with:
-- `intent_hash`
-- `policy_name`
-- matched rule index (or "default")
-- decision (allow/deny/require_approval)
-- rationale / error details
-
-This makes decisions explainable without re-running logic.
-
-### 2) RequireApproval as a third outcome (with suspension)
-Diamond semantics for RequireApproval:
-
-- `emit_effect` does **not** fail the plan.
-- The plan step transitions to a **blocked** state.
-- The kernel journals an `ApprovalRequested` record keyed by a stable id (often `intent_hash`).
-- An approval event/receipt arrives, is journaled, and unblocks the step.
-- Only then does the kernel enqueue the effect (or deny definitively).
-
-### 3) Rate limits and counters via a deterministic ledger
-Policies should declare counters and use shared deterministic ledger infrastructure:
-
-- Policy counters: token buckets or windows, replenished via deterministic time/epoch.
 
 ---
 
 ## Deterministic Policy Context (Safe Inputs)
 
-Expand the policy context only with deterministic values, e.g.:
+v0.5 keeps the context minimal (origin + effect + cap). If we expand it later, only add deterministic values such as:
 
 - `origin_kind`, `origin_name`
 - `plan_id`, `step_id`
@@ -137,30 +107,13 @@ Avoid wallclock or mutable host state inside the policy gate.
 
 ---
 
-## Optional Ergonomic Upgrade: Denial as a Synthetic Receipt
-
-Instead of making denial a hard error, treat denial/approval-required as synthetic receipts:
-
-- `emit_effect` returns a receipt-like record `{status: denied | approval_required | ok | error}`
-- `await_receipt` consumes the result and drives plan branching
-
-This keeps governance outcomes explicit and makes flows resilient without weakening security.
-
----
-
 ## Minimal "Working Policy System" Requirements
 
 1) **Policy decision journaling**
-   - Always record allow/deny/approval-required decisions.
+   - Always record allow/deny decisions.
 
-2) **RequireApproval outcome**
-   - Suspend the plan step; unblock only after approval event/receipt.
-
-3) **Rate limits**
-   - Deterministic counters with clear replenishment semantics.
-
-4) **Deterministic context**
-   - Provide logical time/sequence and stable identifiers.
+2) **Minimal deterministic context**
+   - Keep context to origin + effect + cap unless new policy features require more.
 
 ---
 
@@ -168,60 +121,6 @@ This keeps governance outcomes explicit and makes flows resilient without weaken
 
 1) **Plan allowlist**
    - Policy allows only a named plan for `http.request`.
-
-2) **Rate limit**
-   - Policy allows N HTTP requests per logical window per plan.
-
-3) **Approval-gated effect**
-   - `payment.charge` requires approval; plan blocks then resumes on approval.
-
----
-
-## Proposed Direction: Policy Engines as Deterministic Modules
-
-### Extend `defmodule` with a pure kind
-Add a deterministic module kind for pure functions:
-
-- `module_kind: "pure"`
-- ABI: `run(input_bytes) -> output_bytes` using canonical CBOR in/out (schema-pinned).
-
-This is the shared substrate for cap enforcers and policy engines.
-
-### Make `defpolicy` optionally carry an engine
-Allow `defpolicy` to select its evaluator:
-
-```json
-{
-  "$kind": "defpolicy",
-  "name": "com/acme/policy@2",
-  "engine": { "module": "com/acme/PolicyEngine@1" },
-  "rules": [ ... ]
-}
-```
-
-- If `engine` is missing: use the built-in RulePolicy interpreter (today’s behavior).
-- If `engine` is present: call the policy engine module (deterministic, pinned).
-
-This avoids kernel growth as policies become richer (approvals, counters, param-aware decisions).
-
-### Policy Engine ABI (Proposed)
-
-```cbor
-PolicyDecision = "allow" | "deny" | { "require_approval": { request_id, reason } }
-```
-
-The engine returns a decision plus deterministic counter deltas. The kernel applies deltas and journals the decision.
-
----
-
-### Authorizer Pipeline (Constraints-Only Caps)
-1) Canonicalize effect params.
-2) Run cap enforcer module -> returns `{ ok?, explain }`.
-3) Kernel checks expiry.
-4) Run policy engine (rules or module) -> returns `{ allow/deny/require_approval, counter_deltas, explain }`.
-5) Kernel applies counter deltas, journals decisions, then enqueues or blocks.
-
----
 
 ## Where Policy Logic Should Live
 
@@ -231,36 +130,22 @@ Policies must be enforced **in the kernel** (authoritative, deterministic, journ
 
 ## Build Order (Minimal to Meaningful)
 
-1) Journal allow/deny policy decisions
-2) Add RequireApproval + plan suspension model
-3) Add deterministic counters / rate limits
-4) Expand deterministic policy context
-5) Optional: denial as synthetic receipts for better ergonomics
+1) Add `cap_type` matching to policy rules
+2) Keep policy context minimal until approvals/limits exist
 
 ---
 
-## Required Spec/Schema Updates (Documented Only)
+## Required Spec/Schema Updates (Scope-Only)
 
-The following changes are required to make the design enforceable in AIR, but are **not** made in this doc set:
-
-1) **defpolicy**: add optional `engine` module reference (pure module).
-2) **Policy decisions**: extend to `allow | deny | require_approval` and document stable approval request IDs (default: `intent_hash`).
-3) **Built-in schemas**: add `sys/PolicyEvalInput@1` and `sys/PolicyEvalOutput@1` with deterministic context fields (`journal_height`, `logical_now_ns`, origin info, cap identifiers).
-4) **Journal records**: define a canonical policy decision record with evaluator identity, matched rule index, decision, explain codes, and counter delta hash.
-5) **Approval records**: define a canonical approval request/decision record and require an authenticated approval ingress path (control-plane or approval adapter).
-6) **Rule matching**: consider adding optional `cap_type` match for `RulePolicy` to reduce rule explosion.
+1) **defpolicy**: add optional `cap_type` match field.
+2) **Rule matching**: implement `cap_type` match in RulePolicy.
 
 ---
 
 ## Summary of Required Work
 
-1) Journal policy decisions with rationale and rule index.
-2) Implement RequireApproval with a blocked-step model.
-3) Implement deterministic counters / rate limits.
-4) Expand deterministic policy context.
-5) Add tests/fixtures for the minimal use-cases.
-
-Once these exist, policies become governance-grade and auditable rather than a simple filter.
+1) Add `cap_type` match to `defpolicy` rules.
+2) Add/adjust tests for `cap_type` matching as needed.
 
 ---
 
@@ -270,4 +155,4 @@ Once these exist, policies become governance-grade and auditable rather than a s
 Yes. Caps constrain **delegated authority** (“can ever”). Policy is a **governance gate** (“should now”). Collapsing them would reintroduce cap semantics inside policy and weaken least-privilege reasoning.
 
 ### What about performance?
-Policy engines are deterministic pure modules, so they can be lightweight. The incremental cost is tiny compared to canonicalization/journaling and any real external I/O. Optimize later if profiling shows hot paths.
+Rule matching is fast (a few string compares). The incremental cost is tiny compared to canonicalization/journaling and any real external I/O. Optimize later if profiling shows hot paths.
