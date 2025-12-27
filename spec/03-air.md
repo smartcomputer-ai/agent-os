@@ -451,7 +451,7 @@ Policies define ordered rules that allow or deny effects based on their characte
 
 Policy matching works over open strings: custom effect kinds are allowed as long as the runtime has a catalog entry mapping that kind to a capability type and schemas. Unknown effect kinds (not in the built-in catalog or a registered adapter catalog) are rejected during validation/dispatch before policy evaluation.
 
-Decisions are journaled: `PolicyDecisionRecorded { intent_hash, policy_name, rule_index, decision }` and `CapDecisionRecorded { intent_hash, effect_kind, cap_name, cap_type, grant_hash, enforcer_module, decision, deny?, expiry_ns?, logical_now_ns }`.
+Decisions are journaled as `policy_decision { intent_hash, policy_name, rule_index, decision }` and `cap_decision { intent_hash, effect_kind, cap_name, cap_type, grant_hash, enforcer_module, decision, deny?, expiry_ns?, logical_now_ns }`.
 
 ### Recommended Default Policy
 
@@ -690,8 +690,8 @@ Runtime journal entries are canonical CBOR enums; the important ones for AIR pla
 - **DomainEvent** `{ schema, value, key? }` – emitted by reducers or plan raise_event; replay feeds reducers and triggers.
 - **EffectIntent** `{ intent_hash, kind, cap_name, params_cbor, idempotency_key, origin }` – queued effects from reducers and plans.
 - **EffectReceipt** `{ intent_hash, adapter_id, status, payload_cbor, cost_cents?, signature }` – adapters’ signed receipts; replay reproduces plan/resume behavior.
-- **CapDecision** `{ intent_hash, effect_kind, cap_name, cap_type, grant_hash, enforcer_module, decision, deny?, expiry_ns?, logical_now_ns }` – capability checks recorded at enqueue time for audit/replay explainability.
-- **PolicyDecision** `{ intent_hash, policy_name, rule_index?, decision }` – policy allow/deny decision recorded at enqueue time.
+- **cap_decision** `{ intent_hash, effect_kind, cap_name, cap_type, grant_hash, enforcer_module, decision, deny?, expiry_ns?, logical_now_ns }` – capability checks recorded at enqueue time for audit/replay explainability.
+- **policy_decision** `{ intent_hash, policy_name, rule_index?, decision }` – policy allow/deny decision recorded at enqueue time.
 - **PlanResult** `{ plan_name, plan_id, output_schema, value_cbor }` – appended when an `end` step returns a value; shadow/governance tooling can surface outputs directly from the journal without re-running expressions.
 - **Snapshot** `{ snapshot_ref, height }` – pointer to CAS snapshot blob; enables fast replay.
 - **Governance** – proposal/shadow/approve/apply records (design-time control plane).
