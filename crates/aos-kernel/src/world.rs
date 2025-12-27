@@ -6,7 +6,7 @@ use std::sync::Arc;
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name, NamedRef,
-    SecretDecl, SecretEntry, TypeExpr, builtins,
+    PlanStepKind, SecretDecl, SecretEntry, TypeExpr, builtins,
     catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
@@ -23,7 +23,7 @@ use serde_cbor;
 use serde_cbor::Value as CborValue;
 
 use crate::cap_enforcer::{CapEnforcerInvoker, PureCapEnforcer};
-use crate::capability::CapabilityResolver;
+use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::cell_index::{CellIndex, CellMeta};
 use crate::effects::EffectManager;
 use crate::error::KernelError;
@@ -100,6 +100,8 @@ pub struct Kernel<S: Store> {
     plan_registry: PlanRegistry,
     schema_index: Arc<SchemaIndex>,
     reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
+    plan_cap_handles: HashMap<Name, Arc<HashMap<String, CapGrantResolution>>>,
+    module_cap_bindings: HashMap<Name, HashMap<String, CapGrantResolution>>,
     plan_instances: HashMap<u64, PlanInstance>,
     plan_triggers: HashMap<String, Vec<PlanTriggerBinding>>,
     waiting_events: HashMap<String, Vec<u64>>,
@@ -469,8 +471,9 @@ impl<S: Store + 'static> Kernel<S> {
             schema_index.as_ref(),
             effect_catalog.clone(),
         )?;
-        ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
-        ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
+        let plan_cap_handles = resolve_plan_cap_handles(&loaded.plans, &capability_resolver)?;
+        let module_cap_bindings =
+            resolve_module_cap_bindings(&loaded.manifest, &capability_resolver)?;
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
             .defaults
@@ -521,6 +524,8 @@ impl<S: Store + 'static> Kernel<S> {
             schema_defs,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
+            plan_cap_handles,
+            module_cap_bindings,
             reducers: ReducerRegistry::new(store.clone(), config.module_cache_dir.clone())?,
             pures,
             router,
@@ -944,20 +949,18 @@ impl<S: Store + 'static> Kernel<S> {
         }
         for effect in &output.effects {
             let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
-            let cap_name = self
-                .manifest
-                .module_bindings
+            let grant = self
+                .module_cap_bindings
                 .get(&reducer_name)
-                .and_then(|binding| binding.slots.get(&slot))
+                .and_then(|binding| binding.get(&slot))
                 .ok_or_else(|| KernelError::CapabilityBindingMissing {
                     reducer: reducer_name.clone(),
                     slot: slot.clone(),
-                })?
-                .clone();
+                })?;
             let intent =
                 match self
                     .effect_manager
-                    .enqueue_reducer_effect(&reducer_name, &cap_name, effect)
+                    .enqueue_reducer_effect_with_grant(&reducer_name, grant, effect)
                 {
                     Ok(intent) => intent,
                     Err(err) => {
@@ -1248,8 +1251,22 @@ impl<S: Store + 'static> Kernel<S> {
                     ))
                 })?
                 .clone();
-            let instance =
-                PlanInstance::from_snapshot(inst_snapshot, plan, self.schema_index.clone());
+            let cap_handles = self
+                .plan_cap_handles
+                .get(&inst_snapshot.name)
+                .ok_or_else(|| {
+                    KernelError::SnapshotUnavailable(format!(
+                        "plan '{}' missing cap bindings while applying snapshot",
+                        inst_snapshot.name
+                    ))
+                })?
+                .clone();
+            let instance = PlanInstance::from_snapshot(
+                inst_snapshot,
+                plan,
+                self.schema_index.clone(),
+                cap_handles,
+            );
             self.plan_instances.insert(instance.id, instance);
         }
 
@@ -1894,6 +1911,9 @@ impl<S: Store + 'static> Kernel<S> {
             schema_index.as_ref(),
             effect_catalog.clone(),
         )?;
+        let plan_cap_handles = resolve_plan_cap_handles(&loaded.plans, &capability_resolver)?;
+        let module_cap_bindings =
+            resolve_module_cap_bindings(&loaded.manifest, &capability_resolver)?;
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
             .defaults
@@ -1970,6 +1990,8 @@ impl<S: Store + 'static> Kernel<S> {
             secret_catalog,
             self.secret_resolver.clone(),
         );
+        self.plan_cap_handles = plan_cap_handles;
+        self.module_cap_bindings = module_cap_bindings;
         Ok(())
     }
 
@@ -2037,12 +2059,23 @@ impl<S: Store + 'static> Kernel<S> {
                     let correlation =
                         determine_correlation_value(binding, &input, event.key.as_ref());
                     let instance_id = self.scheduler.alloc_plan_id();
+                    let cap_handles = self
+                        .plan_cap_handles
+                        .get(&plan_def.name)
+                        .ok_or_else(|| {
+                            KernelError::Manifest(format!(
+                                "plan '{}' missing cap bindings",
+                                plan_def.name
+                            ))
+                        })?
+                        .clone();
                     let instance = PlanInstance::new(
                         instance_id,
                         plan_def.clone(),
                         input,
                         self.schema_index.clone(),
                         correlation,
+                        cap_handles,
                     );
                     self.plan_instances.insert(instance_id, instance);
                     self.scheduler.push_plan(instance_id);
@@ -3566,10 +3599,11 @@ fn wrap_for_event_schema(
     }
 }
 
-fn ensure_plan_capabilities(
-    plans: &HashMap<Name, aos_air_types::DefPlan>,
+fn resolve_plan_cap_handles(
+    plans: &HashMap<Name, DefPlan>,
     resolver: &CapabilityResolver,
-) -> Result<(), KernelError> {
+) -> Result<HashMap<Name, Arc<HashMap<String, CapGrantResolution>>>, KernelError> {
+    let mut plan_caps = HashMap::new();
     for plan in plans.values() {
         for cap in &plan.required_caps {
             if !resolver.has_grant(cap) {
@@ -3579,25 +3613,38 @@ fn ensure_plan_capabilities(
                 });
             }
         }
+        let mut step_caps = HashMap::new();
+        for step in &plan.steps {
+            if let PlanStepKind::EmitEffect(emit) = &step.kind {
+                let resolved = resolver.resolve(emit.cap.as_str(), emit.kind.as_str())?;
+                step_caps.insert(step.id.clone(), resolved);
+            }
+        }
+        plan_caps.insert(plan.name.clone(), Arc::new(step_caps));
     }
-    Ok(())
+    Ok(plan_caps)
 }
 
-fn ensure_module_capabilities(
+fn resolve_module_cap_bindings(
     manifest: &Manifest,
     resolver: &CapabilityResolver,
-) -> Result<(), KernelError> {
+) -> Result<HashMap<Name, HashMap<String, CapGrantResolution>>, KernelError> {
+    let mut bindings = HashMap::new();
     for (module, binding) in &manifest.module_bindings {
-        for (_slot, cap) in &binding.slots {
+        let mut slot_map = HashMap::new();
+        for (slot, cap) in &binding.slots {
             if !resolver.has_grant(cap) {
                 return Err(KernelError::ModuleCapabilityMissing {
                     module: module.clone(),
                     cap: cap.clone(),
                 });
             }
+            let resolved = resolver.resolve_grant(cap)?;
+            slot_map.insert(slot.clone(), resolved);
         }
+        bindings.insert(module.clone(), slot_map);
     }
-    Ok(())
+    Ok(bindings)
 }
 
 fn persist_loaded_manifest<S: Store>(

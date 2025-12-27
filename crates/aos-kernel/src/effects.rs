@@ -11,7 +11,8 @@ use url::Url;
 
 use crate::cap_enforcer::{CapCheckInput, CapEffectOrigin, CapEnforcerInvoker};
 use crate::capability::{
-    CAP_ALLOW_ALL_ENFORCER, CAP_HTTP_ENFORCER, CAP_LLM_ENFORCER, CapabilityResolver,
+    CAP_ALLOW_ALL_ENFORCER, CAP_HTTP_ENFORCER, CAP_LLM_ENFORCER, CapGrantResolution,
+    CapabilityResolver,
 };
 use crate::error::KernelError;
 use crate::journal::{
@@ -105,6 +106,26 @@ impl EffectManager {
         )
     }
 
+    pub fn enqueue_reducer_effect_with_grant(
+        &mut self,
+        reducer_name: &str,
+        grant: &CapGrantResolution,
+        effect: &ReducerEffect,
+    ) -> Result<EffectIntent, KernelError> {
+        let source = EffectSource::Reducer {
+            name: reducer_name.to_string(),
+        };
+        let runtime_kind = EffectKind::new(effect.kind.clone());
+        let idempotency_key = normalize_idempotency_key(effect.idempotency_key.as_deref())?;
+        self.enqueue_effect_with_grant(
+            source,
+            runtime_kind,
+            effect.params_cbor.clone(),
+            idempotency_key,
+            grant,
+        )
+    }
+
     pub fn queued(&self) -> &[EffectIntent] {
         self.queue.as_slice()
     }
@@ -124,6 +145,21 @@ impl EffectManager {
         self.enqueue_effect(source, cap_name, runtime_kind, params_cbor, idempotency_key)
     }
 
+    pub fn enqueue_plan_effect_with_grant(
+        &mut self,
+        plan_name: &str,
+        kind: &EffectKind,
+        grant: &CapGrantResolution,
+        params_cbor: Vec<u8>,
+        idempotency_key: [u8; 32],
+    ) -> Result<EffectIntent, KernelError> {
+        let source = EffectSource::Plan {
+            name: plan_name.to_string(),
+        };
+        let runtime_kind = kind.clone();
+        self.enqueue_effect_with_grant(source, runtime_kind, params_cbor, idempotency_key, grant)
+    }
+
     fn enqueue_effect(
         &mut self,
         source: EffectSource,
@@ -131,6 +167,26 @@ impl EffectManager {
         runtime_kind: EffectKind,
         params_cbor: Vec<u8>,
         idempotency_key: [u8; 32],
+    ) -> Result<EffectIntent, KernelError> {
+        let resolved = self
+            .capability_gate
+            .resolve(cap_name, runtime_kind.as_str())?;
+        self.enqueue_effect_with_grant(
+            source,
+            runtime_kind,
+            params_cbor,
+            idempotency_key,
+            &resolved,
+        )
+    }
+
+    fn enqueue_effect_with_grant(
+        &mut self,
+        source: EffectSource,
+        runtime_kind: EffectKind,
+        params_cbor: Vec<u8>,
+        idempotency_key: [u8; 32],
+        resolved: &CapGrantResolution,
     ) -> Result<EffectIntent, KernelError> {
         if let EffectSource::Reducer { .. } = &source {
             let scope = self
@@ -153,29 +209,33 @@ impl EffectManager {
         .map_err(|err| KernelError::EffectManager(err.to_string()))?;
         let canonical_params = normalize_secret_variants(&canonical_params)
             .map_err(|err| KernelError::SecretResolution(err.to_string()))?;
-        let resolved = self
-            .capability_gate
-            .resolve(cap_name, runtime_kind.as_str())?;
-        let grant = resolved.grant;
-        let enforcer_module = resolved.enforcer.module;
+        let grant = &resolved.grant;
+        let enforcer_module = resolved.enforcer.module.as_str();
         let grant_hash = resolved.grant_hash;
         let intent = EffectIntent::from_raw_params(
             runtime_kind.clone(),
-            cap_name.to_string(),
+            grant.name.clone(),
             canonical_params.clone(),
             idempotency_key,
         )
         .map_err(|err| KernelError::EffectManager(err.to_string()))?;
-        let cap_type = self
+        let expected_cap_type = self
             .effect_catalog
             .cap_type(&runtime_kind)
-            .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?
-            .as_str()
-            .to_string();
+            .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?;
+        if &resolved.cap_type != expected_cap_type {
+            return Err(KernelError::CapabilityTypeMismatch {
+                grant: grant.name.clone(),
+                effect_kind: runtime_kind.as_str().to_string(),
+                expected: expected_cap_type.as_str().to_string(),
+                found: resolved.cap_type.as_str().to_string(),
+            });
+        }
+        let cap_type = expected_cap_type.as_str().to_string();
         if let Err(reason) = cap_constraints_only(
-            enforcer_module.as_str(),
+            enforcer_module,
             &runtime_kind,
-            &grant,
+            grant,
             &canonical_params,
             self.enforcer_invoker.as_ref(),
             &source,
@@ -184,15 +244,15 @@ impl EffectManager {
             self.record_cap_deny(
                 intent.intent_hash,
                 runtime_kind.as_str(),
-                cap_name,
+                grant.name.as_str(),
                 &cap_type,
                 grant_hash,
-                enforcer_module.as_str(),
+                enforcer_module,
                 grant.expiry_ns,
                 reason.clone(),
             );
             return Err(KernelError::CapabilityDenied {
-                cap: cap_name.to_string(),
+                cap: grant.name.clone(),
                 effect_kind: runtime_kind.as_str().to_string(),
                 reason,
             });
@@ -206,22 +266,27 @@ impl EffectManager {
                 self.record_cap_deny(
                     intent.intent_hash,
                     runtime_kind.as_str(),
-                    cap_name,
+                    grant.name.as_str(),
                     &cap_type,
                     grant_hash,
-                    enforcer_module.as_str(),
+                    enforcer_module,
                     grant.expiry_ns,
                     reason.clone(),
                 );
                 return Err(KernelError::CapabilityDenied {
-                    cap: cap_name.to_string(),
+                    cap: grant.name.clone(),
                     effect_kind: runtime_kind.as_str().to_string(),
                     reason,
                 });
             }
         }
         if let Some(catalog) = &self.secret_catalog {
-            crate::secret::enforce_secret_policy(&canonical_params, catalog, &source, cap_name)?;
+            crate::secret::enforce_secret_policy(
+                &canonical_params,
+                catalog,
+                &source,
+                grant.name.as_str(),
+            )?;
         }
         let policy_detail = self.policy_gate.decide(&intent, &grant, &source)?;
         let policy_decision = policy_detail.decision;
@@ -231,10 +296,10 @@ impl EffectManager {
                 self.record_cap_allow(
                     intent.intent_hash,
                     runtime_kind.as_str(),
-                    cap_name,
+                    grant.name.as_str(),
                     &cap_type,
                     grant_hash,
-                    enforcer_module.as_str(),
+                    enforcer_module,
                     grant.expiry_ns,
                 );
                 self.queue.push(intent.clone());

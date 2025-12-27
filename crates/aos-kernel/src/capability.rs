@@ -107,6 +107,19 @@ impl CapabilityResolver {
         })
     }
 
+    pub fn resolve_grant(&self, cap_name: &str) -> Result<CapGrantResolution, KernelError> {
+        let resolved = self
+            .grants
+            .get(cap_name)
+            .ok_or_else(|| KernelError::CapabilityGrantNotFound(cap_name.to_string()))?;
+        Ok(CapGrantResolution {
+            grant: resolved.grant.clone(),
+            cap_type: resolved.cap_type.clone(),
+            enforcer: resolved.enforcer.clone(),
+            grant_hash: resolved.grant_hash,
+        })
+    }
+
     pub fn from_manifest(
         manifest: &Manifest,
         caps: &HashMap<Name, DefCap>,

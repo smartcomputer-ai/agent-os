@@ -22,6 +22,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_cbor::{self, Value as CborValue};
 
+use crate::capability::CapGrantResolution;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::schema_value::cbor_to_expr_value;
@@ -79,6 +80,7 @@ pub struct PlanInstance {
     predecessors: HashMap<String, Vec<Dependency>>,
     step_states: HashMap<String, StepState>,
     schema_index: Arc<SchemaIndex>,
+    cap_handles: Arc<HashMap<String, CapGrantResolution>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -135,6 +137,7 @@ impl PlanInstance {
         input: ExprValue,
         schema_index: Arc<SchemaIndex>,
         correlation: Option<(Vec<u8>, ExprValue)>,
+        cap_handles: Arc<HashMap<String, CapGrantResolution>>,
     ) -> Self {
         let mut step_map = HashMap::new();
         let mut step_order = Vec::new();
@@ -184,6 +187,7 @@ impl PlanInstance {
             predecessors,
             step_states,
             schema_index,
+            cap_handles,
         }
     }
 
@@ -248,10 +252,16 @@ impl PlanInstance {
                     } else {
                         [0u8; 32]
                     };
-                    let intent = effects.enqueue_plan_effect(
+                    let grant = self.cap_handles.get(&step_id).ok_or_else(|| {
+                        KernelError::PlanCapabilityMissing {
+                            plan: self.name.clone(),
+                            cap: emit.cap.clone(),
+                        }
+                    })?;
+                    let intent = effects.enqueue_plan_effect_with_grant(
                         &self.name,
                         &emit.kind,
-                        &emit.cap,
+                        grant,
                         params_cbor,
                         idempotency_key,
                     )?;
@@ -561,6 +571,7 @@ impl PlanInstance {
         snapshot: PlanInstanceSnapshot,
         plan: DefPlan,
         schema_index: Arc<SchemaIndex>,
+        cap_handles: Arc<HashMap<String, CapGrantResolution>>,
     ) -> Self {
         let mut instance = PlanInstance::new(
             snapshot.id,
@@ -568,6 +579,7 @@ impl PlanInstance {
             snapshot.env.plan_input.clone(),
             schema_index,
             None,
+            cap_handles,
         );
         instance.env = snapshot.env;
         instance.completed = snapshot.completed;
@@ -1065,7 +1077,7 @@ fn expr_value_to_literal(value: &ExprValue) -> Result<ValueLiteral, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::CapabilityResolver;
+    use crate::capability::{CapGrantResolution, CapabilityResolver};
     use crate::policy::AllowAllPolicy;
     use aos_air_types::plan_literals::SchemaIndex;
     use aos_air_types::{
@@ -1098,7 +1110,7 @@ mod tests {
         ExprValue::Record(IndexMap::new())
     }
 
-    fn test_effect_manager() -> EffectManager {
+    fn test_capability_resolver() -> CapabilityResolver {
         let cap_params =
             aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new())).expect("cap params");
         let grants = vec![
@@ -1121,7 +1133,11 @@ mod tests {
                 CapType::http_out(),
             ),
         ];
-        let resolver = CapabilityResolver::from_runtime_grants(grants).expect("grant resolver");
+        CapabilityResolver::from_runtime_grants(grants).expect("grant resolver")
+    }
+
+    fn test_effect_manager() -> EffectManager {
+        let resolver = test_capability_resolver();
         let effect_catalog = Arc::new(EffectCatalog::from_defs(
             aos_air_types::builtins::builtin_effects()
                 .iter()
@@ -1136,6 +1152,20 @@ mod tests {
             None,
             None,
         )
+    }
+
+    fn test_cap_handles(plan: &DefPlan) -> Arc<HashMap<String, CapGrantResolution>> {
+        let resolver = test_capability_resolver();
+        let mut handles = HashMap::new();
+        for step in &plan.steps {
+            if let PlanStepKind::EmitEffect(emit) = &step.kind {
+                let resolved = resolver
+                    .resolve(emit.cap.as_str(), emit.kind.as_str())
+                    .expect("cap handle");
+                handles.insert(step.id.clone(), resolved);
+            }
+        }
+        Arc::new(handles)
     }
 
     fn empty_schema_index() -> Arc<SchemaIndex> {
@@ -1169,7 +1199,8 @@ mod tests {
     }
 
     fn new_plan_instance(plan: DefPlan) -> PlanInstance {
-        PlanInstance::new(1, plan, default_env(), empty_schema_index(), None)
+        let cap_handles = test_cap_handles(&plan);
+        PlanInstance::new(1, plan, default_env(), empty_schema_index(), None, cap_handles)
     }
 
     fn http_params_value_literal(tag: &str) -> ValueLiteral {
@@ -1204,7 +1235,8 @@ mod tests {
     }
 
     fn plan_instance_with_schema(plan: DefPlan, schema_index: Arc<SchemaIndex>) -> PlanInstance {
-        PlanInstance::new(1, plan, default_env(), schema_index, None)
+        let cap_handles = test_cap_handles(&plan);
+        PlanInstance::new(1, plan, default_env(), schema_index, None, cap_handles)
     }
 
     /// Assign steps should synchronously write to the plan environment.
@@ -1504,7 +1536,7 @@ mod tests {
                 int: EmptyObject {},
             })),
         );
-        let mut plan = PlanInstance::new(1, base_plan(steps), default_env(), schema_index, None);
+        let mut plan = plan_instance_with_schema(base_plan(steps), schema_index);
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
@@ -1557,12 +1589,9 @@ mod tests {
                 .into(),
             }),
         }];
-        let mut plan = PlanInstance::new(
-            1,
+        let mut plan = plan_instance_with_schema(
             base_plan(steps),
-            default_env(),
             schema_index_with_event("com.test/Evt@1", event_schema),
-            None,
         );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
@@ -1591,12 +1620,9 @@ mod tests {
                 value: literal_event.into(),
             }),
         }];
-        let mut plan = PlanInstance::new(
-            1,
+        let mut plan = plan_instance_with_schema(
             base_plan(steps),
-            default_env(),
             schema_index_with_event("com.test/Literal@1", event_schema),
-            None,
         );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
@@ -1693,7 +1719,7 @@ mod tests {
             )]),
         });
         let schema_index = schema_index_with_event("com.test/Evt@1", event_schema);
-        let mut instance = PlanInstance::new(1, plan, default_env(), schema_index, None);
+        let mut instance = plan_instance_with_schema(plan, schema_index);
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
@@ -1741,12 +1767,14 @@ mod tests {
 
         let plan = base_plan(steps);
         let correlation_value = ExprValue::Text("corr".into());
+        let cap_handles = test_cap_handles(&plan);
         let mut instance = PlanInstance::new(
             1,
             plan,
             default_env(),
             empty_schema_index(),
             Some((b"corr".to_vec(), correlation_value)),
+            cap_handles,
         );
         let mut effects = test_effect_manager();
         let err = instance.tick(&mut effects).unwrap_err();
@@ -1906,12 +1934,14 @@ mod tests {
             },
         ]);
         let schema_index = empty_schema_index();
+        let cap_handles = test_cap_handles(&plan_def);
         let mut instance = PlanInstance::new(
             1,
             plan_def.clone(),
             default_env(),
             schema_index.clone(),
             None,
+            cap_handles.clone(),
         );
         let mut effects = test_effect_manager();
         let first = instance.tick(&mut effects).unwrap();
@@ -1922,7 +1952,8 @@ mod tests {
             .expect("waiting receipt");
         let snapshot = instance.snapshot();
 
-        let mut restored = PlanInstance::from_snapshot(snapshot, plan_def, schema_index);
+        let mut restored =
+            PlanInstance::from_snapshot(snapshot, plan_def, schema_index, cap_handles);
         hash[0] ^= 0xAA;
         restored.override_pending_receipt_hash(hash);
         assert_eq!(restored.pending_receipt_hash(), Some(hash));
