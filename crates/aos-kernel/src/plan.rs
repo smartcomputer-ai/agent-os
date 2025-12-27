@@ -1121,7 +1121,7 @@ mod tests {
                 CapType::http_out(),
             ),
         ];
-        let resolver = CapabilityResolver::from_runtime_grants(grants);
+        let resolver = CapabilityResolver::from_runtime_grants(grants).expect("grant resolver");
         let effect_catalog = Arc::new(EffectCatalog::from_defs(
             aos_air_types::builtins::builtin_effects()
                 .iter()

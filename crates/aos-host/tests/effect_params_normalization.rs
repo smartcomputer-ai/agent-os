@@ -25,8 +25,11 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let grant = CapabilityGrant::builder("cap_llm", "sys/llm.basic@1", &serde_json::json!({}))
         .build()
         .expect("grant");
-    let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::llm_basic())]);
+    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
+        grant,
+        aos_air_types::CapType::llm_basic(),
+    )])
+    .expect("grant resolver");
     let mut mgr = mgr_with_cap(cap_gate);
 
     // Params variant A: valid dec128 encoded as string
@@ -72,7 +75,8 @@ fn reducer_effect_params_canonicalize_noop() {
         .build()
         .expect("grant");
     let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::timer())]);
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::timer())])
+            .expect("grant resolver");
     let mut mgr = mgr_with_cap(cap_gate);
 
     // Params with out-of-order fields (key optional) to ensure canonicalization sorts.
@@ -142,8 +146,11 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
         .build()
         .expect("grant");
-    let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::http_out())]);
+    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
+        grant,
+        aos_air_types::CapType::http_out(),
+    )])
+    .expect("grant resolver");
     let mut mgr = mgr_with_cap(cap_gate);
 
     // Sugar A: body_ref null, headers absent

@@ -213,7 +213,7 @@ Relevant code:
 5) ⏸️ **Plan-level cap slots (defer)**
    - Defer for v0.5; plans are manifest data and can reference grant names directly.
 
-6) ⏳ **Stable grant hash in journals**
+6) ✅ **Stable grant hash in journals**
    - Compute + record a `grant_hash` alongside cap decisions.
 
 ---

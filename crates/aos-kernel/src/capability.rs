@@ -5,7 +5,7 @@ use aos_air_types::{
     TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, builtins,
     catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
 };
-use aos_cbor::to_canonical_cbor;
+use aos_cbor::Hash;
 use aos_effects::CapabilityGrant;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as Base64Engine;
@@ -29,6 +29,7 @@ struct ResolvedGrant {
     grant: CapabilityGrant,
     cap_type: CapType,
     enforcer: CapEnforcer,
+    grant_hash: [u8; 32],
 }
 
 #[derive(Clone)]
@@ -36,6 +37,7 @@ pub struct CapGrantResolution {
     pub grant: CapabilityGrant,
     pub cap_type: CapType,
     pub enforcer: CapEnforcer,
+    pub grant_hash: [u8; 32],
 }
 
 pub const CAP_ALLOW_ALL_ENFORCER: &str = "sys/CapAllowAll@1";
@@ -50,7 +52,7 @@ impl CapabilityResolver {
         }
     }
 
-    pub fn from_runtime_grants<I>(grants: I) -> Self
+    pub fn from_runtime_grants<I>(grants: I) -> Result<Self, KernelError>
     where
         I: IntoIterator<Item = (CapabilityGrant, CapType)>,
     {
@@ -58,19 +60,21 @@ impl CapabilityResolver {
             .into_iter()
             .map(|(grant, cap_type)| {
                 let enforcer = default_enforcer_for_cap_type(&cap_type);
-                (
+                let grant_hash = compute_grant_hash(&grant, &cap_type)?;
+                Ok((
                     grant.name.clone(),
                     ResolvedGrant {
                         grant,
                         cap_type,
                         enforcer,
+                        grant_hash,
                     },
-                )
+                ))
             })
-            .collect();
+            .collect::<Result<HashMap<_, _>, KernelError>>()?;
         let catalog =
             EffectCatalog::from_defs(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
-        Self::new(map, Arc::new(catalog))
+        Ok(Self::new(map, Arc::new(catalog)))
     }
 
     pub fn has_grant(&self, name: &str) -> bool {
@@ -99,6 +103,7 @@ impl CapabilityResolver {
             grant: resolved.grant.clone(),
             cap_type: resolved.cap_type.clone(),
             enforcer: resolved.enforcer.clone(),
+            grant_hash: resolved.grant_hash,
         })
     }
 
@@ -145,11 +150,39 @@ fn resolve_grant(
         params_cbor,
         expiry_ns: grant.expiry_ns,
     };
+    let grant_hash = compute_grant_hash(&capability_grant, &defcap.cap_type)?;
     Ok(ResolvedGrant {
         grant: capability_grant,
         cap_type: defcap.cap_type.clone(),
         enforcer: defcap.enforcer.clone(),
+        grant_hash,
     })
+}
+
+fn compute_grant_hash(
+    grant: &CapabilityGrant,
+    cap_type: &CapType,
+) -> Result<[u8; 32], KernelError> {
+    #[derive(serde::Serialize)]
+    struct GrantHashInput<'a> {
+        defcap_ref: &'a str,
+        cap_type: &'a str,
+        #[serde(with = "serde_bytes")]
+        params_cbor: &'a [u8],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expiry_ns: Option<u64>,
+    }
+
+    let input = GrantHashInput {
+        defcap_ref: grant.cap.as_str(),
+        cap_type: cap_type.as_str(),
+        params_cbor: &grant.params_cbor,
+        expiry_ns: grant.expiry_ns,
+    };
+    let hash = Hash::of_cbor(&input).map_err(|err| {
+        KernelError::EffectManager(format!("grant hash encoding failed: {err}"))
+    })?;
+    Ok(*hash.as_bytes())
 }
 
 fn encode_value_literal(

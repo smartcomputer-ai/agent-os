@@ -158,6 +158,7 @@ impl EffectManager {
             .resolve(cap_name, runtime_kind.as_str())?;
         let grant = resolved.grant;
         let enforcer_module = resolved.enforcer.module;
+        let grant_hash = resolved.grant_hash;
         let intent = EffectIntent::from_raw_params(
             runtime_kind.clone(),
             cap_name.to_string(),
@@ -186,6 +187,7 @@ impl EffectManager {
                 runtime_kind.as_str(),
                 cap_name,
                 &cap_type,
+                grant_hash,
                 enforcer_module.as_str(),
                 grant.expiry_ns,
                 reason,
@@ -203,6 +205,7 @@ impl EffectManager {
                     runtime_kind.as_str(),
                     cap_name,
                     &cap_type,
+                    grant_hash,
                     enforcer_module.as_str(),
                     grant.expiry_ns,
                     CapDenyReason {
@@ -230,6 +233,7 @@ impl EffectManager {
                     runtime_kind.as_str(),
                     cap_name,
                     &cap_type,
+                    grant_hash,
                     enforcer_module.as_str(),
                     grant.expiry_ns,
                 );
@@ -291,6 +295,7 @@ impl EffectManager {
         effect_kind: &str,
         cap_name: &str,
         cap_type: &str,
+        grant_hash: [u8; 32],
         enforcer_module: &str,
         expiry_ns: Option<u64>,
         reason: CapDenyReason,
@@ -301,6 +306,7 @@ impl EffectManager {
             effect_kind: effect_kind.to_string(),
             cap_name: cap_name.to_string(),
             cap_type: cap_type.to_string(),
+            grant_hash,
             enforcer_module: enforcer_module.to_string(),
             decision: CapDecisionOutcome::Deny,
             deny: Some(reason),
@@ -315,6 +321,7 @@ impl EffectManager {
         effect_kind: &str,
         cap_name: &str,
         cap_type: &str,
+        grant_hash: [u8; 32],
         enforcer_module: &str,
         expiry_ns: Option<u64>,
     ) {
@@ -324,6 +331,7 @@ impl EffectManager {
             effect_kind: effect_kind.to_string(),
             cap_name: cap_name.to_string(),
             cap_type: cap_type.to_string(),
+            grant_hash,
             enforcer_module: enforcer_module.to_string(),
             decision: CapDecisionOutcome::Allow,
             deny: None,
@@ -649,7 +657,7 @@ mod tests {
     use std::sync::Arc;
 
     fn effect_manager_with_grants(grants: Vec<(CapabilityGrant, CapType)>) -> EffectManager {
-        let resolver = CapabilityResolver::from_runtime_grants(grants);
+        let resolver = CapabilityResolver::from_runtime_grants(grants).expect("grant resolver");
         let effect_catalog = Arc::new(EffectCatalog::from_defs(
             builtins::builtin_effects().iter().map(|b| b.effect.clone()),
         ));
