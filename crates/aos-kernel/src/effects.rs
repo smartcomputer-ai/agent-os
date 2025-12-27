@@ -14,8 +14,11 @@ use crate::capability::{
     CAP_ALLOW_ALL_ENFORCER, CAP_HTTP_ENFORCER, CAP_LLM_ENFORCER, CapabilityResolver,
 };
 use crate::error::KernelError;
-use crate::journal::{CapDecisionOutcome, CapDecisionRecord, CapDecisionStage, CapDenyReason};
-use crate::policy::PolicyGate;
+use crate::journal::{
+    CapDecisionOutcome, CapDecisionRecord, CapDecisionStage, CapDenyReason, PolicyDecisionOutcome,
+    PolicyDecisionRecord,
+};
+use crate::policy::{PolicyDecisionDetail, PolicyGate};
 use crate::secret::{SecretResolver, normalize_secret_variants};
 use aos_air_types::catalog::EffectCatalog;
 use aos_air_types::plan_literals::SchemaIndex;
@@ -50,6 +53,7 @@ pub struct EffectManager {
     effect_catalog: Arc<EffectCatalog>,
     schema_index: Arc<SchemaIndex>,
     cap_decisions: Vec<CapDecisionRecord>,
+    policy_decisions: Vec<PolicyDecisionRecord>,
     logical_now_ns: u64,
     enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>>,
     secret_catalog: Option<crate::secret::SecretCatalog>,
@@ -73,6 +77,7 @@ impl EffectManager {
             effect_catalog,
             schema_index,
             cap_decisions: Vec::new(),
+            policy_decisions: Vec::new(),
             logical_now_ns: 0,
             enforcer_invoker,
             secret_catalog,
@@ -215,7 +220,10 @@ impl EffectManager {
         if let Some(catalog) = &self.secret_catalog {
             crate::secret::enforce_secret_policy(&canonical_params, catalog, &source, cap_name)?;
         }
-        match self.policy_gate.decide(&intent, &grant, &source)? {
+        let policy_detail = self.policy_gate.decide(&intent, &grant, &source)?;
+        let policy_decision = policy_detail.decision;
+        self.record_policy_decision(intent.intent_hash, policy_detail);
+        match policy_decision {
             aos_effects::traits::PolicyDecision::Allow => {
                 self.record_cap_allow(
                     intent.intent_hash,
@@ -263,6 +271,10 @@ impl EffectManager {
 
     pub fn drain_cap_decisions(&mut self) -> Vec<CapDecisionRecord> {
         std::mem::take(&mut self.cap_decisions)
+    }
+
+    pub fn drain_policy_decisions(&mut self) -> Vec<PolicyDecisionRecord> {
+        std::mem::take(&mut self.policy_decisions)
     }
 
     pub fn logical_now_ns(&self) -> u64 {
@@ -317,6 +329,23 @@ impl EffectManager {
             deny: None,
             expiry_ns,
             logical_now_ns: self.logical_now_ns,
+        });
+    }
+
+    fn record_policy_decision(
+        &mut self,
+        intent_hash: [u8; 32],
+        detail: PolicyDecisionDetail,
+    ) {
+        let outcome = match detail.decision {
+            aos_effects::traits::PolicyDecision::Allow => PolicyDecisionOutcome::Allow,
+            aos_effects::traits::PolicyDecision::Deny => PolicyDecisionOutcome::Deny,
+        };
+        self.policy_decisions.push(PolicyDecisionRecord {
+            intent_hash,
+            policy_name: detail.policy_name,
+            rule_index: detail.rule_index,
+            decision: outcome,
         });
     }
 }

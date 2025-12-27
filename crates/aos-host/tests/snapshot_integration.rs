@@ -9,6 +9,7 @@ use aos_kernel::Kernel;
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::journal::JournalKind;
 use aos_store::FsStore;
 use aos_wasm_abi::ReducerOutput;
 use helpers::fixtures::{self, START_SCHEMA, TestWorld};
@@ -216,6 +217,36 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
         replay_world.kernel.reducer_state("com.acme/TimerHandler@1"),
         Some(vec![0xCC])
     );
+}
+
+/// Cap decisions should be preserved in journals across snapshot/replay cycles.
+#[test]
+fn cap_decisions_survive_snapshot_replay() {
+    let store = fixtures::new_mem_store();
+    let manifest = fulfillment_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("123"))
+        .expect("submit start event");
+    world.tick_n(2).unwrap();
+
+    world.kernel.create_snapshot().unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+    assert!(
+        entries.iter().any(|entry| entry.kind == JournalKind::CapDecision),
+        "expected cap decision entry"
+    );
+
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        fulfillment_manifest(&store),
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+
+    let intents = replay_world.drain_effects();
+    assert_eq!(intents.len(), 1, "effect queue should survive replay");
 }
 
 /// Simple snapshot/restore without any in-flight effects should restore reducer state.

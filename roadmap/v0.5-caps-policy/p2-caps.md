@@ -204,14 +204,14 @@ Relevant code:
    - Drop `reserve_estimate` and remove the `CapSettle*` schemas.
    - Keep a constraints-only `CapCheckOutput`.
 
-3) ⏳ **Policy decision journaling**
+3) ✅ **Policy decision journaling**
    - Journal allow/deny decisions for replay/audit.
 
-4) ⏳ **Host-level replay coverage**
+4) ✅ **Host-level replay coverage**
    - Expand integration tests that replay cap decisions across journal/snapshot boundaries.
 
-5) ⏳ **Plan-level cap slots**
-   - Allow plans to use slots that are bound to grants via `manifest.plan_bindings`.
+5) ⏸️ **Plan-level cap slots (defer)**
+   - Defer for v0.5; plans are manifest data and can reference grant names directly.
 
 6) ⏳ **Stable grant hash in journals**
    - Compute + record a `grant_hash` alongside cap decisions.

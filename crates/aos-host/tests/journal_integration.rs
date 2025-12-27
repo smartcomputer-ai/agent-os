@@ -1,15 +1,18 @@
 use aos_air_exec::Value as ExprValue;
+use aos_air_types::{EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch, PolicyRule};
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
-use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord};
+use aos_kernel::journal::{
+    IntentOriginRecord, JournalKind, JournalRecord, PolicyDecisionOutcome,
+};
 use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 use serde_cbor;
 use tempfile::TempDir;
 
 mod helpers;
-use helpers::{fulfillment_manifest, timer_manifest};
+use helpers::{attach_default_policy, fulfillment_manifest, timer_manifest};
 
 /// Journal replay without snapshots should restore reducer state identically.
 #[test]
@@ -198,6 +201,47 @@ fn plan_journal_replay_resumes_waiting_receipt() {
             .reducer_state("com.acme/ResultReducer@1"),
         Some(vec![0xEE])
     );
+}
+
+/// Policy decisions should be journaled for plan-origin effects.
+#[test]
+fn policy_decision_is_journaled() {
+    let store = fixtures::new_mem_store();
+    let mut manifest = fulfillment_manifest(&store);
+    let policy = aos_air_types::DefPolicy {
+        name: "com.acme/allow-plan-http@1".into(),
+        rules: vec![PolicyRule {
+            when: PolicyMatch {
+                effect_kind: Some(AirEffectKind::http_request()),
+                origin_kind: Some(OriginKind::Plan),
+                ..Default::default()
+            },
+            decision: PolicyDecision::Allow,
+        }],
+    };
+    attach_default_policy(&mut manifest, policy.clone());
+
+    let mut world = TestWorld::with_store(store, manifest).unwrap();
+    world
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
+        .expect("submit start event");
+    world.tick_n(2).unwrap();
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let record = journal_entries
+        .iter()
+        .find(|entry| entry.kind == JournalKind::PolicyDecision)
+        .map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).unwrap())
+        .expect("policy decision entry missing");
+
+    match record {
+        JournalRecord::PolicyDecision(decision) => {
+            assert_eq!(decision.policy_name, policy.name);
+            assert_eq!(decision.rule_index, Some(0));
+            assert_eq!(decision.decision, PolicyDecisionOutcome::Allow);
+        }
+        _ => unreachable!("expected policy decision record"),
+    }
 }
 
 /// FsJournal should persist entries to disk and allow a fresh kernel to resume state.

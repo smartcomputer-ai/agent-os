@@ -961,11 +961,11 @@ impl<S: Store + 'static> Kernel<S> {
                 {
                     Ok(intent) => intent,
                     Err(err) => {
-                        self.record_cap_decisions()?;
+                        self.record_decisions()?;
                         return Err(err);
                     }
                 };
-            self.record_cap_decisions()?;
+            self.record_decisions()?;
             self.record_effect_intent(
                 &intent,
                 IntentOriginRecord::Reducer {
@@ -1139,6 +1139,9 @@ impl<S: Store + 'static> Kernel<S> {
             }
             JournalRecord::CapDecision(_) => {
                 // Cap decisions are audit-only; runtime state is rebuilt via replay.
+            }
+            JournalRecord::PolicyDecision(_) => {
+                // Policy decisions are audit-only; runtime state is rebuilt via replay.
             }
             JournalRecord::Snapshot(_) => {
                 // already handled separately
@@ -2069,13 +2072,13 @@ impl<S: Store + 'static> Kernel<S> {
                 let outcome = match instance.tick(&mut self.effect_manager) {
                     Ok(outcome) => outcome,
                     Err(err) => {
-                        self.record_cap_decisions()?;
+                        self.record_decisions()?;
                         return Err(err);
                     }
                 };
                 (name, outcome, snapshot.step_states)
             };
-            self.record_cap_decisions()?;
+            self.record_decisions()?;
             for event in &outcome.raised_events {
                 self.process_domain_event(event.clone())?;
             }
@@ -2153,7 +2156,7 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(pending) = self.pending_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
             self.update_logical_now_from_receipt(&pending.effect_kind, &receipt)?;
-            self.record_cap_decisions()?;
+            self.record_decisions()?;
             if let Some(instance) = self.plan_instances.get_mut(&pending.plan_id) {
                 if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
                     self.scheduler.push_plan(pending.plan_id);
@@ -2182,7 +2185,7 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
             self.update_logical_now_from_receipt(&context.effect_kind, &receipt)?;
-            self.record_cap_decisions()?;
+            self.record_decisions()?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
             self.process_domain_event(event)?;
             self.remember_receipt(receipt.intent_hash);
@@ -2324,10 +2327,14 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(record)
     }
 
-    fn record_cap_decisions(&mut self) -> Result<(), KernelError> {
+    fn record_decisions(&mut self) -> Result<(), KernelError> {
         let records = self.effect_manager.drain_cap_decisions();
         for record in records {
             self.append_record(JournalRecord::CapDecision(record))?;
+        }
+        let policy_records = self.effect_manager.drain_policy_decisions();
+        for record in policy_records {
+            self.append_record(JournalRecord::PolicyDecision(record))?;
         }
         Ok(())
     }

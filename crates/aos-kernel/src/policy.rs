@@ -6,13 +6,22 @@ use aos_effects::{CapabilityGrant, EffectIntent, EffectSource};
 
 use crate::error::KernelError;
 
+const ALLOW_ALL_POLICY_NAME: &str = "allow_all";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicyDecisionDetail {
+    pub policy_name: String,
+    pub rule_index: Option<u32>,
+    pub decision: PolicyDecision,
+}
+
 pub trait PolicyGate: Send + Sync {
     fn decide(
         &self,
         intent: &EffectIntent,
         grant: &CapabilityGrant,
         source: &EffectSource,
-    ) -> Result<PolicyDecision, KernelError>;
+    ) -> Result<PolicyDecisionDetail, KernelError>;
 }
 
 #[derive(Default, Clone, Copy)]
@@ -24,8 +33,12 @@ impl PolicyGate for AllowAllPolicy {
         _intent: &EffectIntent,
         _grant: &CapabilityGrant,
         _source: &EffectSource,
-    ) -> Result<PolicyDecision, KernelError> {
-        Ok(PolicyDecision::Allow)
+    ) -> Result<PolicyDecisionDetail, KernelError> {
+        Ok(PolicyDecisionDetail {
+            policy_name: ALLOW_ALL_POLICY_NAME.into(),
+            rule_index: None,
+            decision: PolicyDecision::Allow,
+        })
     }
 }
 
@@ -54,13 +67,21 @@ impl PolicyGate for RulePolicy {
         intent: &EffectIntent,
         _grant: &CapabilityGrant,
         source: &EffectSource,
-    ) -> Result<PolicyDecision, KernelError> {
-        for rule in &self.rules {
+    ) -> Result<PolicyDecisionDetail, KernelError> {
+        for (idx, rule) in self.rules.iter().enumerate() {
             if rule.matches(intent, source) {
-                return Ok(rule.decision);
+                return Ok(PolicyDecisionDetail {
+                    policy_name: self.name.clone(),
+                    rule_index: Some(idx as u32),
+                    decision: rule.decision,
+                });
             }
         }
-        Ok(PolicyDecision::Deny)
+        Ok(PolicyDecisionDetail {
+            policy_name: self.name.clone(),
+            rule_index: None,
+            decision: PolicyDecision::Deny,
+        })
     }
 }
 
@@ -153,7 +174,8 @@ mod tests {
                 &EffectSource::Reducer { name: "r".into() },
             )
             .unwrap();
-        assert_eq!(decision, PolicyDecision::Deny);
+        assert_eq!(decision.decision, PolicyDecision::Deny);
+        assert_eq!(decision.rule_index, None);
     }
 
     #[test]
@@ -177,7 +199,8 @@ mod tests {
                 &EffectSource::Reducer { name: "r".into() },
             )
             .unwrap();
-        assert_eq!(decision, PolicyDecision::Deny);
+        assert_eq!(decision.decision, PolicyDecision::Deny);
+        assert_eq!(decision.rule_index, Some(0));
     }
 
     #[test]
@@ -201,7 +224,8 @@ mod tests {
                 &EffectSource::Plan { name: "p".into() },
             )
             .unwrap();
-        assert_eq!(decision, PolicyDecision::Allow);
+        assert_eq!(decision.decision, PolicyDecision::Allow);
+        assert_eq!(decision.rule_index, Some(0));
     }
 
     fn dummy_grant() -> CapabilityGrant {
