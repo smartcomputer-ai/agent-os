@@ -5,13 +5,13 @@
 
 extern crate alloc;
 
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use alloc::format;
 use aos_sys::{CapCheckInput, CapCheckOutput, CapDenyReason};
 use aos_wasm_sdk::{PureError, PureModule, aos_pure};
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_cbor::Value as CborValue;
 
 // Required for WASM binary entry point
@@ -123,7 +123,9 @@ impl PureModule for CapEnforceHttpOut {
         }
         if let Some(prefixes) = &cap_params.path_prefixes {
             if !prefixes.is_empty()
-                && !prefixes.iter().any(|prefix| parsed.path.starts_with(prefix))
+                && !prefixes
+                    .iter()
+                    .any(|prefix| parsed.path.starts_with(prefix))
             {
                 return Ok(deny(
                     "path_not_allowed",

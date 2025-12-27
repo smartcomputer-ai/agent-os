@@ -11,12 +11,10 @@ use url::Url;
 
 use crate::cap_enforcer::{CapCheckInput, CapEffectOrigin, CapEnforcerInvoker};
 use crate::capability::{
-    CapabilityResolver, CAP_ALLOW_ALL_ENFORCER, CAP_HTTP_ENFORCER, CAP_LLM_ENFORCER,
+    CAP_ALLOW_ALL_ENFORCER, CAP_HTTP_ENFORCER, CAP_LLM_ENFORCER, CapabilityResolver,
 };
 use crate::error::KernelError;
-use crate::journal::{
-    CapDecisionOutcome, CapDecisionRecord, CapDecisionStage, CapDenyReason,
-};
+use crate::journal::{CapDecisionOutcome, CapDecisionRecord, CapDecisionStage, CapDenyReason};
 use crate::policy::PolicyGate;
 use crate::secret::{SecretResolver, normalize_secret_variants};
 use aos_air_types::catalog::EffectCatalog;
@@ -275,7 +273,6 @@ impl EffectManager {
         self.logical_now_ns = self.logical_now_ns.max(logical_now_ns);
     }
 
-
     fn record_cap_deny(
         &mut self,
         intent_hash: [u8; 32],
@@ -460,14 +457,16 @@ fn builtin_http_enforcer(
             ),
         });
     }
-    let cap_params: HttpCapParams = decode_cbor(&grant.params_cbor).map_err(|err| CapDenyReason {
-        code: "cap_params_invalid".into(),
-        message: err.to_string(),
-    })?;
-    let effect_params: HttpRequestParams = decode_cbor(params_cbor).map_err(|err| CapDenyReason {
-        code: "effect_params_invalid".into(),
-        message: err.to_string(),
-    })?;
+    let cap_params: HttpCapParams =
+        decode_cbor(&grant.params_cbor).map_err(|err| CapDenyReason {
+            code: "cap_params_invalid".into(),
+            message: err.to_string(),
+        })?;
+    let effect_params: HttpRequestParams =
+        decode_cbor(params_cbor).map_err(|err| CapDenyReason {
+            code: "effect_params_invalid".into(),
+            message: err.to_string(),
+        })?;
     let url = Url::parse(&effect_params.url).map_err(|err| CapDenyReason {
         code: "invalid_url".into(),
         message: err.to_string(),
@@ -539,16 +538,16 @@ fn builtin_llm_enforcer(
             ),
         });
     }
-    let cap_params: LlmCapParams = decode_cbor(&grant.params_cbor).map_err(|err| CapDenyReason {
-        code: "cap_params_invalid".into(),
-        message: err.to_string(),
-    })?;
-    let effect_params: LlmGenerateParamsView = decode_cbor(params_cbor).map_err(|err| {
-        CapDenyReason {
+    let cap_params: LlmCapParams =
+        decode_cbor(&grant.params_cbor).map_err(|err| CapDenyReason {
+            code: "cap_params_invalid".into(),
+            message: err.to_string(),
+        })?;
+    let effect_params: LlmGenerateParamsView =
+        decode_cbor(params_cbor).map_err(|err| CapDenyReason {
             code: "effect_params_invalid".into(),
             message: err.to_string(),
-        }
-    })?;
+        })?;
     if !allowlist_contains(&cap_params.providers, &effect_params.provider, |v| {
         v.to_string()
     }) {
@@ -620,13 +619,11 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    fn effect_manager_with_grants(
-        grants: Vec<(CapabilityGrant, CapType)>,
-    ) -> EffectManager {
+    fn effect_manager_with_grants(grants: Vec<(CapabilityGrant, CapType)>) -> EffectManager {
         let resolver = CapabilityResolver::from_runtime_grants(grants);
-        let effect_catalog = Arc::new(
-            EffectCatalog::from_defs(builtins::builtin_effects().iter().map(|b| b.effect.clone())),
-        );
+        let effect_catalog = Arc::new(EffectCatalog::from_defs(
+            builtins::builtin_effects().iter().map(|b| b.effect.clone()),
+        ));
         let mut schemas = HashMap::new();
         for builtin in builtins::builtin_schemas() {
             schemas.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
@@ -752,14 +749,10 @@ mod tests {
 
     #[test]
     fn expired_cap_is_denied() {
-        let grant = CapabilityGrant::builder(
-            "cap_http",
-            "sys/http.out@1",
-            &serde_json::json!({}),
-        )
-        .expiry_ns(10)
-        .build()
-        .expect("grant");
+        let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
+            .expiry_ns(10)
+            .build()
+            .expect("grant");
         let mut mgr = effect_manager_with_grants(vec![(grant, CapType::http_out())]);
         mgr.update_logical_now_ns(20);
 

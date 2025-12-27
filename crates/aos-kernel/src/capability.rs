@@ -6,19 +6,16 @@ use aos_air_types::{
     catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
 };
 use aos_cbor::to_canonical_cbor;
-use base64::engine::general_purpose::STANDARD as Base64Engine;
-use base64::Engine;
 use aos_effects::CapabilityGrant;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as Base64Engine;
 use indexmap::IndexMap;
 
 use crate::error::KernelError;
 
 pub trait CapabilityGate {
-    fn resolve(
-        &self,
-        cap_name: &str,
-        effect_kind: &str,
-    ) -> Result<CapGrantResolution, KernelError>;
+    fn resolve(&self, cap_name: &str, effect_kind: &str)
+    -> Result<CapGrantResolution, KernelError>;
 }
 
 #[derive(Clone)]
@@ -226,7 +223,7 @@ fn literal_to_cbor_value(value: &ValueLiteral) -> Result<serde_cbor::Value, Kern
         ValueLiteral::SecretRef(_) => {
             return Err(KernelError::CapabilityEncoding(
                 "secret_ref literals are not supported in capability params".into(),
-            ))
+            ));
         }
     })
 }

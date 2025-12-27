@@ -9,8 +9,8 @@ use aos_host::config::HostConfig;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
 use aos_host::testhost::TestHost;
-use aos_host::util::{is_placeholder_hash, patch_modules};
 use aos_host::util::reset_journal;
+use aos_host::util::{is_placeholder_hash, patch_modules};
 use aos_kernel::LoadedManifest;
 use aos_kernel::cell_index::CellIndex;
 use aos_kernel::journal::OwnedJournalEntry;
@@ -362,12 +362,8 @@ fn maybe_patch_sys_module(
         existing.clone()
     } else {
         let cache_dir = example_root.join(".aos").join("cache").join("modules");
-        let wasm_bytes = util::compile_wasm_bin(
-            crate::workspace_root(),
-            "aos-sys",
-            bin_name,
-            &cache_dir,
-        )?;
+        let wasm_bytes =
+            util::compile_wasm_bin(crate::workspace_root(), "aos-sys", bin_name, &cache_dir)?;
         let wasm_hash = store
             .put_blob(&wasm_bytes)
             .with_context(|| format!("store {module_name} wasm blob"))?;

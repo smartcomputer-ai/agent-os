@@ -128,9 +128,7 @@ fn llm_enforcer_module_denies_model() {
         name: "sys/llm.basic@1".into(),
         hash: fixtures::zero_hash(),
     });
-    loaded
-        .caps
-        .insert("sys/llm.basic@1".into(), llm_defcap());
+    loaded.caps.insert("sys/llm.basic@1".into(), llm_defcap());
 
     let mut world = TestWorld::with_store(store, loaded).expect("world");
     world
@@ -197,9 +195,11 @@ fn hosts_param(hosts: &[&str]) -> ValueLiteral {
             ValueLiteral::Set(ValueSet {
                 set: hosts
                     .iter()
-                    .map(|host| ValueLiteral::Text(ValueText {
-                        text: (*host).to_string(),
-                    }))
+                    .map(|host| {
+                        ValueLiteral::Text(ValueText {
+                            text: (*host).to_string(),
+                        })
+                    })
                     .collect(),
             }),
         )]),
@@ -213,9 +213,11 @@ fn models_param(models: &[&str]) -> ValueLiteral {
             ValueLiteral::Set(ValueSet {
                 set: models
                     .iter()
-                    .map(|model| ValueLiteral::Text(ValueText {
-                        text: (*model).to_string(),
-                    }))
+                    .map(|model| {
+                        ValueLiteral::Text(ValueText {
+                            text: (*model).to_string(),
+                        })
+                    })
                     .collect(),
             }),
         )]),
@@ -237,22 +239,18 @@ fn opt_text_set() -> TypeExpr {
 fn opt_nat_set() -> TypeExpr {
     TypeExpr::Option(TypeOption {
         option: Box::new(TypeExpr::Set(TypeSet {
-            set: Box::new(TypeExpr::Primitive(TypePrimitive::Nat(
-                TypePrimitiveNat {
-                    nat: EmptyObject {},
-                },
-            ))),
+            set: Box::new(TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
+                nat: EmptyObject {},
+            }))),
         })),
     })
 }
 
 fn opt_nat() -> TypeExpr {
     TypeExpr::Option(TypeOption {
-        option: Box::new(TypeExpr::Primitive(TypePrimitive::Nat(
-            TypePrimitiveNat {
-                nat: EmptyObject {},
-            },
-        ))),
+        option: Box::new(TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
+            nat: EmptyObject {},
+        }))),
     })
 }
 

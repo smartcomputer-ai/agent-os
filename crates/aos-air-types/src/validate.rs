@@ -520,12 +520,11 @@ pub fn validate_manifest(
     }
     let grant_exists = |name: &str| grant_map.contains_key(name);
     let cap_type_for_grant = |grant_name: &str| -> Result<String, ValidationError> {
-        let grant = grant_map
-            .get(grant_name)
-            .copied()
-            .ok_or_else(|| ValidationError::CapabilityNotFound {
+        let grant = grant_map.get(grant_name).copied().ok_or_else(|| {
+            ValidationError::CapabilityNotFound {
                 cap: grant_name.to_string(),
-            })?;
+            }
+        })?;
         if !defcap_listed(grant.cap.as_str()) {
             return Err(ValidationError::CapabilityDefinitionNotFound {
                 cap: grant.cap.clone(),
@@ -854,11 +853,11 @@ pub fn validate_manifest(
                         cap: emit.cap.clone(),
                     });
                 }
-                let expected = effect_cap_types
-                    .get(emit.kind.as_str())
-                    .ok_or_else(|| ValidationError::EffectNotFound {
+                let expected = effect_cap_types.get(emit.kind.as_str()).ok_or_else(|| {
+                    ValidationError::EffectNotFound {
                         kind: emit.kind.as_str().to_string(),
-                    })?;
+                    }
+                })?;
                 let found = cap_type_for_grant(emit.cap.as_str())?;
                 if &found != expected {
                     return Err(ValidationError::CapabilityTypeMismatch {
@@ -1003,8 +1002,8 @@ mod tests {
         ModuleAbi, ModuleBinding, ModuleKind, NamedRef, PlanBind, PlanBindEffect, PlanEdge,
         PlanStep, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
         PlanStepKind, PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent,
-        SchemaRef, SecretDecl, SecretEntry, SecretPolicy, TypeExpr, TypeRecord, TypeRef, TypeVariant,
-        ValueLiteral, ValueRecord,
+        SchemaRef, SecretDecl, SecretEntry, SecretPolicy, TypeExpr, TypeRecord, TypeRef,
+        TypeVariant, ValueLiteral, ValueRecord,
     };
     use indexmap::IndexMap;
 

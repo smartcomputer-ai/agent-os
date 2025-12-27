@@ -41,7 +41,6 @@ use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
 use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::pure::PureRegistry;
-use std::sync::Mutex;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
@@ -55,6 +54,7 @@ use crate::snapshot::{
     EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanResultSnapshot,
     ReducerReceiptSnapshot, ReducerStateEntry, receipts_to_vecdeque,
 };
+use std::sync::Mutex;
 
 const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
@@ -505,11 +505,9 @@ impl<S: Store + 'static> Kernel<S> {
             store.clone(),
             config.module_cache_dir.clone(),
         )?));
-        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> =
-            Some(Arc::new(PureCapEnforcer::new(
-                Arc::new(loaded.modules.clone()),
-                pures.clone(),
-            )));
+        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
+            PureCapEnforcer::new(Arc::new(loaded.modules.clone()), pures.clone()),
+        ));
 
         let mut kernel = Self {
             store: store.clone(),
@@ -568,10 +566,9 @@ impl<S: Store + 'static> Kernel<S> {
                         kernel.reducers.ensure_loaded(name, module_def)?;
                     }
                     aos_air_types::ModuleKind::Pure => {
-                        let mut pures = kernel
-                            .pures
-                            .lock()
-                            .map_err(|_| KernelError::Manifest("pure registry lock poisoned".into()))?;
+                        let mut pures = kernel.pures.lock().map_err(|_| {
+                            KernelError::Manifest("pure registry lock poisoned".into())
+                        })?;
                         pures.ensure_loaded(name, module_def)?;
                     }
                 }
@@ -957,16 +954,17 @@ impl<S: Store + 'static> Kernel<S> {
                     slot: slot.clone(),
                 })?
                 .clone();
-            let intent = match self
-                .effect_manager
-                .enqueue_reducer_effect(&reducer_name, &cap_name, effect)
-            {
-                Ok(intent) => intent,
-                Err(err) => {
-                    self.record_cap_decisions()?;
-                    return Err(err);
-                }
-            };
+            let intent =
+                match self
+                    .effect_manager
+                    .enqueue_reducer_effect(&reducer_name, &cap_name, effect)
+                {
+                    Ok(intent) => intent,
+                    Err(err) => {
+                        self.record_cap_decisions()?;
+                        return Err(err);
+                    }
+                };
             self.record_cap_decisions()?;
             self.record_effect_intent(
                 &intent,
@@ -1957,11 +1955,9 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             Some(crate::secret::SecretCatalog::new(&self.secrets))
         };
-        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> =
-            Some(Arc::new(PureCapEnforcer::new(
-                Arc::new(self.module_defs.clone()),
-                self.pures.clone(),
-            )));
+        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
+            PureCapEnforcer::new(Arc::new(self.module_defs.clone()), self.pures.clone()),
+        ));
         self.effect_manager = EffectManager::new(
             capability_resolver,
             policy_gate,

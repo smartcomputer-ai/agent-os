@@ -945,10 +945,7 @@ fn idempotency_key_from_value(value: ExprValue) -> Result<[u8; 32], KernelError>
         ExprValue::Bytes(bytes) => Hash::from_bytes(&bytes)
             .map(|h| *h.as_bytes())
             .map_err(|err| {
-                KernelError::IdempotencyKeyInvalid(format!(
-                    "expected 32 bytes, got {}",
-                    err.0
-                ))
+                KernelError::IdempotencyKeyInvalid(format!("expected 32 bytes, got {}", err.0))
             }),
         other => Err(KernelError::IdempotencyKeyInvalid(format!(
             "expected hash or bytes, got {}",
@@ -1102,8 +1099,8 @@ mod tests {
     }
 
     fn test_effect_manager() -> EffectManager {
-        let cap_params = aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new()))
-            .expect("cap params");
+        let cap_params =
+            aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new())).expect("cap params");
         let grants = vec![
             (
                 CapabilityGrant {
@@ -1328,13 +1325,13 @@ mod tests {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::http_request(),
-                params: http_params_literal("data"),
-                cap: "cap".into(),
-                idempotency_key: None,
-                bind: PlanBindEffect {
-                    effect_id_as: "req".into(),
-                },
+                    kind: EffectKind::http_request(),
+                    params: http_params_literal("data"),
+                    cap: "cap".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
                 }),
             },
             PlanStep {
@@ -1362,37 +1359,37 @@ mod tests {
             PlanStep {
                 id: "emit_a".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::http_request(),
-                params: http_params_literal("alpha"),
-                cap: "cap".into(),
-                idempotency_key: None,
-                bind: PlanBindEffect {
-                    effect_id_as: "handle_a".into(),
-                },
+                    kind: EffectKind::http_request(),
+                    params: http_params_literal("alpha"),
+                    cap: "cap".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "handle_a".into(),
+                    },
                 }),
             },
             PlanStep {
                 id: "emit_b".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::http_request(),
-                params: http_params_literal("beta"),
-                cap: "cap".into(),
-                idempotency_key: None,
-                bind: PlanBindEffect {
-                    effect_id_as: "handle_b".into(),
-                },
+                    kind: EffectKind::http_request(),
+                    params: http_params_literal("beta"),
+                    cap: "cap".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "handle_b".into(),
+                    },
                 }),
             },
             PlanStep {
                 id: "emit_c".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::http_request(),
-                params: http_params_literal("gamma"),
-                cap: "cap".into(),
-                idempotency_key: None,
-                bind: PlanBindEffect {
-                    effect_id_as: "handle_c".into(),
-                },
+                    kind: EffectKind::http_request(),
+                    params: http_params_literal("gamma"),
+                    cap: "cap".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "handle_c".into(),
+                    },
                 }),
             },
             PlanStep {
@@ -1874,13 +1871,13 @@ mod tests {
             PlanStep {
                 id: "emit".into(),
                 kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::http_request(),
-                params: http_params_literal("payload"),
-                cap: "cap".into(),
-                idempotency_key: None,
-                bind: PlanBindEffect {
-                    effect_id_as: "req".into(),
-                },
+                    kind: EffectKind::http_request(),
+                    params: http_params_literal("payload"),
+                    cap: "cap".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
                 }),
             },
             PlanStep {
