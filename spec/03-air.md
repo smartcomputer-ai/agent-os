@@ -438,6 +438,7 @@ Policies define ordered rules that allow or deny effects based on their characte
 
 - `effect_kind?: EffectKind` – namespaced effect kind (http.request, llm.generate, etc.)
 - `cap_name?: text` – which CapGrant name
+- `cap_type?: CapType` – capability type of the resolved grant (http.out, llm.basic, etc.)
 - `origin_kind?: "plan" | "reducer"` – whether the effect originates from a plan or a reducer
 - `origin_name?: Name` – the specific plan or reducer Name
 

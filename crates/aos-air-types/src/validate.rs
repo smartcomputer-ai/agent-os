@@ -1576,6 +1576,7 @@ mod tests {
                     when: PolicyMatch {
                         effect_kind: Some(bad_kind.clone()),
                         cap_name: None,
+                        cap_type: None,
                         origin_kind: None,
                         origin_name: None,
                     },
@@ -1653,6 +1654,7 @@ mod tests {
                     when: PolicyMatch {
                         effect_kind: None,
                         cap_name: Some(missing_cap.clone()),
+                        cap_type: None,
                         origin_kind: None,
                         origin_name: None,
                     },

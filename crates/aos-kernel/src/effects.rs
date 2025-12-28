@@ -288,7 +288,9 @@ impl EffectManager {
                 grant.name.as_str(),
             )?;
         }
-        let policy_detail = self.policy_gate.decide(&intent, &grant, &source)?;
+        let policy_detail = self
+            .policy_gate
+            .decide(&intent, &grant, &source, &resolved.cap_type)?;
         let policy_decision = policy_detail.decision;
         self.record_policy_decision(intent.intent_hash, &policy_detail);
         match policy_decision {

@@ -35,6 +35,7 @@ fn policy_match_serializes_round_trip() {
     let r#match = PolicyMatch {
         effect_kind: Some(crate::EffectKind::http_request()),
         cap_name: None,
+        cap_type: Some(crate::CapType::http_out()),
         origin_kind: Some(crate::OriginKind::Plan),
         origin_name: Some("com.acme/Plan@1".into()),
     };
@@ -53,6 +54,7 @@ fn policy_supports_multiple_rules_and_filters() {
                 "when": {
                     "effect_kind": "http.request",
                     "cap_name": "cap_http",
+                    "cap_type": "http.out",
                     "origin_kind": "plan",
                     "origin_name": "com.acme/Plan@1"
                 },
