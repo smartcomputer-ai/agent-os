@@ -1,5 +1,7 @@
 # p2-policy: Policy System (Constraints-Only, v0.5)
 
+**complete**
+
 ## TL;DR
 Policies are a kernel gate that can Allow/Deny effects at enqueue time. Decisions are journaled. Policies are selected via manifest defaults and apply globally; if no default is set, the kernel allows all. v0.5 policy scope is deliberately small: **no approvals, no counters/limits, no external policy engines**. The only remaining scope item is adding `cap_type` matching to reduce rule explosion.
 
@@ -130,7 +132,7 @@ Policies must be enforced **in the kernel** (authoritative, deterministic, journ
 
 ## Build Order (Minimal to Meaningful)
 
-1) Add `cap_type` matching to policy rules
+1) Add `cap_type` matching to policy rules (done)
 2) Keep policy context minimal until approvals/limits exist
 
 ---
@@ -144,8 +146,7 @@ Policies must be enforced **in the kernel** (authoritative, deterministic, journ
 
 ## Summary of Required Work
 
-1) Add `cap_type` match to `defpolicy` rules.
-2) Add/adjust tests for `cap_type` matching as needed.
+Done for v0.5 constraints-only policy.
 
 ---
 
