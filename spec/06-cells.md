@@ -7,11 +7,12 @@ Status: **implemented** (kernel/storage/control). Cells make many instances of t
 - **Cell**: an instance of a keyed reducer identified by `key` (bytes). Holds only that substate and its mailbox.
 - **Run**: plan instance. Scheduler interleaves ready runs and ready cells deterministically.
 
-## ABI (unchanged export, new envelope flags)
+## ABI (unchanged export, optional context)
 - Export: `step(ptr,len) -> (ptr,len)` (canonical CBOR in/out).
-- Input envelope: `{ version:1, state: bytes|null, event:{schema:Name, value:bytes}, ctx:{ key?:bytes, cell_mode:bool } }`
-  - `cell_mode=false` (v1 compatibility): reducer receives whole state (often a map<key,substate>); `ctx.key` is advisory.
-  - `cell_mode=true` (cells): reducer receives only this cell's state; `ctx.key` is required.
+- Input envelope: `{ version:1, state: bytes|null, event:{schema:Name, value:bytes, key?:bytes}, ctx?:bytes }`
+  - When a reducer declares `sys/ReducerContext@1`, `ctx` carries `key` and `cell_mode`.
+  - `cell_mode=false` (v1 compatibility): reducer receives whole state (often a map<key,substate>); `key` is advisory.
+  - `cell_mode=true` (cells): reducer receives only this cell's state; `key` is required.
 - Output envelope: `{ state:bytes|null, domain_events?:[…], effects?:[…], ann?:bytes }`
   - Returning `state=null` in cell mode deletes/GCs the cell.
 - ReducerEffect unchanged; reducers remain limited to micro-effects.

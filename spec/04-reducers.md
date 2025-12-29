@@ -6,7 +6,7 @@ Reducers are deterministic, WASM-compiled state machines that own application/do
 
 ## Scope Note (v1.0 → v1.1)
 
-v1 reducers treat the whole state as a single value. To model many FSM instances, author code as a `map<key, substate>`. Version 1.1 promotes this pattern to **Cells**: keyed reducers with per-cell state/mailboxes, still using the same `step` export. The kernel sets `ctx.cell_mode=true` and supplies `ctx.key`; returning `state=null` deletes the cell. See spec/06-cells.md for routing, storage, and migration details.
+v1 reducers treat the whole state as a single value. To model many FSM instances, author code as a `map<key, substate>`. Version 1.1 promotes this pattern to **Cells**: keyed reducers with per-cell state/mailboxes, still using the same `step` export. When a reducer declares a call context, the kernel supplies `cell_mode` and `key` inside that context; returning `state=null` deletes the cell. See spec/06-cells.md for routing, storage, and migration details.
 
 ## Role and Boundaries
 
@@ -20,7 +20,7 @@ Reducers are the **single source of state changes**. They advance only when they
 
 ## Execution Environment (Deterministic WASM)
 
-Reducers target core WASM (`wasm32-unknown-unknown`). No WASI, no threads, no ambient clock or randomness. Deterministic numerics are required; prefer `dec128` in values; normalize NaNs if floats are used internally.
+Reducers target core WASM (`wasm32-unknown-unknown`). No WASI, no threads, no ambient clock or randomness. Deterministic numerics are required; prefer `dec128` in values; normalize NaNs if floats are used internally. Deterministic time/entropy are available only via the optional call context.
 
 All I/O happens via returned effects; reducers cannot perform syscalls. **Replay guarantee**: given the same input event stream and recorded receipts, reducers produce identical state bytes.
 
@@ -36,14 +36,14 @@ All I/O happens via returned effects; reducers cannot perform syscalls. **Replay
 {
   version: 1,
   state: <bytes|null>,
-  event: <bytes>,
-  ctx: { key?: <bytes>, cell_mode: <bool> }
+  event: { schema: Name, value: bytes, key?: bytes },
+  ctx?: <bytes>   // canonical CBOR for sys/ReducerContext@1 (omitted if not declared)
 }
 ```
 
 - `state` is canonical CBOR matching the declared state schema; `null` is passed when creating a new cell.
-- `event` is canonical CBOR of a DomainEvent or ReceiptEvent addressed to this reducer; the kernel validates and canonicalizes every event payload against its schema before routing/journaling, so reducers always see schema-shaped canonical CBOR.
-- `ctx.cell_mode` is `true` when routed as a keyed reducer; `ctx.key` must be present in that mode and is advisory in v1 compatibility mode.
+- `event` is a DomainEvent envelope (`schema`, `value`, `key?`) whose `value` is canonical CBOR; the kernel validates and canonicalizes every event payload against its schema before routing/journaling.
+- If a reducer declares context, `sys/ReducerContext@1` includes `key` and `cell_mode`; `key` is required when `cell_mode=true`.
 
 ### Output CBOR (canonical)
 
@@ -69,12 +69,14 @@ Semantic contract from reducer to kernel:
 {
   kind: EffectKind,
   params: Value,
-  cap_slot?: string
+  cap_slot?: string,
+  idempotency_key?: bytes
 }
 ```
 
 - `kind`: must be in reducer's declared `effects_emitted` allowlist
 - `cap_slot` (optional): abstract slot to bind a concrete CapGrant via `manifest.module_bindings`
+- `idempotency_key` (optional): unique bytes to avoid intent hash collisions for identical effects
 
 `EffectKind` is a namespaced string. The v1 kernel ships the built-in catalog listed in spec/03-air.md §7; adapter-defined kinds require runtime support to map to capabilities and receipts.
 
@@ -104,7 +106,8 @@ All reducer-sourced effects pass through capability and policy gates. The v1 pol
 - Policy Match rules can specify `origin_kind: "reducer"` to deny heavy effects from reducers
 - Policy Match rules can specify `origin_kind: "plan"` to allow those same effects from plans
 - The kernel populates origin metadata (origin_kind and origin_name) on every EffectIntent for policy evaluation
-- Budgets settle on receipts
+
+Timer note: `timer.set.deliver_at_ns` uses logical time; reducers can derive deadlines from `logical_now_ns` in call context when declared.
 
 ## Relationship To Plans
 
@@ -123,6 +126,7 @@ This boundary yields:
 - `abi.reducer`:
   - `state`: SchemaRef (canonical CBOR enforced at boundaries)
   - `event`: SchemaRef (domain/receipt event type family)
+  - `context`?: SchemaRef (declare `sys/ReducerContext@1` to receive call context)
   - `annotations`?: SchemaRef
   - `effects_emitted`?: [EffectKind] — whitelist for static checks
   - `cap_slots`?: { slot_name → CapType } — abstract capability slots
@@ -397,7 +401,7 @@ Provide a small helper (aos-saga) to reduce boilerplate:
 
 - Orchestrating multi-effect external workflows inside reducers (mixing payment/email/http) — lift to plans.
 - Emitting unbounded numbers of effects per step — keep to zero or one micro-effect.
-- Using wall-clock or randomness — derive from event/log context instead; schedule timers for delays.
+- Using wall-clock or randomness — derive from call context (`now_ns`/`logical_now_ns`) if declared; schedule timers for delays.
 - Cross-calling other reducers — communicate via events only.
 
 ## Operational Guidance

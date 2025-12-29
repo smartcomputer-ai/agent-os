@@ -12,11 +12,12 @@ These are not separate runtimes. Under the hood, there is one unified system: th
 
 One world is the unit of computation and ownership. Each world runs a single‑threaded deterministic stepper over an append‑only event journal with periodic snapshots. All control‑plane changes—modules, plans, schemas, policies, capabilities—are expressed as AIR patches and validated by the kernel before use.
 
-Application logic runs inside sandboxed WASM modules (reducers and pure components). External I/O happens through explicit effects executed by adapters; every effect yields a signed receipt that is appended to the journal and used for replay. This separation between pure computation and effectful I/O is what enables deterministic replay: the same journal and receipts always produce the same state.
+Application logic runs inside sandboxed WASM modules (reducers and pure components). External I/O happens through explicit effects executed by adapters; every effect yields a signed receipt that is appended to the journal and used for replay. The kernel also stamps each ingress with deterministic time/entropy and journals those values; modules can opt in to receiving that call context as explicit input. This separation between pure computation and effectful I/O is what enables deterministic replay: the same journal and receipts always produce the same state.
 
 ## Components (High Level)
 
 - Kernel (Stepper): deterministic event processor, applies journal entries, enforces policy, and drives plans.
+- Kernel Clock: samples wall-clock + monotonic time at ingress and records deterministic timestamps.
 - Journal: append‑only log of all events (proposals, approvals, plan application, effect intents, receipts, snapshots).
 - Snapshotter: materializes state at intervals for fast restore; replay from journal remains authoritative.
 - Store (CAS): content‑addressed object store for AIR nodes, WASM modules, blobs, receipts, and snapshots.
@@ -84,7 +85,7 @@ After canonicalization, the loader validates references, shapes, capability decl
 
 ### Capabilities (Constraints-Only)
 
-Capabilities are passed to plans and modules by grant name; no ambient authority exists. At enqueue time the kernel enforces parameter constraints (hosts, models, max_tokens ceilings) and expiry using deterministic inputs. Budgets and ledger accounting are deferred to a future milestone.
+Capabilities are passed to plans and modules by grant name; no ambient authority exists. At enqueue time the kernel enforces parameter constraints (hosts, models, max_tokens ceilings) via deterministic **cap enforcer modules** and checks expiry against `logical_now_ns`. Budgets and ledger accounting are deferred to a future milestone.
 
 ### Policy Gate (v1)
 
@@ -119,20 +120,20 @@ All external I/O crosses `emit_effect` and is policy/capability‑gated; receipt
 
 ### WASM Runtime
 
-The WASM runtime uses a deterministic profile: no threads, no wall‑clock or time syscalls, stable float behavior, and seeded RNG from the journal. Limited hostcalls provide pure intrinsics (serialization, hashing) and foreign‑memory copy.
+The WASM runtime uses a deterministic profile: no threads, no ambient clock or randomness, stable float behavior, and limited hostcalls for pure intrinsics (serialization, hashing) and foreign‑memory copy. When a module declares a context schema, the kernel passes in deterministic time/entropy captured at ingress; there are no direct syscalls.
 
 ### Module Registry
 
 Modules are content‑addressed WASM artifacts registered in the manifest with declared interfaces. Two types exist in v1:
 
 - **Reducer**: state machine reacting to events.
-  - ABI: `step(state_bytes, event_bytes) → (state_bytes, effects[], annotations)`
+  - ABI: `step(envelope) → envelope`, where the input envelope includes state/event bytes and an optional call context (if declared).
 - **Pure Component**: pure function.
-  - ABI: `run(input_bytes) → output_bytes`
+  - ABI: `run(envelope) → envelope`, where the input envelope includes input bytes and an optional call context (if declared).
 
 ### Keyed Reducers (Cells)
 
-Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with optional `key` and a `cell_mode` flag. Routing uses `manifest.routing.events[].key_field`; triggers may set `correlate_by`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and plan runs. See [spec/06-cells.md](06-cells.md) for the full v1.1 behavior and migration notes.
+Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with an optional call context, and for keyed reducers that context includes `key` and `cell_mode`. Routing uses `manifest.routing.events[].key_field`; triggers may set `correlate_by`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and plan runs. See [spec/06-cells.md](06-cells.md) for the full v1.1 behavior and migration notes.
 
 ### Router and Inbox
 
@@ -150,7 +151,7 @@ Four adapters ship in v1:
 
 - **HTTP**: `http.request(method, url, headers, body_ref) → receipt(status, headers, body_ref, timings)`
 - **Blob**: `blob.{put,get} → receipt(blob_ref, size)`
-- **Timer**: `timer.set(at/after) → receipt(delivered_at)`
+- **Timer**: `timer.set(deliver_at_ns) → receipt(delivered_at_ns)` (logical time)
 - **LLM**: `llm.generate(model, params, input_ref) → receipt(output_ref, token_usage, cost, provider_id)`
 
 Each adapter signs receipts (ed25519/HMAC) including intent_hash, inputs/outputs hashes, timings, and cost.
@@ -161,7 +162,7 @@ Version 1.2 will add **WASM-based adapters**: custom effect implementations that
 
 ### Receipt Handling
 
-ReceiptAppended events advance plans and reducers waiting on effects. Budgets decrement on receipt; policy re‑checks may occur if costs exceed thresholds. During replay, the system consumes recorded receipts to produce identical state without re‑executing effects.
+ReceiptAppended events advance plans and reducers waiting on effects. During replay, the system consumes recorded receipts to produce identical state without re‑executing effects.
 
 ## Constitutional Loop (Design Time)
 
@@ -183,7 +184,7 @@ Shadow runs provide deterministic rehearsal of a proposal. They use a copy of th
 
 Canonical CBOR is used for all persisted values. [CBOR (Concise Binary Object Representation)](https://cbor.io/) is a binary serialization format similar to JSON but with a deterministic encoding—the same data structure always produces the same byte sequence, which is essential for content addressing and replay guarantees. 
 
-Modules have no access to time or randomness; all nondeterminism is isolated to the effect boundary and recorded via receipts. This ensures that replaying the same journal and receipts always produces identical state.
+Modules have no ambient access to time or randomness; all nondeterminism is isolated to the effect boundary and recorded via receipts. Deterministic time/entropy are provided only via the optional call context, sampled at ingress and journaled. This ensures that replaying the same journal and receipts always produces identical state.
 
 ### Safety
 
