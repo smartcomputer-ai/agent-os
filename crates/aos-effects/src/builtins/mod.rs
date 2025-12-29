@@ -58,6 +58,7 @@ pub struct BlobGetReceipt {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TimerSetParams {
+    /// Logical-time deadline (monotonic), in nanoseconds.
     pub deliver_at_ns: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
@@ -65,6 +66,7 @@ pub struct TimerSetParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TimerSetReceipt {
+    /// Logical-time delivery timestamp (monotonic), in nanoseconds.
     pub delivered_at_ns: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,

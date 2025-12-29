@@ -106,6 +106,8 @@ pub enum KernelError {
     ManifestValidation(String),
     #[error("query error: {0}")]
     Query(String),
+    #[error("entropy error: {0}")]
+    Entropy(String),
 }
 
 impl KernelError {
@@ -148,6 +150,7 @@ impl KernelError {
             KernelError::SecretPolicyDenied { .. } => "secret.policy_denied",
             KernelError::ManifestValidation(_) => "manifest.validation",
             KernelError::Query(_) => "query.error",
+            KernelError::Entropy(_) => "entropy.error",
         }
     }
 }

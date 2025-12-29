@@ -109,6 +109,12 @@ pub struct DomainEventRecord {
         with = "serde_bytes_opt"
     )]
     pub key: Option<Vec<u8>>,
+    #[serde(default)]
+    pub now_ns: u64,
+    #[serde(default)]
+    pub logical_now_ns: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
+    pub entropy: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -141,6 +147,12 @@ pub struct EffectReceiptRecord {
     pub cost_cents: Option<u64>,
     #[serde(with = "serde_bytes")]
     pub signature: Vec<u8>,
+    #[serde(default)]
+    pub now_ns: u64,
+    #[serde(default)]
+    pub logical_now_ns: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
+    pub entropy: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

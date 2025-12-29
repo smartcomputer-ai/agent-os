@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
@@ -12,7 +14,6 @@ use aos_air_types::{
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
-use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
 use aos_wasm_abi::{
@@ -21,6 +22,7 @@ use aos_wasm_abi::{
 use serde::Serialize;
 use serde_cbor;
 use serde_cbor::Value as CborValue;
+use getrandom::getrandom;
 
 use crate::cap_enforcer::{CapEnforcerInvoker, PureCapEnforcer};
 use crate::capability::{CapGrantResolution, CapabilityResolver};
@@ -60,6 +62,48 @@ const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
 const CELL_CACHE_SIZE: usize = 128;
 const MONO_KEY: &[u8] = b"";
+const ENTROPY_LEN: usize = 64;
+
+#[derive(Debug, Clone)]
+struct IngressStamp {
+    now_ns: u64,
+    logical_now_ns: u64,
+    entropy: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct KernelClock {
+    start: Instant,
+    logical_offset_ns: AtomicU64,
+}
+
+impl KernelClock {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+            logical_offset_ns: AtomicU64::new(0),
+        }
+    }
+
+    fn now_wall_ns(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64
+    }
+
+    fn logical_now_ns(&self) -> u64 {
+        self.logical_offset_ns.load(Ordering::Relaxed) + self.start.elapsed().as_nanos() as u64
+    }
+
+    fn sync_logical_min(&self, target_ns: u64) {
+        let current = self.logical_now_ns();
+        if target_ns > current {
+            self.logical_offset_ns
+                .fetch_add(target_ns - current, Ordering::Relaxed);
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct KernelConfig {
@@ -112,6 +156,7 @@ pub struct Kernel<S: Store> {
     plan_results: VecDeque<PlanResultEntry>,
     scheduler: Scheduler,
     effect_manager: EffectManager,
+    clock: KernelClock,
     reducer_state: HashMap<Name, ReducerState>,
     reducer_index_roots: HashMap<Name, Hash>,
     snapshot_index: HashMap<JournalSeq, (Hash, Option<Hash>)>,
@@ -552,6 +597,7 @@ impl<S: Store + 'static> Kernel<S> {
                 },
                 secret_resolver.clone(),
             ),
+            clock: KernelClock::new(),
             reducer_state: HashMap::new(),
             reducer_index_roots: HashMap::new(),
             snapshot_index: HashMap::new(),
@@ -1122,6 +1168,7 @@ impl<S: Store + 'static> Kernel<S> {
     fn apply_replay_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
         match record {
             JournalRecord::DomainEvent(event) => {
+                self.sync_logical_from_record(event.logical_now_ns);
                 self.submit_domain_event(event.schema, event.value);
                 self.tick_until_idle()?;
             }
@@ -1129,6 +1176,7 @@ impl<S: Store + 'static> Kernel<S> {
                 self.restore_effect_intent(record)?;
             }
             JournalRecord::EffectReceipt(record) => {
+                self.sync_logical_from_record(record.logical_now_ns);
                 let receipt = EffectReceipt {
                     intent_hash: record.intent_hash,
                     adapter_id: record.adapter_id,
@@ -1302,6 +1350,8 @@ impl<S: Store + 'static> Kernel<S> {
         );
         self.effect_manager
             .update_logical_now_ns(snapshot.logical_now_ns());
+        self.clock
+            .sync_logical_min(self.effect_manager.logical_now_ns());
 
         self.plan_results.clear();
         for result_snapshot in snapshot.plan_results().iter().cloned() {
@@ -1614,6 +1664,10 @@ impl<S: Store + 'static> Kernel<S> {
             snapshot: self.last_snapshot_height,
             head: self.journal.next_seq(),
         }
+    }
+
+    pub fn logical_time_now_ns(&self) -> u64 {
+        self.clock.logical_now_ns()
     }
 
     /// Return snapshot record (hash + manifest hash) for an exact height, if known.
@@ -2188,7 +2242,6 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<(), KernelError> {
         if let Some(pending) = self.pending_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
-            self.update_logical_now_from_receipt(&pending.effect_kind, &receipt)?;
             self.record_decisions()?;
             if let Some(instance) = self.plan_instances.get_mut(&pending.plan_id) {
                 if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
@@ -2217,7 +2270,6 @@ impl<S: Store + 'static> Kernel<S> {
 
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt)?;
-            self.update_logical_now_from_receipt(&context.effect_kind, &receipt)?;
             self.record_decisions()?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
             self.process_domain_event(event)?;
@@ -2236,20 +2288,6 @@ impl<S: Store + 'static> Kernel<S> {
         Err(KernelError::UnknownReceipt(format_intent_hash(
             &receipt.intent_hash,
         )))
-    }
-
-    fn update_logical_now_from_receipt(
-        &mut self,
-        effect_kind: &str,
-        receipt: &EffectReceipt,
-    ) -> Result<(), KernelError> {
-        if effect_kind == aos_effects::EffectKind::TIMER_SET {
-            let timer_receipt: TimerSetReceipt = serde_cbor::from_slice(&receipt.payload_cbor)
-                .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
-            self.effect_manager
-                .update_logical_now_ns(timer_receipt.delivered_at_ns);
-        }
-        Ok(())
     }
 
     fn deliver_event_to_waiting_plans(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
@@ -2312,6 +2350,29 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(JournalRecord::PlanEnded(record))
     }
 
+    fn sample_ingress(&mut self) -> Result<IngressStamp, KernelError> {
+        let now_ns = self.clock.now_wall_ns();
+        let sampled_logical = self.clock.logical_now_ns();
+        self.effect_manager.update_logical_now_ns(sampled_logical);
+        let logical_now_ns = self.effect_manager.logical_now_ns();
+        self.clock.sync_logical_min(logical_now_ns);
+
+        let mut entropy = vec![0u8; ENTROPY_LEN];
+        getrandom(&mut entropy).map_err(|err| KernelError::Entropy(err.to_string()))?;
+
+        Ok(IngressStamp {
+            now_ns,
+            logical_now_ns,
+            entropy,
+        })
+    }
+
+    fn sync_logical_from_record(&mut self, logical_now_ns: u64) {
+        self.effect_manager.update_logical_now_ns(logical_now_ns);
+        let logical_now_ns = self.effect_manager.logical_now_ns();
+        self.clock.sync_logical_min(logical_now_ns);
+    }
+
     fn append_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
         if self.suppress_journal {
             return Ok(());
@@ -2324,10 +2385,17 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn record_domain_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+        if self.suppress_journal {
+            return Ok(());
+        }
+        let stamp = self.sample_ingress()?;
         let record = JournalRecord::DomainEvent(DomainEventRecord {
             schema: event.schema.clone(),
             value: event.value.clone(),
             key: event.key.clone(),
+            now_ns: stamp.now_ns,
+            logical_now_ns: stamp.logical_now_ns,
+            entropy: stamp.entropy,
         });
         self.append_record(record)
     }
@@ -2349,6 +2417,10 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn record_effect_receipt(&mut self, receipt: &EffectReceipt) -> Result<(), KernelError> {
+        if self.suppress_journal {
+            return Ok(());
+        }
+        let stamp = self.sample_ingress()?;
         let record = JournalRecord::EffectReceipt(EffectReceiptRecord {
             intent_hash: receipt.intent_hash,
             adapter_id: receipt.adapter_id.clone(),
@@ -2356,6 +2428,9 @@ impl<S: Store + 'static> Kernel<S> {
             payload_cbor: receipt.payload_cbor.clone(),
             cost_cents: receipt.cost_cents,
             signature: receipt.signature.clone(),
+            now_ns: stamp.now_ns,
+            logical_now_ns: stamp.logical_now_ns,
+            entropy: stamp.entropy,
         });
         self.append_record(record)
     }
@@ -3378,6 +3453,9 @@ mod tests {
             payload_cbor: vec![],
             cost_cents: None,
             signature: vec![],
+            now_ns: 0,
+            logical_now_ns: 0,
+            entropy: Vec::new(),
         };
         let receipt_bytes = serde_cbor::to_vec(&receipt).unwrap();
         kernel

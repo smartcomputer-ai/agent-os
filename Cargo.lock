@@ -264,6 +264,7 @@ dependencies = [
  "aos-wasm-build",
  "base64 0.21.7",
  "camino",
+ "getrandom 0.2.16",
  "hex",
  "indexmap",
  "log",

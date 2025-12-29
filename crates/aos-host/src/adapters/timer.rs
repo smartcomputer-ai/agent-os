@@ -6,7 +6,7 @@
 //! 3. The daemon owns the timer lifecycle, not the adapter registry
 //!
 //! This module provides:
-//! - `TimerEntry`: a persistable timer with wall-clock deadline
+//! - `TimerEntry`: a persistable timer with logical-time deadline
 //! - `TimerHeap`: min-heap ordered by deadline
 //! - `TimerScheduler`: schedules timer.set intents without producing receipts
 
@@ -23,11 +23,11 @@ use crate::error::HostError;
 
 /// A scheduled timer entry with persistable deadline.
 ///
-/// Uses absolute wall-clock nanoseconds (`deliver_at_ns`) rather than `Instant`
+/// Uses logical nanoseconds (`deliver_at_ns`) rather than `Instant`
 /// so timers can be persisted across restarts.
 #[derive(Debug, Clone)]
 pub struct TimerEntry {
-    /// Absolute wall-clock deadline in nanoseconds (Unix time).
+    /// Absolute logical deadline in nanoseconds.
     pub deliver_at_ns: u64,
     /// Intent hash for building the receipt.
     pub intent_hash: [u8; 32],
@@ -38,7 +38,7 @@ pub struct TimerEntry {
 }
 
 impl TimerEntry {
-    /// Compute runtime `Instant` from absolute deadline.
+    /// Compute runtime `Instant` from absolute logical deadline.
     ///
     /// If the deadline is in the past, returns `Instant::now()` (fire immediately).
     pub fn deadline_instant(&self, now_ns: u64) -> Instant {
@@ -115,7 +115,7 @@ impl TimerHeap {
 /// Timer scheduler that handles timer.set intents without producing immediate receipts.
 ///
 /// The scheduler:
-/// 1. Parses `timer.set` intents to extract deadline
+/// 1. Parses `timer.set` intents to extract logical deadline
 /// 2. Stores entries in a min-heap
 /// 3. Provides methods to query next deadline and pop due timers
 /// 4. Can rehydrate from pending reducer receipts on restart

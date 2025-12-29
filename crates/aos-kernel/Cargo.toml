@@ -24,6 +24,7 @@ hex = "0.4"
 base64 = "0.21"
 url = "2"
 wasmtime = "36.0.3"
+getrandom = "0.2"
 
 [dev-dependencies]
 wat = "1"
