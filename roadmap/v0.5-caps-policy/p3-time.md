@@ -1,5 +1,7 @@
 # p3-time: Deterministic Time (Caps + Policy)
 
+**complete**
+
 ## TL;DR
 Caps, policy counters, and approvals need a deterministic clock. The kernel is the timekeeper:
 it stamps each ingress with both **wall-clock `now_ns`** and **monotonic `logical_now_ns`** and
@@ -64,13 +66,13 @@ Receipt timestamps are advisory and do **not** drive the clock.
 
 ## v0.5 Target
 
-- Define `timer.set.deliver_at_ns` as a **logical time** deadline (monotonic).
-- Add `logical_now_ns` to world state (monotonic kernel time).
+- Define `timer.set.deliver_at_ns` as a **logical time** deadline (monotonic). (done)
+- Add `logical_now_ns` to world state (monotonic kernel time). (done)
 - Journal `now_ns` (wall clock), `logical_now_ns` (monotonic), and entropy at ingress
-  by extending existing journal record structs (no new envelope).
-- Include `journal_height` and `logical_now_ns` in the policy/cap authorizer context.
-- Expose `now_ns` and `logical_now_ns` in reducer/pure call context (`p3-context`).
-- Align the timer system to kernel time (privileged adapter or kernel-assisted timers).
+  by extending existing journal record structs (no new envelope). (done)
+- Align the timer system to kernel time (privileged adapter or kernel-assisted timers). (done)
+- Include `journal_height` and `logical_now_ns` in the policy/cap authorizer context. (next)
+- Expose `now_ns` and `logical_now_ns` in reducer/pure call context (`p3-context`). (next)
 
 ---
 
@@ -103,3 +105,10 @@ Receipt timestamps are advisory and do **not** drive the clock.
 4) **Context**
    - `p3-context` will read the journaled `now_ns`, `logical_now_ns`, and `entropy`
      and pass them into reducer/pure invocation context.
+
+---
+
+## Progress
+
+- Done: kernel clock, ingress stamping, logical-time timers, and journal extensions.
+- Next: authorizer context expansion + reducer/pure call context (`p3-context`).
