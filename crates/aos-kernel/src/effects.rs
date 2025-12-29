@@ -4,7 +4,7 @@ use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams};
 use aos_effects::{
     CapabilityGrant, EffectIntent, EffectKind, EffectSource, normalize_effect_params,
 };
-use aos_wasm_abi::ReducerEffect;
+use aos_wasm_abi::{PureContext, ReducerEffect};
 use serde::de::DeserializeOwned;
 use serde_cbor::Value as CborValue;
 use url::Url;
@@ -47,6 +47,13 @@ impl EffectQueue {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct CapContext {
+    pub logical_now_ns: u64,
+    pub journal_height: u64,
+    pub manifest_hash: String,
+}
+
 pub struct EffectManager {
     queue: EffectQueue,
     capability_gate: CapabilityResolver,
@@ -56,6 +63,7 @@ pub struct EffectManager {
     cap_decisions: Vec<CapDecisionRecord>,
     policy_decisions: Vec<PolicyDecisionRecord>,
     logical_now_ns: u64,
+    cap_context: Option<CapContext>,
     enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>>,
     secret_catalog: Option<crate::secret::SecretCatalog>,
     secret_resolver: Option<Arc<dyn SecretResolver>>,
@@ -80,6 +88,7 @@ impl EffectManager {
             cap_decisions: Vec::new(),
             policy_decisions: Vec::new(),
             logical_now_ns: 0,
+            cap_context: None,
             enforcer_invoker,
             secret_catalog,
             secret_resolver,
@@ -240,6 +249,7 @@ impl EffectManager {
             self.enforcer_invoker.as_ref(),
             &source,
             self.logical_now_ns,
+            self.cap_context.as_ref(),
         ) {
             self.record_cap_deny(
                 intent.intent_hash,
@@ -356,6 +366,14 @@ impl EffectManager {
 
     pub fn update_logical_now_ns(&mut self, logical_now_ns: u64) {
         self.logical_now_ns = self.logical_now_ns.max(logical_now_ns);
+    }
+
+    pub fn set_cap_context(&mut self, context: CapContext) {
+        self.cap_context = Some(context);
+    }
+
+    pub fn clear_cap_context(&mut self) {
+        self.cap_context = None;
     }
 
     fn record_cap_deny(
@@ -480,6 +498,7 @@ fn cap_constraints_only(
     enforcer_invoker: Option<&Arc<dyn CapEnforcerInvoker>>,
     origin: &EffectSource,
     logical_now_ns: u64,
+    cap_context: Option<&CapContext>,
 ) -> Result<(), CapDenyReason> {
     if enforcer_module == CAP_ALLOW_ALL_ENFORCER {
         return Ok(());
@@ -493,6 +512,7 @@ fn cap_constraints_only(
             params_cbor,
             origin,
             logical_now_ns,
+            cap_context,
         );
     }
     match enforcer_module {
@@ -513,6 +533,7 @@ fn invoke_enforcer(
     params_cbor: &[u8],
     origin: &EffectSource,
     logical_now_ns: u64,
+    cap_context: Option<&CapContext>,
 ) -> Result<(), CapDenyReason> {
     let origin = match origin {
         EffectSource::Reducer { name } => CapEffectOrigin {
@@ -533,8 +554,14 @@ fn invoke_enforcer(
         origin,
         logical_now_ns,
     };
+    let context = cap_context.map(|ctx| PureContext {
+        logical_now_ns: ctx.logical_now_ns,
+        journal_height: ctx.journal_height,
+        manifest_hash: ctx.manifest_hash.clone(),
+        module: enforcer_module.to_string(),
+    });
     let output = invoker
-        .check(enforcer_module, input)
+        .check(enforcer_module, input, context)
         .map_err(|err| CapDenyReason {
             code: "enforcer_error".into(),
             message: err.to_string(),

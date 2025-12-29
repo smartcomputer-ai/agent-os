@@ -223,6 +223,7 @@ fn reducer_params_round_trip_journal_replay() {
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/ReducerState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
@@ -282,6 +283,7 @@ fn reducer_params_round_trip_journal_replay() {
                     reducer.abi.reducer = Some(ReducerAbi {
                         state: fixtures::schema("com.acme/ReducerState@1"),
                         event: fixtures::schema(fixtures::START_SCHEMA),
+                        context: Some(fixtures::schema("sys/ReducerContext@1")),
                         annotations: None,
                         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
                         cap_slots: Default::default(),

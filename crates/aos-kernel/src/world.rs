@@ -16,9 +16,7 @@ use aos_air_types::{
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
-use aos_wasm_abi::{
-    ABI_VERSION, CallContext, DomainEvent, PureInput, PureOutput, ReducerInput, ReducerOutput,
-};
+use aos_wasm_abi::{ABI_VERSION, DomainEvent, PureInput, PureOutput, ReducerInput, ReducerOutput};
 use serde::Serialize;
 use serde_cbor;
 use serde_cbor::Value as CborValue;
@@ -29,7 +27,7 @@ use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::cell_index::{CellIndex, CellMeta};
 use crate::effects::EffectManager;
 use crate::error::KernelError;
-use crate::event::{KernelEvent, ReducerEvent};
+use crate::event::{IngressStamp, KernelEvent, ReducerEvent};
 use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
@@ -63,13 +61,6 @@ const RECENT_PLAN_RESULT_CACHE: usize = 256;
 const CELL_CACHE_SIZE: usize = 128;
 const MONO_KEY: &[u8] = b"";
 const ENTROPY_LEN: usize = 64;
-
-#[derive(Debug, Clone)]
-struct IngressStamp {
-    now_ns: u64,
-    logical_now_ns: u64,
-    entropy: Vec<u8>,
-}
 
 #[derive(Debug)]
 struct KernelClock {
@@ -668,12 +659,32 @@ impl<S: Store + 'static> Kernel<S> {
                 "module '{name}' is not a pure module"
             )));
         }
+        let wants_context = module_def
+            .abi
+            .pure
+            .as_ref()
+            .and_then(|abi| abi.context.as_ref())
+            .is_some();
+        if wants_context && input.ctx.is_none() {
+            return Err(KernelError::Manifest(format!(
+                "pure module '{name}' requires call context"
+            )));
+        }
+        let input = if wants_context {
+            input.clone()
+        } else {
+            PureInput {
+                version: input.version,
+                input: input.input.clone(),
+                ctx: None,
+            }
+        };
         let mut pures = self
             .pures
             .lock()
             .map_err(|_| KernelError::Manifest("pure registry lock poisoned".into()))?;
         pures.ensure_loaded(name, module_def)?;
-        pures.invoke(name, input)
+        pures.invoke(name, &input)
     }
 
     pub fn tick(&mut self) -> Result<(), KernelError> {
@@ -687,17 +698,27 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn process_domain_event(&mut self, event: DomainEvent) -> Result<(), KernelError> {
+        let journal_height = self.journal.next_seq();
+        let stamp = self.sample_ingress(journal_height)?;
+        self.process_domain_event_with_ingress(event, stamp)
+    }
+
+    fn process_domain_event_with_ingress(
+        &mut self,
+        event: DomainEvent,
+        stamp: IngressStamp,
+    ) -> Result<(), KernelError> {
         let event = self.normalize_domain_event(event)?;
-        let routed = self.route_event(&event)?;
+        let routed = self.route_event(&event, &stamp)?;
         let mut event_for_plans = event.clone();
         if event_for_plans.key.is_none() {
             if let Some(key_bytes) = routed.iter().find_map(|ev| ev.event.key.clone()) {
                 event_for_plans.key = Some(key_bytes);
             }
         }
-        self.record_domain_event(&event_for_plans)?;
-        self.deliver_event_to_waiting_plans(&event_for_plans)?;
-        self.start_plans_for_event(&event_for_plans)?;
+        self.record_domain_event(&event_for_plans, &stamp)?;
+        self.deliver_event_to_waiting_plans(&event_for_plans, &stamp)?;
+        self.start_plans_for_event(&event_for_plans, &stamp)?;
         for ev in routed {
             self.scheduler.push_reducer(ev);
         }
@@ -720,7 +741,11 @@ impl<S: Store + 'static> Kernel<S> {
         })
     }
 
-    fn route_event(&self, event: &DomainEvent) -> Result<Vec<ReducerEvent>, KernelError> {
+    fn route_event(
+        &self,
+        event: &DomainEvent,
+        stamp: &IngressStamp,
+    ) -> Result<Vec<ReducerEvent>, KernelError> {
         let mut routed = Vec::new();
         let Some(bindings) = self.router.get(&event.schema) else {
             return Ok(routed);
@@ -832,6 +857,7 @@ impl<S: Store + 'static> Kernel<S> {
             routed.push(ReducerEvent {
                 reducer: binding.reducer.clone(),
                 event: routed_event,
+                stamp: stamp.clone(),
             });
         }
         Ok(routed)
@@ -861,17 +887,22 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn handle_reducer_event(&mut self, event: ReducerEvent) -> Result<(), KernelError> {
         let reducer_name = event.reducer.clone();
-        let module_def = self
-            .module_defs
-            .get(&reducer_name)
-            .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.clone()))?;
-        self.reducers.ensure_loaded(&reducer_name, module_def)?;
-
-        let keyed = self
-            .module_defs
-            .get(&reducer_name)
-            .and_then(|m| m.key_schema.as_ref())
-            .is_some();
+        let (keyed, wants_context) = {
+            let module_def = self
+                .module_defs
+                .get(&reducer_name)
+                .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.clone()))?;
+            self.reducers.ensure_loaded(&reducer_name, module_def)?;
+            (
+                module_def.key_schema.is_some(),
+                module_def
+                    .abi
+                    .reducer
+                    .as_ref()
+                    .and_then(|abi| abi.context.as_ref())
+                    .is_some(),
+            )
+        };
         let key = event.event.key.clone();
         if keyed && key.is_none() {
             return Err(KernelError::Manifest(format!(
@@ -920,11 +951,38 @@ impl<S: Store + 'static> Kernel<S> {
             None
         };
 
+        let ctx_bytes = if wants_context {
+            let event_hash = Hash::of_cbor(&event.event)
+                .map_err(|err| KernelError::Manifest(err.to_string()))?
+                .to_hex();
+            let context = aos_wasm_abi::ReducerContext {
+                now_ns: event.stamp.now_ns,
+                logical_now_ns: event.stamp.logical_now_ns,
+                journal_height: event.stamp.journal_height,
+                entropy: event.stamp.entropy.clone(),
+                event_hash,
+                manifest_hash: event.stamp.manifest_hash.clone(),
+                reducer: reducer_name.clone(),
+                key: key.clone(),
+                cell_mode: keyed,
+            };
+            Some(
+                to_canonical_cbor(&context)
+                    .map_err(|err| KernelError::Manifest(err.to_string()))?,
+            )
+        } else {
+            None
+        };
+        self.effect_manager.set_cap_context(crate::effects::CapContext {
+            logical_now_ns: event.stamp.logical_now_ns,
+            journal_height: event.stamp.journal_height,
+            manifest_hash: event.stamp.manifest_hash.clone(),
+        });
         let input = ReducerInput {
             version: ABI_VERSION,
             state: current_state,
             event: event.event.clone(),
-            ctx: CallContext::new(keyed, key.clone()),
+            ctx: ctx_bytes,
         };
         let output = self.reducers.invoke(&reducer_name, &input)?;
         self.handle_reducer_output(reducer_name.clone(), key, keyed, output)?;
@@ -1169,7 +1227,23 @@ impl<S: Store + 'static> Kernel<S> {
         match record {
             JournalRecord::DomainEvent(event) => {
                 self.sync_logical_from_record(event.logical_now_ns);
-                self.submit_domain_event(event.schema, event.value);
+                let stamp = IngressStamp {
+                    now_ns: event.now_ns,
+                    logical_now_ns: event.logical_now_ns,
+                    entropy: event.entropy,
+                    journal_height: event.journal_height,
+                    manifest_hash: if event.manifest_hash.is_empty() {
+                        self.manifest_hash.to_hex()
+                    } else {
+                        event.manifest_hash
+                    },
+                };
+                let event = DomainEvent {
+                    schema: event.schema,
+                    value: event.value,
+                    key: event.key,
+                };
+                self.process_domain_event_with_ingress(event, stamp)?;
                 self.tick_until_idle()?;
             }
             JournalRecord::EffectIntent(record) => {
@@ -1177,6 +1251,17 @@ impl<S: Store + 'static> Kernel<S> {
             }
             JournalRecord::EffectReceipt(record) => {
                 self.sync_logical_from_record(record.logical_now_ns);
+                let stamp = IngressStamp {
+                    now_ns: record.now_ns,
+                    logical_now_ns: record.logical_now_ns,
+                    entropy: record.entropy,
+                    journal_height: record.journal_height,
+                    manifest_hash: if record.manifest_hash.is_empty() {
+                        self.manifest_hash.to_hex()
+                    } else {
+                        record.manifest_hash
+                    },
+                };
                 let receipt = EffectReceipt {
                     intent_hash: record.intent_hash,
                     adapter_id: record.adapter_id,
@@ -1185,7 +1270,7 @@ impl<S: Store + 'static> Kernel<S> {
                     cost_cents: record.cost_cents,
                     signature: record.signature,
                 };
-                self.handle_receipt(receipt)?;
+                self.handle_receipt_with_ingress(receipt, stamp)?;
                 self.tick_until_idle()?;
             }
             JournalRecord::CapDecision(_) => {
@@ -2084,7 +2169,11 @@ impl<S: Store + 'static> Kernel<S> {
         self.secret_resolver.clone()
     }
 
-    fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+    fn start_plans_for_event(
+        &mut self,
+        event: &DomainEvent,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
         if let Some(plan_bindings) = self.plan_triggers.get(&event.schema) {
             for binding in plan_bindings {
                 if let Some(plan_def) = self.plan_registry.get(&binding.plan) {
@@ -2123,7 +2212,7 @@ impl<S: Store + 'static> Kernel<S> {
                             ))
                         })?
                         .clone();
-                    let instance = PlanInstance::new(
+                    let mut instance = PlanInstance::new(
                         instance_id,
                         plan_def.clone(),
                         input,
@@ -2131,6 +2220,7 @@ impl<S: Store + 'static> Kernel<S> {
                         correlation,
                         cap_handles,
                     );
+                    instance.set_context(crate::plan::PlanContext::from_stamp(stamp));
                     self.plan_instances.insert(instance_id, instance);
                     self.scheduler.push_plan(instance_id);
                 }
@@ -2156,6 +2246,16 @@ impl<S: Store + 'static> Kernel<S> {
                     .expect("instance must exist");
                 let name = instance.name.clone();
                 let snapshot = instance.snapshot();
+                if let Some(context) = instance.context().cloned() {
+                    self.effect_manager
+                        .set_cap_context(crate::effects::CapContext {
+                            logical_now_ns: context.logical_now_ns,
+                            journal_height: context.journal_height,
+                            manifest_hash: context.manifest_hash.clone(),
+                        });
+                } else {
+                    self.effect_manager.clear_cap_context();
+                }
                 let outcome = match instance.tick(&mut self.effect_manager) {
                     Ok(outcome) => outcome,
                     Err(err) => {
@@ -2240,10 +2340,21 @@ impl<S: Store + 'static> Kernel<S> {
         &mut self,
         receipt: aos_effects::EffectReceipt,
     ) -> Result<(), KernelError> {
+        let journal_height = self.journal.next_seq();
+        let stamp = self.sample_ingress(journal_height)?;
+        self.handle_receipt_with_ingress(receipt, stamp)
+    }
+
+    fn handle_receipt_with_ingress(
+        &mut self,
+        receipt: aos_effects::EffectReceipt,
+        stamp: IngressStamp,
+    ) -> Result<(), KernelError> {
         if let Some(pending) = self.pending_receipts.remove(&receipt.intent_hash) {
-            self.record_effect_receipt(&receipt)?;
+            self.record_effect_receipt(&receipt, &stamp)?;
             self.record_decisions()?;
             if let Some(instance) = self.plan_instances.get_mut(&pending.plan_id) {
+                instance.set_context(crate::plan::PlanContext::from_stamp(&stamp));
                 if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
                     self.scheduler.push_plan(pending.plan_id);
                 }
@@ -2269,7 +2380,7 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
-            self.record_effect_receipt(&receipt)?;
+            self.record_effect_receipt(&receipt, &stamp)?;
             self.record_decisions()?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
             self.process_domain_event(event)?;
@@ -2290,11 +2401,16 @@ impl<S: Store + 'static> Kernel<S> {
         )))
     }
 
-    fn deliver_event_to_waiting_plans(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+    fn deliver_event_to_waiting_plans(
+        &mut self,
+        event: &DomainEvent,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
         if let Some(mut plan_ids) = self.waiting_events.remove(&event.schema) {
             let mut still_waiting = Vec::new();
             for id in plan_ids.drain(..) {
                 if let Some(instance) = self.plan_instances.get_mut(&id) {
+                    instance.set_context(crate::plan::PlanContext::from_stamp(stamp));
                     if instance.deliver_event(event)? {
                         self.scheduler.push_plan(id);
                     } else {
@@ -2350,7 +2466,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(JournalRecord::PlanEnded(record))
     }
 
-    fn sample_ingress(&mut self) -> Result<IngressStamp, KernelError> {
+    fn sample_ingress(&mut self, journal_height: u64) -> Result<IngressStamp, KernelError> {
         let now_ns = self.clock.now_wall_ns();
         let sampled_logical = self.clock.logical_now_ns();
         self.effect_manager.update_logical_now_ns(sampled_logical);
@@ -2364,6 +2480,8 @@ impl<S: Store + 'static> Kernel<S> {
             now_ns,
             logical_now_ns,
             entropy,
+            journal_height,
+            manifest_hash: self.manifest_hash.to_hex(),
         })
     }
 
@@ -2384,18 +2502,27 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
-    fn record_domain_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+    fn record_domain_event(
+        &mut self,
+        event: &DomainEvent,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
         if self.suppress_journal {
             return Ok(());
         }
-        let stamp = self.sample_ingress()?;
+        let event_hash = Hash::of_cbor(event)
+            .map_err(|err| KernelError::Journal(err.to_string()))?
+            .to_hex();
         let record = JournalRecord::DomainEvent(DomainEventRecord {
             schema: event.schema.clone(),
             value: event.value.clone(),
             key: event.key.clone(),
             now_ns: stamp.now_ns,
             logical_now_ns: stamp.logical_now_ns,
-            entropy: stamp.entropy,
+            journal_height: stamp.journal_height,
+            entropy: stamp.entropy.clone(),
+            event_hash,
+            manifest_hash: stamp.manifest_hash.clone(),
         });
         self.append_record(record)
     }
@@ -2416,11 +2543,14 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(record)
     }
 
-    fn record_effect_receipt(&mut self, receipt: &EffectReceipt) -> Result<(), KernelError> {
+    fn record_effect_receipt(
+        &mut self,
+        receipt: &EffectReceipt,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
         if self.suppress_journal {
             return Ok(());
         }
-        let stamp = self.sample_ingress()?;
         let record = JournalRecord::EffectReceipt(EffectReceiptRecord {
             intent_hash: receipt.intent_hash,
             adapter_id: receipt.adapter_id.clone(),
@@ -2430,7 +2560,9 @@ impl<S: Store + 'static> Kernel<S> {
             signature: receipt.signature.clone(),
             now_ns: stamp.now_ns,
             logical_now_ns: stamp.logical_now_ns,
-            entropy: stamp.entropy,
+            journal_height: stamp.journal_height,
+            entropy: stamp.entropy.clone(),
+            manifest_hash: stamp.manifest_hash.clone(),
         });
         self.append_record(record)
     }
@@ -2696,6 +2828,16 @@ mod tests {
         }
     }
 
+    fn dummy_stamp<S: Store + 'static>(kernel: &Kernel<S>) -> IngressStamp {
+        IngressStamp {
+            now_ns: 0,
+            logical_now_ns: 0,
+            entropy: Vec::new(),
+            journal_height: 0,
+            manifest_hash: kernel.manifest_hash().to_hex(),
+        }
+    }
+
     fn kernel_with_snapshot(height: JournalSeq) -> Kernel<MemStore> {
         let store = Arc::new(MemStore::default());
         let manifest = minimal_manifest();
@@ -2781,7 +2923,7 @@ mod tests {
         )])))
         .unwrap();
         let event = DomainEvent::new("com.acme/Event@1", payload);
-        let err = kernel.route_event(&event).unwrap_err();
+        let err = kernel.route_event(&event, &dummy_stamp(&kernel)).unwrap_err();
         assert!(format!("{err:?}").contains("missing key_field"), "{err}");
     }
 
@@ -2794,7 +2936,7 @@ mod tests {
         )])))
         .unwrap();
         let event = DomainEvent::new("com.acme/Event@1", payload);
-        let err = kernel.route_event(&event).unwrap_err();
+        let err = kernel.route_event(&event, &dummy_stamp(&kernel)).unwrap_err();
         assert!(format!("{err:?}").contains("provided key_field"), "{err}");
     }
 
@@ -2807,7 +2949,7 @@ mod tests {
         )])))
         .unwrap();
         let event = DomainEvent::new("com.acme/Event@1", payload);
-        let routed = kernel.route_event(&event).expect("route");
+        let routed = kernel.route_event(&event, &dummy_stamp(&kernel)).expect("route");
         assert_eq!(routed.len(), 1);
         let expected_key = aos_cbor::to_canonical_cbor(&CborValue::Text("abc".into())).unwrap();
         assert_eq!(routed[0].event.key.as_ref().unwrap(), &expected_key);
@@ -2896,6 +3038,7 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new("com.acme/State@1").unwrap(),
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
@@ -2966,6 +3109,7 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new("com.acme/State@1").unwrap(),
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
@@ -3035,6 +3179,7 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new("com.acme/State@1").unwrap(),
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
@@ -3104,6 +3249,7 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new("com.acme/State@1").unwrap(),
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
@@ -3455,7 +3601,9 @@ mod tests {
             signature: vec![],
             now_ns: 0,
             logical_now_ns: 0,
+            journal_height: 0,
             entropy: Vec::new(),
+            manifest_hash: String::new(),
         };
         let receipt_bytes = serde_cbor::to_vec(&receipt).unwrap();
         kernel

@@ -941,11 +941,13 @@ pub fn validate_manifest(
         }
         if let Some(abi) = module.abi.reducer.as_ref() {
             for schema_ref in [
-                abi.state.as_str(),
-                abi.event.as_str(),
-                abi.annotations.as_ref().map(|s| s.as_str()).unwrap_or(""),
+                Some(abi.state.as_str()),
+                Some(abi.event.as_str()),
+                abi.context.as_ref().map(|s| s.as_str()),
+                abi.annotations.as_ref().map(|s| s.as_str()),
             ]
             .iter()
+            .flatten()
             .filter(|s| !s.is_empty())
             {
                 if !schema_exists(schema_ref) {
@@ -956,7 +958,10 @@ pub fn validate_manifest(
             }
         }
         if let Some(abi) = module.abi.pure.as_ref() {
-            for schema_ref in [abi.input.as_str(), abi.output.as_str()] {
+            for schema_ref in [abi.input.as_str(), abi.output.as_str()]
+                .into_iter()
+                .chain(abi.context.as_ref().map(|s| s.as_str()))
+            {
                 if !schema_exists(schema_ref) {
                     return Err(ValidationError::SchemaNotFound {
                         schema: schema_ref.to_string(),
@@ -1300,6 +1305,7 @@ mod tests {
                     reducer: Some(ReducerAbi {
                         state: SchemaRef::new("sys/TimerFired@1").unwrap(),
                         event: SchemaRef::new("sys/TimerFired@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                         annotations: None,
                         effects_emitted: vec![],
                         cap_slots: IndexMap::new(),
@@ -1381,6 +1387,7 @@ mod tests {
                     reducer: Some(ReducerAbi {
                         state: SchemaRef::new("sys/TimerFired@1").unwrap(),
                         event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                         annotations: None,
                         effects_emitted: vec![],
                         cap_slots: IndexMap::new(),
@@ -1462,6 +1469,7 @@ mod tests {
                     reducer: Some(ReducerAbi {
                         state: SchemaRef::new("com.acme/State@1").unwrap(),
                         event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                         annotations: None,
                         effects_emitted: vec![EffectKind::timer_set()],
                         cap_slots: IndexMap::new(),

@@ -81,6 +81,7 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
     module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("demo/TimerState@1"),
         event: fixtures::schema("demo/TimerEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),

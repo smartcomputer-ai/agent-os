@@ -480,8 +480,25 @@ fn engine_cache_fingerprint() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerEffect};
+    use aos_wasm_abi::{ABI_VERSION, DomainEvent, ReducerContext, ReducerEffect};
     use tempfile::TempDir;
+
+    fn ctx_bytes(reducer: &str) -> Vec<u8> {
+        let ctx = ReducerContext {
+            now_ns: 1,
+            logical_now_ns: 2,
+            journal_height: 3,
+            entropy: vec![0x11; 64],
+            event_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
+            manifest_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                .into(),
+            reducer: reducer.into(),
+            key: None,
+            cell_mode: false,
+        };
+        serde_cbor::to_vec(&ctx).expect("ctx bytes")
+    }
     #[test]
     fn reducer_round_trip_with_stub_module() {
         let runtime = ReducerRuntime::new().unwrap();
@@ -499,7 +516,7 @@ mod tests {
             version: ABI_VERSION,
             state: Some(vec![0xde, 0xad]),
             event: DomainEvent::new("com.acme/Event@1", vec![0x01]),
-            ctx: CallContext::new(false, None),
+            ctx: Some(ctx_bytes("com.acme/Reducer@1")),
         };
 
         let output = runtime.run(&wasm_bytes, &input).unwrap();
@@ -521,7 +538,7 @@ mod tests {
             version: ABI_VERSION,
             state: None,
             event: DomainEvent::new("demo/Event@1", vec![]),
-            ctx: CallContext::new(false, None),
+            ctx: Some(ctx_bytes("demo/Reducer@1")),
         };
 
         runtime.run(&wasm_bytes, &input).unwrap();
@@ -548,7 +565,7 @@ mod tests {
             version: ABI_VERSION,
             state: None,
             event: DomainEvent::new("demo/Event@1", vec![]),
-            ctx: CallContext::new(false, None),
+            ctx: Some(ctx_bytes("demo/Reducer@1")),
         };
 
         let runtime = ReducerRuntime::new_with_disk_cache(Some(cache_root.clone())).unwrap();

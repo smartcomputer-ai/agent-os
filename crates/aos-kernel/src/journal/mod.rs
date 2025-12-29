@@ -113,8 +113,14 @@ pub struct DomainEventRecord {
     pub now_ns: u64,
     #[serde(default)]
     pub logical_now_ns: u64,
+    #[serde(default)]
+    pub journal_height: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
     pub entropy: Vec<u8>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub event_hash: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub manifest_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -151,8 +157,12 @@ pub struct EffectReceiptRecord {
     pub now_ns: u64,
     #[serde(default)]
     pub logical_now_ns: u64,
+    #[serde(default)]
+    pub journal_height: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
     pub entropy: Vec<u8>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub manifest_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

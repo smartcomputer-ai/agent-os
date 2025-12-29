@@ -1,7 +1,7 @@
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use aos_wasm_abi::{
-    AbiDecodeError, AbiEncodeError, CallContext, DomainEvent as AbiDomainEvent,
+    AbiDecodeError, AbiEncodeError, DomainEvent as AbiDomainEvent, ReducerContext,
     ReducerEffect as AbiReducerEffect, ReducerInput, ReducerOutput,
 };
 use serde::Serialize;
@@ -33,7 +33,7 @@ pub trait Reducer: Default {
 pub struct ReducerCtx<S, A = Value> {
     pub state: S,
     ann: Option<A>,
-    key: Option<Vec<u8>>,
+    context: Option<ReducerContext>,
     reducer_name: &'static str,
     domain_events: Vec<PendingEvent>,
     effects: Vec<PendingEffect>,
@@ -41,11 +41,11 @@ pub struct ReducerCtx<S, A = Value> {
 }
 
 impl<S, A> ReducerCtx<S, A> {
-    fn new(state: S, ctx: CallContext, reducer_name: &'static str) -> Self {
+    fn new(state: S, ctx: Option<ReducerContext>, reducer_name: &'static str) -> Self {
         Self {
             state,
             ann: None,
-            key: ctx.key,
+            context: ctx,
             reducer_name,
             domain_events: Vec::new(),
             effects: Vec::new(),
@@ -55,13 +55,14 @@ impl<S, A> ReducerCtx<S, A> {
 
     /// Optional cell key provided by the kernel.
     pub fn key(&self) -> Option<&[u8]> {
-        self.key.as_deref()
+        self.context.as_ref().and_then(|ctx| ctx.key.as_deref())
     }
 
     /// Return the key and fail deterministically if the reducer is keyed but no key was supplied.
     pub fn key_required(&self) -> Result<&[u8], ReduceError> {
-        self.key
-            .as_deref()
+        self.context
+            .as_ref()
+            .and_then(|ctx| ctx.key.as_deref())
             .ok_or(ReduceError::new("missing reducer key"))
     }
 
@@ -73,8 +74,8 @@ impl<S, A> ReducerCtx<S, A> {
 
     /// Enforce that the provided bytes exactly match the reducer key (when present).
     pub fn ensure_key_eq(&self, expected: &[u8]) -> Result<(), ReduceError> {
-        match &self.key {
-            Some(actual) if actual.as_slice() == expected => Ok(()),
+        match self.context.as_ref().and_then(|ctx| ctx.key.as_deref()) {
+            Some(actual) if actual == expected => Ok(()),
             Some(_) => Err(ReduceError::new("key mismatch")),
             None => Err(ReduceError::new("missing reducer key")),
         }
@@ -83,6 +84,51 @@ impl<S, A> ReducerCtx<S, A> {
     /// Name of the reducer type (for diagnostics).
     pub fn reducer_name(&self) -> &'static str {
         self.reducer_name
+    }
+
+    /// Access the full call context supplied by the kernel.
+    pub fn context(&self) -> Option<&ReducerContext> {
+        self.context.as_ref()
+    }
+
+    /// Monotonic kernel time (ns) at ingress.
+    pub fn logical_now_ns(&self) -> Option<u64> {
+        self.context.as_ref().map(|ctx| ctx.logical_now_ns)
+    }
+
+    /// Wall clock (ns) sampled at ingress.
+    pub fn now_ns(&self) -> Option<u64> {
+        self.context.as_ref().map(|ctx| ctx.now_ns)
+    }
+
+    /// Journal height for this invocation.
+    pub fn journal_height(&self) -> Option<u64> {
+        self.context.as_ref().map(|ctx| ctx.journal_height)
+    }
+
+    /// Entropy bytes sampled at ingress.
+    pub fn entropy(&self) -> Option<&[u8]> {
+        self.context.as_ref().map(|ctx| ctx.entropy.as_slice())
+    }
+
+    /// Hash of the canonical event envelope.
+    pub fn event_hash(&self) -> Option<&str> {
+        self.context.as_ref().map(|ctx| ctx.event_hash.as_str())
+    }
+
+    /// Manifest hash for the active world.
+    pub fn manifest_hash(&self) -> Option<&str> {
+        self.context.as_ref().map(|ctx| ctx.manifest_hash.as_str())
+    }
+
+    /// Reducer module name string.
+    pub fn reducer_module(&self) -> Option<&str> {
+        self.context.as_ref().map(|ctx| ctx.reducer.as_str())
+    }
+
+    /// Whether the reducer is operating in keyed mode.
+    pub fn cell_mode(&self) -> Option<bool> {
+        self.context.as_ref().map(|ctx| ctx.cell_mode)
     }
 
     /// Attach structured annotations.
@@ -353,6 +399,7 @@ pub enum StepError {
     AbiDecode(AbiDecodeError),
     StateDecode(serde_cbor::Error),
     EventDecode(serde_cbor::Error),
+    CtxDecode(serde_cbor::Error),
     StateEncode(serde_cbor::Error),
     AnnEncode(serde_cbor::Error),
     OutputEncode(AbiEncodeError),
@@ -375,6 +422,7 @@ impl core::fmt::Display for StepError {
             StepError::AbiDecode(err) => write!(f, "abi decode failed: {err}"),
             StepError::StateDecode(err) => write!(f, "state decode failed: {err}"),
             StepError::EventDecode(err) => write!(f, "event decode failed: {err}"),
+            StepError::CtxDecode(err) => write!(f, "context decode failed: {err}"),
             StepError::StateEncode(err) => write!(f, "state encode failed: {err}"),
             StepError::AnnEncode(err) => write!(f, "annotation encode failed: {err}"),
             StepError::OutputEncode(err) => write!(f, "output encode failed: {err}"),
@@ -407,7 +455,11 @@ where
         None => R::State::default(),
     };
     let event = serde_cbor::from_slice(&input.event.value).map_err(StepError::EventDecode)?;
-    let mut ctx = ReducerCtx::new(state, input.ctx, reducer_name);
+    let context = match &input.ctx {
+        Some(bytes) => Some(ReducerContext::decode(bytes).map_err(StepError::CtxDecode)?),
+        None => None,
+    };
+    let mut ctx = ReducerCtx::new(state, context, reducer_name);
     let mut reducer = R::default();
     reducer
         .reduce(event, &mut ctx)
@@ -519,8 +571,25 @@ macro_rules! aos_event_union {
 mod tests {
     use super::*;
     use alloc::string::String;
-    use aos_wasm_abi::{CallContext, DomainEvent, ReducerInput};
+    use aos_wasm_abi::{DomainEvent, ReducerContext, ReducerInput};
     use serde::{Deserialize, Serialize};
+
+    fn context_bytes(reducer: &str) -> Vec<u8> {
+        let ctx = ReducerContext {
+            now_ns: 1,
+            logical_now_ns: 2,
+            journal_height: 3,
+            entropy: vec![0x11; 64],
+            event_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
+            manifest_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                .into(),
+            reducer: reducer.into(),
+            key: None,
+            cell_mode: false,
+        };
+        serde_cbor::to_vec(&ctx).expect("context bytes")
+    }
 
     #[derive(Default)]
     struct TestReducer;
@@ -558,7 +627,6 @@ mod tests {
 
     #[test]
     fn intent_builder_serializes_payload() {
-        let ctx = CallContext::new(false, None);
         let input = ReducerInput {
             version: aos_wasm_abi::ABI_VERSION,
             state: None,
@@ -566,7 +634,7 @@ mod tests {
                 "schema",
                 serde_cbor::to_vec(&TestEvent::Increment(1)).unwrap(),
             ),
-            ctx,
+            ctx: Some(context_bytes("com.acme/TestReducer@1")),
         };
         let bytes = input.encode().unwrap();
         let output = step_bytes::<TestReducer>(&bytes).expect("step");
@@ -612,7 +680,7 @@ mod tests {
             version: aos_wasm_abi::ABI_VERSION,
             state: None,
             event: DomainEvent::new("schema", serde_cbor::to_vec(&EffectEvent).unwrap()),
-            ctx: CallContext::new(false, None),
+            ctx: Some(context_bytes("com.acme/EffectReducer@1")),
         };
         let bytes = input.encode().unwrap();
         let _ = step_bytes::<EffectReducer>(&bytes);
@@ -655,7 +723,7 @@ mod tests {
             version: aos_wasm_abi::ABI_VERSION,
             state: None,
             event: DomainEvent::new("schema", serde_cbor::to_vec(&AnnEvent).unwrap()),
-            ctx: CallContext::new(false, None),
+            ctx: Some(context_bytes("com.acme/AnnReducer@1")),
         };
         let bytes = input.encode().unwrap();
         let output = step_bytes::<AnnReducer>(&bytes).unwrap();

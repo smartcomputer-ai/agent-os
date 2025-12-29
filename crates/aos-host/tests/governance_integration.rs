@@ -352,6 +352,7 @@ fn manifest_with_reducer(
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/PatchedState@1"),
         event: fixtures::schema(START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -493,6 +494,7 @@ fn upgrade_manifest(
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),

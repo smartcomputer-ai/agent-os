@@ -40,6 +40,7 @@ async fn keyed_reducer_integration_flow() {
         reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
             state: fixtures::schema("com.acme/State@1"),
             event: fixtures::schema("com.acme/Event@1"),
+            context: Some(fixtures::schema("sys/ReducerContext@1")),
             annotations: None,
             effects_emitted: vec![],
             cap_slots: Default::default(),

@@ -17,6 +17,7 @@
           "properties": {
             "state": { "$ref": "common.schema.json#/$defs/SchemaRef" },
             "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+            "context": { "$ref": "common.schema.json#/$defs/SchemaRef" },
             "annotations": { "$ref": "common.schema.json#/$defs/SchemaRef" },
             "effects_emitted": {
               "type": "array",
@@ -38,7 +39,8 @@
           "type": "object",
           "properties": {
             "input": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-            "output": { "$ref": "common.schema.json#/$defs/SchemaRef" }
+            "output": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+            "context": { "$ref": "common.schema.json#/$defs/SchemaRef" }
           },
           "required": ["input","output"],
           "additionalProperties": false

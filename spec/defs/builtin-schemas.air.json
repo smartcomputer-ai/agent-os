@@ -36,6 +36,35 @@
       }
     }
   },
+  {
+    "$kind": "defschema",
+    "name": "sys/ReducerContext@1",
+    "type": {
+      "record": {
+        "now_ns": { "nat": {} },
+        "logical_now_ns": { "nat": {} },
+        "journal_height": { "nat": {} },
+        "entropy": { "bytes": {} },
+        "event_hash": { "hash": {} },
+        "manifest_hash": { "hash": {} },
+        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "key": { "option": { "bytes": {} } },
+        "cell_mode": { "bool": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/PureContext@1",
+    "type": {
+      "record": {
+        "logical_now_ns": { "nat": {} },
+        "journal_height": { "nat": {} },
+        "manifest_hash": { "hash": {} },
+        "module": { "text": {}, "$comment": "Name-formatted string" }
+      }
+    }
+  },
 
   {
     "$kind": "defschema",

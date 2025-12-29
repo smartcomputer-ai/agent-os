@@ -464,6 +464,8 @@ pub struct ReducerAbi {
     pub state: SchemaRef,
     pub event: SchemaRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<SchemaRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotations: Option<SchemaRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects_emitted: Vec<EffectKind>,
@@ -475,6 +477,8 @@ pub struct ReducerAbi {
 pub struct PureAbi {
     pub input: SchemaRef,
     pub output: SchemaRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<SchemaRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

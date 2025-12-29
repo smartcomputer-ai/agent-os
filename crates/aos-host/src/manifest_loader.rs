@@ -615,6 +615,7 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new(&state_schema.name).unwrap(),
                     event: SchemaRef::new(&event_schema.name).unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: Vec::new(),
                     cap_slots: IndexMap::new(),

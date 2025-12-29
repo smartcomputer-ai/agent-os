@@ -111,6 +111,7 @@ fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) ->
             reducer: Some(ReducerAbi {
                 state: SchemaRef::new(STATE_SCHEMA).unwrap(),
                 event: SchemaRef::new(EVENT_SCHEMA).unwrap(),
+                context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: Vec::new(),
                 cap_slots: IndexMap::new(),
@@ -373,6 +374,7 @@ async fn testhost_with_fixtures_build_loaded_manifest() {
     module.abi.reducer = Some(ReducerAbi {
         state: SchemaRef::new("test/State@1").unwrap(),
         event: SchemaRef::new("test/Event@1").unwrap(),
+        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
@@ -490,6 +492,7 @@ async fn testhost_timer_effect_flow() {
     module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("test/TimerState@1"),
         event: fixtures::schema("test/TimerEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -579,6 +582,7 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
     module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("test/TimerState@1"),
         event: fixtures::schema("test/TimerEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -640,6 +644,7 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
     module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("test/TimerState@1"),
         event: fixtures::schema("test/TimerEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),

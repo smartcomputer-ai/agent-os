@@ -151,6 +151,7 @@ fn sugar_literal_plan_executes_http_flow() {
     result_module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/Result@1"),
         event: fixtures::schema("com.acme/ResultEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
@@ -290,6 +291,7 @@ fn single_plan_orchestration_completes_after_receipt() {
     result_module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/Result@1"),
         event: fixtures::schema("com.acme/ResultEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
@@ -438,6 +440,7 @@ fn reducer_and_plan_effects_are_enqueued() {
     reducer_module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/ReducerState@1"),
         event: fixtures::schema(START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -761,6 +764,7 @@ fn blob_put_receipt_routes_event_to_handler() {
     emitter.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(event_schema),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -768,6 +772,7 @@ fn blob_put_receipt_routes_event_to_handler() {
     handler.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(event_schema),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -891,6 +896,7 @@ fn blob_get_receipt_routes_event_to_handler() {
     emitter.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(event_schema),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -898,6 +904,7 @@ fn blob_get_receipt_routes_event_to_handler() {
     handler.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(event_schema),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -1001,6 +1008,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
     next_emitter.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/NextEmitterState@1"),
         event: fixtures::schema("com.acme/PulseNext@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -1292,6 +1300,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
     ready_emitter.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/ReadyEmitterState@1"),
         event: fixtures::schema("com.acme/TriggerReady@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -1307,6 +1316,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
     other_emitter.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/OtherEmitterState@1"),
         event: fixtures::schema("com.acme/TriggerOther@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -1574,6 +1584,7 @@ fn raised_events_are_routed_to_reducers() {
     reducer_module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/RaisedState@1"),
         event: fixtures::schema("com.acme/Raised@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),

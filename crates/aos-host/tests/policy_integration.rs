@@ -41,6 +41,7 @@ fn reducer_http_effect_is_denied() {
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/HttpState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
         cap_slots: Default::default(),

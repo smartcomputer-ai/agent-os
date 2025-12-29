@@ -51,6 +51,7 @@ pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     result_module.abi.reducer = Some(ReducerAbi {
         state: result_state_schema.clone(),
         event: result_event_schema.clone(),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
@@ -214,6 +215,7 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     result_module.abi.reducer = Some(ReducerAbi {
         state: result_state_schema.clone(),
         event: result_event_schema.clone(),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
@@ -230,6 +232,7 @@ pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     unblock_emitter.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/UnblockEmitterState@1"),
         event: fixtures::schema("com.acme/EmitUnblock@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
@@ -362,6 +365,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
     timer_emitter.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(timer_event_schema),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -369,6 +373,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
     timer_handler.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(timer_event_schema),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -422,6 +427,7 @@ pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/SimpleState@1"),
         event: fixtures::schema(START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),

@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::{self, Value as CborValue};
 
 use crate::capability::CapGrantResolution;
+use crate::event::IngressStamp;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::schema_value::cbor_to_expr_value;
@@ -69,6 +70,7 @@ pub struct PlanInstance {
     pub plan: DefPlan,
     pub env: ExprEnv,
     pub completed: bool,
+    context: Option<PlanContext>,
     effect_handles: HashMap<String, [u8; 32]>,
     receipt_waits: BTreeMap<[u8; 32], ReceiptWait>,
     receipt_values: HashMap<String, ExprValue>,
@@ -97,6 +99,23 @@ pub struct EventWait {
     pub where_clause: Option<Expr>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlanContext {
+    pub logical_now_ns: u64,
+    pub journal_height: u64,
+    pub manifest_hash: String,
+}
+
+impl PlanContext {
+    pub fn from_stamp(stamp: &IngressStamp) -> Self {
+        Self {
+            logical_now_ns: stamp.logical_now_ns,
+            journal_height: stamp.journal_height,
+            manifest_hash: stamp.manifest_hash.clone(),
+        }
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct PlanTickOutcome {
     pub raised_events: Vec<DomainEvent>,
@@ -121,6 +140,7 @@ pub struct PlanInstanceSnapshot {
     pub name: String,
     pub env: ExprEnv,
     pub completed: bool,
+    pub context: Option<PlanContext>,
     pub effect_handles: Vec<(String, [u8; 32])>,
     pub receipt_waits: Vec<ReceiptWait>,
     pub receipt_values: Vec<(String, ExprValue)>,
@@ -176,6 +196,7 @@ impl PlanInstance {
             plan,
             env,
             completed: false,
+            context: None,
             effect_handles: HashMap::new(),
             receipt_waits: BTreeMap::new(),
             receipt_values: HashMap::new(),
@@ -545,6 +566,7 @@ impl PlanInstance {
             name: self.name.clone(),
             env: self.env.clone(),
             completed: self.completed,
+            context: self.context.clone(),
             effect_handles: self
                 .effect_handles
                 .iter()
@@ -583,6 +605,7 @@ impl PlanInstance {
         );
         instance.env = snapshot.env;
         instance.completed = snapshot.completed;
+        instance.context = snapshot.context;
         instance.effect_handles = snapshot.effect_handles.into_iter().collect();
         instance.receipt_waits = snapshot
             .receipt_waits
@@ -595,6 +618,14 @@ impl PlanInstance {
         instance.correlation_id = snapshot.correlation_id;
         instance.step_states = snapshot.step_states.into_iter().collect();
         instance
+    }
+
+    pub fn set_context(&mut self, context: PlanContext) {
+        self.context = Some(context);
+    }
+
+    pub fn context(&self) -> Option<&PlanContext> {
+        self.context.as_ref()
     }
 
     pub fn deliver_receipt(

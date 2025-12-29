@@ -300,6 +300,7 @@ dependencies = [
 name = "aos-sys"
 version = "0.1.0"
 dependencies = [
+ "aos-wasm-abi",
  "aos-wasm-sdk",
  "hex",
  "serde",
@@ -316,6 +317,7 @@ dependencies = [
  "aos-wasm-abi",
  "log",
  "serde",
+ "serde_cbor",
  "sha2",
  "tempfile",
  "wasmtime",
@@ -344,6 +346,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
+ "toml",
  "walkdir",
  "which",
 ]

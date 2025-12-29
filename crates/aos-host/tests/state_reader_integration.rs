@@ -25,6 +25,7 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
     module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/StoreState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -74,6 +75,7 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
     reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
         state: fixtures::schema("com.acme/State@1"),
         event: fixtures::schema("com.acme/Event@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),

@@ -657,6 +657,7 @@ pub fn stub_pure_module<S: Store + ?Sized>(
             pure: Some(aos_air_types::PureAbi {
                 input: schema(input_schema),
                 output: schema(output_schema),
+                context: Some(schema("sys/PureContext@1")),
             }),
         },
     }
@@ -700,6 +701,7 @@ pub fn reducer_module_from_target(
             reducer: Some(aos_air_types::ReducerAbi {
                 state: schema(state_schema),
                 event: schema(event_schema),
+                context: Some(schema("sys/ReducerContext@1")),
                 annotations: None,
                 effects_emitted: vec![],
                 cap_slots: IndexMap::new(),
@@ -745,6 +747,7 @@ pub fn pure_module_from_target(
             pure: Some(aos_air_types::PureAbi {
                 input: schema(input_schema),
                 output: schema(output_schema),
+                context: Some(schema("sys/PureContext@1")),
             }),
         },
     }

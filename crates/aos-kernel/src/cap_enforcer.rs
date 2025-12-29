@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use aos_air_types::{DefModule, Name};
 use aos_cbor::to_canonical_cbor;
 use aos_store::Store;
-use aos_wasm_abi::{ABI_VERSION, PureInput, PureOutput};
+use aos_wasm_abi::{ABI_VERSION, PureContext, PureInput, PureOutput};
 use serde::{Deserialize, Serialize};
 use serde_bytes;
 
@@ -39,7 +39,12 @@ pub struct CapCheckOutput {
 }
 
 pub trait CapEnforcerInvoker: Send + Sync {
-    fn check(&self, module: &str, input: CapCheckInput) -> Result<CapCheckOutput, KernelError>;
+    fn check(
+        &self,
+        module: &str,
+        input: CapCheckInput,
+        ctx: Option<PureContext>,
+    ) -> Result<CapCheckOutput, KernelError>;
 }
 
 pub struct PureCapEnforcer<S: Store> {
@@ -57,7 +62,12 @@ impl<S: Store> PureCapEnforcer<S> {
 }
 
 impl<S: Store> CapEnforcerInvoker for PureCapEnforcer<S> {
-    fn check(&self, module: &str, input: CapCheckInput) -> Result<CapCheckOutput, KernelError> {
+    fn check(
+        &self,
+        module: &str,
+        input: CapCheckInput,
+        ctx: Option<PureContext>,
+    ) -> Result<CapCheckOutput, KernelError> {
         let module_def = self
             .module_defs
             .get(module)
@@ -69,9 +79,29 @@ impl<S: Store> CapEnforcerInvoker for PureCapEnforcer<S> {
         }
         let input_bytes = to_canonical_cbor(&input)
             .map_err(|err| KernelError::Manifest(format!("encode cap input: {err}")))?;
+        let wants_context = module_def
+            .abi
+            .pure
+            .as_ref()
+            .and_then(|abi| abi.context.as_ref())
+            .is_some();
+        let ctx_bytes = if wants_context {
+            let ctx = ctx.ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "module '{module}' requires call context"
+                ))
+            })?;
+            Some(
+                to_canonical_cbor(&ctx)
+                    .map_err(|err| KernelError::Manifest(format!("encode cap context: {err}")))?,
+            )
+        } else {
+            None
+        };
         let pure_input = PureInput {
             version: ABI_VERSION,
             input: input_bytes,
+            ctx: ctx_bytes,
         };
         let output = {
             let mut pures = self

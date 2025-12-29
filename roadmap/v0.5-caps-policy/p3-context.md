@@ -1,9 +1,9 @@
 # p3-context: Deterministic Call Context ("bowl")
 
 ## TL;DR
-Reducers and pure modules should receive a small, deterministic **call context** on every
-invocation. Reducers get time/entropy/journal metadata; pure modules get a minimal
-context (logical time + journal height + manifest hash).
+Reducers and pure modules may receive a small, deterministic **call context** when they
+declare it in the module ABI. Reducers get time/entropy/journal metadata; pure modules
+get a minimal context (logical time + journal height + manifest hash).
 The kernel samples wall clock and monotonic time **at ingress**, journals them, and replays
 those values during execution.
 
@@ -14,7 +14,8 @@ and replayable, similar to Urbit's bowl but without global state access.
 
 ## Goals
 - Deterministic and replayable across shadow runs and replays.
-- Provide time/entropy/journal metadata without turning them into effects.
+- Provide time/entropy/journal metadata without turning them into effects (when modules
+  opt in).
 - Keep reducers isolated; cross-reducer reads remain plan-only (`introspect.*`).
 - Versioned context schema to allow future expansion.
 
@@ -37,7 +38,8 @@ The kernel captures the following **at ingress** and records them on every
 - **event_hash**: sha256 of the canonical event envelope (schema + value + key).
 - **manifest_hash**: manifest hash pinned for this world/entry.
 
-These become the call context fields seen by reducers (and a reduced subset for pures).
+These become the call context fields seen by reducers (and a reduced subset for pures)
+when the module declares a context schema.
 
 ---
 
@@ -101,13 +103,13 @@ Current:
 { version: 1, state: <bytes|null>, event: <bytes>, ctx: { key?, cell_mode } }
 ```
 
-Proposed:
+Proposed (context optional):
 ```
 {
   version: 1,
   state: <bytes|null>,
   event: <bytes>,
-  ctx: <bytes>   // canonical CBOR for sys/ReducerContext@1
+  ctx: <bytes>   // canonical CBOR for sys/ReducerContext@1 (omitted if not declared)
 }
 ```
 
@@ -118,12 +120,12 @@ Current:
 { version: 1, input: <bytes> }
 ```
 
-Proposed:
+Proposed (context optional):
 ```
 {
   version: 1,
   input: <bytes>,
-  ctx: <bytes>   // canonical CBOR for sys/PureContext@1
+  ctx: <bytes>   // canonical CBOR for sys/PureContext@1 (omitted if not declared)
 }
 ```
 
@@ -131,7 +133,7 @@ Proposed:
 
 ## Module ABI Declaration
 
-Reducers and pure modules **must** declare their expected context schema:
+Reducers and pure modules **may** declare their expected context schema:
 
 ```
 abi: {
@@ -157,7 +159,8 @@ abi: {
 }
 ```
 
-If omitted, the manifest loader rejects the module (no backwards-compat requirement).
+If omitted, the kernel does **not** send a context envelope to that module.
+Modules that need context (time, key, etc.) should declare it explicitly.
 
 ---
 
@@ -170,14 +173,15 @@ If omitted, the manifest loader rejects the module (no backwards-compat requirem
   timestamps do not drive it.
 - `introspect.*` remains the plan-level "scry" equivalent for cross-reducer reads.
 - Pure module context is derived from the **current ingress stamp** (same as the
-  enclosing event/receipt); no separate journal entry is created.
+  enclosing event/receipt); no separate journal entry is created when context is declared.
 
 ---
 
 ## v0.5 Target
 
 - Add `sys/ReducerContext@1` and `sys/PureContext@1` to `spec/defs/builtin-schemas.air.json`.
-- Extend reducer and pure module ABI envelopes to carry context bytes.
+- Extend reducer and pure module ABI envelopes to carry optional context bytes.
 - Populate context from journal entry metadata at invocation time.
 - Keep caps/policy time based on `logical_now_ns` (no change in authorizer semantics).
 - Validate `entropy` length (64 bytes) at load/validation time.
+- Omit context envelopes for modules that do not declare a context schema.

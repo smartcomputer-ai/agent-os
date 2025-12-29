@@ -323,6 +323,7 @@ fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedM
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/SimpleFsState@1"),
         event: fixtures::schema(START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),

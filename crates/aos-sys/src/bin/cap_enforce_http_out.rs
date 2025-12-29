@@ -9,6 +9,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use aos_sys::{CapCheckInput, CapCheckOutput, CapDenyReason};
+use aos_wasm_abi::PureContext;
 use aos_wasm_sdk::{PureError, PureModule, aos_pure};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -53,7 +54,11 @@ impl PureModule for CapEnforceHttpOut {
     type Input = CapCheckInput;
     type Output = CapCheckOutput;
 
-    fn run(&mut self, input: Self::Input) -> Result<Self::Output, PureError> {
+    fn run(
+        &mut self,
+        input: Self::Input,
+        _ctx: Option<&PureContext>,
+    ) -> Result<Self::Output, PureError> {
         if input.effect_kind != "http.request" {
             return Ok(deny(
                 "effect_kind_mismatch",

@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use aos_wasm_abi::{AbiDecodeError, AbiEncodeError, PureInput, PureOutput};
+use aos_wasm_abi::{AbiDecodeError, AbiEncodeError, PureContext, PureInput, PureOutput};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -14,7 +14,11 @@ pub trait PureModule: Default {
     type Output: Serialize;
 
     /// Core pure logic.
-    fn run(&mut self, input: Self::Input) -> Result<Self::Output, PureError>;
+    fn run(
+        &mut self,
+        input: Self::Input,
+        ctx: Option<&PureContext>,
+    ) -> Result<Self::Output, PureError>;
 }
 
 /// Deterministic pure-module failure.
@@ -44,6 +48,7 @@ impl core::fmt::Display for PureError {
 pub enum RunError {
     AbiDecode(AbiDecodeError),
     InputDecode(serde_cbor::Error),
+    CtxDecode(serde_cbor::Error),
     OutputEncode(serde_cbor::Error),
     OutputEnvelope(AbiEncodeError),
     Run(&'static str),
@@ -61,6 +66,7 @@ impl core::fmt::Display for RunError {
         match self {
             RunError::AbiDecode(err) => write!(f, "abi decode failed: {err}"),
             RunError::InputDecode(err) => write!(f, "input decode failed: {err}"),
+            RunError::CtxDecode(err) => write!(f, "context decode failed: {err}"),
             RunError::OutputEncode(err) => write!(f, "output encode failed: {err}"),
             RunError::OutputEnvelope(err) => write!(f, "output envelope encode failed: {err}"),
             RunError::Run(msg) => write!(f, "run error: {msg}"),
@@ -83,9 +89,13 @@ where
 {
     let _module_name = core::any::type_name::<M>();
     let payload = serde_cbor::from_slice(&input.input).map_err(RunError::InputDecode)?;
+    let ctx = match &input.ctx {
+        Some(bytes) => Some(PureContext::decode(bytes).map_err(RunError::CtxDecode)?),
+        None => None,
+    };
     let mut module = M::default();
     let output = module
-        .run(payload)
+        .run(payload, ctx.as_ref())
         .map_err(|err| RunError::Run(err.message()))?;
     let output_bytes = serde_cbor::to_vec(&output).map_err(RunError::OutputEncode)?;
     let envelope = PureOutput {
@@ -145,7 +155,11 @@ mod tests {
         type Input = Input;
         type Output = Output;
 
-        fn run(&mut self, input: Self::Input) -> Result<Self::Output, PureError> {
+        fn run(
+            &mut self,
+            input: Self::Input,
+            _ctx: Option<&PureContext>,
+        ) -> Result<Self::Output, PureError> {
             Ok(Output {
                 doubled: input.value * 2,
             })
@@ -154,9 +168,18 @@ mod tests {
 
     #[test]
     fn run_bytes_round_trip() {
+        let ctx = PureContext {
+            logical_now_ns: 5,
+            journal_height: 9,
+            manifest_hash: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                .into(),
+            module: "com.acme/TestPure@1".into(),
+        };
+        let ctx_bytes = serde_cbor::to_vec(&ctx).unwrap();
         let env = PureInput {
             version: aos_wasm_abi::ABI_VERSION,
             input: serde_cbor::to_vec(&Input { value: 7 }).unwrap(),
+            ctx: Some(ctx_bytes),
         };
         let bytes = env.encode().unwrap();
         let output = run_bytes::<TestPure>(&bytes).expect("run");

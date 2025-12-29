@@ -46,6 +46,7 @@ fn rejects_module_with_unknown_kind() {
 fn reducer_abi_struct_round_trip() {
     let abi = ModuleAbi {
         reducer: Some(ReducerAbi {
+            context: None,
             state: SchemaRef::new("com.acme/State@1").unwrap(),
             event: SchemaRef::new("com.acme/Event@1").unwrap(),
             annotations: None,
@@ -120,7 +121,8 @@ fn parses_pure_module() {
         "abi": {
             "pure": {
                 "input": "com.acme/Input@1",
-                "output": "com.acme/Output@1"
+                "output": "com.acme/Output@1",
+                "context": "sys/PureContext@1"
             }
         }
     });
