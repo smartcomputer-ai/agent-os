@@ -184,7 +184,7 @@ impl ManifestPatch {
                 _ => {}
             }
         }
-        // Ensure built-in schemas/effects are present so shadow validation has full catalogs.
+        // Ensure built-in schemas/effects/caps are present so shadow validation has full catalogs.
         for builtin in aos_air_types::builtins::builtin_schemas() {
             schemas
                 .entry(builtin.schema.name.clone())
@@ -196,6 +196,20 @@ impl ManifestPatch {
             {
                 manifest.schemas.push(aos_air_types::NamedRef {
                     name: builtin.schema.name.clone(),
+                    hash: builtin.hash_ref.clone(),
+                });
+            }
+        }
+        for builtin in aos_air_types::builtins::builtin_caps() {
+            caps.entry(builtin.cap.name.clone())
+                .or_insert(builtin.cap.clone());
+            if !manifest
+                .caps
+                .iter()
+                .any(|nr| nr.name == builtin.cap.name)
+            {
+                manifest.caps.push(aos_air_types::NamedRef {
+                    name: builtin.cap.name.clone(),
                     hash: builtin.hash_ref.clone(),
                 });
             }

@@ -252,6 +252,12 @@ fn patch_named_refs(
             } else {
                 bail!("manifest references unknown {kind} '{}'", reference.name);
             }
+        } else if kind == "cap" {
+            if let Some(builtin) = air_types::builtins::find_builtin_cap(reference.name.as_str()) {
+                builtin.hash_ref.clone()
+            } else {
+                bail!("manifest references unknown {kind} '{}'", reference.name);
+            }
         } else {
             bail!("manifest references unknown {kind} '{}'", reference.name);
         };

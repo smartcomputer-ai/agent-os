@@ -154,6 +154,19 @@ fn load_refs<S: Store>(
                 continue;
             }
         }
+        if kind == NodeKind::Cap {
+            if let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str()) {
+                ensure_builtin_cap_hash(reference, builtin)?;
+                nodes.insert(
+                    reference.name.clone(),
+                    CatalogEntry {
+                        hash: builtin.hash,
+                        node: AirNode::Defcap(builtin.cap.clone()),
+                    },
+                );
+                continue;
+            }
+        }
         let hash = parse_hash_str(reference.hash.as_str())?;
         let node: AirNode = store.get_node(hash)?;
         if !kind.matches(&node) {
@@ -263,6 +276,21 @@ fn ensure_builtin_hash(reference: &NamedRef, builtin: &builtins::BuiltinSchema) 
 fn ensure_builtin_effect_hash(
     reference: &NamedRef,
     builtin: &builtins::BuiltinEffect,
+) -> StoreResult<()> {
+    let actual = parse_hash_str(reference.hash.as_str())?;
+    if actual != builtin.hash {
+        return Err(StoreError::HashMismatch {
+            kind: EntryKind::Node,
+            expected: builtin.hash,
+            actual,
+        });
+    }
+    Ok(())
+}
+
+fn ensure_builtin_cap_hash(
+    reference: &NamedRef,
+    builtin: &builtins::BuiltinCap,
 ) -> StoreResult<()> {
     let actual = parse_hash_str(reference.hash.as_str())?;
     if actual != builtin.hash {
