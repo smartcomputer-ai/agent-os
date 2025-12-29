@@ -98,12 +98,12 @@ Pure modules do not receive `now_ns`, `entropy`, or `event_hash` by default.
 
 ### Reducer input envelope
 
-Current:
+Previous (pre-context):
 ```
-{ version: 1, state: <bytes|null>, event: <bytes>, ctx: { key?, cell_mode } }
+{ version: 1, state: <bytes|null>, event: <bytes> }
 ```
 
-Proposed (context optional):
+Current (context optional):
 ```
 {
   version: 1,
@@ -115,12 +115,12 @@ Proposed (context optional):
 
 ### Pure module input envelope
 
-Current:
+Previous (pre-context):
 ```
 { version: 1, input: <bytes> }
 ```
 
-Proposed (context optional):
+Current (context optional):
 ```
 {
   version: 1,
@@ -174,6 +174,19 @@ Modules that need context (time, key, etc.) should declare it explicitly.
 - `introspect.*` remains the plan-level "scry" equivalent for cross-reducer reads.
 - Pure module context is derived from the **current ingress stamp** (same as the
   enclosing event/receipt); no separate journal entry is created when context is declared.
+
+---
+
+## Implementation Notes (As Built)
+
+- Context schemas are now built-ins: `sys/ReducerContext@1` and `sys/PureContext@1`.
+- `defmodule` makes `context` optional for both reducer and pure ABIs.
+- Kernel stamps ingress with `now_ns`, `logical_now_ns`, `entropy`, `journal_height`,
+  `event_hash` (canonical DomainEvent CBOR), and `manifest_hash`.
+- Context bytes are only sent when a module declares `context`; otherwise `ctx` is omitted.
+- Modules that require `ctx.key()` must declare reducer context (e.g., keyed reducers).
+- The reducer/pure ABI envelopes now carry `ctx` as canonical CBOR bytes (optional).
+- WASM build cache includes path dependency hashes so SDK/ABI changes trigger rebuilds.
 
 ---
 

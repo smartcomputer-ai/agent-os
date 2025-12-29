@@ -708,6 +708,7 @@ impl<S: Store + 'static> Kernel<S> {
         event: DomainEvent,
         stamp: IngressStamp,
     ) -> Result<(), KernelError> {
+        Self::validate_entropy(&stamp.entropy)?;
         let event = self.normalize_domain_event(event)?;
         let routed = self.route_event(&event, &stamp)?;
         let mut event_for_plans = event.clone();
@@ -2350,6 +2351,7 @@ impl<S: Store + 'static> Kernel<S> {
         receipt: aos_effects::EffectReceipt,
         stamp: IngressStamp,
     ) -> Result<(), KernelError> {
+        Self::validate_entropy(&stamp.entropy)?;
         if let Some(pending) = self.pending_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt, &stamp)?;
             self.record_decisions()?;
@@ -2483,6 +2485,16 @@ impl<S: Store + 'static> Kernel<S> {
             journal_height,
             manifest_hash: self.manifest_hash.to_hex(),
         })
+    }
+
+    fn validate_entropy(entropy: &[u8]) -> Result<(), KernelError> {
+        if entropy.len() != ENTROPY_LEN {
+            return Err(KernelError::Entropy(format!(
+                "entropy length must be {ENTROPY_LEN} bytes (got {})",
+                entropy.len()
+            )));
+        }
+        Ok(())
     }
 
     fn sync_logical_from_record(&mut self, logical_now_ns: u64) {
@@ -2832,7 +2844,7 @@ mod tests {
         IngressStamp {
             now_ns: 0,
             logical_now_ns: 0,
-            entropy: Vec::new(),
+            entropy: vec![0u8; ENTROPY_LEN],
             journal_height: 0,
             manifest_hash: kernel.manifest_hash().to_hex(),
         }
