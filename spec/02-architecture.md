@@ -85,7 +85,7 @@ After canonicalization, the loader validates references, shapes, capability decl
 
 ### Capabilities (Constraints-Only)
 
-Capabilities are passed to plans and modules by grant name; no ambient authority exists. At enqueue time the kernel enforces parameter constraints (hosts, models, max_tokens ceilings) via deterministic **cap enforcer modules** and checks expiry against `logical_now_ns`. Budgets and ledger accounting are deferred to a future milestone.
+Capabilities are passed to plans and modules by grant name; no ambient authority exists. At enqueue time the kernel enforces parameter constraints (hosts, models, max_tokens ceilings) via deterministic **cap enforcer modules** (defaulting to `sys/CapAllowAll@1` when a defcap omits one) and checks expiry against `logical_now_ns`. Budgets and ledger accounting are deferred to a future milestone.
 
 ### Policy Gate (v1)
 

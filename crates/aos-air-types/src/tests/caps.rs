@@ -52,6 +52,23 @@ fn parses_cap_definition_and_grant() {
 }
 
 #[test]
+fn defaults_enforcer_when_missing() {
+    let cap_json = json!({
+        "$kind": "defcap",
+        "name": "com.acme/http@1",
+        "cap_type": "http.out",
+        "schema": {
+            "record": {
+                "hosts": {"set": {"text": {}}}
+            }
+        }
+    });
+    assert_json_schema(crate::schemas::DEFCAP, &cap_json);
+    let cap: DefCap = serde_json::from_value(cap_json).expect("cap json");
+    assert_eq!(cap.enforcer.module.as_str(), "sys/CapAllowAll@1");
+}
+
+#[test]
 fn rejects_grant_with_wrong_shape() {
     let grant_json = json!({
         "name": "cap_http",

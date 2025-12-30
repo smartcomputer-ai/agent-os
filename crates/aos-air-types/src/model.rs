@@ -586,12 +586,19 @@ pub struct DefCap {
     pub name: Name,
     pub cap_type: CapType,
     pub schema: TypeExpr,
+    #[serde(default = "default_cap_enforcer")]
     pub enforcer: CapEnforcer,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapEnforcer {
     pub module: Name,
+}
+
+fn default_cap_enforcer() -> CapEnforcer {
+    CapEnforcer {
+        module: "sys/CapAllowAll@1".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

@@ -360,11 +360,11 @@ Capabilities define scoped permissions for effects. A `defcap` declares a capabi
   "name": "namespace/name@version",
   "cap_type": <CapType>,
   "schema": <SchemaRef>,
-  "enforcer": { "module": "sys/CapAllowAll@1" }
+  "enforcer"?: { "module": "sys/CapAllowAll@1" }
 }
 ```
 
-The schema defines parameter constraints enforced at enqueue time. The enforcer is a deterministic module invoked by the kernel during authorization; `sys/CapAllowAll@1` is a built-in allow-all enforcer.
+The schema defines parameter constraints enforced at enqueue time. The enforcer is a deterministic module invoked by the kernel during authorization; if omitted, the kernel defaults to `sys/CapAllowAll@1` (a built-in allow-all enforcer).
 
 ### Standard v1 Capability Types (built-in)
 
