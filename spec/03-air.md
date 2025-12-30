@@ -12,6 +12,12 @@ AIR (Agent Intermediate Representation) is a small, typed, canonical control‑p
 - spec/schemas/defsecret.schema.json
 - spec/schemas/manifest.schema.json
 
+**Built-in catalogs** (data files; loaded by the kernel):
+- spec/defs/builtin-schemas.air.json
+- spec/defs/builtin-effects.air.json
+- spec/defs/builtin-caps.air.json
+- spec/defs/builtin-modules.air.json
+
 These schemas validate structure. Semantic checks (DAG acyclicity, type compatibility, name/hash resolution, capability bindings) are enforced by the kernel validator.
 
 ## Goals and Scope
@@ -135,7 +141,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; **the routed schema must equal the reducer’s `defmodule.abi.reducer.event`** (use a variant schema to accept multiple event shapes, including receipts). `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`); when the event schema is a variant, `key_field` typically targets the wrapped value (e.g., `$value.note_id`). The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input; a trigger's optional `correlate_by` copies that field into the run context for later `await_event` filters (for variant inputs, use `$value.<field>`). The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-ins are no longer auto-included. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; **the routed schema must equal the reducer’s `defmodule.abi.reducer.event`** (use a variant schema to accept multiple event shapes, including receipts). `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`); when the event schema is a variant, `key_field` typically targets the wrapped value (e.g., `$value.note_id`). The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input; a trigger's optional `correlate_by` copies that field into the run context for later `await_event` filters (for variant inputs, use `$value.<field>`). The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-in schemas/effects are not auto-included. Built-in caps and modules are available even if omitted from `manifest.caps`/`manifest.modules`. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
 
 See: spec/schemas/manifest.schema.json
 
@@ -196,6 +202,8 @@ Registers a WASM module with its interface contract.
 ```
 
 `EffectKind` and `CapType` are namespaced strings. The schema no longer hardcodes an enum; v1 ships a built-in catalog listed in §7, and adapters can introduce additional kinds as runtime support lands.
+
+**Built-in modules** live in `spec/defs/builtin-modules.air.json` (e.g., `sys/CapEnforceHttpOut@1`, `sys/CapEnforceLlmBasic@1`, `sys/ObjectCatalog@1`). `sys/*` module names are reserved: external manifests may **reference** them, but may not define them; the kernel supplies the definitions and hashes.
 
 The `key_schema` field (v1.1 addendum) documents the key type when this reducer is routed as keyed. The ABI remains a single `step` export; the kernel provides an envelope with optional call context. When routed as keyed, the reducer context includes `cell_mode=true` and the keyed `key`; returning `state=null` deletes the cell instance.
 
@@ -367,6 +375,8 @@ Capabilities define scoped permissions for effects. A `defcap` declares a capabi
 The schema defines parameter constraints enforced at enqueue time. The enforcer is a deterministic module invoked by the kernel during authorization; if omitted, the kernel defaults to `sys/CapAllowAll@1` (a built-in allow-all enforcer).
 
 ### Standard v1 Capability Types (built-in)
+
+Built-in `defcap` entries live in `spec/defs/builtin-caps.air.json` and are auto-available; manifests may omit them from `manifest.caps` as long as grants reference them by name.
 
 **sys/http.out@1**
 - Schema: `{ hosts?: set<text>, schemes?: set<text>, methods?: set<text>, ports?: set<nat>, path_prefixes?: set<text> }`
@@ -699,7 +709,7 @@ Patches describe changes to the control plane (design-time modifications).
 - **set_secrets**: `{ pre_hash:hash, secrets:[ SecretEntry… ] }` — replace manifest secrets block (refs/decls); no secret values carried in patches.
 - **defsecret**: `add_def` / `replace_def` / `remove_def` now accept `defsecret`; `set_manifest_refs` can add/remove secret refs. Secret values still live outside patches; `set_secrets` only adjusts manifest entries.
 
-**System defs are immutable**: Patch compilation rejects any `sys/*` definition edits (add/replace/remove) and any manifest ref updates for `sys/*`. Built-in `sys/*` schemas/effects/caps are provided by the kernel and are not patchable.
+**System defs are immutable**: Patch compilation rejects any `sys/*` definition edits (add/replace/remove) and any manifest ref updates for `sys/*`. Built-in `sys/*` schemas/effects/caps/modules are provided by the kernel and are not patchable. External manifests/assets may reference `sys/*` entries but may not define them.
 
 ### Application
 

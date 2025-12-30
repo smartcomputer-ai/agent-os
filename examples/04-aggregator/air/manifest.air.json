@@ -67,11 +67,11 @@
                 }
               ]
             },
-            "verbs": {
-              "set": [
-                {
-                  "text": "GET"
-                }
+        "methods": {
+          "set": [
+            {
+              "text": "GET"
+            }
               ]
             }
           }

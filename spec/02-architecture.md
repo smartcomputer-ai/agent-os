@@ -75,11 +75,11 @@ Nodes (AIR terms, receipts) and blobs (WASM modules, large payloads) are address
 
 ### AIR Manifest
 
-The manifest is read-only at runtime and serves as the authoritative catalog of defmodule, defplan, defschema, defcap, and defpolicy objects. Updates occur only via approved Proposed → Applied events.
+The manifest is read-only at runtime and serves as the authoritative catalog of defmodule, defplan, defschema, defcap, and defpolicy objects. Built-in catalogs provide `sys/*` schemas/effects/caps/modules; external manifests may reference `sys/*` entries but may not define them. Updates occur only via approved Proposed → Applied events.
 
 ### AIR Loader/Validator
 
-Authoring ergonomics and determinism meet here. The loader accepts either JSON lens described in the AIR spec—concise schema-directed “sugar” JSON or the tagged canonical overlay used by tools/agents—and canonicalizes both to typed values before anything touches the kernel. Every value is normalized (set dedupe/order, map ordering, numeric range checks, decimal128, option/variant envelopes) and then encoded as canonical CBOR with the declared schema hash bound in. That canonical form is the only thing the kernel, store, and hash engine ever see.
+Authoring ergonomics and determinism meet here. The loader accepts either JSON lens described in the AIR spec—concise schema-directed “sugar” JSON or the tagged canonical overlay used by tools/agents—and canonicalizes both to typed values before anything touches the kernel. Built-in catalogs are merged for `sys/*` schemas/effects/caps/modules; external `sys/*` definitions are rejected. Every value is normalized (set dedupe/order, map ordering, numeric range checks, decimal128, option/variant envelopes) and then encoded as canonical CBOR with the declared schema hash bound in. That canonical form is the only thing the kernel, store, and hash engine ever see.
 
 After canonicalization, the loader validates references, shapes, capability declarations, and plan graphs, then exposes a typed view for the kernel. Tooling hooks (`air fmt`, `air diff`, `air patch`) operate on the same canonical CBOR but can render either lens for humans.
 
