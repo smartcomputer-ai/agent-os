@@ -115,6 +115,14 @@ impl EffectManager {
         )
     }
 
+    pub fn unique_grant_for_effect_kind(
+        &self,
+        effect_kind: &str,
+    ) -> Result<Option<CapGrantResolution>, KernelError> {
+        self.capability_gate
+            .unique_grant_for_effect_kind(effect_kind)
+    }
+
     pub fn enqueue_reducer_effect_with_grant(
         &mut self,
         reducer_name: &str,

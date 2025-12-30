@@ -9,7 +9,7 @@
         "event": "demo/TimerEvent@1",
         "effects_emitted": ["timer.set"],
         "cap_slots": {
-          "timer": "timer"
+          "default": "timer"
         }
       }
     }

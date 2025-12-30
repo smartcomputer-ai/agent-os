@@ -38,11 +38,7 @@
     }
   ],
   "plans": [],
-  "caps": [
-    {
-      "name": "sys/blob@1"
-    }
-  ],
+  "caps": [],
   "policies": [
     {
       "name": "demo/blob_policy@1"
@@ -59,13 +55,6 @@
         }
       }
     ]
-  },
-  "module_bindings": {
-    "demo/BlobEchoSM@1": {
-      "slots": {
-        "blob": "blob_grant"
-      }
-    }
   },
   "routing": {
     "events": [

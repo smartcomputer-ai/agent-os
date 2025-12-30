@@ -9,7 +9,7 @@
         "event": "demo/BlobEchoEvent@1",
         "effects_emitted": ["blob.put", "blob.get"],
         "cap_slots": {
-          "blob": "blob"
+          "default": "blob"
         }
       }
     }

@@ -132,6 +132,7 @@ fn write_nodes(
     let mut hashes = StoredHashes::default();
     for schema in schemas {
         let name = schema.name.clone();
+        reject_sys_name("defschema", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defschema(schema))
             .context("store defschema node")?;
@@ -139,6 +140,7 @@ fn write_nodes(
     }
     for module in modules {
         let name = module.name.clone();
+        reject_sys_name("defmodule", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defmodule(module))
             .context("store defmodule node")?;
@@ -146,6 +148,7 @@ fn write_nodes(
     }
     for plan in plans {
         let name = plan.name.clone();
+        reject_sys_name("defplan", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defplan(plan))
             .context("store defplan node")?;
@@ -153,6 +156,7 @@ fn write_nodes(
     }
     for cap in caps {
         let name = cap.name.clone();
+        reject_sys_name("defcap", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defcap(cap))
             .context("store defcap node")?;
@@ -160,6 +164,7 @@ fn write_nodes(
     }
     for policy in policies {
         let name = policy.name.clone();
+        reject_sys_name("defpolicy", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defpolicy(policy))
             .context("store defpolicy node")?;
@@ -167,6 +172,7 @@ fn write_nodes(
     }
     for secret in secrets {
         let name = secret.name.clone();
+        reject_sys_name("defsecret", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defsecret(secret))
             .context("store defsecret node")?;
@@ -174,6 +180,7 @@ fn write_nodes(
     }
     for effect in effects {
         let name = effect.name.clone();
+        reject_sys_name("defeffect", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defeffect(effect))
             .context("store defeffect node")?;
@@ -192,6 +199,13 @@ where
         if !seen.insert(name.clone()) {
             bail!("duplicate {kind} '{name}' detected in assets");
         }
+    }
+    Ok(())
+}
+
+fn reject_sys_name(kind: &str, name: &str) -> Result<()> {
+    if name.starts_with("sys/") {
+        bail!("{kind} '{name}' is reserved; sys/* definitions must come from built-ins");
     }
     Ok(())
 }
@@ -247,6 +261,13 @@ fn patch_named_refs(
             builtin.hash_ref.clone()
         } else if kind == "effect" {
             if let Some(builtin) = air_types::builtins::find_builtin_effect(reference.name.as_str())
+            {
+                builtin.hash_ref.clone()
+            } else {
+                bail!("manifest references unknown {kind} '{}'", reference.name);
+            }
+        } else if kind == "module" {
+            if let Some(builtin) = air_types::builtins::find_builtin_module(reference.name.as_str())
             {
                 builtin.hash_ref.clone()
             } else {

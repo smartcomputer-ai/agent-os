@@ -11,16 +11,5 @@
         "cap_slots": {}
       }
     }
-  },
-  {
-    "$kind": "defmodule",
-    "name": "sys/CapEnforceHttpOut@1",
-    "module_kind": "pure",
-    "abi": {
-      "pure": {
-        "input": "sys/CapCheckInput@1",
-        "output": "sys/CapCheckOutput@1"
-      }
-    }
   }
 ]

@@ -8,7 +8,7 @@
       "event": "demo/RetryEvent@1",
       "annotations": "sys/BytesOrSecretRef@1",
       "effects_emitted": ["timer.set"],
-      "cap_slots": { "timer": "timer" }
+      "cap_slots": { "default": "timer" }
     }
   }
 }

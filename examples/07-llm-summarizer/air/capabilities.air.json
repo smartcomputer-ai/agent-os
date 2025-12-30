@@ -8,8 +8,7 @@
         "hosts": { "set": { "text": {} } },
         "methods": { "set": { "text": {} } }
       }
-    },
-    "enforcer": { "module": "sys/CapAllowAll@1" }
+    }
   },
   {
     "$kind": "defcap",

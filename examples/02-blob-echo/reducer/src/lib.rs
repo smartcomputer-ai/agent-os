@@ -116,7 +116,7 @@ fn handle_start(ctx: &mut ReducerCtx<EchoState>, event: StartEvent) {
         namespace: event.namespace,
         blob_ref: HashRef::new(blob_ref).expect("blob hash"),
     };
-    ctx.effects().emit_raw("blob.put", &params, Some("blob"));
+    ctx.effects().emit_raw("blob.put", &params, Some("default"));
 }
 
 fn handle_put_result(ctx: &mut ReducerCtx<EchoState>, event: BlobPutResultEvent) {
@@ -140,7 +140,7 @@ fn handle_put_result(ctx: &mut ReducerCtx<EchoState>, event: BlobPutResultEvent)
             namespace: namespace.clone(),
             key: key.clone(),
         };
-        ctx.effects().emit_raw("blob.get", &params, Some("blob"));
+        ctx.effects().emit_raw("blob.get", &params, Some("default"));
     }
 }
 

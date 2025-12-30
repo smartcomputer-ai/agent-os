@@ -79,7 +79,6 @@
       }
     ]
   },
-  "module_bindings": {},
   "routing": {
     "events": [
       {

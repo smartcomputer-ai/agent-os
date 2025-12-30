@@ -469,7 +469,10 @@ pub fn validate_manifest(
 ) -> Result<(), ValidationError> {
     let schema_exists =
         |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
-    let defcap_listed = |name: &str| manifest.caps.iter().any(|cap| cap.name.as_str() == name);
+    let defcap_listed = |name: &str| {
+        manifest.caps.iter().any(|cap| cap.name.as_str() == name)
+            || builtins::find_builtin_cap(name).is_some()
+    };
     let mut known_effect_kinds: HashSet<String> = builtins::builtin_effects()
         .iter()
         .map(|e| e.effect.kind.as_str().to_string())

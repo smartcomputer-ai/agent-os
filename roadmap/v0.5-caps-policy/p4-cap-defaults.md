@@ -42,6 +42,8 @@ Impact:
 - `manifest.caps` can be empty for common effects.
 - Grants continue to reference named defcaps (`cap: "sys/timer@1"`).
 
+Status: DONE.
+
 ### 3) Inline defcap definitions in grants
 
 Skipped for now. The combination of default enforcer + built-in `sys/*` caps +
@@ -63,6 +65,8 @@ Structure change:
 Impact:
 - Reduces boilerplate for simple reducers that only emit one effect type.
 - Still deterministic; ambiguous cases remain errors.
+
+Status: DONE.
 
 ### 5) Example simplification sweep
 
@@ -114,6 +118,8 @@ After steps (2) + (4), the following examples can be simplified:
   - Remove `enforcer` from the HTTP defcap if allow-all is intended.
   - Remove empty `module_bindings` from the manifest.
 
+Status: DONE (examples updated and `cargo run -p aos-examples -- all` passes).
+
 ## Additional Hardening
 
 ### 6) Lock down `sys/*` definitions at load time
@@ -124,6 +130,8 @@ defplan, defpolicy, defeffect, and defsecret. Only built-in catalogs may define 
 Implications:
 - Examples no longer carry `sys/*` definitions in their own assets.
 - Loader/asset ingestion performs a strict namespace check before merge.
+
+Status: DONE.
 
 ## Notes / Open Questions
 

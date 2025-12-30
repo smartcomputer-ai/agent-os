@@ -1054,14 +1054,22 @@ impl<S: Store + 'static> Kernel<S> {
         }
         for effect in &output.effects {
             let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
-            let grant = self
+            let bound_grant = self
                 .module_cap_bindings
                 .get(&reducer_name)
-                .and_then(|binding| binding.get(&slot))
-                .ok_or_else(|| KernelError::CapabilityBindingMissing {
+                .and_then(|binding| binding.get(&slot));
+            let default_grant = if bound_grant.is_none() && slot == "default" {
+                self.effect_manager
+                    .unique_grant_for_effect_kind(effect.kind.as_str())?
+            } else {
+                None
+            };
+            let grant = bound_grant.or_else(|| default_grant.as_ref()).ok_or_else(|| {
+                KernelError::CapabilityBindingMissing {
                     reducer: reducer_name.clone(),
                     slot: slot.clone(),
-                })?;
+                }
+            })?;
             let intent =
                 match self
                     .effect_manager

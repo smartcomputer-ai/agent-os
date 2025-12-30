@@ -4,11 +4,12 @@ use aos_cbor::Hash;
 use once_cell::sync::Lazy;
 use serde_json;
 
-use crate::{DefCap, DefEffect, DefSchema, HashRef};
+use crate::{DefCap, DefEffect, DefModule, DefSchema, HashRef};
 
 static BUILTIN_SCHEMAS_RAW: &str = include_str!("../../../spec/defs/builtin-schemas.air.json");
 static BUILTIN_EFFECTS_RAW: &str = include_str!("../../../spec/defs/builtin-effects.air.json");
 static BUILTIN_CAPS_RAW: &str = include_str!("../../../spec/defs/builtin-caps.air.json");
+static BUILTIN_MODULES_RAW: &str = include_str!("../../../spec/defs/builtin-modules.air.json");
 
 #[derive(Debug)]
 pub struct BuiltinSchema {
@@ -27,6 +28,13 @@ pub struct BuiltinEffect {
 #[derive(Debug, Clone)]
 pub struct BuiltinCap {
     pub cap: DefCap,
+    pub hash: Hash,
+    pub hash_ref: HashRef,
+}
+
+#[derive(Debug, Clone)]
+pub struct BuiltinModule {
+    pub module: DefModule,
     pub hash: Hash,
     pub hash_ref: HashRef,
 }
@@ -79,6 +87,22 @@ static BUILTIN_CAPS: Lazy<Vec<BuiltinCap>> = Lazy::new(|| {
         .collect()
 });
 
+static BUILTIN_MODULES: Lazy<Vec<BuiltinModule>> = Lazy::new(|| {
+    let defs: Vec<DefModule> = serde_json::from_str(BUILTIN_MODULES_RAW)
+        .expect("spec/defs/builtin-modules.air.json must parse");
+    defs.into_iter()
+        .map(|module| {
+            let hash = Hash::of_cbor(&module).expect("canonical hash");
+            let hash_ref = HashRef::new(hash.to_hex()).expect("valid hash");
+            BuiltinModule {
+                module,
+                hash,
+                hash_ref,
+            }
+        })
+        .collect()
+});
+
 static BUILTIN_SCHEMA_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
     BUILTIN_SCHEMAS
         .iter()
@@ -103,6 +127,14 @@ static BUILTIN_CAP_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
         .collect()
 });
 
+static BUILTIN_MODULE_INDEX: Lazy<HashMap<String, usize>> = Lazy::new(|| {
+    BUILTIN_MODULES
+        .iter()
+        .enumerate()
+        .map(|(idx, module)| (module.module.name.clone(), idx))
+        .collect()
+});
+
 /// Returns the parsed list of built-in `defschema` nodes (timer/blob params, receipts, and events).
 pub fn builtin_schemas() -> &'static [BuiltinSchema] {
     &BUILTIN_SCHEMAS
@@ -116,6 +148,11 @@ pub fn builtin_effects() -> &'static [BuiltinEffect] {
 /// Returns the parsed list of built-in `defcap` nodes.
 pub fn builtin_caps() -> &'static [BuiltinCap] {
     &BUILTIN_CAPS
+}
+
+/// Returns the parsed list of built-in `defmodule` nodes.
+pub fn builtin_modules() -> &'static [BuiltinModule] {
+    &BUILTIN_MODULES
 }
 
 /// Finds a built-in schema definition by name (e.g., `sys/TimerFired@1`).
@@ -137,6 +174,13 @@ pub fn find_builtin_cap(name: &str) -> Option<&'static BuiltinCap> {
     BUILTIN_CAP_INDEX
         .get(name)
         .and_then(|idx| BUILTIN_CAPS.get(*idx))
+}
+
+/// Finds a built-in module definition by name (e.g., `sys/ObjectCatalog@1`).
+pub fn find_builtin_module(name: &str) -> Option<&'static BuiltinModule> {
+    BUILTIN_MODULE_INDEX
+        .get(name)
+        .and_then(|idx| BUILTIN_MODULES.get(*idx))
 }
 
 #[cfg(test)]
@@ -208,6 +252,31 @@ mod tests {
     #[test]
     fn exposes_expected_caps() {
         let names: Vec<_> = builtin_caps().iter().map(|c| c.cap.name.as_str()).collect();
-        assert!(names.contains(&"sys/query@1"));
+        for name in [
+            "sys/query@1",
+            "sys/timer@1",
+            "sys/blob@1",
+            "sys/http.out@1",
+            "sys/llm.basic@1",
+            "sys/secret@1",
+            "sys/catalog.write@1",
+        ] {
+            assert!(names.contains(&name));
+        }
+    }
+
+    #[test]
+    fn exposes_expected_modules() {
+        let names: Vec<_> = builtin_modules()
+            .iter()
+            .map(|m| m.module.name.as_str())
+            .collect();
+        for name in [
+            "sys/CapEnforceHttpOut@1",
+            "sys/CapEnforceLlmBasic@1",
+            "sys/ObjectCatalog@1",
+        ] {
+            assert!(names.contains(&name));
+        }
     }
 }

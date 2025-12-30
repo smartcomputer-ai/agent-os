@@ -3,25 +3,6 @@
     "$kind": "defcap",
     "name": "notes/blob_cap@1",
     "cap_type": "blob",
-    "schema": { "record": {} },
-    "enforcer": { "module": "sys/CapAllowAll@1" }
-  },
-  {
-    "$kind": "defcap",
-    "name": "sys/blob@1",
-    "cap_type": "blob",
-    "schema": { "record": {} },
-    "enforcer": { "module": "sys/CapAllowAll@1" }
-  },
-  {
-    "$kind": "defcap",
-    "name": "sys/query@1",
-    "cap_type": "query",
-    "schema": {
-      "record": {
-        "scope": { "option": { "text": {} } }
-      }
-    },
-    "enforcer": { "module": "sys/CapAllowAll@1" }
+    "schema": { "record": {} }
   }
 ]

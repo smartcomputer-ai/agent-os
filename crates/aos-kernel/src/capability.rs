@@ -120,6 +120,25 @@ impl CapabilityResolver {
         })
     }
 
+    pub fn unique_grant_for_effect_kind(
+        &self,
+        effect_kind: &str,
+    ) -> Result<Option<CapGrantResolution>, KernelError> {
+        let expected = expected_cap_type(&self.effect_catalog, effect_kind)?;
+        let mut matches = self.grants.values().filter(|grant| grant.cap_type == expected);
+        let first = matches.next();
+        if first.is_none() || matches.next().is_some() {
+            return Ok(None);
+        }
+        let resolved = first.expect("first checked");
+        Ok(Some(CapGrantResolution {
+            grant: resolved.grant.clone(),
+            cap_type: resolved.cap_type.clone(),
+            enforcer: resolved.enforcer.clone(),
+            grant_hash: resolved.grant_hash,
+        }))
+    }
+
     pub fn from_manifest(
         manifest: &Manifest,
         caps: &HashMap<Name, DefCap>,

@@ -8,7 +8,6 @@
         "hosts": { "set": { "text": {} } },
         "verbs": { "set": { "text": {} } }
       }
-    },
-    "enforcer": { "module": "sys/CapAllowAll@1" }
+    }
   }
 ]

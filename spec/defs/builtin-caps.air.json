@@ -3,7 +3,6 @@
     "$kind": "defcap",
     "name": "sys/query@1",
     "cap_type": "query",
-    "enforcer": { "module": "sys/CapAllowAll@1" },
     "schema": {
       "record": {
         "scope": {
@@ -13,5 +12,75 @@
       }
     },
     "$comment": "Grants use of introspect.* effects (read-only world inspection)."
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/timer@1",
+    "cap_type": "timer",
+    "schema": { "record": {} },
+    "$comment": "Grants use of timer.set."
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/blob@1",
+    "cap_type": "blob",
+    "schema": {
+      "record": {
+        "namespaces": { "option": { "set": { "text": {} } } }
+      }
+    },
+    "$comment": "Grants use of blob.put/blob.get."
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/http.out@1",
+    "cap_type": "http.out",
+    "schema": {
+      "record": {
+        "hosts": { "option": { "set": { "text": {} } } },
+        "schemes": { "option": { "set": { "text": {} } } },
+        "methods": { "option": { "set": { "text": {} } } },
+        "ports": { "option": { "set": { "nat": {} } } },
+        "path_prefixes": { "option": { "set": { "text": {} } } }
+      }
+    },
+    "enforcer": { "module": "sys/CapEnforceHttpOut@1" },
+    "$comment": "Grants outbound HTTP under allowlists."
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/llm.basic@1",
+    "cap_type": "llm.basic",
+    "schema": {
+      "record": {
+        "providers": { "option": { "set": { "text": {} } } },
+        "models": { "option": { "set": { "text": {} } } },
+        "max_tokens": { "option": { "nat": {} } },
+        "tools_allow": { "option": { "set": { "text": {} } } }
+      }
+    },
+    "enforcer": { "module": "sys/CapEnforceLlmBasic@1" },
+    "$comment": "Grants basic LLM generation."
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/secret@1",
+    "cap_type": "secret",
+    "schema": { "record": {} },
+    "$comment": "Grants access to secret/vault effects."
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/catalog.write@1",
+    "cap_type": "catalog.write",
+    "schema": {
+      "record": {
+        "prefixes": {
+          "set": { "text": {} },
+          "$comment": "Allowed name prefixes (e.g., 'agents/self/'). Empty set = all names."
+        }
+      }
+    },
+    "$comment": "Grants write access to the object catalog."
   }
 ]
