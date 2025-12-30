@@ -44,26 +44,9 @@ Impact:
 
 ### 3) Inline defcap definitions in grants
 
-Allow a `cap_grant` to carry the defcap definition inline instead of referencing a
-separate defcap object.
-
-Structure change (one option):
-```
-CapGrant:
-  name: text
-  cap: Name(defcap)
-  cap_def?: defcap            // if present, registers a defcap with the same name
-  params: Value
-  expiry_ns?: nat
-```
-
-Rules:
-- `cap_def.name` must match `cap`.
-- If both inline and top-level defcap exist, they must be identical.
-
-Impact:
-- Single-file manifests can define a grant + schema + enforcer in one place.
-- Helps avoid separate `capabilities.air.json` in examples.
+Skipped for now. The combination of default enforcer + built-in `sys/*` caps +
+default slot binding should remove most of the boilerplate without introducing
+asymmetry or governance complexity.
 
 ### 4) Default reducer cap-slot binding
 
@@ -81,9 +64,59 @@ Impact:
 - Reduces boilerplate for simple reducers that only emit one effect type.
 - Still deterministic; ambiguous cases remain errors.
 
+### 5) Example simplification sweep
+
+After steps (2) + (4), the following examples can be simplified:
+
+- `examples/01-hello-timer`
+  - Remove `air/capabilities.air.json` (sys/timer now built-in).
+  - Drop `sys/timer@1` from `manifest.caps`.
+  - If reducer uses the default slot, remove `module_bindings` (or keep until slot rename).
+
+- `examples/02-blob-echo`
+  - Remove `air/capabilities.air.json` (sys/blob now built-in).
+  - Drop `sys/blob@1` from `manifest.caps`.
+  - If reducer uses the default slot, remove `module_bindings`.
+
+- `examples/08-retry-backoff`
+  - Remove `air/capabilities.air.json` (sys/timer now built-in).
+  - Drop `sys/timer@1` from `manifest.caps`.
+  - If reducer uses the default slot, remove `module_bindings`.
+
+- `examples/09-worldfs-lab`
+  - Remove `sys/blob@1` and `sys/query@1` from `air/capabilities.air.json`
+    (built-in); keep only the custom `notes/blob_cap@1`.
+  - Drop `sys/blob@1` + `sys/query@1` from `manifest.caps`.
+  - If `cap_sys_blob` / `cap_query` grants are unused, drop them too.
+  - Remove empty `module_bindings` from the manifest.
+
+- `examples/03-fetch-notify`
+  - Keep custom `demo/http_fetch_cap@1`; still needs the HTTP enforcer.
+  - Remove empty `module_bindings` from the manifest.
+
+- `examples/04-aggregator`
+  - Keep custom `demo/http_aggregate_cap@1`.
+  - Remove `enforcer` field (defaults to allow-all).
+  - Remove empty `module_bindings` from the manifest.
+
+- `examples/05-chain-comp`
+  - Keep custom `demo/http_chain_cap@1`.
+  - Remove `enforcer` field (defaults to allow-all).
+  - Remove empty `module_bindings` from the manifest.
+
+- `examples/06-safe-upgrade` (air.v1 + air.v2)
+  - Keep custom HTTP caps.
+  - Remove `enforcer` fields where allow-all is intended.
+  - Remove empty `module_bindings` from the manifest.
+
+- `examples/07-llm-summarizer`
+  - Keep HTTP and LLM caps; LLM still uses `sys/CapEnforceLlmBasic@1`.
+  - Remove `enforcer` from the HTTP defcap if allow-all is intended.
+  - Remove empty `module_bindings` from the manifest.
+
 ## Additional Hardening
 
-### 5) Lock down `sys/*` definitions at load time
+### 6) Lock down `sys/*` definitions at load time
 
 Reject any external manifest entries named `sys/*` for defcap, defmodule, defschema,
 defplan, defpolicy, defeffect, and defsecret. Only built-in catalogs may define `sys/*`.
@@ -95,6 +128,9 @@ Implications:
 ## Notes / Open Questions
 
 - Auto-include should be always-on for built-in catalogs.
-- Inline defcaps in grants should be normalized by lifting into the manifest catalog
-  during load (identity-checked against any existing defcap).
 - Default bindings must not mask mistakes; restrict to single-grant cases only.
+
+## Other Possible Improvements Noticed
+
+- `examples/04-aggregator` still uses `verbs` in the HTTP cap schema; align to
+  `methods` to match the current spec.
