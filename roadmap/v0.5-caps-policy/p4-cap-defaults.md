@@ -1,6 +1,6 @@
 ---
 title: "p4: Cap Defaults / DX"
-status: draft
+status: done
 ---
 
 # p4-cap-defaults
