@@ -7,12 +7,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use aos_wasm_abi::{ReducerInput, ReducerOutput};
+use aos_wasm_abi::{PureInput, PureOutput, ReducerInput, ReducerOutput};
 use log::debug;
 use sha2::{Digest, Sha256};
 use wasmtime::{Config, Engine, Linker, Module, Store};
 
 const STEP_EXPORT: &str = "step";
+const RUN_EXPORT: &str = "run";
 const ALLOC_EXPORT: &str = "alloc";
 const MEMORY_EXPORT: &str = "memory";
 const WASMTIME_VERSION: &str = "36.0.3";
@@ -225,7 +226,208 @@ impl ReducerRuntime {
     }
 }
 
+/// Deterministic runtime wrapper around Wasmtime for pure modules.
+pub struct PureRuntime {
+    engine: Arc<Engine>,
+    module_cache: Mutex<HashMap<ModuleKey, Arc<Module>>>,
+    disk_cache: Option<DiskCache>,
+}
+
+impl PureRuntime {
+    /// Build a runtime with deterministic configuration (no threads, no fuel, no debug info).
+    pub fn new() -> Result<Self> {
+        Self::new_with_disk_cache(None)
+    }
+
+    /// Build a runtime and optionally persist compiled modules under `cache_dir`.
+    pub fn new_with_disk_cache(cache_dir: Option<PathBuf>) -> Result<Self> {
+        let mut cfg = Config::new();
+        cfg.wasm_multi_value(true);
+        cfg.wasm_threads(false);
+        cfg.wasm_reference_types(true);
+        cfg.consume_fuel(false);
+        cfg.debug_info(false);
+        cfg.cranelift_nan_canonicalization(true);
+        let engine = Engine::new(&cfg)?;
+        let disk_cache = if let Some(dir) = cache_dir {
+            let fingerprint = engine_cache_fingerprint();
+            let engine_dir = dir.join(&fingerprint);
+            fs::create_dir_all(&engine_dir)
+                .with_context(|| format!("create cache dir {}", engine_dir.display()))?;
+            Some(DiskCache {
+                root: dir,
+                engine_fingerprint: fingerprint,
+            })
+        } else {
+            None
+        };
+        Ok(Self {
+            engine: Arc::new(engine),
+            module_cache: Mutex::new(HashMap::new()),
+            disk_cache,
+        })
+    }
+
+    /// Compile a pure WASM blob into a reusable Wasmtime module.
+    pub fn compile(&self, wasm_bytes: &[u8]) -> Result<Module> {
+        Module::new(&self.engine, wasm_bytes)
+    }
+
+    /// Obtain (and cache) a compiled module for the given WASM bytes.
+    pub fn cached_module(&self, wasm_bytes: &[u8]) -> Result<Arc<Module>> {
+        self.module_from_cache(wasm_bytes)
+    }
+
+    /// Execute an already-compiled module with the given ABI envelope.
+    pub fn run_compiled(&self, module: &Module, input: &PureInput) -> Result<PureOutput> {
+        let mut store = Store::new(&self.engine, ());
+        let linker = Linker::new(&self.engine);
+        let instance = linker.instantiate(&mut store, module)?;
+        let memory = instance
+            .get_memory(&mut store, MEMORY_EXPORT)
+            .context("wasm export 'memory' not found")?;
+        let alloc = instance
+            .get_typed_func::<i32, i32>(&mut store, ALLOC_EXPORT)
+            .context("wasm export 'alloc' not found")?;
+        let legacy_run = instance.get_typed_func::<(i32, i32), (i32, i32)>(&mut store, RUN_EXPORT);
+        let run = match legacy_run {
+            Ok(run) => RunImpl::Legacy(run),
+            Err(_) => RunImpl::Modern(
+                instance
+                    .get_typed_func::<(i32, i32, i32), ()>(&mut store, RUN_EXPORT)
+                    .context("wasm export 'run' not found")?,
+            ),
+        };
+
+        let input_bytes = input.encode()?;
+        let input_len = i32::try_from(input_bytes.len()).context("input too large for wasm32")?;
+        let input_ptr = alloc.call(&mut store, input_len)?;
+        memory.write(&mut store, input_ptr as usize, &input_bytes)?;
+
+        let output = match run {
+            RunImpl::Legacy(run) => {
+                let (out_ptr, out_len) = run.call(&mut store, (input_ptr, input_len))?;
+                let output_len = usize::try_from(out_len).context("negative output length")?;
+                let mut output = vec![0u8; output_len];
+                memory.read(&mut store, out_ptr as usize, &mut output)?;
+                output
+            }
+            RunImpl::Modern(run) => {
+                let result_ptr = alloc.call(&mut store, 8)?;
+                run.call(&mut store, (result_ptr, input_ptr, input_len))?;
+                let mut result_buf = [0u8; 8];
+                memory.read(&mut store, result_ptr as usize, &mut result_buf)?;
+                let out_ptr = i32::from_le_bytes([
+                    result_buf[0],
+                    result_buf[1],
+                    result_buf[2],
+                    result_buf[3],
+                ]);
+                let out_len = i32::from_le_bytes([
+                    result_buf[4],
+                    result_buf[5],
+                    result_buf[6],
+                    result_buf[7],
+                ]);
+                let output_len = usize::try_from(out_len).context("negative output length")?;
+                let mut output = vec![0u8; output_len];
+                memory.read(&mut store, out_ptr as usize, &mut output)?;
+                output
+            }
+        };
+
+        let pure_output = PureOutput::decode(&output)?;
+        Ok(pure_output)
+    }
+
+    /// Execute a pure WASM module with the given ABI envelope (compiles each time).
+    pub fn run(&self, wasm_bytes: &[u8], input: &PureInput) -> Result<PureOutput> {
+        let module = self.module_from_cache(wasm_bytes)?;
+        self.run_compiled(&module, input)
+    }
+
+    fn module_from_cache(&self, wasm_bytes: &[u8]) -> Result<Arc<Module>> {
+        let key = ModuleKey::from_bytes(wasm_bytes);
+        let key_hex = key.hex();
+        if let Some(existing) = self.get_cached_module(&key) {
+            debug!("aos-wasm: memory cache hit for pure module {key_hex}");
+            return Ok(existing);
+        }
+
+        if let Some(serialized) = self.load_serialized(&key, &key_hex)? {
+            debug!("aos-wasm: disk cache hit for pure module {key_hex}");
+            self.insert_cached_module(key, serialized.clone());
+            return Ok(serialized);
+        }
+
+        debug!("aos-wasm: cache miss for pure module {key_hex}; compiling module");
+        let compiled = Arc::new(self.compile(wasm_bytes)?);
+        self.store_serialized(&key, &key_hex, &compiled).ok();
+        self.insert_cached_module(key, compiled.clone());
+        Ok(compiled)
+    }
+
+    fn get_cached_module(&self, key: &ModuleKey) -> Option<Arc<Module>> {
+        self.module_cache
+            .lock()
+            .expect("module cache poisoned")
+            .get(key)
+            .cloned()
+    }
+
+    fn insert_cached_module(&self, key: ModuleKey, module: Arc<Module>) {
+        let mut cache = self.module_cache.lock().expect("module cache poisoned");
+        cache.entry(key).or_insert_with(|| module.clone());
+    }
+
+    fn load_serialized(&self, key: &ModuleKey, key_hex: &str) -> Result<Option<Arc<Module>>> {
+        let cache = match &self.disk_cache {
+            Some(cache) => cache,
+            None => return Ok(None),
+        };
+        let path = cache.module_path(key);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = match fs::read(&path) {
+            Ok(data) => data,
+            Err(_) => {
+                debug!("aos-wasm: failed to read serialized module {key_hex}, removing cache file");
+                let _ = fs::remove_file(&path);
+                return Ok(None);
+            }
+        };
+        match unsafe { Module::deserialize(&self.engine, &bytes) } {
+            Ok(module) => Ok(Some(Arc::new(module))),
+            Err(err) => {
+                debug!(
+                    "aos-wasm: deserialize failed for cached module {key_hex}: {err}; removing cache file"
+                );
+                let _ = fs::remove_file(&path);
+                Ok(None)
+            }
+        }
+    }
+
+    fn store_serialized(&self, key: &ModuleKey, key_hex: &str, module: &Module) -> Result<()> {
+        let cache = match &self.disk_cache {
+            Some(cache) => cache,
+            None => return Ok(()),
+        };
+        let path = cache.module_path(key);
+        let bytes = module.serialize()?;
+        fs::write(&path, bytes)
+            .with_context(|| format!("write wasm cache for pure module {key_hex}"))?;
+        Ok(())
+    }
+}
+
 enum StepImpl {
+    Legacy(wasmtime::TypedFunc<(i32, i32), (i32, i32)>),
+    Modern(wasmtime::TypedFunc<(i32, i32, i32), ()>),
+}
+
+enum RunImpl {
     Legacy(wasmtime::TypedFunc<(i32, i32), (i32, i32)>),
     Modern(wasmtime::TypedFunc<(i32, i32, i32), ()>),
 }
@@ -278,8 +480,25 @@ fn engine_cache_fingerprint() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerEffect};
+    use aos_wasm_abi::{ABI_VERSION, DomainEvent, ReducerContext, ReducerEffect};
     use tempfile::TempDir;
+
+    fn ctx_bytes(reducer: &str) -> Vec<u8> {
+        let ctx = ReducerContext {
+            now_ns: 1,
+            logical_now_ns: 2,
+            journal_height: 3,
+            entropy: vec![0x11; 64],
+            event_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
+            manifest_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                .into(),
+            reducer: reducer.into(),
+            key: None,
+            cell_mode: false,
+        };
+        serde_cbor::to_vec(&ctx).expect("ctx bytes")
+    }
     #[test]
     fn reducer_round_trip_with_stub_module() {
         let runtime = ReducerRuntime::new().unwrap();
@@ -297,7 +516,7 @@ mod tests {
             version: ABI_VERSION,
             state: Some(vec![0xde, 0xad]),
             event: DomainEvent::new("com.acme/Event@1", vec![0x01]),
-            ctx: CallContext::new(false, None),
+            ctx: Some(ctx_bytes("com.acme/Reducer@1")),
         };
 
         let output = runtime.run(&wasm_bytes, &input).unwrap();
@@ -319,7 +538,7 @@ mod tests {
             version: ABI_VERSION,
             state: None,
             event: DomainEvent::new("demo/Event@1", vec![]),
-            ctx: CallContext::new(false, None),
+            ctx: Some(ctx_bytes("demo/Reducer@1")),
         };
 
         runtime.run(&wasm_bytes, &input).unwrap();
@@ -346,7 +565,7 @@ mod tests {
             version: ABI_VERSION,
             state: None,
             event: DomainEvent::new("demo/Event@1", vec![]),
-            ctx: CallContext::new(false, None),
+            ctx: Some(ctx_bytes("demo/Reducer@1")),
         };
 
         let runtime = ReducerRuntime::new_with_disk_cache(Some(cache_root.clone())).unwrap();

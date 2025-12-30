@@ -1,4 +1,4 @@
-//! Reducer ABI envelopes shared by the kernel and WASM SDK.
+//! Reducer/pure ABI envelopes shared by the kernel and WASM SDK.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -13,7 +13,12 @@ pub struct ReducerInput {
     #[serde(with = "serde_bytes")]
     pub state: Option<Vec<u8>>,
     pub event: DomainEvent,
-    pub ctx: CallContext,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub ctx: Option<Vec<u8>>,
 }
 
 impl ReducerInput {
@@ -46,6 +51,53 @@ pub struct ReducerOutput {
 }
 
 impl ReducerOutput {
+    pub fn decode(bytes: &[u8]) -> Result<Self, AbiDecodeError> {
+        serde_cbor::from_slice(bytes).map_err(AbiDecodeError::Cbor)
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, AbiEncodeError> {
+        serde_cbor::to_vec(self).map_err(AbiEncodeError::Cbor)
+    }
+}
+
+/// Pure module input envelope (kernel → WASM module).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct PureInput {
+    pub version: u8,
+    #[serde(with = "serde_bytes")]
+    pub input: Vec<u8>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub ctx: Option<Vec<u8>>,
+}
+
+impl PureInput {
+    pub fn decode(bytes: &[u8]) -> Result<Self, AbiDecodeError> {
+        let input: PureInput = serde_cbor::from_slice(bytes)?;
+        if input.version != ABI_VERSION {
+            return Err(AbiDecodeError::UnsupportedVersion {
+                found: input.version,
+            });
+        }
+        Ok(input)
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, AbiEncodeError> {
+        serde_cbor::to_vec(self).map_err(AbiEncodeError::Cbor)
+    }
+}
+
+/// Pure module output envelope (WASM module → kernel).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct PureOutput {
+    #[serde(with = "serde_bytes")]
+    pub output: Vec<u8>,
+}
+
+impl PureOutput {
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiDecodeError> {
         serde_cbor::from_slice(bytes).map_err(AbiDecodeError::Cbor)
     }
@@ -111,15 +163,42 @@ mod serde_bytes_opt {
 
 /// Contextual metadata provided with every reducer call.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct CallContext {
+pub struct ReducerContext {
+    pub now_ns: u64,
+    pub logical_now_ns: u64,
+    pub journal_height: u64,
     #[serde(with = "serde_bytes")]
+    pub entropy: Vec<u8>,
+    pub event_hash: String,
+    pub manifest_hash: String,
+    pub reducer: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
     pub key: Option<Vec<u8>>,
     pub cell_mode: bool,
 }
 
-impl CallContext {
-    pub fn new(cell_mode: bool, key: Option<Vec<u8>>) -> Self {
-        Self { cell_mode, key }
+impl ReducerContext {
+    pub fn decode(bytes: &[u8]) -> Result<Self, serde_cbor::Error> {
+        serde_cbor::from_slice(bytes)
+    }
+}
+
+/// Contextual metadata provided with every pure module call.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct PureContext {
+    pub logical_now_ns: u64,
+    pub journal_height: u64,
+    pub manifest_hash: String,
+    pub module: String,
+}
+
+impl PureContext {
+    pub fn decode(bytes: &[u8]) -> Result<Self, serde_cbor::Error> {
+        serde_cbor::from_slice(bytes)
     }
 }
 
@@ -131,6 +210,12 @@ pub struct ReducerEffect {
     pub params_cbor: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap_slot: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub idempotency_key: Option<Vec<u8>>,
 }
 
 impl ReducerEffect {
@@ -139,6 +224,7 @@ impl ReducerEffect {
             kind: kind.into(),
             params_cbor,
             cap_slot: None,
+            idempotency_key: None,
         }
     }
 
@@ -151,6 +237,7 @@ impl ReducerEffect {
             kind: kind.into(),
             params_cbor,
             cap_slot: Some(slot.into()),
+            idempotency_key: None,
         }
     }
 }
@@ -175,11 +262,25 @@ mod tests {
 
     #[test]
     fn round_trip_input() {
+        let ctx = ReducerContext {
+            now_ns: 10,
+            logical_now_ns: 12,
+            journal_height: 7,
+            entropy: vec![0x11; 64],
+            event_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
+            manifest_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                .into(),
+            reducer: "com.acme/Reducer@1".into(),
+            key: Some(vec![0x01, 0x02]),
+            cell_mode: true,
+        };
+        let ctx_bytes = serde_cbor::to_vec(&ctx).expect("ctx bytes");
         let input = ReducerInput {
             version: ABI_VERSION,
             state: Some(vec![1, 2, 3]),
             event: DomainEvent::new("com.acme/Event@1", vec![0xaa]),
-            ctx: CallContext::new(true, Some(vec![0x01, 0x02])),
+            ctx: Some(ctx_bytes),
         };
         let bytes = input.encode().expect("encode");
         let decoded = ReducerInput::decode(&bytes).expect("decode");
@@ -188,11 +289,25 @@ mod tests {
 
     #[test]
     fn rejects_wrong_version() {
+        let ctx = ReducerContext {
+            now_ns: 10,
+            logical_now_ns: 12,
+            journal_height: 7,
+            entropy: vec![0x11; 64],
+            event_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+                .into(),
+            manifest_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                .into(),
+            reducer: "com.acme/Reducer@1".into(),
+            key: None,
+            cell_mode: false,
+        };
+        let ctx_bytes = serde_cbor::to_vec(&ctx).expect("ctx bytes");
         let mut input = ReducerInput {
             version: ABI_VERSION,
             state: None,
             event: DomainEvent::new("schema", vec![]),
-            ctx: CallContext::new(false, None),
+            ctx: Some(ctx_bytes),
         };
         input.version = 99;
         let bytes = serde_cbor::to_vec(&input).unwrap();
@@ -211,5 +326,32 @@ mod tests {
         let bytes = output.encode().expect("encode");
         let decoded = ReducerOutput::decode(&bytes).expect("decode");
         assert_eq!(decoded, output);
+    }
+
+    #[test]
+    fn round_trip_pure_envelopes() {
+        let ctx = PureContext {
+            logical_now_ns: 9,
+            journal_height: 3,
+            manifest_hash: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                .into(),
+            module: "com.acme/Pure@1".into(),
+        };
+        let ctx_bytes = serde_cbor::to_vec(&ctx).expect("ctx bytes");
+        let input = PureInput {
+            version: ABI_VERSION,
+            input: vec![0xaa, 0xbb],
+            ctx: Some(ctx_bytes),
+        };
+        let bytes = input.encode().expect("encode");
+        let decoded = PureInput::decode(&bytes).expect("decode");
+        assert_eq!(decoded, input);
+
+        let output = PureOutput {
+            output: vec![0x01, 0x02],
+        };
+        let out_bytes = output.encode().expect("encode");
+        let out_decoded = PureOutput::decode(&out_bytes).expect("decode");
+        assert_eq!(out_decoded, output);
     }
 }

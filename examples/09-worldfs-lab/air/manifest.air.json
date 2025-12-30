@@ -13,6 +13,7 @@
     { "name": "sys/ObjectKey@1" },
     { "name": "sys/ObjectMeta@1" },
     { "name": "sys/ObjectVersions@1" },
+    { "name": "sys/ObjectRegisteredPayload@1" },
     { "name": "sys/ObjectRegistered@1" },
     { "name": "sys/BlobPutParams@1" },
     { "name": "sys/BlobPutReceipt@1" },
@@ -30,9 +31,7 @@
     { "name": "sys/blob.put@1" }
   ],
   "caps": [
-    { "name": "notes/blob_cap@1" },
-    { "name": "sys/blob@1" },
-    { "name": "sys/query@1" }
+    { "name": "notes/blob_cap@1" }
   ],
   "policies": [
     { "name": "notes/allow_all@1" }
@@ -40,14 +39,8 @@
   "defaults": {
     "policy": "notes/allow_all@1",
     "cap_grants": [
-      { "name": "cap_blob", "cap": "notes/blob_cap@1", "params": { "record": {} } },
-      { "name": "cap_sys_blob", "cap": "sys/blob@1", "params": { "record": {} } },
-      { "name": "cap_query", "cap": "sys/query@1", "params": { "record": { "scope": { "text": "*" } } } }
+      { "name": "cap_blob", "cap": "notes/blob_cap@1", "params": { "record": {} } }
     ]
-  },
-  "module_bindings": {
-    "notes/NotebookSM@1": { "slots": {} },
-    "sys/ObjectCatalog@1": { "slots": {} }
   },
   "routing": {
     "events": [

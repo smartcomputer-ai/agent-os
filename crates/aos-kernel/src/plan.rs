@@ -13,7 +13,7 @@ use aos_air_types::{
     ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText, ValueTimeNs, ValueUuid,
     ValueVariant, catalog::EffectCatalog, value_normalize::normalize_cbor_by_name,
 };
-use aos_cbor::to_canonical_cbor;
+use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
 use base64::Engine;
@@ -22,6 +22,8 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_cbor::{self, Value as CborValue};
 
+use crate::capability::CapGrantResolution;
+use crate::event::IngressStamp;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 use crate::schema_value::cbor_to_expr_value;
@@ -68,6 +70,7 @@ pub struct PlanInstance {
     pub plan: DefPlan,
     pub env: ExprEnv,
     pub completed: bool,
+    context: Option<PlanContext>,
     effect_handles: HashMap<String, [u8; 32]>,
     receipt_waits: BTreeMap<[u8; 32], ReceiptWait>,
     receipt_values: HashMap<String, ExprValue>,
@@ -79,6 +82,7 @@ pub struct PlanInstance {
     predecessors: HashMap<String, Vec<Dependency>>,
     step_states: HashMap<String, StepState>,
     schema_index: Arc<SchemaIndex>,
+    cap_handles: Arc<HashMap<String, CapGrantResolution>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -93,6 +97,23 @@ pub struct EventWait {
     pub schema: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub where_clause: Option<Expr>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlanContext {
+    pub logical_now_ns: u64,
+    pub journal_height: u64,
+    pub manifest_hash: String,
+}
+
+impl PlanContext {
+    pub fn from_stamp(stamp: &IngressStamp) -> Self {
+        Self {
+            logical_now_ns: stamp.logical_now_ns,
+            journal_height: stamp.journal_height,
+            manifest_hash: stamp.manifest_hash.clone(),
+        }
+    }
 }
 
 #[derive(Default, Debug)]
@@ -119,6 +140,7 @@ pub struct PlanInstanceSnapshot {
     pub name: String,
     pub env: ExprEnv,
     pub completed: bool,
+    pub context: Option<PlanContext>,
     pub effect_handles: Vec<(String, [u8; 32])>,
     pub receipt_waits: Vec<ReceiptWait>,
     pub receipt_values: Vec<(String, ExprValue)>,
@@ -135,6 +157,7 @@ impl PlanInstance {
         input: ExprValue,
         schema_index: Arc<SchemaIndex>,
         correlation: Option<(Vec<u8>, ExprValue)>,
+        cap_handles: Arc<HashMap<String, CapGrantResolution>>,
     ) -> Self {
         let mut step_map = HashMap::new();
         let mut step_order = Vec::new();
@@ -173,6 +196,7 @@ impl PlanInstance {
             plan,
             env,
             completed: false,
+            context: None,
             effect_handles: HashMap::new(),
             receipt_waits: BTreeMap::new(),
             receipt_values: HashMap::new(),
@@ -184,6 +208,7 @@ impl PlanInstance {
             predecessors,
             step_states,
             schema_index,
+            cap_handles,
         }
     }
 
@@ -238,11 +263,28 @@ impl PlanInstance {
                     let params_cbor =
                         aos_cbor::to_canonical_cbor(&expr_value_to_cbor_value(&params_value))
                             .map_err(|err| KernelError::Manifest(err.to_string()))?;
-                    let intent = effects.enqueue_plan_effect(
+                    let idempotency_key = if let Some(key) = &emit.idempotency_key {
+                        let value = eval_expr_or_value(
+                            key,
+                            &self.env,
+                            "plan effect idempotency eval error",
+                        )?;
+                        idempotency_key_from_value(value)?
+                    } else {
+                        [0u8; 32]
+                    };
+                    let grant = self.cap_handles.get(&step_id).ok_or_else(|| {
+                        KernelError::PlanCapabilityMissing {
+                            plan: self.name.clone(),
+                            cap: emit.cap.clone(),
+                        }
+                    })?;
+                    let intent = effects.enqueue_plan_effect_with_grant(
                         &self.name,
                         &emit.kind,
-                        &emit.cap,
+                        grant,
                         params_cbor,
+                        idempotency_key,
                     )?;
                     outcome.intents_enqueued.push(intent.clone());
                     let handle = emit.bind.effect_id_as.clone();
@@ -367,19 +409,22 @@ impl PlanInstance {
                                 schema_name
                             ))
                         })?;
-                        let value =
-                            eval_expr_or_value(&raise.value, &self.env, "plan raise_event eval error")?;
+                        let value = eval_expr_or_value(
+                            &raise.value,
+                            &self.env,
+                            "plan raise_event eval error",
+                        )?;
                         let mut event_literal = expr_value_to_literal(&value).map_err(|err| {
                             KernelError::Manifest(format!("plan raise_event literal error: {err}"))
                         })?;
                         canonicalize_literal(&mut event_literal, schema, &self.schema_index)
-                        .map_err(|err| {
-                            KernelError::Manifest(format!(
-                                "plan raise_event canonicalization error: {err}"
-                            ))
-                        })?;
+                            .map_err(|err| {
+                                KernelError::Manifest(format!(
+                                    "plan raise_event canonicalization error: {err}"
+                                ))
+                            })?;
                         validate_literal(&event_literal, schema, schema_name, &self.schema_index)
-                        .map_err(|err| {
+                            .map_err(|err| {
                             KernelError::Manifest(format!(
                                 "plan raise_event validation error: {err}"
                             ))
@@ -521,6 +566,7 @@ impl PlanInstance {
             name: self.name.clone(),
             env: self.env.clone(),
             completed: self.completed,
+            context: self.context.clone(),
             effect_handles: self
                 .effect_handles
                 .iter()
@@ -547,6 +593,7 @@ impl PlanInstance {
         snapshot: PlanInstanceSnapshot,
         plan: DefPlan,
         schema_index: Arc<SchemaIndex>,
+        cap_handles: Arc<HashMap<String, CapGrantResolution>>,
     ) -> Self {
         let mut instance = PlanInstance::new(
             snapshot.id,
@@ -554,9 +601,11 @@ impl PlanInstance {
             snapshot.env.plan_input.clone(),
             schema_index,
             None,
+            cap_handles,
         );
         instance.env = snapshot.env;
         instance.completed = snapshot.completed;
+        instance.context = snapshot.context;
         instance.effect_handles = snapshot.effect_handles.into_iter().collect();
         instance.receipt_waits = snapshot
             .receipt_waits
@@ -569,6 +618,14 @@ impl PlanInstance {
         instance.correlation_id = snapshot.correlation_id;
         instance.step_states = snapshot.step_states.into_iter().collect();
         instance
+    }
+
+    pub fn set_context(&mut self, context: PlanContext) {
+        self.context = Some(context);
+    }
+
+    pub fn context(&self) -> Option<&PlanContext> {
+        self.context.as_ref()
     }
 
     pub fn deliver_receipt(
@@ -920,6 +977,26 @@ fn expr_value_to_cbor_value(value: &ExprValue) -> CborValue {
     }
 }
 
+fn idempotency_key_from_value(value: ExprValue) -> Result<[u8; 32], KernelError> {
+    match value {
+        ExprValue::Hash(hash) => Hash::from_hex_str(hash.as_str())
+            .map(|h| *h.as_bytes())
+            .map_err(|err| KernelError::IdempotencyKeyInvalid(err.to_string())),
+        ExprValue::Text(text) => Hash::from_hex_str(&text)
+            .map(|h| *h.as_bytes())
+            .map_err(|err| KernelError::IdempotencyKeyInvalid(err.to_string())),
+        ExprValue::Bytes(bytes) => Hash::from_bytes(&bytes)
+            .map(|h| *h.as_bytes())
+            .map_err(|err| {
+                KernelError::IdempotencyKeyInvalid(format!("expected 32 bytes, got {}", err.0))
+            }),
+        other => Err(KernelError::IdempotencyKeyInvalid(format!(
+            "expected hash or bytes, got {}",
+            other.kind()
+        ))),
+    }
+}
+
 fn try_convert_variant_record(record: &IndexMap<String, ExprValue>) -> Option<CborValue> {
     if record.len() != 2 {
         return None;
@@ -1031,7 +1108,7 @@ fn expr_value_to_literal(value: &ExprValue) -> Result<ValueLiteral, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capability::CapabilityResolver;
+    use crate::capability::{CapGrantResolution, CapabilityResolver};
     use crate::policy::AllowAllPolicy;
     use aos_air_types::plan_literals::SchemaIndex;
     use aos_air_types::{
@@ -1042,7 +1119,8 @@ mod tests {
         ValueInt, ValueLiteral, ValueRecord, ValueText,
     };
     use aos_effects::CapabilityGrant;
-    use std::collections::HashMap;
+    use serde_cbor::Value as CborValue;
+    use std::collections::{BTreeMap, HashMap};
     use std::sync::Arc;
 
     fn base_plan(steps: Vec<PlanStep>) -> DefPlan {
@@ -1063,15 +1141,16 @@ mod tests {
         ExprValue::Record(IndexMap::new())
     }
 
-    fn test_effect_manager() -> EffectManager {
+    fn test_capability_resolver() -> CapabilityResolver {
+        let cap_params =
+            aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new())).expect("cap params");
         let grants = vec![
             (
                 CapabilityGrant {
                     name: "cap".into(),
                     cap: "sys/http.out@1".into(),
-                    params_cbor: Vec::new(),
+                    params_cbor: cap_params.clone(),
                     expiry_ns: None,
-                    budget: None,
                 },
                 CapType::http_out(),
             ),
@@ -1079,14 +1158,17 @@ mod tests {
                 CapabilityGrant {
                     name: "cap_http".into(),
                     cap: "sys/http.out@1".into(),
-                    params_cbor: Vec::new(),
+                    params_cbor: cap_params,
                     expiry_ns: None,
-                    budget: None,
                 },
                 CapType::http_out(),
             ),
         ];
-        let resolver = CapabilityResolver::from_runtime_grants(grants);
+        CapabilityResolver::from_runtime_grants(grants).expect("grant resolver")
+    }
+
+    fn test_effect_manager() -> EffectManager {
+        let resolver = test_capability_resolver();
         let effect_catalog = Arc::new(EffectCatalog::from_defs(
             aos_air_types::builtins::builtin_effects()
                 .iter()
@@ -1099,7 +1181,22 @@ mod tests {
             builtin_schema_index(),
             None,
             None,
+            None,
         )
+    }
+
+    fn test_cap_handles(plan: &DefPlan) -> Arc<HashMap<String, CapGrantResolution>> {
+        let resolver = test_capability_resolver();
+        let mut handles = HashMap::new();
+        for step in &plan.steps {
+            if let PlanStepKind::EmitEffect(emit) = &step.kind {
+                let resolved = resolver
+                    .resolve(emit.cap.as_str(), emit.kind.as_str())
+                    .expect("cap handle");
+                handles.insert(step.id.clone(), resolved);
+            }
+        }
+        Arc::new(handles)
     }
 
     fn empty_schema_index() -> Arc<SchemaIndex> {
@@ -1133,13 +1230,8 @@ mod tests {
     }
 
     fn new_plan_instance(plan: DefPlan) -> PlanInstance {
-        PlanInstance::new(
-            1,
-            plan,
-            default_env(),
-            empty_schema_index(),
-            None,
-        )
+        let cap_handles = test_cap_handles(&plan);
+        PlanInstance::new(1, plan, default_env(), empty_schema_index(), None, cap_handles)
     }
 
     fn http_params_value_literal(tag: &str) -> ValueLiteral {
@@ -1174,13 +1266,8 @@ mod tests {
     }
 
     fn plan_instance_with_schema(plan: DefPlan, schema_index: Arc<SchemaIndex>) -> PlanInstance {
-        PlanInstance::new(
-            1,
-            plan,
-            default_env(),
-            schema_index,
-            None,
-        )
+        let cap_handles = test_cap_handles(&plan);
+        PlanInstance::new(1, plan, default_env(), schema_index, None, cap_handles)
     }
 
     /// Assign steps should synchronously write to the plan environment.
@@ -1235,6 +1322,7 @@ mod tests {
                 kind: EffectKind::http_request(),
                 params: http_params_literal("data"),
                 cap: "cap".into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -1280,6 +1368,7 @@ mod tests {
                 kind: EffectKind::http_request(),
                 params: params_literal.into(),
                 cap: "cap".into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -1302,6 +1391,7 @@ mod tests {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("data"),
                     cap: "cap".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -1335,6 +1425,7 @@ mod tests {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("alpha"),
                     cap: "cap".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "handle_a".into(),
                     },
@@ -1346,6 +1437,7 @@ mod tests {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("beta"),
                     cap: "cap".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "handle_b".into(),
                     },
@@ -1357,6 +1449,7 @@ mod tests {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("gamma"),
                     cap: "cap".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "handle_c".into(),
                     },
@@ -1474,13 +1567,7 @@ mod tests {
                 int: EmptyObject {},
             })),
         );
-        let mut plan = PlanInstance::new(
-            1,
-            base_plan(steps),
-            default_env(),
-            schema_index,
-            None,
-        );
+        let mut plan = plan_instance_with_schema(base_plan(steps), schema_index);
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
@@ -1533,12 +1620,9 @@ mod tests {
                 .into(),
             }),
         }];
-        let mut plan = PlanInstance::new(
-            1,
+        let mut plan = plan_instance_with_schema(
             base_plan(steps),
-            default_env(),
             schema_index_with_event("com.test/Evt@1", event_schema),
-            None,
         );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
@@ -1567,12 +1651,9 @@ mod tests {
                 value: literal_event.into(),
             }),
         }];
-        let mut plan = PlanInstance::new(
-            1,
+        let mut plan = plan_instance_with_schema(
             base_plan(steps),
-            default_env(),
             schema_index_with_event("com.test/Literal@1", event_schema),
-            None,
         );
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
@@ -1669,13 +1750,7 @@ mod tests {
             )]),
         });
         let schema_index = schema_index_with_event("com.test/Evt@1", event_schema);
-        let mut instance = PlanInstance::new(
-            1,
-            plan,
-            default_env(),
-            schema_index,
-            None,
-        );
+        let mut instance = plan_instance_with_schema(plan, schema_index);
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert_eq!(outcome.waiting_event, Some("com.test/Evt@1".into()));
@@ -1723,12 +1798,14 @@ mod tests {
 
         let plan = base_plan(steps);
         let correlation_value = ExprValue::Text("corr".into());
+        let cap_handles = test_cap_handles(&plan);
         let mut instance = PlanInstance::new(
             1,
             plan,
             default_env(),
             empty_schema_index(),
             Some((b"corr".to_vec(), correlation_value)),
+            cap_handles,
         );
         let mut effects = test_effect_manager();
         let err = instance.tick(&mut effects).unwrap_err();
@@ -1856,6 +1933,7 @@ mod tests {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("payload"),
                     cap: "cap".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -1887,12 +1965,14 @@ mod tests {
             },
         ]);
         let schema_index = empty_schema_index();
+        let cap_handles = test_cap_handles(&plan_def);
         let mut instance = PlanInstance::new(
             1,
             plan_def.clone(),
             default_env(),
             schema_index.clone(),
             None,
+            cap_handles.clone(),
         );
         let mut effects = test_effect_manager();
         let first = instance.tick(&mut effects).unwrap();
@@ -1903,7 +1983,8 @@ mod tests {
             .expect("waiting receipt");
         let snapshot = instance.snapshot();
 
-        let mut restored = PlanInstance::from_snapshot(snapshot, plan_def, schema_index);
+        let mut restored =
+            PlanInstance::from_snapshot(snapshot, plan_def, schema_index, cap_handles);
         hash[0] ^= 0xAA;
         restored.override_pending_receipt_hash(hash);
         assert_eq!(restored.pending_receipt_hash(), Some(hash));

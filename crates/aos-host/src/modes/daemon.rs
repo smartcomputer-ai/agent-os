@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 
 use crate::adapters::timer::TimerScheduler;
 use crate::error::HostError;
-use crate::host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};
+use crate::host::{ExternalEvent, RunMode, WorldHost};
 use aos_kernel::cell_index::CellMeta;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::ApprovalDecisionRecord;
@@ -207,7 +207,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
 
         loop {
             // Calculate next wake time
-            let now_ns = now_wallclock_ns();
+            let now_ns = self.host.kernel().logical_time_now_ns();
             let next_deadline = self.timer_scheduler.next_deadline(now_ns);
 
             // If control channel is closed and no timers pending, exit

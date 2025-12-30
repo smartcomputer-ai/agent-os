@@ -89,7 +89,7 @@ fn handle_start(ctx: &mut ReducerCtx<TimerState>, event: StartEvent) {
                 deliver_at_ns: deadline,
                 key: ctx.state.key.clone(),
             };
-            ctx.effects().timer_set(&params, "timer");
+            ctx.effects().timer_set(&params, "default");
         }
     }
 }

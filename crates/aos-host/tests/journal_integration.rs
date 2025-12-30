@@ -1,15 +1,20 @@
 use aos_air_exec::Value as ExprValue;
+use aos_air_types::{EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch, PolicyRule};
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
-use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord};
+use aos_kernel::journal::{
+    IntentOriginRecord, JournalKind, JournalRecord, PolicyDecisionOutcome,
+};
+use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 use serde_cbor;
+use serde_cbor::Value as CborValue;
+use std::collections::BTreeMap;
 use tempfile::TempDir;
 
 mod helpers;
-use helpers::{fulfillment_manifest, timer_manifest};
+use helpers::{attach_default_policy, fulfillment_manifest, timer_manifest};
 
 /// Journal replay without snapshots should restore reducer state identically.
 #[test]
@@ -198,6 +203,107 @@ fn plan_journal_replay_resumes_waiting_receipt() {
             .reducer_state("com.acme/ResultReducer@1"),
         Some(vec![0xEE])
     );
+}
+
+/// Policy decisions should be journaled for plan-origin effects.
+#[test]
+fn policy_decision_is_journaled() {
+    let store = fixtures::new_mem_store();
+    let mut manifest = fulfillment_manifest(&store);
+    let policy = aos_air_types::DefPolicy {
+        name: "com.acme/allow-plan-http@1".into(),
+        rules: vec![PolicyRule {
+            when: PolicyMatch {
+                effect_kind: Some(AirEffectKind::http_request()),
+                origin_kind: Some(OriginKind::Plan),
+                ..Default::default()
+            },
+            decision: PolicyDecision::Allow,
+        }],
+    };
+    attach_default_policy(&mut manifest, policy.clone());
+
+    let mut world = TestWorld::with_store(store, manifest).unwrap();
+    world
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
+        .expect("submit start event");
+    world.tick_n(2).unwrap();
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let record = journal_entries
+        .iter()
+        .find(|entry| entry.kind == JournalKind::PolicyDecision)
+        .map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).unwrap())
+        .expect("policy decision entry missing");
+
+    match record {
+        JournalRecord::PolicyDecision(decision) => {
+            assert_eq!(decision.policy_name, policy.name);
+            assert_eq!(decision.rule_index, Some(0));
+            assert_eq!(decision.decision, PolicyDecisionOutcome::Allow);
+        }
+        _ => unreachable!("expected policy decision record"),
+    }
+}
+
+/// Cap decisions should include a stable grant hash in the journal.
+#[test]
+fn cap_decision_includes_grant_hash() {
+    let store = fixtures::new_mem_store();
+    let manifest = fulfillment_manifest(&store);
+    let mut world = TestWorld::with_store(store, manifest).unwrap();
+
+    world
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
+        .expect("submit start event");
+    world.tick_n(2).unwrap();
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let record = journal_entries
+        .iter()
+        .find(|entry| entry.kind == JournalKind::CapDecision)
+        .map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).unwrap())
+        .expect("cap decision entry missing");
+
+    let decision = match record {
+        JournalRecord::CapDecision(decision) => decision,
+        _ => unreachable!("expected cap decision record"),
+    };
+
+    let params_cbor =
+        aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new())).expect("params cbor");
+    let expected =
+        compute_grant_hash("sys/http.out@1", "http.out", &params_cbor, None);
+    assert_eq!(decision.grant_hash, expected);
+}
+
+fn compute_grant_hash(
+    defcap_ref: &str,
+    cap_type: &str,
+    params_cbor: &[u8],
+    expiry_ns: Option<u64>,
+) -> [u8; 32] {
+    let mut map = BTreeMap::new();
+    map.insert(
+        CborValue::Text("defcap_ref".into()),
+        CborValue::Text(defcap_ref.into()),
+    );
+    map.insert(
+        CborValue::Text("cap_type".into()),
+        CborValue::Text(cap_type.into()),
+    );
+    map.insert(
+        CborValue::Text("params_cbor".into()),
+        CborValue::Bytes(params_cbor.to_vec()),
+    );
+    if let Some(expiry) = expiry_ns {
+        map.insert(
+            CborValue::Text("expiry_ns".into()),
+            CborValue::Integer(expiry as i128),
+        );
+    }
+    let hash = aos_cbor::Hash::of_cbor(&CborValue::Map(map)).expect("grant hash");
+    *hash.as_bytes()
 }
 
 /// FsJournal should persist entries to disk and allow a fresh kernel to resume state.

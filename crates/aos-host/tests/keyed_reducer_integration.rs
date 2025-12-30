@@ -6,7 +6,6 @@ mod helpers;
 use std::sync::Arc;
 
 use aos_cbor::Hash;
-use helpers::fixtures::{self, TestStore};
 use aos_kernel::Kernel;
 use aos_kernel::cell_index::CellIndex;
 use aos_kernel::journal::mem::MemJournal;
@@ -14,6 +13,7 @@ use aos_kernel::journal::{JournalKind, OwnedJournalEntry};
 use aos_kernel::snapshot::KernelSnapshot;
 use aos_store::Store;
 use aos_wasm_abi::ReducerOutput;
+use helpers::fixtures::{self, TestStore};
 
 /// Full-path integration for keyed reducers:
 /// - routes keyed events,
@@ -40,6 +40,7 @@ async fn keyed_reducer_integration_flow() {
         reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
             state: fixtures::schema("com.acme/State@1"),
             event: fixtures::schema("com.acme/Event@1"),
+            context: Some(fixtures::schema("sys/ReducerContext@1")),
             annotations: None,
             effects_emitted: vec![],
             cap_slots: Default::default(),

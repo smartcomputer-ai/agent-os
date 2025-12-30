@@ -89,6 +89,8 @@ pub enum StoreError {
         version: u64,
         context: String,
     },
+    #[error("reserved sys/* name '{name}' is not allowed for {kind}")]
+    ReservedSysName { kind: &'static str, name: String },
     #[error("manifest declares unsupported air_version '{found}' (supported: {supported})")]
     UnsupportedAirVersion { found: String, supported: String },
     #[error("manifest must declare air_version (supported: {supported})")]

@@ -88,6 +88,7 @@ pub fn load_manifest_from_bytes<S: Store>(store: &S, bytes: &[u8]) -> StoreResul
     load_refs(store, &manifest.caps, NodeKind::Cap, &mut nodes)?;
     load_refs(store, &manifest.policies, NodeKind::Policy, &mut nodes)?;
     load_secret_refs(store, &manifest.secrets, &mut nodes)?;
+    insert_builtin_caps(&mut nodes);
 
     normalize_plan_literals(&mut nodes)?;
     let resolved_secrets = resolve_secrets(&manifest, &nodes)?;
@@ -128,6 +129,20 @@ fn load_refs<S: Store>(
     nodes: &mut HashMap<String, CatalogEntry>,
 ) -> StoreResult<()> {
     for reference in refs {
+        if is_sys_name(reference.name.as_str()) {
+            match kind {
+                NodeKind::Schema => {}
+                NodeKind::Effect => {}
+                NodeKind::Cap => {}
+                NodeKind::Module => {}
+                _ => {
+                    return Err(StoreError::ReservedSysName {
+                        kind: kind.label(),
+                        name: reference.name.clone(),
+                    });
+                }
+            }
+        }
         if kind == NodeKind::Schema {
             if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
                 ensure_builtin_hash(reference, builtin)?;
@@ -136,6 +151,19 @@ fn load_refs<S: Store>(
                     CatalogEntry {
                         hash: builtin.hash,
                         node: AirNode::Defschema(builtin.schema.clone()),
+                    },
+                );
+                continue;
+            }
+        }
+        if kind == NodeKind::Module {
+            if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
+                ensure_builtin_module_hash(reference, builtin)?;
+                nodes.insert(
+                    reference.name.clone(),
+                    CatalogEntry {
+                        hash: builtin.hash,
+                        node: AirNode::Defmodule(builtin.module.clone()),
                     },
                 );
                 continue;
@@ -153,6 +181,25 @@ fn load_refs<S: Store>(
                 );
                 continue;
             }
+        }
+        if kind == NodeKind::Cap {
+            if let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str()) {
+                ensure_builtin_cap_hash(reference, builtin)?;
+                nodes.insert(
+                    reference.name.clone(),
+                    CatalogEntry {
+                        hash: builtin.hash,
+                        node: AirNode::Defcap(builtin.cap.clone()),
+                    },
+                );
+                continue;
+            }
+        }
+        if is_sys_name(reference.name.as_str()) {
+            return Err(StoreError::ReservedSysName {
+                kind: kind.label(),
+                name: reference.name.clone(),
+            });
         }
         let hash = parse_hash_str(reference.hash.as_str())?;
         let node: AirNode = store.get_node(hash)?;
@@ -207,15 +254,24 @@ fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreRe
     let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(effect_defs);
     for (name, entry) in nodes.iter_mut() {
         if let AirNode::Defplan(plan) = &mut entry.node {
-            normalize_plan_literals(plan, &schema_index, &effect_catalog).map_err(
-                |source| StoreError::PlanNormalization {
+            normalize_plan_literals(plan, &schema_index, &effect_catalog).map_err(|source| {
+                StoreError::PlanNormalization {
                     name: name.clone(),
                     source,
-                },
-            )?;
+                }
+            })?;
         }
     }
     Ok(())
+}
+
+fn insert_builtin_caps(nodes: &mut HashMap<String, CatalogEntry>) {
+    for builtin in builtins::builtin_caps() {
+        nodes.entry(builtin.cap.name.clone()).or_insert_with(|| CatalogEntry {
+            hash: builtin.hash,
+            node: AirNode::Defcap(builtin.cap.clone()),
+        });
+    }
 }
 
 fn parse_hash_str(value: &str) -> StoreResult<Hash> {
@@ -223,6 +279,10 @@ fn parse_hash_str(value: &str) -> StoreResult<Hash> {
         value: value.to_string(),
         source,
     })
+}
+
+fn is_sys_name(name: &str) -> bool {
+    name.starts_with("sys/")
 }
 
 fn parse_secret_name(name: &str) -> StoreResult<(String, u64)> {
@@ -270,6 +330,39 @@ fn ensure_builtin_effect_hash(
             kind: EntryKind::Node,
             expected: builtin.hash,
             actual,
+        });
+    }
+    Ok(())
+}
+
+fn ensure_builtin_cap_hash(
+    reference: &NamedRef,
+    builtin: &builtins::BuiltinCap,
+) -> StoreResult<()> {
+    let actual = parse_hash_str(reference.hash.as_str())?;
+    if actual != builtin.hash {
+        return Err(StoreError::HashMismatch {
+            kind: EntryKind::Node,
+            expected: builtin.hash,
+            actual,
+        });
+    }
+    Ok(())
+}
+
+fn ensure_builtin_module_hash(
+    reference: &NamedRef,
+    builtin: &builtins::BuiltinModule,
+) -> StoreResult<()> {
+    if reference.hash.as_str().is_empty() || reference.hash == builtin.hash_ref {
+        return Ok(());
+    }
+    let expected = parse_hash_str(reference.hash.as_str())?;
+    if expected != builtin.hash {
+        return Err(StoreError::HashMismatch {
+            kind: EntryKind::Node,
+            expected,
+            actual: builtin.hash,
         });
     }
     Ok(())
@@ -695,6 +788,7 @@ mod tests {
                         kind: EffectKind::http_request(),
                         params: http_params.clone().into(),
                         cap: "http_cap".into(),
+                        idempotency_key: None,
                         bind: PlanBindEffect {
                             effect_id_as: "req".into(),
                         },
@@ -908,6 +1002,9 @@ mod tests {
             schema: TypeExpr::Ref(TypeRef {
                 reference: SchemaRef::new("sys/SecretRef@1").unwrap(),
             }),
+            enforcer: aos_air_types::CapEnforcer {
+                module: "sys/CapAllowAll@1".into(),
+            },
         };
         let defcap_hash = store
             .put_node(&AirNode::Defcap(defcap.clone()))
@@ -920,7 +1017,6 @@ mod tests {
                 version: 1,
             }),
             expiry_ns: None,
-            budget: None,
         };
         let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
         let mut manifest = empty_manifest_with_builtins();
@@ -953,6 +1049,9 @@ mod tests {
             schema: TypeExpr::Ref(TypeRef {
                 reference: SchemaRef::new("sys/SecretRef@1").unwrap(),
             }),
+            enforcer: aos_air_types::CapEnforcer {
+                module: "sys/CapAllowAll@1".into(),
+            },
         };
         let defcap_hash = store
             .put_node(&AirNode::Defcap(defcap.clone()))
@@ -965,7 +1064,6 @@ mod tests {
                 version: 0,
             }),
             expiry_ns: None,
-            budget: None,
         };
         let secret_schema = builtins::find_builtin_schema("sys/SecretRef@1").unwrap();
         let mut manifest = empty_manifest_with_builtins();
@@ -1051,7 +1149,6 @@ mod tests {
                     version: 1,
                 }),
                 expiry_ns: None,
-                budget: None,
             }],
         });
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();

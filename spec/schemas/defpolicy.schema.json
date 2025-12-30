@@ -40,6 +40,10 @@
           "$ref": "common.schema.json#/$defs/CapGrantName",
           "description": "Match capability grant name"
         },
+        "cap_type": {
+          "$ref": "common.schema.json#/$defs/CapType",
+          "description": "Match capability type (from the resolved grant)"
+        },
         "origin_kind": {
           "type": "string",
           "enum": ["plan", "reducer"],

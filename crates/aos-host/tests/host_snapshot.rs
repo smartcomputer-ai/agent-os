@@ -4,11 +4,11 @@ mod helpers;
 use std::sync::Arc;
 
 use aos_host::config::HostConfig;
-use helpers::fixtures;
 use aos_host::{ExternalEvent, WorldHost};
 use aos_kernel::KernelConfig;
 use aos_store::FsStore;
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use helpers::fixtures;
 use serde_cbor;
 use serde_json;
 use tempfile::TempDir;
@@ -81,6 +81,7 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
     module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("demo/TimerState@1"),
         event: fixtures::schema("demo/TimerEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),

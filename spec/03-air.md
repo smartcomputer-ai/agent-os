@@ -12,6 +12,12 @@ AIR (Agent Intermediate Representation) is a small, typed, canonical control‑p
 - spec/schemas/defsecret.schema.json
 - spec/schemas/manifest.schema.json
 
+**Built-in catalogs** (data files; loaded by the kernel):
+- spec/defs/builtin-schemas.air.json
+- spec/defs/builtin-effects.air.json
+- spec/defs/builtin-caps.air.json
+- spec/defs/builtin-modules.air.json
+
 These schemas validate structure. Semantic checks (DAG acyclicity, type compatibility, name/hash resolution, capability bindings) are enforced by the kernel validator.
 
 ## Goals and Scope
@@ -20,7 +26,7 @@ AIR v1 provides one canonical, typed control plane the kernel can load, validate
 
 AIR is **control‑plane only**. It defines schemas, modules, plans, capabilities, policies, and the manifest. Application state lives in reducer state (deterministic WASM), encoded as canonical CBOR.
 
-The policy engine is minimal: ordered allow/deny rules with budgets enforced on receipts. Hooks are reserved for richer policy later. The effects set in v1 is also minimal: `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`. Migrations are deferred; `defmigration` is reserved.
+The policy engine is minimal: ordered allow/deny rules. Hooks are reserved for richer policy later. The effects set in v1 is also minimal: `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`. Migrations are deferred; `defmigration` is reserved.
 
 ## 1) Vocabulary and Identity
 
@@ -135,7 +141,7 @@ The manifest is the root catalog of a world's control plane. It lists all schema
 
 ### Rules
 
-Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; **the routed schema must equal the reducer’s `defmodule.abi.reducer.event`** (use a variant schema to accept multiple event shapes, including receipts). `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`); when the event schema is a variant, `key_field` typically targets the wrapped value (e.g., `$value.note_id`). The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input; a trigger's optional `correlate_by` copies that field into the run context for later `await_event` filters (for variant inputs, use `$value.<field>`). The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-ins are no longer auto-included. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
+Names must be unique per kind; all hashes must exist in the store. `air_version` is **required**; v1 manifests must set it to `"1"`. Supplying an unknown version or omitting the field is a validation error. `routing.events` maps DomainEvents on the bus to reducers; **the routed schema must equal the reducer’s `defmodule.abi.reducer.event`** (use a variant schema to accept multiple event shapes, including receipts). `routing.inboxes` maps external adapter inboxes (e.g., `http.inbox:contact_form`) to reducers for messages that skip the DomainEvent bus. For keyed reducers, include `key_field` to tell the kernel where to extract the key from the event payload (validated against the reducer's `key_schema`); when the event schema is a variant, `key_field` typically targets the wrapped value (e.g., `$value.note_id`). The `triggers` array maps DomainIntent events to plans: when a reducer emits an event matching a trigger's schema, the kernel starts the referenced plan with that event as input; a trigger's optional `correlate_by` copies that field into the run context for later `await_event` filters (for variant inputs, use `$value.<field>`). The `effects` list is the authoritative catalog of effect kinds for this world. **List every schema/effect your world uses**; built-in schemas/effects are not auto-included. Built-in caps and modules are available even if omitted from `manifest.caps`/`manifest.modules`. Tooling may still fill the canonical hash for built-ins when the name is present without a hash.
 
 See: spec/schemas/manifest.schema.json
 
@@ -165,7 +171,8 @@ Registers a WASM module with its interface contract.
 
 ### Module Kind
 
-**reducer**: deterministic state machine
+- **reducer**: deterministic state machine
+- **pure**: deterministic, side‑effect‑free function
 
 ### Shape
 
@@ -173,15 +180,21 @@ Registers a WASM module with its interface contract.
 {
   "$kind": "defmodule",
   "name": "namespace/name@version",
-  "module_kind": "reducer",
+  "module_kind": "reducer" | "pure",
   "wasm_hash": <Hash>,
   "abi": {
     "reducer": {
       "state": <SchemaRef>,
       "event": <SchemaRef>,
+      "context"?: <SchemaRef>,
       "annotations"?: <SchemaRef>,
       "effects_emitted"?: [<EffectKind>…],
       "cap_slots"?: {slot_name: <CapType>}
+    },
+    "pure": {
+      "input": <SchemaRef>,
+      "output": <SchemaRef>,
+      "context"?: <SchemaRef>
     }
   },
 "key_schema"?: <SchemaRef>
@@ -190,22 +203,58 @@ Registers a WASM module with its interface contract.
 
 `EffectKind` and `CapType` are namespaced strings. The schema no longer hardcodes an enum; v1 ships a built-in catalog listed in §7, and adapters can introduce additional kinds as runtime support lands.
 
-The `key_schema` field (v1.1 addendum) documents the key type when this reducer is routed as keyed. The ABI remains a single `step` export; the kernel provides an envelope with optional key.
-When routed as keyed, the kernel sets `ctx.cell_mode=true` and passes only the targeted cell's state; returning `state=null` deletes the cell instance.
+**Built-in modules** live in `spec/defs/builtin-modules.air.json` (e.g., `sys/CapEnforceHttpOut@1`, `sys/CapEnforceLlmBasic@1`, `sys/ObjectCatalog@1`). `sys/*` module names are reserved: external manifests may **reference** them, but may not define them; the kernel supplies the definitions and hashes.
+
+The `key_schema` field (v1.1 addendum) documents the key type when this reducer is routed as keyed. The ABI remains a single `step` export; the kernel provides an envelope with optional call context. When routed as keyed, the reducer context includes `cell_mode=true` and the keyed `key`; returning `state=null` deletes the cell instance.
 
 ### ABI
 
 Reducer export: `step(ptr, len) -> (ptr, len)`
 
-- **Input**: CBOR envelope including optional key (see Cells spec)
+- **Input**: CBOR envelope including optional call context (see Call Context + Cells spec)
 - **Output**: CBOR `{state, domain_events?, effects?, ann?}`
+
+Reducer input envelope (canonical CBOR):
+
+```
+{
+  version: 1,
+  state: <bytes|null>,
+  event: { schema: Name, value: bytes, key?: bytes },
+  ctx?: <bytes>    // canonical CBOR for declared context schema
+}
+```
+
+Pure export: `run(ptr, len) -> (ptr, len)`
+
+Pure input envelope (canonical CBOR):
+
+```
+{
+  version: 1,
+  input: <bytes>,
+  ctx?: <bytes>    // canonical CBOR for declared context schema
+}
+```
 
 ### Determinism
 
-No WASI ambient syscalls, no threads, no clock. All I/O happens via the effect layer. Prefer `dec128` in values; normalize NaNs if floats are used internally.
+No WASI ambient syscalls, no threads, no ambient clock or randomness. All I/O happens via the effect layer. Deterministic time/entropy are supplied only via the optional call context. Prefer `dec128` in values; normalize NaNs if floats are used internally.
 
-**Note**: Pure modules (stateless, side-effect-free functions) are deferred to v1.1+. Use reducers for all computation in v1.
-`module_kind` is currently limited to `"reducer"`; future versions may add `"pure"` without breaking existing manifests.
+**Note**: Pure modules (stateless, side-effect-free functions) are supported as `module_kind: "pure"`.
+Use reducers for stateful logic; use pure modules for deterministic transforms and authorizers.
+
+### Call Context (optional)
+
+Modules may declare a `context` schema in their ABI. If omitted, the kernel does **not**
+send a context envelope to that module. Built-in contexts:
+
+- `sys/ReducerContext@1`: reducer call context (now/logical time, entropy, journal metadata, reducer/key).
+- `sys/PureContext@1`: pure module call context (logical time + journal/manifest metadata).
+
+`sys/ReducerContext@1` fields include `now_ns`, `logical_now_ns`, `journal_height`, `entropy` (64 bytes),
+`event_hash`, `manifest_hash`, `reducer`, `key`, and `cell_mode`. `sys/PureContext@1` includes
+`logical_now_ns`, `journal_height`, `manifest_hash`, and `module`.
 
 See: spec/schemas/defmodule.schema.json
 
@@ -222,7 +271,7 @@ Built-in kinds in v1:
 - receipt: `{ status:int, headers: map{text→text}, body_ref?:hash, timings:{start_ns:nat,end_ns:nat}, adapter_id:text }`
 
 **blob.put**
-- params: `{ namespace:text, blob_ref:hash }`
+- params: `{ blob_ref:hash }`
 - receipt: `{ blob_ref:hash, size:nat }`
 
 **blob.get**
@@ -230,7 +279,7 @@ Built-in kinds in v1:
 - receipt: `{ blob_ref:hash, size:nat }`
 
 **timer.set**
-- params: `{ deliver_at_ns:nat, key?:text }`
+- params: `{ deliver_at_ns:nat, key?:text }` (`deliver_at_ns` uses logical time)
 - receipt: `{ delivered_at_ns:nat, key?:text }`
 
 **llm.generate**
@@ -264,7 +313,7 @@ Reducers that emit micro-effects rely on the kernel to translate adapter receipt
 | **`sys/BlobPutResult@1`** | Delivery of a `blob.put` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobPutParams@1`, `receipt:sys/BlobPutReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 | **`sys/BlobGetResult@1`** | Delivery of a `blob.get` receipt to the reducer. | `intent_hash:hash`, `reducer:text` (Name format), `effect_kind:text`, `adapter_id:text`, `status:"ok" \| "error" \| "timeout"`, `requested:sys/BlobGetParams@1`, `receipt:sys/BlobGetReceipt@1`, `cost_cents?:nat`, `signature:bytes` |
 
-Reducers should **reference these schemas from their ABI event variant** (e.g., `TimerEvent.Fired -> sys/TimerFired@1`) and route only the reducer’s ABI event schema. The kernel wraps receipt payloads into that variant before routing. Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/budget enforcement can trust the same structures without changing reducer code.
+Reducers should **reference these schemas from their ABI event variant** (e.g., `TimerEvent.Fired -> sys/TimerFired@1`) and route only the reducer’s ABI event schema. The kernel wraps receipt payloads into that variant before routing. Plans typically raise domain-specific result events instead of consuming these `sys/*` receipts. The shared `cost_cents` and `signature` fields exist today so future policy/cost analysis can trust the same structures without changing reducer code.
 
 Canonical JSON definitions for these schemas (plus their parameter/receipt companions) live in `spec/defs/builtin-schemas.air.json` so manifests can hash and reference them directly.
 
@@ -279,7 +328,7 @@ An intent is a request to perform an external effect:
   kind: EffectKind,
   params: ValueCBORRef,
   cap: CapGrantName,
-  idempotency_key: hash,
+  idempotency_key?: bytes,
   intent_hash: hash
 }
 ```
@@ -287,6 +336,8 @@ An intent is a request to perform an external effect:
 The `intent_hash` = `sha256(cbor(kind, params, cap, idempotency_key))` is computed by the kernel; adapters verify it.
 
 **Canonical params**: Before hashing or enqueue, the kernel **decodes → schema‑checks → canonicalizes → re‑encodes** `params` using the effect kind's parameter schema (same AIR canonical rules as the loader: `$tag/$value` variants, canonical map/set/option shapes, numeric normalization). The canonical CBOR bytes become `params_cbor` and are the **only** form stored, hashed, and dispatched; non‑conforming params are rejected. This path runs for *every* origin (plans, reducers, injected tooling) so authoring sugar or reducer ABI quirks cannot change intent identity.
+
+**Idempotency key**: plans and reducers may supply an explicit `idempotency_key`; when omitted, the kernel uses the all‑zero key. Re‑emitting an identical effect with the same key yields the same `intent_hash`.
 
 ### Receipt
 
@@ -307,7 +358,7 @@ The kernel validates the signature (ed25519/HMAC), binds the receipt to its inte
 
 ## 9) defcap (Capability Types) and Grants
 
-Capabilities define scoped permissions for effects. A `defcap` declares a capability type; a `CapGrant` is a runtime instance of that capability with concrete constraints and budgets.
+Capabilities define scoped permissions for effects. A `defcap` declares a capability type; a `CapGrant` is a runtime instance of that capability with concrete constraints and optional expiry.
 
 ### defcap Definition
 
@@ -315,23 +366,25 @@ Capabilities define scoped permissions for effects. A `defcap` declares a capabi
 {
   "$kind": "defcap",
   "name": "namespace/name@version",
-  "cap_type": "http.out" | "blob" | "timer" | "llm.basic" | "secret" | "query",
-  "schema": <SchemaRef>
+  "cap_type": <CapType>,
+  "schema": <SchemaRef>,
+  "enforcer"?: { "module": "sys/CapAllowAll@1" }
 }
 ```
 
-The schema defines parameter constraints enforced at enqueue time.
+The schema defines parameter constraints enforced at enqueue time. The enforcer is a deterministic module invoked by the kernel during authorization; if omitted, the kernel defaults to `sys/CapAllowAll@1` (a built-in allow-all enforcer).
 
 ### Standard v1 Capability Types (built-in)
 
+Built-in `defcap` entries live in `spec/defs/builtin-caps.air.json` and are auto-available; manifests may omit them from `manifest.caps` as long as grants reference them by name.
+
 **sys/http.out@1**
-- Schema: `{ hosts: set<text>, verbs: set<text>, path_prefixes?: set<text> }`
-- At enqueue: `authority(url) ∈ hosts`; `method ∈ verbs`; path `starts_with` any `path_prefixes` if present.
-- Terminology: `verbs` is the allowlist of HTTP methods for the capability; each request still supplies its concrete `method`.
+- Schema: `{ hosts?: set<text>, schemes?: set<text>, methods?: set<text>, ports?: set<nat>, path_prefixes?: set<text> }`
+- At enqueue: enforce allowlists when present (host/scheme/method/port/path_prefix).
 
 **sys/llm.basic@1**
-- Schema: `{ providers?: set<text>, models?: set<text>, max_tokens_max?: nat, temperature_max?: dec128, tools_allow?: set<text> }`
-- At enqueue: `provider`/`model` ∈ allowlists if present; `max_tokens ≤ max_tokens_max`; `temperature ≤ temperature_max`; `tools ⊆ tools_allow`.
+- Schema: `{ providers?: set<text>, models?: set<text>, max_tokens?: nat, tools_allow?: set<text> }`
+- At enqueue: `provider`/`model` ∈ allowlists if present; `max_tokens` ≤ cap `max_tokens`; `tools ⊆ tools_allow`.
 
 **sys/blob@1**
 - Schema: `{ namespaces?: set<text> }` (minimal in v1)
@@ -340,7 +393,7 @@ The schema defines parameter constraints enforced at enqueue time.
 - Schema: `{}` (no constraints in v1)
 
 **sys/query@1**
-- Schema: `{ scope: text }` (`scope` is optional/semantically freeform; empty string = all)
+- Schema: `{ scope?: text }` (`scope` is optional/semantically freeform; empty/none = all)
 - Guards read-only `introspect.*` effects; policy may further restrict by reducer/effect kind.
 
 ### CapGrant (Runtime Instance)
@@ -352,27 +405,23 @@ A grant is kernel state referenced by name:
   name: text,
   cap: Name(defcap),
   params: Value,
-  expiry_ns?: nat,
-  budget?: {tokens?: nat, bytes?: nat, cents?: nat}
+  expiry_ns?: nat
 }
 ```
 
 The `params` must conform to the defcap's schema and encode concrete allowlists/ceilings.
+Grants are canonicalized at load; kernels may compute a stable `grant_hash` from
+`{defcap_ref, cap_type, params_cbor, expiry_ns}` for auditing.
 
 ### Enforcement
 
 **At enqueue, the kernel checks:**
-1. Grant exists and has not expired.
+1. Grant exists and has not expired (expiry checked against `logical_now_ns`).
 2. Capability type matches effect kind.
-3. Effect params satisfy grant constraints (hosts, models, max_tokens_max, etc.).
-4. Conservative budget pre-check for variable-cost effects:
-   - `llm.generate`: if `max_tokens` declared, check `max_tokens ≤ remaining tokens budget`; deny if insufficient.
-   - `blob.put`: if blob_ref size known from CAS, check `size ≤ remaining bytes budget`; deny if insufficient.
-5. Policy decision (see defpolicy).
+3. Effect params satisfy grant constraints via the enforcer module.
+4. Policy decision (see defpolicy).
 
-**At receipt, the kernel settles budgets:**
-- Decrements actual usage (`token_usage`, blob `size`, `cost_cents`) from grant.
-- If a dimension goes negative, mark grant exhausted; future enqueues using that grant are denied until replenished.
+Budget enforcement is deferred to a future milestone; see `roadmap/vX-future/p4-budgets.md`.
 
 See: spec/schemas/defcap.schema.json
 
@@ -441,6 +490,7 @@ Policies define ordered rules that allow or deny effects based on their characte
 
 - `effect_kind?: EffectKind` – namespaced effect kind (http.request, llm.generate, etc.)
 - `cap_name?: text` – which CapGrant name
+- `cap_type?: CapType` – capability type of the resolved grant (http.out, llm.basic, etc.)
 - `origin_kind?: "plan" | "reducer"` – whether the effect originates from a plan or a reducer
 - `origin_name?: Name` – the specific plan or reducer Name
 
@@ -454,7 +504,7 @@ Policies define ordered rules that allow or deny effects based on their characte
 
 Policy matching works over open strings: custom effect kinds are allowed as long as the runtime has a catalog entry mapping that kind to a capability type and schemas. Unknown effect kinds (not in the built-in catalog or a registered adapter catalog) are rejected during validation/dispatch before policy evaluation.
 
-Decisions are journaled: `PolicyDecisionRecorded { intent_hash, policy_name, rule_index, decision }`.
+Decisions are journaled as `policy_decision { intent_hash, policy_name, rule_index, decision }` and `cap_decision { intent_hash, effect_kind, cap_name, cap_type, grant_hash, enforcer_module, decision, deny?, expiry_ns?, logical_now_ns }`.
 
 ### Recommended Default Policy
 
@@ -523,7 +573,7 @@ See: spec/12-plans-v1.1.md for planned extensions (`spawn_plan`, `await_plan`, `
 - The kernel validates/canonicalizes `value` against `event` before emitting. **Never embed `$schema` fields inside event or effect payloads; self-describing payloads are rejected.**
 
 **emit_effect**: Request an external effect
-- `{ id, op:"emit_effect", kind:EffectKind, params:ExprOrValue, cap:CapGrantName, bind:{effect_id_as:VarName} }`
+- `{ id, op:"emit_effect", kind:EffectKind, params:ExprOrValue, cap:CapGrantName, idempotency_key?: bytes, bind:{effect_id_as:VarName} }`
 
 **await_receipt**: Wait for an effect receipt
 - `{ id, op:"await_receipt", for:Expr /*effect_id*/, bind:{as:VarName} }`
@@ -605,7 +655,7 @@ Plans can start in two ways:
 
 **Manual start**: `{ plan:Name, input:ValueCBORRef, bind_locals?:{VarName:ValueCBORRef…} }`
 
-The kernel pins the manifest hash for the instance, checks input/locals against schemas, and executes under the current policy/cap ledger. Effects always check live grants at enqueue time.
+The kernel pins the manifest hash for the instance, checks input/locals against schemas, and executes under the current policy and capability grants. Effects always check live grants at enqueue time.
 
 ## 14) Validation Rules (Semantic)
 
@@ -659,6 +709,8 @@ Patches describe changes to the control plane (design-time modifications).
 - **set_secrets**: `{ pre_hash:hash, secrets:[ SecretEntry… ] }` — replace manifest secrets block (refs/decls); no secret values carried in patches.
 - **defsecret**: `add_def` / `replace_def` / `remove_def` now accept `defsecret`; `set_manifest_refs` can add/remove secret refs. Secret values still live outside patches; `set_secrets` only adjusts manifest entries.
 
+**System defs are immutable**: Patch compilation rejects any `sys/*` definition edits (add/replace/remove) and any manifest ref updates for `sys/*`. Built-in `sys/*` schemas/effects/caps/modules are provided by the kernel and are not patchable. External manifests/assets may reference `sys/*` entries but may not define them.
+
 ### Application
 
 Patches are applied transactionally to yield a new manifest; full re‑validation is required. The governance system turns patches into journal entries: Proposed → (Shadow) → Approved → Applied.
@@ -690,17 +742,20 @@ Notes:
 
 Runtime journal entries are canonical CBOR enums; the important ones for AIR plans are:
 
-- **DomainEvent** `{ schema, value, key? }` – emitted by reducers or plan raise_event; replay feeds reducers and triggers.
+- **DomainEvent** `{ schema, value, key?, now_ns, logical_now_ns, journal_height, entropy, event_hash, manifest_hash }` – emitted by reducers or plan raise_event; replay feeds reducers and triggers.
 - **EffectIntent** `{ intent_hash, kind, cap_name, params_cbor, idempotency_key, origin }` – queued effects from reducers and plans.
-- **EffectReceipt** `{ intent_hash, adapter_id, status, payload_cbor, cost_cents?, signature }` – adapters’ signed receipts; replay reproduces plan/resume behavior.
+- **EffectReceipt** `{ intent_hash, adapter_id, status, payload_cbor, cost_cents?, signature, now_ns, logical_now_ns, journal_height, entropy, manifest_hash }` – adapters’ signed receipts; replay reproduces plan/resume behavior.
+- **cap_decision** `{ intent_hash, effect_kind, cap_name, cap_type, grant_hash, enforcer_module, decision, deny?, expiry_ns?, logical_now_ns }` – capability checks recorded at enqueue time for audit/replay explainability.
+- **policy_decision** `{ intent_hash, policy_name, rule_index?, decision }` – policy allow/deny decision recorded at enqueue time.
 - **PlanResult** `{ plan_name, plan_id, output_schema, value_cbor }` – appended when an `end` step returns a value; shadow/governance tooling can surface outputs directly from the journal without re-running expressions.
 - **Snapshot** `{ snapshot_ref, height }` – pointer to CAS snapshot blob; enables fast replay.
 - **Governance** – proposal/shadow/approve/apply records (design-time control plane).
 
+Ingress-stamped fields (`now_ns`, `logical_now_ns`, `journal_height`, `entropy`, `manifest_hash`, and `event_hash` for DomainEvent) are sampled by the kernel at ingress and replayed verbatim. `event_hash` is the sha256 of the canonical DomainEvent envelope (`schema`, `value`, `key`).
+
 ### Budget and Capability (Optional, for Observability)
 
-- **BudgetExceeded** `{ grant_name, dimension:"tokens"|"bytes"|"cents", delta:nat, new_balance:int }`
-  - Appended when a receipt settlement drives a budget dimension negative; grant marked exhausted
+Budgets are deferred; no budget events are emitted in v1.
 
 ## 17) Determinism and Replay
 
@@ -714,7 +769,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 **Runtime**: Invalid module IO → instance error; `emit_effect` denied → step fails (v1: fail instance) unless guarded; no timeouts in v1 (await persists); cancellation is a governance action.
 
-**Budgets**: Decrement on receipts; over‑budget → policy denial at enqueue.
+**Budgets**: Deferred to a future milestone; see `roadmap/vX-future/p4-budgets.md`.
 
 ## 19) On‑Disk Expectations
 
@@ -742,7 +797,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 20.2 defcap (http.out@1)
 
 ```json
-{ "$kind":"defcap", "name":"sys/http.out@1", "cap_type":"http.out", "schema": { "record": { "hosts": { "set": { "text": {} } }, "verbs": { "set": { "text": {} } }, "rpm": { "nat": {} } } } }
+{ "$kind":"defcap", "name":"sys/http.out@1", "cap_type":"http.out", "schema": { "record": { "hosts": { "set": { "text": {} } }, "schemes": { "set": { "text": {} } }, "methods": { "set": { "text": {} } }, "ports": { "set": { "nat": {} } }, "path_prefixes": { "set": { "text": {} } } } }, "enforcer": { "module": "sys/CapEnforceHttpOut@1" } }
 ```
 
 20.3 defpolicy (allow google rss; deny LLM from reducers)
@@ -780,7 +835,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
 
 ## 21) Implementation Guidance (Engineering Notes)
 
-- Build order: canonical CBOR + hashing → store/loader/validator → Wasmtime reducer/pure ABIs + schema checks → effect manager + adapters (http/fs/timer/llm) + cap ledger + receipts → plan executor (DAG + Expr) → patcher + governance loop → shadow‑run.
+- Build order: canonical CBOR + hashing → store/loader/validator → Wasmtime reducer/pure ABIs + schema checks → effect manager + adapters (http/fs/timer/llm) + receipts → plan executor (DAG + Expr) → patcher + governance loop → shadow‑run.
 - Determinism tests: golden “replay or die” snapshots; fuzz Expr evaluator and CBOR canonicalizer.
 - Errors: precise validator diagnostics (name, step id, path). Journal policy decisions and validation failures with structured details for explainers.
 

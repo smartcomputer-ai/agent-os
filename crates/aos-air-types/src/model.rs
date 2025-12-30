@@ -448,12 +448,15 @@ pub struct DefModule {
 #[serde(rename_all = "lowercase")]
 pub enum ModuleKind {
     Reducer,
+    Pure,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleAbi {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reducer: Option<ReducerAbi>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pure: Option<PureAbi>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -461,11 +464,21 @@ pub struct ReducerAbi {
     pub state: SchemaRef,
     pub event: SchemaRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<SchemaRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub annotations: Option<SchemaRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects_emitted: Vec<EffectKind>,
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub cap_slots: IndexMap<VarName, CapType>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PureAbi {
+    pub input: SchemaRef,
+    pub output: SchemaRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<SchemaRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -524,6 +537,8 @@ pub struct PlanStepEmitEffect {
     pub kind: EffectKind,
     pub params: ExprOrValue,
     pub cap: CapGrantName,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotency_key: Option<ExprOrValue>,
     pub bind: PlanBindEffect,
 }
 
@@ -571,6 +586,19 @@ pub struct DefCap {
     pub name: Name,
     pub cap_type: CapType,
     pub schema: TypeExpr,
+    #[serde(default = "default_cap_enforcer")]
+    pub enforcer: CapEnforcer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapEnforcer {
+    pub module: Name,
+}
+
+fn default_cap_enforcer() -> CapEnforcer {
+    CapEnforcer {
+        module: "sys/CapAllowAll@1".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -698,6 +726,8 @@ pub struct PolicyMatch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap_name: Option<CapGrantName>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap_type: Option<CapType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_kind: Option<OriginKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_name: Option<Name>,
@@ -817,18 +847,6 @@ pub struct CapGrant {
     pub params: ValueLiteral,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_ns: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub budget: Option<CapGrantBudget>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapGrantBudget {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tokens: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bytes: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cents: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]

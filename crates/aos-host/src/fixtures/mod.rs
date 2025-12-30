@@ -18,7 +18,7 @@ use aos_air_types::{
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
 use aos_store::{MemStore, Store};
-use aos_wasm_abi::{DomainEvent, ReducerOutput};
+use aos_wasm_abi::{DomainEvent, PureOutput, ReducerOutput};
 use indexmap::IndexMap;
 use std::fs;
 use std::path::PathBuf;
@@ -261,6 +261,7 @@ pub fn introspect_manifest_steps(
                     )]),
                 })),
                 cap: cap_slot.into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: effect_var.clone(),
                 },
@@ -448,7 +449,6 @@ pub fn cap_http_grant() -> CapGrant {
         cap: "sys/http.out@1".into(),
         params: empty_value_literal(),
         expiry_ns: None,
-        budget: None,
     }
 }
 
@@ -459,7 +459,6 @@ pub fn timer_cap_grant() -> CapGrant {
         cap: "sys/timer@1".into(),
         params: empty_value_literal(),
         expiry_ns: None,
-        budget: None,
     }
 }
 
@@ -470,7 +469,6 @@ pub fn blob_cap_grant() -> CapGrant {
         cap: "sys/blob@1".into(),
         params: empty_value_literal(),
         expiry_ns: None,
-        budget: None,
     }
 }
 
@@ -481,7 +479,6 @@ pub fn query_cap_grant() -> CapGrant {
         cap: "sys/query@1".into(),
         params: empty_value_literal(),
         expiry_ns: None,
-        budget: None,
     }
 }
 
@@ -493,6 +490,9 @@ pub fn http_defcap() -> DefCap {
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapEnforceHttpOut@1".into(),
+        },
     }
 }
 
@@ -504,6 +504,9 @@ pub fn timer_defcap() -> DefCap {
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapAllowAll@1".into(),
+        },
     }
 }
 
@@ -515,6 +518,9 @@ pub fn blob_defcap() -> DefCap {
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapAllowAll@1".into(),
+        },
     }
 }
 
@@ -535,6 +541,9 @@ pub fn query_defcap() -> DefCap {
                 }),
             )]),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapAllowAll@1".into(),
+        },
     }
 }
 
@@ -592,7 +601,65 @@ pub fn stub_reducer_module<S: Store + ?Sized>(
         module_kind: ModuleKind::Reducer,
         wasm_hash: wasm_hash_ref,
         key_schema: None,
-        abi: ModuleAbi { reducer: None },
+        abi: ModuleAbi {
+            reducer: None,
+            pure: None,
+        },
+    }
+}
+
+/// Compiles a trivial WAT module whose `run` export always returns the provided
+/// `PureOutput` bytes. Useful for exercising kernel pure-module dispatch.
+pub fn stub_pure_module<S: Store + ?Sized>(
+    store: &Arc<S>,
+    name: impl Into<String>,
+    output: &PureOutput,
+    input_schema: &str,
+    output_schema: &str,
+) -> DefModule {
+    let output_bytes = output.encode().expect("encode pure output");
+    let data_literal = output_bytes
+        .iter()
+        .map(|b| format!("\\{:02x}", b))
+        .collect::<String>();
+    let len = output_bytes.len();
+    let wat = format!(
+        r#"(module
+  (memory (export "memory") 1)
+  (global $heap (mut i32) (i32.const {len}))
+  (data (i32.const 0) "{data}")
+  (func (export "alloc") (param i32) (result i32)
+    (local $old i32)
+    global.get $heap
+    local.tee $old
+    local.get 0
+    i32.add
+    global.set $heap
+    local.get $old)
+  (func (export "run") (param i32 i32) (result i32 i32)
+    (i32.const 0)
+    (i32.const {len}))
+)"#,
+        len = len,
+        data = data_literal
+    );
+    let wasm_bytes = parse_str(&wat).expect("wat compile");
+    let wasm_hash = store.put_blob(&wasm_bytes).expect("store wasm");
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
+
+    DefModule {
+        name: name.into(),
+        module_kind: ModuleKind::Pure,
+        wasm_hash: wasm_hash_ref,
+        key_schema: None,
+        abi: ModuleAbi {
+            reducer: None,
+            pure: Some(aos_air_types::PureAbi {
+                input: schema(input_schema),
+                output: schema(output_schema),
+                context: Some(schema("sys/PureContext@1")),
+            }),
+        },
     }
 }
 
@@ -634,9 +701,53 @@ pub fn reducer_module_from_target(
             reducer: Some(aos_air_types::ReducerAbi {
                 state: schema(state_schema),
                 event: schema(event_schema),
+                context: Some(schema("sys/ReducerContext@1")),
                 annotations: None,
                 effects_emitted: vec![],
                 cap_slots: IndexMap::new(),
+            }),
+            pure: None,
+        },
+    }
+}
+
+/// Load a real pure WASM module from `target/wasm32-unknown-unknown/<profile>/<file>` and register
+/// it in the store, returning a fully populated DefModule.
+pub fn pure_module_from_target(
+    store: &Arc<TestStore>,
+    name: &str,
+    wasm_file: &str,
+    input_schema: &str,
+    output_schema: &str,
+) -> DefModule {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = manifest_dir
+        .join("../../target/wasm32-unknown-unknown/debug")
+        .join(wasm_file);
+
+    if !path.exists() {
+        panic!(
+            "missing {} — build it first with `cargo build -p aos-sys --target wasm32-unknown-unknown`",
+            path.display()
+        );
+    }
+
+    let bytes = fs::read(&path).expect("read wasm");
+    let wasm_hash = Hash::of_bytes(&bytes);
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
+    store.put_blob(&bytes).expect("store wasm blob");
+
+    DefModule {
+        name: name.to_string(),
+        module_kind: ModuleKind::Pure,
+        wasm_hash: wasm_hash_ref,
+        key_schema: None,
+        abi: ModuleAbi {
+            reducer: None,
+            pure: Some(aos_air_types::PureAbi {
+                input: schema(input_schema),
+                output: schema(output_schema),
+                context: Some(schema("sys/PureContext@1")),
             }),
         },
     }

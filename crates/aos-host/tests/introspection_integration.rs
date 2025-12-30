@@ -25,6 +25,7 @@ fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
     reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
         state: fixtures::schema("com.acme/StoreState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),

@@ -10,6 +10,7 @@ extern crate alloc;
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::String;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -41,4 +42,40 @@ pub struct ObjectVersions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObjectRegistered {
     pub meta: ObjectMeta,
+}
+
+// ---------------------------------------------------------------------------
+// Cap enforcer ABI types (sys/CapCheckInput@1, sys/CapCheckOutput@1)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapEffectOrigin {
+    pub kind: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapCheckInput {
+    pub cap_def: String,
+    pub grant_name: String,
+    #[serde(with = "serde_bytes")]
+    pub cap_params: Vec<u8>,
+    pub effect_kind: String,
+    #[serde(with = "serde_bytes")]
+    pub effect_params: Vec<u8>,
+    pub origin: CapEffectOrigin,
+    pub logical_now_ns: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapDenyReason {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapCheckOutput {
+    pub constraints_ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deny: Option<CapDenyReason>,
 }

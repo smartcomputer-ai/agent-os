@@ -2,12 +2,12 @@
 mod helpers;
 
 use aos_effects::CapabilityGrant;
-use helpers::fixtures;
 use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
 use aos_wasm_abi::ReducerEffect;
+use helpers::fixtures;
 use serde_cbor::Value as CborValue;
 use serde_json;
 use std::collections::{BTreeMap, HashMap};
@@ -25,8 +25,11 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let grant = CapabilityGrant::builder("cap_llm", "sys/llm.basic@1", &serde_json::json!({}))
         .build()
         .expect("grant");
-    let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::llm_basic())]);
+    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
+        grant,
+        aos_air_types::CapType::llm_basic(),
+    )])
+    .expect("grant resolver");
     let mut mgr = mgr_with_cap(cap_gate);
 
     // Params variant A: valid dec128 encoded as string
@@ -40,6 +43,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
             &EffectKind::llm_generate(),
             "cap_llm",
             params_a.clone(),
+            [0u8; 32],
         )
         .expect("enqueue A");
     let intent_b = mgr
@@ -48,6 +52,7 @@ fn plan_effect_params_canonicalize_before_hashing() {
             &EffectKind::llm_generate(),
             "cap_llm",
             params_b.clone(),
+            [0u8; 32],
         )
         .expect("enqueue B");
 
@@ -70,7 +75,8 @@ fn reducer_effect_params_canonicalize_noop() {
         .build()
         .expect("grant");
     let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::timer())]);
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::timer())])
+            .expect("grant resolver");
     let mut mgr = mgr_with_cap(cap_gate);
 
     // Params with out-of-order fields (key optional) to ensure canonicalization sorts.
@@ -140,8 +146,11 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
         .build()
         .expect("grant");
-    let cap_gate =
-        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::http_out())]);
+    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
+        grant,
+        aos_air_types::CapType::http_out(),
+    )])
+    .expect("grant resolver");
     let mut mgr = mgr_with_cap(cap_gate);
 
     // Sugar A: body_ref null, headers absent
@@ -168,6 +177,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
             &EffectKind::http_request(),
             "cap_http",
             params_a.clone(),
+            [0u8; 32],
         )
         .expect("enqueue A");
     let intent_b = mgr
@@ -176,6 +186,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
             &EffectKind::http_request(),
             "cap_http",
             params_b.clone(),
+            [0u8; 32],
         )
         .expect("enqueue B");
 
@@ -212,6 +223,7 @@ fn reducer_params_round_trip_journal_replay() {
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/ReducerState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
@@ -271,6 +283,7 @@ fn reducer_params_round_trip_journal_replay() {
                     reducer.abi.reducer = Some(ReducerAbi {
                         state: fixtures::schema("com.acme/ReducerState@1"),
                         event: fixtures::schema(fixtures::START_SCHEMA),
+                        context: Some(fixtures::schema("sys/ReducerContext@1")),
                         annotations: None,
                         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
                         cap_slots: Default::default(),
@@ -331,6 +344,7 @@ fn mgr_with_cap(cap_gate: CapabilityResolver) -> EffectManager {
         Box::new(AllowAllPolicy),
         effects,
         schemas,
+        None,
         None,
         None,
     )

@@ -15,10 +15,10 @@ use aos_air_types::{
     TypeVariant, catalog::EffectCatalog,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use helpers::fixtures::{self, TestStore};
 use aos_host::testhost::TestHost;
 use aos_kernel::LoadedManifest;
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use helpers::fixtures::{self, TestStore};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -111,10 +111,12 @@ fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) ->
             reducer: Some(ReducerAbi {
                 state: SchemaRef::new(STATE_SCHEMA).unwrap(),
                 event: SchemaRef::new(EVENT_SCHEMA).unwrap(),
+                context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: Vec::new(),
                 cap_slots: IndexMap::new(),
             }),
+            pure: None,
         },
     };
 
@@ -372,6 +374,7 @@ async fn testhost_with_fixtures_build_loaded_manifest() {
     module.abi.reducer = Some(ReducerAbi {
         state: SchemaRef::new("test/State@1").unwrap(),
         event: SchemaRef::new("test/Event@1").unwrap(),
+        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
@@ -489,6 +492,7 @@ async fn testhost_timer_effect_flow() {
     module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("test/TimerState@1"),
         event: fixtures::schema("test/TimerEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -504,7 +508,10 @@ async fn testhost_timer_effect_flow() {
             "test/TimerReducer@1",
         )],
     );
-    fixtures::insert_test_schemas(&mut loaded, vec![timer_event_schema(), timer_state_schema()]);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![timer_event_schema(), timer_state_schema()],
+    );
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
@@ -575,6 +582,7 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
     module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("test/TimerState@1"),
         event: fixtures::schema("test/TimerEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -588,7 +596,10 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
             "test/TimerReducer@1",
         )],
     );
-    fixtures::insert_test_schemas(&mut loaded, vec![timer_event_schema(), timer_state_schema()]);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![timer_event_schema(), timer_state_schema()],
+    );
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
@@ -633,6 +644,7 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
     module.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("test/TimerState@1"),
         event: fixtures::schema("test/TimerEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -646,7 +658,10 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
             "test/TimerReducer@1",
         )],
     );
-    fixtures::insert_test_schemas(&mut loaded, vec![timer_event_schema(), timer_state_schema()]);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![timer_event_schema(), timer_state_schema()],
+    );
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
     host.send_event("test/TimerEvent@1", timer_start_event())

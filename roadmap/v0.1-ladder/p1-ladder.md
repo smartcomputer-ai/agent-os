@@ -9,7 +9,7 @@ Below is a concrete, staged plan to (1) level‑up the runtime, (2) ship a credi
 ## North‑star alignment (but sequence matters)
 
 * **North star:** a running world that can be modified by an LLM‑based agent via the constitutional loop (propose → shadow → approve → apply). Keep this *design‑time* path on the same deterministic substrate and journal as runtime. That’s already how the system is shaped—lean into it. 
-* **Sequence:** get a “walking skeleton” world executing simple reducers → micro‑effects → plans → receipts → policy/cap budgets; then wire in the governance loop/shadow‑runs; only then introduce an LLM adapter and a small “self‑edit” demo. This preserves determinism and auditability while you add surface area.  
+* **Sequence:** get a “walking skeleton” world executing simple reducers → micro‑effects → plans → receipts → policy/cap gating; then wire in the governance loop/shadow‑runs; only then introduce an LLM adapter and a small “self‑edit” demo. This preserves determinism and auditability while you add surface area.  
 
 ---
 
@@ -41,7 +41,7 @@ Below is a concrete, staged plan to (1) level‑up the runtime, (2) ship a credi
 **Implement**
 
 * Effect Manager skeleton + **Timer** and **Blob** adapters. Each emits **signed receipts** (ed25519/HMAC), the kernel appends them, and (for micro‑effects) converts to `sys/*` *receipt events* for reducers. Enforce idempotency & height fences on receipts.   
-* Capability ledger (grants with optional budgets/expiry) and the **policy gate** with first‑match‑wins, default‑deny. In v1 this is allow/deny only.  
+* Capability grants (constraints + expiry) and the **policy gate** with first‑match‑wins, default‑deny. In v1 this is allow/deny only.  
 
 **Demo 1 – “Hello Timer” (reducer‑only)**
 
@@ -54,7 +54,7 @@ Below is a concrete, staged plan to (1) level‑up the runtime, (2) ship a credi
 **Acceptance**
 
 * Policy denies non‑micro effects from reducers (origin‑aware), allows timer/blob via tight cap slots; denial is journaled as `PolicyDecisionRecorded`.  
-* Budget settlement on receipts (bytes/cents) decrements grant balances; enqueue pre‑checks for known sizes. 
+* Cap constraint enforcement at enqueue (hosts/models/max_tokens) and expiry checks are journaled. 
 
 ---
 
@@ -119,7 +119,7 @@ Below is a concrete, staged plan to (1) level‑up the runtime, (2) ship a credi
 **Implement**
 
 * Proposal → Shadow → Approval → Apply flow as first‑class design‑time events in the journal, with shadow predicting effects/costs/diffs. Plan/cap/policy changes only take effect via Apply. 
-* Shadow receipts are stubbed; produce typed diffs and predicted budgets for approval review (“least‑privilege” grants derived from shadow). 
+* Shadow receipts are stubbed; produce typed diffs and predicted effects for approval review (“least‑privilege” grants derived from shadow). 
 
 **Demo 6 – “Safe upgrade of a plan”**
 
@@ -131,11 +131,11 @@ Below is a concrete, staged plan to (1) level‑up the runtime, (2) ship a credi
 
 ---
 
-### **M6 — LLM adapter + budgets + policy**
+### **M6 — LLM adapter + policy**
 
 **Implement**
 
-* `llm.generate` adapter with usage/cost in receipt; enforce conservative **pre‑check** vs **settlement** on budgets and allow only from plans (deny from reducers).   
+* `llm.generate` adapter with usage/cost in receipt; enforce cap constraints (model allowlists, max_tokens ceilings) and allow only from plans (deny from reducers).   
 
 **Demo 7 – “LLM summarizer plan”**
 
@@ -143,7 +143,7 @@ Below is a concrete, staged plan to (1) level‑up the runtime, (2) ship a credi
 
 **Acceptance**
 
-* Token/cents budgets decrement on receipt; over‑budget grants are denied on next enqueue; policy journals decisions (origin_kind/name visible).  
+* Policy journals decisions (origin_kind/name visible); receipts carry usage/cost for audit.
 
 ---
 
@@ -170,7 +170,7 @@ Below is a concrete, staged plan to (1) level‑up the runtime, (2) ship a credi
 | 4     | Aggregator          | Fan‑out/join in DAG         | Plan DAG parallelism      |
 | 5     | 3‑plan chain + comp | Choreography + reducer saga | Multi‑plan + comp         |
 | 6     | Safe upgrade        | Propose→Shadow→Apply        | Design‑time loop          |
-| 7     | LLM summarizer      | Caps/budgets/policy         | LLM in plan               |
+| 7     | LLM summarizer      | Caps/policy                 | LLM in plan               |
 
 Each app is a glorified integration test: a tiny reducer (WASM), a few `defschema`s, one or more `defplan`s, caps, a default policy, and a manifest with routing/triggers. That’s precisely what AIR v1 expects.  
 
@@ -188,11 +188,11 @@ Each app is a glorified integration test: a tiny reducer (WASM), a few `defschem
 
 1. **Deterministic substrate first.** Canonical CBOR + content addressing + stepper replay are the bedrock for receipts, policies, and audits; everything else composes on top of this.  
 2. **Clear reducer/plan boundary.** Keep business invariants and typestate in reducers; push orchestration and external IO into plans. Enforce via policy (origin_kind) and a reducer micro‑effects allowlist. This keeps shadow‑runs analyzable and receipts at explicit choke points.  
-3. **Capabilities before policy *features*.** Get least‑privilege *working*—host/model allowlists, budgets pre‑check at enqueue and settle on receipt—before adding richer approvals/rate limits. That matches your v1 policy scope.  
+3. **Capabilities before policy *features*.** Get least‑privilege working—host/model allowlists and constraint enforcement—before adding richer approvals/rate limits. That matches your v1 policy scope.  
 4. **Plan engine with small surface.** The six step kinds + guards, no loops, no recursion (by design). That keeps plans analyzable and shadow‑simulable.  
 5. **Receipt rigor.** Each adapter signs receipts including intent hash, inputs/outputs hashes, timings, and cost; kernel verifies and journals; late receipts are fenced out after rollback. This is your audit backbone.  
 6. **Design‑time loop.** Make “self‑modification as data” real: proposals are AIR patches; shadow produces typed diffs and predicted effect counts/costs; approvals lead to manifest swaps. That’s the agent‑ready control plane.  
-7. **LLM last.** Once governance is real, add `llm.generate` with budgets—and showcase it with a trivial summarizer plan and *one* “self‑edit” demo (agent proposes a one‑step plan change).  
+7. **LLM last.** Once governance is real, add `llm.generate` with caps/policy—and showcase it with a trivial summarizer plan and *one* “self‑edit” demo (agent proposes a one‑step plan change).  
 
 ---
 
@@ -203,7 +203,7 @@ Each app is a glorified integration test: a tiny reducer (WASM), a few `defschem
 1. Start a world with `fetch_plan@1` (GET a safe test URL, `end`).
 2. Propose `fetch_plan@2` (add an `assign` to tweak headers + a second GET). Shadow shows 1 extra effect and +X bytes. Approve + apply.
 3. Trigger the reducer → plan runs v2 → receipts show both HTTP calls → `PlanResult` includes the concatenated body hash.
-4. Optional: propose adding a summarization step; shadow predicts LLM tokens/cents; approve updates LLM cap budget; run again and inspect receipts.
+4. Optional: propose adding a summarization step; shadow predicts LLM tokens/cents for review; approve updates LLM cap grants; run again and inspect receipts.
 
 This compresses everything users need to *trust* AOS: determinism, receipts, capabilities/policy, plans vs reducers, and the constitutional loop.   
 
@@ -622,15 +622,14 @@ Why this fits v1 guardrails:
 
 * **Authoring → canonicalization**: Load the JSON above through the AIR loader. It will type‑check, canonicalize to CBOR, and compute `sha256(cbor(node))` hashes; use those to assemble `manifest.air.cbor`. This is the identity model for values and nodes in AIR v1. 
 * **Routing**: `routing.events[]` wires which events a reducer consumes. For Hello Timer, route both the domain event (`demo/TimerEvent@1`) and the built‑in receipt (`sys/TimerFired@1`) to the same reducer; the **reducer’s `event` schema is the variant family** that includes both.  
-* **Policy & caps**: The kernel checks capability constraints and policy **at enqueue time**, and settles budgets **on receipt**; we didn’t add budgets here, but your grant shape supports them if you want to turn on negative‑tests. 
+* **Policy & caps**: The kernel checks capability constraints and policy **at enqueue time**. Budget enforcement is deferred. 
 * **Journal invariants**: Use these demos to validate `EffectIntent`/`Receipt` lifecycles and `PolicyDecisionRecorded` entries for the timer allow rule. 
 
 ---
 
 ## What’s next (optional quick follow‑ups)
 
-* **Test App 2 — Blob Echo**: same pattern as Hello Timer but with `blob.put/get` receipts mapped to `sys/Blob*Result@1` and state fences (exercise CAS + bytes budgets). 
+* **Test App 2 — Blob Echo**: same pattern as Hello Timer but with `blob.put/get` receipts mapped to `sys/Blob*Result@1` and state fences (exercise CAS + receipts). 
 * **Single‑Plan demo** (“Fetch & Notify”): introduce one plan (`emit_effect` → `await_receipt` → `raise_event`) to verify the plan engine, required_caps, and `allowed_effects` checks.  
 
 If you want, I can also produce **ready‑to‑paste test fixtures**: (1) a tiny journal appender that feeds the exact Start/Bump events, (2) canned receipts for a fake timer adapter to exercise replay, and (3) a minimal “manifest‑builder” script that hashes nodes and fills those `sha256:000…` placeholders for you. 
-

@@ -7,7 +7,17 @@ pub enum KernelEvent {
 }
 
 #[derive(Debug, Clone)]
+pub struct IngressStamp {
+    pub now_ns: u64,
+    pub logical_now_ns: u64,
+    pub entropy: Vec<u8>,
+    pub journal_height: u64,
+    pub manifest_hash: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ReducerEvent {
     pub reducer: String,
     pub event: DomainEvent,
+    pub stamp: IngressStamp,
 }

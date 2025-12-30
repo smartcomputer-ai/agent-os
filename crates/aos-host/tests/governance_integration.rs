@@ -10,12 +10,13 @@ use aos_air_types::{
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
 use aos_cbor::{Hash, to_canonical_cbor};
-use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
+use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
 use aos_kernel::shadow::ShadowHarness;
-use aos_wasm_abi::ReducerOutput;
+use aos_wasm_abi::{PureOutput, ReducerOutput};
+use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use indexmap::IndexMap;
 use serde_cbor;
 use serde_json::json;
@@ -125,7 +126,11 @@ fn patch_hash_is_identical_for_sugar_and_canonical_plans() {
             .iter()
             .map(|e| e.effect.clone()),
     );
-    normalize_plan_literals(&mut canonical_plan, &builtin_schema_index(), &effect_catalog)
+    normalize_plan_literals(
+        &mut canonical_plan,
+        &builtin_schema_index(),
+        &effect_catalog,
+    )
     .expect("normalize canonical plan");
 
     let sugar_patch = plan_patch(sugar_plan);
@@ -347,6 +352,7 @@ fn manifest_with_reducer(
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/PatchedState@1"),
         event: fixtures::schema(START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -488,6 +494,7 @@ fn upgrade_manifest(
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
@@ -523,7 +530,6 @@ fn upgrade_manifest(
         cap: primary_cap.name.clone(),
         params: empty_literal(),
         expiry_ns: None,
-        budget: None,
     });
     if followup {
         loaded.manifest.caps.push(NamedRef {
@@ -538,7 +544,6 @@ fn upgrade_manifest(
             cap: followup_cap.name,
             params: empty_literal(),
             expiry_ns: None,
-            budget: None,
         });
     }
     loaded.manifest.defaults = Some(ManifestDefaults {
@@ -570,6 +575,7 @@ fn upgrade_plan_v1(name: &str) -> DefPlan {
                     kind: EffectKind::http_request(),
                     params: http_params_literal("v1"),
                     cap: "cap_http_primary".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -618,6 +624,7 @@ fn upgrade_plan_v2(name: &str) -> DefPlan {
                 kind: EffectKind::http_request(),
                 params: http_params_literal("v2"),
                 cap: "cap_http_followup".into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: "req_follow".into(),
                 },
@@ -669,6 +676,9 @@ fn test_http_cap(name: &str) -> DefCap {
         schema: TypeExpr::Record(TypeRecord {
             record: IndexMap::new(),
         }),
+        enforcer: aos_air_types::CapEnforcer {
+            module: "sys/CapEnforceHttpOut@1".into(),
+        },
     }
 }
 
@@ -693,6 +703,7 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
                     kind: EffectKind::http_request(),
                     params: http_params_literal("shadow"),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -741,10 +752,26 @@ fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedM
         invariants: vec![],
     };
 
+    let allow_output = CapCheckOutput {
+        constraints_ok: true,
+        deny: None,
+    };
+    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
+    let pure_output = PureOutput {
+        output: output_bytes,
+    };
+    let enforcer = fixtures::stub_pure_module(
+        store,
+        "sys/CapEnforceHttpOut@1",
+        &pure_output,
+        "sys/CapCheckInput@1",
+        "sys/CapCheckOutput@1",
+    );
+
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
-        vec![],
+        vec![enforcer],
         vec![],
     );
 

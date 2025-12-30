@@ -38,6 +38,7 @@ pub enum JournalKind {
     DomainEvent,
     EffectIntent,
     EffectReceipt,
+    CapDecision,
     Snapshot,
     PolicyDecision,
     Governance,
@@ -55,6 +56,7 @@ pub enum JournalRecord {
     DomainEvent(DomainEventRecord),
     EffectIntent(EffectIntentRecord),
     EffectReceipt(EffectReceiptRecord),
+    CapDecision(CapDecisionRecord),
     PolicyDecision(PolicyDecisionRecord),
     Snapshot(SnapshotRecord),
     Governance(GovernanceRecord),
@@ -69,6 +71,7 @@ impl JournalRecord {
             JournalRecord::DomainEvent(_) => JournalKind::DomainEvent,
             JournalRecord::EffectIntent(_) => JournalKind::EffectIntent,
             JournalRecord::EffectReceipt(_) => JournalKind::EffectReceipt,
+            JournalRecord::CapDecision(_) => JournalKind::CapDecision,
             JournalRecord::PolicyDecision(_) => JournalKind::PolicyDecision,
             JournalRecord::Snapshot(_) => JournalKind::Snapshot,
             JournalRecord::Governance(_) => JournalKind::Governance,
@@ -106,6 +109,18 @@ pub struct DomainEventRecord {
         with = "serde_bytes_opt"
     )]
     pub key: Option<Vec<u8>>,
+    #[serde(default)]
+    pub now_ns: u64,
+    #[serde(default)]
+    pub logical_now_ns: u64,
+    #[serde(default)]
+    pub journal_height: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
+    pub entropy: Vec<u8>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub event_hash: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub manifest_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -138,6 +153,59 @@ pub struct EffectReceiptRecord {
     pub cost_cents: Option<u64>,
     #[serde(with = "serde_bytes")]
     pub signature: Vec<u8>,
+    #[serde(default)]
+    pub now_ns: u64,
+    #[serde(default)]
+    pub logical_now_ns: u64,
+    #[serde(default)]
+    pub journal_height: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
+    pub entropy: Vec<u8>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub manifest_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CapDecisionStage {
+    Enqueue,
+    Settle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CapDecisionOutcome {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapDenyReason {
+    pub code: String,
+    pub message: String,
+}
+
+impl std::fmt::Display for CapDenyReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.code, self.message)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapDecisionRecord {
+    pub intent_hash: [u8; 32],
+    pub stage: CapDecisionStage,
+    pub effect_kind: String,
+    pub cap_name: String,
+    pub cap_type: String,
+    pub grant_hash: [u8; 32],
+    pub enforcer_module: String,
+    pub decision: CapDecisionOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deny: Option<CapDenyReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_ns: Option<u64>,
+    pub logical_now_ns: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

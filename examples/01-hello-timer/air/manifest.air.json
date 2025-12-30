@@ -8,6 +8,9 @@
       "name": "demo/TimerState@1"
     },
     {
+      "name": "demo/TimerStart@1"
+    },
+    {
       "name": "demo/TimerEvent@1"
     },
     {
@@ -26,11 +29,7 @@
     }
   ],
   "plans": [],
-  "caps": [
-    {
-      "name": "sys/timer@1"
-    }
-  ],
+  "caps": [],
   "policies": [
     {
       "name": "demo/default_policy@1"
@@ -47,13 +46,6 @@
         }
       }
     ]
-  },
-  "module_bindings": {
-    "demo/TimerSM@1": {
-      "slots": {
-        "timer": "timer_grant"
-      }
-    }
   },
   "routing": {
     "events": [

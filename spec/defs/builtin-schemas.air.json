@@ -36,13 +36,41 @@
       }
     }
   },
+  {
+    "$kind": "defschema",
+    "name": "sys/ReducerContext@1",
+    "type": {
+      "record": {
+        "now_ns": { "nat": {} },
+        "logical_now_ns": { "nat": {} },
+        "journal_height": { "nat": {} },
+        "entropy": { "bytes": {} },
+        "event_hash": { "hash": {} },
+        "manifest_hash": { "hash": {} },
+        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "key": { "option": { "bytes": {} } },
+        "cell_mode": { "bool": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/PureContext@1",
+    "type": {
+      "record": {
+        "logical_now_ns": { "nat": {} },
+        "journal_height": { "nat": {} },
+        "manifest_hash": { "hash": {} },
+        "module": { "text": {}, "$comment": "Name-formatted string" }
+      }
+    }
+  },
 
   {
     "$kind": "defschema",
     "name": "sys/BlobPutParams@1",
     "type": {
       "record": {
-        "namespace": { "text": {} },
         "blob_ref": { "hash": {} }
       }
     }
@@ -182,6 +210,44 @@
         },
         "cost_cents": { "nat": {} },
         "provider_id": { "text": {} }
+      }
+    }
+  },
+
+  {
+    "$kind": "defschema",
+    "name": "sys/CapCheckInput@1",
+    "type": {
+      "record": {
+        "cap_def": { "text": {}, "$comment": "Name-formatted string" },
+        "grant_name": { "text": {} },
+        "cap_params": { "bytes": {}, "$comment": "Canonical CBOR" },
+        "effect_kind": { "text": {} },
+        "effect_params": { "bytes": {}, "$comment": "Canonical CBOR" },
+        "origin": {
+          "record": {
+            "kind": { "text": {} },
+            "name": { "text": {}, "$comment": "Name-formatted string" }
+          }
+        },
+        "logical_now_ns": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/CapCheckOutput@1",
+    "type": {
+      "record": {
+        "constraints_ok": { "bool": {} },
+        "deny": {
+          "option": {
+            "record": {
+              "code": { "text": {} },
+              "message": { "text": {} }
+            }
+          }
+        }
       }
     }
   },
@@ -449,12 +515,17 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ObjectRegistered@1",
+    "name": "sys/ObjectRegisteredPayload@1",
     "type": {
       "record": {
         "meta": { "ref": "sys/ObjectMeta@1" }
       }
     }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/ObjectRegistered@1",
+    "type": { "ref": "sys/ObjectRegisteredPayload@1" }
   },
 
   {

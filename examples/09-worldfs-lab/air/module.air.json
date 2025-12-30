@@ -8,21 +8,8 @@
       "reducer": {
         "state": "notes/NoteState@1",
         "event": "notes/NoteEvent@1",
+        "context": "sys/ReducerContext@1",
         "annotations": "sys/BytesOrSecretRef@1",
-        "effects_emitted": [],
-        "cap_slots": {}
-      }
-    }
-  },
-  {
-    "$kind": "defmodule",
-    "name": "sys/ObjectCatalog@1",
-    "module_kind": "reducer",
-    "key_schema": "sys/ObjectKey@1",
-    "abi": {
-      "reducer": {
-        "state": "sys/ObjectVersions@1",
-        "event": "sys/ObjectRegistered@1",
         "effects_emitted": [],
         "cap_slots": {}
       }

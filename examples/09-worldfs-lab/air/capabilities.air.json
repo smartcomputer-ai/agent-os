@@ -4,21 +4,5 @@
     "name": "notes/blob_cap@1",
     "cap_type": "blob",
     "schema": { "record": {} }
-  },
-  {
-    "$kind": "defcap",
-    "name": "sys/blob@1",
-    "cap_type": "blob",
-    "schema": { "record": {} }
-  },
-  {
-    "$kind": "defcap",
-    "name": "sys/query@1",
-    "cap_type": "query",
-    "schema": {
-      "record": {
-        "scope": { "option": { "text": {} } }
-      }
-    }
   }
 ]

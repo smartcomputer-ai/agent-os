@@ -152,7 +152,7 @@ fn schedule_retry(ctx: &mut ReducerCtx<RetryState>) {
         deliver_at_ns,
         key: Some(ctx.state.req_id.clone()),
     };
-    ctx.effects().timer_set(&params, "timer");
+    ctx.effects().timer_set(&params, "default");
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

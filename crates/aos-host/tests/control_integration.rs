@@ -55,6 +55,7 @@ async fn control_channel_round_trip() {
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),

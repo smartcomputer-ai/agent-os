@@ -423,9 +423,11 @@ impl<S: Store + 'static> WorldHost<S> {
     /// 3. Build a `sys/TimerFired@1` receipt event via `build_reducer_receipt_event()`
     /// 4. Route/wrap at dispatch and push reducer event to scheduler
     ///
+    /// Uses kernel logical time for scheduling and receipt timestamps.
+    ///
     /// Returns the number of timers fired.
     pub fn fire_due_timers(&mut self, scheduler: &mut TimerScheduler) -> Result<usize, HostError> {
-        let now_ns = now_wallclock_ns();
+        let now_ns = self.kernel.logical_time_now_ns();
         let due = scheduler.pop_due(now_ns);
         let count = due.len();
 

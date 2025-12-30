@@ -6,11 +6,11 @@ use serde_json::Value as JsonValue;
 use thiserror::Error;
 
 use crate::{
-    DefPlan, EffectKind, ExprOrValue, HashRef, TypeExpr, TypeList, TypeMap, TypeMapEntry,
-    TypeMapKey, TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueBool,
-    ValueBytes, ValueDec128, ValueDurationNs, ValueHash, ValueInt, ValueList, ValueLiteral,
-    ValueMap, ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet, ValueText, ValueTimeNs,
-    ValueUuid, ValueVariant,
+    DefPlan, EffectKind, EmptyObject, ExprOrValue, HashRef, TypeExpr, TypeList, TypeMap,
+    TypeMapEntry, TypeMapKey, TypeOption, TypePrimitive, TypePrimitiveHash, TypeRecord, TypeSet,
+    TypeVariant, ValueBool, ValueBytes, ValueDec128, ValueDurationNs, ValueHash, ValueInt,
+    ValueList, ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull, ValueRecord, ValueSet,
+    ValueText, ValueTimeNs, ValueUuid, ValueVariant,
 };
 use crate::{Expr, ExprConst, typecheck::validate_value_literal};
 
@@ -73,6 +73,18 @@ pub fn normalize_plan_literals(
                     schemas,
                     "emit_effect.params",
                 )?;
+                if let Some(key) = &mut step.idempotency_key {
+                    let schema = TypeExpr::Primitive(TypePrimitive::Hash(TypePrimitiveHash {
+                        hash: EmptyObject::default(),
+                    }));
+                    normalize_expr_or_value(
+                        key,
+                        &schema,
+                        "idempotency_key",
+                        schemas,
+                        "emit_effect.idempotency_key",
+                    )?;
+                }
             }
             crate::PlanStepKind::Assign(step) => {
                 if let Some(schema_ref) = plan.locals.get(&step.bind.var) {
@@ -802,6 +814,7 @@ mod tests {
                         "body_ref": null
                     })),
                     cap: "cap".into(),
+                    idempotency_key: None,
                     bind: crate::PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -812,8 +825,7 @@ mod tests {
             allowed_effects: vec![EffectKind::http_request()],
             invariants: vec![],
         };
-        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .unwrap();
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap();
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(matches!(step.params, ExprOrValue::Literal(_)));
         } else {
@@ -839,6 +851,7 @@ mod tests {
                         "body_ref": { "const": { "null": {} } }
                     })),
                     cap: "cap".into(),
+                    idempotency_key: None,
                     bind: crate::PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -851,7 +864,7 @@ mod tests {
         };
 
         let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .expect_err("should reject const wrapper in expr");
+            .expect_err("should reject const wrapper in expr");
         assert!(matches!(err, PlanLiteralError::InvalidJson(_)));
     }
 
@@ -876,6 +889,7 @@ mod tests {
                         "api_key": null
                     })),
                     cap: "cap_llm".into(),
+                    idempotency_key: None,
                     bind: crate::PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -886,8 +900,7 @@ mod tests {
             allowed_effects: vec![EffectKind::llm_generate()],
             invariants: vec![],
         };
-        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .unwrap();
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap();
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(matches!(step.params, ExprOrValue::Literal(_)));
         } else {
@@ -925,8 +938,7 @@ mod tests {
             invariants: vec![],
         };
 
-        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .unwrap();
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap();
 
         if let crate::PlanStepKind::RaiseEvent(step) = &plan.steps[0].kind {
             assert!(matches!(step.value, ExprOrValue::Literal(_)));
@@ -955,8 +967,8 @@ mod tests {
             invariants: vec![],
         };
 
-        let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .unwrap_err();
+        let err =
+            normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap_err();
         assert!(matches!(err, PlanLiteralError::SchemaNotFound { .. }));
     }
 
@@ -980,6 +992,7 @@ mod tests {
                         }
                     })),
                     cap: "cap".into(),
+                    idempotency_key: None,
                     bind: crate::PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -1035,6 +1048,7 @@ mod tests {
                         }
                     })),
                     cap: "cap".into(),
+                    idempotency_key: None,
                     bind: crate::PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -1046,8 +1060,7 @@ mod tests {
             invariants: vec![],
         };
 
-        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-        .expect("normalize");
+        normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).expect("normalize");
         if let crate::PlanStepKind::EmitEffect(step) = &plan.steps[0].kind {
             assert!(
                 matches!(step.params, ExprOrValue::Literal(_)),

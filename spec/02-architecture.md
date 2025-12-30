@@ -12,18 +12,19 @@ These are not separate runtimes. Under the hood, there is one unified system: th
 
 One world is the unit of computation and ownership. Each world runs a single‑threaded deterministic stepper over an append‑only event journal with periodic snapshots. All control‑plane changes—modules, plans, schemas, policies, capabilities—are expressed as AIR patches and validated by the kernel before use.
 
-Application logic runs inside sandboxed WASM modules (reducers and pure components). External I/O happens through explicit effects executed by adapters; every effect yields a signed receipt that is appended to the journal and used for replay. This separation between pure computation and effectful I/O is what enables deterministic replay: the same journal and receipts always produce the same state.
+Application logic runs inside sandboxed WASM modules (reducers and pure components). External I/O happens through explicit effects executed by adapters; every effect yields a signed receipt that is appended to the journal and used for replay. The kernel also stamps each ingress with deterministic time/entropy and journals those values; modules can opt in to receiving that call context as explicit input. This separation between pure computation and effectful I/O is what enables deterministic replay: the same journal and receipts always produce the same state.
 
 ## Components (High Level)
 
 - Kernel (Stepper): deterministic event processor, applies journal entries, enforces policy, and drives plans.
+- Kernel Clock: samples wall-clock + monotonic time at ingress and records deterministic timestamps.
 - Journal: append‑only log of all events (proposals, approvals, plan application, effect intents, receipts, snapshots).
 - Snapshotter: materializes state at intervals for fast restore; replay from journal remains authoritative.
 - Store (CAS): content‑addressed object store for AIR nodes, WASM modules, blobs, receipts, and snapshots.
 - AIR Loader/Validator: loads the manifest, validates forms, resolves references, and exposes a typed view to the kernel.
 - Plan Engine: executes AIR plans deterministically (evaluates guards, emits effects, raises/awaits events), supports shadow runs.
-- Capability Ledger: scoped capability tokens (type, scope, budget, expiry) bound to principals and plans.
-- Policy Gate: declarative allow/deny/require‑approval rules over effects and plans; budgets settle on receipts.
+- Capability Resolver: scoped capability grants (type, scope, expiry) bound to plans and reducers.
+- Policy Gate: declarative allow/deny/require‑approval rules over effects and plans.
 - WASM Runtime: deterministic sandbox (Wasmtime profile) for reducers and pure components.
 - Effect Manager: queues effect intents, dispatches to adapters, ingests receipts, enforces idempotency.
 - Adapters: host‑side executors for effect kinds (HTTP, Blob/FS, Timer, LLM ship in v1; custom adapters can register additional kinds/cap types) with signing.
@@ -34,7 +35,7 @@ Application logic runs inside sandboxed WASM modules (reducers and pure componen
 
 ### Deterministic Stepper
 
-The kernel processes exactly one event at a time per world. It applies events to both control‑plane state (AIR manifest, ledger, policies) and data‑plane state (reducer states) in a fixed order. When appropriate, the stepper produces derived events such as PolicyDecisionRecorded, Applied, or SnapshotCreated.
+The kernel processes exactly one event at a time per world. It applies events to both control‑plane state (AIR manifest and policies) and data‑plane state (reducer states) in a fixed order. When appropriate, the stepper produces derived events such as PolicyDecisionRecorded, Applied, or SnapshotCreated.
 
 ### Event Kinds (v1)
 
@@ -74,23 +75,23 @@ Nodes (AIR terms, receipts) and blobs (WASM modules, large payloads) are address
 
 ### AIR Manifest
 
-The manifest is read-only at runtime and serves as the authoritative catalog of defmodule, defplan, defschema, defcap, and defpolicy objects. Updates occur only via approved Proposed → Applied events.
+The manifest is read-only at runtime and serves as the authoritative catalog of defmodule, defplan, defschema, defcap, and defpolicy objects. Built-in catalogs provide `sys/*` schemas/effects/caps/modules; external manifests may reference `sys/*` entries but may not define them. Updates occur only via approved Proposed → Applied events.
 
 ### AIR Loader/Validator
 
-Authoring ergonomics and determinism meet here. The loader accepts either JSON lens described in the AIR spec—concise schema-directed “sugar” JSON or the tagged canonical overlay used by tools/agents—and canonicalizes both to typed values before anything touches the kernel. Every value is normalized (set dedupe/order, map ordering, numeric range checks, decimal128, option/variant envelopes) and then encoded as canonical CBOR with the declared schema hash bound in. That canonical form is the only thing the kernel, store, and hash engine ever see.
+Authoring ergonomics and determinism meet here. The loader accepts either JSON lens described in the AIR spec—concise schema-directed “sugar” JSON or the tagged canonical overlay used by tools/agents—and canonicalizes both to typed values before anything touches the kernel. Built-in catalogs are merged for `sys/*` schemas/effects/caps/modules; external `sys/*` definitions are rejected. Every value is normalized (set dedupe/order, map ordering, numeric range checks, decimal128, option/variant envelopes) and then encoded as canonical CBOR with the declared schema hash bound in. That canonical form is the only thing the kernel, store, and hash engine ever see.
 
 After canonicalization, the loader validates references, shapes, capability declarations, and plan graphs, then exposes a typed view for the kernel. Tooling hooks (`air fmt`, `air diff`, `air patch`) operate on the same canonical CBOR but can render either lens for humans.
 
-### Capability Ledger
+### Capabilities (Constraints-Only)
 
-The capability ledger records grant/revoke events and tracks current balances/budgets per capability token. Capabilities are passed to plans and modules by handle; no ambient authority exists. The ledger enforces parameter constraints (hosts, models, max_tokens ceilings) at enqueue time and performs conservative budget pre-checks for variable-cost effects such as LLM token usage and blob sizes.
+Capabilities are passed to plans and modules by grant name; no ambient authority exists. At enqueue time the kernel enforces parameter constraints (hosts, models, max_tokens ceilings) via deterministic **cap enforcer modules** (defaulting to `sys/CapAllowAll@1` when a defcap omits one) and checks expiry against `logical_now_ns`. Budgets and ledger accounting are deferred to a future milestone.
 
 ### Policy Gate (v1)
 
 The policy gate evaluates allow/deny decisions for effects based on origin-aware rules. Origin metadata (origin_kind: plan or reducer, origin_name) is attached to all effect intents. Rule evaluation is first-match-wins; if no rule matches, the default is deny. Decisions are journaled as PolicyDecisionRecorded events.
 
-Budgets settle on receipts; a grant is marked exhausted if any dimension goes negative. Deferred to v1.1+: approvals (require_approval), rate limits (rpm), and identity/principal support.
+Deferred to v1.1+: approvals (require_approval), rate limits (rpm), and identity/principal support.
 
 ## Triggers and Events (Runtime)
 
@@ -106,7 +107,7 @@ The typical runtime flow between reducers and plans follows six steps:
 
 1. **Reducer emits DomainIntent** (e.g., `ChargeRequested`) as a domain event.
 2. **Trigger starts plan** with the event as `@plan.input` and records a correlation id if provided.
-3. **Plan emits effects** under capabilities; the kernel checks: (a) capability grant constraints, (b) conservative budget pre-check, (c) policy decision (origin-aware). The Effect Manager dispatches if allowed.
+3. **Plan emits effects** under capabilities; the kernel checks: (a) capability grant constraints, (b) policy decision (origin-aware). The Effect Manager dispatches if allowed.
 4. **Adapter executes** the effect and appends a signed receipt; the plan's `await_receipt` step resumes with the receipt value.
 5. **Plan raises result** via `raise_event`, publishing a DomainEvent (e.g., `PaymentResult`) to the bus; routing delivers it to reducers, which advance their typestate.
 6. **Optional continuation**: plans may `await_event` for subsequent reducer‑produced events to continue orchestration in one instance. The wait is future-only, first-match-per-waiter, and broadcast (events are not consumed). When a trigger set a `correlate_by` key, `await_event` **must** include a `where` predicate (typically matching that key) to avoid cross-talk between concurrent plan instances.
@@ -119,20 +120,20 @@ All external I/O crosses `emit_effect` and is policy/capability‑gated; receipt
 
 ### WASM Runtime
 
-The WASM runtime uses a deterministic profile: no threads, no wall‑clock or time syscalls, stable float behavior, and seeded RNG from the journal. Limited hostcalls provide pure intrinsics (serialization, hashing) and foreign‑memory copy.
+The WASM runtime uses a deterministic profile: no threads, no ambient clock or randomness, stable float behavior, and limited hostcalls for pure intrinsics (serialization, hashing) and foreign‑memory copy. When a module declares a context schema, the kernel passes in deterministic time/entropy captured at ingress; there are no direct syscalls.
 
 ### Module Registry
 
 Modules are content‑addressed WASM artifacts registered in the manifest with declared interfaces. Two types exist in v1:
 
 - **Reducer**: state machine reacting to events.
-  - ABI: `step(state_bytes, event_bytes) → (state_bytes, effects[], annotations)`
+  - ABI: `step(envelope) → envelope`, where the input envelope includes state/event bytes and an optional call context (if declared).
 - **Pure Component**: pure function.
-  - ABI: `run(input_bytes) → output_bytes`
+  - ABI: `run(envelope) → envelope`, where the input envelope includes input bytes and an optional call context (if declared).
 
 ### Keyed Reducers (Cells)
 
-Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with optional `key` and a `cell_mode` flag. Routing uses `manifest.routing.events[].key_field`; triggers may set `correlate_by`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and plan runs. See [spec/06-cells.md](06-cells.md) for the full v1.1 behavior and migration notes.
+Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with an optional call context, and for keyed reducers that context includes `key` and `cell_mode`. Routing uses `manifest.routing.events[].key_field`; triggers may set `correlate_by`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and plan runs. See [spec/06-cells.md](06-cells.md) for the full v1.1 behavior and migration notes.
 
 ### Router and Inbox
 
@@ -150,7 +151,7 @@ Four adapters ship in v1:
 
 - **HTTP**: `http.request(method, url, headers, body_ref) → receipt(status, headers, body_ref, timings)`
 - **Blob**: `blob.{put,get} → receipt(blob_ref, size)`
-- **Timer**: `timer.set(at/after) → receipt(delivered_at)`
+- **Timer**: `timer.set(deliver_at_ns) → receipt(delivered_at_ns)` (logical time)
 - **LLM**: `llm.generate(model, params, input_ref) → receipt(output_ref, token_usage, cost, provider_id)`
 
 Each adapter signs receipts (ed25519/HMAC) including intent_hash, inputs/outputs hashes, timings, and cost.
@@ -161,7 +162,7 @@ Version 1.2 will add **WASM-based adapters**: custom effect implementations that
 
 ### Receipt Handling
 
-ReceiptAppended events advance plans and reducers waiting on effects. Budgets decrement on receipt; policy re‑checks may occur if costs exceed thresholds. During replay, the system consumes recorded receipts to produce identical state without re‑executing effects.
+ReceiptAppended events advance plans and reducers waiting on effects. During replay, the system consumes recorded receipts to produce identical state without re‑executing effects.
 
 ## Constitutional Loop (Design Time)
 
@@ -183,13 +184,13 @@ Shadow runs provide deterministic rehearsal of a proposal. They use a copy of th
 
 Canonical CBOR is used for all persisted values. [CBOR (Concise Binary Object Representation)](https://cbor.io/) is a binary serialization format similar to JSON but with a deterministic encoding—the same data structure always produces the same byte sequence, which is essential for content addressing and replay guarantees. 
 
-Modules have no access to time or randomness; all nondeterminism is isolated to the effect boundary and recorded via receipts. This ensures that replaying the same journal and receipts always produces identical state.
+Modules have no ambient access to time or randomness; all nondeterminism is isolated to the effect boundary and recorded via receipts. Deterministic time/entropy are provided only via the optional call context, sampled at ingress and journaled. This ensures that replaying the same journal and receipts always produces identical state.
 
 ### Safety
 
-**Capability scoping**: Tokens encode scope, expiry, and budgets; they are passed explicitly.
+**Capability scoping**: Tokens encode scope and expiry; they are passed explicitly.
 
-**Policy gates**: Enforce allow/deny/approval decisions and quotas before dispatch; budgets settle on receipt.
+**Policy gates**: Enforce allow/deny/approval decisions and quotas before dispatch.
 
 **Rollback**: Move the head to a prior snapshot; receipts include fences to ignore late arrivals after a rollback.
 
@@ -240,7 +241,7 @@ Here's how all the pieces fit together in a typical **design‑time** change wor
 3. **Shadow**: A shadow run quantifies diffs and predicted costs.
 4. **Approve**: Approval grants least‑privilege capabilities based on shadow results.
 5. **Apply**: The kernel commits the new manifest root; routing tables and capability bindings update atomically.
-6. **Execute**: Execution proceeds; effects produce signed receipts; budgets decrement; snapshots capture state.
+6. **Execute**: Execution proceeds; effects produce signed receipts; snapshots capture state.
 7. **Replay**: Replay from journal and receipts reproduces the exact same state.
 
 Once applied, changes become **runtime** behavior: reducers emit domain intents, triggers start plans, plans orchestrate effects under policy and capabilities, adapters produce signed receipts, and results flow back as events. Both modes—design time and runtime—share the same deterministic kernel and journal. The homoiconic control plane (AIR) is what makes this possible: the system can inspect, simulate, and safely modify its own definition using the same event‑sourced substrate it uses for application logic.

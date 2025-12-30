@@ -372,6 +372,7 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
     };
     let api_key = decode_api_key(map.get(&serde_cbor::Value::Text("api_key".into())))?;
 
+    let tools = if tools.is_empty() { None } else { Some(tools) };
     Ok(LlmGenerateParams {
         provider: text("provider")?,
         model: text("model")?,

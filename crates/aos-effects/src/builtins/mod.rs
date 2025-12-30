@@ -9,7 +9,7 @@ pub type HeaderMap = IndexMap<String, String>;
 pub struct HttpRequestParams {
     pub method: String,
     pub url: String,
-    #[serde(default, skip_serializing_if = "HeaderMap::is_empty")]
+    #[serde(default)]
     pub headers: HeaderMap,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_ref: Option<HashRef>,
@@ -18,7 +18,7 @@ pub struct HttpRequestParams {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HttpRequestReceipt {
     pub status: i32,
-    #[serde(default, skip_serializing_if = "HeaderMap::is_empty")]
+    #[serde(default)]
     pub headers: HeaderMap,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body_ref: Option<HashRef>,
@@ -34,7 +34,6 @@ pub struct RequestTimings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlobPutParams {
-    pub namespace: String,
     pub blob_ref: HashRef,
 }
 
@@ -58,6 +57,7 @@ pub struct BlobGetReceipt {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TimerSetParams {
+    /// Logical-time deadline (monotonic), in nanoseconds.
     pub deliver_at_ns: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
@@ -65,6 +65,7 @@ pub struct TimerSetParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TimerSetReceipt {
+    /// Logical-time delivery timestamp (monotonic), in nanoseconds.
     pub delivered_at_ns: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
@@ -77,8 +78,8 @@ pub struct LlmGenerateParams {
     pub temperature: String,
     pub max_tokens: u64,
     pub input_ref: HashRef,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
 }

@@ -27,19 +27,29 @@
   },
   {
     "$kind": "defschema",
+    "name": "demo/LlmSummarizerStart@1",
+    "type": { "record": { "url": { "text": {} } } }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/LlmSummarizerSummaryReady@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "summary": { "text": {} },
+        "tokens_prompt": { "nat": {} },
+        "tokens_completion": { "nat": {} },
+        "cost_millis": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demo/LlmSummarizerEvent@1",
     "type": {
       "variant": {
-        "Start": { "record": { "url": { "text": {} } } },
-        "SummaryReady": {
-          "record": {
-            "request_id": { "nat": {} },
-            "summary": { "text": {} },
-            "tokens_prompt": { "nat": {} },
-            "tokens_completion": { "nat": {} },
-            "cost_millis": { "nat": {} }
-          }
-        }
+        "Start": { "ref": "demo/LlmSummarizerStart@1" },
+        "SummaryReady": { "ref": "demo/LlmSummarizerSummaryReady@1" }
       }
     }
   },

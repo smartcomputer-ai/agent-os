@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aos_host::config::HostConfig;
-use helpers::fixtures::{self, START_SCHEMA, TestStore};
 use aos_host::modes::daemon::{ControlMsg, WorldDaemon};
 use aos_host::{ExternalEvent, WorldHost};
 use aos_kernel::Kernel;
 use aos_kernel::journal::mem::MemJournal;
+use helpers::fixtures::{self, START_SCHEMA, TestStore};
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 // Re-use shared helpers defined for other integration tests.

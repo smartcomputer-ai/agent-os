@@ -264,6 +264,7 @@ dependencies = [
  "aos-wasm-build",
  "base64 0.21.7",
  "camino",
+ "getrandom 0.2.16",
  "hex",
  "indexmap",
  "log",
@@ -273,6 +274,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "url",
  "walkdir",
  "wasmtime",
  "wat",
@@ -298,9 +300,11 @@ dependencies = [
 name = "aos-sys"
 version = "0.1.0"
 dependencies = [
+ "aos-wasm-abi",
  "aos-wasm-sdk",
  "hex",
  "serde",
+ "serde_bytes",
  "serde_cbor",
  "sha2",
 ]
@@ -313,6 +317,7 @@ dependencies = [
  "aos-wasm-abi",
  "log",
  "serde",
+ "serde_cbor",
  "sha2",
  "tempfile",
  "wasmtime",
@@ -341,6 +346,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
+ "toml",
  "walkdir",
  "which",
 ]

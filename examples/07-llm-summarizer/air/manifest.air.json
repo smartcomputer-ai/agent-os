@@ -8,6 +8,12 @@
       "name": "demo/LlmSummarizerState@1"
     },
     {
+      "name": "demo/LlmSummarizerStart@1"
+    },
+    {
+      "name": "demo/LlmSummarizerSummaryReady@1"
+    },
+    {
       "name": "demo/LlmSummarizerEvent@1"
     },
     {
@@ -53,6 +59,9 @@
   "modules": [
     {
       "name": "demo/LlmSummarizer@1"
+    },
+    {
+      "name": "sys/CapEnforceLlmBasic@1"
     }
   ],
   "plans": [
@@ -124,7 +133,6 @@
       }
     ]
   },
-  "module_bindings": {},
   "routing": {
     "events": [
       {

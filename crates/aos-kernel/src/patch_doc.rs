@@ -176,12 +176,17 @@ pub fn compile_patch_document<S: Store>(
             PatchOp::AddDef { add_def } => {
                 enforce_kind(&add_def.kind, &add_def.node)?;
                 if let Some(name) = node_name(&add_def.node) {
+                    reject_sys_name(name, "add")?;
                     insert_placeholder_ref(&mut manifest, &add_def.kind, name)?;
                 }
                 nodes.push(add_def.node);
             }
             PatchOp::ReplaceDef { replace_def } => {
                 enforce_kind(&replace_def.kind, &replace_def.new_node)?;
+                reject_sys_name(&replace_def.name, "replace")?;
+                if let Some(name) = node_name(&replace_def.new_node) {
+                    reject_sys_name(name, "replace")?;
+                }
                 update_manifest_ref_hash(
                     &mut manifest,
                     &replace_def.kind,
@@ -192,6 +197,7 @@ pub fn compile_patch_document<S: Store>(
                 nodes.push(replace_def.new_node);
             }
             PatchOp::RemoveDef { remove_def } => {
+                reject_sys_name(&remove_def.name, "remove")?;
                 update_manifest_ref_hash(
                     &mut manifest,
                     &remove_def.kind,
@@ -201,6 +207,12 @@ pub fn compile_patch_document<S: Store>(
                 )?;
             }
             PatchOp::SetManifestRefs { set_manifest_refs } => {
+                for reference in &set_manifest_refs.add {
+                    reject_sys_name(&reference.name, "add manifest ref for")?;
+                }
+                for reference in &set_manifest_refs.remove {
+                    reject_sys_name(&reference.name, "remove manifest ref for")?;
+                }
                 apply_manifest_refs(&mut manifest, set_manifest_refs)?;
             }
             PatchOp::SetDefaults { set_defaults } => {
@@ -570,6 +582,15 @@ fn node_name(node: &AirNode) -> Option<&str> {
     }
 }
 
+fn reject_sys_name(name: &str, op: &str) -> Result<(), KernelError> {
+    if name.starts_with("sys/") {
+        return Err(KernelError::Manifest(format!(
+            "patch cannot {op} reserved sys/* definition: {name}"
+        )));
+    }
+    Ok(())
+}
+
 fn zero_hash_ref() -> Result<HashRef, KernelError> {
     HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
         .map_err(|e| KernelError::Manifest(e.to_string()))
@@ -631,7 +652,6 @@ mod tests {
                     null: EmptyObject {},
                 }),
                 expiry_ns: None,
-                budget: None,
             }],
         });
         let base_hash = store_manifest(&store, manifest);
@@ -666,7 +686,6 @@ mod tests {
                             null: EmptyObject {},
                         }),
                         expiry_ns: None,
-                        budget: None,
                     }]),
                 },
             }],
@@ -785,7 +804,6 @@ mod tests {
                             null: EmptyObject {},
                         }),
                         expiry_ns: None,
-                        budget: None,
                     }]),
                 },
             }],
@@ -894,6 +912,47 @@ mod tests {
         };
         let patch = compile_patch_document(&store, doc).expect("compile");
         assert_eq!(patch.manifest.secrets.len(), 1);
+    }
+
+    #[test]
+    fn rejects_sys_add_def() {
+        let store = MemStore::new();
+        let base_hash = store_manifest(&store, empty_manifest());
+        let doc = PatchDocument {
+            version: "1".into(),
+            base_manifest_hash: base_hash,
+            patches: vec![PatchOp::AddDef {
+                add_def: AddDef {
+                    kind: "defschema".into(),
+                    node: defschema("sys/TimerSetParams@1"),
+                },
+            }],
+        };
+        let err = compile_patch_document(&store, doc).unwrap_err();
+        assert!(format!("{err}").contains("sys/*"));
+    }
+
+    #[test]
+    fn rejects_sys_manifest_ref_updates() {
+        let store = MemStore::new();
+        let base_hash = store_manifest(&store, empty_manifest());
+        let doc = PatchDocument {
+            version: "1".into(),
+            base_manifest_hash: base_hash,
+            patches: vec![PatchOp::SetManifestRefs {
+                set_manifest_refs: SetManifestRefs {
+                    add: vec![ManifestRef {
+                        kind: "defschema".into(),
+                        name: "sys/TimerSetParams@1".into(),
+                        hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                            .into(),
+                    }],
+                    remove: vec![],
+                },
+            }],
+        };
+        let err = compile_patch_document(&store, doc).unwrap_err();
+        assert!(format!("{err}").contains("sys/*"));
     }
     #[test]
     fn defsecret_manifest_refs_are_allowed() {

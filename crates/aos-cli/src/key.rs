@@ -207,7 +207,10 @@ mod tests {
     #[test]
     fn derives_key_from_payload_via_routing() {
         let (_tmp, dirs) = build_test_world();
-        let payload = json!({ "id": "abc", "payload": "x" });
+        let payload = json!({
+            "$tag": "Payload",
+            "$value": { "id": "abc", "payload": "x" }
+        });
         let key = derive_event_key(
             &dirs,
             "com.acme/Event@1",
@@ -224,7 +227,7 @@ mod tests {
     #[test]
     fn override_key_wins_over_payload() {
         let (_tmp, dirs) = build_test_world();
-        let payload = json!({ "id": "abc" });
+        let payload = json!({ "$tag": "Payload", "$value": { "id": "abc" } });
         let overrides = KeyOverrides {
             utf8: Some("override".into()),
             ..Default::default()
@@ -241,7 +244,7 @@ mod tests {
     #[test]
     fn error_when_payload_missing_key_field() {
         let (_tmp, dirs) = build_test_world();
-        let payload = json!({ "not_id": "abc" });
+        let payload = json!({ "$tag": "Payload", "$value": { "not_id": "abc" } });
         let err = derive_event_key(
             &dirs,
             "com.acme/Event@1",
@@ -262,7 +265,7 @@ mod tests {
             utf8: Some("abc".into()),
             ..Default::default()
         };
-        let payload = json!({"id":"abc"});
+        let payload = json!({ "$tag": "Payload", "$value": { "id": "abc" } });
         let err = derive_event_key(&dirs, "com.acme/Event@1", &payload, &overrides).unwrap_err();
         assert!(
             err.to_string().contains("no routing entry"),
@@ -303,6 +306,7 @@ mod tests {
   "schemas": [
     { "name": "com.acme/Key@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
     { "name": "com.acme/State@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    { "name": "com.acme/EventPayload@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
     { "name": "com.acme/Event@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
   ],
   "modules": [ { "name": "com.acme/Reducer@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" } ],
@@ -328,6 +332,7 @@ mod tests {
   "schemas": [
     {{ "name":"com.acme/Key@1", "hash":"{zero}" }},
     {{ "name":"com.acme/State@1", "hash":"{zero}" }},
+    {{ "name":"com.acme/EventPayload@1", "hash":"{zero}" }},
     {{ "name":"com.acme/Event@1", "hash":"{zero}" }}
   ],
   "modules": [ {{ "name":"com.acme/Reducer@1", "hash":"{zero}" }} ],
@@ -337,7 +342,7 @@ mod tests {
   "policies": [],
   "secrets": [],
   "routing": {{
-    "events": [ {{ "event":"com.acme/Event@1", "reducer":"com.acme/Reducer@1", "key_field":"id" }} ],
+    "events": [ {{ "event":"com.acme/Event@1", "reducer":"com.acme/Reducer@1", "key_field":"$value.id" }} ],
     "inboxes": []
   }},
   "triggers": [],
@@ -352,7 +357,8 @@ mod tests {
         let defs = r#"[
   { "$kind":"defschema", "name":"com.acme/Key@1", "type": { "text": {} } },
   { "$kind":"defschema", "name":"com.acme/State@1", "type": { "bool": {} } },
-  { "$kind":"defschema", "name":"com.acme/Event@1", "type": { "record": { "id": { "text": {} }, "payload": { "text": {} } } } }
+  { "$kind":"defschema", "name":"com.acme/EventPayload@1", "type": { "record": { "id": { "text": {} }, "payload": { "text": {} } } } },
+  { "$kind":"defschema", "name":"com.acme/Event@1", "type": { "variant": { "Payload": { "ref": "com.acme/EventPayload@1" } } } }
 ]"#;
         fs::write(air_dir.join("defs.schema.json"), defs).unwrap();
     }

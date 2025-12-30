@@ -48,26 +48,36 @@
   },
   {
     "$kind": "defschema",
+    "name": "demo/AggregatorStart@1",
+    "type": {
+      "record": {
+        "topic": { "text": {} },
+        "primary": { "ref": "demo/AggregationTarget@1" },
+        "secondary": { "ref": "demo/AggregationTarget@1" },
+        "tertiary": { "ref": "demo/AggregationTarget@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/AggregateComplete@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "topic": { "text": {} },
+        "primary": { "ref": "demo/AggregateResponse@1" },
+        "secondary": { "ref": "demo/AggregateResponse@1" },
+        "tertiary": { "ref": "demo/AggregateResponse@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demo/AggregatorEvent@1",
     "type": {
       "variant": {
-        "Start": {
-          "record": {
-            "topic": { "text": {} },
-            "primary": { "ref": "demo/AggregationTarget@1" },
-            "secondary": { "ref": "demo/AggregationTarget@1" },
-            "tertiary": { "ref": "demo/AggregationTarget@1" }
-          }
-        },
-        "AggregateComplete": {
-          "record": {
-            "request_id": { "nat": {} },
-            "topic": { "text": {} },
-            "primary": { "ref": "demo/AggregateResponse@1" },
-            "secondary": { "ref": "demo/AggregateResponse@1" },
-            "tertiary": { "ref": "demo/AggregateResponse@1" }
-          }
-        }
+        "Start": { "ref": "demo/AggregatorStart@1" },
+        "AggregateComplete": { "ref": "demo/AggregateComplete@1" }
       }
     }
   },

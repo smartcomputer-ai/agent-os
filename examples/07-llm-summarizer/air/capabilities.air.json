@@ -19,6 +19,7 @@
         "models": { "set": { "text": {} } },
         "max_tokens": { "nat": {} }
       }
-    }
+    },
+    "enforcer": { "module": "sys/CapEnforceLlmBasic@1" }
   }
 ]

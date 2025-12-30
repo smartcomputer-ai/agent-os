@@ -1,5 +1,6 @@
 //! Deterministic kernel entry points: load manifests, run reducers, emit intents.
 
+pub mod cap_enforcer;
 pub mod capability;
 pub mod cell_index;
 pub mod effects;
@@ -12,6 +13,7 @@ pub mod manifest;
 pub mod patch_doc;
 pub mod plan;
 pub mod policy;
+pub mod pure;
 pub mod query;
 pub mod receipts;
 pub mod reducer;
@@ -26,6 +28,7 @@ pub use effects::{EffectManager, EffectQueue};
 pub use error::KernelError;
 pub use event::{KernelEvent, ReducerEvent};
 pub use manifest::{LoadedManifest, ManifestLoader};
+pub use pure::PureRegistry;
 pub use query::{Consistency, ReadMeta, StateRead, StateReader};
 pub use reducer::ReducerRegistry;
 pub use secret::{

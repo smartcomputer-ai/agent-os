@@ -6,7 +6,7 @@
   "properties": {
     "$kind": { "const": "defmodule" },
     "name": { "$ref": "common.schema.json#/$defs/Name" },
-    "module_kind": { "type": "string", "enum": ["reducer"] },
+    "module_kind": { "type": "string", "enum": ["reducer", "pure"] },
     "wasm_hash": { "$ref": "common.schema.json#/$defs/Hash" },
     "key_schema": { "$ref": "common.schema.json#/$defs/SchemaRef" },
     "abi": {
@@ -17,6 +17,7 @@
           "properties": {
             "state": { "$ref": "common.schema.json#/$defs/SchemaRef" },
             "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+            "context": { "$ref": "common.schema.json#/$defs/SchemaRef" },
             "annotations": { "$ref": "common.schema.json#/$defs/SchemaRef" },
             "effects_emitted": {
               "type": "array",
@@ -33,6 +34,16 @@
           },
           "required": ["state","event"],
           "additionalProperties": false
+        },
+        "pure": {
+          "type": "object",
+          "properties": {
+            "input": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+            "output": { "$ref": "common.schema.json#/$defs/SchemaRef" },
+            "context": { "$ref": "common.schema.json#/$defs/SchemaRef" }
+          },
+          "required": ["input","output"],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -41,7 +52,9 @@
   "required": ["$kind","name","module_kind","wasm_hash","abi"],
   "allOf": [
     { "if": { "properties": { "module_kind": { "const": "reducer" } } },
-      "then": { "required": ["abi"], "properties": { "abi": { "required": ["reducer"] } } } }
+      "then": { "required": ["abi"], "properties": { "abi": { "required": ["reducer"] } } } },
+    { "if": { "properties": { "module_kind": { "const": "pure" } } },
+      "then": { "required": ["abi"], "properties": { "abi": { "required": ["pure"] } } } }
   ],
   "additionalProperties": false
 }

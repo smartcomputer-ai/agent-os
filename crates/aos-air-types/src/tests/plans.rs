@@ -5,8 +5,8 @@ use serde_json::json;
 
 use super::assert_json_schema;
 use crate::{
-    DefPlan, EffectKind, ExprOrValue, TypeExpr, TypeMap, TypeMapEntry, TypeMapKey,
-    TypePrimitive, TypePrimitiveNat, TypePrimitiveText, TypePrimitiveUuid, TypeSet,
+    DefPlan, EffectKind, ExprOrValue, TypeExpr, TypeMap, TypeMapEntry, TypeMapKey, TypePrimitive,
+    TypePrimitiveNat, TypePrimitiveText, TypePrimitiveUuid, TypeSet,
     builtins::builtin_schemas,
     plan_literals::{PlanLiteralError, SchemaIndex, normalize_plan_literals},
     validate,
@@ -213,8 +213,7 @@ fn literal_without_local_schema_errors() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let mut plan: DefPlan = serde_json::from_value(plan_json).expect("plan");
-    let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog())
-    .unwrap_err();
+    let err = normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap_err();
     assert!(matches!(
         err,
         crate::plan_literals::PlanLiteralError::MissingSchema { .. }

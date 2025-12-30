@@ -9,8 +9,10 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use log::debug;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use toml::Value;
 use walkdir::WalkDir;
 
 #[derive(Clone, Copy, Debug)]
@@ -94,6 +96,7 @@ mod tests {
 
 fn build_fingerprint(request: &BuildRequest) -> Result<String, BuildError> {
     let source_hash = hash_directory(&request.source_dir)?;
+    let path_dep_hash = hash_path_deps(&request.source_dir)?;
     let inputs = vec![
         ("source", source_hash),
         ("target", request.config.toolchain.target.clone()),
@@ -106,6 +109,10 @@ fn build_fingerprint(request: &BuildRequest) -> Result<String, BuildError> {
             },
         ),
     ];
+    let mut inputs = inputs;
+    if let Some(hash) = path_dep_hash {
+        inputs.push(("path_deps", hash));
+    }
     Ok(cache::fingerprint(&inputs))
 }
 
@@ -133,6 +140,68 @@ fn hash_directory(path: &Utf8PathBuf) -> Result<String, BuildError> {
         hasher.update(&data);
     }
     Ok(hex::encode(hasher.finalize()))
+}
+
+fn hash_path_deps(source_dir: &Utf8PathBuf) -> Result<Option<String>, BuildError> {
+    let manifest_path = Path::new(source_dir.as_str()).join("Cargo.toml");
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+    let data = fs::read_to_string(&manifest_path).map_err(BuildError::Io)?;
+    let manifest: Value = data
+        .parse()
+        .map_err(|err| BuildError::BuildFailed(format!("parse Cargo.toml: {err}")))?;
+    let mut paths = BTreeSet::new();
+    if let Some(table) = manifest.as_table() {
+        collect_path_deps(table, &mut paths);
+    }
+    if paths.is_empty() {
+        return Ok(None);
+    }
+
+    let base = Path::new(source_dir.as_str());
+    let mut hasher = Sha256::new();
+    for path_str in paths {
+        let dep_path = Path::new(&path_str);
+        let full = if dep_path.is_absolute() {
+            dep_path.to_path_buf()
+        } else {
+            base.join(dep_path)
+        };
+        let full = full.canonicalize().map_err(BuildError::Io)?;
+        let utf_path = Utf8PathBuf::from_path_buf(full.clone()).map_err(|_| {
+            BuildError::BuildFailed(format!("path is not utf-8: {}", full.display()))
+        })?;
+        let dep_hash = hash_directory(&utf_path)?;
+        hasher.update(path_str.as_bytes());
+        hasher.update(b"=");
+        hasher.update(dep_hash.as_bytes());
+        hasher.update(b"\n");
+    }
+    Ok(Some(hex::encode(hasher.finalize())))
+}
+
+fn collect_path_deps(table: &toml::value::Table, paths: &mut BTreeSet<String>) {
+    const SECTIONS: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
+    for section in SECTIONS {
+        if let Some(Value::Table(deps)) = table.get(section) {
+            for dep in deps.values() {
+                if let Some(path) = dep
+                    .get("path")
+                    .and_then(|value| value.as_str())
+                {
+                    paths.insert(path.to_string());
+                }
+            }
+        }
+    }
+    if let Some(Value::Table(targets)) = table.get("target") {
+        for target in targets.values() {
+            if let Some(target_table) = target.as_table() {
+                collect_path_deps(target_table, paths);
+            }
+        }
+    }
 }
 
 fn should_skip(entry: &walkdir::DirEntry) -> bool {

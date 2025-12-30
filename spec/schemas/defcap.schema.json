@@ -14,6 +14,15 @@
     "schema": {
       "$ref": "common.schema.json#/$defs/TypeExpr",
       "description": "Parameter schema defining allowlists and ceilings. Standard v1 schemas: sys/http.out@1 = { hosts: set<text>, verbs: set<text>, path_prefixes?: set<text> }; sys/llm.basic@1 = { providers?: set<text>, models?: set<text>, max_tokens_max?: nat, temperature_max?: dec128, tools_allow?: set<text> }; sys/blob@1 = { namespaces?: set<text> }; sys/timer@1 = {}; sys/query@1 = { scope: text } (scope optional/opaque)."
+    },
+    "enforcer": {
+      "description": "Module implementing deterministic cap enforcement. Optional; defaults to sys/CapAllowAll@1 when omitted.",
+      "type": "object",
+      "properties": {
+        "module": { "$ref": "common.schema.json#/$defs/Name" }
+      },
+      "required": ["module"],
+      "additionalProperties": false
     }
   },
   "required": ["$kind","name","cap_type","schema"],

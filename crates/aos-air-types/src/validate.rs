@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     CapGrantName, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, EffectKind, Expr, Manifest,
-    PlanStepKind, RoutingEvent, StepId, TypeExpr, builtins,
+    PlanStepKind, RoutingEvent, SecretEntry, StepId, TypeExpr, builtins,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -91,9 +91,7 @@ pub enum ValidationError {
         expected: String,
         found: String,
     },
-    #[error(
-        "reducer '{reducer}' event family schema '{event_schema}' is invalid: {reason}"
-    )]
+    #[error("reducer '{reducer}' event family schema '{event_schema}' is invalid: {reason}")]
     ReducerEventFamilyInvalid {
         reducer: String,
         event_schema: String,
@@ -114,6 +112,10 @@ pub enum ValidationError {
     EffectNotFound { kind: String },
     #[error("capability grant '{cap}' not found")]
     CapabilityNotFound { cap: String },
+    #[error("capability grant '{cap}' is duplicated")]
+    DuplicateCapabilityGrant { cap: String },
+    #[error("capability definition '{cap}' not found")]
+    CapabilityDefinitionNotFound { cap: String },
     #[error(
         "capability '{cap}' type '{found}' does not match effect '{effect}' required type '{expected}'"
     )]
@@ -467,18 +469,85 @@ pub fn validate_manifest(
 ) -> Result<(), ValidationError> {
     let schema_exists =
         |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
-    let cap_exists = |name: &str| manifest.caps.iter().any(|cap| cap.name.as_str() == name);
+    let defcap_listed = |name: &str| {
+        manifest.caps.iter().any(|cap| cap.name.as_str() == name)
+            || builtins::find_builtin_cap(name).is_some()
+    };
     let mut known_effect_kinds: HashSet<String> = builtins::builtin_effects()
         .iter()
         .map(|e| e.effect.kind.as_str().to_string())
         .collect();
     known_effect_kinds.extend(effects.values().map(|def| def.kind.as_str().to_string()));
+    let mut effect_cap_types: HashMap<String, String> = HashMap::new();
+    for builtin in builtins::builtin_effects() {
+        effect_cap_types.insert(
+            builtin.effect.kind.as_str().to_string(),
+            builtin.effect.cap_type.as_str().to_string(),
+        );
+    }
+    for effect in effects.values() {
+        effect_cap_types.insert(
+            effect.kind.as_str().to_string(),
+            effect.cap_type.as_str().to_string(),
+        );
+    }
+    let mut defcap_types: HashMap<String, String> = HashMap::new();
+    for builtin in builtins::builtin_caps() {
+        defcap_types.insert(
+            builtin.cap.name.clone(),
+            builtin.cap.cap_type.as_str().to_string(),
+        );
+    }
+    for cap in caps.values() {
+        defcap_types.insert(cap.name.clone(), cap.cap_type.as_str().to_string());
+    }
+    let mut grant_map: HashMap<String, &crate::CapGrant> = HashMap::new();
+    if let Some(defaults) = manifest.defaults.as_ref() {
+        for grant in &defaults.cap_grants {
+            if grant_map.insert(grant.name.clone(), grant).is_some() {
+                return Err(ValidationError::DuplicateCapabilityGrant {
+                    cap: grant.name.clone(),
+                });
+            }
+            if !defcap_listed(grant.cap.as_str()) {
+                return Err(ValidationError::CapabilityDefinitionNotFound {
+                    cap: grant.cap.clone(),
+                });
+            }
+            if !defcap_types.contains_key(grant.cap.as_str()) {
+                return Err(ValidationError::CapabilityDefinitionNotFound {
+                    cap: grant.cap.clone(),
+                });
+            }
+        }
+    }
+    let grant_exists = |name: &str| grant_map.contains_key(name);
+    let cap_type_for_grant = |grant_name: &str| -> Result<String, ValidationError> {
+        let grant = grant_map.get(grant_name).copied().ok_or_else(|| {
+            ValidationError::CapabilityNotFound {
+                cap: grant_name.to_string(),
+            }
+        })?;
+        if !defcap_listed(grant.cap.as_str()) {
+            return Err(ValidationError::CapabilityDefinitionNotFound {
+                cap: grant.cap.clone(),
+            });
+        }
+        defcap_types
+            .get(grant.cap.as_str())
+            .cloned()
+            .ok_or_else(|| ValidationError::CapabilityDefinitionNotFound {
+                cap: grant.cap.clone(),
+            })
+    };
 
     let schema_type = |name: &str| -> Option<TypeExpr> {
         schemas
             .get(name)
             .map(|schema| schema.ty.clone())
-            .or_else(|| builtins::find_builtin_schema(name).map(|builtin| builtin.schema.ty.clone()))
+            .or_else(|| {
+                builtins::find_builtin_schema(name).map(|builtin| builtin.schema.ty.clone())
+            })
     };
     let resolve_type = |ty: &TypeExpr| -> Option<TypeExpr> {
         match ty {
@@ -511,71 +580,71 @@ pub fn validate_manifest(
         }
     };
     let key_field_type = |event_schema: &TypeExpr, key_field: &str| {
-            let segments: Vec<&str> = key_field.split('.').filter(|s| !s.is_empty()).collect();
-            if segments.is_empty() {
-                return None;
-            }
-            let resolved = resolve_type(event_schema)?;
-            if let TypeExpr::Variant(variant) = &resolved {
-                if segments[0] == "$value" {
-                    let remaining = &segments[1..];
-                    if remaining.is_empty() {
-                        return None;
-                    }
-                    let mut found: Option<TypeExpr> = None;
-                    for ty in variant.variant.values() {
-                        let resolved_arm = resolve_type(ty)?;
-                        let mut current = resolved_arm;
-                        for seg in remaining {
-                            current = match current {
-                                TypeExpr::Record(record) => {
-                                    let field_ty = record.record.get(*seg)?;
-                                    resolve_type(field_ty)?
-                                }
-                                _ => return None,
-                            };
-                        }
-                        if let Some(existing) = &found {
-                            let resolved_existing = resolve_type(existing)?;
-                            let resolved_current = resolve_type(&current)?;
-                            if !type_eq(&resolved_existing, &resolved_current) {
-                                return None;
-                            }
-                        } else {
-                            found = Some(current);
-                        }
-                    }
-                    return found;
-                }
-                if segments[0] == "$tag" {
+        let segments: Vec<&str> = key_field.split('.').filter(|s| !s.is_empty()).collect();
+        if segments.is_empty() {
+            return None;
+        }
+        let resolved = resolve_type(event_schema)?;
+        if let TypeExpr::Variant(variant) = &resolved {
+            if segments[0] == "$value" {
+                let remaining = &segments[1..];
+                if remaining.is_empty() {
                     return None;
                 }
+                let mut found: Option<TypeExpr> = None;
+                for ty in variant.variant.values() {
+                    let resolved_arm = resolve_type(ty)?;
+                    let mut current = resolved_arm;
+                    for seg in remaining {
+                        current = match current {
+                            TypeExpr::Record(record) => {
+                                let field_ty = record.record.get(*seg)?;
+                                resolve_type(field_ty)?
+                            }
+                            _ => return None,
+                        };
+                    }
+                    if let Some(existing) = &found {
+                        let resolved_existing = resolve_type(existing)?;
+                        let resolved_current = resolve_type(&current)?;
+                        if !type_eq(&resolved_existing, &resolved_current) {
+                            return None;
+                        }
+                    } else {
+                        found = Some(current);
+                    }
+                }
+                return found;
+            }
+            if segments[0] == "$tag" {
                 return None;
             }
+            return None;
+        }
 
-            let mut current = resolved;
-            for seg in segments {
-                current = match current {
-                    TypeExpr::Record(record) => {
-                        let field_ty = record.record.get(seg)?;
-                        resolve_type(field_ty)?
-                    }
-                    _ => return None,
-                };
-            }
-            Some(current)
-        };
+        let mut current = resolved;
+        for seg in segments {
+            current = match current {
+                TypeExpr::Record(record) => {
+                    let field_ty = record.record.get(seg)?;
+                    resolve_type(field_ty)?
+                }
+                _ => return None,
+            };
+        }
+        Some(current)
+    };
     let key_type_matches = |field_ty: &TypeExpr, key_schema: &TypeExpr| {
-            let resolved_field = resolve_type(field_ty)?;
-            let resolved_key = resolve_type(key_schema)?;
-            if type_eq(&resolved_field, &resolved_key) {
-                return Some(true);
-            }
-            if let (TypeExpr::Ref(field_ref), TypeExpr::Ref(key_ref)) = (field_ty, key_schema) {
-                return Some(field_ref.reference == key_ref.reference);
-            }
-            Some(false)
-        };
+        let resolved_field = resolve_type(field_ty)?;
+        let resolved_key = resolve_type(key_schema)?;
+        if type_eq(&resolved_field, &resolved_key) {
+            return Some(true);
+        }
+        if let (TypeExpr::Ref(field_ref), TypeExpr::Ref(key_ref)) = (field_ty, key_schema) {
+            return Some(field_ref.reference == key_ref.reference);
+        }
+        Some(false)
+    };
 
     if let Some(routing) = manifest.routing.as_ref() {
         for RoutingEvent {
@@ -597,11 +666,10 @@ pub fn validate_manifest(
                     })?;
             if let Some(reducer_abi) = module.abi.reducer.as_ref() {
                 let expected = reducer_abi.event.as_str();
-                let family_schema = schema_type(expected).ok_or_else(|| {
-                    ValidationError::SchemaNotFound {
+                let family_schema =
+                    schema_type(expected).ok_or_else(|| ValidationError::SchemaNotFound {
                         schema: expected.to_string(),
-                    }
-                })?;
+                    })?;
                 if !event_in_family(event.as_str(), expected, &family_schema) {
                     return Err(ValidationError::RoutingSchemaMismatch {
                         reducer: reducer.clone(),
@@ -635,11 +703,10 @@ pub fn validate_manifest(
                         schema: key_schema_name.to_string(),
                     }
                 })?;
-                let event_schema = schema_type(event.as_str()).ok_or_else(|| {
-                    ValidationError::SchemaNotFound {
+                let event_schema =
+                    schema_type(event.as_str()).ok_or_else(|| ValidationError::SchemaNotFound {
                         schema: event.as_str().to_string(),
-                    }
-                })?;
+                    })?;
                 let field_ty = key_field_type(&event_schema, field).ok_or_else(|| {
                     ValidationError::RoutingKeyFieldMismatch {
                         reducer: reducer.clone(),
@@ -677,11 +744,10 @@ pub fn validate_manifest(
             continue;
         };
         let event_schema_name = reducer.event.as_str();
-        let event_schema = schema_type(event_schema_name).ok_or_else(|| {
-            ValidationError::SchemaNotFound {
+        let event_schema =
+            schema_type(event_schema_name).ok_or_else(|| ValidationError::SchemaNotFound {
                 schema: event_schema_name.to_string(),
-            }
-        })?;
+            })?;
         match &event_schema {
             TypeExpr::Ref(_) => {}
             TypeExpr::Variant(variant) => {
@@ -785,27 +851,24 @@ pub fn validate_manifest(
                         kind: emit.kind.as_str().to_string(),
                     });
                 }
-                if !cap_exists(emit.cap.as_str()) {
+                if !grant_exists(emit.cap.as_str()) {
                     return Err(ValidationError::CapabilityNotFound {
                         cap: emit.cap.clone(),
                     });
                 }
-                if let Some(effect_def) = effects
-                    .values()
-                    .find(|def| def.kind.as_str() == emit.kind.as_str())
-                {
-                    if let Some(cap_def) = caps.get(emit.cap.as_str()) {
-                        let found = cap_def.cap_type.as_str().to_string();
-                        let expected = effect_def.cap_type.as_str().to_string();
-                        if found != expected {
-                            return Err(ValidationError::CapabilityTypeMismatch {
-                                cap: emit.cap.clone(),
-                                effect: emit.kind.as_str().to_string(),
-                                expected,
-                                found,
-                            });
-                        }
+                let expected = effect_cap_types.get(emit.kind.as_str()).ok_or_else(|| {
+                    ValidationError::EffectNotFound {
+                        kind: emit.kind.as_str().to_string(),
                     }
+                })?;
+                let found = cap_type_for_grant(emit.cap.as_str())?;
+                if &found != expected {
+                    return Err(ValidationError::CapabilityTypeMismatch {
+                        cap: emit.cap.clone(),
+                        effect: emit.kind.as_str().to_string(),
+                        expected: expected.clone(),
+                        found,
+                    });
                 }
             }
         }
@@ -817,7 +880,7 @@ pub fn validate_manifest(
             }
         }
         for required in &plan.required_caps {
-            if !cap_exists(required.as_str()) {
+            if !grant_exists(required.as_str()) {
                 return Err(ValidationError::CapabilityNotFound {
                     cap: required.clone(),
                 });
@@ -843,7 +906,28 @@ pub fn validate_manifest(
                 }
             }
             if let Some(cap) = rule.when.cap_name.as_ref() {
-                if !cap_exists(cap.as_str()) {
+                if !grant_exists(cap.as_str()) {
+                    return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
+                }
+            }
+        }
+    }
+
+    for binding in manifest.module_bindings.values() {
+        for cap in binding.slots.values() {
+            if !grant_exists(cap.as_str()) {
+                return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
+            }
+        }
+    }
+
+    for secret in &manifest.secrets {
+        let SecretEntry::Decl(secret) = secret else {
+            continue;
+        };
+        if let Some(policy) = secret.policy.as_ref() {
+            for cap in &policy.allowed_caps {
+                if !grant_exists(cap.as_str()) {
                     return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
                 }
             }
@@ -860,12 +944,26 @@ pub fn validate_manifest(
         }
         if let Some(abi) = module.abi.reducer.as_ref() {
             for schema_ref in [
-                abi.state.as_str(),
-                abi.event.as_str(),
-                abi.annotations.as_ref().map(|s| s.as_str()).unwrap_or(""),
+                Some(abi.state.as_str()),
+                Some(abi.event.as_str()),
+                abi.context.as_ref().map(|s| s.as_str()),
+                abi.annotations.as_ref().map(|s| s.as_str()),
             ]
             .iter()
+            .flatten()
             .filter(|s| !s.is_empty())
+            {
+                if !schema_exists(schema_ref) {
+                    return Err(ValidationError::SchemaNotFound {
+                        schema: schema_ref.to_string(),
+                    });
+                }
+            }
+        }
+        if let Some(abi) = module.abi.pure.as_ref() {
+            for schema_ref in [abi.input.as_str(), abi.output.as_str()]
+                .into_iter()
+                .chain(abi.context.as_ref().map(|s| s.as_str()))
             {
                 if !schema_exists(schema_ref) {
                     return Err(ValidationError::SchemaNotFound {
@@ -907,11 +1005,13 @@ fn classify_reference(reference: &str) -> ReferenceKind {
 mod tests {
     use super::*;
     use crate::{
-        DefModule, DefPlan, DefPolicy, DefSchema, EffectKind, Expr, ExprConst, ExprRecord, ExprRef,
-        HashRef, Manifest, ModuleAbi, ModuleKind, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-        PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
-        PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent, SchemaRef,
-        TypeExpr, TypeRecord, TypeRef, TypeVariant,
+        CapEnforcer, CapGrant, CapType, DefCap, DefModule, DefPlan, DefPolicy, DefSchema,
+        EffectKind, Expr, ExprConst, ExprRecord, ExprRef, HashRef, Manifest, ManifestDefaults,
+        ModuleAbi, ModuleBinding, ModuleKind, NamedRef, PlanBind, PlanBindEffect, PlanEdge,
+        PlanStep, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
+        PlanStepKind, PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent,
+        SchemaRef, SecretDecl, SecretEntry, SecretPolicy, TypeExpr, TypeRecord, TypeRef,
+        TypeVariant, ValueLiteral, ValueRecord,
     };
     use indexmap::IndexMap;
 
@@ -925,6 +1025,7 @@ mod tests {
                 })
                 .into(),
                 cap: "http_cap".into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -1081,6 +1182,7 @@ mod tests {
                 })
                 .into(),
                 cap: "http_cap".into(),
+                idempotency_key: None,
                 bind: PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -1206,10 +1308,12 @@ mod tests {
                     reducer: Some(ReducerAbi {
                         state: SchemaRef::new("sys/TimerFired@1").unwrap(),
                         event: SchemaRef::new("sys/TimerFired@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                         annotations: None,
                         effects_emitted: vec![],
                         cap_slots: IndexMap::new(),
                     }),
+                    pure: None,
                 },
             },
         );
@@ -1286,10 +1390,12 @@ mod tests {
                     reducer: Some(ReducerAbi {
                         state: SchemaRef::new("sys/TimerFired@1").unwrap(),
                         event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                         annotations: None,
                         effects_emitted: vec![],
                         cap_slots: IndexMap::new(),
                     }),
+                    pure: None,
                 },
             },
         );
@@ -1366,10 +1472,12 @@ mod tests {
                     reducer: Some(ReducerAbi {
                         state: SchemaRef::new("com.acme/State@1").unwrap(),
                         event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                         annotations: None,
                         effects_emitted: vec![EffectKind::timer_set()],
                         cap_slots: IndexMap::new(),
                     }),
+                    pure: None,
                 },
             },
         );
@@ -1458,6 +1566,7 @@ mod tests {
                         })
                         .into(),
                         cap: "cap".into(),
+                        idempotency_key: None,
                         bind: PlanBindEffect {
                             effect_id_as: "id".into(),
                         },
@@ -1478,6 +1587,7 @@ mod tests {
                     when: PolicyMatch {
                         effect_kind: Some(bad_kind.clone()),
                         cap_name: None,
+                        cap_type: None,
                         origin_kind: None,
                         origin_name: None,
                     },
@@ -1534,6 +1644,7 @@ mod tests {
                         })
                         .into(),
                         cap: missing_cap.clone(),
+                        idempotency_key: None,
                         bind: PlanBindEffect {
                             effect_id_as: "id".into(),
                         },
@@ -1554,6 +1665,7 @@ mod tests {
                     when: PolicyMatch {
                         effect_kind: None,
                         cap_name: Some(missing_cap.clone()),
+                        cap_type: None,
                         origin_kind: None,
                         origin_name: None,
                     },
@@ -1587,6 +1699,237 @@ mod tests {
             err,
             ValidationError::CapabilityNotFound { cap }
             if cap == missing_cap
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_missing_grant_in_module_binding() {
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::from([(
+                "com.acme/Reducer@1".into(),
+                ModuleBinding {
+                    slots: IndexMap::from([("http".into(), "cap_missing".into())]),
+                },
+            )]),
+            routing: None,
+            triggers: vec![],
+        };
+        let schemas = HashMap::new();
+        let modules = HashMap::new();
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let caps = HashMap::new();
+        let policies = HashMap::new();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::CapabilityNotFound { cap }
+            if cap == "cap_missing"
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_grant_missing_defcap() {
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: Some(ManifestDefaults {
+                policy: None,
+                cap_grants: vec![CapGrant {
+                    name: "cap_http".into(),
+                    cap: "com.acme/http@1".into(),
+                    params: ValueLiteral::Record(ValueRecord {
+                        record: IndexMap::new(),
+                    }),
+                    expiry_ns: None,
+                }],
+            }),
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let schemas = HashMap::new();
+        let modules = HashMap::new();
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let caps = HashMap::new();
+        let policies = HashMap::new();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::CapabilityDefinitionNotFound { cap }
+            if cap == "com.acme/http@1"
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_grant_cap_type_mismatch() {
+        let mut plans = HashMap::new();
+        plans.insert(
+            "com.acme/plan@1".into(),
+            DefPlan {
+                name: "com.acme/plan@1".into(),
+                input: SchemaRef::new("com.acme/Input@1").unwrap(),
+                output: None,
+                locals: IndexMap::new(),
+                steps: vec![
+                    PlanStep {
+                        id: "emit".into(),
+                        kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                            kind: EffectKind::http_request(),
+                            params: Expr::Record(ExprRecord {
+                                record: IndexMap::new(),
+                            })
+                            .into(),
+                            cap: "cap_timer".into(),
+                            idempotency_key: None,
+                            bind: PlanBindEffect {
+                                effect_id_as: "id".into(),
+                            },
+                        }),
+                    },
+                    PlanStep {
+                        id: "end".into(),
+                        kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                    },
+                ],
+                edges: vec![PlanEdge {
+                    from: "emit".into(),
+                    to: "end".into(),
+                    when: None,
+                }],
+                required_caps: vec!["cap_timer".into()],
+                allowed_effects: vec![EffectKind::http_request()],
+                invariants: vec![],
+            },
+        );
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/Input@1".to_string(),
+            DefSchema {
+                name: "com.acme/Input@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        let defcap = DefCap {
+            name: "com.acme/cap@1".into(),
+            cap_type: CapType::timer(),
+            schema: TypeExpr::Record(TypeRecord {
+                record: IndexMap::new(),
+            }),
+            enforcer: CapEnforcer {
+                module: "sys/CapAllowAll@1".into(),
+            },
+        };
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![NamedRef {
+                name: defcap.name.clone(),
+                hash: HashRef::new(
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+                )
+                .unwrap(),
+            }],
+            policies: vec![],
+            secrets: vec![],
+            defaults: Some(ManifestDefaults {
+                policy: None,
+                cap_grants: vec![CapGrant {
+                    name: "cap_timer".into(),
+                    cap: defcap.name.clone(),
+                    params: ValueLiteral::Record(ValueRecord {
+                        record: IndexMap::new(),
+                    }),
+                    expiry_ns: None,
+                }],
+            }),
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let modules = HashMap::new();
+        let effects = HashMap::new();
+        let mut caps = HashMap::new();
+        caps.insert(defcap.name.clone(), defcap);
+        let policies = HashMap::new();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::CapabilityTypeMismatch { cap, expected, found, .. }
+            if cap == "cap_timer" && expected == "http.out" && found == "timer"
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_missing_grant_in_secret_policy() {
+        let secret = SecretDecl {
+            alias: "com.acme/secret@1".into(),
+            version: 1,
+            binding_id: "binding".into(),
+            expected_digest: None,
+            policy: Some(SecretPolicy {
+                allowed_caps: vec!["cap_missing".into()],
+                allowed_plans: vec![],
+            }),
+        };
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![SecretEntry::Decl(secret)],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let schemas = HashMap::new();
+        let modules = HashMap::new();
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let caps = HashMap::new();
+        let policies = HashMap::new();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::CapabilityNotFound { cap }
+            if cap == "cap_missing"
         ));
     }
 }

@@ -54,11 +54,7 @@
       "name": "sys/timer.set@1"
     }
   ],
-  "caps": [
-    {
-      "name": "sys/timer@1"
-    }
-  ],
+  "caps": [],
   "policies": [
     {
       "name": "demo/default_policy@1"
@@ -75,13 +71,6 @@
         }
       }
     ]
-  },
-  "module_bindings": {
-    "demo/RetrySM@1": {
-      "slots": {
-        "timer": "timer_grant"
-      }
-    }
   },
   "routing": {
     "events": [

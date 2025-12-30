@@ -6,7 +6,7 @@
     "schema": {
       "record": {
         "hosts": { "set": { "text": {} } },
-        "verbs": { "set": { "text": {} } }
+        "methods": { "set": { "text": {} } }
       }
     }
   }

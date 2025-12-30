@@ -2,11 +2,13 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name, NamedRef,
-    SecretDecl, SecretEntry, TypeExpr, builtins,
+    PlanStepKind, SecretDecl, SecretEntry, TypeExpr, builtins,
     catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
@@ -14,16 +16,18 @@ use aos_air_types::{
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
-use aos_wasm_abi::{ABI_VERSION, CallContext, DomainEvent, ReducerInput, ReducerOutput};
+use aos_wasm_abi::{ABI_VERSION, DomainEvent, PureInput, PureOutput, ReducerInput, ReducerOutput};
 use serde::Serialize;
 use serde_cbor;
 use serde_cbor::Value as CborValue;
+use getrandom::getrandom;
 
-use crate::capability::CapabilityResolver;
+use crate::cap_enforcer::{CapEnforcerInvoker, PureCapEnforcer};
+use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::cell_index::{CellIndex, CellMeta};
 use crate::effects::EffectManager;
 use crate::error::KernelError;
-use crate::event::{KernelEvent, ReducerEvent};
+use crate::event::{IngressStamp, KernelEvent, ReducerEvent};
 use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
@@ -36,6 +40,7 @@ use crate::journal::{
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
 use crate::policy::{AllowAllPolicy, RulePolicy};
+use crate::pure::PureRegistry;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
 use crate::reducer::ReducerRegistry;
@@ -49,11 +54,47 @@ use crate::snapshot::{
     EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanResultSnapshot,
     ReducerReceiptSnapshot, ReducerStateEntry, receipts_to_vecdeque,
 };
+use std::sync::Mutex;
 
 const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
 const CELL_CACHE_SIZE: usize = 128;
 const MONO_KEY: &[u8] = b"";
+const ENTROPY_LEN: usize = 64;
+
+#[derive(Debug)]
+struct KernelClock {
+    start: Instant,
+    logical_offset_ns: AtomicU64,
+}
+
+impl KernelClock {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+            logical_offset_ns: AtomicU64::new(0),
+        }
+    }
+
+    fn now_wall_ns(&self) -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64
+    }
+
+    fn logical_now_ns(&self) -> u64 {
+        self.logical_offset_ns.load(Ordering::Relaxed) + self.start.elapsed().as_nanos() as u64
+    }
+
+    fn sync_logical_min(&self, target_ns: u64) {
+        let current = self.logical_now_ns();
+        if target_ns > current {
+            self.logical_offset_ns
+                .fetch_add(target_ns - current, Ordering::Relaxed);
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct KernelConfig {
@@ -89,20 +130,24 @@ pub struct Kernel<S: Store> {
     policy_defs: HashMap<Name, DefPolicy>,
     schema_defs: HashMap<Name, DefSchema>,
     reducers: ReducerRegistry<S>,
+    pures: Arc<Mutex<PureRegistry<S>>>,
     router: HashMap<String, Vec<RouteBinding>>,
     plan_registry: PlanRegistry,
     schema_index: Arc<SchemaIndex>,
     reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
+    plan_cap_handles: HashMap<Name, Arc<HashMap<String, CapGrantResolution>>>,
+    module_cap_bindings: HashMap<Name, HashMap<String, CapGrantResolution>>,
     plan_instances: HashMap<u64, PlanInstance>,
     plan_triggers: HashMap<String, Vec<PlanTriggerBinding>>,
     waiting_events: HashMap<String, Vec<u64>>,
-    pending_receipts: HashMap<[u8; 32], u64>,
+    pending_receipts: HashMap<[u8; 32], PendingPlanReceiptInfo>,
     pending_reducer_receipts: HashMap<[u8; 32], ReducerEffectContext>,
     recent_receipts: VecDeque<[u8; 32]>,
     recent_receipt_index: HashSet<[u8; 32]>,
     plan_results: VecDeque<PlanResultEntry>,
     scheduler: Scheduler,
     effect_manager: EffectManager,
+    clock: KernelClock,
     reducer_state: HashMap<Name, ReducerState>,
     reducer_index_roots: HashMap<Name, Hash>,
     snapshot_index: HashMap<JournalSeq, (Hash, Option<Hash>)>,
@@ -121,6 +166,12 @@ pub struct PlanResultEntry {
     pub plan_id: u64,
     pub output_schema: String,
     pub value_cbor: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingPlanReceiptInfo {
+    plan_id: u64,
+    effect_kind: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -456,8 +507,9 @@ impl<S: Store + 'static> Kernel<S> {
             schema_index.as_ref(),
             effect_catalog.clone(),
         )?;
-        ensure_plan_capabilities(&loaded.plans, &capability_resolver)?;
-        ensure_module_capabilities(&loaded.manifest, &capability_resolver)?;
+        let plan_cap_handles = resolve_plan_cap_handles(&loaded.plans, &capability_resolver)?;
+        let module_cap_bindings =
+            resolve_module_cap_bindings(&loaded.manifest, &capability_resolver)?;
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
             .defaults
@@ -488,6 +540,14 @@ impl<S: Store + 'static> Kernel<S> {
             .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
         let manifest_hash = Hash::of_bytes(&manifest_bytes);
 
+        let pures = Arc::new(Mutex::new(PureRegistry::new(
+            store.clone(),
+            config.module_cache_dir.clone(),
+        )?));
+        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
+            PureCapEnforcer::new(Arc::new(loaded.modules.clone()), pures.clone()),
+        ));
+
         let mut kernel = Self {
             store: store.clone(),
             manifest: loaded.manifest.clone(),
@@ -500,7 +560,10 @@ impl<S: Store + 'static> Kernel<S> {
             schema_defs,
             schema_index: schema_index.clone(),
             reducer_schemas: reducer_schemas.clone(),
-            reducers: ReducerRegistry::new(store, config.module_cache_dir.clone())?,
+            plan_cap_handles,
+            module_cap_bindings,
+            reducers: ReducerRegistry::new(store.clone(), config.module_cache_dir.clone())?,
+            pures,
             router,
             plan_registry,
             plan_instances: HashMap::new(),
@@ -517,6 +580,7 @@ impl<S: Store + 'static> Kernel<S> {
                 policy_gate,
                 effect_catalog.clone(),
                 schema_index.clone(),
+                enforcer_invoker,
                 if loaded.secrets.is_empty() {
                     None
                 } else {
@@ -524,6 +588,7 @@ impl<S: Store + 'static> Kernel<S> {
                 },
                 secret_resolver.clone(),
             ),
+            clock: KernelClock::new(),
             reducer_state: HashMap::new(),
             reducer_index_roots: HashMap::new(),
             snapshot_index: HashMap::new(),
@@ -538,7 +603,17 @@ impl<S: Store + 'static> Kernel<S> {
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
-                kernel.reducers.ensure_loaded(name, module_def)?;
+                match module_def.module_kind {
+                    aos_air_types::ModuleKind::Reducer => {
+                        kernel.reducers.ensure_loaded(name, module_def)?;
+                    }
+                    aos_air_types::ModuleKind::Pure => {
+                        let mut pures = kernel.pures.lock().map_err(|_| {
+                            KernelError::Manifest("pure registry lock poisoned".into())
+                        })?;
+                        pures.ensure_loaded(name, module_def)?;
+                    }
+                }
             }
         }
         kernel.replay_existing_entries()?;
@@ -570,6 +645,48 @@ impl<S: Store + 'static> Kernel<S> {
         self.process_domain_event(event)
     }
 
+    pub fn invoke_pure(
+        &mut self,
+        name: &str,
+        input: &PureInput,
+    ) -> Result<PureOutput, KernelError> {
+        let module_def = self
+            .module_defs
+            .get(name)
+            .ok_or_else(|| KernelError::PureNotFound(name.to_string()))?;
+        if module_def.module_kind != aos_air_types::ModuleKind::Pure {
+            return Err(KernelError::Manifest(format!(
+                "module '{name}' is not a pure module"
+            )));
+        }
+        let wants_context = module_def
+            .abi
+            .pure
+            .as_ref()
+            .and_then(|abi| abi.context.as_ref())
+            .is_some();
+        if wants_context && input.ctx.is_none() {
+            return Err(KernelError::Manifest(format!(
+                "pure module '{name}' requires call context"
+            )));
+        }
+        let input = if wants_context {
+            input.clone()
+        } else {
+            PureInput {
+                version: input.version,
+                input: input.input.clone(),
+                ctx: None,
+            }
+        };
+        let mut pures = self
+            .pures
+            .lock()
+            .map_err(|_| KernelError::Manifest("pure registry lock poisoned".into()))?;
+        pures.ensure_loaded(name, module_def)?;
+        pures.invoke(name, &input)
+    }
+
     pub fn tick(&mut self) -> Result<(), KernelError> {
         if let Some(task) = self.scheduler.pop() {
             match task {
@@ -581,17 +698,28 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn process_domain_event(&mut self, event: DomainEvent) -> Result<(), KernelError> {
+        let journal_height = self.journal.next_seq();
+        let stamp = self.sample_ingress(journal_height)?;
+        self.process_domain_event_with_ingress(event, stamp)
+    }
+
+    fn process_domain_event_with_ingress(
+        &mut self,
+        event: DomainEvent,
+        stamp: IngressStamp,
+    ) -> Result<(), KernelError> {
+        Self::validate_entropy(&stamp.entropy)?;
         let event = self.normalize_domain_event(event)?;
-        let routed = self.route_event(&event)?;
+        let routed = self.route_event(&event, &stamp)?;
         let mut event_for_plans = event.clone();
         if event_for_plans.key.is_none() {
             if let Some(key_bytes) = routed.iter().find_map(|ev| ev.event.key.clone()) {
                 event_for_plans.key = Some(key_bytes);
             }
         }
-        self.record_domain_event(&event_for_plans)?;
-        self.deliver_event_to_waiting_plans(&event_for_plans)?;
-        self.start_plans_for_event(&event_for_plans)?;
+        self.record_domain_event(&event_for_plans, &stamp)?;
+        self.deliver_event_to_waiting_plans(&event_for_plans, &stamp)?;
+        self.start_plans_for_event(&event_for_plans, &stamp)?;
         for ev in routed {
             self.scheduler.push_reducer(ev);
         }
@@ -614,7 +742,11 @@ impl<S: Store + 'static> Kernel<S> {
         })
     }
 
-    fn route_event(&self, event: &DomainEvent) -> Result<Vec<ReducerEvent>, KernelError> {
+    fn route_event(
+        &self,
+        event: &DomainEvent,
+        stamp: &IngressStamp,
+    ) -> Result<Vec<ReducerEvent>, KernelError> {
         let mut routed = Vec::new();
         let Some(bindings) = self.router.get(&event.schema) else {
             return Ok(routed);
@@ -633,13 +765,12 @@ impl<S: Store + 'static> Kernel<S> {
                 .module_defs
                 .get(&binding.reducer)
                 .ok_or_else(|| KernelError::ReducerNotFound(binding.reducer.clone()))?;
-            let reducer_schema =
-                self.reducer_schemas.get(&binding.reducer).ok_or_else(|| {
-                    KernelError::Manifest(format!(
-                        "schema for reducer '{}' not found while routing event",
-                        binding.reducer
-                    ))
-                })?;
+            let reducer_schema = self.reducer_schemas.get(&binding.reducer).ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "schema for reducer '{}' not found while routing event",
+                    binding.reducer
+                ))
+            })?;
             let keyed = module_def.key_schema.is_some();
 
             match (keyed, &binding.key_field) {
@@ -661,21 +792,21 @@ impl<S: Store + 'static> Kernel<S> {
             let wrapped_value = match &binding.wrap {
                 EventWrap::Identity => event_value.clone(),
                 EventWrap::Variant { tag } => CborValue::Map(BTreeMap::from([
-                    (
-                        CborValue::Text("$tag".into()),
-                        CborValue::Text(tag.clone()),
-                    ),
+                    (CborValue::Text("$tag".into()), CborValue::Text(tag.clone())),
                     (CborValue::Text("$value".into()), event_value.clone()),
                 ])),
             };
-            let normalized_for_reducer =
-                normalize_value_with_schema(wrapped_value, &reducer_schema.event_schema, &self.schema_index)
-                    .map_err(|err| {
-                        KernelError::Manifest(format!(
-                            "failed to encode event '{}' for reducer '{}': {err}",
-                            event.schema, binding.reducer
-                        ))
-                    })?;
+            let normalized_for_reducer = normalize_value_with_schema(
+                wrapped_value,
+                &reducer_schema.event_schema,
+                &self.schema_index,
+            )
+            .map_err(|err| {
+                KernelError::Manifest(format!(
+                    "failed to encode event '{}' for reducer '{}': {err}",
+                    event.schema, binding.reducer
+                ))
+            })?;
 
             let key_bytes = if let Some(field) = &binding.key_field {
                 let key_schema_ref = module_def
@@ -727,6 +858,7 @@ impl<S: Store + 'static> Kernel<S> {
             routed.push(ReducerEvent {
                 reducer: binding.reducer.clone(),
                 event: routed_event,
+                stamp: stamp.clone(),
             });
         }
         Ok(routed)
@@ -756,17 +888,22 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn handle_reducer_event(&mut self, event: ReducerEvent) -> Result<(), KernelError> {
         let reducer_name = event.reducer.clone();
-        let module_def = self
-            .module_defs
-            .get(&reducer_name)
-            .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.clone()))?;
-        self.reducers.ensure_loaded(&reducer_name, module_def)?;
-
-        let keyed = self
-            .module_defs
-            .get(&reducer_name)
-            .and_then(|m| m.key_schema.as_ref())
-            .is_some();
+        let (keyed, wants_context) = {
+            let module_def = self
+                .module_defs
+                .get(&reducer_name)
+                .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.clone()))?;
+            self.reducers.ensure_loaded(&reducer_name, module_def)?;
+            (
+                module_def.key_schema.is_some(),
+                module_def
+                    .abi
+                    .reducer
+                    .as_ref()
+                    .and_then(|abi| abi.context.as_ref())
+                    .is_some(),
+            )
+        };
         let key = event.event.key.clone();
         if keyed && key.is_none() {
             return Err(KernelError::Manifest(format!(
@@ -815,11 +952,38 @@ impl<S: Store + 'static> Kernel<S> {
             None
         };
 
+        let ctx_bytes = if wants_context {
+            let event_hash = Hash::of_cbor(&event.event)
+                .map_err(|err| KernelError::Manifest(err.to_string()))?
+                .to_hex();
+            let context = aos_wasm_abi::ReducerContext {
+                now_ns: event.stamp.now_ns,
+                logical_now_ns: event.stamp.logical_now_ns,
+                journal_height: event.stamp.journal_height,
+                entropy: event.stamp.entropy.clone(),
+                event_hash,
+                manifest_hash: event.stamp.manifest_hash.clone(),
+                reducer: reducer_name.clone(),
+                key: key.clone(),
+                cell_mode: keyed,
+            };
+            Some(
+                to_canonical_cbor(&context)
+                    .map_err(|err| KernelError::Manifest(err.to_string()))?,
+            )
+        } else {
+            None
+        };
+        self.effect_manager.set_cap_context(crate::effects::CapContext {
+            logical_now_ns: event.stamp.logical_now_ns,
+            journal_height: event.stamp.journal_height,
+            manifest_hash: event.stamp.manifest_hash.clone(),
+        });
         let input = ReducerInput {
             version: ABI_VERSION,
             state: current_state,
             event: event.event.clone(),
-            ctx: CallContext::new(keyed, key.clone()),
+            ctx: ctx_bytes,
         };
         let output = self.reducers.invoke(&reducer_name, &input)?;
         self.handle_reducer_output(reducer_name.clone(), key, keyed, output)?;
@@ -890,19 +1054,34 @@ impl<S: Store + 'static> Kernel<S> {
         }
         for effect in &output.effects {
             let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
-            let cap_name = self
-                .manifest
-                .module_bindings
+            let bound_grant = self
+                .module_cap_bindings
                 .get(&reducer_name)
-                .and_then(|binding| binding.slots.get(&slot))
-                .ok_or_else(|| KernelError::CapabilityBindingMissing {
+                .and_then(|binding| binding.get(&slot));
+            let default_grant = if bound_grant.is_none() && slot == "default" {
+                self.effect_manager
+                    .unique_grant_for_effect_kind(effect.kind.as_str())?
+            } else {
+                None
+            };
+            let grant = bound_grant.or_else(|| default_grant.as_ref()).ok_or_else(|| {
+                KernelError::CapabilityBindingMissing {
                     reducer: reducer_name.clone(),
                     slot: slot.clone(),
-                })?
-                .clone();
+                }
+            })?;
             let intent =
-                self.effect_manager
-                    .enqueue_reducer_effect(&reducer_name, &cap_name, effect)?;
+                match self
+                    .effect_manager
+                    .enqueue_reducer_effect_with_grant(&reducer_name, grant, effect)
+                {
+                    Ok(intent) => intent,
+                    Err(err) => {
+                        self.record_decisions()?;
+                        return Err(err);
+                    }
+                };
+            self.record_decisions()?;
             self.record_effect_intent(
                 &intent,
                 IntentOriginRecord::Reducer {
@@ -947,9 +1126,10 @@ impl<S: Store + 'static> Kernel<S> {
         let pending_plan_receipts = self
             .pending_receipts
             .iter()
-            .map(|(hash, plan_id)| PendingPlanReceiptSnapshot {
-                plan_id: *plan_id,
+            .map(|(hash, entry)| PendingPlanReceiptSnapshot {
+                plan_id: entry.plan_id,
                 intent_hash: *hash,
+                effect_kind: entry.effect_kind.clone(),
             })
             .collect();
         let waiting_events = self
@@ -978,6 +1158,7 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(|entry| entry.to_snapshot())
             .collect();
+        let logical_now_ns = self.effect_manager.logical_now_ns();
         let mut snapshot = KernelSnapshot::new(
             height,
             reducer_state,
@@ -989,6 +1170,7 @@ impl<S: Store + 'static> Kernel<S> {
             queued_effects,
             pending_reducer_receipts,
             plan_results,
+            logical_now_ns,
             Some(*self.manifest_hash.as_bytes()),
         );
         snapshot.set_reducer_index_roots(reducer_index_roots);
@@ -1053,13 +1235,42 @@ impl<S: Store + 'static> Kernel<S> {
     fn apply_replay_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
         match record {
             JournalRecord::DomainEvent(event) => {
-                self.submit_domain_event(event.schema, event.value);
+                self.sync_logical_from_record(event.logical_now_ns);
+                let stamp = IngressStamp {
+                    now_ns: event.now_ns,
+                    logical_now_ns: event.logical_now_ns,
+                    entropy: event.entropy,
+                    journal_height: event.journal_height,
+                    manifest_hash: if event.manifest_hash.is_empty() {
+                        self.manifest_hash.to_hex()
+                    } else {
+                        event.manifest_hash
+                    },
+                };
+                let event = DomainEvent {
+                    schema: event.schema,
+                    value: event.value,
+                    key: event.key,
+                };
+                self.process_domain_event_with_ingress(event, stamp)?;
                 self.tick_until_idle()?;
             }
             JournalRecord::EffectIntent(record) => {
                 self.restore_effect_intent(record)?;
             }
             JournalRecord::EffectReceipt(record) => {
+                self.sync_logical_from_record(record.logical_now_ns);
+                let stamp = IngressStamp {
+                    now_ns: record.now_ns,
+                    logical_now_ns: record.logical_now_ns,
+                    entropy: record.entropy,
+                    journal_height: record.journal_height,
+                    manifest_hash: if record.manifest_hash.is_empty() {
+                        self.manifest_hash.to_hex()
+                    } else {
+                        record.manifest_hash
+                    },
+                };
                 let receipt = EffectReceipt {
                     intent_hash: record.intent_hash,
                     adapter_id: record.adapter_id,
@@ -1068,8 +1279,14 @@ impl<S: Store + 'static> Kernel<S> {
                     cost_cents: record.cost_cents,
                     signature: record.signature,
                 };
-                self.handle_receipt(receipt)?;
+                self.handle_receipt_with_ingress(receipt, stamp)?;
                 self.tick_until_idle()?;
+            }
+            JournalRecord::CapDecision(_) => {
+                // Cap decisions are audit-only; runtime state is rebuilt via replay.
+            }
+            JournalRecord::PolicyDecision(_) => {
+                // Policy decisions are audit-only; runtime state is rebuilt via replay.
             }
             JournalRecord::Snapshot(_) => {
                 // already handled separately
@@ -1176,10 +1393,21 @@ impl<S: Store + 'static> Kernel<S> {
                     ))
                 })?
                 .clone();
+            let cap_handles = self
+                .plan_cap_handles
+                .get(&inst_snapshot.name)
+                .ok_or_else(|| {
+                    KernelError::SnapshotUnavailable(format!(
+                        "plan '{}' missing cap bindings while applying snapshot",
+                        inst_snapshot.name
+                    ))
+                })?
+                .clone();
             let instance = PlanInstance::from_snapshot(
                 inst_snapshot,
                 plan,
                 self.schema_index.clone(),
+                cap_handles,
             );
             self.plan_instances.insert(instance.id, instance);
         }
@@ -1188,7 +1416,15 @@ impl<S: Store + 'static> Kernel<S> {
             .pending_plan_receipts()
             .iter()
             .cloned()
-            .map(|snap| (snap.intent_hash, snap.plan_id))
+            .map(|snap| {
+                (
+                    snap.intent_hash,
+                    PendingPlanReceiptInfo {
+                        plan_id: snap.plan_id,
+                        effect_kind: snap.effect_kind,
+                    },
+                )
+            })
             .collect();
         self.pending_reducer_receipts = snapshot
             .pending_reducer_receipts()
@@ -1206,6 +1442,10 @@ impl<S: Store + 'static> Kernel<S> {
                 .map(|snap| snap.into_intent())
                 .collect(),
         );
+        self.effect_manager
+            .update_logical_now_ns(snapshot.logical_now_ns());
+        self.clock
+            .sync_logical_min(self.effect_manager.logical_now_ns());
 
         self.plan_results.clear();
         for result_snapshot in snapshot.plan_results().iter().cloned() {
@@ -1244,7 +1484,13 @@ impl<S: Store + 'static> Kernel<S> {
             }
             IntentOriginRecord::Plan { name: _, plan_id } => {
                 self.reconcile_plan_replay_identity(plan_id, record.intent_hash);
-                self.pending_receipts.insert(record.intent_hash, plan_id);
+                self.pending_receipts.insert(
+                    record.intent_hash,
+                    PendingPlanReceiptInfo {
+                        plan_id,
+                        effect_kind,
+                    },
+                );
             }
         }
         Ok(())
@@ -1514,6 +1760,10 @@ impl<S: Store + 'static> Kernel<S> {
         }
     }
 
+    pub fn logical_time_now_ns(&self) -> u64 {
+        self.clock.logical_now_ns()
+    }
+
     /// Return snapshot record (hash + manifest hash) for an exact height, if known.
     fn snapshot_at_height(&self, height: JournalSeq) -> Option<(Hash, Option<Hash>)> {
         self.snapshot_index.get(&height).cloned()
@@ -1546,7 +1796,7 @@ impl<S: Store + 'static> Kernel<S> {
     pub fn pending_plan_receipts(&self) -> Vec<(u64, [u8; 32])> {
         self.pending_receipts
             .iter()
-            .map(|(hash, plan_id)| (*plan_id, *hash))
+            .map(|(hash, entry)| (entry.plan_id, *hash))
             .collect()
     }
 
@@ -1809,6 +2059,9 @@ impl<S: Store + 'static> Kernel<S> {
             schema_index.as_ref(),
             effect_catalog.clone(),
         )?;
+        let plan_cap_handles = resolve_plan_cap_handles(&loaded.plans, &capability_resolver)?;
+        let module_cap_bindings =
+            resolve_module_cap_bindings(&loaded.manifest, &capability_resolver)?;
         let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
             .manifest
             .defaults
@@ -1873,14 +2126,20 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             Some(crate::secret::SecretCatalog::new(&self.secrets))
         };
+        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
+            PureCapEnforcer::new(Arc::new(self.module_defs.clone()), self.pures.clone()),
+        ));
         self.effect_manager = EffectManager::new(
             capability_resolver,
             policy_gate,
             effect_catalog,
             schema_index.clone(),
+            enforcer_invoker,
             secret_catalog,
             self.secret_resolver.clone(),
         );
+        self.plan_cap_handles = plan_cap_handles;
+        self.module_cap_bindings = module_cap_bindings;
         Ok(())
     }
 
@@ -1919,7 +2178,11 @@ impl<S: Store + 'static> Kernel<S> {
         self.secret_resolver.clone()
     }
 
-    fn start_plans_for_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+    fn start_plans_for_event(
+        &mut self,
+        event: &DomainEvent,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
         if let Some(plan_bindings) = self.plan_triggers.get(&event.schema) {
             for binding in plan_bindings {
                 if let Some(plan_def) = self.plan_registry.get(&binding.plan) {
@@ -1948,13 +2211,25 @@ impl<S: Store + 'static> Kernel<S> {
                     let correlation =
                         determine_correlation_value(binding, &input, event.key.as_ref());
                     let instance_id = self.scheduler.alloc_plan_id();
-                    let instance = PlanInstance::new(
+                    let cap_handles = self
+                        .plan_cap_handles
+                        .get(&plan_def.name)
+                        .ok_or_else(|| {
+                            KernelError::Manifest(format!(
+                                "plan '{}' missing cap bindings",
+                                plan_def.name
+                            ))
+                        })?
+                        .clone();
+                    let mut instance = PlanInstance::new(
                         instance_id,
                         plan_def.clone(),
                         input,
                         self.schema_index.clone(),
                         correlation,
+                        cap_handles,
                     );
+                    instance.set_context(crate::plan::PlanContext::from_stamp(stamp));
                     self.plan_instances.insert(instance_id, instance);
                     self.scheduler.push_plan(instance_id);
                 }
@@ -1980,12 +2255,30 @@ impl<S: Store + 'static> Kernel<S> {
                     .expect("instance must exist");
                 let name = instance.name.clone();
                 let snapshot = instance.snapshot();
-                let outcome = instance.tick(&mut self.effect_manager)?;
+                if let Some(context) = instance.context().cloned() {
+                    self.effect_manager
+                        .set_cap_context(crate::effects::CapContext {
+                            logical_now_ns: context.logical_now_ns,
+                            journal_height: context.journal_height,
+                            manifest_hash: context.manifest_hash.clone(),
+                        });
+                } else {
+                    self.effect_manager.clear_cap_context();
+                }
+                let outcome = match instance.tick(&mut self.effect_manager) {
+                    Ok(outcome) => outcome,
+                    Err(err) => {
+                        self.record_decisions()?;
+                        return Err(err);
+                    }
+                };
                 (name, outcome, snapshot.step_states)
             };
+            self.record_decisions()?;
             for event in &outcome.raised_events {
                 self.process_domain_event(event.clone())?;
             }
+            let mut intent_kinds = HashMap::new();
             for intent in &outcome.intents_enqueued {
                 self.record_effect_intent(
                     intent,
@@ -1994,9 +2287,23 @@ impl<S: Store + 'static> Kernel<S> {
                         plan_id: id,
                     },
                 )?;
+                intent_kinds.insert(intent.intent_hash, intent.kind.as_str().to_string());
             }
             for hash in &outcome.waiting_receipts {
-                self.pending_receipts.insert(*hash, id);
+                let kind = intent_kinds.get(hash).cloned().or_else(|| {
+                    self.effect_manager
+                        .queued()
+                        .iter()
+                        .find(|intent| intent.intent_hash == *hash)
+                        .map(|intent| intent.kind.as_str().to_string())
+                });
+                self.pending_receipts.insert(
+                    *hash,
+                    PendingPlanReceiptInfo {
+                        plan_id: id,
+                        effect_kind: kind.unwrap_or_else(|| "unknown".into()),
+                    },
+                );
             }
             if let Some(schema) = outcome.waiting_event.clone() {
                 self.waiting_events.entry(schema).or_default().push(id);
@@ -2042,11 +2349,24 @@ impl<S: Store + 'static> Kernel<S> {
         &mut self,
         receipt: aos_effects::EffectReceipt,
     ) -> Result<(), KernelError> {
-        if let Some(plan_id) = self.pending_receipts.remove(&receipt.intent_hash) {
-            self.record_effect_receipt(&receipt)?;
-            if let Some(instance) = self.plan_instances.get_mut(&plan_id) {
+        let journal_height = self.journal.next_seq();
+        let stamp = self.sample_ingress(journal_height)?;
+        self.handle_receipt_with_ingress(receipt, stamp)
+    }
+
+    fn handle_receipt_with_ingress(
+        &mut self,
+        receipt: aos_effects::EffectReceipt,
+        stamp: IngressStamp,
+    ) -> Result<(), KernelError> {
+        Self::validate_entropy(&stamp.entropy)?;
+        if let Some(pending) = self.pending_receipts.remove(&receipt.intent_hash) {
+            self.record_effect_receipt(&receipt, &stamp)?;
+            self.record_decisions()?;
+            if let Some(instance) = self.plan_instances.get_mut(&pending.plan_id) {
+                instance.set_context(crate::plan::PlanContext::from_stamp(&stamp));
                 if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
-                    self.scheduler.push_plan(plan_id);
+                    self.scheduler.push_plan(pending.plan_id);
                 }
                 self.remember_receipt(receipt.intent_hash);
                 return Ok(());
@@ -2054,7 +2374,7 @@ impl<S: Store + 'static> Kernel<S> {
                 log::warn!(
                     "receipt {} arrived for completed plan {}",
                     format_intent_hash(&receipt.intent_hash),
-                    plan_id
+                    pending.plan_id
                 );
                 self.remember_receipt(receipt.intent_hash);
                 return Ok(());
@@ -2070,7 +2390,8 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
-            self.record_effect_receipt(&receipt)?;
+            self.record_effect_receipt(&receipt, &stamp)?;
+            self.record_decisions()?;
             let event = build_reducer_receipt_event(&context, &receipt)?;
             self.process_domain_event(event)?;
             self.remember_receipt(receipt.intent_hash);
@@ -2090,11 +2411,16 @@ impl<S: Store + 'static> Kernel<S> {
         )))
     }
 
-    fn deliver_event_to_waiting_plans(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+    fn deliver_event_to_waiting_plans(
+        &mut self,
+        event: &DomainEvent,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
         if let Some(mut plan_ids) = self.waiting_events.remove(&event.schema) {
             let mut still_waiting = Vec::new();
             for id in plan_ids.drain(..) {
                 if let Some(instance) = self.plan_instances.get_mut(&id) {
+                    instance.set_context(crate::plan::PlanContext::from_stamp(stamp));
                     if instance.deliver_event(event)? {
                         self.scheduler.push_plan(id);
                     } else {
@@ -2150,6 +2476,41 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(JournalRecord::PlanEnded(record))
     }
 
+    fn sample_ingress(&mut self, journal_height: u64) -> Result<IngressStamp, KernelError> {
+        let now_ns = self.clock.now_wall_ns();
+        let sampled_logical = self.clock.logical_now_ns();
+        self.effect_manager.update_logical_now_ns(sampled_logical);
+        let logical_now_ns = self.effect_manager.logical_now_ns();
+        self.clock.sync_logical_min(logical_now_ns);
+
+        let mut entropy = vec![0u8; ENTROPY_LEN];
+        getrandom(&mut entropy).map_err(|err| KernelError::Entropy(err.to_string()))?;
+
+        Ok(IngressStamp {
+            now_ns,
+            logical_now_ns,
+            entropy,
+            journal_height,
+            manifest_hash: self.manifest_hash.to_hex(),
+        })
+    }
+
+    fn validate_entropy(entropy: &[u8]) -> Result<(), KernelError> {
+        if entropy.len() != ENTROPY_LEN {
+            return Err(KernelError::Entropy(format!(
+                "entropy length must be {ENTROPY_LEN} bytes (got {})",
+                entropy.len()
+            )));
+        }
+        Ok(())
+    }
+
+    fn sync_logical_from_record(&mut self, logical_now_ns: u64) {
+        self.effect_manager.update_logical_now_ns(logical_now_ns);
+        let logical_now_ns = self.effect_manager.logical_now_ns();
+        self.clock.sync_logical_min(logical_now_ns);
+    }
+
     fn append_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {
         if self.suppress_journal {
             return Ok(());
@@ -2161,11 +2522,27 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
-    fn record_domain_event(&mut self, event: &DomainEvent) -> Result<(), KernelError> {
+    fn record_domain_event(
+        &mut self,
+        event: &DomainEvent,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
+        if self.suppress_journal {
+            return Ok(());
+        }
+        let event_hash = Hash::of_cbor(event)
+            .map_err(|err| KernelError::Journal(err.to_string()))?
+            .to_hex();
         let record = JournalRecord::DomainEvent(DomainEventRecord {
             schema: event.schema.clone(),
             value: event.value.clone(),
             key: event.key.clone(),
+            now_ns: stamp.now_ns,
+            logical_now_ns: stamp.logical_now_ns,
+            journal_height: stamp.journal_height,
+            entropy: stamp.entropy.clone(),
+            event_hash,
+            manifest_hash: stamp.manifest_hash.clone(),
         });
         self.append_record(record)
     }
@@ -2186,7 +2563,14 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(record)
     }
 
-    fn record_effect_receipt(&mut self, receipt: &EffectReceipt) -> Result<(), KernelError> {
+    fn record_effect_receipt(
+        &mut self,
+        receipt: &EffectReceipt,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
+        if self.suppress_journal {
+            return Ok(());
+        }
         let record = JournalRecord::EffectReceipt(EffectReceiptRecord {
             intent_hash: receipt.intent_hash,
             adapter_id: receipt.adapter_id.clone(),
@@ -2194,8 +2578,25 @@ impl<S: Store + 'static> Kernel<S> {
             payload_cbor: receipt.payload_cbor.clone(),
             cost_cents: receipt.cost_cents,
             signature: receipt.signature.clone(),
+            now_ns: stamp.now_ns,
+            logical_now_ns: stamp.logical_now_ns,
+            journal_height: stamp.journal_height,
+            entropy: stamp.entropy.clone(),
+            manifest_hash: stamp.manifest_hash.clone(),
         });
         self.append_record(record)
+    }
+
+    fn record_decisions(&mut self) -> Result<(), KernelError> {
+        let records = self.effect_manager.drain_cap_decisions();
+        for record in records {
+            self.append_record(JournalRecord::CapDecision(record))?;
+        }
+        let policy_records = self.effect_manager.drain_policy_decisions();
+        for record in policy_records {
+            self.append_record(JournalRecord::PolicyDecision(record))?;
+        }
+        Ok(())
     }
 }
 
@@ -2447,6 +2848,16 @@ mod tests {
         }
     }
 
+    fn dummy_stamp<S: Store + 'static>(kernel: &Kernel<S>) -> IngressStamp {
+        IngressStamp {
+            now_ns: 0,
+            logical_now_ns: 0,
+            entropy: vec![0u8; ENTROPY_LEN],
+            journal_height: 0,
+            manifest_hash: kernel.manifest_hash().to_hex(),
+        }
+    }
+
     fn kernel_with_snapshot(height: JournalSeq) -> Kernel<MemStore> {
         let store = Arc::new(MemStore::default());
         let manifest = minimal_manifest();
@@ -2489,6 +2900,7 @@ mod tests {
             vec![],
             vec![],
             vec![],
+            0,
             Some(*manifest_hash.as_bytes()),
         );
         let snap_bytes = serde_cbor::to_vec(&snapshot).unwrap();
@@ -2531,7 +2943,7 @@ mod tests {
         )])))
         .unwrap();
         let event = DomainEvent::new("com.acme/Event@1", payload);
-        let err = kernel.route_event(&event).unwrap_err();
+        let err = kernel.route_event(&event, &dummy_stamp(&kernel)).unwrap_err();
         assert!(format!("{err:?}").contains("missing key_field"), "{err}");
     }
 
@@ -2544,7 +2956,7 @@ mod tests {
         )])))
         .unwrap();
         let event = DomainEvent::new("com.acme/Event@1", payload);
-        let err = kernel.route_event(&event).unwrap_err();
+        let err = kernel.route_event(&event, &dummy_stamp(&kernel)).unwrap_err();
         assert!(format!("{err:?}").contains("provided key_field"), "{err}");
     }
 
@@ -2557,7 +2969,7 @@ mod tests {
         )])))
         .unwrap();
         let event = DomainEvent::new("com.acme/Event@1", payload);
-        let routed = kernel.route_event(&event).expect("route");
+        let routed = kernel.route_event(&event, &dummy_stamp(&kernel)).expect("route");
         assert_eq!(routed.len(), 1);
         let expected_key = aos_cbor::to_canonical_cbor(&CborValue::Text("abc".into())).unwrap();
         assert_eq!(routed[0].event.key.as_ref().unwrap(), &expected_key);
@@ -2646,10 +3058,12 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new("com.acme/State@1").unwrap(),
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
                 }),
+                pure: None,
             },
         };
         let mut modules = HashMap::new();
@@ -2715,10 +3129,12 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new("com.acme/State@1").unwrap(),
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
                 }),
+                pure: None,
             },
         };
         let mut modules = HashMap::new();
@@ -2783,10 +3199,12 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new("com.acme/State@1").unwrap(),
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
                 }),
+                pure: None,
             },
         };
         let mut modules = HashMap::new();
@@ -2851,10 +3269,12 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new("com.acme/State@1").unwrap(),
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: vec![],
                     cap_slots: Default::default(),
                 }),
+                pure: None,
             },
         };
         let mut modules = HashMap::new();
@@ -3199,6 +3619,11 @@ mod tests {
             payload_cbor: vec![],
             cost_cents: None,
             signature: vec![],
+            now_ns: 0,
+            logical_now_ns: 0,
+            journal_height: 0,
+            entropy: Vec::new(),
+            manifest_hash: String::new(),
         };
         let receipt_bytes = serde_cbor::to_vec(&receipt).unwrap();
         kernel
@@ -3294,13 +3719,12 @@ fn build_router(
     };
 
     for route in &routing.events {
-        let reducer_schema =
-            reducer_schemas
-                .get(&route.reducer)
-                .ok_or_else(|| KernelError::Manifest(format!(
-                    "schema for reducer '{}' not found while building router",
-                    route.reducer
-                )))?;
+        let reducer_schema = reducer_schemas.get(&route.reducer).ok_or_else(|| {
+            KernelError::Manifest(format!(
+                "schema for reducer '{}' not found while building router",
+                route.reducer
+            ))
+        })?;
         let route_event = route.event.as_str();
         let reducer_event_schema = reducer_schema.event_schema_name.as_str();
         if route_event == reducer_event_schema {
@@ -3407,14 +3831,12 @@ fn wrap_for_event_schema(
                     }
                 }
             }
-            found
-                .map(|tag| EventWrap::Variant { tag })
-                .ok_or_else(|| {
-                    KernelError::Manifest(format!(
-                        "event '{event_schema}' is not in reducer schema '{}' family",
-                        reducer_schema.event_schema_name
-                    ))
-                })
+            found.map(|tag| EventWrap::Variant { tag }).ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "event '{event_schema}' is not in reducer schema '{}' family",
+                    reducer_schema.event_schema_name
+                ))
+            })
         }
         _ => Err(KernelError::Manifest(format!(
             "event '{event_schema}' is not in reducer schema '{}' family",
@@ -3423,10 +3845,11 @@ fn wrap_for_event_schema(
     }
 }
 
-fn ensure_plan_capabilities(
-    plans: &HashMap<Name, aos_air_types::DefPlan>,
+fn resolve_plan_cap_handles(
+    plans: &HashMap<Name, DefPlan>,
     resolver: &CapabilityResolver,
-) -> Result<(), KernelError> {
+) -> Result<HashMap<Name, Arc<HashMap<String, CapGrantResolution>>>, KernelError> {
+    let mut plan_caps = HashMap::new();
     for plan in plans.values() {
         for cap in &plan.required_caps {
             if !resolver.has_grant(cap) {
@@ -3436,25 +3859,38 @@ fn ensure_plan_capabilities(
                 });
             }
         }
+        let mut step_caps = HashMap::new();
+        for step in &plan.steps {
+            if let PlanStepKind::EmitEffect(emit) = &step.kind {
+                let resolved = resolver.resolve(emit.cap.as_str(), emit.kind.as_str())?;
+                step_caps.insert(step.id.clone(), resolved);
+            }
+        }
+        plan_caps.insert(plan.name.clone(), Arc::new(step_caps));
     }
-    Ok(())
+    Ok(plan_caps)
 }
 
-fn ensure_module_capabilities(
+fn resolve_module_cap_bindings(
     manifest: &Manifest,
     resolver: &CapabilityResolver,
-) -> Result<(), KernelError> {
+) -> Result<HashMap<Name, HashMap<String, CapGrantResolution>>, KernelError> {
+    let mut bindings = HashMap::new();
     for (module, binding) in &manifest.module_bindings {
-        for (_slot, cap) in &binding.slots {
+        let mut slot_map = HashMap::new();
+        for (slot, cap) in &binding.slots {
             if !resolver.has_grant(cap) {
                 return Err(KernelError::ModuleCapabilityMissing {
                     module: module.clone(),
                     cap: cap.clone(),
                 });
             }
+            let resolved = resolver.resolve_grant(cap)?;
+            slot_map.insert(slot.clone(), resolved);
         }
+        bindings.insert(module.clone(), slot_map);
     }
-    Ok(())
+    Ok(bindings)
 }
 
 fn persist_loaded_manifest<S: Store>(

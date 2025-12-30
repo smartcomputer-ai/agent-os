@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -8,8 +9,8 @@ use aos_host::config::HostConfig;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
 use aos_host::testhost::TestHost;
-use aos_host::util::patch_modules;
 use aos_host::util::reset_journal;
+use aos_host::util::{is_placeholder_hash, patch_modules};
 use aos_kernel::LoadedManifest;
 use aos_kernel::cell_index::CellIndex;
 use aos_kernel::journal::OwnedJournalEntry;
@@ -70,6 +71,20 @@ impl ExampleHost {
 
         maybe_patch_object_catalog(cfg.example_root, store.clone(), &mut loaded_host)?;
         maybe_patch_object_catalog(cfg.example_root, store.clone(), &mut loaded_replay)?;
+
+        let mut sys_module_cache = HashMap::new();
+        maybe_patch_sys_enforcers(
+            cfg.example_root,
+            store.clone(),
+            &mut loaded_host,
+            &mut sys_module_cache,
+        )?;
+        maybe_patch_sys_enforcers(
+            cfg.example_root,
+            store.clone(),
+            &mut loaded_replay,
+            &mut sys_module_cache,
+        )?;
 
         let host_config = HostConfig::default();
         let kernel_config = util::kernel_config(cfg.example_root)?;
@@ -301,6 +316,65 @@ fn maybe_patch_object_catalog(
     });
     if patched == 0 {
         anyhow::bail!("object catalog module missing in manifest");
+    }
+    Ok(())
+}
+
+fn maybe_patch_sys_enforcers(
+    example_root: &Path,
+    store: Arc<FsStore>,
+    loaded: &mut LoadedManifest,
+    cache: &mut HashMap<&'static str, HashRef>,
+) -> Result<()> {
+    for (module_name, bin_name) in [
+        ("sys/CapEnforceHttpOut@1", "cap_enforce_http_out"),
+        ("sys/CapEnforceLlmBasic@1", "cap_enforce_llm_basic"),
+    ] {
+        maybe_patch_sys_module(
+            example_root,
+            store.clone(),
+            loaded,
+            cache,
+            module_name,
+            bin_name,
+        )?;
+    }
+    Ok(())
+}
+
+fn maybe_patch_sys_module(
+    example_root: &Path,
+    store: Arc<FsStore>,
+    loaded: &mut LoadedManifest,
+    cache: &mut HashMap<&'static str, HashRef>,
+    module_name: &'static str,
+    bin_name: &'static str,
+) -> Result<()> {
+    let needs_patch = loaded
+        .modules
+        .get(module_name)
+        .map(is_placeholder_hash)
+        .unwrap_or(false);
+    if !needs_patch {
+        return Ok(());
+    }
+    let wasm_hash_ref = if let Some(existing) = cache.get(module_name) {
+        existing.clone()
+    } else {
+        let cache_dir = example_root.join(".aos").join("cache").join("modules");
+        let wasm_bytes =
+            util::compile_wasm_bin(crate::workspace_root(), "aos-sys", bin_name, &cache_dir)?;
+        let wasm_hash = store
+            .put_blob(&wasm_bytes)
+            .with_context(|| format!("store {module_name} wasm blob"))?;
+        let wasm_hash_ref =
+            HashRef::new(wasm_hash.to_hex()).with_context(|| format!("hash {module_name}"))?;
+        cache.insert(module_name, wasm_hash_ref.clone());
+        wasm_hash_ref
+    };
+    let patched = patch_modules(loaded, &wasm_hash_ref, |name, _| name == module_name);
+    if patched == 0 {
+        anyhow::bail!("module '{module_name}' missing in manifest");
     }
     Ok(())
 }

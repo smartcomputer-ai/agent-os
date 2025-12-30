@@ -8,6 +8,12 @@
       "name": "demo/AggregatorState@1"
     },
     {
+      "name": "demo/AggregatorStart@1"
+    },
+    {
+      "name": "demo/AggregateComplete@1"
+    },
+    {
       "name": "demo/AggregatorEvent@1"
     },
     {
@@ -61,11 +67,11 @@
                 }
               ]
             },
-            "verbs": {
-              "set": [
-                {
-                  "text": "GET"
-                }
+        "methods": {
+          "set": [
+            {
+              "text": "GET"
+            }
               ]
             }
           }
@@ -73,7 +79,6 @@
       }
     ]
   },
-  "module_bindings": {},
   "routing": {
     "events": [
       {

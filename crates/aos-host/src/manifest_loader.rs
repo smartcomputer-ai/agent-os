@@ -12,6 +12,7 @@ use anyhow::{Context, Result, bail};
 use aos_air_types::{
     self as air_types, AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema,
     DefSecret, HashRef, Manifest, Name, NamedRef, SecretEntry, catalog::EffectCatalog,
+    validate_manifest,
 };
 use aos_kernel::{LoadedManifest, governance::ManifestPatch};
 use aos_store::{Catalog, FsStore, Store, load_manifest_from_bytes};
@@ -76,7 +77,19 @@ pub fn load_from_assets(store: Arc<FsStore>, asset_root: &Path) -> Result<Option
     )?;
     patch_manifest_refs(&mut manifest, &hashes)?;
     let catalog = manifest_catalog(&store, manifest)?;
-    Ok(Some(catalog_to_loaded(catalog)))
+    let loaded = catalog_to_loaded(catalog);
+    if let Err(err) = validate_manifest(
+        &loaded.manifest,
+        &loaded.modules,
+        &loaded.schemas,
+        &loaded.plans,
+        &loaded.effects,
+        &loaded.caps,
+        &loaded.policies,
+    ) {
+        bail!("manifest validation failed: {err}");
+    }
+    Ok(Some(loaded))
 }
 
 pub fn manifest_patch_from_loaded(loaded: &LoadedManifest) -> ManifestPatch {
@@ -119,6 +132,7 @@ fn write_nodes(
     let mut hashes = StoredHashes::default();
     for schema in schemas {
         let name = schema.name.clone();
+        reject_sys_name("defschema", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defschema(schema))
             .context("store defschema node")?;
@@ -126,6 +140,7 @@ fn write_nodes(
     }
     for module in modules {
         let name = module.name.clone();
+        reject_sys_name("defmodule", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defmodule(module))
             .context("store defmodule node")?;
@@ -133,6 +148,7 @@ fn write_nodes(
     }
     for plan in plans {
         let name = plan.name.clone();
+        reject_sys_name("defplan", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defplan(plan))
             .context("store defplan node")?;
@@ -140,6 +156,7 @@ fn write_nodes(
     }
     for cap in caps {
         let name = cap.name.clone();
+        reject_sys_name("defcap", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defcap(cap))
             .context("store defcap node")?;
@@ -147,6 +164,7 @@ fn write_nodes(
     }
     for policy in policies {
         let name = policy.name.clone();
+        reject_sys_name("defpolicy", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defpolicy(policy))
             .context("store defpolicy node")?;
@@ -154,6 +172,7 @@ fn write_nodes(
     }
     for secret in secrets {
         let name = secret.name.clone();
+        reject_sys_name("defsecret", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defsecret(secret))
             .context("store defsecret node")?;
@@ -161,6 +180,7 @@ fn write_nodes(
     }
     for effect in effects {
         let name = effect.name.clone();
+        reject_sys_name("defeffect", name.as_str())?;
         let hash = store
             .put_node(&AirNode::Defeffect(effect))
             .context("store defeffect node")?;
@@ -179,6 +199,13 @@ where
         if !seen.insert(name.clone()) {
             bail!("duplicate {kind} '{name}' detected in assets");
         }
+    }
+    Ok(())
+}
+
+fn reject_sys_name(kind: &str, name: &str) -> Result<()> {
+    if name.starts_with("sys/") {
+        bail!("{kind} '{name}' is reserved; sys/* definitions must come from built-ins");
     }
     Ok(())
 }
@@ -235,6 +262,19 @@ fn patch_named_refs(
         } else if kind == "effect" {
             if let Some(builtin) = air_types::builtins::find_builtin_effect(reference.name.as_str())
             {
+                builtin.hash_ref.clone()
+            } else {
+                bail!("manifest references unknown {kind} '{}'", reference.name);
+            }
+        } else if kind == "module" {
+            if let Some(builtin) = air_types::builtins::find_builtin_module(reference.name.as_str())
+            {
+                builtin.hash_ref.clone()
+            } else {
+                bail!("manifest references unknown {kind} '{}'", reference.name);
+            }
+        } else if kind == "cap" {
+            if let Some(builtin) = air_types::builtins::find_builtin_cap(reference.name.as_str()) {
                 builtin.hash_ref.clone()
             } else {
                 bail!("manifest references unknown {kind} '{}'", reference.name);
@@ -504,7 +544,7 @@ mod tests {
     use super::*;
     use aos_air_types::{
         HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef, TypeExpr, TypePrimitive,
-        TypePrimitiveNat,
+        TypePrimitiveNat, TypeRef, TypeVariant,
     };
     use aos_cbor::Hash;
     use indexmap::IndexMap;
@@ -577,9 +617,20 @@ mod tests {
             name: "demo/State@1".into(),
             ty: nat_type(),
         };
+        let event_payload_schema = DefSchema {
+            name: "demo/EventPayload@1".into(),
+            ty: nat_type(),
+        };
         let event_schema = DefSchema {
             name: "demo/Event@1".into(),
-            ty: nat_type(),
+            ty: TypeExpr::Variant(TypeVariant {
+                variant: IndexMap::from([(
+                    "Payload".to_string(),
+                    TypeExpr::Ref(TypeRef {
+                        reference: SchemaRef::new(&event_payload_schema.name).unwrap(),
+                    }),
+                )]),
+            }),
         };
 
         let module = DefModule {
@@ -591,19 +642,26 @@ mod tests {
                 reducer: Some(ReducerAbi {
                     state: SchemaRef::new(&state_schema.name).unwrap(),
                     event: SchemaRef::new(&event_schema.name).unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: Vec::new(),
                     cap_slots: IndexMap::new(),
                 }),
+                pure: None,
             },
         };
 
         let state_node = AirNode::Defschema(state_schema.clone());
+        let event_payload_node = AirNode::Defschema(event_payload_schema.clone());
         let event_node = AirNode::Defschema(event_schema.clone());
         let module_node = AirNode::Defmodule(module.clone());
         write_node(
             &air_dir.join("schemas.air.json"),
-            &[state_node.clone(), event_node.clone()],
+            &[
+                state_node.clone(),
+                event_payload_node.clone(),
+                event_node.clone(),
+            ],
         );
         write_node(&air_dir.join("module.air.json"), &[module_node.clone()]);
 
@@ -611,6 +669,7 @@ mod tests {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![
                 named_ref_from_node(&state_node),
+                named_ref_from_node(&event_payload_node),
                 named_ref_from_node(&event_node),
             ],
             modules: vec![named_ref_from_node(&module_node)],
@@ -651,6 +710,7 @@ mod tests {
         let loaded = loaded.expect("manifest present");
         assert!(loaded.modules.contains_key("demo/Reducer@1"));
         assert!(loaded.schemas.contains_key("demo/State@1"));
+        assert!(loaded.schemas.contains_key("demo/EventPayload@1"));
         assert!(loaded.schemas.contains_key("demo/Event@1"));
     }
 

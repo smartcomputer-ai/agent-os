@@ -27,6 +27,7 @@ fn parses_cap_definition_and_grant() {
         "$kind": "defcap",
         "name": "com.acme/http@1",
         "cap_type": "http.out",
+        "enforcer": { "module": "sys/CapAllowAll@1" },
         "schema": {
             "record": {
                 "hosts": {"set": {"text": {}}}
@@ -51,6 +52,23 @@ fn parses_cap_definition_and_grant() {
 }
 
 #[test]
+fn defaults_enforcer_when_missing() {
+    let cap_json = json!({
+        "$kind": "defcap",
+        "name": "com.acme/http@1",
+        "cap_type": "http.out",
+        "schema": {
+            "record": {
+                "hosts": {"set": {"text": {}}}
+            }
+        }
+    });
+    assert_json_schema(crate::schemas::DEFCAP, &cap_json);
+    let cap: DefCap = serde_json::from_value(cap_json).expect("cap json");
+    assert_eq!(cap.enforcer.module.as_str(), "sys/CapAllowAll@1");
+}
+
+#[test]
 fn rejects_grant_with_wrong_shape() {
     let grant_json = json!({
         "name": "cap_http",
@@ -68,6 +86,7 @@ fn supports_all_cap_types() {
             "$kind": "defcap",
             "name": format!("com.acme/{cap_type}@1"),
             "cap_type": cap_type,
+            "enforcer": { "module": "sys/CapAllowAll@1" },
             "schema": {"record": {}}
         });
         assert_json_schema(crate::schemas::DEFCAP, &cap_json);
@@ -82,6 +101,7 @@ fn accepts_custom_cap_type_strings() {
         "$kind": "defcap",
         "name": "com.acme/unknown@1",
         "cap_type": "email.outbound",
+        "enforcer": { "module": "sys/CapAllowAll@1" },
         "schema": {"record": {}}
     });
     assert_json_schema(crate::schemas::DEFCAP, &cap_json);
@@ -90,22 +110,13 @@ fn accepts_custom_cap_type_strings() {
 }
 
 #[test]
-fn cap_grant_may_include_budget_and_expiry() {
+fn cap_grant_may_include_expiry() {
     let grant_json = json!({
         "name": "cap_llm",
         "cap": "com.acme/llm@1",
         "params": {"record": {}},
-        "expiry_ns": 99,
-        "budget": {
-            "tokens": 1000,
-            "bytes": 2048,
-            "cents": 50
-        }
+        "expiry_ns": 99
     });
     let grant: CapGrant = serde_json::from_value(grant_json).expect("grant json");
-    let budget = grant.budget.expect("budget");
-    assert_eq!(budget.tokens, Some(1000));
-    assert_eq!(budget.bytes, Some(2048));
-    assert_eq!(budget.cents, Some(50));
     assert_eq!(grant.expiry_ns, Some(99));
 }

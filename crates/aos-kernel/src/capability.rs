@@ -1,18 +1,21 @@
 use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{
-    CapGrant, CapGrantBudget, CapType, DefCap, Manifest, Name, TypeExpr, TypeList, TypeMap,
+    CapEnforcer, CapGrant, CapType, DefCap, Manifest, Name, TypeExpr, TypeList, TypeMap,
     TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, builtins,
     catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
 };
-use aos_cbor::to_canonical_cbor;
-use aos_effects::{CapabilityBudget, CapabilityGrant};
+use aos_cbor::Hash;
+use aos_effects::CapabilityGrant;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as Base64Engine;
 use indexmap::IndexMap;
 
 use crate::error::KernelError;
 
 pub trait CapabilityGate {
-    fn resolve(&self, cap_name: &str, effect_kind: &str) -> Result<CapabilityGrant, KernelError>;
+    fn resolve(&self, cap_name: &str, effect_kind: &str)
+    -> Result<CapGrantResolution, KernelError>;
 }
 
 #[derive(Clone)]
@@ -25,7 +28,21 @@ pub struct CapabilityResolver {
 struct ResolvedGrant {
     grant: CapabilityGrant,
     cap_type: CapType,
+    enforcer: CapEnforcer,
+    grant_hash: [u8; 32],
 }
+
+#[derive(Clone)]
+pub struct CapGrantResolution {
+    pub grant: CapabilityGrant,
+    pub cap_type: CapType,
+    pub enforcer: CapEnforcer,
+    pub grant_hash: [u8; 32],
+}
+
+pub const CAP_ALLOW_ALL_ENFORCER: &str = "sys/CapAllowAll@1";
+pub const CAP_HTTP_ENFORCER: &str = "sys/CapEnforceHttpOut@1";
+pub const CAP_LLM_ENFORCER: &str = "sys/CapEnforceLlmBasic@1";
 
 impl CapabilityResolver {
     fn new(grants: HashMap<String, ResolvedGrant>, effect_catalog: Arc<EffectCatalog>) -> Self {
@@ -35,17 +52,29 @@ impl CapabilityResolver {
         }
     }
 
-    pub fn from_runtime_grants<I>(grants: I) -> Self
+    pub fn from_runtime_grants<I>(grants: I) -> Result<Self, KernelError>
     where
         I: IntoIterator<Item = (CapabilityGrant, CapType)>,
     {
         let map = grants
             .into_iter()
-            .map(|(grant, cap_type)| (grant.name.clone(), ResolvedGrant { grant, cap_type }))
-            .collect();
+            .map(|(grant, cap_type)| {
+                let enforcer = default_enforcer_for_cap_type(&cap_type);
+                let grant_hash = compute_grant_hash(&grant, &cap_type)?;
+                Ok((
+                    grant.name.clone(),
+                    ResolvedGrant {
+                        grant,
+                        cap_type,
+                        enforcer,
+                        grant_hash,
+                    },
+                ))
+            })
+            .collect::<Result<HashMap<_, _>, KernelError>>()?;
         let catalog =
             EffectCatalog::from_defs(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
-        Self::new(map, Arc::new(catalog))
+        Ok(Self::new(map, Arc::new(catalog)))
     }
 
     pub fn has_grant(&self, name: &str) -> bool {
@@ -56,7 +85,7 @@ impl CapabilityResolver {
         &self,
         cap_name: &str,
         effect_kind: &str,
-    ) -> Result<CapabilityGrant, KernelError> {
+    ) -> Result<CapGrantResolution, KernelError> {
         let resolved = self
             .grants
             .get(cap_name)
@@ -70,7 +99,44 @@ impl CapabilityResolver {
                 effect_kind: effect_kind.to_string(),
             });
         }
-        Ok(resolved.grant.clone())
+        Ok(CapGrantResolution {
+            grant: resolved.grant.clone(),
+            cap_type: resolved.cap_type.clone(),
+            enforcer: resolved.enforcer.clone(),
+            grant_hash: resolved.grant_hash,
+        })
+    }
+
+    pub fn resolve_grant(&self, cap_name: &str) -> Result<CapGrantResolution, KernelError> {
+        let resolved = self
+            .grants
+            .get(cap_name)
+            .ok_or_else(|| KernelError::CapabilityGrantNotFound(cap_name.to_string()))?;
+        Ok(CapGrantResolution {
+            grant: resolved.grant.clone(),
+            cap_type: resolved.cap_type.clone(),
+            enforcer: resolved.enforcer.clone(),
+            grant_hash: resolved.grant_hash,
+        })
+    }
+
+    pub fn unique_grant_for_effect_kind(
+        &self,
+        effect_kind: &str,
+    ) -> Result<Option<CapGrantResolution>, KernelError> {
+        let expected = expected_cap_type(&self.effect_catalog, effect_kind)?;
+        let mut matches = self.grants.values().filter(|grant| grant.cap_type == expected);
+        let first = matches.next();
+        if first.is_none() || matches.next().is_some() {
+            return Ok(None);
+        }
+        let resolved = first.expect("first checked");
+        Ok(Some(CapGrantResolution {
+            grant: resolved.grant.clone(),
+            cap_type: resolved.cap_type.clone(),
+            enforcer: resolved.enforcer.clone(),
+            grant_hash: resolved.grant_hash,
+        }))
     }
 
     pub fn from_manifest(
@@ -109,30 +175,122 @@ fn resolve_grant(
             reason: err.to_string(),
         }
     })?;
-    let params_cbor = encode_value_literal(&grant.params)?;
+    let params_cbor = encode_value_literal(&grant.params, &expanded_schema, schema_index)?;
     let capability_grant = CapabilityGrant {
         name: grant.name.clone(),
         cap: grant.cap.clone(),
         params_cbor,
         expiry_ns: grant.expiry_ns,
-        budget: grant.budget.as_ref().map(convert_budget),
     };
+    let grant_hash = compute_grant_hash(&capability_grant, &defcap.cap_type)?;
     Ok(ResolvedGrant {
         grant: capability_grant,
         cap_type: defcap.cap_type.clone(),
+        enforcer: defcap.enforcer.clone(),
+        grant_hash,
     })
 }
 
-fn convert_budget(budget: &CapGrantBudget) -> CapabilityBudget {
-    CapabilityBudget {
-        tokens: budget.tokens,
-        bytes: budget.bytes,
-        cents: budget.cents,
+fn compute_grant_hash(
+    grant: &CapabilityGrant,
+    cap_type: &CapType,
+) -> Result<[u8; 32], KernelError> {
+    #[derive(serde::Serialize)]
+    struct GrantHashInput<'a> {
+        defcap_ref: &'a str,
+        cap_type: &'a str,
+        #[serde(with = "serde_bytes")]
+        params_cbor: &'a [u8],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expiry_ns: Option<u64>,
     }
+
+    let input = GrantHashInput {
+        defcap_ref: grant.cap.as_str(),
+        cap_type: cap_type.as_str(),
+        params_cbor: &grant.params_cbor,
+        expiry_ns: grant.expiry_ns,
+    };
+    let hash = Hash::of_cbor(&input).map_err(|err| {
+        KernelError::EffectManager(format!("grant hash encoding failed: {err}"))
+    })?;
+    Ok(*hash.as_bytes())
 }
 
-fn encode_value_literal(value: &ValueLiteral) -> Result<Vec<u8>, KernelError> {
-    to_canonical_cbor(value).map_err(|err| KernelError::CapabilityEncoding(err.to_string()))
+fn encode_value_literal(
+    value: &ValueLiteral,
+    schema: &TypeExpr,
+    schemas: &SchemaIndex,
+) -> Result<Vec<u8>, KernelError> {
+    let cbor_value = literal_to_cbor_value(value)?;
+    let normalized =
+        aos_air_types::value_normalize::normalize_value_with_schema(cbor_value, schema, schemas)
+            .map_err(|err| KernelError::CapabilityEncoding(err.to_string()))?;
+    Ok(normalized.bytes)
+}
+
+fn literal_to_cbor_value(value: &ValueLiteral) -> Result<serde_cbor::Value, KernelError> {
+    use serde_cbor::Value as CborValue;
+    Ok(match value {
+        ValueLiteral::Null(_) => CborValue::Null,
+        ValueLiteral::Bool(v) => CborValue::Bool(v.bool),
+        ValueLiteral::Int(v) => CborValue::Integer(v.int as i128),
+        ValueLiteral::Nat(v) => CborValue::Integer(v.nat as i128),
+        ValueLiteral::Dec128(v) => CborValue::Text(v.dec128.clone()),
+        ValueLiteral::Bytes(v) => {
+            let bytes = Base64Engine
+                .decode(&v.bytes_b64)
+                .map_err(|err| KernelError::CapabilityEncoding(err.to_string()))?;
+            CborValue::Bytes(bytes)
+        }
+        ValueLiteral::Text(v) => CborValue::Text(v.text.clone()),
+        ValueLiteral::TimeNs(v) => CborValue::Integer(v.time_ns as i128),
+        ValueLiteral::DurationNs(v) => CborValue::Integer(v.duration_ns as i128),
+        ValueLiteral::Hash(v) => CborValue::Text(v.hash.as_str().to_string()),
+        ValueLiteral::Uuid(v) => CborValue::Text(v.uuid.clone()),
+        ValueLiteral::List(v) => CborValue::Array(
+            v.list
+                .iter()
+                .map(literal_to_cbor_value)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        ValueLiteral::Set(v) => CborValue::Array(
+            v.set
+                .iter()
+                .map(literal_to_cbor_value)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        ValueLiteral::Map(v) => {
+            let mut map = std::collections::BTreeMap::new();
+            for entry in &v.map {
+                let key = literal_to_cbor_value(&entry.key)?;
+                let value = literal_to_cbor_value(&entry.value)?;
+                map.insert(key, value);
+            }
+            CborValue::Map(map)
+        }
+        ValueLiteral::Record(v) => {
+            let mut map = std::collections::BTreeMap::new();
+            for (key, value) in &v.record {
+                map.insert(CborValue::Text(key.clone()), literal_to_cbor_value(value)?);
+            }
+            CborValue::Map(map)
+        }
+        ValueLiteral::Variant(v) => {
+            let mut map = std::collections::BTreeMap::new();
+            let value = match &v.value {
+                Some(inner) => literal_to_cbor_value(inner)?,
+                None => CborValue::Null,
+            };
+            map.insert(CborValue::Text(v.tag.clone()), value);
+            CborValue::Map(map)
+        }
+        ValueLiteral::SecretRef(_) => {
+            return Err(KernelError::CapabilityEncoding(
+                "secret_ref literals are not supported in capability params".into(),
+            ));
+        }
+    })
 }
 
 fn expected_cap_type(catalog: &EffectCatalog, effect_kind: &str) -> Result<CapType, KernelError> {
@@ -145,6 +303,17 @@ fn expected_cap_type(catalog: &EffectCatalog, effect_kind: &str) -> Result<CapTy
 
 fn cap_type_as_str(cap_type: &CapType) -> &str {
     cap_type.as_str()
+}
+
+fn default_enforcer_for_cap_type(cap_type: &CapType) -> CapEnforcer {
+    let module = match cap_type.as_str() {
+        CapType::HTTP_OUT => CAP_HTTP_ENFORCER,
+        CapType::LLM_BASIC => CAP_LLM_ENFORCER,
+        _ => CAP_ALLOW_ALL_ENFORCER,
+    };
+    CapEnforcer {
+        module: module.to_string(),
+    }
 }
 
 fn expand_cap_schema(
@@ -245,7 +414,6 @@ mod tests {
                     cap: "sys/http.out@1".into(),
                     params,
                     expiry_ns: None,
-                    budget: None,
                 }],
             }),
             module_bindings: IndexMap::new(),
@@ -259,6 +427,9 @@ mod tests {
             name: "sys/http.out@1".into(),
             cap_type: CapType::http_out(),
             schema: hosts_schema(),
+            enforcer: aos_air_types::CapEnforcer {
+                module: "sys/CapEnforceHttpOut@1".into(),
+            },
         }
     }
 
@@ -323,6 +494,9 @@ mod tests {
             schema: TypeExpr::Ref(TypeRef {
                 reference: SchemaRef::new(referenced_schema).expect("schema ref"),
             }),
+            enforcer: aos_air_types::CapEnforcer {
+                module: "sys/CapEnforceHttpOut@1".into(),
+            },
         };
         let schema_index =
             SchemaIndex::new(HashMap::from([(referenced_schema.to_string(), ref_schema)]));

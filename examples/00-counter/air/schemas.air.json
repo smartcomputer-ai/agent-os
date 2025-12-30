@@ -22,15 +22,27 @@
   },
   {
     "$kind": "defschema",
+    "name": "demo/CounterStart@1",
+    "type": {
+      "record": {
+        "target": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/CounterTick@1",
+    "type": {
+      "unit": {}
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demo/CounterEvent@1",
     "type": {
       "variant": {
-        "Start": {
-          "record": {
-            "target": { "nat": {} }
-          }
-        },
-        "Tick": { "unit": {} }
+        "Start": { "ref": "demo/CounterStart@1" },
+        "Tick": { "ref": "demo/CounterTick@1" }
       }
     }
   }

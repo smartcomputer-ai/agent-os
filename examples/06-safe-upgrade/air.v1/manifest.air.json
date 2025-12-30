@@ -8,6 +8,12 @@
       "name": "demo/SafeUpgradeState@1"
     },
     {
+      "name": "demo/SafeUpgradeStart@1"
+    },
+    {
+      "name": "demo/SafeUpgradeNotifyComplete@1"
+    },
+    {
       "name": "demo/SafeUpgradeEvent@1"
     },
     {
@@ -70,7 +76,6 @@
       }
     ]
   },
-  "module_bindings": {},
   "routing": {
     "events": [
       {

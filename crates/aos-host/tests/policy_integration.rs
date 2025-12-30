@@ -4,9 +4,10 @@ use aos_air_types::{
     ReducerAbi, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
 };
 use aos_effects::builtins::HttpRequestParams;
-use helpers::fixtures::{self, TestWorld, zero_hash};
+use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
-use aos_wasm_abi::ReducerEffect;
+use aos_wasm_abi::{PureOutput, ReducerEffect};
+use helpers::fixtures::{self, TestStore, TestWorld, zero_hash};
 use indexmap::IndexMap;
 
 mod helpers;
@@ -40,6 +41,7 @@ fn reducer_http_effect_is_denied() {
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/HttpState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
         cap_slots: Default::default(),
@@ -107,6 +109,7 @@ fn plan_effect_allowed_by_policy() {
                 kind: AirEffectKind::http_request(),
                 params: http_params_literal("https://example.com"),
                 cap: "cap_http".into(),
+                idempotency_key: None,
                 bind: aos_air_types::PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -118,10 +121,11 @@ fn plan_effect_allowed_by_policy() {
         invariants: vec![],
     };
 
+    let enforcer = allow_http_enforcer(&store);
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
-        vec![],
+        vec![enforcer],
         vec![],
     );
     fixtures::insert_test_schemas(
@@ -217,6 +221,7 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
                     kind: AirEffectKind::http_request(),
                     params: ExprOrValue::Expr(params_expr),
                     cap: "cap_http".into(),
+                    idempotency_key: None,
                     bind: aos_air_types::PlanBindEffect {
                         effect_id_as: "req".into(),
                     },
@@ -237,10 +242,11 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
         invariants: vec![],
     };
 
+    let enforcer = allow_http_enforcer(&store);
     let mut loaded = fixtures::build_loaded_manifest(
         vec![plan],
         vec![fixtures::start_trigger(&plan_name)],
-        vec![],
+        vec![enforcer],
         vec![],
     );
 
@@ -304,6 +310,7 @@ fn plan_introspect_denied_by_policy() {
                     )]),
                 })),
                 cap: "query_cap".into(),
+                idempotency_key: None,
                 bind: aos_air_types::PlanBindEffect {
                     effect_id_as: "req".into(),
                 },
@@ -357,6 +364,24 @@ fn plan_introspect_denied_by_policy() {
     );
 }
 
+fn allow_http_enforcer(store: &std::sync::Arc<TestStore>) -> aos_air_types::DefModule {
+    let allow_output = CapCheckOutput {
+        constraints_ok: true,
+        deny: None,
+    };
+    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
+    let pure_output = PureOutput {
+        output: output_bytes,
+    };
+    fixtures::stub_pure_module(
+        store,
+        "sys/CapEnforceHttpOut@1",
+        &pure_output,
+        "sys/CapCheckInput@1",
+        "sys/CapCheckOutput@1",
+    )
+}
+
 #[test]
 fn plan_introspect_missing_capability_is_rejected() {
     let store = fixtures::new_mem_store();
@@ -379,6 +404,7 @@ fn plan_introspect_missing_capability_is_rejected() {
                     )]),
                 })),
                 cap: "query_cap".into(),
+                idempotency_key: None,
                 bind: aos_air_types::PlanBindEffect {
                     effect_id_as: "req".into(),
                 },

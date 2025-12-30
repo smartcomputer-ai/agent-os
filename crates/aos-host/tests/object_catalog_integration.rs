@@ -23,10 +23,10 @@ use std::sync::Arc;
 use aos_air_types::{
     builtins, plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name,
 };
-use helpers::fixtures::{self, TestStore};
 use aos_kernel::Kernel;
 use aos_kernel::journal::OwnedJournalEntry;
 use aos_kernel::journal::mem::MemJournal;
+use helpers::fixtures::{self, TestStore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

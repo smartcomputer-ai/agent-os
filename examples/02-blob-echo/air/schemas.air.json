@@ -26,16 +26,21 @@
   },
   {
     "$kind": "defschema",
+    "name": "demo/BlobEchoStart@1",
+    "type": {
+      "record": {
+        "namespace": { "text": {} },
+        "key": { "text": {} },
+        "data": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demo/BlobEchoEvent@1",
     "type": {
       "variant": {
-        "Start": {
-          "record": {
-            "namespace": { "text": {} },
-            "key": { "text": {} },
-            "data": { "bytes": {} }
-          }
-        },
+        "Start": { "ref": "demo/BlobEchoStart@1" },
         "PutResult": { "ref": "sys/BlobPutResult@1" },
         "GetResult": { "ref": "sys/BlobGetResult@1" }
       }

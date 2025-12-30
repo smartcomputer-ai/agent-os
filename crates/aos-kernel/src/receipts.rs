@@ -238,7 +238,6 @@ mod tests {
     #[test]
     fn blob_put_receipt_event_is_structured() {
         let params = BlobPutParams {
-            namespace: "ns".into(),
             blob_ref: fake_hash(0x10),
         };
         let ctx = ReducerEffectContext::new(
@@ -263,7 +262,7 @@ mod tests {
         }
 
         let decoded: Payload = serde_cbor::from_slice(&event.value).unwrap();
-        assert_eq!(decoded.requested.namespace, "ns");
+        assert_eq!(decoded.requested.blob_ref, params.blob_ref);
         assert_eq!(decoded.receipt.size, 42);
     }
 

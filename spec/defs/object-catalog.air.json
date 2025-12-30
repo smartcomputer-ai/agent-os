@@ -8,6 +8,7 @@
       "reducer": {
         "state": "sys/ObjectVersions@1",
         "event": "sys/ObjectRegistered@1",
+        "context": "sys/ReducerContext@1",
         "effects_emitted": [],
         "cap_slots": {}
       }
@@ -18,6 +19,7 @@
     "$kind": "defcap",
     "name": "sys/catalog.write@1",
     "cap_type": "catalog.write",
+    "enforcer": { "module": "sys/CapAllowAll@1" },
     "schema": {
       "record": {
         "prefixes": {

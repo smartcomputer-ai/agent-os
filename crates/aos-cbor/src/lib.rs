@@ -161,7 +161,7 @@ mod tests {
         let cases = [
             (
                 "spec/schemas/common.schema.json",
-                "sha256:a79ea22f665cbc073b73cbbd632b4123e34ff00338a61b52f5f85460f0b89064",
+                "sha256:f834638e7853dd81983f0113e955488bfe22e3041266a243490de7342b7d309e",
             ),
             (
                 "spec/schemas/defschema.schema.json",
@@ -169,19 +169,19 @@ mod tests {
             ),
             (
                 "spec/schemas/defmodule.schema.json",
-                "sha256:9db4dc958903289dde3e63efc4ebc91e5c4a00fd4a910a0a90b69efa9cb006eb",
+                "sha256:385eb62162445b896c7cae0a9f878bf632da85dd8177b3f678a84b0c7a1078d5",
             ),
             (
                 "spec/schemas/defplan.schema.json",
-                "sha256:524e85de0526b663db63442c48359be53d686c1186da85ef14b7d8887d0c593f",
+                "sha256:86caf331236e164c52ac2f215539d859de4365ab2205049810c3aca230a56316",
             ),
             (
                 "spec/schemas/defcap.schema.json",
-                "sha256:0e5469a59302346e1a116e8db4f5c1a56849fd8e95cd997ece5b251598dcd115",
+                "sha256:bff2e9b2fe8f9224c1882474b3ceb759dd5f6669423f06fe5d52461fb3fd0f68",
             ),
             (
                 "spec/schemas/defpolicy.schema.json",
-                "sha256:10460bec4d5ab5ae0ef1d529f4bb98414c7429f8432e9b048d48c8762aff7b68",
+                "sha256:6c49b5b9fe6023a04559d77b769740a5f2439419e80ea2fe73b2751e6b78a9ff",
             ),
             (
                 "spec/schemas/manifest.schema.json",
@@ -193,7 +193,7 @@ mod tests {
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:6a051ddc5a725b553d22609655ca5bdd46b6563f8c810e420051d885cf7decb1",
+                "sha256:d78ef5e27609e294b744b956dc2c784e9664b92220bdcdb74b051c471e8903df",
             ),
         ];
 
