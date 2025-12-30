@@ -34,7 +34,6 @@ pub struct RequestTimings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlobPutParams {
-    pub namespace: String,
     pub blob_ref: HashRef,
 }
 

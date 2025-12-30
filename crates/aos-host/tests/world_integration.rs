@@ -740,7 +740,6 @@ fn blob_put_receipt_routes_event_to_handler() {
             effects: vec![ReducerEffect::new(
                 aos_effects::EffectKind::BLOB_PUT,
                 serde_cbor::to_vec(&BlobPutParams {
-                    namespace: "docs".into(),
                     blob_ref: fake_hash(0x20),
                 })
                 .unwrap(),

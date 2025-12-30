@@ -136,8 +136,12 @@ fn seed_world(host: &mut ExampleHost, seeds: &[NoteSeed]) -> Result<()> {
 }
 
 fn drive_blob_puts(host: &mut ExampleHost, seeds: &[NoteSeed]) -> Result<()> {
-    let seed_map: HashMap<String, NoteSeed> =
-        seeds.iter().cloned().map(|s| (s.id.clone(), s)).collect();
+    let mut report_by_hash: HashMap<String, (String, Vec<u8>)> = HashMap::new();
+    for seed in seeds {
+        let report = build_report_from_seed(&seed.id, seed);
+        let hash = hash_bytes(&report);
+        report_by_hash.insert(hash, (seed.id.clone(), report));
+    }
     let store = host.store();
     let kernel = host.kernel_mut();
     let mut safety = 0;
@@ -153,24 +157,16 @@ fn drive_blob_puts(host: &mut ExampleHost, seeds: &[NoteSeed]) -> Result<()> {
                 intent.kind
             );
             let params: BlobPutParams = serde_cbor::from_slice(&intent.params_cbor)?;
-            let note_id = params.namespace.clone();
-            let seed = seed_map
-                .get(&note_id)
-                .ok_or_else(|| anyhow!("unknown note seed {note_id}"))?;
-            let report = build_report_from_seed(&note_id, seed);
-            let hash = hash_bytes(&report);
-            ensure!(
-                hash == params.blob_ref.as_str(),
-                "hash mismatch for note {note_id}: plan {:?} vs computed {}",
-                params.blob_ref.as_str(),
-                hash
-            );
+            let blob_ref = params.blob_ref.as_str();
+            let (note_id, report) = report_by_hash
+                .get(blob_ref)
+                .ok_or_else(|| anyhow!("unknown report hash {blob_ref}"))?;
             let stored_hash = store
                 .put_blob(&report)
                 .map_err(|e| anyhow!("store blob: {e}"))?;
             let stored_ref = HashRef::new(stored_hash.to_hex())?;
             ensure!(
-                stored_ref.as_str() == params.blob_ref.as_str(),
+                stored_ref.as_str() == blob_ref,
                 "store hash mismatch for note {note_id}"
             );
 

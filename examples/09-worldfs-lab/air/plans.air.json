@@ -10,7 +10,6 @@
         "kind": "blob.put",
         "params": {
           "record": {
-            "namespace": { "ref": "@plan.input.namespace" },
             "blob_ref": { "ref": "@plan.input.report_hash" }
           }
         },

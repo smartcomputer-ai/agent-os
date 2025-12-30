@@ -116,8 +116,7 @@ fn handle_blob_put(
         .get(&blob_ref)
         .ok_or_else(|| anyhow!("missing blob data for {blob_ref}"))?;
     println!(
-        "     blob.put -> namespace={} blob_ref={} size={} bytes",
-        params.namespace,
+        "     blob.put -> blob_ref={} size={} bytes",
         blob_ref,
         data.len()
     );

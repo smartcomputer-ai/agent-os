@@ -271,7 +271,7 @@ Built-in kinds in v1:
 - receipt: `{ status:int, headers: map{text→text}, body_ref?:hash, timings:{start_ns:nat,end_ns:nat}, adapter_id:text }`
 
 **blob.put**
-- params: `{ namespace:text, blob_ref:hash }`
+- params: `{ blob_ref:hash }`
 - receipt: `{ blob_ref:hash, size:nat }`
 
 **blob.get**
