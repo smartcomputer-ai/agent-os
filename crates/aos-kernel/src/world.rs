@@ -25,7 +25,8 @@ use getrandom::getrandom;
 use crate::cap_enforcer::{CapEnforcerInvoker, PureCapEnforcer};
 use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::cell_index::{CellIndex, CellMeta};
-use crate::effects::EffectManager;
+use crate::effects::{EffectManager, EffectParamPreprocessor};
+use crate::governance_effects::GovernanceParamPreprocessor;
 use crate::error::KernelError;
 use crate::event::{IngressStamp, KernelEvent, ReducerEvent};
 use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
@@ -548,6 +549,11 @@ impl<S: Store + 'static> Kernel<S> {
             PureCapEnforcer::new(Arc::new(loaded.modules.clone()), pures.clone()),
         ));
 
+        let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> =
+            Some(Arc::new(GovernanceParamPreprocessor::new(
+                store.clone(),
+                loaded.manifest.clone(),
+            )));
         let mut kernel = Self {
             store: store.clone(),
             manifest: loaded.manifest.clone(),
@@ -580,6 +586,7 @@ impl<S: Store + 'static> Kernel<S> {
                 policy_gate,
                 effect_catalog.clone(),
                 schema_index.clone(),
+                param_preprocessor,
                 enforcer_invoker,
                 if loaded.secrets.is_empty() {
                     None
@@ -2046,7 +2053,7 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn swap_manifest(&mut self, patch: &ManifestPatch) -> Result<(), KernelError> {
-        let loaded = patch.to_loaded_manifest();
+        let loaded = patch.to_loaded_manifest(self.store.as_ref())?;
         let schema_index = Arc::new(build_schema_index_from_loaded(
             self.store.as_ref(),
             &loaded,
@@ -2083,9 +2090,15 @@ impl<S: Store + 'static> Kernel<S> {
         let manifest_bytes = to_canonical_cbor(&self.manifest)
             .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
         self.manifest_hash = Hash::of_bytes(&manifest_bytes);
+        self.secrets = loaded.secrets;
         self.module_defs = loaded.modules;
+        self.plan_defs = loaded.plans;
+        self.cap_defs = loaded.caps;
+        self.effect_defs = loaded.effects;
+        self.policy_defs = loaded.policies;
+        self.schema_defs = loaded.schemas;
         self.plan_registry = PlanRegistry::default();
-        for plan in loaded.plans.values() {
+        for plan in self.plan_defs.values() {
             self.plan_registry.register(plan.clone());
         }
 
@@ -2129,11 +2142,17 @@ impl<S: Store + 'static> Kernel<S> {
         let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
             PureCapEnforcer::new(Arc::new(self.module_defs.clone()), self.pures.clone()),
         ));
+        let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> =
+            Some(Arc::new(GovernanceParamPreprocessor::new(
+                self.store.clone(),
+                self.manifest.clone(),
+            )));
         self.effect_manager = EffectManager::new(
             capability_resolver,
             policy_gate,
             effect_catalog,
             schema_index.clone(),
+            param_preprocessor,
             enforcer_invoker,
             secret_catalog,
             self.secret_resolver.clone(),

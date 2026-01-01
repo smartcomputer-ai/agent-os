@@ -217,6 +217,8 @@ mod tests {
         assert!(names.contains(&"sys/VaultRotateParams@1"));
         assert!(names.contains(&"sys/VaultRotateReceipt@1"));
         // Governance
+        assert!(names.contains(&"sys/GovPatchInput@1"));
+        assert!(names.contains(&"sys/GovPatchSummary@1"));
         assert!(names.contains(&"sys/GovProposeParams@1"));
         assert!(names.contains(&"sys/GovProposeReceipt@1"));
         assert!(names.contains(&"sys/GovShadowParams@1"));
@@ -260,6 +262,7 @@ mod tests {
             "sys/llm.basic@1",
             "sys/secret@1",
             "sys/catalog.write@1",
+            "sys/governance@1",
         ] {
             assert!(names.contains(&name));
         }
@@ -274,6 +277,7 @@ mod tests {
         for name in [
             "sys/CapEnforceHttpOut@1",
             "sys/CapEnforceLlmBasic@1",
+            "sys/CapEnforceGovernance@1",
             "sys/ObjectCatalog@1",
         ] {
             assert!(names.contains(&name));

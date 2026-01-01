@@ -27,6 +27,10 @@ path = "src/bin/cap_enforce_http_out.rs"
 name = "cap_enforce_llm_basic"
 path = "src/bin/cap_enforce_llm_basic.rs"
 
+[[bin]]
+name = "cap_enforce_governance"
+path = "src/bin/cap_enforce_governance.rs"
+
 [dependencies]
 aos-wasm-sdk = { path = "../aos-wasm-sdk" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }

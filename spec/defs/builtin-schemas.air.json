@@ -333,10 +333,55 @@
 
   {
     "$kind": "defschema",
+    "name": "sys/GovPatchInput@1",
+    "type": {
+      "variant": {
+        "hash": { "hash": {} },
+        "patch_cbor": { "bytes": {} },
+        "patch_doc_json": { "bytes": {} },
+        "patch_blob_ref": {
+          "record": {
+            "blob_ref": { "hash": {} },
+            "format": { "text": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovPatchSummary@1",
+    "type": {
+      "record": {
+        "base_manifest_hash": { "option": { "hash": {} } },
+        "patch_hash": { "hash": {} },
+        "ops": { "set": { "text": {} } },
+        "def_changes": {
+          "list": {
+            "record": {
+              "kind": { "text": {} },
+              "name": { "text": {} },
+              "action": {
+                "variant": {
+                  "added": { "unit": {} },
+                  "removed": { "unit": {} },
+                  "changed": { "unit": {} }
+                }
+              }
+            }
+          }
+        },
+        "manifest_sections": { "set": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/GovProposeParams@1",
     "type": {
       "record": {
-        "patch_hash": { "hash": {} },
+        "patch": { "ref": "sys/GovPatchInput@1" },
+        "summary": { "option": { "ref": "sys/GovPatchSummary@1" } },
         "manifest_base": {
           "option": { "hash": {} },
           "$comment": "When present, must equal patch.base_manifest_hash for the proposal."

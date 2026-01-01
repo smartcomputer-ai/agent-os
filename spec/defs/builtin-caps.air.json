@@ -82,5 +82,20 @@
       }
     },
     "$comment": "Grants write access to the object catalog."
+  },
+  {
+    "$kind": "defcap",
+    "name": "sys/governance@1",
+    "cap_type": "governance",
+    "schema": {
+      "record": {
+        "ops": { "option": { "set": { "text": {} } } },
+        "def_kinds": { "option": { "set": { "text": {} } } },
+        "name_prefixes": { "option": { "set": { "text": {} } } },
+        "manifest_sections": { "option": { "set": { "text": {} } } }
+      }
+    },
+    "enforcer": { "module": "sys/CapEnforceGovernance@1" },
+    "$comment": "Grants governance.* effects under patch-scoped constraints."
   }
 ]

@@ -10,43 +10,40 @@
 - Governance effect schemas and defeffects are defined (plan-only origin) in builtins.
 - Control channel governance verbs are live; CLI can propose/shadow/approve/apply.
 - Safe-upgrade example and control/kernel governance tests exist.
+- Kernel internal adapter handles `governance.*` effects and emits typed receipts.
+- `governance.propose@1` accepts patch variants; kernel preprocessor compiles patch docs/CBOR to canonical patches + summaries.
+- `sys/governance@1` cap + `sys/CapEnforceGovernance@1` enforcer are in builtins (with GovPatchInput/GovPatchSummary schemas).
+- Plan-driven governance loop is covered by new integration tests.
 
 ## What still needs to be done
-- **Plan-driven governance effects**: add the in-kernel effect adapter that handles `governance.*` intents, returns typed receipts, and replays from recorded receipts.
-- **Governance cap type + default policy stub**: embed `sys/governance@1` in builtins and provide a default-deny policy template.
-- **Patch build surface for plans**: add a compile/build path so plans can submit patch docs/CBOR (see options below).
+- **Default-deny governance policy stub**: provide a starter policy template for `sys/governance@1` (optional but helpful).
 - **In-world upgrade requests**: add a system intent schema + manifest trigger so reducers can request upgrades.
-- **Tests/fixtures**: plan-driven loop, policy/cap denials, sequencing errors, hash mismatch, idempotency, and replay determinism.
+- **Tests/fixtures**: policy/cap denials, sequencing errors, idempotency, replay determinism assertions for governance receipts.
 - **CLI polish**: `gov list/show` are still stubs (optional for P1, but useful for operator parity).
 
 ## Proposed work (updated)
-1) **Governance cap design + embed builtin**  
-   - Add `sys/governance@1` defcap to `spec/defs/builtin-caps.air.json` and `aos-air-types` builtin list.  
-   - Enforce constraints via a pure enforcer module (see design below); handler only normalizes/derives summary.
+1) **Governance cap design + embed builtin** (done)  
+   - `sys/governance@1` in builtins + pure enforcer module.  
+   - Handler normalizes/derives summary before enforcement.
 
-2) **Governance effect adapter + receipts**  
-   - Route `governance.propose/shadow/approve/apply` intents through kernel governance APIs.  
-   - Emit receipts that mirror governance journal records (Proposed/ShadowReport/Approved/Applied).  
-   - Enforce `GovProposeParams.manifest_base == patch.base_manifest_hash` when provided.  
-   - Use idempotency keys to fence duplicates; reject invalid sequencing.
+2) **Governance effect adapter + receipts** (done)  
+   - `governance.propose/shadow/approve/apply` routed through kernel governance APIs.  
+   - Typed receipts emitted; manifest_base check enforced.  
+   - Sequencing errors surfaced via error receipts.
 
-3) **Patch build surface for plans**  
-   - Lock-in: extend `governance.propose@1` params to accept a variant `patch` input:
-     - `patch = { hash }` where `hash` is the canonical **ManifestPatch CBOR** hash (no JSON form here).
-     - `patch = { patch_cbor }` for raw ManifestPatch CBOR bytes.
-     - `patch = { patch_doc_json }` for PatchDocument JSON bytes.
-     - `patch = { patch_blob_ref, format }` with `format = "manifest_patch_cbor" | "patch_doc_json"` for large payloads.
-   - The handler compiles PatchDocument inputs to a canonical ManifestPatch, stores nodes, computes `patch_hash`, and returns it in the receipt.
-   - No separate `patch.compile` step for P1; keep the single-step propose flow to mirror control.
+3) **Patch build surface for plans** (done)  
+   - `governance.propose@1` accepts `patch` variant input (`hash`, `patch_cbor`, `patch_doc_json`, `patch_blob_ref`).  
+   - PatchDocument inputs compile to canonical ManifestPatch + summary.  
+   - No separate `patch.compile` step in P1.
 
-4) **Plan surface + triggers**  
-   - Introduce `sys/GovActionRequested@1` (or similar) so reducers can emit upgrade requests.  
+4) **Plan surface + triggers** (remaining)  
+   - Introduce `sys/GovActionRequested@1` (or similar) for reducer-driven requests.  
    - Add manifest triggers to launch privileged upgrade plans.  
-   - Document the pattern: reducer intent -> upgrade plan -> governance effects -> result event to reducer.
+   - Document: reducer intent -> upgrade plan -> governance effects -> result event to reducer.
 
-5) **Tests/fixtures**  
-   - Integration test: plan-driven loop end-to-end with receipts and replay.  
-   - Negative cases: policy deny, cap missing, sequencing errors, manifest_base mismatch, duplicate apply.
+5) **Tests/fixtures** (partial)  
+   - Plan-driven loop is covered.  
+   - Remaining negative cases: policy/cap denials, sequencing/idempotency edges, replay determinism checks for governance receipts.
 
 ## Governance cap design (proposal)
 Design the cap in terms of patch operations and manifest surfaces, since patches are the upgrade unit. Keep cap enforcement in pure modules (per v0.5 caps/policy) and give the enforcer a canonical, minimal patch summary rather than the full patch payload.

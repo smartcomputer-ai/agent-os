@@ -60,6 +60,7 @@ pub struct EffectManager {
     policy_gate: Box<dyn PolicyGate>,
     effect_catalog: Arc<EffectCatalog>,
     schema_index: Arc<SchemaIndex>,
+    param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>>,
     cap_decisions: Vec<CapDecisionRecord>,
     policy_decisions: Vec<PolicyDecisionRecord>,
     logical_now_ns: u64,
@@ -69,12 +70,22 @@ pub struct EffectManager {
     secret_resolver: Option<Arc<dyn SecretResolver>>,
 }
 
+pub trait EffectParamPreprocessor: Send + Sync {
+    fn preprocess(
+        &self,
+        source: &EffectSource,
+        kind: &EffectKind,
+        params_cbor: Vec<u8>,
+    ) -> Result<Vec<u8>, KernelError>;
+}
+
 impl EffectManager {
     pub fn new(
         capability_gate: CapabilityResolver,
         policy_gate: Box<dyn PolicyGate>,
         effect_catalog: Arc<EffectCatalog>,
         schema_index: Arc<SchemaIndex>,
+        param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>>,
         enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>>,
         secret_catalog: Option<crate::secret::SecretCatalog>,
         secret_resolver: Option<Arc<dyn SecretResolver>>,
@@ -85,6 +96,7 @@ impl EffectManager {
             policy_gate,
             effect_catalog,
             schema_index,
+            param_preprocessor,
             cap_decisions: Vec::new(),
             policy_decisions: Vec::new(),
             logical_now_ns: 0,
@@ -216,6 +228,12 @@ impl EffectManager {
                 ));
             }
         }
+
+        let params_cbor = if let Some(preprocessor) = &self.param_preprocessor {
+            preprocessor.preprocess(&source, &runtime_kind, params_cbor)?
+        } else {
+            params_cbor
+        };
 
         let canonical_params = normalize_effect_params(
             &self.effect_catalog,
@@ -775,6 +793,7 @@ mod tests {
             Box::new(crate::policy::AllowAllPolicy),
             effect_catalog,
             schema_index,
+            None,
             None,
             None,
             None,

@@ -1,12 +1,20 @@
-use aos_cbor::{Hash, to_canonical_cbor};
+use aos_air_types::HashRef;
+use aos_cbor::to_canonical_cbor;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use serde::{Deserialize, Serialize};
 
 use crate::cell_index::CellMeta;
+use crate::governance_effects::{
+    GovApplyParams, GovApplyReceipt, GovApprovalDecision, GovApproveParams, GovApproveReceipt,
+    GovPatchInput, GovProposeParams, GovProposeReceipt, GovShadowParams, GovShadowReceipt,
+    GovPredictedEffect, GovPendingReceipt, GovPlanResultPreview, GovLedgerDelta, GovLedgerKind,
+    GovDeltaKind,
+};
 use crate::query::{Consistency, ReadMeta, StateReader};
 use crate::{Kernel, KernelError};
 
-const ADAPTER_ID: &str = "kernel.introspect";
+const INTROSPECT_ADAPTER_ID: &str = "kernel.introspect";
+const GOVERNANCE_ADAPTER_ID: &str = "kernel.governance";
 
 /// Kinds handled entirely inside the kernel (no host adapter).
 pub(crate) static INTERNAL_EFFECT_KINDS: &[&str] = &[
@@ -14,6 +22,10 @@ pub(crate) static INTERNAL_EFFECT_KINDS: &[&str] = &[
     "introspect.reducer_state",
     "introspect.journal_head",
     "introspect.list_cells",
+    "governance.propose",
+    "governance.shadow",
+    "governance.approve",
+    "governance.apply",
 ];
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -104,7 +116,7 @@ where
 {
     /// Handle an internal effect intent and return its receipt if the kind is supported.
     pub fn handle_internal_intent(
-        &self,
+        &mut self,
         intent: &EffectIntent,
     ) -> Result<Option<EffectReceipt>, KernelError> {
         if !INTERNAL_EFFECT_KINDS.contains(&intent.kind.as_str()) {
@@ -116,13 +128,22 @@ where
             EffectKind::INTROSPECT_REDUCER_STATE => self.handle_reducer_state(intent),
             EffectKind::INTROSPECT_JOURNAL_HEAD => self.handle_journal_head(intent),
             EffectKind::INTROSPECT_LIST_CELLS => self.handle_list_cells(intent),
+            "governance.propose" => self.handle_governance_propose(intent),
+            "governance.shadow" => self.handle_governance_shadow(intent),
+            "governance.approve" => self.handle_governance_approve(intent),
+            "governance.apply" => self.handle_governance_apply(intent),
             _ => unreachable!("guard ensures only internal kinds reach here"),
         };
 
+        let adapter_id = if intent.kind.as_str().starts_with("governance.") {
+            GOVERNANCE_ADAPTER_ID
+        } else {
+            INTROSPECT_ADAPTER_ID
+        };
         let receipt = match receipt_result {
             Ok(payload_cbor) => EffectReceipt {
                 intent_hash: intent.intent_hash,
-                adapter_id: ADAPTER_ID.to_string(),
+                adapter_id: adapter_id.to_string(),
                 status: ReceiptStatus::Ok,
                 payload_cbor,
                 cost_cents: Some(0),
@@ -130,7 +151,7 @@ where
             },
             Err(err) => EffectReceipt {
                 intent_hash: intent.intent_hash,
-                adapter_id: ADAPTER_ID.to_string(),
+                adapter_id: adapter_id.to_string(),
                 status: ReceiptStatus::Error,
                 payload_cbor: Vec::new(),
                 cost_cents: Some(0),
@@ -198,6 +219,151 @@ where
         };
         Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
     }
+
+    fn handle_governance_propose(&mut self, intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
+        let params: GovProposeParams = intent
+            .params()
+            .map_err(|e| KernelError::Manifest(format!("decode gov.propose params: {e}")))?;
+        let patch_hash = match &params.patch {
+            GovPatchInput::Hash(hash) => hash.clone(),
+            _ => {
+                return Err(KernelError::Manifest(
+                    "gov.propose params must use patch hash input after normalization".into(),
+                ));
+            }
+        };
+        let patch =
+            crate::governance_effects::load_patch_by_hash(self.store().as_ref(), &patch_hash)?;
+        let proposal_id = self.submit_proposal(patch, params.description.clone())?;
+        let receipt = GovProposeReceipt {
+            proposal_id,
+            patch_hash,
+            manifest_base: params.manifest_base.clone(),
+        };
+        Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
+    }
+
+    fn handle_governance_shadow(&mut self, intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
+        let params: GovShadowParams = intent
+            .params()
+            .map_err(|e| KernelError::Manifest(format!("decode gov.shadow params: {e}")))?;
+        let summary = self.run_shadow(params.proposal_id, None)?;
+        let receipt = GovShadowReceipt {
+            proposal_id: params.proposal_id,
+            manifest_hash: HashRef::new(summary.manifest_hash)
+                .map_err(|e| KernelError::Manifest(format!("invalid manifest hash: {e}")))?,
+            predicted_effects: summary
+                .predicted_effects
+                .into_iter()
+                .map(|effect| {
+                    let intent_hash = hash_ref_from_hex(&effect.intent_hash)?;
+                    let params_json = match effect.params_json {
+                        Some(value) => Some(
+                            serde_json::to_string(&value).map_err(|err| {
+                                KernelError::Manifest(format!("encode params_json: {err}"))
+                            })?,
+                        ),
+                        None => None,
+                    };
+                    Ok(GovPredictedEffect {
+                        kind: effect.kind,
+                        cap: effect.cap,
+                        intent_hash,
+                        params_json,
+                    })
+                })
+                .collect::<Result<Vec<_>, KernelError>>()?,
+            pending_receipts: summary
+                .pending_receipts
+                .into_iter()
+                .map(|pending| {
+                    Ok(GovPendingReceipt {
+                        plan_id: pending.plan_id,
+                        plan: pending.plan,
+                        intent_hash: hash_ref_from_hex(&pending.intent_hash)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, KernelError>>()?,
+            plan_results: summary
+                .plan_results
+                .into_iter()
+                .map(|result| GovPlanResultPreview {
+                    plan: result.plan,
+                    plan_id: result.plan_id,
+                    output_schema: result.output_schema,
+                })
+                .collect(),
+            ledger_deltas: summary
+                .ledger_deltas
+                .into_iter()
+                .map(|delta| GovLedgerDelta {
+                    ledger: match delta.ledger {
+                        crate::shadow::LedgerKind::Capability => GovLedgerKind::Capability,
+                        crate::shadow::LedgerKind::Policy => GovLedgerKind::Policy,
+                    },
+                    name: delta.name,
+                    change: match delta.change {
+                        crate::shadow::DeltaKind::Added => GovDeltaKind::Added,
+                        crate::shadow::DeltaKind::Removed => GovDeltaKind::Removed,
+                        crate::shadow::DeltaKind::Changed => GovDeltaKind::Changed,
+                    },
+                })
+                .collect(),
+        };
+        Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
+    }
+
+    fn handle_governance_approve(&mut self, intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
+        let params: GovApproveParams = intent
+            .params()
+            .map_err(|e| KernelError::Manifest(format!("decode gov.approve params: {e}")))?;
+        let proposal = self
+            .governance()
+            .proposals()
+            .get(&params.proposal_id)
+            .ok_or(KernelError::ProposalNotFound(params.proposal_id))?;
+        let patch_hash = HashRef::new(proposal.patch_hash.clone())
+            .map_err(|e| KernelError::Manifest(format!("invalid patch hash: {e}")))?;
+        match params.decision {
+            GovApprovalDecision::Approve => self.approve_proposal(params.proposal_id, params.approver.clone())?,
+            GovApprovalDecision::Reject => self.reject_proposal(params.proposal_id, params.approver.clone())?,
+        }
+        let receipt = GovApproveReceipt {
+            proposal_id: params.proposal_id,
+            decision: params.decision,
+            patch_hash,
+            approver: params.approver,
+            reason: params.reason,
+        };
+        Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
+    }
+
+    fn handle_governance_apply(&mut self, intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
+        let params: GovApplyParams = intent
+            .params()
+            .map_err(|e| KernelError::Manifest(format!("decode gov.apply params: {e}")))?;
+        let proposal = self
+            .governance()
+            .proposals()
+            .get(&params.proposal_id)
+            .ok_or(KernelError::ProposalNotFound(params.proposal_id))?;
+        let patch_hash = HashRef::new(proposal.patch_hash.clone())
+            .map_err(|e| KernelError::Manifest(format!("invalid patch hash: {e}")))?;
+        self.apply_proposal(params.proposal_id)?;
+        let manifest_hash_new = HashRef::new(self.manifest_hash().to_hex())
+            .map_err(|e| KernelError::Manifest(format!("invalid manifest hash: {e}")))?;
+        let receipt = GovApplyReceipt {
+            proposal_id: params.proposal_id,
+            manifest_hash_new,
+            patch_hash,
+        };
+        Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
+    }
+}
+
+fn hash_ref_from_hex(hex: &str) -> Result<HashRef, KernelError> {
+    let value = format!("sha256:{hex}");
+    HashRef::new(value).map_err(|e| KernelError::Manifest(format!("invalid hash: {e}")))
 }
 
 fn to_meta(meta: &ReadMeta) -> MetaSer {
@@ -248,7 +414,7 @@ mod tests {
 
     #[test]
     fn manifest_intent_produces_receipt() {
-        let kernel = open_kernel();
+        let mut kernel = open_kernel();
         let params = ManifestParams {
             consistency: "head".into(),
         };
@@ -279,7 +445,7 @@ mod tests {
 
     #[test]
     fn invalid_params_returns_error_receipt() {
-        let kernel = open_kernel();
+        let mut kernel = open_kernel();
         // bogus CBOR payload
         let intent = EffectIntent {
             kind: EffectKind::introspect_manifest(),
@@ -293,12 +459,12 @@ mod tests {
             .unwrap()
             .expect("handled");
         assert_eq!(receipt.status, ReceiptStatus::Error);
-        assert_eq!(receipt.adapter_id, ADAPTER_ID);
+        assert_eq!(receipt.adapter_id, INTROSPECT_ADAPTER_ID);
     }
 
     #[test]
     fn list_cells_empty_for_non_keyed() {
-        let kernel = open_kernel();
+        let mut kernel = open_kernel();
         let params = ListCellsParams {
             reducer: "missing/Reducer@1".into(),
         };
