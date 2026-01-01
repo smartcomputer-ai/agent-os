@@ -5,7 +5,7 @@ use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::DefListing;
 use aos_kernel::KernelHeights;
 use aos_kernel::ReadMeta;
-use aos_kernel::governance::ManifestPatch;
+use aos_kernel::governance::{ManifestPatch, Proposal, ProposalState};
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::PatchDocument;
 use aos_kernel::shadow::ShadowSummary;
@@ -580,6 +580,50 @@ async fn handle_request(
                 inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({}))
             }
+            "gov-list" => {
+                let status = req
+                    .payload
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("pending");
+                let filter = parse_gov_list_filter(status)?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx.send(ControlMsg::GovList { resp: tx }).await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let proposals = inner.map_err(ControlError::host)?;
+                let list: Vec<serde_json::Value> = proposals
+                    .into_iter()
+                    .filter(|p| filter.matches(&p.state))
+                    .map(proposal_list_json)
+                    .collect();
+                let meta = world_meta(&control_tx).await?;
+                Ok(serde_json::json!({ "proposals": list, "meta": meta_to_json(&meta) }))
+            }
+            "gov-get" => {
+                let proposal_id = req
+                    .payload
+                    .get("proposal_id")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| ControlError::invalid_request("missing proposal_id"))?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::GovGet {
+                        proposal_id,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let proposal = inner.map_err(ControlError::host)?;
+                let meta = world_meta(&control_tx).await?;
+                Ok(serde_json::json!({
+                    "proposal": proposal_detail_json(proposal),
+                    "meta": meta_to_json(&meta)
+                }))
+            }
             _ => Err(ControlError::unknown_method()),
         }
     })()
@@ -639,12 +683,87 @@ struct ApplyPayload {
     proposal_id: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum GovListFilter {
+    Pending,
+    Approved,
+    Applied,
+    Rejected,
+    All,
+    Submitted,
+    Shadowed,
+}
+
 fn default_approve() -> String {
     "approve".into()
 }
 
 fn default_approver() -> String {
     "control-client".into()
+}
+
+fn parse_gov_list_filter(status: &str) -> Result<GovListFilter, ControlError> {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "pending" => Ok(GovListFilter::Pending),
+        "approved" => Ok(GovListFilter::Approved),
+        "applied" => Ok(GovListFilter::Applied),
+        "rejected" => Ok(GovListFilter::Rejected),
+        "all" => Ok(GovListFilter::All),
+        "submitted" => Ok(GovListFilter::Submitted),
+        "shadowed" => Ok(GovListFilter::Shadowed),
+        other => Err(ControlError::invalid_request(format!(
+            "invalid status '{other}' (expected pending, approved, applied, rejected, all, submitted, shadowed)"
+        ))),
+    }
+}
+
+impl GovListFilter {
+    fn matches(self, state: &ProposalState) -> bool {
+        match self {
+            GovListFilter::Pending => {
+                matches!(state, ProposalState::Submitted | ProposalState::Shadowed)
+            }
+            GovListFilter::Approved => matches!(state, ProposalState::Approved),
+            GovListFilter::Applied => matches!(state, ProposalState::Applied),
+            GovListFilter::Rejected => matches!(state, ProposalState::Rejected),
+            GovListFilter::All => true,
+            GovListFilter::Submitted => matches!(state, ProposalState::Submitted),
+            GovListFilter::Shadowed => matches!(state, ProposalState::Shadowed),
+        }
+    }
+}
+
+fn proposal_state_str(state: &ProposalState) -> &'static str {
+    match state {
+        ProposalState::Submitted => "submitted",
+        ProposalState::Shadowed => "shadowed",
+        ProposalState::Approved => "approved",
+        ProposalState::Rejected => "rejected",
+        ProposalState::Applied => "applied",
+    }
+}
+
+fn proposal_list_json(proposal: Proposal) -> serde_json::Value {
+    let state = proposal_state_str(&proposal.state);
+    serde_json::json!({
+        "id": proposal.id,
+        "description": proposal.description,
+        "patch_hash": proposal.patch_hash,
+        "state": state,
+        "approver": proposal.approver,
+    })
+}
+
+fn proposal_detail_json(proposal: Proposal) -> serde_json::Value {
+    let state = proposal_state_str(&proposal.state);
+    serde_json::json!({
+        "id": proposal.id,
+        "description": proposal.description,
+        "patch_hash": proposal.patch_hash,
+        "state": state,
+        "approver": proposal.approver,
+        "shadow_summary": proposal.shadow_summary,
+    })
 }
 
 fn validate_patch_doc(doc: &serde_json::Value) -> Result<(), ControlError> {

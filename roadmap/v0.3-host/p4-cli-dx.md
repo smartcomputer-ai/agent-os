@@ -208,11 +208,11 @@ List governance proposals.
 
 Control verb: `gov-list` (read-only introspection).
 
-#### `world gov show --id <proposal-id>`
+#### `world gov get --id <proposal-id>`
 
 Show details of a specific proposal.
 
-Control verb: `gov-show` (read-only introspection).
+Control verb: `gov-get` (read-only introspection).
 
 ## Control Verb Mapping
 
@@ -230,7 +230,7 @@ Control verb: `gov-show` (read-only introspection).
 | `gov approve` | `approve` | |
 | `gov apply` | `apply` | |
 | `gov list` | `gov-list` | |
-| `gov show` | `gov-show` | |
+| `gov get` | `gov-get` | |
 
 ## Implementation Notes
 

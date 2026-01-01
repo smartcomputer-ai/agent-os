@@ -23,10 +23,11 @@ use crate::adapters::timer::TimerScheduler;
 use crate::error::HostError;
 use crate::host::{ExternalEvent, RunMode, WorldHost};
 use aos_kernel::cell_index::CellMeta;
-use aos_kernel::governance::ManifestPatch;
+use aos_kernel::governance::{ManifestPatch, Proposal};
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::{PatchDocument, compile_patch_document};
 use aos_kernel::shadow::ShadowSummary;
+use aos_kernel::KernelError;
 
 /// Convert a `std::time::Instant` to a `tokio::time::Instant`.
 ///
@@ -117,6 +118,13 @@ pub enum ControlMsg {
     GovApply {
         proposal_id: u64,
         resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    GovList {
+        resp: oneshot::Sender<Result<Vec<Proposal>, HostError>>,
+    },
+    GovGet {
+        proposal_id: u64,
+        resp: oneshot::Sender<Result<Proposal, HostError>>,
     },
 }
 
@@ -441,6 +449,32 @@ impl<S: Store + 'static> WorldDaemon<S> {
                     .host
                     .kernel_mut()
                     .apply_proposal(proposal_id)
+                    .map_err(HostError::from);
+                let _ = resp.send(res);
+            }
+            ControlMsg::GovList { resp } => {
+                tracing::info!("Governance list via control");
+                let mut proposals: Vec<Proposal> = self
+                    .host
+                    .kernel()
+                    .governance()
+                    .proposals()
+                    .values()
+                    .cloned()
+                    .collect();
+                proposals.sort_by_key(|p| p.id);
+                let _ = resp.send(Ok(proposals));
+            }
+            ControlMsg::GovGet { proposal_id, resp } => {
+                tracing::info!("Governance get via control");
+                let res = self
+                    .host
+                    .kernel()
+                    .governance()
+                    .proposals()
+                    .get(&proposal_id)
+                    .cloned()
+                    .ok_or_else(|| KernelError::ProposalNotFound(proposal_id))
                     .map_err(HostError::from);
                 let _ = resp.send(res);
             }

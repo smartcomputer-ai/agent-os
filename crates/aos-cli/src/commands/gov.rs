@@ -1,9 +1,10 @@
-//! `aos gov` governance commands (stubs).
+//! `aos gov` governance commands.
 
 use std::fs;
 use std::path::PathBuf;
 
 use crate::opts::{ResolvedDirs, WorldOpts, resolve_dirs};
+use crate::output::print_success;
 use crate::util::validate_patch_json;
 use anyhow::{Context, Result};
 use aos_air_types::AirNode;
@@ -41,8 +42,8 @@ pub enum GovSubcommand {
     /// List governance proposals
     List(ListArgs),
 
-    /// Show proposal details
-    Show(ShowArgs),
+    /// Get proposal details
+    Get(GetArgs),
 }
 
 #[derive(Args, Debug)]
@@ -113,7 +114,7 @@ pub struct ListArgs {
 }
 
 #[derive(Args, Debug)]
-pub struct ShowArgs {
+pub struct GetArgs {
     /// Proposal ID
     #[arg(long)]
     pub id: String,
@@ -229,18 +230,41 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
             println!("Apply result: ok={}", resp.ok);
         }
         GovSubcommand::List(list_args) => {
-            println!(
-                "Governance not yet implemented.\n\
-                 Would list proposals with status: {}",
-                list_args.status
-            );
+            let mut client = ControlClient::connect(&dirs.control_socket)
+                .await
+                .context("connect control socket")?;
+            let resp = send_req(
+                &mut client,
+                "gov-list",
+                serde_json::json!({ "status": list_args.status }),
+            )
+            .await?;
+            let result = resp.result.unwrap_or_default();
+            let proposals = result
+                .get("proposals")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            let meta = result.get("meta").cloned();
+            print_success(opts, proposals, meta, vec![])?;
         }
-        GovSubcommand::Show(show_args) => {
-            println!(
-                "Governance not yet implemented.\n\
-                 Would show proposal: {}",
-                show_args.id
-            );
+        GovSubcommand::Get(get_args) => {
+            let proposal_id: u64 = get_args.id.parse().context("proposal id must be u64")?;
+            let mut client = ControlClient::connect(&dirs.control_socket)
+                .await
+                .context("connect control socket")?;
+            let resp = send_req(
+                &mut client,
+                "gov-get",
+                serde_json::json!({ "proposal_id": proposal_id }),
+            )
+            .await?;
+            let result = resp.result.unwrap_or_default();
+            let proposal = result
+                .get("proposal")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!(null));
+            let meta = result.get("meta").cloned();
+            print_success(opts, proposal, meta, vec![])?;
         }
     }
 

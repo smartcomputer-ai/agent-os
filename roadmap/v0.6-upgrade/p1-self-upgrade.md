@@ -8,7 +8,7 @@
 - Kernel governance loop exists (propose/shadow/approve/apply) with journal records and shadow summaries.
 - Patch schema + patch-doc compiler are in place; control channel accepts PatchDocument or ManifestPatch.
 - Governance effect schemas and defeffects are defined (plan-only origin) in builtins.
-- Control channel governance verbs are live; CLI can propose/shadow/approve/apply.
+- Control channel governance verbs are live; CLI can propose/shadow/approve/apply/list/get.
 - Safe-upgrade example and control/kernel governance tests exist.
 - Kernel internal adapter handles `governance.*` effects and emits typed receipts.
 - `governance.propose@1` accepts patch variants; kernel preprocessor compiles patch docs/CBOR to canonical patches + summaries.
@@ -21,7 +21,6 @@
 - **Default-deny governance policy stub**: provide a starter policy template for `sys/governance@1` (optional but helpful).
 - **Example wiring (optional)**: add `sys/GovActionRequested@1` triggers to example manifests if desired.
 - **Tests/fixtures (optional)**: policy/cap denials, sequencing errors, idempotency, replay determinism assertions for governance receipts.
-- **CLI polish**: `gov list/show` are still stubs (optional for P1, but useful for operator parity).
 
 ## Proposed work (updated)
 1) **Governance cap design + embed builtin** (done)  
