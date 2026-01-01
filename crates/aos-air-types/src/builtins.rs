@@ -227,6 +227,7 @@ mod tests {
         assert!(names.contains(&"sys/GovApproveReceipt@1"));
         assert!(names.contains(&"sys/GovApplyParams@1"));
         assert!(names.contains(&"sys/GovApplyReceipt@1"));
+        assert!(names.contains(&"sys/GovActionRequested@1"));
         // ObjectCatalog
         assert!(names.contains(&"sys/ObjectKey@1"));
         assert!(names.contains(&"sys/ObjectMeta@1"));

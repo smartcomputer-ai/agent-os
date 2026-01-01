@@ -523,6 +523,17 @@
       }
     }
   },
+  {
+    "$kind": "defschema",
+    "name": "sys/GovActionRequested@1",
+    "type": {
+      "record": {
+        "patch": { "ref": "sys/GovPatchInput@1" },
+        "manifest_base": { "option": { "hash": {} } },
+        "description": { "option": { "text": {} } }
+      }
+    }
+  },
 
   {
     "$kind": "defschema",

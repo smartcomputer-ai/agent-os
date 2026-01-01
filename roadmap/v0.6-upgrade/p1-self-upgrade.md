@@ -14,10 +14,11 @@
 - `governance.propose@1` accepts patch variants; kernel preprocessor compiles patch docs/CBOR to canonical patches + summaries.
 - `sys/governance@1` cap + `sys/CapEnforceGovernance@1` enforcer are in builtins (with GovPatchInput/GovPatchSummary schemas).
 - Plan-driven governance loop is covered by new integration tests.
+- `sys/GovActionRequested@1` schema added for reducer-driven upgrade requests.
 
 ## What still needs to be done
 - **Default-deny governance policy stub**: provide a starter policy template for `sys/governance@1` (optional but helpful).
-- **In-world upgrade requests**: add a system intent schema + manifest trigger so reducers can request upgrades.
+- **In-world upgrade requests**: wire up manifest triggers in the example manifests (schema is now in builtins).
 - **Tests/fixtures**: policy/cap denials, sequencing errors, idempotency, replay determinism assertions for governance receipts.
 - **CLI polish**: `gov list/show` are still stubs (optional for P1, but useful for operator parity).
 
@@ -36,10 +37,22 @@
    - PatchDocument inputs compile to canonical ManifestPatch + summary.  
    - No separate `patch.compile` step in P1.
 
-4) **Plan surface + triggers** (remaining)  
-   - Introduce `sys/GovActionRequested@1` (or similar) for reducer-driven requests.  
+4) **Plan surface + triggers** (partial)  
+   - `sys/GovActionRequested@1` is now available for reducer-driven requests.  
    - Add manifest triggers to launch privileged upgrade plans.  
-   - Document: reducer intent -> upgrade plan -> governance effects -> result event to reducer.
+   - Pattern: reducer intent -> upgrade plan -> governance effects -> result event to reducer.
+
+Example trigger pattern (manifest excerpt):
+```json
+{
+  "triggers": [
+    {
+      "event": "sys/GovActionRequested@1",
+      "plan": "com.acme/UpgradePlan@1"
+    }
+  ]
+}
+```
 
 5) **Tests/fixtures** (partial)  
    - Plan-driven loop is covered.  
