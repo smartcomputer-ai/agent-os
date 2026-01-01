@@ -15,11 +15,12 @@
 - `sys/governance@1` cap + `sys/CapEnforceGovernance@1` enforcer are in builtins (with GovPatchInput/GovPatchSummary schemas).
 - Plan-driven governance loop is covered by new integration tests.
 - `sys/GovActionRequested@1` schema added for reducer-driven upgrade requests.
+- `sys/GovActionRequested@1` trigger path is covered by integration tests.
 
 ## What still needs to be done
 - **Default-deny governance policy stub**: provide a starter policy template for `sys/governance@1` (optional but helpful).
-- **In-world upgrade requests**: wire up manifest triggers in the example manifests (schema is now in builtins).
-- **Tests/fixtures**: policy/cap denials, sequencing errors, idempotency, replay determinism assertions for governance receipts.
+- **Example wiring (optional)**: add `sys/GovActionRequested@1` triggers to example manifests if desired.
+- **Tests/fixtures (optional)**: policy/cap denials, sequencing errors, idempotency, replay determinism assertions for governance receipts.
 - **CLI polish**: `gov list/show` are still stubs (optional for P1, but useful for operator parity).
 
 ## Proposed work (updated)
@@ -37,9 +38,9 @@
    - PatchDocument inputs compile to canonical ManifestPatch + summary.  
    - No separate `patch.compile` step in P1.
 
-4) **Plan surface + triggers** (partial)  
-   - `sys/GovActionRequested@1` is now available for reducer-driven requests.  
-   - Add manifest triggers to launch privileged upgrade plans.  
+4) **Plan surface + triggers** (done)  
+   - `sys/GovActionRequested@1` is available for reducer-driven requests.  
+   - Trigger path is exercised by integration tests; example wiring is optional.  
    - Pattern: reducer intent -> upgrade plan -> governance effects -> result event to reducer.
 
 Example trigger pattern (manifest excerpt):
@@ -55,8 +56,8 @@ Example trigger pattern (manifest excerpt):
 ```
 
 5) **Tests/fixtures** (partial)  
-   - Plan-driven loop is covered.  
-   - Remaining negative cases: policy/cap denials, sequencing/idempotency edges, replay determinism checks for governance receipts.
+   - Plan-driven loop and `sys/GovActionRequested@1` trigger path are covered.  
+   - Remaining negative cases (optional): policy/cap denials, sequencing/idempotency edges, replay determinism checks for governance receipts.
 
 ## Governance cap design (proposal)
 Design the cap in terms of patch operations and manifest surfaces, since patches are the upgrade unit. Keep cap enforcement in pure modules (per v0.5 caps/policy) and give the enforcer a canonical, minimal patch summary rather than the full patch payload.
