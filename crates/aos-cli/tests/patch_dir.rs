@@ -1,4 +1,6 @@
-use aos_cbor::Hash;
+use aos_air_types::AirNode;
+use aos_cbor::{Hash, to_canonical_cbor};
+use aos_store::{FsStore, Store};
 use assert_cmd::prelude::*;
 use std::fs;
 use tempfile::tempdir;
@@ -36,10 +38,13 @@ fn patch_dir_dry_run_emits_patchdoc_with_base_and_refs() {
     .unwrap();
 
     // Create a dummy current manifest in the store to derive base hash (world/.aos/manifest.air.cbor).
-    let manifest_bytes = fs::read(world.join("air/manifest.air.json")).unwrap();
-    // For tests we can just store the JSON bytes; the real CLI patches from the store.
-    fs::write(world.join(".aos/manifest.air.cbor"), &manifest_bytes).unwrap();
-    let base_hash = Hash::of_bytes(&manifest_bytes).to_hex();
+    let manifest_json = fs::read_to_string(world.join("air/manifest.air.json")).unwrap();
+    let manifest_node: AirNode = serde_json::from_str(&manifest_json).unwrap();
+    let manifest_cbor = to_canonical_cbor(&manifest_node).unwrap();
+    let store = FsStore::open(&world).unwrap();
+    store.put_node(&manifest_node).unwrap();
+    fs::write(world.join(".aos/manifest.air.cbor"), &manifest_cbor).unwrap();
+    let base_hash = Hash::of_bytes(&manifest_cbor).to_hex();
 
     // Run CLI in dry-run mode and capture stdout.
     let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin!("aos"));

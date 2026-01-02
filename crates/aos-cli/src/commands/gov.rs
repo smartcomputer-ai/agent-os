@@ -7,11 +7,11 @@ use crate::opts::{ResolvedDirs, WorldOpts, resolve_dirs};
 use crate::output::print_success;
 use crate::util::validate_patch_json;
 use anyhow::{Context, Result};
-use aos_air_types::AirNode;
+use aos_air_types::{AirNode, Manifest};
 use aos_cbor::Hash;
 use aos_host::control::{ControlClient, RequestEnvelope, ResponseEnvelope};
 use aos_host::manifest_loader::ZERO_HASH_SENTINEL;
-use aos_host::manifest_loader::load_from_assets;
+use aos_host::world_io::{BundleFilter, build_patch_document, decode_manifest_bytes, load_air_bundle, manifest_node_hash};
 use aos_store::{FsStore, Store};
 use base64::prelude::*;
 use clap::{Args, Subcommand};
@@ -126,8 +126,35 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
 
     match &args.cmd {
         GovSubcommand::Propose(propose_args) => {
+            let mut control_client = if propose_args.dry_run {
+                if super::should_use_control(opts) {
+                    super::try_control_client(&dirs).await
+                } else {
+                    None
+                }
+            } else {
+                Some(
+                    ControlClient::connect(&dirs.control_socket)
+                        .await
+                        .context("connect control socket")?,
+                )
+            };
+
             let patch_bytes = if let Some(dir) = &propose_args.patch_dir {
-                let doc = build_patchdoc_from_dir(&dirs, dir, propose_args.base.clone())?;
+                let store = Arc::new(FsStore::open(&dirs.store_root)?);
+                let bundle = load_air_bundle(store.clone(), dir, BundleFilter::AirOnly)?;
+                let base_manifest = resolve_base_manifest(
+                    &dirs,
+                    store.as_ref(),
+                    propose_args.base.clone(),
+                    control_client.as_mut(),
+                )
+                .await?;
+                let doc = build_patch_document(
+                    &bundle,
+                    &base_manifest.manifest,
+                    &base_manifest.hash,
+                )?;
                 let mut doc_json = serde_json::to_value(&doc).context("serialize patch doc")?;
                 autofill_patchdoc_hashes(&mut doc_json, propose_args.require_hashes)?;
                 validate_patch_json(&doc_json)?;
@@ -167,9 +194,16 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
                 }
             };
 
-            let mut client = ControlClient::connect(&dirs.control_socket)
-                .await
-                .context("connect control socket")?;
+            if propose_args.dry_run {
+                return Ok(());
+            }
+            let mut client = if let Some(client) = control_client.take() {
+                client
+            } else {
+                ControlClient::connect(&dirs.control_socket)
+                    .await
+                    .context("connect control socket")?
+            };
             let resp = send_req(
                 &mut client,
                 "gov-propose",
@@ -369,216 +403,67 @@ fn node_name(node: &AirNode) -> Option<&str> {
     }
 }
 
-fn build_patchdoc_from_dir(
+struct BaseManifest {
+    manifest: Manifest,
+    hash: String,
+}
+
+async fn resolve_base_manifest(
     dirs: &ResolvedDirs,
-    air_dir: &PathBuf,
+    store: &FsStore,
     base_override: Option<String>,
-) -> Result<serde_json::Value> {
-    let store = Arc::new(FsStore::open(&dirs.store_root)?);
-    let loaded = load_from_assets(store.clone(), air_dir)
-        .context("load AIR from patch-dir")?
-        .ok_or_else(|| anyhow::anyhow!("no manifest found under {}", air_dir.display()))?;
-
-    // Derive base manifest hash: CLI defaults to current world manifest.air.cbor unless overridden.
-    let base_manifest_hash = if let Some(h) = base_override {
-        h
-    } else {
-        let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
-        let bytes = fs::read(&manifest_path).with_context(|| {
-            format!(
-                "read current world manifest at {} (or pass --base)",
-                manifest_path.display()
-            )
-        })?;
-        Hash::of_bytes(&bytes).to_hex()
-    };
-    let base_manifest = {
-        let h = Hash::from_hex_str(&base_manifest_hash).context("parse base manifest hash")?;
-        match store.get_node(h) {
-            Ok(AirNode::Manifest(m)) => m,
-            Ok(_) => anyhow::bail!("base_manifest_hash does not point to a manifest"),
-            Err(_) => {
-                // Fallback: parse manifest bytes directly if node not in store (e.g., test fixture)
-                let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
-                let bytes = fs::read(&manifest_path)?;
-                if let Ok(catalog) = aos_store::load_manifest_from_bytes(store.as_ref(), &bytes) {
-                    catalog.manifest
-                } else {
-                    serde_json::from_slice(&bytes).context("parse manifest json")?
-                }
-            }
+    mut control: Option<&mut ControlClient>,
+) -> Result<BaseManifest> {
+    if let Some(hash) = base_override {
+        if let Ok(manifest) = manifest_from_store(store, &hash) {
+            return Ok(BaseManifest { manifest, hash });
         }
-    };
-
-    // Build add_def ops for all defs in the loaded bundle.
-    let mut patches: Vec<serde_json::Value> = Vec::new();
-    for node in loaded
-        .modules
-        .values()
-        .cloned()
-        .map(AirNode::Defmodule)
-        .chain(loaded.plans.values().cloned().map(AirNode::Defplan))
-        .chain(loaded.schemas.values().cloned().map(AirNode::Defschema))
-        .chain(loaded.caps.values().cloned().map(AirNode::Defcap))
-        .chain(loaded.policies.values().cloned().map(AirNode::Defpolicy))
-        .chain(loaded.effects.values().cloned().map(AirNode::Defeffect))
-    {
-        let kind = match &node {
-            AirNode::Defmodule(_) => "defmodule",
-            AirNode::Defplan(_) => "defplan",
-            AirNode::Defschema(_) => "defschema",
-            AirNode::Defcap(_) => "defcap",
-            AirNode::Defpolicy(_) => "defpolicy",
-            AirNode::Defeffect(_) => "defeffect",
-            AirNode::Defsecret(_) | AirNode::Manifest(_) => continue, // skip secrets/manifest for now
-        };
-        patches.push(serde_json::json!({
-            "add_def": { "kind": kind, "node": serde_json::to_value(&node)? }
-        }));
+        let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
+        let manifest = manifest_from_path(&manifest_path)?;
+        let computed = manifest_node_hash(&manifest)?;
+        if computed != hash {
+            anyhow::bail!(
+                "base manifest hash mismatch: expected {hash}, computed {computed}"
+            );
+        }
+        return Ok(BaseManifest { manifest, hash });
     }
 
-    // Set manifest refs from the loaded manifest.
-    let mut add_refs: Vec<serde_json::Value> = Vec::new();
-    add_refs.extend(
-        loaded
-            .manifest
-            .schemas
-            .iter()
-            .map(|r| serde_json::json!({"kind":"defschema","name":r.name,"hash":r.hash.as_str()})),
-    );
-    add_refs.extend(
-        loaded
-            .manifest
-            .modules
-            .iter()
-            .map(|r| serde_json::json!({"kind":"defmodule","name":r.name,"hash":r.hash.as_str()})),
-    );
-    add_refs.extend(
-        loaded
-            .manifest
-            .plans
-            .iter()
-            .map(|r| serde_json::json!({"kind":"defplan","name":r.name,"hash":r.hash.as_str()})),
-    );
-    add_refs.extend(
-        loaded
-            .manifest
-            .caps
-            .iter()
-            .map(|r| serde_json::json!({"kind":"defcap","name":r.name,"hash":r.hash.as_str()})),
-    );
-    add_refs.extend(
-        loaded
-            .manifest
-            .policies
-            .iter()
-            .map(|r| serde_json::json!({"kind":"defpolicy","name":r.name,"hash":r.hash.as_str()})),
-    );
-    add_refs.extend(
-        loaded
-            .manifest
-            .effects
-            .iter()
-            .map(|r| serde_json::json!({"kind":"defeffect","name":r.name,"hash":r.hash.as_str()})),
-    );
-    add_refs.extend(
-        loaded
-            .manifest
-            .secrets
-            .iter()
-            .filter_map(|e| match e {
-                aos_air_types::SecretEntry::Ref(nr) => Some(nr),
-                _ => None,
-            })
-            .map(|r| serde_json::json!({"kind":"defsecret","name":r.name,"hash":r.hash.as_str()})),
-    );
-
-    if !add_refs.is_empty() {
-        patches.push(serde_json::json!({
-            "set_manifest_refs": { "add": add_refs, "remove": [] }
-        }));
+    if let Some(client) = control.as_mut() {
+        if let Ok((_meta, bytes)) = client.manifest_read("cli-base-manifest", None).await {
+            let manifest = decode_manifest_bytes(&bytes)?;
+            let hash = manifest_node_hash(&manifest)?;
+            return Ok(BaseManifest { manifest, hash });
+        }
     }
 
-    if let Some(defaults) = &loaded.manifest.defaults {
-        patches.push(serde_json::json!({
-            "set_defaults": {
-                "policy": defaults.policy,
-                "cap_grants": defaults.cap_grants
-            }
-        }));
+    let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
+    let manifest = manifest_from_path(&manifest_path)?;
+    let hash = manifest_node_hash(&manifest)?;
+    if let Ok(from_store) = manifest_from_store(store, &hash) {
+        return Ok(BaseManifest {
+            manifest: from_store,
+            hash,
+        });
     }
+    Ok(BaseManifest { manifest, hash })
+}
 
-    // routing.events
-    let base_events = base_manifest
-        .routing
-        .as_ref()
-        .map(|r| &r.events)
-        .cloned()
-        .unwrap_or_default();
-    let pre = Hash::of_cbor(&base_events)
-        .context("hash base routing.events")?
-        .to_hex();
-    let new_events = loaded
-        .manifest
-        .routing
-        .as_ref()
-        .map(|r| &r.events)
-        .cloned()
-        .unwrap_or_default();
-    patches.push(serde_json::json!({
-        "set_routing_events": { "pre_hash": pre, "events": new_events }
-    }));
+fn manifest_from_store(store: &FsStore, hash_hex: &str) -> Result<Manifest> {
+    let hash = Hash::from_hex_str(hash_hex).context("parse base manifest hash")?;
+    let node: AirNode = store
+        .get_node(hash)
+        .context("load base manifest from store")?;
+    match node {
+        AirNode::Manifest(manifest) => Ok(manifest),
+        _ => anyhow::bail!("base_manifest_hash does not point to a manifest"),
+    }
+}
 
-    // routing.inboxes
-    let base_inboxes = base_manifest
-        .routing
-        .as_ref()
-        .map(|r| &r.inboxes)
-        .cloned()
-        .unwrap_or_default();
-    let pre = Hash::of_cbor(&base_inboxes)
-        .context("hash base routing.inboxes")?
-        .to_hex();
-    let new_inboxes = loaded
-        .manifest
-        .routing
-        .as_ref()
-        .map(|r| &r.inboxes)
-        .cloned()
-        .unwrap_or_default();
-    patches.push(serde_json::json!({
-        "set_routing_inboxes": { "pre_hash": pre, "inboxes": new_inboxes }
-    }));
-
-    // triggers
-    let pre = Hash::of_cbor(&base_manifest.triggers)
-        .context("hash base triggers")?
-        .to_hex();
-    patches.push(serde_json::json!({
-        "set_triggers": { "pre_hash": pre, "triggers": loaded.manifest.triggers }
-    }));
-
-    // module_bindings
-    let pre = Hash::of_cbor(&base_manifest.module_bindings)
-        .context("hash base module_bindings")?
-        .to_hex();
-    patches.push(serde_json::json!({
-        "set_module_bindings": { "pre_hash": pre, "bindings": loaded.manifest.module_bindings }
-    }));
-
-    // secrets block
-    let pre = Hash::of_cbor(&base_manifest.secrets)
-        .context("hash base secrets")?
-        .to_hex();
-    patches.push(serde_json::json!({
-        "set_secrets": { "pre_hash": pre, "secrets": loaded.manifest.secrets }
-    }));
-
-    Ok(serde_json::json!({
-        "version": "1",
-        "base_manifest_hash": base_manifest_hash,
-        "patches": patches,
-    }))
+fn manifest_from_path(path: &std::path::Path) -> Result<Manifest> {
+    let bytes = fs::read(path)
+        .with_context(|| format!("read current world manifest at {}", path.display()))?;
+    decode_manifest_bytes(&bytes)
 }
 
 pub async fn send_req(

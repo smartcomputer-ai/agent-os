@@ -3,7 +3,10 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use aos_air_types::{Manifest, CURRENT_AIR_VERSION};
+use aos_host::world_io::{GenesisImport, WorldBundle, import_genesis, write_air_layout};
+use aos_store::FsStore;
 use clap::Args;
 
 #[derive(Args, Debug)]
@@ -21,24 +24,40 @@ pub fn cmd_init(args: &InitArgs) -> Result<()> {
     let path = &args.path;
 
     fs::create_dir_all(path)?;
-    fs::create_dir_all(path.join(".aos"))?;
-    fs::create_dir_all(path.join("air"))?;
     fs::create_dir_all(path.join("modules"))?;
     fs::create_dir_all(path.join("reducer/src"))?;
 
-    // Write minimal manifest
-    let manifest = r#"{
-  "$kind": "manifest",
-  "air_version": "1",
-  "schemas": [],
-  "modules": [],
-  "plans": [],
-  "caps": [],
-  "policies": [],
-  "effects": [],
-  "triggers": []
-}"#;
-    fs::write(path.join("air/manifest.air.json"), manifest)?;
+    let manifest = Manifest {
+        air_version: CURRENT_AIR_VERSION.to_string(),
+        schemas: Vec::new(),
+        modules: Vec::new(),
+        plans: Vec::new(),
+        effects: Vec::new(),
+        caps: Vec::new(),
+        policies: Vec::new(),
+        secrets: Vec::new(),
+        defaults: None,
+        module_bindings: Default::default(),
+        routing: None,
+        triggers: Vec::new(),
+    };
+    let bundle = WorldBundle {
+        manifest,
+        schemas: Vec::new(),
+        modules: Vec::new(),
+        plans: Vec::new(),
+        caps: Vec::new(),
+        policies: Vec::new(),
+        effects: Vec::new(),
+        secrets: Vec::new(),
+    };
+
+    let store = FsStore::open(path).context("open store")?;
+    let GenesisImport {
+        manifest_hash: _,
+        manifest_bytes,
+    } = import_genesis(&store, &bundle)?;
+    write_air_layout(&bundle, &manifest_bytes, path)?;
 
     // TODO: Support --template to scaffold different starter manifests
 

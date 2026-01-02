@@ -7,6 +7,7 @@ pub mod host;
 pub mod manifest_loader;
 pub mod modes;
 pub mod util;
+pub mod world_io;
 
 pub mod testhost;
 
