@@ -7,7 +7,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, DefSecret, Manifest,
-    SecretEntry,
+    SecretEntry, builtins,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::LoadedManifest;
@@ -36,6 +36,23 @@ pub struct WorldBundle {
     pub policies: Vec<DefPolicy>,
     pub effects: Vec<DefEffect>,
     pub secrets: Vec<DefSecret>,
+    pub wasm_blobs: Option<std::collections::BTreeMap<String, Vec<u8>>>,
+    pub source_bundle: Option<SourceBundle>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceBundle {
+    pub hash: String,
+    pub bytes: Vec<u8>,
+    pub metadata: Option<SourceBundleMeta>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceBundleMeta {
+    pub name: String,
+    pub kind: String,
+    pub owner: String,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -200,6 +217,9 @@ pub fn export_bundle<S: Store>(
     let catalog = aos_store::load_manifest_from_bytes(store, &manifest_bytes)
         .context("load manifest catalog")?;
     let mut bundle = bundle_from_catalog(catalog, options.include_sys);
+    if options.include_sys {
+        extend_with_builtins(&mut bundle);
+    }
     bundle.manifest = manifest;
     bundle.sort_defs();
     Ok(ExportedBundle {
@@ -584,6 +604,8 @@ impl WorldBundle {
             policies: loaded.policies.into_values().collect(),
             effects: loaded.effects.into_values().collect(),
             secrets: Vec::new(),
+            wasm_blobs: None,
+            source_bundle: None,
         };
         bundle.sort_defs();
         bundle
@@ -599,6 +621,8 @@ impl WorldBundle {
             policies: loaded.policies.into_values().collect(),
             effects: loaded.effects.into_values().collect(),
             secrets,
+            wasm_blobs: None,
+            source_bundle: None,
         }
         .sorted()
     }
@@ -726,6 +750,43 @@ impl HasName for DefSecret {
     }
 }
 
+fn extend_with_builtins(bundle: &mut WorldBundle) {
+    let mut existing: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for schema in &bundle.schemas {
+        existing.insert(schema.name.clone());
+    }
+    for effect in &bundle.effects {
+        existing.insert(effect.name.clone());
+    }
+    for cap in &bundle.caps {
+        existing.insert(cap.name.clone());
+    }
+    for module in &bundle.modules {
+        existing.insert(module.name.clone());
+    }
+
+    for builtin in builtins::builtin_schemas() {
+        if existing.insert(builtin.schema.name.clone()) {
+            bundle.schemas.push(builtin.schema.clone());
+        }
+    }
+    for builtin in builtins::builtin_effects() {
+        if existing.insert(builtin.effect.name.clone()) {
+            bundle.effects.push(builtin.effect.clone());
+        }
+    }
+    for builtin in builtins::builtin_caps() {
+        if existing.insert(builtin.cap.name.clone()) {
+            bundle.caps.push(builtin.cap.clone());
+        }
+    }
+    for builtin in builtins::builtin_modules() {
+        if existing.insert(builtin.module.name.clone()) {
+            bundle.modules.push(builtin.module.clone());
+        }
+    }
+}
+
 fn bundle_from_catalog(catalog: aos_store::Catalog, include_sys: bool) -> WorldBundle {
     let mut schemas = Vec::new();
     let mut modules = Vec::new();
@@ -760,6 +821,8 @@ fn bundle_from_catalog(catalog: aos_store::Catalog, include_sys: bool) -> WorldB
         policies,
         effects,
         secrets,
+        wasm_blobs: None,
+        source_bundle: None,
     }
 }
 
@@ -859,5 +922,47 @@ mod tests {
             store2.has_node(manifest_node_hash).expect("manifest stored"),
             "manifest node should be stored in CAS"
         );
+    }
+
+    #[test]
+    fn export_with_sys_includes_builtins() {
+        let store = MemStore::new();
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: Vec::new(),
+            modules: Vec::new(),
+            plans: Vec::new(),
+            effects: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            secrets: Vec::new(),
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: None,
+            triggers: Vec::new(),
+        };
+        let manifest_hash = store
+            .put_node(&AirNode::Manifest(manifest))
+            .expect("store manifest")
+            .to_hex();
+
+        let exported = export_bundle(
+            &store,
+            &manifest_hash,
+            ExportOptions { include_sys: true },
+        )
+        .expect("export bundle");
+        let has_sys_schema = exported
+            .bundle
+            .schemas
+            .iter()
+            .any(|s| s.name.as_str().starts_with("sys/"));
+        let has_sys_effect = exported
+            .bundle
+            .effects
+            .iter()
+            .any(|e| e.name.as_str().starts_with("sys/"));
+        assert!(has_sys_schema, "expected built-in sys schema");
+        assert!(has_sys_effect, "expected built-in sys effect");
     }
 }

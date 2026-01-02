@@ -50,6 +50,8 @@ pub fn cmd_init(args: &InitArgs) -> Result<()> {
         policies: Vec::new(),
         effects: Vec::new(),
         secrets: Vec::new(),
+        wasm_blobs: None,
+        source_bundle: None,
     };
 
     let store = FsStore::open(path).context("open store")?;
