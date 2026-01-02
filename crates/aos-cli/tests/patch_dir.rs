@@ -5,7 +5,7 @@ use assert_cmd::prelude::*;
 use std::fs;
 use tempfile::tempdir;
 
-// Uses the built binary to exercise --patch-dir dry-run and inspect output.
+// Uses the built binary to exercise `aos import --air` dry-run and inspect output.
 #[test]
 fn patch_dir_dry_run_emits_patchdoc_with_base_and_refs() {
     let tmp = tempdir().expect("tmpdir");
@@ -49,10 +49,11 @@ fn patch_dir_dry_run_emits_patchdoc_with_base_and_refs() {
     // Run CLI in dry-run mode and capture stdout.
     let mut cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin!("aos"));
     cmd.current_dir(&world)
-        .arg("gov")
-        .arg("propose")
-        .arg("--patch-dir")
+        .arg("import")
+        .arg("--air")
         .arg("air")
+        .arg("--import-mode")
+        .arg("patch")
         .arg("--dry-run");
     let output = cmd.assert().success().get_output().stdout.clone();
     let text = String::from_utf8(output).unwrap();

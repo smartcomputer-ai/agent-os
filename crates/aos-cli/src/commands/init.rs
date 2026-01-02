@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use aos_air_types::{Manifest, CURRENT_AIR_VERSION};
-use aos_host::world_io::{GenesisImport, WorldBundle, import_genesis, write_air_layout};
+use aos_host::world_io::{ImportMode, ImportOutcome, WorldBundle, import_bundle, write_air_layout};
 use aos_store::FsStore;
 use clap::Args;
 
@@ -55,10 +55,11 @@ pub fn cmd_init(args: &InitArgs) -> Result<()> {
     };
 
     let store = FsStore::open(path).context("open store")?;
-    let GenesisImport {
-        manifest_hash: _,
-        manifest_bytes,
-    } = import_genesis(&store, &bundle)?;
+    let outcome = import_bundle(&store, &bundle, ImportMode::Genesis)?;
+    let ImportOutcome::Genesis(genesis) = outcome else {
+        anyhow::bail!("unexpected import outcome for genesis");
+    };
+    let manifest_bytes = genesis.manifest_bytes;
     write_air_layout(&bundle, &manifest_bytes, path)?;
 
     // TODO: Support --template to scaffold different starter manifests

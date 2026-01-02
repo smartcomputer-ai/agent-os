@@ -53,7 +53,7 @@ pub struct ProposeArgs {
     pub patch: Option<PathBuf>,
 
     /// Build a PatchDocument from an AIR directory (compute hashes, set manifest refs)
-    #[arg(long, conflicts_with = "patch")]
+    #[arg(long, conflicts_with = "patch", hide = true)]
     pub patch_dir: Option<PathBuf>,
 
     /// Optional base manifest hash; defaults to current world manifest if omitted
@@ -141,6 +141,9 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
             };
 
             let patch_bytes = if let Some(dir) = &propose_args.patch_dir {
+                eprintln!(
+                    "notice: --patch-dir is deprecated; use `aos import --air <dir> --mode patch --air-only --propose`"
+                );
                 let store = Arc::new(FsStore::open(&dirs.store_root)?);
                 let bundle = load_air_bundle(store.clone(), dir, BundleFilter::AirOnly)?;
                 let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");

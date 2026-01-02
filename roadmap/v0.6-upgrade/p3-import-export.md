@@ -3,6 +3,14 @@
 **Priority**: P3  
 **Effort**: Medium  
 **Risk if deferred**: Medium (no unified workflow for editing + upgrades)
+**Status**: Complete
+
+## Status snapshot (current codebase)
+- `aos export` uses World IO to materialize `air/` plus optional `modules/` and `sources/`.
+- `aos import --air` supports genesis/patch modes and can drive governance steps.
+- `aos import --source` creates a deterministic tar bundle, stores it as a blob, and registers it.
+- `aos init` goes through the World IO genesis import path.
+- `aos gov propose --patch-dir` is hidden and prints a deprecation notice.
 
 ## Dependency
 Requires P2 World IO (`roadmap/v0.6-upgrade/p2-world-io.md`) to provide canonical import/export logic.
@@ -25,19 +33,19 @@ Behavior:
 
 ### Import (filesystem view -> world update)
 ```
-aos import --air <dir> [--mode genesis|patch] [--air-only] [--dry-run]
+aos import --air <dir> [--import-mode genesis|patch] [--air-only] [--dry-run]
 aos import --source <dir|tar> --name <key> [--tag <tag>] [--owner <owner>]
 ```
 Behavior:
-- `--mode genesis`: initializes a world (used by `aos init`).
-- `--mode patch`: emits a PatchDocument (used by governance/commit flows).
+- `--import-mode genesis`: initializes a world (used by `aos init`).
+- `--import-mode patch`: emits a PatchDocument (used by governance/commit flows).
 - `--air-only`: ignores modules/sources (replacement for `gov propose --patch-dir`).
 - `--source`: creates a deterministic tarball (if given a dir), stores it as a blob,
   and registers it in ObjectCatalog under `source.bundle`.
 
 ### Governance integration
 ```
-aos import --air <dir> --mode patch --air-only --propose [--shadow] [--approve] [--apply]
+aos import --air <dir> --import-mode patch --air-only --propose [--shadow] [--approve] [--apply]
 ```
 Behavior:
 - Builds PatchDocument via World IO, then runs governance steps.
@@ -45,22 +53,22 @@ Behavior:
 
 ### Build integration (optional)
 ```
-aos import --air <dir> --mode patch --build
+aos import --air <dir> --import-mode patch --build
 ```
 Behavior:
 - Builds wasm externally, stores blobs, and updates `defmodule.wasm_hash` before patch generation.
 
 ## Migration notes
-- Remove `gov propose --patch-dir` and redirect users to `aos import --air --air-only`.
+- `gov propose --patch-dir` is deprecated (hidden in help) and redirects users to `aos import --air --air-only`.
 - Keep `gov propose --patch` for raw PatchDocument / ManifestPatch inputs.
-- `aos init` becomes a thin wrapper: template -> `aos import --mode genesis`.
+- `aos init` becomes a thin wrapper: template -> `aos import --import-mode genesis`.
 
 ## Proposed work
-1) Implement `aos export` backed by World IO.
-2) Implement `aos import` with `--air` and `--source` inputs.
-3) Wire `aos init` to `aos import --mode genesis`.
-4) Deprecate `gov propose --patch-dir` and add a compatibility shim.
-5) Add examples documenting the new import/export workflow.
+1) [x] Implement `aos export` backed by World IO.
+2) [x] Implement `aos import` with `--air` and `--source` inputs.
+3) [x] Wire `aos init` to the genesis import path.
+4) [x] Deprecate `gov propose --patch-dir` and add a compatibility shim.
+5) [x] Add examples documenting the new import/export workflow.
 
 ## Open questions
 - Do we want `aos commit` as a thin wrapper around `aos import --build --propose --apply`?
