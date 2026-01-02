@@ -2,15 +2,16 @@
 
 **Priority**: P2  
 **Effort**: Medium  
-**Risk if deferred**: Medium (filesystem paths will drift and become incompatible)
+**Risk if deferred**: Medium (filesystem paths will drift and become incompatible)  
+**Status**: Complete
 
 ## Status snapshot (current codebase)
-- `aos init` writes a minimal `air/manifest.air.json` and directories, but does not seed the store.
-- `aos gov propose --patch-dir` builds a PatchDocument in CLI code (custom logic in `crates/aos-cli/src/commands/gov.rs`).
-- `manifest_loader::load_from_assets` is the canonical AIR reader and already rejects `sys/*` defs.
-- Kernel persists manifest + defs into the store on world load; control `manifest-get` returns canonical CBOR bytes.
-- The base manifest hash for patching is currently derived from `.aos/manifest.air.cbor`, which is not guaranteed to exist.
-- No shared import/export library; each path manipulates files differently.
+- World IO module exists in `crates/aos-host/src/world_io.rs` and is re-exported by `aos-host`.
+- `aos init` seeds the store via World IO and writes canonical `.aos/manifest.air.cbor`.
+- `aos gov propose --patch-dir` uses World IO to build PatchDocuments and resolve base manifest hashes.
+- `manifest_loader::load_from_assets_with_defs` preserves `defsecret` nodes for World IO.
+- `export_bundle` loads manifest + defs from CAS and can include built-in `sys/*` defs.
+- Base manifest resolution prefers control `manifest-get`, then CAS, then `.aos/manifest.air.cbor`.
 
 ## Goal
 Create a single World IO path that canonicalizes AIR bundles, derives patch docs, and can export a deterministic filesystem view. Use it for both `init` (genesis) and `gov propose` (patch) so the rules are shared.
@@ -85,25 +86,25 @@ Deprecate `gov propose --patch-dir` in favor of a single `aos import` path:
 
 ## Work plan
 1) **World IO module**  
-   - Implement `WorldBundle`, `ImportMode`, `BundleFilter`.
-   - Move patch doc construction out of CLI into World IO.
+   - [x] Implement `WorldBundle`, `ImportMode`, `BundleFilter`.
+   - [x] Move patch doc construction out of CLI into World IO.
 
 2) **Base manifest resolver**  
-   - Prefer control `manifest-get`; fallback to store read.
-   - Remove hard dependency on `.aos/manifest.air.cbor`.
+   - [x] Prefer control `manifest-get`; fallback to store read.
+   - [x] Remove hard dependency on `.aos/manifest.air.cbor`.
 
 3) **Refactor `aos init`**  
-   - Generate template bundle and import via `Genesis`.
-   - Write canonical `.aos/manifest.air.cbor`.
+   - [x] Generate template bundle and import via `Genesis`.
+   - [x] Write canonical `.aos/manifest.air.cbor`.
 
 4) **Refactor `aos gov propose`**  
-   - Replace `--patch-dir` logic with World IO.
-   - Add `aos import` (or equivalent) as the unified entry point.
+   - [x] Replace `--patch-dir` logic with World IO.
+   - [ ] Add `aos import` (or equivalent) as the unified entry point. (Moved to P3)
 
 5) **Tests**  
-   - Import/export round-trip yields identical manifest hash.
-   - Patch doc generated from `air/` matches existing semantics.
-   - Genesis import seeds store with manifest node and defs.
+   - [x] Import/export round-trip yields identical manifest hash.
+   - [x] Patch doc generated from `air/` matches existing semantics.
+   - [x] Genesis import seeds store with manifest node and defs.
 
 ## Open questions
 - Where should World IO live (aos-host vs aos-store)?
