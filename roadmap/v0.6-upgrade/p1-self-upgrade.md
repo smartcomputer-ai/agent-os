@@ -1,5 +1,7 @@
 # P1: Self-Upgrade via Governed Plans
 
+**completed**
+
 **Priority**: P1  
 **Effort**: Medium  
 **Risk if deferred**: High (blocks agent-led upgrades; governance remains operator-only)
