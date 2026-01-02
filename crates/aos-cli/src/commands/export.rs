@@ -44,6 +44,10 @@ pub struct ExportArgs {
     /// Export AIR only (no modules/sources)
     #[arg(long)]
     pub air_only: bool,
+
+    /// Write a single defs bundle (air/defs.air.json) instead of per-kind files
+    #[arg(long)]
+    pub defs_bundle: bool,
 }
 
 pub async fn cmd_export(opts: &WorldOpts, args: &ExportArgs) -> Result<()> {
@@ -82,6 +86,7 @@ pub async fn cmd_export(opts: &WorldOpts, args: &ExportArgs) -> Result<()> {
         &out_dir,
         WriteOptions {
             include_sys: args.with_sys,
+            defs_bundle: args.defs_bundle,
         },
     )?;
 

@@ -7,6 +7,7 @@
 
 ## Status snapshot (current codebase)
 - `aos export` uses World IO to materialize `air/` plus optional `modules/` and `sources/`.
+- `aos export --defs-bundle` writes a single `air/defs.air.json` bundle.
 - `aos import --air` supports genesis/patch modes and can drive governance steps.
 - `aos import --source` creates a deterministic tar bundle, stores it as a blob, and registers it.
 - `aos init` goes through the World IO genesis import path.
@@ -22,13 +23,14 @@ Expose a single import/export CLI surface for checkout/commit workflows and remo
 
 ### Export (world -> filesystem view)
 ```
-aos export [--out <dir>] [--with-modules] [--with-sources] [--with-sys] [--manifest <hash>] [--air-only]
+aos export [--out <dir>] [--with-modules] [--with-sources] [--with-sys] [--defs-bundle] [--manifest <hash>] [--air-only]
 ```
 Behavior:
 - Uses control `manifest-get` when daemon is running; falls back to store.
 - Materializes a stable `air/` layout plus optional `modules/`.
 - If `--with-sources` is set and a source bundle exists, unpack it to `sources/`.
 - If `--with-sys` is set, export built-in `sys/*` defs into `air/sys.air.json` for reference.
+- If `--defs-bundle` is set, write a single `air/defs.air.json` instead of per-kind files.
 - Writes `.aos/manifest.air.cbor` with canonical bytes.
 
 ### Import (filesystem view -> world update)
@@ -71,8 +73,7 @@ Behavior:
 5) [x] Add examples documenting the new import/export workflow.
 
 ## Open questions
-- Do we want `aos commit` as a thin wrapper around `aos import --build --propose --apply`?
-- Should `aos export` support a single `air/defs.air.json` file or multi-file layout only?
+- None (commit wrapper deferred for now).
 
 ## Source bundle format (v1)
 We only need a portable format for **source code**, not for AIR or WASM. AIR is JSON in

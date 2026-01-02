@@ -143,7 +143,10 @@ async fn import_air(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
             &bundle,
             &genesis.manifest_bytes,
             &dirs.world,
-            WriteOptions { include_sys: false },
+            WriteOptions {
+                include_sys: false,
+                defs_bundle: false,
+            },
         )?;
         return print_success(
             opts,

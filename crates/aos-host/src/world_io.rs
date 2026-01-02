@@ -76,11 +76,15 @@ pub struct ExportedBundle {
 #[derive(Debug, Clone, Copy)]
 pub struct WriteOptions {
     pub include_sys: bool,
+    pub defs_bundle: bool,
 }
 
 impl Default for WriteOptions {
     fn default() -> Self {
-        Self { include_sys: false }
+        Self {
+            include_sys: false,
+            defs_bundle: false,
+        }
     }
 }
 
@@ -522,58 +526,71 @@ pub fn write_air_layout_with_options(
         &air_dir.join("manifest.air.json"),
         &AirNode::Manifest(bundle.manifest.clone()),
     )?;
-    write_node_array(
-        &air_dir.join("schemas.air.json"),
-        schemas
-            .iter()
-            .cloned()
-            .map(AirNode::Defschema)
-            .collect(),
-    )?;
-    write_node_array(
-        &air_dir.join("module.air.json"),
-        modules
-            .iter()
-            .cloned()
-            .map(AirNode::Defmodule)
-            .collect(),
-    )?;
-    write_node_array(
-        &air_dir.join("plans.air.json"),
-        plans
-            .iter()
-            .cloned()
-            .map(AirNode::Defplan)
-            .collect(),
-    )?;
-    write_node_array(
-        &air_dir.join("effects.air.json"),
-        effects
-            .iter()
-            .cloned()
-            .map(AirNode::Defeffect)
-            .collect(),
-    )?;
-    write_node_array(
-        &air_dir.join("capabilities.air.json"),
-        caps.iter().cloned().map(AirNode::Defcap).collect(),
-    )?;
-    write_node_array(
-        &air_dir.join("policies.air.json"),
-        policies
-            .iter()
-            .cloned()
-            .map(AirNode::Defpolicy)
-            .collect(),
-    )?;
-    write_node_array(
-        &air_dir.join("secrets.air.json"),
-        secrets
-            .iter()
-            .cloned()
-            .map(AirNode::Defsecret)
-            .collect(),
-    )?;
+    if options.defs_bundle {
+        let defs = collect_def_nodes(
+            schemas,
+            modules,
+            plans,
+            effects,
+            caps,
+            policies,
+            secrets,
+        );
+        write_node_array(&air_dir.join("defs.air.json"), defs)?;
+    } else {
+        write_node_array(
+            &air_dir.join("schemas.air.json"),
+            schemas
+                .iter()
+                .cloned()
+                .map(AirNode::Defschema)
+                .collect(),
+        )?;
+        write_node_array(
+            &air_dir.join("module.air.json"),
+            modules
+                .iter()
+                .cloned()
+                .map(AirNode::Defmodule)
+                .collect(),
+        )?;
+        write_node_array(
+            &air_dir.join("plans.air.json"),
+            plans
+                .iter()
+                .cloned()
+                .map(AirNode::Defplan)
+                .collect(),
+        )?;
+        write_node_array(
+            &air_dir.join("effects.air.json"),
+            effects
+                .iter()
+                .cloned()
+                .map(AirNode::Defeffect)
+                .collect(),
+        )?;
+        write_node_array(
+            &air_dir.join("capabilities.air.json"),
+            caps.iter().cloned().map(AirNode::Defcap).collect(),
+        )?;
+        write_node_array(
+            &air_dir.join("policies.air.json"),
+            policies
+                .iter()
+                .cloned()
+                .map(AirNode::Defpolicy)
+                .collect(),
+        )?;
+        write_node_array(
+            &air_dir.join("secrets.air.json"),
+            secrets
+                .iter()
+                .cloned()
+                .map(AirNode::Defsecret)
+                .collect(),
+        )?;
+    }
 
     if options.include_sys {
         let sys_nodes = collect_sys_nodes(
@@ -685,6 +702,26 @@ fn split_sys_defs<T: HasName + Clone>(
 }
 
 fn collect_sys_nodes(
+    schemas: Vec<DefSchema>,
+    modules: Vec<DefModule>,
+    plans: Vec<DefPlan>,
+    effects: Vec<DefEffect>,
+    caps: Vec<DefCap>,
+    policies: Vec<DefPolicy>,
+    secrets: Vec<DefSecret>,
+) -> Vec<AirNode> {
+    let mut nodes = Vec::new();
+    nodes.extend(schemas.into_iter().map(AirNode::Defschema));
+    nodes.extend(modules.into_iter().map(AirNode::Defmodule));
+    nodes.extend(plans.into_iter().map(AirNode::Defplan));
+    nodes.extend(effects.into_iter().map(AirNode::Defeffect));
+    nodes.extend(caps.into_iter().map(AirNode::Defcap));
+    nodes.extend(policies.into_iter().map(AirNode::Defpolicy));
+    nodes.extend(secrets.into_iter().map(AirNode::Defsecret));
+    nodes
+}
+
+fn collect_def_nodes(
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
     plans: Vec<DefPlan>,
@@ -848,6 +885,7 @@ mod tests {
     use super::*;
     use aos_air_types::{CURRENT_AIR_VERSION, DefSchema, EmptyObject, HashRef, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveBool};
     use aos_store::{MemStore, Store};
+    use tempfile::tempdir;
 
     #[test]
     fn manifest_node_hash_matches_store() {
@@ -964,5 +1002,74 @@ mod tests {
             .any(|e| e.name.as_str().starts_with("sys/"));
         assert!(has_sys_schema, "expected built-in sys schema");
         assert!(has_sys_effect, "expected built-in sys effect");
+    }
+
+    #[test]
+    fn write_defs_bundle_emits_single_defs_file() {
+        let store = MemStore::new();
+        let schema = DefSchema {
+            name: "demo/State@1".into(),
+            ty: TypeExpr::Primitive(TypePrimitive::Bool(TypePrimitiveBool {
+                bool: EmptyObject::default(),
+            })),
+        };
+        let schema_hash = store
+            .put_node(&AirNode::Defschema(schema.clone()))
+            .expect("store schema");
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![NamedRef {
+                name: schema.name.clone(),
+                hash: HashRef::new(schema_hash.to_hex()).expect("hash ref"),
+            }],
+            modules: Vec::new(),
+            plans: Vec::new(),
+            effects: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            secrets: Vec::new(),
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: None,
+            triggers: Vec::new(),
+        };
+        let bundle = WorldBundle {
+            manifest: manifest.clone(),
+            schemas: vec![schema.clone()],
+            modules: Vec::new(),
+            plans: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            effects: Vec::new(),
+            secrets: Vec::new(),
+            wasm_blobs: None,
+            source_bundle: None,
+        };
+
+        let tmp = tempdir().expect("tempdir");
+        let manifest_bytes = manifest_node_bytes(&manifest).expect("manifest bytes");
+        write_air_layout_with_options(
+            &bundle,
+            &manifest_bytes,
+            tmp.path(),
+            WriteOptions {
+                include_sys: false,
+                defs_bundle: true,
+            },
+        )
+        .expect("write layout");
+
+        let defs_path = tmp.path().join("air/defs.air.json");
+        assert!(defs_path.exists(), "defs bundle should exist");
+        assert!(
+            !tmp.path().join("air/schemas.air.json").exists(),
+            "per-kind file should not be written"
+        );
+        let defs_json = fs::read_to_string(&defs_path).expect("read defs bundle");
+        let nodes: Vec<AirNode> = serde_json::from_str(&defs_json).expect("parse defs bundle");
+        assert!(
+            nodes.iter().any(|node| matches!(node, AirNode::Defschema(def) if def.name == schema.name)),
+            "defs bundle should include schema"
+        );
     }
 }
