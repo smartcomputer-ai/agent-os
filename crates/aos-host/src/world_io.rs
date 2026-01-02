@@ -17,6 +17,7 @@ use aos_kernel::patch_doc::{
 };
 use aos_store::{FsStore, Store};
 
+use crate::control::ControlClient;
 use crate::manifest_loader;
 
 #[derive(Debug, Clone, Copy)]
@@ -37,10 +38,61 @@ pub struct WorldBundle {
     pub secrets: Vec<DefSecret>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ExportOptions {
+    pub include_sys: bool,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self { include_sys: false }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExportedBundle {
+    pub bundle: WorldBundle,
+    pub manifest_hash: String,
+    pub manifest_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct WriteOptions {
+    pub include_sys: bool,
+}
+
+impl Default for WriteOptions {
+    fn default() -> Self {
+        Self { include_sys: false }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GenesisImport {
     pub manifest_hash: String,
     pub manifest_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ImportMode {
+    Genesis,
+    Patch {
+        base_manifest: Manifest,
+        base_manifest_hash: String,
+    },
+}
+
+#[derive(Debug)]
+pub enum ImportOutcome {
+    Genesis(GenesisImport),
+    Patch(PatchDocument),
+}
+
+#[derive(Debug, Clone)]
+pub struct BaseManifest {
+    pub manifest: Manifest,
+    pub hash: String,
+    pub bytes: Vec<u8>,
 }
 
 pub fn load_air_bundle(
@@ -48,10 +100,13 @@ pub fn load_air_bundle(
     dir: &Path,
     _filter: BundleFilter,
 ) -> Result<WorldBundle> {
-    let loaded = manifest_loader::load_from_assets(store, dir)
+    let assets = manifest_loader::load_from_assets_with_defs(store, dir)
         .with_context(|| format!("load AIR bundle from {}", dir.display()))?
         .ok_or_else(|| anyhow::anyhow!("no manifest found under {}", dir.display()))?;
-    Ok(WorldBundle::from_loaded(loaded))
+    Ok(WorldBundle::from_loaded_assets(
+        assets.loaded,
+        assets.secrets,
+    ))
 }
 
 pub fn import_genesis<S: Store>(store: &S, bundle: &WorldBundle) -> Result<GenesisImport> {
@@ -100,6 +155,56 @@ pub fn import_genesis<S: Store>(store: &S, bundle: &WorldBundle) -> Result<Genes
     let manifest_hash = Hash::of_bytes(&manifest_bytes).to_hex();
     Ok(GenesisImport {
         manifest_hash,
+        manifest_bytes,
+    })
+}
+
+pub fn import_bundle<S: Store>(
+    store: &S,
+    bundle: &WorldBundle,
+    mode: ImportMode,
+) -> Result<ImportOutcome> {
+    match mode {
+        ImportMode::Genesis => Ok(ImportOutcome::Genesis(import_genesis(store, bundle)?)),
+        ImportMode::Patch {
+            base_manifest,
+            base_manifest_hash,
+        } => {
+            let doc = build_patch_document(bundle, &base_manifest, &base_manifest_hash)?;
+            Ok(ImportOutcome::Patch(doc))
+        }
+    }
+}
+
+pub fn export_bundle<S: Store>(
+    store: &S,
+    manifest_hash: &str,
+    options: ExportOptions,
+) -> Result<ExportedBundle> {
+    let hash = Hash::from_hex_str(manifest_hash).context("parse manifest hash")?;
+    let node: AirNode = store
+        .get_node(hash)
+        .context("load manifest node from store")?;
+    let manifest = match node {
+        AirNode::Manifest(manifest) => manifest,
+        _ => bail!("manifest hash does not point to a manifest node"),
+    };
+    let manifest_bytes = manifest_node_bytes(&manifest)?;
+    let computed_hash = Hash::of_bytes(&manifest_bytes).to_hex();
+    if computed_hash != manifest_hash {
+        bail!(
+            "manifest hash mismatch: expected {manifest_hash}, computed {computed_hash}"
+        );
+    }
+
+    let catalog = aos_store::load_manifest_from_bytes(store, &manifest_bytes)
+        .context("load manifest catalog")?;
+    let mut bundle = bundle_from_catalog(catalog, options.include_sys);
+    bundle.manifest = manifest;
+    bundle.sort_defs();
+    Ok(ExportedBundle {
+        bundle,
+        manifest_hash: computed_hash,
         manifest_bytes,
     })
 }
@@ -156,6 +261,14 @@ pub fn build_patch_document(
             add_def: AddDef {
                 kind: "defeffect".to_string(),
                 node: AirNode::Defeffect(effect.clone()),
+            },
+        });
+    }
+    for secret in &bundle.secrets {
+        patches.push(PatchOp::AddDef {
+            add_def: AddDef {
+                kind: "defsecret".to_string(),
+                node: AirNode::Defsecret(secret.clone()),
             },
         });
     }
@@ -267,6 +380,66 @@ pub fn build_patch_document(
     })
 }
 
+pub async fn resolve_base_manifest(
+    store: &FsStore,
+    base_override: Option<String>,
+    mut control: Option<&mut ControlClient>,
+    manifest_path: &Path,
+) -> Result<BaseManifest> {
+    if let Some(hash) = base_override {
+        if let Ok(manifest) = manifest_from_store(store, &hash) {
+            let bytes = manifest_node_bytes(&manifest)?;
+            return Ok(BaseManifest {
+                manifest,
+                hash,
+                bytes,
+            });
+        }
+        let manifest = manifest_from_path(manifest_path)?;
+        let bytes = manifest_node_bytes(&manifest)?;
+        let computed = Hash::of_bytes(&bytes).to_hex();
+        if computed != hash {
+            bail!(
+                "base manifest hash mismatch: expected {hash}, computed {computed}"
+            );
+        }
+        return Ok(BaseManifest {
+            manifest,
+            hash,
+            bytes,
+        });
+    }
+
+    if let Some(client) = control.as_mut() {
+        if let Ok((_meta, bytes)) = client.manifest_read("cli-base-manifest", None).await {
+            let manifest = decode_manifest_bytes(&bytes)?;
+            let hash = manifest_node_hash(&manifest)?;
+            let bytes = manifest_node_bytes(&manifest)?;
+            return Ok(BaseManifest {
+                manifest,
+                hash,
+                bytes,
+            });
+        }
+    }
+
+    let manifest = manifest_from_path(manifest_path)?;
+    let bytes = manifest_node_bytes(&manifest)?;
+    let hash = Hash::of_bytes(&bytes).to_hex();
+    if let Ok(from_store) = manifest_from_store(store, &hash) {
+        return Ok(BaseManifest {
+            manifest: from_store,
+            hash,
+            bytes,
+        });
+    }
+    Ok(BaseManifest {
+        manifest,
+        hash,
+        bytes,
+    })
+}
+
 pub fn manifest_node_hash(manifest: &Manifest) -> Result<String> {
     let bytes = manifest_node_bytes(manifest)?;
     Ok(Hash::of_bytes(&bytes).to_hex())
@@ -304,9 +477,26 @@ pub fn write_air_layout(
     manifest_cbor: &[u8],
     out_dir: &Path,
 ) -> Result<()> {
+    write_air_layout_with_options(bundle, manifest_cbor, out_dir, WriteOptions::default())
+}
+
+pub fn write_air_layout_with_options(
+    bundle: &WorldBundle,
+    manifest_cbor: &[u8],
+    out_dir: &Path,
+    options: WriteOptions,
+) -> Result<()> {
     let air_dir = out_dir.join("air");
     fs::create_dir_all(&air_dir).context("create air dir")?;
     fs::create_dir_all(out_dir.join(".aos")).context("create .aos dir")?;
+
+    let (schemas, sys_schemas) = split_sys_defs(&bundle.schemas, options.include_sys);
+    let (modules, sys_modules) = split_sys_defs(&bundle.modules, options.include_sys);
+    let (plans, sys_plans) = split_sys_defs(&bundle.plans, options.include_sys);
+    let (effects, sys_effects) = split_sys_defs(&bundle.effects, options.include_sys);
+    let (caps, sys_caps) = split_sys_defs(&bundle.caps, options.include_sys);
+    let (policies, sys_policies) = split_sys_defs(&bundle.policies, options.include_sys);
+    let (secrets, sys_secrets) = split_sys_defs(&bundle.secrets, options.include_sys);
 
     write_json(
         &air_dir.join("manifest.air.json"),
@@ -314,8 +504,7 @@ pub fn write_air_layout(
     )?;
     write_node_array(
         &air_dir.join("schemas.air.json"),
-        bundle
-            .schemas
+        schemas
             .iter()
             .cloned()
             .map(AirNode::Defschema)
@@ -323,8 +512,7 @@ pub fn write_air_layout(
     )?;
     write_node_array(
         &air_dir.join("module.air.json"),
-        bundle
-            .modules
+        modules
             .iter()
             .cloned()
             .map(AirNode::Defmodule)
@@ -332,8 +520,7 @@ pub fn write_air_layout(
     )?;
     write_node_array(
         &air_dir.join("plans.air.json"),
-        bundle
-            .plans
+        plans
             .iter()
             .cloned()
             .map(AirNode::Defplan)
@@ -341,8 +528,7 @@ pub fn write_air_layout(
     )?;
     write_node_array(
         &air_dir.join("effects.air.json"),
-        bundle
-            .effects
+        effects
             .iter()
             .cloned()
             .map(AirNode::Defeffect)
@@ -350,12 +536,11 @@ pub fn write_air_layout(
     )?;
     write_node_array(
         &air_dir.join("capabilities.air.json"),
-        bundle.caps.iter().cloned().map(AirNode::Defcap).collect(),
+        caps.iter().cloned().map(AirNode::Defcap).collect(),
     )?;
     write_node_array(
         &air_dir.join("policies.air.json"),
-        bundle
-            .policies
+        policies
             .iter()
             .cloned()
             .map(AirNode::Defpolicy)
@@ -363,13 +548,25 @@ pub fn write_air_layout(
     )?;
     write_node_array(
         &air_dir.join("secrets.air.json"),
-        bundle
-            .secrets
+        secrets
             .iter()
             .cloned()
             .map(AirNode::Defsecret)
             .collect(),
     )?;
+
+    if options.include_sys {
+        let sys_nodes = collect_sys_nodes(
+            sys_schemas,
+            sys_modules,
+            sys_plans,
+            sys_effects,
+            sys_caps,
+            sys_policies,
+            sys_secrets,
+        );
+        write_node_array(&air_dir.join("sys.air.json"), sys_nodes)?;
+    }
 
     fs::write(out_dir.join(".aos/manifest.air.cbor"), manifest_cbor)
         .context("write manifest.air.cbor")?;
@@ -378,30 +575,47 @@ pub fn write_air_layout(
 
 impl WorldBundle {
     pub fn from_loaded(loaded: LoadedManifest) -> Self {
-        let mut schemas = loaded.schemas.into_values().collect::<Vec<_>>();
-        let mut modules = loaded.modules.into_values().collect::<Vec<_>>();
-        let mut plans = loaded.plans.into_values().collect::<Vec<_>>();
-        let mut caps = loaded.caps.into_values().collect::<Vec<_>>();
-        let mut policies = loaded.policies.into_values().collect::<Vec<_>>();
-        let mut effects = loaded.effects.into_values().collect::<Vec<_>>();
+        let mut bundle = WorldBundle {
+            manifest: loaded.manifest,
+            schemas: loaded.schemas.into_values().collect(),
+            modules: loaded.modules.into_values().collect(),
+            plans: loaded.plans.into_values().collect(),
+            caps: loaded.caps.into_values().collect(),
+            policies: loaded.policies.into_values().collect(),
+            effects: loaded.effects.into_values().collect(),
+            secrets: Vec::new(),
+        };
+        bundle.sort_defs();
+        bundle
+    }
 
-        schemas.sort_by(|a, b| a.name.cmp(&b.name));
-        modules.sort_by(|a, b| a.name.cmp(&b.name));
-        plans.sort_by(|a, b| a.name.cmp(&b.name));
-        caps.sort_by(|a, b| a.name.cmp(&b.name));
-        policies.sort_by(|a, b| a.name.cmp(&b.name));
-        effects.sort_by(|a, b| a.name.cmp(&b.name));
-
+    pub fn from_loaded_assets(loaded: LoadedManifest, secrets: Vec<DefSecret>) -> Self {
         WorldBundle {
             manifest: loaded.manifest,
-            schemas,
-            modules,
-            plans,
-            caps,
-            policies,
-            effects,
-            secrets: Vec::new(),
+            schemas: loaded.schemas.into_values().collect(),
+            modules: loaded.modules.into_values().collect(),
+            plans: loaded.plans.into_values().collect(),
+            caps: loaded.caps.into_values().collect(),
+            policies: loaded.policies.into_values().collect(),
+            effects: loaded.effects.into_values().collect(),
+            secrets,
         }
+        .sorted()
+    }
+
+    fn sort_defs(&mut self) {
+        self.schemas.sort_by(|a, b| a.name.cmp(&b.name));
+        self.modules.sort_by(|a, b| a.name.cmp(&b.name));
+        self.plans.sort_by(|a, b| a.name.cmp(&b.name));
+        self.caps.sort_by(|a, b| a.name.cmp(&b.name));
+        self.policies.sort_by(|a, b| a.name.cmp(&b.name));
+        self.effects.sort_by(|a, b| a.name.cmp(&b.name));
+        self.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    fn sorted(mut self) -> Self {
+        self.sort_defs();
+        self
     }
 }
 
@@ -428,11 +642,149 @@ fn write_node_array(path: &Path, nodes: Vec<AirNode>) -> Result<()> {
     fs::write(path, json).with_context(|| format!("write {}", path.display()))
 }
 
+fn split_sys_defs<T: HasName + Clone>(
+    defs: &[T],
+    include_sys: bool,
+) -> (Vec<T>, Vec<T>) {
+    let mut normal = Vec::new();
+    let mut sys = Vec::new();
+    for def in defs {
+        if def.name().starts_with("sys/") {
+            if include_sys {
+                sys.push(def.clone());
+            }
+        } else {
+            normal.push(def.clone());
+        }
+    }
+    (normal, sys)
+}
+
+fn collect_sys_nodes(
+    schemas: Vec<DefSchema>,
+    modules: Vec<DefModule>,
+    plans: Vec<DefPlan>,
+    effects: Vec<DefEffect>,
+    caps: Vec<DefCap>,
+    policies: Vec<DefPolicy>,
+    secrets: Vec<DefSecret>,
+) -> Vec<AirNode> {
+    let mut nodes = Vec::new();
+    nodes.extend(schemas.into_iter().map(AirNode::Defschema));
+    nodes.extend(modules.into_iter().map(AirNode::Defmodule));
+    nodes.extend(plans.into_iter().map(AirNode::Defplan));
+    nodes.extend(effects.into_iter().map(AirNode::Defeffect));
+    nodes.extend(caps.into_iter().map(AirNode::Defcap));
+    nodes.extend(policies.into_iter().map(AirNode::Defpolicy));
+    nodes.extend(secrets.into_iter().map(AirNode::Defsecret));
+    nodes
+}
+
+trait HasName {
+    fn name(&self) -> &str;
+}
+
+impl HasName for DefSchema {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+impl HasName for DefModule {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+impl HasName for DefPlan {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+impl HasName for DefEffect {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+impl HasName for DefCap {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+impl HasName for DefPolicy {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+impl HasName for DefSecret {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+fn bundle_from_catalog(catalog: aos_store::Catalog, include_sys: bool) -> WorldBundle {
+    let mut schemas = Vec::new();
+    let mut modules = Vec::new();
+    let mut plans = Vec::new();
+    let mut caps = Vec::new();
+    let mut policies = Vec::new();
+    let mut effects = Vec::new();
+    let mut secrets = Vec::new();
+
+    for (name, entry) in catalog.nodes {
+        if !include_sys && name.starts_with("sys/") {
+            continue;
+        }
+        match entry.node {
+            AirNode::Defschema(schema) => schemas.push(schema),
+            AirNode::Defmodule(module) => modules.push(module),
+            AirNode::Defplan(plan) => plans.push(plan),
+            AirNode::Defcap(cap) => caps.push(cap),
+            AirNode::Defpolicy(policy) => policies.push(policy),
+            AirNode::Defeffect(effect) => effects.push(effect),
+            AirNode::Defsecret(secret) => secrets.push(secret),
+            AirNode::Manifest(_) => {}
+        }
+    }
+
+    WorldBundle {
+        manifest: catalog.manifest,
+        schemas,
+        modules,
+        plans,
+        caps,
+        policies,
+        effects,
+        secrets,
+    }
+}
+
+fn manifest_from_store(store: &FsStore, hash_hex: &str) -> Result<Manifest> {
+    let hash = Hash::from_hex_str(hash_hex).context("parse base manifest hash")?;
+    let node: AirNode = store
+        .get_node(hash)
+        .context("load base manifest from store")?;
+    match node {
+        AirNode::Manifest(manifest) => Ok(manifest),
+        _ => bail!("base_manifest_hash does not point to a manifest"),
+    }
+}
+
+fn manifest_from_path(path: &Path) -> Result<Manifest> {
+    let bytes =
+        fs::read(path).with_context(|| format!("read manifest at {}", path.display()))?;
+    decode_manifest_bytes(&bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_air_types::CURRENT_AIR_VERSION;
-    use aos_store::MemStore;
+    use aos_air_types::{CURRENT_AIR_VERSION, DefSchema, EmptyObject, HashRef, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveBool};
+    use aos_store::{MemStore, Store};
 
     #[test]
     fn manifest_node_hash_matches_store() {
@@ -456,5 +808,56 @@ mod tests {
             .expect("store manifest");
         let computed = manifest_node_hash(&manifest).expect("compute hash");
         assert_eq!(stored.to_hex(), computed);
+    }
+
+    #[test]
+    fn export_import_round_trip_manifest_hash() {
+        let store = MemStore::new();
+        let schema = DefSchema {
+            name: "demo/State@1".into(),
+            ty: TypeExpr::Primitive(TypePrimitive::Bool(TypePrimitiveBool {
+                bool: EmptyObject::default(),
+            })),
+        };
+        let schema_hash = store
+            .put_node(&AirNode::Defschema(schema.clone()))
+            .expect("store schema");
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![NamedRef {
+                name: schema.name.clone(),
+                hash: HashRef::new(schema_hash.to_hex()).expect("hash ref"),
+            }],
+            modules: Vec::new(),
+            plans: Vec::new(),
+            effects: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            secrets: Vec::new(),
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: None,
+            triggers: Vec::new(),
+        };
+        let manifest_hash = store
+            .put_node(&AirNode::Manifest(manifest.clone()))
+            .expect("store manifest")
+            .to_hex();
+
+        let exported = export_bundle(&store, &manifest_hash, ExportOptions::default())
+            .expect("export bundle");
+        assert_eq!(exported.manifest_hash, manifest_hash);
+        assert_eq!(exported.bundle.schemas.len(), 1);
+
+        let store2 = MemStore::new();
+        let imported = import_genesis(&store2, &exported.bundle).expect("import genesis");
+        assert_eq!(imported.manifest_hash, manifest_hash);
+        assert!(store2.has_node(schema_hash).expect("schema stored"));
+        let manifest_node_hash =
+            Hash::from_hex_str(&imported.manifest_hash).expect("manifest hash parse");
+        assert!(
+            store2.has_node(manifest_node_hash).expect("manifest stored"),
+            "manifest node should be stored in CAS"
+        );
     }
 }

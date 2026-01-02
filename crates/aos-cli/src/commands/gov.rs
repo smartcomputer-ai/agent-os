@@ -3,16 +3,16 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::opts::{ResolvedDirs, WorldOpts, resolve_dirs};
+use crate::opts::{WorldOpts, resolve_dirs};
 use crate::output::print_success;
 use crate::util::validate_patch_json;
 use anyhow::{Context, Result};
-use aos_air_types::{AirNode, Manifest};
+use aos_air_types::AirNode;
 use aos_cbor::Hash;
 use aos_host::control::{ControlClient, RequestEnvelope, ResponseEnvelope};
 use aos_host::manifest_loader::ZERO_HASH_SENTINEL;
-use aos_host::world_io::{BundleFilter, build_patch_document, decode_manifest_bytes, load_air_bundle, manifest_node_hash};
-use aos_store::{FsStore, Store};
+use aos_host::world_io::{BundleFilter, build_patch_document, load_air_bundle, resolve_base_manifest};
+use aos_store::FsStore;
 use base64::prelude::*;
 use clap::{Args, Subcommand};
 use serde_json::Value;
@@ -143,11 +143,12 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
             let patch_bytes = if let Some(dir) = &propose_args.patch_dir {
                 let store = Arc::new(FsStore::open(&dirs.store_root)?);
                 let bundle = load_air_bundle(store.clone(), dir, BundleFilter::AirOnly)?;
+                let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
                 let base_manifest = resolve_base_manifest(
-                    &dirs,
                     store.as_ref(),
                     propose_args.base.clone(),
                     control_client.as_mut(),
+                    &manifest_path,
                 )
                 .await?;
                 let doc = build_patch_document(
@@ -403,68 +404,6 @@ fn node_name(node: &AirNode) -> Option<&str> {
     }
 }
 
-struct BaseManifest {
-    manifest: Manifest,
-    hash: String,
-}
-
-async fn resolve_base_manifest(
-    dirs: &ResolvedDirs,
-    store: &FsStore,
-    base_override: Option<String>,
-    mut control: Option<&mut ControlClient>,
-) -> Result<BaseManifest> {
-    if let Some(hash) = base_override {
-        if let Ok(manifest) = manifest_from_store(store, &hash) {
-            return Ok(BaseManifest { manifest, hash });
-        }
-        let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
-        let manifest = manifest_from_path(&manifest_path)?;
-        let computed = manifest_node_hash(&manifest)?;
-        if computed != hash {
-            anyhow::bail!(
-                "base manifest hash mismatch: expected {hash}, computed {computed}"
-            );
-        }
-        return Ok(BaseManifest { manifest, hash });
-    }
-
-    if let Some(client) = control.as_mut() {
-        if let Ok((_meta, bytes)) = client.manifest_read("cli-base-manifest", None).await {
-            let manifest = decode_manifest_bytes(&bytes)?;
-            let hash = manifest_node_hash(&manifest)?;
-            return Ok(BaseManifest { manifest, hash });
-        }
-    }
-
-    let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
-    let manifest = manifest_from_path(&manifest_path)?;
-    let hash = manifest_node_hash(&manifest)?;
-    if let Ok(from_store) = manifest_from_store(store, &hash) {
-        return Ok(BaseManifest {
-            manifest: from_store,
-            hash,
-        });
-    }
-    Ok(BaseManifest { manifest, hash })
-}
-
-fn manifest_from_store(store: &FsStore, hash_hex: &str) -> Result<Manifest> {
-    let hash = Hash::from_hex_str(hash_hex).context("parse base manifest hash")?;
-    let node: AirNode = store
-        .get_node(hash)
-        .context("load base manifest from store")?;
-    match node {
-        AirNode::Manifest(manifest) => Ok(manifest),
-        _ => anyhow::bail!("base_manifest_hash does not point to a manifest"),
-    }
-}
-
-fn manifest_from_path(path: &std::path::Path) -> Result<Manifest> {
-    let bytes = fs::read(path)
-        .with_context(|| format!("read current world manifest at {}", path.display()))?;
-    decode_manifest_bytes(&bytes)
-}
 
 pub async fn send_req(
     client: &mut ControlClient,
