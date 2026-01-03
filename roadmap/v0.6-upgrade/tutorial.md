@@ -30,19 +30,10 @@ cat > air/defs.air.json <<'JSON'
   },
   {
     "$kind": "defschema",
-    "name": "demo/NoteAdd@1",
+    "name": "demo/NoteEvent@1",
     "type": {
       "record": {
         "text": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/NoteEvent@1",
-    "type": {
-      "variant": {
-        "Add": { "ref": "demo/NoteAdd@1" }
       }
     }
   },
@@ -71,7 +62,6 @@ cat > air/manifest.air.json <<'JSON'
   "air_version": "1",
   "schemas": [
     { "name": "demo/NoteState@1" },
-    { "name": "demo/NoteAdd@1" },
     { "name": "demo/NoteEvent@1" }
   ],
   "modules": [
@@ -124,7 +114,7 @@ cat > reducer/src/lib.rs <<'RS'
 extern crate alloc;
 
 use alloc::string::String;
-use aos_wasm_sdk::{aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
+use aos_wasm_sdk::{aos_reducer, ReduceError, Reducer, ReducerCtx};
 use serde::{Deserialize, Serialize};
 
 aos_reducer!(NotesSm);
@@ -135,11 +125,9 @@ struct NoteState {
     last: String,
 }
 
-aos_variant! {
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    enum NoteEvent {
-        Add { text: String },
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NoteEvent {
+    text: String,
 }
 
 #[derive(Default)]
@@ -155,12 +143,8 @@ impl Reducer for NotesSm {
         event: Self::Event,
         ctx: &mut ReducerCtx<Self::State, ()>,
     ) -> Result<(), ReduceError> {
-        match event {
-            NoteEvent::Add { text } => {
-                ctx.state.count = ctx.state.count.saturating_add(1);
-                ctx.state.last = text;
-            }
-        }
+        ctx.state.count = ctx.state.count.saturating_add(1);
+        ctx.state.last = event.text;
         Ok(())
     }
 }
@@ -175,14 +159,14 @@ aos run
 
 Send an event (in another terminal):
 ```
-aos event send demo/NoteEvent@1 '{"$tag":"Add","$value":{"text":"first note"}}'
+aos event send demo/NoteEvent@1 '{"text":"first note"}'
 ```
 
 Query state:
 ```
 aos state get demo/Notes@1
 ```
-Note: variant events use the canonical `{"$tag":"Variant","$value":{...}}` form.
+Note: record events use the schema-defined fields directly.
 
 ## 5) Export/edit/import (upgrade flow)
 Export the current world layout for editing:
