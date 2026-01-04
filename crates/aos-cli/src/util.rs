@@ -274,13 +274,20 @@ fn sys_module_spec(name: &str) -> Option<&'static SysModuleSpec> {
     SYS_MODULES.iter().find(|spec| spec.name == name)
 }
 
-const SYS_MODULES: &[SysModuleSpec] = &[SysModuleSpec {
-    name: "sys/Workspace@1",
-    bin: "workspace",
-}, SysModuleSpec {
-    name: "sys/ObjectCatalog@1",
-    bin: "object_catalog",
-}];
+const SYS_MODULES: &[SysModuleSpec] = &[
+    SysModuleSpec {
+        name: "sys/Workspace@1",
+        bin: "workspace",
+    },
+    SysModuleSpec {
+        name: "sys/ObjectCatalog@1",
+        bin: "object_catalog",
+    },
+    SysModuleSpec {
+        name: "sys/CapEnforceWorkspace@1",
+        bin: "cap_enforce_workspace",
+    },
+];
 
 fn resolve_sys_module(
     store: &FsStore,

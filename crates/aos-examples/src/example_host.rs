@@ -329,6 +329,7 @@ fn maybe_patch_sys_enforcers(
     for (module_name, bin_name) in [
         ("sys/CapEnforceHttpOut@1", "cap_enforce_http_out"),
         ("sys/CapEnforceLlmBasic@1", "cap_enforce_llm_basic"),
+        ("sys/CapEnforceWorkspace@1", "cap_enforce_workspace"),
     ] {
         maybe_patch_sys_module(
             example_root,

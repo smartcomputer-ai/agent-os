@@ -52,9 +52,10 @@ Completed:
 - [x] Kernel internal effects: resolve/list/read_ref/read_bytes/write_bytes/remove/diff
 - [x] Tree/path validation + CAS-backed tree storage
 - [x] Unit + integration tests for reducer and effects
+- [x] Cap enforcement for workspace scoping (workspaces/path_prefixes/ops)
+- [x] Workspace cap enforcer integration test
 
 Next:
-- [ ] Cap enforcement for workspace scoping (workspaces/path_prefixes/ops)
 - [ ] Deprecate/remove ObjectCatalog usages and docs references
 
 Deferred (tracked elsewhere):

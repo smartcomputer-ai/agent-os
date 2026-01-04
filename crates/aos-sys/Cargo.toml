@@ -32,6 +32,10 @@ name = "cap_enforce_llm_basic"
 path = "src/bin/cap_enforce_llm_basic.rs"
 
 [[bin]]
+name = "cap_enforce_workspace"
+path = "src/bin/cap_enforce_workspace.rs"
+
+[[bin]]
 name = "cap_enforce_governance"
 path = "src/bin/cap_enforce_governance.rs"
 

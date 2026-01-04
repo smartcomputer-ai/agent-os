@@ -80,6 +80,7 @@
         "ops": { "option": { "set": { "text": {} } } }
       }
     },
+    "enforcer": { "module": "sys/CapEnforceWorkspace@1" },
     "$comment": "Grants access to workspace.resolve/list/read/write/diff operations."
   },
   {

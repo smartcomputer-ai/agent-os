@@ -305,6 +305,7 @@ mod tests {
             "sys/CapEnforceHttpOut@1",
             "sys/CapEnforceLlmBasic@1",
             "sys/CapEnforceGovernance@1",
+            "sys/CapEnforceWorkspace@1",
             "sys/Workspace@1",
             "sys/ObjectCatalog@1",
         ] {
