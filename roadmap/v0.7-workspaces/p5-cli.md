@@ -18,12 +18,19 @@ Workspace ref format:
   - `/path` optional (default: root)
 
 Commands:
+- `aos ws resolve <ref>` (prints `{ exists, head, resolved_version, root_hash }`)
 - `aos ws ls [ref] [--scope dir|subtree] [--limit N] [--cursor CURSOR]`
   - `aos ws ls` (no ref) lists all workspace names
   - `aos ws ls <ref>` lists paths within the resolved tree
 - `aos ws cat <ref> [--range START:END] [--raw|--out PATH]`
+  - Default: attempt UTF-8; if JSON or CBOR, pretty-print
+  - If binary/invalid UTF-8, refuse and require `--raw` or `--out`
+  - `--raw`/`--out` streams bytes without decoding
 - `aos ws stat <ref>` (uses `read_ref`)
 - `aos ws write <ref> --in <file|@-> [--mode 644|755]`
+  - Input helpers (mutually exclusive):
+    - `--text <string>` (UTF-8 bytes)
+    - `--json <json>` (parse + write minified JSON bytes)
 - `aos ws rm <ref>`
 - `aos ws diff <refA> <refB> [--prefix PATH]`
 - `aos ws log <workspace>` (reads `sys/Workspace@1` keyed state)
@@ -47,6 +54,7 @@ Commands:
   - `workspace`: name
   - `expected_head`: resolved version (if exists)
   - `meta`: `{ root_hash, owner, created_at }`
+- `owner` source order: `--owner` flag → `AOS_OWNER` env → OS username (best-effort). If all missing, use `unknown`.
 - `created_at` uses wall-clock; deterministic replay is unaffected (events are logged).
 
 ## Control Protocol Additions (daemon path)
