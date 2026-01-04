@@ -176,7 +176,7 @@ pub fn find_builtin_cap(name: &str) -> Option<&'static BuiltinCap> {
         .and_then(|idx| BUILTIN_CAPS.get(*idx))
 }
 
-/// Finds a built-in module definition by name (e.g., `sys/ObjectCatalog@1`).
+/// Finds a built-in module definition by name (e.g., `sys/Workspace@1`).
 pub fn find_builtin_module(name: &str) -> Option<&'static BuiltinModule> {
     BUILTIN_MODULE_INDEX
         .get(name)
@@ -228,12 +228,6 @@ mod tests {
         assert!(names.contains(&"sys/GovApplyParams@1"));
         assert!(names.contains(&"sys/GovApplyReceipt@1"));
         assert!(names.contains(&"sys/GovActionRequested@1"));
-        // ObjectCatalog
-        assert!(names.contains(&"sys/ObjectKey@1"));
-        assert!(names.contains(&"sys/ObjectMeta@1"));
-        assert!(names.contains(&"sys/ObjectVersions@1"));
-        assert!(names.contains(&"sys/ObjectRegisteredPayload@1"));
-        assert!(names.contains(&"sys/ObjectRegistered@1"));
         // Workspace
         assert!(names.contains(&"sys/WorkspaceName@1"));
         assert!(names.contains(&"sys/WorkspaceRef@1"));
@@ -288,7 +282,6 @@ mod tests {
             "sys/llm.basic@1",
             "sys/secret@1",
             "sys/workspace@1",
-            "sys/catalog.write@1",
             "sys/governance@1",
         ] {
             assert!(names.contains(&name));
@@ -307,7 +300,6 @@ mod tests {
             "sys/CapEnforceGovernance@1",
             "sys/CapEnforceWorkspace@1",
             "sys/Workspace@1",
-            "sys/ObjectCatalog@1",
         ] {
             assert!(names.contains(&name));
         }

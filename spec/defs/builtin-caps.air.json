@@ -85,20 +85,6 @@
   },
   {
     "$kind": "defcap",
-    "name": "sys/catalog.write@1",
-    "cap_type": "catalog.write",
-    "schema": {
-      "record": {
-        "prefixes": {
-          "set": { "text": {} },
-          "$comment": "Allowed name prefixes (e.g., 'agents/self/'). Empty set = all names."
-        }
-      }
-    },
-    "$comment": "Grants write access to the object catalog."
-  },
-  {
-    "$kind": "defcap",
     "name": "sys/governance@1",
     "cap_type": "governance",
     "schema": {

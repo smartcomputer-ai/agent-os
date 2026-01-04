@@ -69,9 +69,6 @@ impl ExampleHost {
             &wasm_hash_ref,
         )?;
 
-        maybe_patch_object_catalog(cfg.example_root, store.clone(), &mut loaded_host)?;
-        maybe_patch_object_catalog(cfg.example_root, store.clone(), &mut loaded_replay)?;
-
         let mut sys_module_cache = HashMap::new();
         maybe_patch_sys_enforcers(
             cfg.example_root,
@@ -287,37 +284,6 @@ fn load_and_patch(
         .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
     patch_module_hash(&mut loaded, reducer_name, wasm_hash)?;
     Ok(loaded)
-}
-
-fn maybe_patch_object_catalog(
-    example_root: &Path,
-    store: Arc<FsStore>,
-    loaded: &mut LoadedManifest,
-) -> Result<()> {
-    let needs_patch = loaded.modules.iter().any(|(name, module)| {
-        name == "sys/ObjectCatalog@1" && aos_host::util::is_placeholder_hash(module)
-    });
-    if !needs_patch {
-        return Ok(());
-    }
-    let cache_dir = example_root.join(".aos").join("cache").join("modules");
-    let wasm_bytes = util::compile_wasm_bin(
-        crate::workspace_root(),
-        "aos-sys",
-        "object_catalog",
-        &cache_dir,
-    )?;
-    let wasm_hash = store
-        .put_blob(&wasm_bytes)
-        .context("store object_catalog wasm blob")?;
-    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash object catalog")?;
-    let patched = patch_modules(loaded, &wasm_hash_ref, |name, _| {
-        name == "sys/ObjectCatalog@1"
-    });
-    if patched == 0 {
-        anyhow::bail!("object catalog module missing in manifest");
-    }
-    Ok(())
 }
 
 fn maybe_patch_sys_enforcers(

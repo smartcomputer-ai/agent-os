@@ -8,10 +8,6 @@ publish = false
 path = "src/lib.rs"
 
 [[bin]]
-name = "object_catalog"
-path = "src/bin/object_catalog.rs"
-
-[[bin]]
 name = "workspace"
 path = "src/bin/workspace.rs"
 

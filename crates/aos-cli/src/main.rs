@@ -17,7 +17,6 @@ use commands::gov::GovArgs;
 use commands::import::ImportArgs;
 use commands::init::InitArgs;
 use commands::manifest::ManifestArgs;
-use commands::obj::ObjArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
 use opts::{WorldOpts, resolve_world};
@@ -80,9 +79,6 @@ enum Command {
 
     /// Blob commands
     Blob(BlobArgs),
-
-    /// Object catalog commands
-    Obj(ObjArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -156,6 +152,5 @@ async fn main() -> Result<()> {
         Command::Gov(args) => commands::gov::cmd_gov(opts, &args).await,
         Command::Defs(args) => commands::defs::cmd_defs(opts, &args).await,
         Command::Blob(args) => commands::blob::cmd_blob(opts, &args).await,
-        Command::Obj(args) => commands::obj::cmd_obj(opts, &args).await,
     }
 }

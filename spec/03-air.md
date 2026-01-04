@@ -203,7 +203,7 @@ Registers a WASM module with its interface contract.
 
 `EffectKind` and `CapType` are namespaced strings. The schema no longer hardcodes an enum; v1 ships a built-in catalog listed in §7, and adapters can introduce additional kinds as runtime support lands.
 
-**Built-in modules** live in `spec/defs/builtin-modules.air.json` (e.g., `sys/CapEnforceHttpOut@1`, `sys/CapEnforceLlmBasic@1`, `sys/ObjectCatalog@1`). `sys/*` module names are reserved: external manifests may **reference** them, but may not define them; the kernel supplies the definitions and hashes.
+**Built-in modules** live in `spec/defs/builtin-modules.air.json` (e.g., `sys/CapEnforceHttpOut@1`, `sys/CapEnforceLlmBasic@1`, `sys/Workspace@1`). `sys/*` module names are reserved: external manifests may **reference** them, but may not define them; the kernel supplies the definitions and hashes.
 
 The `key_schema` field (v1.1 addendum) documents the key type when this reducer is routed as keyed. The ABI remains a single `step` export; the kernel provides an envelope with optional call context. When routed as keyed, the reducer context includes `cell_mode=true` and the keyed `key`; returning `state=null` deletes the cell instance.
 

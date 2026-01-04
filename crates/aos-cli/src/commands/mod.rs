@@ -11,7 +11,6 @@ pub mod info;
 pub mod import;
 pub mod init;
 pub mod manifest;
-pub mod obj;
 pub mod replay;
 pub mod run;
 pub mod snapshot;

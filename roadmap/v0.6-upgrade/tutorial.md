@@ -188,9 +188,5 @@ aos import --air /tmp/notes-checkout/air --import-mode patch --air-only \
 ```
 If you change `air/` or `reducer/`, restart `aos run` so the daemon reloads the assets.
 
-## 6) Optional: register a source bundle
-If your manifest includes `sys/ObjectCatalog@1`, you can store a deterministic
-source bundle and register it:
-```
-aos import --source reducer --name source/notes --tag dev
-```
+## 6) Optional: source bundles (deferred)
+Source bundle import/export is deferred to `roadmap/v0.7-workspaces/p7-fs-sync.md`.

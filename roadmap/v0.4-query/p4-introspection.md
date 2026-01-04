@@ -29,7 +29,7 @@ All are read-only; receipts carry consistency metadata for downstream governance
 
 ### 2) Capabilities + policy
 - Introduce `defcap` for query (e.g., `sys/query@1`, cap_type `query`) and wire policy matching on `effect_kind` prefix `introspect.*`; default deny.
-- Reuse `blob` cap for CAS reads; ObjectCatalog read paths may also require `query`.
+- Reuse `blob` cap for CAS reads; introspection paths may also require `query`.
 - Ensure built-in world manifests include a `query` cap grant for trusted operators/agents.
 
 ### 3) Kernel/adapter implementation

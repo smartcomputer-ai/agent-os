@@ -9,7 +9,7 @@
 - `aos export` uses World IO to materialize `air/` plus optional `modules/` and `sources/`.
 - `aos export --defs-bundle` writes a single `air/defs.air.json` bundle.
 - `aos import --air` supports genesis/patch modes and can drive governance steps.
-- `aos import --source` creates a deterministic tar bundle, stores it as a blob, and registers it.
+- Source import/export is deferred to `roadmap/v0.7-workspaces/p7-fs-sync.md` (workspace-backed).
 - `aos init` goes through the World IO genesis import path.
 - `aos gov propose --patch-dir` is hidden and prints a deprecation notice.
 
@@ -36,14 +36,12 @@ Behavior:
 ### Import (filesystem view -> world update)
 ```
 aos import --air <dir> [--import-mode genesis|patch] [--air-only] [--dry-run]
-aos import --source <dir|tar> --name <key> [--tag <tag>] [--owner <owner>]
 ```
 Behavior:
 - `--import-mode genesis`: initializes a world (used by `aos init`).
 - `--import-mode patch`: emits a PatchDocument (used by governance/commit flows).
 - `--air-only`: ignores modules/sources (replacement for `gov propose --patch-dir`).
-- `--source`: creates a deterministic tarball (if given a dir), stores it as a blob,
-  and registers it in ObjectCatalog under `source.bundle`.
+- Source bundle import/export is deferred to `roadmap/v0.7-workspaces/p7-fs-sync.md`.
 
 ### Governance integration
 ```
@@ -75,10 +73,10 @@ Behavior:
 ## Open questions
 - None (commit wrapper deferred for now).
 
-## Source bundle format (v1)
+## Source bundle format (deferred)
 We only need a portable format for **source code**, not for AIR or WASM. AIR is JSON in
 `air/`, and WASM is stored as blobs referenced by `defmodule.wasm_hash`. The source bundle
-is a single deterministic tarball stored as a blob and registered in ObjectCatalog.
+will be a single deterministic tarball stored as a blob and registered in workspace history.
 
 **Deterministic tar rules**:
 - Sort paths lexicographically.

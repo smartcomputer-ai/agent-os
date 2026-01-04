@@ -26,7 +26,7 @@ Create a single World IO path that canonicalizes AIR bundles, derives patch docs
 - **AIR**: authored as JSON in `air/`, canonicalized to CBOR nodes in CAS.
 - **WASM**: compiled externally; stored as blobs and referenced by `defmodule.wasm_hash`.
 - **Source code**: stored as a single deterministic tarball blob (the "source bundle"),
-  registered in ObjectCatalog with metadata; exported as a directory for local dev.
+  registered in workspace history; exported as a directory for local dev.
 - **Sys defs**: never authored; optionally exported as a read-only reference file
   (e.g., `air/sys.air.json`) when requested.
 
@@ -52,7 +52,7 @@ Add a shared module (e.g., `crates/aos-host/src/world_io.rs`) and re-export from
 - `export_bundle(store, manifest_hash, options) -> WorldBundle`
   - Reads manifest + referenced defs from CAS.
   - Pulls wasm blobs for non-sys modules when requested.
-  - Optionally attaches the latest source bundle from ObjectCatalog.
+  - Optionally attaches the latest source bundle from workspace history.
   - Optionally includes built-in `sys/*` defs for reference-only export.
 - `import_bundle(store, bundle, mode) -> ImportPlan`
   - `Genesis`: store nodes + manifest, emit canonical manifest hash.

@@ -534,55 +534,6 @@
       }
     }
   },
-
-  {
-    "$kind": "defschema",
-    "name": "sys/ObjectKey@1",
-    "type": { "text": {} }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/ObjectMeta@1",
-    "type": {
-      "record": {
-        "name": { "text": {} },
-        "kind": { "text": {} },
-        "hash": { "hash": {} },
-        "tags": { "set": { "text": {} } },
-        "created_at": { "time": {} },
-        "owner": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/ObjectVersions@1",
-    "type": {
-      "record": {
-        "latest": { "nat": {} },
-        "versions": {
-          "map": {
-            "key": { "nat": {} },
-            "value": { "ref": "sys/ObjectMeta@1" }
-          }
-        }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/ObjectRegisteredPayload@1",
-    "type": {
-      "record": {
-        "meta": { "ref": "sys/ObjectMeta@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "sys/ObjectRegistered@1",
-    "type": { "ref": "sys/ObjectRegisteredPayload@1" }
-  },
   {
     "$kind": "defschema",
     "name": "sys/WorkspaceName@1",

@@ -54,9 +54,7 @@ Completed:
 - [x] Unit + integration tests for reducer and effects
 - [x] Cap enforcement for workspace scoping (workspaces/path_prefixes/ops)
 - [x] Workspace cap enforcer integration test
-
-Next:
-- [ ] Deprecate/remove ObjectCatalog usages and docs references
+- [x] Deprecate/remove ObjectCatalog usages and docs references
 
 Deferred (tracked elsewhere):
 - [ ] CLI surface and UX → `roadmap/v0.7-workspaces/p5-cli.md`

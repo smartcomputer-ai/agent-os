@@ -280,10 +280,6 @@ const SYS_MODULES: &[SysModuleSpec] = &[
         bin: "workspace",
     },
     SysModuleSpec {
-        name: "sys/ObjectCatalog@1",
-        bin: "object_catalog",
-    },
-    SysModuleSpec {
         name: "sys/CapEnforceWorkspace@1",
         bin: "cap_enforce_workspace",
     },
