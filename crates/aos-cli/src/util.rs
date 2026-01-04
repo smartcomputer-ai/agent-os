@@ -275,6 +275,9 @@ fn sys_module_spec(name: &str) -> Option<&'static SysModuleSpec> {
 }
 
 const SYS_MODULES: &[SysModuleSpec] = &[SysModuleSpec {
+    name: "sys/Workspace@1",
+    bin: "workspace",
+}, SysModuleSpec {
     name: "sys/ObjectCatalog@1",
     bin: "object_catalog",
 }];

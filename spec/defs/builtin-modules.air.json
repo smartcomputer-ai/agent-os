@@ -40,6 +40,23 @@
   },
   {
     "$kind": "defmodule",
+    "name": "sys/Workspace@1",
+    "module_kind": "reducer",
+    "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "key_schema": "sys/WorkspaceName@1",
+    "abi": {
+      "reducer": {
+        "state": "sys/WorkspaceHistory@1",
+        "event": "sys/WorkspaceCommit@1",
+        "context": "sys/ReducerContext@1",
+        "effects_emitted": [],
+        "cap_slots": {}
+      }
+    },
+    "$comment": "Built-in workspace reducer; wasm_hash patched at load time in examples."
+  },
+  {
+    "$kind": "defmodule",
     "name": "sys/ObjectCatalog@1",
     "module_kind": "reducer",
     "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",

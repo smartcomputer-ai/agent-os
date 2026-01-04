@@ -12,6 +12,10 @@ name = "object_catalog"
 path = "src/bin/object_catalog.rs"
 
 [[bin]]
+name = "workspace"
+path = "src/bin/workspace.rs"
+
+[[bin]]
 name = "agent_registry"
 path = "src/bin/agent_registry.rs"
 

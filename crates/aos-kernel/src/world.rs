@@ -1556,6 +1556,18 @@ impl<S: Store + 'static> Kernel<S> {
         }
     }
 
+    pub(crate) fn canonical_key_bytes(
+        &self,
+        schema_name: &str,
+        value: &str,
+    ) -> Result<Vec<u8>, KernelError> {
+        let cbor =
+            serde_cbor::to_vec(&value).map_err(|e| KernelError::Manifest(e.to_string()))?;
+        let normalized = normalize_cbor_by_name(&self.schema_index, schema_name, &cbor)
+            .map_err(|err| KernelError::Manifest(err.to_string()))?;
+        Ok(normalized.bytes)
+    }
+
     pub(crate) fn read_meta(&self) -> ReadMeta {
         ReadMeta {
             journal_height: self.journal.next_seq(),

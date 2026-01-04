@@ -101,6 +101,69 @@
     "cap_type": "governance",
     "origin_scope": "plan"
   },
+  {
+    "$kind": "defeffect",
+    "name": "sys/workspace.resolve@1",
+    "kind": "workspace.resolve",
+    "params_schema": "sys/WorkspaceResolveParams@1",
+    "receipt_schema": "sys/WorkspaceResolveReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/workspace.list@1",
+    "kind": "workspace.list",
+    "params_schema": "sys/WorkspaceListParams@1",
+    "receipt_schema": "sys/WorkspaceListReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/workspace.read_ref@1",
+    "kind": "workspace.read_ref",
+    "params_schema": "sys/WorkspaceReadRefParams@1",
+    "receipt_schema": "sys/WorkspaceReadRefReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/workspace.read_bytes@1",
+    "kind": "workspace.read_bytes",
+    "params_schema": "sys/WorkspaceReadBytesParams@1",
+    "receipt_schema": "sys/WorkspaceReadBytesReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/workspace.write_bytes@1",
+    "kind": "workspace.write_bytes",
+    "params_schema": "sys/WorkspaceWriteBytesParams@1",
+    "receipt_schema": "sys/WorkspaceWriteBytesReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/workspace.remove@1",
+    "kind": "workspace.remove",
+    "params_schema": "sys/WorkspaceRemoveParams@1",
+    "receipt_schema": "sys/WorkspaceRemoveReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/workspace.diff@1",
+    "kind": "workspace.diff",
+    "params_schema": "sys/WorkspaceDiffParams@1",
+    "receipt_schema": "sys/WorkspaceDiffReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
 
   {
     "$kind": "defeffect",

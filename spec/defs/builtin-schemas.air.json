@@ -583,6 +583,262 @@
     "name": "sys/ObjectRegistered@1",
     "type": { "ref": "sys/ObjectRegisteredPayload@1" }
   },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceName@1",
+    "type": { "text": {} }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceRef@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} },
+        "version": { "option": { "nat": {} } },
+        "path": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceCommitMeta@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} },
+        "owner": { "text": {} },
+        "created_at": { "time": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceHistory@1",
+    "type": {
+      "record": {
+        "latest": { "nat": {} },
+        "versions": {
+          "map": {
+            "key": { "nat": {} },
+            "value": { "ref": "sys/WorkspaceCommitMeta@1" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceCommit@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} },
+        "expected_head": { "option": { "nat": {} } },
+        "meta": { "ref": "sys/WorkspaceCommitMeta@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceEntry@1",
+    "type": {
+      "record": {
+        "name": { "text": {} },
+        "kind": { "text": {} },
+        "hash": { "hash": {} },
+        "size": { "nat": {} },
+        "mode": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceTree@1",
+    "type": {
+      "record": {
+        "entries": { "list": { "ref": "sys/WorkspaceEntry@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceResolveParams@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} },
+        "version": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceResolveReceipt@1",
+    "type": {
+      "record": {
+        "exists": { "bool": {} },
+        "resolved_version": { "option": { "nat": {} } },
+        "head": { "option": { "nat": {} } },
+        "root_hash": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceListParams@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} },
+        "path": { "option": { "text": {} } },
+        "scope": { "option": { "text": {} } },
+        "cursor": { "option": { "text": {} } },
+        "limit": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceListEntry@1",
+    "type": {
+      "record": {
+        "path": { "text": {} },
+        "kind": { "text": {} },
+        "hash": { "option": { "hash": {} } },
+        "size": { "option": { "nat": {} } },
+        "mode": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceListReceipt@1",
+    "type": {
+      "record": {
+        "entries": { "list": { "ref": "sys/WorkspaceListEntry@1" } },
+        "next_cursor": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceReadRefParams@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} },
+        "path": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceRefEntry@1",
+    "type": {
+      "record": {
+        "kind": { "text": {} },
+        "hash": { "hash": {} },
+        "size": { "nat": {} },
+        "mode": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceReadRefReceipt@1",
+    "type": { "option": { "ref": "sys/WorkspaceRefEntry@1" } }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceReadBytesParams@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} },
+        "path": { "text": {} },
+        "range": {
+          "option": {
+            "record": {
+              "start": { "nat": {} },
+              "end": { "nat": {} }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceReadBytesReceipt@1",
+    "type": { "bytes": {} }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceWriteBytesParams@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} },
+        "path": { "text": {} },
+        "bytes": { "bytes": {} },
+        "mode": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceWriteBytesReceipt@1",
+    "type": {
+      "record": {
+        "new_root_hash": { "hash": {} },
+        "blob_hash": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceRemoveParams@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} },
+        "path": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceRemoveReceipt@1",
+    "type": {
+      "record": {
+        "new_root_hash": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceDiffParams@1",
+    "type": {
+      "record": {
+        "root_a": { "hash": {} },
+        "root_b": { "hash": {} },
+        "prefix": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceDiffChange@1",
+    "type": {
+      "record": {
+        "path": { "text": {} },
+        "kind": { "text": {} },
+        "old_hash": { "option": { "hash": {} } },
+        "new_hash": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceDiffReceipt@1",
+    "type": {
+      "record": {
+        "changes": { "list": { "ref": "sys/WorkspaceDiffChange@1" } }
+      }
+    }
+  },
 
   {
     "$kind": "defschema",

@@ -71,6 +71,19 @@
   },
   {
     "$kind": "defcap",
+    "name": "sys/workspace@1",
+    "cap_type": "workspace",
+    "schema": {
+      "record": {
+        "workspaces": { "option": { "list": { "text": {} } } },
+        "path_prefixes": { "option": { "list": { "text": {} } } },
+        "ops": { "option": { "set": { "text": {} } } }
+      }
+    },
+    "$comment": "Grants access to workspace.resolve/list/read/write/diff operations."
+  },
+  {
+    "$kind": "defcap",
     "name": "sys/catalog.write@1",
     "cap_type": "catalog.write",
     "schema": {

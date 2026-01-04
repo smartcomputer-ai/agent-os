@@ -44,6 +44,24 @@ Breaking changes are acceptable for this milestone; no migration plan is require
 
 This keeps the model minimal: one registry reducer + one tree effect surface.
 
+## Implementation Status
+
+Completed:
+- [x] Built-in schemas/effects/caps/modules for Workspace
+- [x] `sys/Workspace@1` reducer + types (aos-sys)
+- [x] Kernel internal effects: resolve/list/read_ref/read_bytes/write_bytes/remove/diff
+- [x] Tree/path validation + CAS-backed tree storage
+- [x] Unit + integration tests for reducer and effects
+
+Next:
+- [ ] Cap enforcement for workspace scoping (workspaces/path_prefixes/ops)
+- [ ] Deprecate/remove ObjectCatalog usages and docs references
+
+Deferred (tracked elsewhere):
+- [ ] CLI surface and UX → `roadmap/v0.7-workspaces/p5-cli.md`
+- [ ] Import/export + ~-hex path encoding → `roadmap/v0.7-workspaces/p7-fs-sync.md`
+- [ ] HTTP publishing routes → next major roadmap step
+
 ## Concepts
 
 ### Workspace
