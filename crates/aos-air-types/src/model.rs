@@ -877,6 +877,8 @@ impl EffectKind {
     pub const WORKSPACE_WRITE_BYTES: &'static str = "workspace.write_bytes";
     pub const WORKSPACE_REMOVE: &'static str = "workspace.remove";
     pub const WORKSPACE_DIFF: &'static str = "workspace.diff";
+    pub const WORKSPACE_ANNOTATIONS_GET: &'static str = "workspace.annotations_get";
+    pub const WORKSPACE_ANNOTATIONS_SET: &'static str = "workspace.annotations_set";
 
     pub fn new(kind: impl Into<String>) -> Self {
         Self(kind.into())
@@ -956,6 +958,14 @@ impl EffectKind {
 
     pub fn workspace_diff() -> Self {
         Self::new(Self::WORKSPACE_DIFF)
+    }
+
+    pub fn workspace_annotations_get() -> Self {
+        Self::new(Self::WORKSPACE_ANNOTATIONS_GET)
+    }
+
+    pub fn workspace_annotations_set() -> Self {
+        Self::new(Self::WORKSPACE_ANNOTATIONS_SET)
     }
 }
 

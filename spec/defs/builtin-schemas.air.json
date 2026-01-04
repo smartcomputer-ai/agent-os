@@ -611,6 +611,50 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/WorkspaceEntry@2",
+    "type": {
+      "record": {
+        "name": { "text": {} },
+        "kind": { "text": {} },
+        "hash": { "hash": {} },
+        "size": { "nat": {} },
+        "mode": { "nat": {} },
+        "annotations_hash": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceTree@2",
+    "type": {
+      "record": {
+        "entries": { "list": { "ref": "sys/WorkspaceEntry@2" } },
+        "annotations_hash": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceAnnotations@1",
+    "type": {
+      "map": {
+        "key": { "hash": {} },
+        "value": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceAnnotationsPatch@1",
+    "type": {
+      "map": {
+        "key": { "hash": {} },
+        "value": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/WorkspaceResolveParams@1",
     "type": {
       "record": {
@@ -787,6 +831,46 @@
     "type": {
       "record": {
         "changes": { "list": { "ref": "sys/WorkspaceDiffChange@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceAnnotationsGetParams@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} },
+        "path": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceAnnotationsGetReceipt@1",
+    "type": {
+      "record": {
+        "annotations": { "option": { "ref": "sys/WorkspaceAnnotations@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceAnnotationsSetParams@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} },
+        "path": { "option": { "text": {} } },
+        "annotations_patch": { "ref": "sys/WorkspaceAnnotationsPatch@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceAnnotationsSetReceipt@1",
+    "type": {
+      "record": {
+        "new_root_hash": { "hash": {} },
+        "annotations_hash": { "hash": {} }
       }
     }
   },

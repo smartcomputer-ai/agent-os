@@ -30,6 +30,8 @@ pub(crate) static INTERNAL_EFFECT_KINDS: &[&str] = &[
     "workspace.write_bytes",
     "workspace.remove",
     "workspace.diff",
+    "workspace.annotations_get",
+    "workspace.annotations_set",
     "governance.propose",
     "governance.shadow",
     "governance.approve",
@@ -108,11 +110,15 @@ struct WorkspaceEntry {
     hash: HashRef,
     size: u64,
     mode: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    annotations_hash: Option<HashRef>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WorkspaceTree {
     entries: Vec<WorkspaceEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    annotations_hash: Option<HashRef>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -242,6 +248,41 @@ struct WorkspaceDiffReceipt {
     changes: Vec<WorkspaceDiffChange>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+struct WorkspaceAnnotations(BTreeMap<HashRef, HashRef>);
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+struct WorkspaceAnnotationsPatch(BTreeMap<HashRef, Option<HashRef>>);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsGetParams {
+    root_hash: String,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsGetReceipt {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    annotations: Option<WorkspaceAnnotations>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsSetParams {
+    root_hash: String,
+    #[serde(default)]
+    path: Option<String>,
+    annotations_patch: WorkspaceAnnotationsPatch,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsSetReceipt {
+    new_root_hash: HashRef,
+    annotations_hash: HashRef,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct MetaSer {
     journal_height: u64,
@@ -297,6 +338,8 @@ where
             "workspace.write_bytes" => self.handle_workspace_write_bytes(intent),
             "workspace.remove" => self.handle_workspace_remove(intent),
             "workspace.diff" => self.handle_workspace_diff(intent),
+            "workspace.annotations_get" => self.handle_workspace_annotations_get(intent),
+            "workspace.annotations_set" => self.handle_workspace_annotations_set(intent),
             "governance.propose" => self.handle_governance_propose(intent),
             "governance.shadow" => self.handle_governance_shadow(intent),
             "governance.approve" => self.handle_governance_approve(intent),
@@ -629,7 +672,11 @@ where
             let new = map_b.get(&path);
             if old
                 .zip(new)
-                .map(|(a, b)| a.kind == b.kind && a.hash == b.hash)
+                .map(|(a, b)| {
+                    a.kind == b.kind
+                        && a.hash == b.hash
+                        && a.annotations_hash == b.annotations_hash
+                })
                 .unwrap_or(false)
             {
                 continue;
@@ -647,6 +694,67 @@ where
             changes.push(change);
         }
         let receipt = WorkspaceDiffReceipt { changes };
+        Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
+    }
+
+    fn handle_workspace_annotations_get(
+        &self,
+        intent: &EffectIntent,
+    ) -> Result<Vec<u8>, KernelError> {
+        let params: WorkspaceAnnotationsGetParams = intent
+            .params()
+            .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
+        let root_hash = parse_hash_str(&params.root_hash)?;
+        let path_segments = match params.path.as_deref() {
+            Some(path) => validate_path(path)?,
+            None => Vec::new(),
+        };
+        let store = self.store();
+        let annotations = if path_segments.is_empty() {
+            let tree = load_tree(store.as_ref(), &root_hash)?;
+            annotations_from_hash(store.as_ref(), tree.annotations_hash.as_ref())?
+        } else {
+            let (name, parent) = path_segments
+                .split_last()
+                .ok_or_else(|| KernelError::Query("path required".into()))?;
+            let parent_hash = resolve_dir_hash(store.as_ref(), &root_hash, parent)?;
+            let tree = load_tree(store.as_ref(), &parent_hash)?;
+            let entry = find_entry(&tree, name)
+                .cloned()
+                .ok_or_else(|| KernelError::Query("path not found".into()))?;
+            if entry.kind == "file" {
+                annotations_from_hash(store.as_ref(), entry.annotations_hash.as_ref())?
+            } else if entry.kind == "dir" {
+                let child_hash = hash_from_ref(&entry.hash)?;
+                let child = load_tree(store.as_ref(), &child_hash)?;
+                annotations_from_hash(store.as_ref(), child.annotations_hash.as_ref())?
+            } else {
+                return Err(KernelError::Query("invalid entry kind".into()));
+            }
+        };
+        let receipt = WorkspaceAnnotationsGetReceipt { annotations };
+        Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
+    }
+
+    fn handle_workspace_annotations_set(
+        &self,
+        intent: &EffectIntent,
+    ) -> Result<Vec<u8>, KernelError> {
+        let params: WorkspaceAnnotationsSetParams = intent
+            .params()
+            .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
+        let root_hash = parse_hash_str(&params.root_hash)?;
+        let path_segments = match params.path.as_deref() {
+            Some(path) => validate_path(path)?,
+            None => Vec::new(),
+        };
+        let store = self.store();
+        let (new_root, annotations_hash) =
+            set_annotations_at_path(store.as_ref(), &root_hash, &path_segments, &params.annotations_patch)?;
+        let receipt = WorkspaceAnnotationsSetReceipt {
+            new_root_hash: hash_ref_from_hash(&new_root)?,
+            annotations_hash,
+        };
         Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
     }
 
@@ -1007,6 +1115,108 @@ fn resolve_file_mode(
     Ok(MODE_FILE_DEFAULT)
 }
 
+fn annotations_from_hash<S: aos_store::Store>(
+    store: &S,
+    hash: Option<&HashRef>,
+) -> Result<Option<WorkspaceAnnotations>, KernelError> {
+    let Some(hash) = hash else {
+        return Ok(None);
+    };
+    let hash = hash_from_ref(hash)?;
+    let annotations: WorkspaceAnnotations = store.get_node(hash)?;
+    Ok(Some(annotations))
+}
+
+fn apply_annotations_patch<S: aos_store::Store>(
+    store: &S,
+    current: Option<&HashRef>,
+    patch: &WorkspaceAnnotationsPatch,
+) -> Result<HashRef, KernelError> {
+    let mut annotations = match current {
+        Some(hash) => annotations_from_hash(store, Some(hash))?
+            .unwrap_or_default()
+            .0,
+        None => BTreeMap::new(),
+    };
+    for (key, value) in &patch.0 {
+        match value {
+            Some(hash) => {
+                annotations.insert(key.clone(), hash.clone());
+            }
+            None => {
+                annotations.remove(key);
+            }
+        }
+    }
+    let annotations = WorkspaceAnnotations(annotations);
+    let new_hash = store.put_node(&annotations)?;
+    hash_ref_from_hash(&new_hash)
+}
+
+fn set_annotations_at_path<S: aos_store::Store>(
+    store: &S,
+    tree_hash: &Hash,
+    path: &[String],
+    patch: &WorkspaceAnnotationsPatch,
+) -> Result<(Hash, HashRef), KernelError> {
+    let mut tree = load_tree(store, tree_hash)?;
+    if path.is_empty() {
+        let annotations_hash = apply_annotations_patch(store, tree.annotations_hash.as_ref(), patch)?;
+        tree.annotations_hash = Some(annotations_hash.clone());
+        let new_root = store.put_node(&tree)?;
+        return Ok((new_root, annotations_hash));
+    }
+    if path.len() == 1 {
+        let name = &path[0];
+        let entry = find_entry(&tree, name)
+            .cloned()
+            .ok_or_else(|| KernelError::Query("path not found".into()))?;
+        if entry.kind == "file" {
+            let annotations_hash =
+                apply_annotations_patch(store, entry.annotations_hash.as_ref(), patch)?;
+            let updated = WorkspaceEntry {
+                annotations_hash: Some(annotations_hash.clone()),
+                ..entry
+            };
+            upsert_entry(&mut tree.entries, updated);
+            let new_root = store.put_node(&tree)?;
+            return Ok((new_root, annotations_hash));
+        }
+        if entry.kind == "dir" {
+            let child_hash = hash_from_ref(&entry.hash)?;
+            let (new_child, annotations_hash) =
+                set_annotations_at_path(store, &child_hash, &[], patch)?;
+            let updated = WorkspaceEntry {
+                hash: hash_ref_from_hash(&new_child)?,
+                annotations_hash: entry.annotations_hash.clone(),
+                ..entry
+            };
+            upsert_entry(&mut tree.entries, updated);
+            let new_root = store.put_node(&tree)?;
+            return Ok((new_root, annotations_hash));
+        }
+        return Err(KernelError::Query("invalid entry kind".into()));
+    }
+    let dir_name = &path[0];
+    let entry = find_entry(&tree, dir_name)
+        .cloned()
+        .ok_or_else(|| KernelError::Query("path not found".into()))?;
+    if entry.kind != "dir" {
+        return Err(KernelError::Query("path is not a directory".into()));
+    }
+    let child_hash = hash_from_ref(&entry.hash)?;
+    let (new_child, annotations_hash) =
+        set_annotations_at_path(store, &child_hash, &path[1..], patch)?;
+    let updated = WorkspaceEntry {
+        hash: hash_ref_from_hash(&new_child)?,
+        annotations_hash: entry.annotations_hash.clone(),
+        ..entry
+    };
+    upsert_entry(&mut tree.entries, updated);
+    let new_root = store.put_node(&tree)?;
+    Ok((new_root, annotations_hash))
+}
+
 fn write_file_at_path<S: aos_store::Store>(
     store: &S,
     tree_hash: &Hash,
@@ -1018,24 +1228,36 @@ fn write_file_at_path<S: aos_store::Store>(
     let mut tree = load_tree(store, tree_hash)?;
     if path.len() == 1 {
         let name = path[0].clone();
+        let existing = find_entry(&tree, &name).cloned();
         let entry = WorkspaceEntry {
             name,
             kind: "file".into(),
             hash: blob_hash.clone(),
             size,
             mode,
+            annotations_hash: existing.and_then(|entry| {
+                if entry.kind == "file" {
+                    entry.annotations_hash
+                } else {
+                    None
+                }
+            }),
         };
         upsert_entry(&mut tree.entries, entry);
         return Ok(store.put_node(&tree)?);
     }
     let dir_name = &path[0];
-    let child_hash = if let Some(entry) = find_entry(&tree, dir_name) {
+    let existing = find_entry(&tree, dir_name).cloned();
+    let child_hash = if let Some(entry) = &existing {
         if entry.kind != "dir" {
             return Err(KernelError::Query("path is not a directory".into()));
         }
         hash_from_ref(&entry.hash)?
     } else {
-        store.put_node(&WorkspaceTree { entries: Vec::new() })?
+        store.put_node(&WorkspaceTree {
+            entries: Vec::new(),
+            annotations_hash: None,
+        })?
     };
     let new_child = write_file_at_path(store, &child_hash, &path[1..], blob_hash, size, mode)?;
     let entry = WorkspaceEntry {
@@ -1044,6 +1266,7 @@ fn write_file_at_path<S: aos_store::Store>(
         hash: hash_ref_from_hash(&new_child)?,
         size: 0,
         mode: MODE_DIR,
+        annotations_hash: existing.and_then(|entry| entry.annotations_hash),
     };
     upsert_entry(&mut tree.entries, entry);
     Ok(store.put_node(&tree)?)
@@ -1080,6 +1303,7 @@ fn remove_entry_at_path<S: aos_store::Store>(
         hash: hash_ref_from_hash(&new_child)?,
         size: 0,
         mode: MODE_DIR,
+        annotations_hash: entry.annotations_hash.clone(),
     };
     upsert_entry(&mut tree.entries, entry);
     Ok(store.put_node(&tree)?)
@@ -1216,7 +1440,10 @@ mod tests {
     fn tree_write_and_remove_roundtrip() {
         let store = MemStore::new();
         let root = store
-            .put_node(&WorkspaceTree { entries: Vec::new() })
+            .put_node(&WorkspaceTree {
+                entries: Vec::new(),
+                annotations_hash: None,
+            })
             .expect("root tree");
         let content = b"hello".to_vec();
         let blob_hash = store.put_blob(&content).expect("put blob");

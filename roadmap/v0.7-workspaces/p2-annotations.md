@@ -3,7 +3,7 @@
 **Priority**: P2  
 **Effort**: Medium  
 **Risk if deferred**: Medium (limits metadata for tooling and publishing)  
-**Status**: Draft
+**Status**: Complete
 
 ## Goal
 
@@ -22,6 +22,14 @@ a global ontology on the kernel.
 1) Introduce opaque annotations as **hash -> hash** mappings stored in CAS.
 2) Add `workspace.annotations_get` and `workspace.annotations_set` effects.
 3) The kernel **does not interpret** annotation keys or values.
+
+## Implementation Status
+
+Completed:
+- [x] Built-in schemas/effects for annotations + v2 tree/entry
+- [x] Kernel internal effects for annotations get/set
+- [x] Workspace cap enforcer supports annotations ops
+- [x] Integration tests for annotations (round-trip + file write)
 
 ## Data Model (Schemas)
 

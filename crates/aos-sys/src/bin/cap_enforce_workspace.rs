@@ -69,6 +69,16 @@ struct WorkspaceDiffParams {
     prefix: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct WorkspaceAnnotationsGetParams {
+    path: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct WorkspaceAnnotationsSetParams {
+    path: Option<String>,
+}
+
 impl PureModule for CapEnforceWorkspace {
     type Input = CapCheckInput;
     type Output = CapCheckOutput;
@@ -203,6 +213,36 @@ impl PureModule for CapEnforceWorkspace {
                     ));
                 }
             }
+            "workspace.annotations_get" => {
+                let params: WorkspaceAnnotationsGetParams = match decode_cbor(&input.effect_params) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        return Ok(deny("effect_params_invalid", err.to_string()));
+                    }
+                };
+                let path = params.path.unwrap_or_default();
+                if !path_allowed(&cap_params.path_prefixes, &path) {
+                    return Ok(deny(
+                        "path_not_allowed",
+                        format!("path '{}' not allowed", path),
+                    ));
+                }
+            }
+            "workspace.annotations_set" => {
+                let params: WorkspaceAnnotationsSetParams = match decode_cbor(&input.effect_params) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        return Ok(deny("effect_params_invalid", err.to_string()));
+                    }
+                };
+                let path = params.path.unwrap_or_default();
+                if !path_allowed(&cap_params.path_prefixes, &path) {
+                    return Ok(deny(
+                        "path_not_allowed",
+                        format!("path '{}' not allowed", path),
+                    ));
+                }
+            }
             _ => {
                 return Ok(deny(
                     "effect_kind_mismatch",
@@ -228,6 +268,8 @@ fn op_for_kind(kind: &str) -> Option<&'static str> {
         "workspace.read_ref" | "workspace.read_bytes" => Some("read"),
         "workspace.write_bytes" | "workspace.remove" => Some("write"),
         "workspace.diff" => Some("diff"),
+        "workspace.annotations_get" => Some("read"),
+        "workspace.annotations_set" => Some("write"),
         _ => None,
     }
 }

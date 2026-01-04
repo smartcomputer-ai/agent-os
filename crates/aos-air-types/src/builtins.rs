@@ -236,6 +236,10 @@ mod tests {
         assert!(names.contains(&"sys/WorkspaceCommit@1"));
         assert!(names.contains(&"sys/WorkspaceEntry@1"));
         assert!(names.contains(&"sys/WorkspaceTree@1"));
+        assert!(names.contains(&"sys/WorkspaceEntry@2"));
+        assert!(names.contains(&"sys/WorkspaceTree@2"));
+        assert!(names.contains(&"sys/WorkspaceAnnotations@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsPatch@1"));
         assert!(names.contains(&"sys/WorkspaceResolveParams@1"));
         assert!(names.contains(&"sys/WorkspaceResolveReceipt@1"));
         assert!(names.contains(&"sys/WorkspaceListParams@1"));
@@ -253,6 +257,10 @@ mod tests {
         assert!(names.contains(&"sys/WorkspaceDiffParams@1"));
         assert!(names.contains(&"sys/WorkspaceDiffChange@1"));
         assert!(names.contains(&"sys/WorkspaceDiffReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsGetParams@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsGetReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsSetParams@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsSetReceipt@1"));
         // Introspection
         assert!(names.contains(&"sys/ReadMeta@1"));
         assert!(names.contains(&"sys/IntrospectManifestParams@1"));

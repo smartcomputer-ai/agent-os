@@ -164,6 +164,24 @@
     "cap_type": "workspace",
     "origin_scope": "plan"
   },
+  {
+    "$kind": "defeffect",
+    "name": "sys/workspace.annotations_get@1",
+    "kind": "workspace.annotations_get",
+    "params_schema": "sys/WorkspaceAnnotationsGetParams@1",
+    "receipt_schema": "sys/WorkspaceAnnotationsGetReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
+    "name": "sys/workspace.annotations_set@1",
+    "kind": "workspace.annotations_set",
+    "params_schema": "sys/WorkspaceAnnotationsSetParams@1",
+    "receipt_schema": "sys/WorkspaceAnnotationsSetReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
 
   {
     "$kind": "defeffect",

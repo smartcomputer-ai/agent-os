@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: Medium/High  
 **Risk if deferred**: High (blocks in-world development UX)  
-**Status**: Draft
+**Status**: Completed
 
 ## Goal
 

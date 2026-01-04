@@ -9,6 +9,7 @@
 #[path = "helpers.rs"]
 mod helpers;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use aos_effects::{EffectKind, IntentBuilder, ReceiptStatus};
@@ -154,6 +155,38 @@ struct WorkspaceDiffChange {
 #[derive(Debug, Serialize, Deserialize)]
 struct WorkspaceDiffReceipt {
     changes: Vec<WorkspaceDiffChange>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+struct WorkspaceAnnotations(BTreeMap<String, String>);
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+struct WorkspaceAnnotationsPatch(BTreeMap<String, Option<String>>);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsGetParams {
+    root_hash: String,
+    path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsGetReceipt {
+    annotations: Option<WorkspaceAnnotations>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsSetParams {
+    root_hash: String,
+    path: Option<String>,
+    annotations_patch: WorkspaceAnnotationsPatch,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsSetReceipt {
+    new_root_hash: String,
+    annotations_hash: String,
 }
 
 fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
@@ -413,4 +446,156 @@ async fn workspace_tree_effects_roundtrip() {
             .expect("intent");
     let list_receipt: WorkspaceListReceipt = handle_internal(&mut world.kernel, intent);
     assert!(list_receipt.entries.is_empty());
+}
+
+#[tokio::test]
+async fn workspace_annotations_roundtrip_on_root() {
+    let store = fixtures::new_mem_store();
+    let loaded = build_workspace_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), loaded).expect("world");
+
+    let empty_root = store
+        .put_node(&WorkspaceTree { entries: Vec::new() })
+        .expect("root tree");
+
+    let key_hash = aos_cbor::Hash::of_bytes(b"sys/commit.message").to_hex();
+    let val_hash = aos_cbor::Hash::of_bytes(b"message body").to_hex();
+
+    let mut patch_map = BTreeMap::new();
+    patch_map.insert(key_hash.clone(), Some(val_hash.clone()));
+    let set_params = WorkspaceAnnotationsSetParams {
+        root_hash: empty_root.to_hex(),
+        path: None,
+        annotations_patch: WorkspaceAnnotationsPatch(patch_map),
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_annotations_set(),
+        "sys/workspace@1",
+        &set_params,
+    )
+    .build()
+    .expect("intent");
+    let set_receipt: WorkspaceAnnotationsSetReceipt = handle_internal(&mut world.kernel, intent);
+    assert!(set_receipt.annotations_hash.starts_with("sha256:"));
+
+    let get_params = WorkspaceAnnotationsGetParams {
+        root_hash: set_receipt.new_root_hash.clone(),
+        path: None,
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_annotations_get(),
+        "sys/workspace@1",
+        &get_params,
+    )
+    .build()
+    .expect("intent");
+    let get_receipt: WorkspaceAnnotationsGetReceipt = handle_internal(&mut world.kernel, intent);
+    let annotations = get_receipt.annotations.expect("annotations");
+    assert_eq!(annotations.0.get(&key_hash), Some(&val_hash));
+
+    let mut delete_patch = BTreeMap::new();
+    delete_patch.insert(key_hash.clone(), None);
+    let delete_params = WorkspaceAnnotationsSetParams {
+        root_hash: set_receipt.new_root_hash,
+        path: None,
+        annotations_patch: WorkspaceAnnotationsPatch(delete_patch),
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_annotations_set(),
+        "sys/workspace@1",
+        &delete_params,
+    )
+    .build()
+    .expect("intent");
+    let delete_receipt: WorkspaceAnnotationsSetReceipt =
+        handle_internal(&mut world.kernel, intent);
+
+    let get_params = WorkspaceAnnotationsGetParams {
+        root_hash: delete_receipt.new_root_hash,
+        path: None,
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_annotations_get(),
+        "sys/workspace@1",
+        &get_params,
+    )
+    .build()
+    .expect("intent");
+    let get_receipt: WorkspaceAnnotationsGetReceipt = handle_internal(&mut world.kernel, intent);
+    let annotations = get_receipt.annotations.expect("annotations");
+    assert!(annotations.0.is_empty());
+}
+
+#[tokio::test]
+async fn workspace_annotations_survive_file_write() {
+    let store = fixtures::new_mem_store();
+    let loaded = build_workspace_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), loaded).expect("world");
+
+    let empty_root = store
+        .put_node(&WorkspaceTree { entries: Vec::new() })
+        .expect("root tree");
+
+    let write_params = WorkspaceWriteBytesParams {
+        root_hash: empty_root.to_hex(),
+        path: "notes/readme.txt".into(),
+        bytes: b"hello".to_vec(),
+        mode: None,
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_write_bytes(),
+        "sys/workspace@1",
+        &write_params,
+    )
+    .build()
+    .expect("intent");
+    let write_receipt: WorkspaceWriteBytesReceipt = handle_internal(&mut world.kernel, intent);
+
+    let key_hash = aos_cbor::Hash::of_bytes(b"doc.tag").to_hex();
+    let val_hash = aos_cbor::Hash::of_bytes(b"draft").to_hex();
+    let mut patch_map = BTreeMap::new();
+    patch_map.insert(key_hash.clone(), Some(val_hash.clone()));
+    let set_params = WorkspaceAnnotationsSetParams {
+        root_hash: write_receipt.new_root_hash.clone(),
+        path: Some("notes/readme.txt".into()),
+        annotations_patch: WorkspaceAnnotationsPatch(patch_map),
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_annotations_set(),
+        "sys/workspace@1",
+        &set_params,
+    )
+    .build()
+    .expect("intent");
+    let set_receipt: WorkspaceAnnotationsSetReceipt = handle_internal(&mut world.kernel, intent);
+
+    let write_params = WorkspaceWriteBytesParams {
+        root_hash: set_receipt.new_root_hash.clone(),
+        path: "notes/readme.txt".into(),
+        bytes: b"hello again".to_vec(),
+        mode: None,
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_write_bytes(),
+        "sys/workspace@1",
+        &write_params,
+    )
+    .build()
+    .expect("intent");
+    let write_receipt: WorkspaceWriteBytesReceipt = handle_internal(&mut world.kernel, intent);
+
+    let get_params = WorkspaceAnnotationsGetParams {
+        root_hash: write_receipt.new_root_hash,
+        path: Some("notes/readme.txt".into()),
+    };
+    let intent = IntentBuilder::new(
+        EffectKind::workspace_annotations_get(),
+        "sys/workspace@1",
+        &get_params,
+    )
+    .build()
+    .expect("intent");
+    let get_receipt: WorkspaceAnnotationsGetReceipt = handle_internal(&mut world.kernel, intent);
+    let annotations = get_receipt.annotations.expect("annotations");
+    assert_eq!(annotations.0.get(&key_hash), Some(&val_hash));
 }
