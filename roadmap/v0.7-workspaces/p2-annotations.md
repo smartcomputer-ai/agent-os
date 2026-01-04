@@ -63,14 +63,14 @@ Notes:
 #### `workspace.annotations_get`
 Params:
 - `root_hash: hash`
-- `path: text`
+- `path: option<text>` (none = root)
 Receipt:
 - `annotations: option<sys/WorkspaceAnnotations@1>`
 
 #### `workspace.annotations_set`
 Params:
 - `root_hash: hash`
-- `path: text`
+- `path: option<text>` (none = root)
 - `annotations_patch: sys/WorkspaceAnnotationsPatch@1`
 Receipt:
 - `{ new_root_hash, annotations_hash }`
@@ -78,18 +78,30 @@ Receipt:
 ## Representation Notes
 
 To make annotations part of the content-addressed tree, a tree schema bump is
-likely needed (e.g., `sys/WorkspaceEntry@2` with `annotations_hash?: hash`). New
-writes would emit v2 nodes; readers should accept v1 and v2 during a transition.
+likely needed. Add:
+- `sys/WorkspaceTree@2.annotations_hash?: hash` for the directory itself
+  (including the root).
+- `sys/WorkspaceEntry@2.annotations_hash?: hash` for child objects.
+
+New writes would emit v2 nodes; readers should accept v1 and v2 during a
+transition.
+
+For updates:
+- Directory annotations are stored on the directory node itself.
+- File annotations are stored on the parent entry for that file.
 
 ## Conventions
 
-- Commit-level annotations live on the root path and version with the tree.
+- Commit-level annotations live on the root path (`path = none`) and version with
+  the tree.
 - Suggested keys (hashes of namespaced identifiers):
   - `sys/commit.message`
   - `sys/commit.title`
   - `sys/commit.notes`
   - `sys/tags`
   - `sys/commit.owner` (optional mirror of commit meta)
+Notes:
+- Key hash = `sha256(utf8(key_name))`, stored as a normal `hash` value.
 
 ## Tests
 

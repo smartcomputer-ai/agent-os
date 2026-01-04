@@ -21,7 +21,7 @@ dir, subtree). Everything else is userland and composable.
 
 1) Keep kernel perspectives minimal and structural only.
 2) Add a userland registry of perspective handlers.
-3) Host servers dispatch to handlers for non-structural perspectives.
+3) Host servers dispatch to **pure handlers** for non-structural perspectives.
 
 ## Concepts
 
@@ -33,6 +33,8 @@ These map directly to the Merkle tree model and are stable:
 
 These are covered by `workspace.read_bytes`, `workspace.list`, and `workspace.diff`
 (or a future archive export).
+Notes:
+- `file` means the path resolves to a file entry in the tree.
 
 ### Semantic Perspectives (Userland)
 Everything else is semantic and should be a handler:
@@ -50,14 +52,16 @@ Everything else is semantic and should be a handler:
   "name": "sys/PerspectiveHandler@1",
   "type": {
     "record": {
+      "exec": { "text": {} },
       "module": { "text": {} },
       "entrypoint": { "text": {} },
-      "required_caps": { "list": { "text": {} } },
       "default_mime": { "option": { "text": {} } }
     }
   }
 }
 ```
+Notes:
+- `exec` is `"host_pure"` for v0.
 
 ### 2) Perspective Registry State
 ```jsonc
@@ -118,15 +122,17 @@ Notes:
 
 1) Parse request -> `(WorkspaceRef, perspective)`.
 2) If perspective is structural, call workspace effects directly.
-3) Else look up handler and run it as a plan/module.
+3) Else look up handler and run it as a **host-pure module**.
 
-Handlers use `workspace.resolve`, `workspace.read_bytes`, and `workspace.list`
-under normal caps. No kernel changes are required to add new perspectives.
+Handlers are invoked per request as pure transforms. The host performs
+`workspace.resolve`, `workspace.read_bytes`, and `workspace.list`, then passes
+bytes/metadata into the handler. No kernel changes are required to add new
+perspectives.
 
 ## Capabilities
 
-- Handler execution should be gated by a cap like `sys/perspective.run@1`.
-- Handlers must also hold the underlying `sys/workspace@1` caps for read/list.
+- The host process must hold `sys/workspace@1` caps for read/list.
+- Registry updates should be gated by policy or a plan.
 
 ## Examples
 

@@ -31,8 +31,8 @@ for real workflows. Rather than building another system beside it, we will
 ## Decision Summary
 
 1) **Deprecate ObjectCatalog** and replace it with a Workspace reducer.
-2) **Make Workspace a superset registry**: it stores versioned references to
-   both tree roots and blob roots.
+2) **Make Workspace a superset registry**: artifacts live in trees via
+   conventional paths.
 3) **Introduce WorkspaceRef + workspace.resolve** for explicit name resolution.
 4) **Tree operations are kernel-internal effects** (deterministic, cap-gated).
 5) **Commit history is reducer state** (auditable, replayable).
@@ -48,14 +48,14 @@ This keeps the model minimal: one registry reducer + one tree effect surface.
 
 ### Workspace
 A workspace is a **named versioned root** stored in reducer state:
-- The root can be a **tree** (source code) or a **blob** (single artifact).
+- The root is always a **tree** (source code, artifacts, metadata).
 - Every commit is append-only and auditable.
 
 ### WorkspaceRef (Name vs Referent)
 Plans, HTTP routes, and adapters should carry a **reference** that makes the
 name → referent step explicit:
 - **Stable name**: `workspace` (evolving pointer)
-- **Immutable referent**: resolved `{ root_hash, root_kind, version }`
+- **Immutable referent**: resolved `{ root_hash, version }`
 
 ### Tree
 A workspace tree is a DAG of **directory nodes** stored in CAS. Each directory
@@ -63,7 +63,7 @@ node contains sorted entries; file entries point to blobs.
 
 ### Workspace as Registry
 With this design, "artifact registry" is not a separate system. It is simply a
-workspace whose `root_kind = blob` and whose commits carry minimal metadata.
+workspace whose tree uses conventional paths for artifacts.
 
 ### Commit Metadata vs Annotations
 Commit metadata is reserved for correctness and history navigation. Descriptive
@@ -79,13 +79,17 @@ All names and path segments are URL-safe and deterministic.
   - Regex: `^[A-Za-z0-9._~-]+$`
 - **Path**: `/` is the separator; each segment must match the same regex.
   - No empty segments (`//`), no `.` or `..`, no trailing `/`.
+  - Segments starting with `~` are reserved for encoded forms.
 
 ### Import/Export Encoding
 Unix filenames may contain arbitrary bytes. For lossless interop:
-- Encode each path segment using percent-encoding on **UTF-8 bytes**.
-- Encode any byte outside `[A-Za-z0-9._~-]`, and encode `%` itself.
-- Use uppercase hex (`%2F`, `%20`).
-- On export, decode the percent-encoding.
+- Encode each path segment using a `~`-hex scheme on **UTF-8 bytes**.
+- If a segment is already `[A-Za-z0-9._~-]` and does **not** start with `~`,
+  keep it as-is.
+- Otherwise encode as `~` + uppercase hex of the UTF-8 bytes.
+- Literal `~` is always encoded (so `~` never appears unescaped at segment start).
+- On export, decode segments that start with `~`.
+- On import, reject `~` segments with odd-length or non-hex payloads.
 - On import, **reject non-UTF-8 filenames** (fail fast) to keep determinism.
 
 This preserves 1:1 round-tripping while keeping internal paths URL-safe.
@@ -129,7 +133,6 @@ Notes:
   "type": {
     "record": {
       "root_hash": { "hash": {} },
-      "root_kind": { "text": {} }, // "tree" | "blob"
       "owner": { "text": {} },
       "created_at": { "time": {} }
     }
@@ -137,8 +140,7 @@ Notes:
 }
 ```
 Notes:
-- `root_kind` is validated by runtime to be `"tree"` or `"blob"`.
-- `root_hash` is a CAS hash (tree node hash or blob hash).
+- `root_hash` is the tree root hash.
 - Descriptive metadata (messages, tags) lives in annotations (P2).
 
 ### 4) Workspace History (Reducer State)
@@ -268,6 +270,7 @@ Suggested shape:
 Notes:
 - `ops` values: `"resolve" | "read" | "list" | "diff" | "write" | "commit" | "publish"`.
 - Omitted fields mean "no additional restriction".
+- `path_prefixes` use normalized relative paths (no leading `/`).
 
 ### Effects (names and shapes)
 The exact schema names below should be added to `spec/defs/builtin-schemas.air.json`
@@ -278,10 +281,11 @@ Params:
 - `workspace: text`
 - `version: option<nat>` (none = HEAD)
 Receipt:
-- `{ exists: bool, head?: nat, root_hash?: hash, root_kind?: text }`
+- `{ exists: bool, resolved_version?: nat, head?: nat, root_hash?: hash }`
 Notes:
 - If `exists = false`, other fields are absent.
 - If a specific `version` is missing, return `exists = false`.
+- `resolved_version` is the version actually resolved (useful when `version = none`).
 
 #### `workspace.list`
 Params:
@@ -340,6 +344,9 @@ Receipt:
 - Errors return `ReceiptStatus::Error` with structured error payload.
 - No wall-clock access; deterministic only.
 - `workspace.resolve` reads reducer state deterministically (no CAS reads).
+- `workspace.read_bytes.range` uses `[start, end)` with `end` exclusive.
+- `start <= end` is required; `end` past EOF returns an error.
+- `workspace.remove` deletes files or empty directories; non-empty dirs error.
 
 ## Reducer Semantics
 
@@ -356,6 +363,8 @@ This keeps reducer deterministic and small, and avoids CAS reads in reducers.
 ### API Separation
 All APIs take `{ workspace, version, path }` separately. No combined path format.
 `sys/WorkspaceRef@1` is the standard carrier for these fields.
+All workspace paths are normalized relative paths; root is represented as `none`
+where a path is optional.
 
 ### CLI (planned)
 - Replace `aos obj` with `aos ws`.
@@ -401,7 +410,7 @@ Add tests for:
 - Tree canonicalization: entry ordering and hash stability.
 - Workspace effects: resolve/list/read_ref/read/write/remove/diff round-trips.
 - Reducer concurrency checks (`expected_head`).
-- CLI/World IO percent-encoding round-trip.
+- CLI/World IO `~`-hex encoding round-trip.
 - Replay determinism (tree effects receipts should be replay-safe).
 - Cap scoping: workspace/path/op allowlists.
 
@@ -425,6 +434,5 @@ Add tests for:
 
 ## Open Questions
 
-- Should we allow `root_kind` beyond `tree` and `blob` (future extensibility)?
 - Do we need a `workspace.move/rename` effect (likely not; use write+remove)?
 - Should we add a small index reducer for annotation queries (optional)?

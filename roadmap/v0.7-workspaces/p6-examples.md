@@ -1,0 +1,1 @@
+refactor examples to use workspaces, also refactor any remaining tests.

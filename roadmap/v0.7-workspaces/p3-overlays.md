@@ -35,7 +35,7 @@ overlay keeps provenance auditable and outputs publishable.
       "plan": { "text": {} },
       "base": { "ref": "sys/WorkspaceRef@1" },
       "output_workspace": { "text": {} },
-      "output_path": { "text": {} },
+      "output_path": { "option": { "text": {} } },
       "params_hash": { "option": { "hash": {} } }
     }
   }
@@ -43,6 +43,7 @@ overlay keeps provenance auditable and outputs publishable.
 ```
 Notes:
 - `params_hash` references a blob containing plan parameters.
+- For v0, `output_path` should be `none` (output workspace is dedicated).
 
 ## Convention
 
@@ -52,7 +53,7 @@ Store overlay manifests under:
 A build plan:
 1) Resolves `base` via `workspace.resolve`.
 2) Produces a derived tree.
-3) Commits output under `output_workspace` and `output_path`.
+3) Commits output as the root of `output_workspace`.
 
 ## Tests
 
@@ -63,3 +64,4 @@ A build plan:
 
 - Do we want a registry reducer for overlay state/history?
 - Should overlays be allowed to write into the same workspace as the base?
+- Do we want a tree splice/mount primitive for `output_path` in the future?
