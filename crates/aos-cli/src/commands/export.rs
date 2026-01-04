@@ -21,7 +21,7 @@ use super::{should_use_control, try_control_client};
 
 #[derive(Args, Debug)]
 pub struct ExportArgs {
-    /// Output directory (defaults to current directory)
+    /// Output directory (defaults to world directory)
     #[arg(long)]
     pub out: Option<PathBuf>,
 
@@ -48,6 +48,10 @@ pub struct ExportArgs {
     /// Write a single defs bundle (air/defs.air.json) instead of per-kind files
     #[arg(long)]
     pub defs_bundle: bool,
+
+    /// Overwrite existing air/modules/sources in the output directory
+    #[arg(long)]
+    pub force: bool,
 }
 
 pub async fn cmd_export(opts: &WorldOpts, args: &ExportArgs) -> Result<()> {
@@ -55,8 +59,9 @@ pub async fn cmd_export(opts: &WorldOpts, args: &ExportArgs) -> Result<()> {
     let store = FsStore::open(&dirs.store_root).context("open store")?;
     let mut warnings = Vec::new();
 
-    let out_dir = args.out.clone().unwrap_or_else(|| PathBuf::from("."));
+    let out_dir = resolve_out_dir(&dirs, args.out.clone());
     fs::create_dir_all(&out_dir).context("create export dir")?;
+    ensure_export_target(&out_dir, args)?;
 
     let manifest_hash = if let Some(hash) = &args.manifest {
         hash.clone()
@@ -106,6 +111,53 @@ pub async fn cmd_export(opts: &WorldOpts, args: &ExportArgs) -> Result<()> {
         None,
         warnings,
     )
+}
+
+fn resolve_out_dir(dirs: &crate::opts::ResolvedDirs, out: Option<PathBuf>) -> PathBuf {
+    match out {
+        Some(path) => {
+            if path.is_relative() {
+                dirs.world.join(path)
+            } else {
+                path
+            }
+        }
+        None => dirs.world.clone(),
+    }
+}
+
+fn ensure_export_target(out_dir: &Path, args: &ExportArgs) -> Result<()> {
+    if args.force {
+        return Ok(());
+    }
+    let mut conflicts = Vec::new();
+    let air_dir = out_dir.join("air");
+    if air_dir.exists() {
+        conflicts.push(format!("{}", air_dir.display()));
+    }
+    let manifest_path = out_dir.join(".aos/manifest.air.cbor");
+    if manifest_path.exists() {
+        conflicts.push(format!("{}", manifest_path.display()));
+    }
+    if args.with_modules {
+        let modules_dir = out_dir.join("modules");
+        if modules_dir.exists() {
+            conflicts.push(format!("{}", modules_dir.display()));
+        }
+    }
+    if args.with_sources {
+        let sources_dir = out_dir.join("sources");
+        if sources_dir.exists() {
+            conflicts.push(format!("{}", sources_dir.display()));
+        }
+    }
+    if conflicts.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "export would overwrite existing paths:\n  - {}\nUse --force to overwrite.",
+        conflicts.join("\n  - ")
+    );
 }
 
 fn export_modules(

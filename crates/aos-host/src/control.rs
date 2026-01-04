@@ -491,22 +491,7 @@ async fn handle_request(
                 let patch_bytes = BASE64_STANDARD
                     .decode(payload.patch_b64)
                     .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
-                // Try ManifestPatch CBOR first; fallback to PatchDocument JSON (validated).
-                let patch =
-                    if let Ok(manifest) = serde_cbor::from_slice::<ManifestPatch>(&patch_bytes) {
-                        crate::modes::daemon::GovernancePatchInput::Manifest(manifest)
-                    } else if let Ok(doc_json) =
-                        serde_json::from_slice::<serde_json::Value>(&patch_bytes)
-                    {
-                        validate_patch_doc(&doc_json)?;
-                        let doc: PatchDocument = serde_json::from_value(doc_json)
-                            .map_err(|e| ControlError::decode(format!("decode patch doc: {e}")))?;
-                        crate::modes::daemon::GovernancePatchInput::PatchDoc(doc)
-                    } else {
-                        return Err(ControlError::decode(
-                            "patch_b64 is neither ManifestPatch CBOR nor PatchDocument JSON",
-                        ));
-                    };
+                let patch = decode_governance_patch(&patch_bytes)?;
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
                     .send(ControlMsg::GovPropose {
@@ -579,6 +564,23 @@ async fn handle_request(
                     .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
                 inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({}))
+            }
+            "gov-apply-direct" => {
+                let payload: ApplyDirectPayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let patch_bytes = BASE64_STANDARD
+                    .decode(payload.patch_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let patch = decode_governance_patch(&patch_bytes)?;
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::GovApplyDirect { patch, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let manifest_hash = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "manifest_hash": manifest_hash }))
             }
             "gov-list" => {
                 let status = req
@@ -683,6 +685,11 @@ struct ApplyPayload {
     proposal_id: u64,
 }
 
+#[derive(Debug, Deserialize)]
+struct ApplyDirectPayload {
+    patch_b64: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum GovListFilter {
     Pending,
@@ -715,6 +722,24 @@ fn parse_gov_list_filter(status: &str) -> Result<GovListFilter, ControlError> {
             "invalid status '{other}' (expected pending, approved, applied, rejected, all, submitted, shadowed)"
         ))),
     }
+}
+
+fn decode_governance_patch(
+    patch_bytes: &[u8],
+) -> Result<crate::modes::daemon::GovernancePatchInput, ControlError> {
+    // Try ManifestPatch CBOR first; fallback to PatchDocument JSON (validated).
+    if let Ok(manifest) = serde_cbor::from_slice::<ManifestPatch>(patch_bytes) {
+        return Ok(crate::modes::daemon::GovernancePatchInput::Manifest(manifest));
+    }
+    if let Ok(doc_json) = serde_json::from_slice::<serde_json::Value>(patch_bytes) {
+        validate_patch_doc(&doc_json)?;
+        let doc: PatchDocument = serde_json::from_value(doc_json)
+            .map_err(|e| ControlError::decode(format!("decode patch doc: {e}")))?;
+        return Ok(crate::modes::daemon::GovernancePatchInput::PatchDoc(doc));
+    }
+    Err(ControlError::decode(
+        "patch_b64 is neither ManifestPatch CBOR nor PatchDocument JSON",
+    ))
 }
 
 impl GovListFilter {

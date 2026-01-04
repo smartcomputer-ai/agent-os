@@ -2043,6 +2043,21 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
+    /// Apply a manifest patch directly without governance (dev mode).
+    ///
+    /// The patch is canonicalized, stored in the CAS, and swapped into the live kernel.
+    pub fn apply_patch_direct(&mut self, patch: ManifestPatch) -> Result<String, KernelError> {
+        let canonical = canonicalize_patch(self.store.as_ref(), patch)?;
+
+        for node in &canonical.nodes {
+            self.store.put_node(node)?;
+        }
+        self.store.put_node(&AirNode::Manifest(canonical.manifest.clone()))?;
+
+        self.swap_manifest(&canonical)?;
+        Ok(self.manifest_hash.to_hex())
+    }
+
     fn load_manifest_patch(&self, hash_hex: &str) -> Result<ManifestPatch, KernelError> {
         let hash = Hash::from_hex_str(hash_hex)
             .map_err(|err| KernelError::Manifest(format!("invalid patch hash: {err}")))?;

@@ -119,6 +119,10 @@ pub enum ControlMsg {
         proposal_id: u64,
         resp: oneshot::Sender<Result<(), HostError>>,
     },
+    GovApplyDirect {
+        patch: GovernancePatchInput,
+        resp: oneshot::Sender<Result<String, HostError>>,
+    },
     GovList {
         resp: oneshot::Sender<Result<Vec<Proposal>, HostError>>,
     },
@@ -451,6 +455,20 @@ impl<S: Store + 'static> WorldDaemon<S> {
                     .apply_proposal(proposal_id)
                     .map_err(HostError::from);
                 let _ = resp.send(res);
+            }
+            ControlMsg::GovApplyDirect { patch, resp } => {
+                tracing::info!("Governance direct apply via control");
+                let res = match patch {
+                    GovernancePatchInput::Manifest(patch) => {
+                        self.host.kernel_mut().apply_patch_direct(patch)
+                    }
+                    GovernancePatchInput::PatchDoc(doc) => {
+                        let compiled = compile_patch_document(self.host.store(), doc)
+                            .map_err(HostError::from)?;
+                        self.host.kernel_mut().apply_patch_direct(compiled)
+                    }
+                };
+                let _ = resp.send(res.map_err(HostError::from));
             }
             ControlMsg::GovList { resp } => {
                 tracing::info!("Governance list via control");

@@ -20,7 +20,7 @@ use commands::manifest::ManifestArgs;
 use commands::obj::ObjArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
-use opts::WorldOpts;
+use opts::{WorldOpts, resolve_world};
 
 #[derive(Parser, Debug)]
 #[command(name = "aos", version, about = "AgentOS CLI")]
@@ -124,6 +124,10 @@ enum SnapshotCommand {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let opts = &cli.opts;
+
+    if let Ok(world) = resolve_world(opts) {
+        let _ = crate::util::load_world_env(&world);
+    }
 
     match cli.command {
         Command::Init(args) => commands::init::cmd_init(&args),

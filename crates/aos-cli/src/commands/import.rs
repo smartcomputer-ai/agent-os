@@ -11,13 +11,16 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use serde_json::json;
 use walkdir::WalkDir;
 
+use aos_air_types::AirNode;
 use aos_cbor::Hash;
 use aos_host::control::ControlClient;
+use aos_host::host::WorldHost;
 use aos_host::modes::batch::BatchRunner;
 use aos_host::world_io::{
     BundleFilter, ImportMode, ImportOutcome, build_patch_document, import_bundle, load_air_bundle,
     manifest_node_hash, resolve_base_manifest, write_air_layout_with_options, WriteOptions,
 };
+use aos_kernel::patch_doc::compile_patch_document;
 use aos_store::{FsStore, Store};
 use aos_sys::{ObjectMeta, ObjectRegistered};
 
@@ -38,12 +41,12 @@ pub enum ImportModeArg {
 
 #[derive(Args, Debug)]
 pub struct ImportArgs {
-    /// Import AIR assets from a directory
-    #[arg(long, conflicts_with = "source")]
+    /// Import AIR assets from a directory (default: <world>/air when no inputs provided)
+    #[arg(long)]
     pub air: Option<PathBuf>,
 
-    /// Import source bundle from a directory or tar file
-    #[arg(long, conflicts_with = "air")]
+    /// Import source bundle from a directory or tar file (default: <world>/reducer when no inputs provided)
+    #[arg(long)]
     pub source: Option<PathBuf>,
 
     /// Import mode for AIR (genesis or patch)
@@ -57,6 +60,10 @@ pub struct ImportArgs {
     /// Dry-run: emit patch doc or manifest hash and exit
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Dev mode: auto-apply patches (skip governance unless explicitly requested; env: AOS_DEV)
+    #[arg(long)]
+    pub dev: bool,
 
     /// Propose the patch via governance control
     #[arg(long)]
@@ -90,7 +97,7 @@ pub struct ImportArgs {
     #[arg(long, default_value = "cli")]
     pub approver: String,
 
-    /// Object name for --source
+    /// Object name for --source (default: source/<world-name> for default source dir)
     #[arg(long)]
     pub name: Option<String>,
 
@@ -103,17 +110,87 @@ pub struct ImportArgs {
     pub owner: String,
 }
 
-pub async fn cmd_import(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
-    match (&args.air, &args.source) {
-        (Some(_), None) => import_air(opts, args).await,
-        (None, Some(_)) => import_source(opts, args).await,
-        _ => bail!("--air or --source is required"),
-    }
+struct ImportResult {
+    data: serde_json::Value,
+    warnings: Vec<String>,
 }
 
-async fn import_air(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
-    let air_dir = args.air.as_ref().expect("air");
+pub async fn cmd_import(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
+    let mut warnings = Vec::new();
+
+    let air_explicit = args.air.is_some();
+    let source_explicit = args.source.is_some();
+    let mut air_dir = args.air.clone();
+    let mut source_dir = args.source.clone();
+    let mut source_name = args.name.clone();
+
+    if !air_explicit && !source_explicit {
+        air_dir = Some(dirs.air_dir.clone());
+        if !args.air_only {
+            if dirs.reducer_dir.exists() {
+                source_dir = Some(dirs.reducer_dir.clone());
+                if source_name.is_none() {
+                    source_name = Some(default_source_name(&dirs.world));
+                }
+            } else {
+                warnings.push(format!(
+                    "default source dir '{}' not found; skipping source import",
+                    dirs.reducer_dir.display()
+                ));
+            }
+        }
+    }
+
+    if args.air_only && source_dir.is_some() {
+        bail!("--air-only cannot be used with --source");
+    }
+    if source_dir.is_some() && source_name.is_none() {
+        bail!("--name is required with --source");
+    }
+    if air_dir.is_none() && source_dir.is_none() {
+        bail!("--air or --source is required");
+    }
+
+    let mut air_result = None;
+    let mut source_result = None;
+    let gov_mode = args.propose || args.approve || args.apply;
+    let dev_mode = resolve_dev_mode(args) && !gov_mode;
+    let allow_source = !(!dev_mode && !gov_mode && !source_explicit);
+
+    if let Some(air_dir) = air_dir {
+        let res = import_air(opts, args, &dirs, &air_dir, dev_mode).await?;
+        warnings.extend(res.warnings);
+        air_result = Some(res.data);
+    }
+
+    if let Some(source_dir) = source_dir {
+        if allow_source {
+            let name = source_name.clone().expect("source name required");
+            let res = import_source(opts, args, &dirs, &source_dir, &name).await?;
+            warnings.extend(res.warnings);
+            source_result = Some(res.data);
+        } else {
+            warnings.push("skipping source import (non-dev mode without governance)".into());
+        }
+    }
+
+    let data = match (air_result, source_result) {
+        (Some(air), Some(source)) => serde_json::json!({ "air": air, "source": source }),
+        (Some(air), None) => air,
+        (None, Some(source)) => source,
+        (None, None) => serde_json::json!({}),
+    };
+    print_success(opts, data, None, warnings)
+}
+
+async fn import_air(
+    opts: &WorldOpts,
+    args: &ImportArgs,
+    dirs: &crate::opts::ResolvedDirs,
+    air_dir: &Path,
+    dev_mode: bool,
+) -> Result<ImportResult> {
     let store = FsStore::open(&dirs.store_root).context("open store")?;
     let filter = if args.air_only {
         BundleFilter::AirOnly
@@ -132,7 +209,10 @@ async fn import_air(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
         }
         if args.dry_run {
             let hash = manifest_node_hash(&bundle.manifest)?;
-            return print_success(opts, json!({ "manifest_hash": hash }), None, vec![]);
+            return Ok(ImportResult {
+                data: json!({ "manifest_hash": hash }),
+                warnings: Vec::new(),
+            });
         }
         ensure_world_layout(&dirs)?;
         let outcome = import_bundle(&store, &bundle, ImportMode::Genesis)?;
@@ -148,12 +228,10 @@ async fn import_air(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
                 defs_bundle: false,
             },
         )?;
-        return print_success(
-            opts,
-            json!({ "manifest_hash": genesis.manifest_hash }),
-            None,
-            vec![],
-        );
+        return Ok(ImportResult {
+            data: json!({ "manifest_hash": genesis.manifest_hash }),
+            warnings: Vec::new(),
+        });
     }
 
     let mut control = if should_use_control(opts) {
@@ -168,9 +246,170 @@ async fn import_air(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
     let mut doc_json = serde_json::to_value(&doc).context("serialize patch doc")?;
     autofill_patchdoc_hashes(&mut doc_json, args.require_hashes)?;
     validate_patch_json(&doc_json)?;
+    let doc: PatchDocument =
+        serde_json::from_value(doc_json.clone()).context("decode patch doc")?;
 
-    if args.dry_run || !args.propose {
-        return print_success(opts, doc_json, None, vec![]);
+    if args.dry_run {
+        return Ok(ImportResult {
+            data: doc_json,
+            warnings: Vec::new(),
+        });
+    }
+
+    if dev_mode && !args.shadow {
+        let patch_bytes = serde_json::to_vec(&doc_json).context("encode patch JSON")?;
+        if should_use_control(opts) {
+            if let Some(mut client) = control.take() {
+                let resp = send_gov_req(
+                    &mut client,
+                    "gov-apply-direct",
+                    json!({ "patch_b64": BASE64_STANDARD.encode(patch_bytes) }),
+                )
+                .await?;
+                let manifest_hash = resp
+                    .result
+                    .as_ref()
+                    .and_then(|v| v.get("manifest_hash"))
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("missing manifest_hash in response"))?;
+                return Ok(ImportResult {
+                    data: json!({ "manifest_hash": manifest_hash }),
+                    warnings: Vec::new(),
+                });
+            } else if matches!(opts.mode, Mode::Daemon) {
+                bail!(
+                    "daemon mode requested but no control socket at {}",
+                    dirs.control_socket.display()
+                );
+            }
+        }
+
+        store.put_node(&AirNode::Manifest(base.manifest.clone()))?;
+        let compiled = compile_patch_document(&store, doc.clone()).context("compile patch doc")?;
+        let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
+        let host_config = crate::util::host_config_from_opts(
+            opts.http_timeout_ms,
+            opts.http_max_body_bytes,
+        );
+        let kernel_config = crate::util::make_kernel_config(&dirs.store_root)?;
+        let mut host = WorldHost::open(
+            std::sync::Arc::new(store.clone()),
+            &manifest_path,
+            host_config,
+            kernel_config,
+        )?;
+        let manifest_hash = host.kernel_mut().apply_patch_direct(compiled)?;
+        return Ok(ImportResult {
+            data: json!({ "manifest_hash": manifest_hash }),
+            warnings: Vec::new(),
+        });
+    }
+
+    if dev_mode && args.shadow {
+        let patch_bytes = serde_json::to_vec(&doc_json).context("encode patch JSON")?;
+        if should_use_control(opts) {
+            if let Some(mut client) = control.take() {
+                let resp = send_gov_req(
+                    &mut client,
+                    "gov-propose",
+                    json!({
+                        "patch_b64": BASE64_STANDARD.encode(patch_bytes),
+                        "description": args.description
+                    }),
+                )
+                .await?;
+                let proposal_id = resp
+                    .result
+                    .as_ref()
+                    .and_then(|v| v.get("proposal_id"))
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| anyhow::anyhow!("missing proposal_id in response"))?;
+
+                let mut extra = serde_json::Map::new();
+                let resp = send_gov_req(
+                    &mut client,
+                    "gov-shadow",
+                    json!({ "proposal_id": proposal_id }),
+                )
+                .await?;
+                extra.insert(
+                    "shadow".into(),
+                    resp.result.unwrap_or_else(|| json!({})),
+                );
+                let resp = send_gov_req(
+                    &mut client,
+                    "gov-approve",
+                    json!({
+                        "proposal_id": proposal_id,
+                        "decision": "approve",
+                        "approver": args.approver
+                    }),
+                )
+                .await?;
+                extra.insert("approve".into(), json!({ "ok": resp.ok }));
+                let resp = send_gov_req(
+                    &mut client,
+                    "gov-apply",
+                    json!({ "proposal_id": proposal_id }),
+                )
+                .await?;
+                extra.insert("apply".into(), json!({ "ok": resp.ok }));
+
+                let mut data = serde_json::Map::new();
+                data.insert("proposal_id".into(), json!(proposal_id));
+                for (k, v) in extra {
+                    data.insert(k, v);
+                }
+                return Ok(ImportResult {
+                    data: serde_json::Value::Object(data),
+                    warnings: Vec::new(),
+                });
+            } else if matches!(opts.mode, Mode::Daemon) {
+                bail!(
+                    "daemon mode requested but no control socket at {}",
+                    dirs.control_socket.display()
+                );
+            }
+        }
+
+        store.put_node(&AirNode::Manifest(base.manifest.clone()))?;
+        let compiled = compile_patch_document(&store, doc.clone()).context("compile patch doc")?;
+        let manifest_path = dirs.store_root.join(".aos/manifest.air.cbor");
+        let host_config = crate::util::host_config_from_opts(
+            opts.http_timeout_ms,
+            opts.http_max_body_bytes,
+        );
+        let kernel_config = crate::util::make_kernel_config(&dirs.store_root)?;
+        let mut host = WorldHost::open(
+            std::sync::Arc::new(store.clone()),
+            &manifest_path,
+            host_config,
+            kernel_config,
+        )?;
+        let proposal_id = host
+            .kernel_mut()
+            .submit_proposal(compiled, args.description.clone())?;
+        let summary = host.kernel_mut().run_shadow(proposal_id, None)?;
+        host.kernel_mut()
+            .approve_proposal(proposal_id, args.approver.clone())?;
+        host.kernel_mut().apply_proposal(proposal_id)?;
+
+        let mut data = serde_json::Map::new();
+        data.insert("proposal_id".into(), json!(proposal_id));
+        data.insert("shadow".into(), serde_json::to_value(summary)?);
+        data.insert("approve".into(), json!({ "ok": true }));
+        data.insert("apply".into(), json!({ "ok": true }));
+        return Ok(ImportResult {
+            data: serde_json::Value::Object(data),
+            warnings: Vec::new(),
+        });
+    }
+
+    if !args.propose {
+        return Ok(ImportResult {
+            data: doc_json,
+            warnings: Vec::new(),
+        });
     }
 
     let patch_bytes = serde_json::to_vec(&doc_json).context("encode patch JSON")?;
@@ -242,27 +481,19 @@ async fn import_air(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
     for (k, v) in extra {
         data.insert(k, v);
     }
-    print_success(opts, serde_json::Value::Object(data), None, vec![])
+    Ok(ImportResult {
+        data: serde_json::Value::Object(data),
+        warnings: Vec::new(),
+    })
 }
 
-async fn import_source(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
-    let source_path = args.source.as_ref().expect("source");
-    let name = args
-        .name
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("--name is required with --source"))?
-        .to_string();
-    if args.import_mode != ImportModeArg::Patch {
-        bail!("--import-mode is only valid with --air");
-    }
-    if args.propose || args.shadow || args.approve || args.apply {
-        bail!("--propose/--shadow/--approve/--apply are only valid with --air");
-    }
-    if args.air_only {
-        bail!("--air-only is only valid with --air");
-    }
-
-    let dirs = resolve_dirs(opts)?;
+async fn import_source(
+    opts: &WorldOpts,
+    args: &ImportArgs,
+    dirs: &crate::opts::ResolvedDirs,
+    source_path: &Path,
+    name: &str,
+) -> Result<ImportResult> {
     let mut warnings = Vec::new();
     let bundle_bytes = if source_path.is_dir() {
         build_source_bundle(source_path)?
@@ -272,12 +503,10 @@ async fn import_source(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
     let hash = Hash::of_bytes(&bundle_bytes).to_hex();
 
     if args.dry_run {
-        return print_success(
-            opts,
-            json!({ "hash": hash, "bytes": bundle_bytes.len() }),
-            None,
-            vec![],
-        );
+        return Ok(ImportResult {
+            data: json!({ "hash": hash, "bytes": bundle_bytes.len() }),
+            warnings: Vec::new(),
+        });
     }
 
     let stored_hash = store_blob(opts, &dirs, &bundle_bytes).await?;
@@ -286,7 +515,7 @@ async fn import_source(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
     }
 
     let meta = ObjectMeta {
-        name: name.clone(),
+        name: name.to_string(),
         kind: "source.bundle".into(),
         hash: stored_hash.clone(),
         tags: args.tag.iter().cloned().collect::<BTreeSet<_>>(),
@@ -311,12 +540,10 @@ async fn import_source(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
             if !resp.ok {
                 bail!("event-send failed: {:?}", resp.error);
             }
-            return print_success(
-                opts,
-                json!({ "hash": stored_hash, "name": name }),
-                None,
+            return Ok(ImportResult {
+                data: json!({ "hash": stored_hash, "name": name }),
                 warnings,
-            );
+            });
         } else if matches!(opts.mode, Mode::Daemon) {
             bail!(
                 "daemon mode requested but no control socket at {}",
@@ -341,12 +568,37 @@ async fn import_source(opts: &WorldOpts, args: &ImportArgs) -> Result<()> {
         "batch mode: effects={} receipts={}",
         res.cycle.effects_dispatched, res.cycle.receipts_applied
     ));
-    print_success(
-        opts,
-        json!({ "hash": stored_hash, "name": name }),
-        None,
+    Ok(ImportResult {
+        data: json!({ "hash": stored_hash, "name": name }),
         warnings,
-    )
+    })
+}
+
+fn resolve_dev_mode(args: &ImportArgs) -> bool {
+    if args.dev {
+        return true;
+    }
+    env_truthy("AOS_DEV")
+}
+
+fn env_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|val| {
+            matches!(
+                val.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn default_source_name(world_root: &Path) -> String {
+    let name = world_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("world");
+    format!("source/{name}")
 }
 
 async fn store_blob(opts: &WorldOpts, dirs: &crate::opts::ResolvedDirs, bytes: &[u8]) -> Result<String> {
