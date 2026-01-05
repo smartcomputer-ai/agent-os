@@ -1465,7 +1465,7 @@ mod tests {
         assert_eq!(receipt.status, ReceiptStatus::Ok);
         let decoded: ManifestReceipt = receipt.payload().unwrap();
         assert!(decoded.manifest.len() > 0);
-        assert_eq!(decoded.meta.journal_height, 0);
+        assert_eq!(decoded.meta.journal_height, 1);
     }
 
     #[test]

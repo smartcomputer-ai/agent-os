@@ -36,7 +36,7 @@ use crate::journal::{
     AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, DomainEventRecord, EffectIntentRecord,
     EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry, JournalKind,
     JournalRecord, JournalSeq, OwnedJournalEntry, PlanEndStatus, PlanEndedRecord, PlanResultRecord,
-    ProposedRecord, ShadowReportRecord, SnapshotRecord,
+    ProposedRecord, ShadowReportRecord, SnapshotRecord, ManifestRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
@@ -623,7 +623,11 @@ impl<S: Store + 'static> Kernel<S> {
                 }
             }
         }
+        let journal_empty = kernel.journal.next_seq() == 0;
         kernel.replay_existing_entries()?;
+        if journal_empty {
+            kernel.record_manifest()?;
+        }
         Ok(kernel)
     }
 
@@ -1294,6 +1298,9 @@ impl<S: Store + 'static> Kernel<S> {
             }
             JournalRecord::PolicyDecision(_) => {
                 // Policy decisions are audit-only; runtime state is rebuilt via replay.
+            }
+            JournalRecord::Manifest(_) => {
+                // Manifest updates are handled at load time; snapshots remain authoritative.
             }
             JournalRecord::Snapshot(_) => {
                 // already handled separately
@@ -2188,6 +2195,7 @@ impl<S: Store + 'static> Kernel<S> {
         );
         self.plan_cap_handles = plan_cap_handles;
         self.module_cap_bindings = module_cap_bindings;
+        self.record_manifest()?;
         Ok(())
     }
 
@@ -2568,6 +2576,12 @@ impl<S: Store + 'static> Kernel<S> {
         self.journal
             .append(JournalEntry::new(record.kind(), &bytes))?;
         Ok(())
+    }
+
+    fn record_manifest(&mut self) -> Result<(), KernelError> {
+        self.append_record(JournalRecord::Manifest(ManifestRecord {
+            manifest_hash: self.manifest_hash.to_hex(),
+        }))
     }
 
     fn record_domain_event(
@@ -3685,8 +3699,8 @@ mod tests {
         let scan = kernel.tail_scan_after(0).expect("tail scan");
         assert_eq!(scan.intents.len(), 1);
         assert_eq!(scan.receipts.len(), 1);
-        assert_eq!(scan.intents[0].seq, 0);
-        assert_eq!(scan.receipts[0].seq, 1);
+        assert_eq!(scan.intents[0].seq, 1);
+        assert_eq!(scan.receipts[0].seq, 2);
         assert_eq!(scan.intents[0].record.intent_hash, [1u8; 32]);
         assert_eq!(scan.receipts[0].record.intent_hash, [1u8; 32]);
     }

@@ -10,7 +10,7 @@ use aos_cbor::Hash;
 use aos_host::config::HostConfig;
 use aos_host::util::is_placeholder_hash;
 use aos_kernel::{KernelConfig, LoadedManifest};
-use aos_kernel::journal::{JournalKind, SnapshotRecord};
+use aos_kernel::journal::{JournalKind, SnapshotRecord, ManifestRecord};
 use aos_kernel::journal::Journal;
 use aos_kernel::journal::fs::FsJournal;
 use aos_store::{FsStore, Store};
@@ -29,18 +29,31 @@ pub struct CompiledReducer {
 pub fn latest_manifest_hash_from_journal(store_root: &Path) -> Result<Option<Hash>> {
     let journal = FsJournal::open(store_root).context("open journal")?;
     let entries = journal.load_from(0).context("read journal")?;
-    let mut latest: Option<String> = None;
+    let mut latest_snapshot: Option<String> = None;
+    let mut latest_manifest: Option<String> = None;
     for entry in entries {
-        if entry.kind != JournalKind::Snapshot {
-            continue;
-        }
-        let record: SnapshotRecord =
-            serde_cbor::from_slice(&entry.payload).context("decode snapshot record")?;
-        if let Some(hash) = record.manifest_hash {
-            latest = Some(hash);
+        match entry.kind {
+            JournalKind::Snapshot => {
+                let record: SnapshotRecord =
+                    serde_cbor::from_slice(&entry.payload).context("decode snapshot record")?;
+                if let Some(hash) = record.manifest_hash {
+                    latest_snapshot = Some(hash);
+                }
+            }
+            JournalKind::Manifest => {
+                let record: ManifestRecord =
+                    serde_cbor::from_slice(&entry.payload).context("decode manifest record")?;
+                latest_manifest = Some(record.manifest_hash);
+            }
+            _ => {}
         }
     }
-    let Some(hex) = latest else {
+    let hex = if latest_snapshot.is_some() {
+        latest_snapshot
+    } else {
+        latest_manifest
+    };
+    let Some(hex) = hex else {
         return Ok(None);
     };
     let hash = Hash::from_hex_str(&hex).context("parse manifest hash")?;

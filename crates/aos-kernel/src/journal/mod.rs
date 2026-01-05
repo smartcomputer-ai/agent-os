@@ -39,6 +39,7 @@ pub enum JournalKind {
     EffectIntent,
     EffectReceipt,
     CapDecision,
+    Manifest,
     Snapshot,
     PolicyDecision,
     Governance,
@@ -58,6 +59,7 @@ pub enum JournalRecord {
     EffectReceipt(EffectReceiptRecord),
     CapDecision(CapDecisionRecord),
     PolicyDecision(PolicyDecisionRecord),
+    Manifest(ManifestRecord),
     Snapshot(SnapshotRecord),
     Governance(GovernanceRecord),
     PlanResult(PlanResultRecord),
@@ -73,6 +75,7 @@ impl JournalRecord {
             JournalRecord::EffectReceipt(_) => JournalKind::EffectReceipt,
             JournalRecord::CapDecision(_) => JournalKind::CapDecision,
             JournalRecord::PolicyDecision(_) => JournalKind::PolicyDecision,
+            JournalRecord::Manifest(_) => JournalKind::Manifest,
             JournalRecord::Snapshot(_) => JournalKind::Snapshot,
             JournalRecord::Governance(_) => JournalKind::Governance,
             JournalRecord::PlanResult(_) => JournalKind::PlanResult,
@@ -240,6 +243,11 @@ pub struct SnapshotRecord {
     pub height: JournalSeq,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManifestRecord {
+    pub manifest_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
