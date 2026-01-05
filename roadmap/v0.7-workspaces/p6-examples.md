@@ -3,7 +3,7 @@
 **Priority**: P2  
 **Effort**: Medium  
 **Risk if deferred**: Medium  
-**Status**: Planned
+**Status**: Complete
 
 ## Goal
 
@@ -121,7 +121,7 @@ Plan metadata:
 
 ## Implementation checklist
 
-- [ ] Add `examples/09-workspaces` assets and reducer crate.
-- [ ] Add runner + CLI wiring (main.rs, README).
-- [ ] Extend `crates/aos-examples/src/example_host.rs` to patch `sys/Workspace@1` wasm.
+- [x] Add `examples/09-workspaces` assets and reducer crate.
+- [x] Add runner + CLI wiring (main.rs, README).
+- [x] Extend `crates/aos-examples/src/example_host.rs` to patch `sys/Workspace@1` wasm.
 - [ ] Add any minimal tests if needed (optional).

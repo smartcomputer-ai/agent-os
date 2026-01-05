@@ -8,6 +8,7 @@ mod hello_timer;
 mod llm_summarizer;
 mod retry_backoff;
 mod safe_upgrade;
+mod workspaces;
 mod util;
 
 use anyhow::{Result, anyhow};
@@ -50,6 +51,8 @@ enum Commands {
     LlmSummarizer,
     /// Run the reducer-driven retry with backoff example
     RetryBackoff,
+    /// Run the workspace plan + caps example
+    Workspaces,
     /// Run every available example sequentially
     All,
 }
@@ -137,6 +140,14 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "examples/08-retry-backoff",
         runner: retry_backoff::run,
     },
+    ExampleMeta {
+        number: "09",
+        slug: "workspaces",
+        title: "Workspaces",
+        summary: "Workspace plan + caps demo",
+        dir: "examples/09-workspaces",
+        runner: workspaces::run,
+    },
 ];
 
 fn main() {
@@ -172,6 +183,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::SafeUpgrade) => run_single("safe-upgrade"),
         Some(Commands::LlmSummarizer) => run_single("llm-summarizer"),
         Some(Commands::RetryBackoff) => run_single("retry-backoff"),
+        Some(Commands::Workspaces) => run_single("workspaces"),
         Some(Commands::All) => run_all(),
         None => {
             list_examples();
