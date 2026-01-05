@@ -101,9 +101,9 @@ pub struct WorkspaceStatArgs {
 
 #[derive(Args, Debug)]
 #[command(group(
-    clap::ArgGroup::new("input")
+    clap::ArgGroup::new("ws_input")
         .required(true)
-        .args(&["input", "text", "json"])
+        .args(&["input", "text_in", "json_in"])
 ))]
 pub struct WorkspaceWriteArgs {
     /// Workspace ref: <workspace>[@<version>]/path
@@ -112,14 +112,14 @@ pub struct WorkspaceWriteArgs {
     #[arg(long = "in")]
     pub input: Option<String>,
     /// Text input (UTF-8)
-    #[arg(long)]
-    pub text: Option<String>,
+    #[arg(long = "text-in")]
+    pub text_in: Option<String>,
     /// JSON input (literal, @file, or @-)
-    #[arg(long)]
-    pub json: Option<String>,
+    #[arg(long = "json-in")]
+    pub json_in: Option<String>,
     /// File mode (644 or 755)
-    #[arg(long)]
-    pub mode: Option<String>,
+    #[arg(long = "file-mode")]
+    pub file_mode: Option<String>,
     /// Commit owner
     #[arg(long)]
     pub owner: Option<String>,
@@ -614,7 +614,7 @@ async fn ws_write(opts: &WorldOpts, args: &WorkspaceWriteArgs) -> Result<()> {
     let dirs = resolve_dirs(opts)?;
     let reference = parse_workspace_ref(&args.reference)?;
     let path = require_path(&reference)?;
-    let mode = parse_mode(args.mode.as_deref())?;
+    let mode = parse_mode(args.file_mode.as_deref())?;
     let data = read_write_input(args)?;
     let owner = resolve_owner(args.owner.as_deref());
 
@@ -1345,12 +1345,12 @@ fn parse_mode(input: Option<&str>) -> Result<Option<u64>> {
 }
 
 fn read_write_input(args: &WorkspaceWriteArgs) -> Result<Vec<u8>> {
-    if let Some(text) = &args.text {
+    if let Some(text) = &args.text_in {
         return Ok(text.as_bytes().to_vec());
     }
-    if let Some(json) = &args.json {
+    if let Some(json) = &args.json_in {
         let json_str = parse_input_value(json)?;
-        let value: JsonValue = serde_json::from_str(&json_str).context("parse --json")?;
+        let value: JsonValue = serde_json::from_str(&json_str).context("parse --json-in")?;
         return serde_json::to_vec(&value).context("encode json");
     }
     let input = args.input.as_deref().unwrap_or_default();
