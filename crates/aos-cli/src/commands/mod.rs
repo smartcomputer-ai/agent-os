@@ -91,6 +91,7 @@ pub fn prepare_world(
         &mut loaded,
         store.as_ref(),
         &dirs.world,
+        &dirs.store_root,
         wasm_hash.as_ref(),
         opts.module.as_deref(),
     )?;
