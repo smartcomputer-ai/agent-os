@@ -68,15 +68,17 @@ pub fn prepare_world(
 
     // Compile reducer if present
     let wasm_hash = if dirs.reducer_dir.exists() {
-        println!("Compiling reducer from {}...", dirs.reducer_dir.display());
-        let hash = util::compile_reducer(
+        let compiled = util::compile_reducer(
             &dirs.reducer_dir,
             &dirs.store_root,
             &store,
             opts.force_build,
         )?;
-        println!("Reducer compiled: {}", hash.as_str());
-        Some(hash)
+        if !compiled.cache_hit {
+            println!("Compiled reducer from {}", dirs.reducer_dir.display());
+            println!("Reducer compiled: {}", compiled.hash.as_str());
+        }
+        Some(compiled.hash)
     } else {
         None
     };

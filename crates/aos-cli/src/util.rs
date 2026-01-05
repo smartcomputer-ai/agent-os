@@ -18,13 +18,18 @@ use jsonschema::JSONSchema;
 use serde_json::Value;
 use walkdir::WalkDir;
 
+pub struct CompiledReducer {
+    pub hash: HashRef,
+    pub cache_hit: bool,
+}
+
 /// Compile a reducer crate to WASM and store the blob.
 pub fn compile_reducer(
     reducer_dir: &Path,
     store_root: &Path,
     store: &FsStore,
     force_build: bool,
-) -> Result<HashRef> {
+) -> Result<CompiledReducer> {
     let cache_dir = store_root.join(".aos/cache/modules");
     fs::create_dir_all(&cache_dir).context("create module cache directory")?;
 
@@ -40,7 +45,12 @@ pub fn compile_reducer(
     let hash = store
         .put_blob(&artifact.wasm_bytes)
         .context("store wasm blob")?;
-    HashRef::new(hash.to_hex()).context("create hash ref")
+    let hash_ref = HashRef::new(hash.to_hex()).context("create hash ref")?;
+    let cache_hit = artifact.build_log.as_deref() == Some("cache hit");
+    Ok(CompiledReducer {
+        hash: hash_ref,
+        cache_hit,
+    })
 }
 
 /// Resolve placeholder module hashes in a loaded manifest.
