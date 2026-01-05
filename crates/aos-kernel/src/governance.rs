@@ -142,7 +142,7 @@ pub struct ManifestPatch {
 
 impl ManifestPatch {
     pub fn to_loaded_manifest<S: Store>(&self, store: &S) -> Result<LoadedManifest, KernelError> {
-        let mut manifest = self.manifest.clone();
+        let manifest = self.manifest.clone();
         let mut modules: HashMap<Name, DefModule> = HashMap::new();
         let mut plans: HashMap<Name, DefPlan> = HashMap::new();
         let mut effects: HashMap<Name, DefEffect> = HashMap::new();
@@ -189,49 +189,40 @@ impl ManifestPatch {
             }
         }
 
-        // Ensure built-ins are present so shadow validation has full catalogs.
+        // Ensure built-ins referenced by the manifest are present in catalogs.
         for builtin in builtins::builtin_schemas() {
-            schemas
-                .entry(builtin.schema.name.clone())
-                .or_insert(builtin.schema.clone());
-            if !manifest
-                .schemas
-                .iter()
-                .any(|nr| nr.name == builtin.schema.name)
-            {
-                manifest.schemas.push(aos_air_types::NamedRef {
-                    name: builtin.schema.name.clone(),
-                    hash: builtin.hash_ref.clone(),
-                });
+            if manifest.schemas.iter().any(|nr| nr.name == builtin.schema.name) {
+                schemas
+                    .entry(builtin.schema.name.clone())
+                    .or_insert(builtin.schema.clone());
             }
         }
         for builtin in builtins::builtin_caps() {
-            caps.entry(builtin.cap.name.clone())
-                .or_insert(builtin.cap.clone());
-            if !manifest
-                .caps
-                .iter()
-                .any(|nr| nr.name == builtin.cap.name)
-            {
-                manifest.caps.push(aos_air_types::NamedRef {
-                    name: builtin.cap.name.clone(),
-                    hash: builtin.hash_ref.clone(),
-                });
+            if manifest.caps.iter().any(|nr| nr.name == builtin.cap.name) {
+                caps.entry(builtin.cap.name.clone())
+                    .or_insert(builtin.cap.clone());
             }
         }
         for builtin in builtins::builtin_effects() {
-            effects
-                .entry(builtin.effect.name.clone())
-                .or_insert(builtin.effect.clone());
-            if !manifest
+            if manifest
                 .effects
                 .iter()
                 .any(|nr| nr.name == builtin.effect.name)
             {
-                manifest.effects.push(aos_air_types::NamedRef {
-                    name: builtin.effect.name.clone(),
-                    hash: builtin.hash_ref.clone(),
-                });
+                effects
+                    .entry(builtin.effect.name.clone())
+                    .or_insert(builtin.effect.clone());
+            }
+        }
+        for builtin in builtins::builtin_modules() {
+            if manifest
+                .modules
+                .iter()
+                .any(|nr| nr.name == builtin.module.name)
+            {
+                modules
+                    .entry(builtin.module.name.clone())
+                    .or_insert(builtin.module.clone());
             }
         }
 

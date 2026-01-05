@@ -704,7 +704,10 @@ fn decode_segment(seg: &str) -> Result<String> {
 
 impl IgnoreMatcher {
     fn new(scope: &Path, patterns: &[String]) -> Result<Self> {
-        let root = find_git_root(scope).unwrap_or_else(|| scope.to_path_buf());
+        let scope = scope
+            .canonicalize()
+            .unwrap_or_else(|_| scope.to_path_buf());
+        let root = find_git_root(&scope).unwrap_or_else(|| scope.to_path_buf());
         let prefix = scope
             .strip_prefix(&root)
             .map(Path::to_path_buf)

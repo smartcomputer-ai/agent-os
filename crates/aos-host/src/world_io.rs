@@ -226,6 +226,9 @@ pub fn build_patch_document(
     let mut patches = Vec::new();
 
     for schema in &bundle.schemas {
+        if is_sys_name(schema.name.as_str()) {
+            continue;
+        }
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
                 kind: "defschema".to_string(),
@@ -234,6 +237,9 @@ pub fn build_patch_document(
         });
     }
     for module in &bundle.modules {
+        if is_sys_name(module.name.as_str()) {
+            continue;
+        }
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
                 kind: "defmodule".to_string(),
@@ -242,6 +248,9 @@ pub fn build_patch_document(
         });
     }
     for plan in &bundle.plans {
+        if is_sys_name(plan.name.as_str()) {
+            continue;
+        }
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
                 kind: "defplan".to_string(),
@@ -250,6 +259,9 @@ pub fn build_patch_document(
         });
     }
     for cap in &bundle.caps {
+        if is_sys_name(cap.name.as_str()) {
+            continue;
+        }
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
                 kind: "defcap".to_string(),
@@ -258,6 +270,9 @@ pub fn build_patch_document(
         });
     }
     for policy in &bundle.policies {
+        if is_sys_name(policy.name.as_str()) {
+            continue;
+        }
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
                 kind: "defpolicy".to_string(),
@@ -266,6 +281,9 @@ pub fn build_patch_document(
         });
     }
     for effect in &bundle.effects {
+        if is_sys_name(effect.name.as_str()) {
+            continue;
+        }
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
                 kind: "defeffect".to_string(),
@@ -274,6 +292,9 @@ pub fn build_patch_document(
         });
     }
     for secret in &bundle.secrets {
+        if is_sys_name(secret.name.as_str()) {
+            continue;
+        }
         patches.push(PatchOp::AddDef {
             add_def: AddDef {
                 kind: "defsecret".to_string(),
@@ -283,14 +304,17 @@ pub fn build_patch_document(
     }
 
     let mut add_refs = Vec::new();
-    add_refs.extend(manifest_refs_from("defschema", &bundle.manifest.schemas));
-    add_refs.extend(manifest_refs_from("defmodule", &bundle.manifest.modules));
-    add_refs.extend(manifest_refs_from("defplan", &bundle.manifest.plans));
-    add_refs.extend(manifest_refs_from("defcap", &bundle.manifest.caps));
-    add_refs.extend(manifest_refs_from("defpolicy", &bundle.manifest.policies));
-    add_refs.extend(manifest_refs_from("defeffect", &bundle.manifest.effects));
+    add_refs.extend(manifest_refs_from("defschema", &filter_sys_refs(&bundle.manifest.schemas)));
+    add_refs.extend(manifest_refs_from("defmodule", &filter_sys_refs(&bundle.manifest.modules)));
+    add_refs.extend(manifest_refs_from("defplan", &filter_sys_refs(&bundle.manifest.plans)));
+    add_refs.extend(manifest_refs_from("defcap", &filter_sys_refs(&bundle.manifest.caps)));
+    add_refs.extend(manifest_refs_from("defpolicy", &filter_sys_refs(&bundle.manifest.policies)));
+    add_refs.extend(manifest_refs_from("defeffect", &filter_sys_refs(&bundle.manifest.effects)));
     for secret in &bundle.manifest.secrets {
         if let SecretEntry::Ref(named) = secret {
+            if is_sys_name(named.name.as_str()) {
+                continue;
+            }
             add_refs.push(ManifestRef {
                 kind: "defsecret".to_string(),
                 name: named.name.clone(),
@@ -643,6 +667,17 @@ fn manifest_refs_from(kind: &str, refs: &[aos_air_types::NamedRef]) -> Vec<Manif
             name: r.name.clone(),
             hash: r.hash.as_str().to_string(),
         })
+        .collect()
+}
+
+fn is_sys_name(name: &str) -> bool {
+    name.starts_with("sys/")
+}
+
+fn filter_sys_refs(refs: &[aos_air_types::NamedRef]) -> Vec<aos_air_types::NamedRef> {
+    refs.iter()
+        .filter(|r| !is_sys_name(r.name.as_str()))
+        .cloned()
         .collect()
 }
 

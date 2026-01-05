@@ -156,17 +156,9 @@ pub fn compile_patch_document<S: Store>(
     // Load base manifest
     let base_hash = Hash::from_hex_str(&doc.base_manifest_hash)
         .map_err(|e| KernelError::Manifest(format!("invalid base_manifest_hash: {e}")))?;
-    let manifest_node: AirNode = store
+    let mut manifest: Manifest = store
         .get_node(base_hash)
         .map_err(|e| KernelError::Manifest(format!("load base manifest: {e}")))?;
-    let mut manifest = match manifest_node {
-        AirNode::Manifest(m) => m,
-        _ => {
-            return Err(KernelError::Manifest(
-                "base_manifest_hash did not point to a manifest node".into(),
-            ));
-        }
-    };
 
     let mut nodes: Vec<AirNode> = Vec::new();
 
