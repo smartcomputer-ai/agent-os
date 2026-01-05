@@ -4,9 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use aos_air_types::{Manifest, CURRENT_AIR_VERSION};
-use aos_host::world_io::{ImportMode, ImportOutcome, WorldBundle, import_bundle, write_air_layout};
-use aos_store::FsStore;
+use aos_air_types::{AirNode, Manifest, CURRENT_AIR_VERSION};
 use clap::Args;
 
 #[derive(Args, Debug)]
@@ -24,6 +22,8 @@ pub fn cmd_init(args: &InitArgs) -> Result<()> {
     let path = &args.path;
 
     fs::create_dir_all(path)?;
+    fs::create_dir_all(path.join(".aos"))?;
+    fs::create_dir_all(path.join("air"))?;
     fs::create_dir_all(path.join("modules"))?;
     fs::create_dir_all(path.join("reducer/src"))?;
 
@@ -41,25 +41,29 @@ pub fn cmd_init(args: &InitArgs) -> Result<()> {
         routing: None,
         triggers: Vec::new(),
     };
-    let bundle = WorldBundle {
-        manifest,
-        schemas: Vec::new(),
-        modules: Vec::new(),
-        plans: Vec::new(),
-        caps: Vec::new(),
-        policies: Vec::new(),
-        effects: Vec::new(),
-        secrets: Vec::new(),
-        wasm_blobs: None,
-    };
+    let node = AirNode::Manifest(manifest);
+    let json = serde_json::to_string_pretty(&node).context("serialize manifest")?;
+    fs::write(path.join("air/manifest.air.json"), json)
+        .context("write manifest.air.json")?;
 
-    let store = FsStore::open(path).context("open store")?;
-    let outcome = import_bundle(&store, &bundle, ImportMode::Genesis)?;
-    let ImportOutcome::Genesis(genesis) = outcome else {
-        anyhow::bail!("unexpected import outcome for genesis");
-    };
-    let manifest_bytes = genesis.manifest_bytes;
-    write_air_layout(&bundle, &manifest_bytes, path)?;
+    let sync = serde_json::json!({
+        "version": 1,
+        "air": { "dir": "air" },
+        "build": { "reducer_dir": "reducer" },
+        "modules": { "pull": false },
+        "workspaces": [
+            {
+                "ref": "reducer",
+                "dir": "reducer",
+                "ignore": ["target/", ".git/", ".aos/"]
+            }
+        ]
+    });
+    fs::write(
+        path.join("aos.sync.json"),
+        serde_json::to_string_pretty(&sync).context("serialize sync config")?,
+    )
+    .context("write aos.sync.json")?;
 
     // TODO: Support --template to scaffold different starter manifests
 
@@ -68,6 +72,7 @@ pub fn cmd_init(args: &InitArgs) -> Result<()> {
     println!("  Reducer:    {}", path.join("reducer").display());
     println!("  Modules:    {}", path.join("modules").display());
     println!("  Store:      {}", path.join(".aos").display());
+    println!("  Sync:       {}", path.join("aos.sync.json").display());
 
     if args.template.is_some() {
         println!("\nNote: --template is not yet implemented; created minimal manifest.");

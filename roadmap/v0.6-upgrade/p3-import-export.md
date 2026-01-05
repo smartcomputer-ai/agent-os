@@ -3,64 +3,42 @@
 **Priority**: P3  
 **Effort**: Medium  
 **Risk if deferred**: Medium (no unified workflow for editing + upgrades)
-**Status**: Complete
+**Status**: Superseded (replaced by `aos push`/`aos pull`)
 
 ## Status snapshot (current codebase)
-- `aos export` uses World IO to materialize `air/` plus optional `modules/`.
-- `aos export --defs-bundle` writes a single `air/defs.air.json` bundle.
-- `aos import --air` supports genesis/patch modes and can drive governance steps.
-- Source sync is handled by workspaces (see `roadmap/v0.7-workspaces/p7-fs-sync.md`).
-- `aos init` goes through the World IO genesis import path.
-- `aos gov propose --patch-dir` is hidden and prints a deprecation notice.
+- `aos import`/`aos export` are removed.
+- Sync is handled by `aos push`/`aos pull` (see `roadmap/v0.7-workspaces/p7-fs-sync.md`).
+- Governance-only flows remain available via `aos gov` commands when needed.
 
 ## Dependency
 Requires P2 World IO (`roadmap/v0.6-upgrade/p2-world-io.md`) to provide canonical import/export logic.
 
 ## Goal
-Expose a single import/export CLI surface for checkout/commit workflows and remove ad-hoc filesystem submission paths.
+Expose a single push/pull CLI surface for checkout/commit workflows and remove ad-hoc filesystem submission paths.
 
 ## CLI surface (proposal)
 
-### Export (world -> filesystem view)
+### Push (filesystem view -> world update)
 ```
-aos export [--out <dir>] [--with-modules] [--with-sys] [--defs-bundle] [--manifest <hash>] [--air-only]
+aos push [--map <path>]
 ```
 Behavior:
-- Uses control `manifest-get` when daemon is running; falls back to store.
-- Materializes a stable `air/` layout plus optional `modules/`.
-- If `--with-sys` is set, export built-in `sys/*` defs into `air/sys.air.json` for reference.
-- If `--defs-bundle` is set, write a single `air/defs.air.json` instead of per-kind files.
-- Writes `.aos/manifest.air.cbor` with canonical bytes.
+- Reads AIR JSON + reducer source, builds modules as needed.
+- Applies manifest changes directly (governance optional).
+- Syncs workspace trees declared in `aos.sync.json`.
 
-### Import (filesystem view -> world update)
+### Pull (world -> filesystem view)
 ```
-aos import --air <dir> [--import-mode genesis|patch] [--air-only] [--dry-run]
-```
-Behavior:
-- `--import-mode genesis`: initializes a world (used by `aos init`).
-- `--import-mode patch`: emits a PatchDocument (used by governance/commit flows).
-- `--air-only`: ignores modules (replacement for `gov propose --patch-dir`).
-- Source sync is handled by workspaces (see `roadmap/v0.7-workspaces/p7-fs-sync.md`).
-
-### Governance integration
-```
-aos import --air <dir> --import-mode patch --air-only --propose [--shadow] [--approve] [--apply]
+aos pull [--map <path>]
 ```
 Behavior:
-- Builds PatchDocument via World IO, then runs governance steps.
-- Replaces `aos gov propose --patch-dir`.
-
-### Build integration (optional)
-```
-aos import --air <dir> --import-mode patch --build
-```
-Behavior:
-- Builds wasm externally, stores blobs, and updates `defmodule.wasm_hash` before patch generation.
+- Writes AIR JSON (omitting wasm hashes by default).
+- Optionally materializes `modules/`.
+- Syncs workspace trees declared in `aos.sync.json`.
 
 ## Migration notes
-- `gov propose --patch-dir` is deprecated (hidden in help) and redirects users to `aos import --air --air-only`.
-- Keep `gov propose --patch` for raw PatchDocument / ManifestPatch inputs.
-- `aos init` becomes a thin wrapper: template -> `aos import --import-mode genesis`.
+- `aos import`/`aos export` removed; use `aos push`/`aos pull`.
+- `aos init` writes `aos.sync.json` and a minimal AIR layout.
 
 ## Proposed work
 1) [x] Implement `aos export` backed by World IO.

@@ -2064,7 +2064,9 @@ impl<S: Store + 'static> Kernel<S> {
         for node in &canonical.nodes {
             self.store.put_node(node)?;
         }
-        self.store.put_node(&AirNode::Manifest(canonical.manifest.clone()))?;
+        self.store.put_node(&canonical.manifest)?;
+        self.store
+            .put_node(&AirNode::Manifest(canonical.manifest.clone()))?;
 
         self.swap_manifest(&canonical)?;
         Ok(self.manifest_hash.to_hex())
@@ -3961,6 +3963,7 @@ fn persist_loaded_manifest<S: Store>(
     for effect in loaded.effects.values() {
         store.put_node(&AirNode::Defeffect(effect.clone()))?;
     }
+    store.put_node(&loaded.manifest)?;
     store.put_node(&AirNode::Manifest(loaded.manifest.clone()))?;
     Ok(())
 }

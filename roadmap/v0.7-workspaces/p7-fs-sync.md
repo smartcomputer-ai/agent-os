@@ -8,34 +8,36 @@
 ## Goal
 
 Provide a first-class, ergonomic way to sync local folders (reducer code and
-other artifacts) with workspace trees. Keep AIR JSON import/export separate; we
-do not need to mirror AIR assets into workspaces.
+other artifacts) with workspace trees. Sync should be orchestrated by top-level
+`aos push`/`aos pull`, not by separate AIR import/export commands.
 
 ## Current state (review)
 
-- `aos import/export` handles AIR only; source bundles are removed.
+- `aos import/export` is removed; sync is handled by `aos push`/`aos pull`.
 - `aos ws` supports per-file read/write but no folder sync.
 - `~`-hex path encoding is specified but not implemented in CLI or world IO.
 
 ## Direction (breaking-change-friendly)
 
 1) Make workspaces the canonical carrier for source trees (reducers, assets).  
-2) Keep AIR JSON import/export as-is.  
-3) Replace tar source bundles with workspace checkout/sync.  
-4) Introduce a local workspace map to declare folder <-> workspace bindings
+2) Replace tar source bundles with workspace checkout/sync.  
+3) Introduce a local sync file to declare AIR/build/modules/workspace bindings
    plus optional annotations.
 
-## Workspace map
+## Sync file
 
-File: `aos.workspaces.json` (world root; checked into VCS).
+File: `aos.sync.json` (world root; checked into VCS).
 
 ```json
 {
   "version": 1,
+  "air": { "dir": "air" },
+  "build": { "reducer_dir": "reducer" },
+  "modules": { "pull": false },
   "workspaces": [
     {
       "ref": "reducer",
-      "local_dir": "reducer",
+      "dir": "reducer",
       "annotations": {
         "README.md": { "sys/commit.title": "Notes Reducer" },
         "src/lib.rs": { "sys/lang": "rust" },
@@ -48,14 +50,17 @@ File: `aos.workspaces.json` (world root; checked into VCS).
 ```
 
 Notes:
+- `air.dir` is the AIR JSON directory (defaults to `air`).
+- `build.reducer_dir` is the reducer crate directory (defaults to `reducer`).
+- `modules.pull` controls whether `aos pull` materializes `modules/`.
 - `ref` is a workspace ref string: `<workspace>[@<version>][/path]`.
-- `local_dir` is resolved relative to the map file.
+- `dir` is resolved relative to the map file.
 - `annotations` is optional; keys are workspace paths (`""` means root).
   - Values can be either strings or JSON values.
   - String values are stored as UTF-8 text blobs.
   - Non-string values are encoded as canonical CBOR of the JSON value.
   - `aos ws ann get` should decode CBOR values to JSON for display.
-- `ignore` extends `.gitignore` (no `.aosignore` support).
+- `ignore` extends `.gitignore` (no `.aosignore` support) and is relative to `dir`.
 
 ## Encoding (filesystem <-> workspace)
 
@@ -63,18 +68,24 @@ Workspace paths must be URL-safe; local names may not be. Use the `~`-hex
 scheme on UTF-8 bytes for each segment:
 - If a segment matches `[A-Za-z0-9._~-]` and does not start with `~`, keep it.
 - Otherwise encode as `~` + uppercase hex of the UTF-8 bytes.
-- Literal `~` is always encoded.
+- Segments that start with `~` are always encoded.
 - On export, decode segments starting with `~`. Invalid hex or odd length is an
   error.
 - If decoding produces path collisions, error and require `--raw` export.
 - Reject non-UTF-8 filenames on import for determinism.
 
 ## Push behavior
-Push uses the map file by default; explicit args override it.
+Push uses `aos.sync.json` by default; explicit args override it.
 
-- `aos ws push` (no args) pushes every map entry.
-- `aos ws push <local_dir> <ref>` pushes a single pair.
+- `aos push` (no args) pushes every workspace entry.
+- `aos push <dir> <ref>` pushes a single pair.
 - Push rejects refs that include a version (`@<version>`).
+
+Push orchestration:
+1) Parse AIR JSON, canonicalize defs, and apply patch directly to the world.
+2) Build reducers and patch module hashes before applying the manifest.
+3) Sync workspace entries (local -> workspace).
+4) Create a snapshot after patching so the world can run without AIR files.
 
 1) Resolve workspace head (or create empty root).
 2) Walk local tree (respect `.gitignore` + `ignore`), compute per-file hash + mode.
@@ -84,11 +95,16 @@ Push uses the map file by default; explicit args override it.
 6) Optionally set root annotations like `sys/commit.message`.
 
 ## Pull behavior
-Pull uses the map file by default; explicit args override it.
+Pull uses `aos.sync.json` by default; explicit args override it.
 
-- `aos ws pull` (no args) pulls every map entry.
-- `aos ws pull <ref> <local_dir>` pulls a single pair.
+- `aos pull` (no args) pulls every workspace entry.
+- `aos pull <ref> <dir>` pulls a single pair.
 - Pull allows versioned refs for reproducible checkout.
+
+Pull orchestration:
+1) Export AIR JSON from the world (omit wasm hashes by default).
+2) Optionally materialize `modules/`.
+3) Sync workspace entries (workspace -> local).
 
 1) Resolve workspace head.
 2) List workspace subtree; decode paths.
@@ -105,17 +121,16 @@ Safety:
 ## CLI surface
 
 New commands:
-- `aos ws push [--map <path>] [<local_dir> <ref>] [--dry-run] [--prune] [--message <text>]`
-- `aos ws pull [--map <path>] [<ref> <local_dir>] [--dry-run] [--prune]`
+- `aos push [--map <path>] [<dir> <ref>] [--dry-run] [--prune] [--message <text>]`
+- `aos pull [--map <path>] [<ref> <dir>] [--dry-run] [--prune]`
 
 Notes:
-- `aos ws push`/`pull` uses the map file by default; ad-hoc commands do not.
+- `aos push`/`pull` uses the map file by default; ad-hoc commands do not.
 - `--message` sets `sys/commit.message` on the root path.
 
 ## Implementation notes
 
-- Do not resurrect SourceBundle/tar; source bundles are removed from `WorldBundle`
-  and `aos export`.
+- Do not resurrect SourceBundle/tar; source bundles are removed from `WorldBundle`.
 - Add shared `~`-hex encode/decode helpers to CLI or a small utility crate.
 - Batch commits in sync; avoid per-file commits.
 

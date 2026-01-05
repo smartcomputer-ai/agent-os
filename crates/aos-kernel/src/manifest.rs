@@ -4,7 +4,9 @@ use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
     SecretDecl, catalog::EffectCatalog, validate_manifest,
 };
-use aos_store::{Catalog, Store, load_manifest_from_path};
+use aos_cbor::Hash;
+use aos_cbor::to_canonical_cbor;
+use aos_store::{Catalog, Store, load_manifest_from_bytes, load_manifest_from_path};
 
 use crate::error::KernelError;
 
@@ -28,6 +30,18 @@ impl ManifestLoader {
         path: impl AsRef<std::path::Path>,
     ) -> Result<LoadedManifest, KernelError> {
         let catalog = load_manifest_from_path(store, path)?;
+        Self::from_catalog(catalog)
+    }
+
+    pub fn load_from_hash<S: Store>(
+        store: &S,
+        hash: Hash,
+    ) -> Result<LoadedManifest, KernelError> {
+        let manifest: Manifest = store.get_node(hash)?;
+        let bytes = to_canonical_cbor(&manifest)
+            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
+        let catalog = load_manifest_from_bytes(store, &bytes)
+            .map_err(|err| KernelError::Manifest(format!("load manifest: {err}")))?;
         Self::from_catalog(catalog)
     }
 

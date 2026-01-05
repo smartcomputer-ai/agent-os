@@ -1,6 +1,6 @@
 //! `aos defs` commands (list/get definitions from active manifest).
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
 
 use crate::opts::{Mode, WorldOpts, resolve_dirs};
@@ -87,7 +87,7 @@ async fn defs_get(opts: &WorldOpts, args: &DefsGetArgs) -> Result<()> {
         }
     }
 
-    // Fallback: load manifest assets and search locally
+    // Fallback: load manifest from CAS and search locally
     let (def, warnings) = load_def_local(&dirs, &args.name)?;
     print_success(opts, def, None, warnings)
 }
@@ -134,7 +134,7 @@ async fn defs_list(opts: &WorldOpts, args: &DefsListArgs) -> Result<()> {
         }
     }
 
-    // Fallback: read defs from manifest assets
+    // Fallback: read defs from manifest in CAS
     let (defs, warnings) = list_defs_local(&dirs, &args.kinds, args.prefix.as_deref())?;
     print_success(opts, defs, None, warnings)
 }
@@ -146,8 +146,12 @@ fn load_def_local(
     use std::sync::Arc;
     let mut warnings = vec![];
     let store = Arc::new(aos_store::FsStore::open(&dirs.store_root)?);
-    let loaded = aos_host::manifest_loader::load_from_assets(store, &dirs.air_dir)?
-        .ok_or_else(|| anyhow::anyhow!("no manifest found in {}", dirs.air_dir.display()))?;
+    let Some(manifest_hash) =
+        crate::util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
+            anyhow::bail!("no manifest found in journal; run `aos push` first");
+        };
+    let loaded = aos_kernel::ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
+        .context("load manifest from CAS")?;
     let name_val: aos_air_types::Name = name.to_string();
 
     macro_rules! try_map {
@@ -175,8 +179,12 @@ fn list_defs_local(
 ) -> Result<(serde_json::Value, Vec<String>)> {
     use std::sync::Arc;
     let store = Arc::new(aos_store::FsStore::open(&dirs.store_root)?);
-    let loaded = aos_host::manifest_loader::load_from_assets(store, &dirs.air_dir)?
-        .ok_or_else(|| anyhow::anyhow!("no manifest found in {}", dirs.air_dir.display()))?;
+    let Some(manifest_hash) =
+        crate::util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
+            anyhow::bail!("no manifest found in journal; run `aos push` first");
+        };
+    let loaded = aos_kernel::ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
+        .context("load manifest from CAS")?;
 
     let mut defs = Vec::new();
     let prefix_match = |s: &aos_air_types::Name| {

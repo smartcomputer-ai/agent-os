@@ -10,6 +10,9 @@ use aos_cbor::Hash;
 use aos_host::config::HostConfig;
 use aos_host::util::is_placeholder_hash;
 use aos_kernel::{KernelConfig, LoadedManifest};
+use aos_kernel::journal::{JournalKind, SnapshotRecord};
+use aos_kernel::journal::Journal;
+use aos_kernel::journal::fs::FsJournal;
 use aos_store::{FsStore, Store};
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
@@ -21,6 +24,27 @@ use walkdir::WalkDir;
 pub struct CompiledReducer {
     pub hash: HashRef,
     pub cache_hit: bool,
+}
+
+pub fn latest_manifest_hash_from_journal(store_root: &Path) -> Result<Option<Hash>> {
+    let journal = FsJournal::open(store_root).context("open journal")?;
+    let entries = journal.load_from(0).context("read journal")?;
+    let mut latest: Option<String> = None;
+    for entry in entries {
+        if entry.kind != JournalKind::Snapshot {
+            continue;
+        }
+        let record: SnapshotRecord =
+            serde_cbor::from_slice(&entry.payload).context("decode snapshot record")?;
+        if let Some(hash) = record.manifest_hash {
+            latest = Some(hash);
+        }
+    }
+    let Some(hex) = latest else {
+        return Ok(None);
+    };
+    let hash = Hash::from_hex_str(&hex).context("parse manifest hash")?;
+    Ok(Some(hash))
 }
 
 /// Compile a reducer crate to WASM and store the blob.

@@ -12,11 +12,11 @@ use commands::blob::BlobArgs;
 use commands::cells::CellsArgs;
 use commands::defs::DefsArgs;
 use commands::event::EventArgs;
-use commands::export::ExportArgs;
 use commands::gov::GovArgs;
-use commands::import::ImportArgs;
 use commands::init::InitArgs;
 use commands::manifest::ManifestArgs;
+use commands::pull::PullArgs;
+use commands::push::PushArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
 use commands::workspace::WorkspaceArgs;
@@ -46,11 +46,11 @@ enum Command {
     /// Stop a running daemon
     Stop,
 
-    /// Export a world to AIR layout
-    Export(ExportArgs),
+    /// Push filesystem changes into the world
+    Push(PushArgs),
 
-    /// Import AIR or source bundles into a world
-    Import(ImportArgs),
+    /// Pull world state to the filesystem
+    Pull(PullArgs),
 
     /// Event-related commands
     #[command(subcommand)]
@@ -134,8 +134,8 @@ async fn main() -> Result<()> {
         Command::Status => commands::info::cmd_info(opts).await,
         Command::Run(args) => commands::run::cmd_run(opts, &args).await,
         Command::Stop => commands::stop::cmd_stop(opts).await,
-        Command::Export(args) => commands::export::cmd_export(opts, &args).await,
-        Command::Import(args) => commands::import::cmd_import(opts, &args).await,
+        Command::Push(args) => commands::push::cmd_push(opts, &args).await,
+        Command::Pull(args) => commands::pull::cmd_pull(opts, &args).await,
         Command::Event(cmd) => match cmd {
             EventCommand::Send(args) => commands::event::cmd_event(opts, &args).await,
         },

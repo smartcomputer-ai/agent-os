@@ -142,7 +142,7 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
 
             let patch_bytes = if let Some(dir) = &propose_args.patch_dir {
                 eprintln!(
-                    "notice: --patch-dir is deprecated; use `aos import --air <dir> --mode patch --air-only --propose`"
+                    "notice: --patch-dir is deprecated; use `aos push` or `aos gov propose --patch`"
                 );
                 let store = Arc::new(FsStore::open(&dirs.store_root)?);
                 let bundle = load_air_bundle(store.clone(), dir, BundleFilter::AirOnly)?;

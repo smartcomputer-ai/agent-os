@@ -57,10 +57,13 @@ pub struct ExportedBundle {
     pub manifest_bytes: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct WriteOptions {
     pub include_sys: bool,
     pub defs_bundle: bool,
+    pub strip_wasm_hashes: bool,
+    pub write_manifest_cbor: bool,
+    pub air_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for WriteOptions {
@@ -68,6 +71,9 @@ impl Default for WriteOptions {
         Self {
             include_sys: false,
             defs_bundle: false,
+            strip_wasm_hashes: false,
+            write_manifest_cbor: true,
+            air_dir: None,
         }
     }
 }
@@ -151,12 +157,11 @@ pub fn import_genesis<S: Store>(store: &S, bundle: &WorldBundle) -> Result<Genes
             .context("store defsecret")?;
     }
 
-    let manifest_node = AirNode::Manifest(bundle.manifest.clone());
     store
-        .put_node(&manifest_node)
+        .put_node(&bundle.manifest)
         .context("store manifest")?;
     let manifest_bytes =
-        to_canonical_cbor(&manifest_node).context("encode manifest to canonical CBOR")?;
+        to_canonical_cbor(&bundle.manifest).context("encode manifest to canonical CBOR")?;
     let manifest_hash = Hash::of_bytes(&manifest_bytes).to_hex();
     Ok(GenesisImport {
         manifest_hash,
@@ -187,13 +192,9 @@ pub fn export_bundle<S: Store>(
     options: ExportOptions,
 ) -> Result<ExportedBundle> {
     let hash = Hash::from_hex_str(manifest_hash).context("parse manifest hash")?;
-    let node: AirNode = store
+    let manifest: Manifest = store
         .get_node(hash)
         .context("load manifest node from store")?;
-    let manifest = match node {
-        AirNode::Manifest(manifest) => manifest,
-        _ => bail!("manifest hash does not point to a manifest node"),
-    };
     let manifest_bytes = manifest_node_bytes(&manifest)?;
     let computed_hash = Hash::of_bytes(&manifest_bytes).to_hex();
     if computed_hash != manifest_hash {
@@ -454,25 +455,12 @@ pub fn manifest_node_hash(manifest: &Manifest) -> Result<String> {
 }
 
 pub fn manifest_node_bytes(manifest: &Manifest) -> Result<Vec<u8>> {
-    let node = AirNode::Manifest(manifest.clone());
-    to_canonical_cbor(&node).context("encode manifest node")
+    to_canonical_cbor(manifest).context("encode manifest")
 }
 
 pub fn decode_manifest_bytes(bytes: &[u8]) -> Result<Manifest> {
-    if let Ok(node) = serde_cbor::from_slice::<AirNode>(bytes) {
-        if let AirNode::Manifest(manifest) = node {
-            return Ok(manifest);
-        }
-        bail!("manifest bytes decoded to non-manifest AIR node");
-    }
     if let Ok(manifest) = serde_cbor::from_slice::<Manifest>(bytes) {
         return Ok(manifest);
-    }
-    if let Ok(node) = serde_json::from_slice::<AirNode>(bytes) {
-        if let AirNode::Manifest(manifest) = node {
-            return Ok(manifest);
-        }
-        bail!("manifest bytes decoded to non-manifest AIR node");
     }
     if let Ok(manifest) = serde_json::from_slice::<Manifest>(bytes) {
         return Ok(manifest);
@@ -494,7 +482,10 @@ pub fn write_air_layout_with_options(
     out_dir: &Path,
     options: WriteOptions,
 ) -> Result<()> {
-    let air_dir = out_dir.join("air");
+    let air_dir = options
+        .air_dir
+        .clone()
+        .unwrap_or_else(|| out_dir.join("air"));
     fs::create_dir_all(&air_dir).context("create air dir")?;
     fs::create_dir_all(out_dir.join(".aos")).context("create .aos dir")?;
 
@@ -520,7 +511,7 @@ pub fn write_air_layout_with_options(
             policies,
             secrets,
         );
-        write_node_array(&air_dir.join("defs.air.json"), defs)?;
+        write_node_array_with_options(&air_dir.join("defs.air.json"), defs, options.strip_wasm_hashes)?;
     } else {
         write_node_array(
             &air_dir.join("schemas.air.json"),
@@ -530,13 +521,14 @@ pub fn write_air_layout_with_options(
                 .map(AirNode::Defschema)
                 .collect(),
         )?;
-        write_node_array(
+        write_node_array_with_options(
             &air_dir.join("module.air.json"),
             modules
                 .iter()
                 .cloned()
                 .map(AirNode::Defmodule)
                 .collect(),
+            options.strip_wasm_hashes,
         )?;
         write_node_array(
             &air_dir.join("plans.air.json"),
@@ -589,8 +581,10 @@ pub fn write_air_layout_with_options(
         write_node_array(&air_dir.join("sys.air.json"), sys_nodes)?;
     }
 
-    fs::write(out_dir.join(".aos/manifest.air.cbor"), manifest_cbor)
-        .context("write manifest.air.cbor")?;
+    if options.write_manifest_cbor {
+        fs::write(out_dir.join(".aos/manifest.air.cbor"), manifest_cbor)
+            .context("write manifest.air.cbor")?;
+    }
     Ok(())
 }
 
@@ -663,6 +657,37 @@ fn write_node_array(path: &Path, nodes: Vec<AirNode>) -> Result<()> {
     }
     let json = serde_json::to_string_pretty(&nodes).context("serialize AIR node array")?;
     fs::write(path, json).with_context(|| format!("write {}", path.display()))
+}
+
+fn write_node_array_with_options(
+    path: &Path,
+    nodes: Vec<AirNode>,
+    strip_wasm_hashes: bool,
+) -> Result<()> {
+    if nodes.is_empty() {
+        return Ok(());
+    }
+    if !strip_wasm_hashes {
+        return write_node_array(path, nodes);
+    }
+    let mut values: Vec<serde_json::Value> = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let mut value = serde_json::to_value(&node).context("serialize AIR node array")?;
+        strip_module_wasm_hash(&mut value);
+        values.push(value);
+    }
+    let json = serde_json::to_string_pretty(&values).context("serialize AIR node array")?;
+    fs::write(path, json).with_context(|| format!("write {}", path.display()))
+}
+
+fn strip_module_wasm_hash(value: &mut serde_json::Value) {
+    let serde_json::Value::Object(map) = value else {
+        return;
+    };
+    let kind = map.get("$kind").and_then(|v| v.as_str());
+    if kind == Some("defmodule") {
+        map.remove("wasm_hash");
+    }
 }
 
 fn split_sys_defs<T: HasName + Clone>(
@@ -846,13 +871,10 @@ fn bundle_from_catalog(catalog: aos_store::Catalog, include_sys: bool) -> WorldB
 
 fn manifest_from_store(store: &FsStore, hash_hex: &str) -> Result<Manifest> {
     let hash = Hash::from_hex_str(hash_hex).context("parse base manifest hash")?;
-    let node: AirNode = store
+    let manifest: Manifest = store
         .get_node(hash)
         .context("load base manifest from store")?;
-    match node {
-        AirNode::Manifest(manifest) => Ok(manifest),
-        _ => bail!("base_manifest_hash does not point to a manifest"),
-    }
+    Ok(manifest)
 }
 
 fn manifest_from_path(path: &Path) -> Result<Manifest> {
@@ -885,9 +907,7 @@ mod tests {
             triggers: Vec::new(),
         };
         let store = MemStore::new();
-        let stored = store
-            .put_node(&AirNode::Manifest(manifest.clone()))
-            .expect("store manifest");
+        let stored = store.put_node(&manifest).expect("store manifest");
         let computed = manifest_node_hash(&manifest).expect("compute hash");
         assert_eq!(stored.to_hex(), computed);
     }
@@ -922,7 +942,7 @@ mod tests {
             triggers: Vec::new(),
         };
         let manifest_hash = store
-            .put_node(&AirNode::Manifest(manifest.clone()))
+            .put_node(&manifest.clone())
             .expect("store manifest")
             .to_hex();
 
@@ -961,7 +981,7 @@ mod tests {
             triggers: Vec::new(),
         };
         let manifest_hash = store
-            .put_node(&AirNode::Manifest(manifest))
+            .put_node(&manifest)
             .expect("store manifest")
             .to_hex();
 
@@ -1035,6 +1055,9 @@ mod tests {
             WriteOptions {
                 include_sys: false,
                 defs_bundle: true,
+                strip_wasm_hashes: false,
+                write_manifest_cbor: true,
+                air_dir: None,
             },
         )
         .expect("write layout");

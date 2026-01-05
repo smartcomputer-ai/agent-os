@@ -2,7 +2,7 @@
 
 This walkthrough builds a minimal "Notes" world: one reducer that counts notes
 and stores the last note text. It shows the core loop: edit AIR + reducer,
-run the world, send events, and then export/import for upgrades.
+run the world, send events, and then push/pull for upgrades.
 
 If you do not have a standalone `aos` binary, replace `aos` with
 `cargo run -p aos-cli --` in the commands below.
@@ -168,25 +168,19 @@ aos state get demo/Notes@1
 ```
 Note: record events use the schema-defined fields directly.
 
-## 5) Export/edit/import (upgrade flow)
-Export the current world layout for editing:
+## 5) Push/pull (upgrade flow)
+Edit `air/*` and `reducer/*`, then push changes into the world:
 ```
-aos export --out /tmp/notes-checkout --defs-bundle --with-sys
-```
-
-Edit `/tmp/notes-checkout/air/*` (e.g., add a new schema field or new event).
-
-Preview the patch document:
-```
-aos import --air /tmp/notes-checkout/air --import-mode patch --air-only --dry-run
+aos push
 ```
 
-Apply via governance (daemon required):
+Pull the latest world state back to disk (AIR + workspaces):
 ```
-aos import --air /tmp/notes-checkout/air --import-mode patch --air-only \
-  --propose --shadow --approve --apply
+aos pull
 ```
-If you change `air/` or `reducer/`, restart `aos run` so the daemon reloads the assets.
+
+`aos run` only executes the existing world (CAS + journal). It does not load
+AIR assets or build reducers; use `aos push` for updates.
 
 ## 6) Optional: workspace sync (deferred)
-Source sync is handled by workspaces; see `roadmap/v0.7-workspaces/p7-fs-sync.md`.
+Workspace sync details are in `roadmap/v0.7-workspaces/p7-fs-sync.md`.

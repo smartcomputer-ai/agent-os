@@ -13,11 +13,11 @@ Replace the ObjectCatalog with a single, unified Workspace system that:
 - makes **name → referent resolution** explicit and ergonomic for HTTP and plans.
 
 The Workspace system is the new source of truth for code, artifacts, and
-in-world editing. Tar bundles remain **interop only**.
+in-world editing. Tar bundles are removed; use workspace sync.
 
 ## Motivation (What was wrong)
 
-The current source import path stores a deterministic tarball in the CAS and
+The current source import path (legacy) stores a deterministic tarball in the CAS and
 registers it in ObjectCatalog. That makes source **opaque** to in-world agents:
 - cannot list files without unpacking,
 - cannot edit a single file without re-tarring,
@@ -38,7 +38,7 @@ for real workflows. Rather than building another system beside it, we will
 5) **Commit history is reducer state** (auditable, replayable).
 6) **Commit metadata stays minimal**; descriptive metadata lives in annotations (P2).
 7) **Caps scope authority** by workspace, path prefixes, and ops.
-8) **Tar is only for import/export** (CLI/World IO), not a canonical format.
+8) **Tar is removed**; use workspace sync via `aos push`/`aos pull`.
 
 Breaking changes are acceptable for this milestone; no migration plan is required.
 
@@ -58,7 +58,7 @@ Completed:
 
 Deferred (tracked elsewhere):
 - [ ] CLI surface and UX → `roadmap/v0.7-workspaces/p5-cli.md`
-- [ ] Import/export + ~-hex path encoding → `roadmap/v0.7-workspaces/p7-fs-sync.md`
+- [ ] Push/pull + ~-hex path encoding → `roadmap/v0.7-workspaces/p7-fs-sync.md`
 - [ ] HTTP publishing routes → next major roadmap step
 
 ## Concepts
@@ -105,9 +105,9 @@ Unix filenames may contain arbitrary bytes. For lossless interop:
   keep it as-is.
 - Otherwise encode as `~` + uppercase hex of the UTF-8 bytes.
 - Literal `~` is always encoded (so `~` never appears unescaped at segment start).
-- On export, decode segments that start with `~`.
-- On import, reject `~` segments with odd-length or non-hex payloads.
-- On import, **reject non-UTF-8 filenames** (fail fast) to keep determinism.
+- On pull, decode segments that start with `~`.
+- On push, reject `~` segments with odd-length or non-hex payloads.
+- On push, **reject non-UTF-8 filenames** (fail fast) to keep determinism.
 
 This preserves 1:1 round-tripping while keeping internal paths URL-safe.
 
@@ -408,8 +408,8 @@ The host server first calls `workspace.resolve`, then uses tree ops. This keeps
 HTTP publishing a thin mapping layer over deterministic primitives.
 
 ### Import/Export Changes
-- `aos import --source` becomes: build tree -> commit workspace.
-- Tar remains only for interop via CLI/World IO (no workspace effects).
+- `aos push` builds a tree and commits the workspace.
+- Tar is removed from the workflow.
 
 ## Security and Policy
 
@@ -440,7 +440,7 @@ Add tests for:
 - **Tree ops as internal effects**: reducers cannot traverse CAS; effects can,
   while still remaining deterministic and cap-gated.
 - **URL-safe naming**: prevents ambiguity and enables stable identifiers.
-- **Tar as interop**: avoids making the canonical representation opaque.
+- **Workspace sync**: avoids making the canonical representation opaque.
 
 ## Deferred Follow-ups (P2+)
 

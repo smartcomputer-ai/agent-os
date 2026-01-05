@@ -44,9 +44,12 @@ fn schema_index(schemas: &HashMap<aos_air_types::Name, DefSchema>) -> SchemaInde
 
 fn load_manifest_for_keys(dirs: &ResolvedDirs) -> Result<LoadedManifest> {
     let store = Arc::new(FsStore::open(&dirs.store_root).context("open store")?);
-    aos_host::manifest_loader::load_from_assets(store, &dirs.air_dir)
-        .context("load manifest for key encoding")?
-        .ok_or_else(|| anyhow!("no manifest found in {}", dirs.air_dir.display()))
+    let Some(manifest_hash) =
+        crate::util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
+            anyhow::bail!("no manifest found in journal; run `aos push` first");
+        };
+    aos_kernel::ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
+        .context("load manifest for key encoding")
 }
 
 fn encode_key_value_for_reducer(

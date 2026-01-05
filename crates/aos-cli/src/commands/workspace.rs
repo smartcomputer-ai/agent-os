@@ -1678,11 +1678,16 @@ fn resolve_annotation_values_batch(
     let mut entries = Vec::new();
     if let Some(annotations) = annotations {
         for (key, value_hash) in annotations.0 {
-            let value_text = resolve_blob_text_batch(store, &value_hash);
+            let bytes = resolve_blob_bytes_batch(store, &value_hash);
+            let (value_text, value_json) = bytes
+                .as_deref()
+                .map(decode_blob_value)
+                .unwrap_or((None, None));
             entries.push(serde_json::json!({
                 "key": key,
                 "value_hash": value_hash,
                 "value_text": value_text,
+                "value_json": value_json,
             }));
         }
     }
@@ -1696,29 +1701,42 @@ async fn resolve_annotation_values_control(
     let mut entries = Vec::new();
     if let Some(annotations) = annotations {
         for (key, value_hash) in annotations.0 {
-            let value_text = resolve_blob_text_control(client, &value_hash).await;
+            let bytes = resolve_blob_bytes_control(client, &value_hash).await;
+            let (value_text, value_json) = bytes
+                .as_deref()
+                .map(decode_blob_value)
+                .unwrap_or((None, None));
             entries.push(serde_json::json!({
                 "key": key,
                 "value_hash": value_hash,
                 "value_text": value_text,
+                "value_json": value_json,
             }));
         }
     }
     entries
 }
 
-fn resolve_blob_text_batch(store: &FsStore, value_hash: &str) -> Option<String> {
+fn resolve_blob_bytes_batch(store: &FsStore, value_hash: &str) -> Option<Vec<u8>> {
     let hash = aos_cbor::Hash::from_hex_str(value_hash).ok()?;
-    let bytes = store.get_blob(hash).ok()?;
-    String::from_utf8(bytes).ok()
+    store.get_blob(hash).ok()
 }
 
-async fn resolve_blob_text_control(
+async fn resolve_blob_bytes_control(
     client: &mut ControlClient,
     value_hash: &str,
-) -> Option<String> {
-    let bytes = client.blob_get("cli-ws-ann-get", value_hash).await.ok()?;
-    String::from_utf8(bytes).ok()
+) -> Option<Vec<u8>> {
+    client.blob_get("cli-ws-ann-get", value_hash).await.ok()
+}
+
+fn decode_blob_value(bytes: &[u8]) -> (Option<String>, Option<JsonValue>) {
+    let value_text = String::from_utf8(bytes.to_vec()).ok();
+    let value_json = match serde_cbor::from_slice::<JsonValue>(bytes) {
+        Ok(JsonValue::String(_)) => None,
+        Ok(other) => Some(other),
+        Err(_) => None,
+    };
+    (value_text, value_json)
 }
 
 fn parse_annotation_deletes(keys: &[String]) -> Result<BTreeMap<String, Option<String>>> {

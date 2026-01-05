@@ -4,11 +4,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use aos_air_types::AirNode;
+use aos_cbor::Hash;
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::{
-    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, TailIntent,
-    TailScan, cell_index::CellMeta,
+    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, ManifestLoader,
+    TailIntent, TailScan, cell_index::CellMeta,
 };
 use aos_store::{FsStore, Store};
 
@@ -159,6 +160,20 @@ impl WorldHost<FsStore> {
                 ))
             })?;
 
+        Self::from_loaded_manifest(store, loaded, world_root, host_config, kernel_config)
+    }
+
+    /// Open a world from the CAS manifest hash stored in the journal.
+    pub fn open_from_manifest_hash(
+        world_root: &Path,
+        manifest_hash: Hash,
+        host_config: HostConfig,
+        kernel_config: KernelConfig,
+    ) -> Result<Self, HostError> {
+        let store =
+            Arc::new(FsStore::open(world_root).map_err(|e| HostError::Store(e.to_string()))?);
+        let loaded = ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
+            .map_err(|e| HostError::Manifest(e.to_string()))?;
         Self::from_loaded_manifest(store, loaded, world_root, host_config, kernel_config)
     }
 
