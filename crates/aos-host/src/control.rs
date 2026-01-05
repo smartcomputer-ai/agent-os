@@ -1,10 +1,10 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use aos_cbor::Hash;
-use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectKind, EffectReceipt, IntentBuilder, ReceiptStatus};
 use aos_kernel::DefListing;
-use aos_kernel::KernelHeights;
-use aos_kernel::ReadMeta;
+use aos_kernel::{KernelError, KernelHeights, ReadMeta};
 use aos_kernel::governance::{ManifestPatch, Proposal, ProposalState};
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::PatchDocument;
@@ -12,6 +12,7 @@ use aos_kernel::shadow::ShadowSummary;
 use base64::prelude::*;
 use jsonschema::JSONSchema;
 use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 use serde_cbor;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
@@ -485,6 +486,120 @@ async fn handle_request(
                 let hash_hex = inner.map_err(ControlError::host)?;
                 Ok(serde_json::json!({ "hash": hash_hex }))
             }
+            "workspace-resolve" => {
+                let params: WorkspaceResolveParams = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: WorkspaceResolveReceipt =
+                    internal_effect(control_tx, EffectKind::workspace_resolve(), &params).await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
+            }
+            "workspace-list" => {
+                let params: WorkspaceListParams = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: WorkspaceListReceipt =
+                    internal_effect(control_tx, EffectKind::workspace_list(), &params).await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
+            }
+            "workspace-read-ref" => {
+                let params: WorkspaceReadRefParams = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: Option<WorkspaceRefEntry> =
+                    internal_effect(control_tx, EffectKind::workspace_read_ref(), &params).await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
+            }
+            "workspace-read-bytes" => {
+                let params: WorkspaceReadBytesParams = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let bytes: Vec<u8> =
+                    internal_effect(control_tx, EffectKind::workspace_read_bytes(), &params)
+                        .await?;
+                Ok(serde_json::json!({
+                    "data_b64": BASE64_STANDARD.encode(bytes)
+                }))
+            }
+            "workspace-write-bytes" => {
+                let payload: WorkspaceWriteBytesPayload =
+                    serde_json::from_value(req.payload.clone())
+                        .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let bytes = BASE64_STANDARD
+                    .decode(payload.bytes_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let params = WorkspaceWriteBytesParams {
+                    root_hash: payload.root_hash,
+                    path: payload.path,
+                    bytes,
+                    mode: payload.mode,
+                };
+                let receipt: WorkspaceWriteBytesReceipt =
+                    internal_effect(control_tx, EffectKind::workspace_write_bytes(), &params)
+                        .await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
+            }
+            "workspace-remove" => {
+                let params: WorkspaceRemoveParams = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: WorkspaceRemoveReceipt =
+                    internal_effect(control_tx, EffectKind::workspace_remove(), &params).await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
+            }
+            "workspace-diff" => {
+                let params: WorkspaceDiffParams = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: WorkspaceDiffReceipt =
+                    internal_effect(control_tx, EffectKind::workspace_diff(), &params).await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
+            }
+            "workspace-annotations-get" => {
+                let params: WorkspaceAnnotationsGetParams =
+                    serde_json::from_value(req.payload.clone())
+                        .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: WorkspaceAnnotationsGetReceipt = internal_effect(
+                    control_tx,
+                    EffectKind::workspace_annotations_get(),
+                    &params,
+                )
+                .await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
+            }
+            "workspace-annotations-set" => {
+                let params: WorkspaceAnnotationsSetParams =
+                    serde_json::from_value(req.payload.clone())
+                        .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: WorkspaceAnnotationsSetReceipt = internal_effect(
+                    control_tx,
+                    EffectKind::workspace_annotations_set(),
+                    &params,
+                )
+                .await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
+            }
+            "workspace-empty-root" => {
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::WorkspaceEmptyRoot { resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                let root_hash = inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({ "root_hash": root_hash }))
+            }
             "gov-propose" => {
                 let payload: ProposePayload = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
@@ -657,6 +772,175 @@ struct InjectReceiptPayload {
 #[derive(Debug, Deserialize)]
 struct PutBlobPayload {
     data_b64: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceResolveParams {
+    workspace: String,
+    #[serde(default)]
+    version: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceResolveReceipt {
+    exists: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resolved_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    head: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    root_hash: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceListParams {
+    root_hash: String,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    cursor: Option<String>,
+    limit: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceListReceipt {
+    entries: Vec<WorkspaceListEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceListEntry {
+    path: String,
+    kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceReadRefParams {
+    root_hash: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceRefEntry {
+    kind: String,
+    hash: String,
+    size: u64,
+    mode: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceReadBytesParams {
+    root_hash: String,
+    path: String,
+    #[serde(default)]
+    range: Option<WorkspaceReadBytesRange>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceReadBytesRange {
+    start: u64,
+    end: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkspaceWriteBytesPayload {
+    root_hash: String,
+    path: String,
+    bytes_b64: String,
+    #[serde(default)]
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceWriteBytesParams {
+    root_hash: String,
+    path: String,
+    bytes: Vec<u8>,
+    #[serde(default)]
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceWriteBytesReceipt {
+    new_root_hash: String,
+    blob_hash: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceRemoveParams {
+    root_hash: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceRemoveReceipt {
+    new_root_hash: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceDiffParams {
+    root_a: String,
+    root_b: String,
+    #[serde(default)]
+    prefix: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceDiffReceipt {
+    changes: Vec<WorkspaceDiffChange>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceDiffChange {
+    path: String,
+    kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    old_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    new_hash: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+struct WorkspaceAnnotationsPatch(BTreeMap<String, Option<String>>);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsGetParams {
+    root_hash: String,
+    #[serde(default)]
+    path: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsGetReceipt {
+    annotations: Option<WorkspaceAnnotations>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+struct WorkspaceAnnotations(BTreeMap<String, String>);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsSetParams {
+    root_hash: String,
+    #[serde(default)]
+    path: Option<String>,
+    annotations_patch: WorkspaceAnnotationsPatch,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceAnnotationsSetReceipt {
+    new_root_hash: String,
+    annotations_hash: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -832,6 +1116,32 @@ async fn world_meta(control_tx: &mpsc::Sender<ControlMsg>) -> Result<ReadMeta, C
         .await
         .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
     inner.map_err(ControlError::host)
+}
+
+async fn internal_effect<T: DeserializeOwned, P: Serialize>(
+    control_tx: &mpsc::Sender<ControlMsg>,
+    kind: EffectKind,
+    params: &P,
+) -> Result<T, ControlError> {
+    let intent = IntentBuilder::new(kind.clone(), "sys/workspace@1", params)
+        .build()
+        .map_err(|e| ControlError::decode(format!("encode params: {e}")))?;
+    let (tx, rx) = oneshot::channel();
+    let _ = control_tx
+        .send(ControlMsg::InternalEffect { intent, resp: tx })
+        .await;
+    let inner = rx
+        .await
+        .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+    let receipt = inner.map_err(ControlError::host)?;
+    if receipt.status != ReceiptStatus::Ok {
+        return Err(ControlError::host(HostError::Kernel(
+            KernelError::Query(format!("internal effect '{}' failed", kind.as_str())),
+        )));
+    }
+    receipt
+        .payload::<T>()
+        .map_err(|e| ControlError::decode(format!("decode receipt: {e}")))
 }
 
 /// Minimal control client used by tests and CLI helpers.

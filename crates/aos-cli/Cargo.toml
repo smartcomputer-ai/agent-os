@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 aos-air-types = { path = "../aos-air-types" }
+aos-effects = { path = "../aos-effects" }
 aos-kernel = { path = "../aos-kernel" }
 aos-host = { path = "../aos-host" }
 aos-store = { path = "../aos-store" }

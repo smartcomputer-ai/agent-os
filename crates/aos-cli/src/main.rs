@@ -19,6 +19,7 @@ use commands::init::InitArgs;
 use commands::manifest::ManifestArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
+use commands::workspace::WorkspaceArgs;
 use opts::{WorldOpts, resolve_world};
 
 #[derive(Parser, Debug)]
@@ -79,6 +80,9 @@ enum Command {
 
     /// Blob commands
     Blob(BlobArgs),
+
+    /// Workspace commands
+    Ws(WorkspaceArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -152,5 +156,6 @@ async fn main() -> Result<()> {
         Command::Gov(args) => commands::gov::cmd_gov(opts, &args).await,
         Command::Defs(args) => commands::defs::cmd_defs(opts, &args).await,
         Command::Blob(args) => commands::blob::cmd_blob(opts, &args).await,
+        Command::Ws(args) => commands::workspace::cmd_ws(opts, &args).await,
     }
 }

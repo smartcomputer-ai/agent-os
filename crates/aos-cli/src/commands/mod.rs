@@ -16,6 +16,7 @@ pub mod run;
 pub mod snapshot;
 pub mod state;
 pub mod stop;
+pub mod workspace;
 
 use std::sync::Arc;
 

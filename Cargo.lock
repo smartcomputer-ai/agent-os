@@ -143,6 +143,7 @@ dependencies = [
  "anyhow",
  "aos-air-types",
  "aos-cbor",
+ "aos-effects",
  "aos-host",
  "aos-kernel",
  "aos-store",
