@@ -373,14 +373,17 @@ where
                 cost_cents: Some(0),
                 signature: vec![0; 64],
             },
-            Err(err) => EffectReceipt {
-                intent_hash: intent.intent_hash,
-                adapter_id: adapter_id.to_string(),
-                status: ReceiptStatus::Error,
-                payload_cbor: Vec::new(),
-                cost_cents: Some(0),
-                signature: vec![0; 64],
-            },
+            Err(err) => {
+                let payload_cbor = to_canonical_cbor(&err.to_string()).unwrap_or_default();
+                EffectReceipt {
+                    intent_hash: intent.intent_hash,
+                    adapter_id: adapter_id.to_string(),
+                    status: ReceiptStatus::Error,
+                    payload_cbor,
+                    cost_cents: Some(0),
+                    signature: vec![0; 64],
+                }
+            }
         };
 
         Ok(Some(receipt))
@@ -596,10 +599,16 @@ where
         let path_segments = validate_path(&params.path)?;
         let store = self.store();
         let Some(entry) = resolve_entry(store.as_ref(), &root_hash, &path_segments)? else {
-            return Err(KernelError::Query("path not found".into()));
+            return Err(KernelError::Query(format!(
+                "path not found: {}",
+                params.path
+            )));
         };
         if entry.kind != "file" {
-            return Err(KernelError::Query("path is not a file".into()));
+            return Err(KernelError::Query(format!(
+                "path is not a file: {}",
+                params.path
+            )));
         }
         let blob_hash = hash_from_ref(&entry.hash)?;
         let mut bytes = store.get_blob(blob_hash)?;
@@ -654,6 +663,12 @@ where
         let root_hash = parse_hash_str(&params.root_hash)?;
         let path_segments = validate_path(&params.path)?;
         let store = self.store();
+        if resolve_entry(store.as_ref(), &root_hash, &path_segments)?.is_none() {
+            return Err(KernelError::Query(format!(
+                "path not found: {}",
+                params.path
+            )));
+        }
         let new_root = remove_entry_at_path(store.as_ref(), &root_hash, &path_segments)?;
         let receipt = WorkspaceRemoveReceipt {
             new_root_hash: hash_ref_from_hash(&new_root)?,
@@ -682,7 +697,10 @@ where
             let entry_a = resolve_entry(store.as_ref(), &root_a, &prefix_segments)?;
             let entry_b = resolve_entry(store.as_ref(), &root_b, &prefix_segments)?;
             if entry_a.is_none() && entry_b.is_none() {
-                return Err(KernelError::Query("path not found".into()));
+                return Err(KernelError::Query(format!(
+                    "path not found: {}",
+                    prefix
+                )));
             }
             let file_diff = entry_a
                 .as_ref()
@@ -769,6 +787,14 @@ where
             None => Vec::new(),
         };
         let store = self.store();
+        if !path_segments.is_empty()
+            && resolve_entry(store.as_ref(), &root_hash, &path_segments)?.is_none()
+        {
+            return Err(KernelError::Query(format!(
+                "path not found: {}",
+                params.path.as_deref().unwrap_or_default()
+            )));
+        }
         let annotations = if path_segments.is_empty() {
             let tree = load_tree(store.as_ref(), &root_hash)?;
             annotations_from_hash(store.as_ref(), tree.annotations_hash.as_ref())?
@@ -808,6 +834,14 @@ where
             None => Vec::new(),
         };
         let store = self.store();
+        if !path_segments.is_empty()
+            && resolve_entry(store.as_ref(), &root_hash, &path_segments)?.is_none()
+        {
+            return Err(KernelError::Query(format!(
+                "path not found: {}",
+                params.path.as_deref().unwrap_or_default()
+            )));
+        }
         let (new_root, annotations_hash) =
             set_annotations_at_path(store.as_ref(), &root_hash, &path_segments, &params.annotations_patch)?;
         let receipt = WorkspaceAnnotationsSetReceipt {

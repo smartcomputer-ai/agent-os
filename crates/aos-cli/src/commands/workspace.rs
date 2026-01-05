@@ -1234,6 +1234,9 @@ fn handle_internal<T: serde::de::DeserializeOwned, P: Serialize>(
         .handle_internal_intent(&intent)?
         .ok_or_else(|| anyhow!("{label} not handled as internal effect"))?;
     if receipt.status != ReceiptStatus::Ok {
+        if let Some(message) = decode_internal_error_message(&receipt.payload_cbor) {
+            anyhow::bail!("{label} failed: {message}");
+        }
         anyhow::bail!("{label} failed");
     }
     receipt
@@ -1266,6 +1269,7 @@ async fn control_call<T: serde::de::DeserializeOwned, P: Serialize>(
 }
 
 fn parse_workspace_ref(input: &str) -> Result<WorkspaceRef> {
+    let input = input.trim_end_matches('/');
     if input.is_empty() {
         anyhow::bail!("workspace ref is required");
     }
@@ -1418,6 +1422,21 @@ fn decode_workspace_key(bytes: &[u8]) -> Option<String> {
     serde_cbor::from_slice::<String>(bytes).ok()
 }
 
+fn normalize_path_arg(input: &str) -> Result<String> {
+    let trimmed = input.trim_end_matches('/');
+    if trimmed.is_empty() || trimmed.starts_with('/') {
+        anyhow::bail!("invalid workspace path");
+    }
+    Ok(trimmed.to_string())
+}
+
+fn decode_internal_error_message(payload: &[u8]) -> Option<String> {
+    if payload.is_empty() {
+        return None;
+    }
+    serde_cbor::from_slice::<String>(payload).ok()
+}
+
 fn resolve_diff_prefix(
     ref_a: &WorkspaceRef,
     ref_b: &WorkspaceRef,
@@ -1433,8 +1452,10 @@ fn resolve_diff_prefix(
             anyhow::bail!("diff refs must share the same path");
         }
     }
+    let explicit = explicit
+        .map(normalize_path_arg)
+        .transpose()?;
     Ok(explicit
-        .map(|s| s.to_string())
         .or_else(|| path_a.map(|s| s.to_string()))
         .or_else(|| path_b.map(|s| s.to_string())))
 }

@@ -1131,6 +1131,13 @@ async fn world_meta(control_tx: &mpsc::Sender<ControlMsg>) -> Result<ReadMeta, C
     inner.map_err(ControlError::host)
 }
 
+fn decode_internal_error_message(payload: &[u8]) -> Option<String> {
+    if payload.is_empty() {
+        return None;
+    }
+    serde_cbor::from_slice::<String>(payload).ok()
+}
+
 async fn internal_effect<T: DeserializeOwned, P: Serialize>(
     control_tx: &mpsc::Sender<ControlMsg>,
     kind: EffectKind,
@@ -1148,8 +1155,18 @@ async fn internal_effect<T: DeserializeOwned, P: Serialize>(
         .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
     let receipt = inner.map_err(ControlError::host)?;
     if receipt.status != ReceiptStatus::Ok {
+        let message = decode_internal_error_message(&receipt.payload_cbor)
+            .map(|msg| {
+                msg.strip_prefix("query error: ")
+                    .unwrap_or(msg.as_str())
+                    .to_string()
+            })
+            .unwrap_or_else(|| "unknown error".to_string());
         return Err(ControlError::host(HostError::Kernel(
-            KernelError::Query(format!("internal effect '{}' failed", kind.as_str())),
+            KernelError::Query(format!(
+                "internal effect '{}' failed: {message}",
+                kind.as_str()
+            )),
         )));
     }
     receipt
