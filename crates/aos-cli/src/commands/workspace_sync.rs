@@ -1052,3 +1052,56 @@ fn set_file_mode(path: &Path, mode: u64) -> Result<()> {
     let _ = mode;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_segment_keeps_safe_tokens() {
+        assert_eq!(encode_segment("abcXYZ09._-~"), "abcXYZ09._-~");
+        assert_eq!(encode_segment("a~b"), "a~b");
+    }
+
+    #[test]
+    fn encode_segment_escapes_leading_tilde() {
+        assert_eq!(encode_segment("~tilde"), "~7E74696C6465");
+    }
+
+    #[test]
+    fn decode_segment_round_trips_encoded() {
+        assert_eq!(decode_segment("~7E74696C6465").unwrap(), "~tilde");
+    }
+
+    #[test]
+    fn encode_decode_relative_path_round_trip() {
+        let encoded = encode_relative_path(Path::new("foo/bar baz")).unwrap();
+        assert_eq!(encoded, "foo/~6261722062617A");
+        let decoded = decode_relative_path(&encoded).unwrap();
+        assert_eq!(decoded, PathBuf::from("foo/bar baz"));
+    }
+
+    #[test]
+    fn decode_relative_path_rejects_dot_segments() {
+        assert!(decode_relative_path("~2E").is_err());
+        assert!(decode_relative_path("~2E2E").is_err());
+    }
+
+    #[test]
+    fn decode_segment_rejects_invalid_hex() {
+        assert!(decode_segment("~").is_err());
+        assert!(decode_segment("~0").is_err());
+        assert!(decode_segment("~GG").is_err());
+    }
+
+    #[test]
+    fn decode_segment_rejects_invalid_utf8() {
+        assert!(decode_segment("~FF").is_err());
+    }
+
+    #[test]
+    fn encode_relative_path_rejects_empty() {
+        assert!(encode_relative_path(Path::new("")).is_err());
+        assert!(encode_relative_path(Path::new(".")).is_err());
+    }
+}

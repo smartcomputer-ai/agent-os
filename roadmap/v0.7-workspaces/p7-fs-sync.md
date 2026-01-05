@@ -3,7 +3,7 @@
 **Priority**: P2  
 **Effort**: Medium/High  
 **Risk if deferred**: High (blocks local dev workflows)  
-**Status**: Draft
+**Status**: Done
 
 ## Goal
 
@@ -14,8 +14,11 @@ other artifacts) with workspace trees. Sync should be orchestrated by top-level
 ## Current state (review)
 
 - `aos import/export` is removed; sync is handled by `aos push`/`aos pull`.
-- `aos ws` supports per-file read/write but no folder sync.
-- `~`-hex path encoding is specified but not implemented in CLI or world IO.
+- `aos ws` supports per-file read/write; directory sync is handled by `aos push`/`aos pull`.
+- Workspace sync uses `~`-hex path encoding and decoding in the CLI.
+- Sync respects `.gitignore` plus `ignore` entries from the map file.
+- Annotations in the map file accept strings or JSON values.
+- `aos ws ann get` renders CBOR annotation blobs as JSON.
 
 ## Direction (breaking-change-friendly)
 
@@ -105,6 +108,7 @@ Pull orchestration:
 1) Export AIR JSON from the world (omit wasm hashes by default).
 2) Optionally materialize `modules/`.
 3) Sync workspace entries (workspace -> local).
+4) Pull does not write annotations back to disk (for now).
 
 1) Resolve workspace head.
 2) List workspace subtree; decode paths.
@@ -114,7 +118,7 @@ Pull orchestration:
 
 Safety:
 - Default is no delete; require `--prune` for removes.
-- If `expected_head` changes mid-sync, abort unless `--force`.
+- If `expected_head` changes mid-sync, abort.
 - Non-UTF-8 names or unsupported file types (symlinks, devices) error out.
 - Empty directories are not represented; use a `.keep` file if needed.
 
@@ -131,11 +135,6 @@ Notes:
 ## Implementation notes
 
 - Do not resurrect SourceBundle/tar; source bundles are removed from `WorldBundle`.
-- Add shared `~`-hex encode/decode helpers to CLI or a small utility crate.
+- Shared `~`-hex encode/decode lives in workspace sync helpers.
 - Batch commits in sync; avoid per-file commits.
-
-## Open questions
-
-- Should annotation values support JSON or CBOR (not just text)?
-- Do we want a bulk `workspace.write_tree` internal effect for speed?
-- Do we want per-workspace ignore rules stored in annotations?
+- Pull does not write annotations to disk (by design for now).
