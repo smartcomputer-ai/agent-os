@@ -63,6 +63,16 @@ Response:
 - `def-get { name }` → returns `{ def }` where `def` is the manifest entry for that name (`defschema`/`defmodule`/`defplan`/`defcap`/`defeffect`/`defpolicy`); errors if missing.
 - `def-list { kinds?: ["defschema"|"defmodule"|"defplan"|"defcap"|"defeffect"|"defpolicy"|"schema"|"module"|"plan"|"cap"|"effect"|"policy"], prefix?: "..." }` → returns `{ defs:[{ kind, name, cap_type?, params_schema?, receipt_schema?, plan_steps?, policy_rules? }], meta }` sorted by name (aliases normalized to `$kind`).
 - `journal-head {}` → returns `{ journal_height, snapshot_hash?, manifest_hash }`.
+- `workspace-resolve { workspace, version? }` → returns `{ exists, resolved_version?, head?, root_hash? }`.
+- `workspace-empty-root { workspace }` → returns `{ root_hash }`.
+- `workspace-list { root_hash, path?, scope?, cursor?, limit }` → returns `{ entries:[{ path, kind, hash?, size?, mode? }], next_cursor? }`.
+- `workspace-read-ref { root_hash, path }` → returns `{ kind, hash, size, mode }` or `null` when missing.
+- `workspace-read-bytes { root_hash, path, range? }` → returns `{ data_b64 }`.
+- `workspace-write-bytes { root_hash, path, bytes_b64, mode? }` → returns `{ new_root_hash, blob_hash }`.
+- `workspace-remove { root_hash, path }` → returns `{ new_root_hash }`.
+- `workspace-diff { root_a, root_b, prefix? }` → returns `{ changes:[{ path, kind, old_hash?, new_hash? }] }`.
+- `workspace-annotations-get { root_hash, path? }` → returns `{ annotations?:{ key: hash } }`.
+- `workspace-annotations-set { root_hash, path?, annotations_patch:{ key: hash|null } }` → returns `{ new_root_hash, annotations_hash }`.
 - `blob-put { data_b64 }` → stores blob in CAS; returns `{ hash: "sha256:..." }`.
 - `blob-get { hash }` → returns `{ data_b64 }` (CAS lookup).
 - `snapshot {}` → forces snapshot; `result` is empty object.

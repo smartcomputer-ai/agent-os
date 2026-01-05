@@ -26,7 +26,7 @@ AIR v1 provides one canonical, typed control plane the kernel can load, validate
 
 AIR is **control‑plane only**. It defines schemas, modules, plans, capabilities, policies, and the manifest. Application state lives in reducer state (deterministic WASM), encoded as canonical CBOR.
 
-The policy engine is minimal: ordered allow/deny rules. Hooks are reserved for richer policy later. The effects set in v1 is also minimal: `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`. Migrations are deferred; `defmigration` is reserved.
+The policy engine is minimal: ordered allow/deny rules. Hooks are reserved for richer policy later. The effects set in v1 includes `http.request`, `blob.{put,get}`, `timer.set`, `llm.generate`, `vault.{put,rotate}`, `workspace.*`, and `introspect.*`. Migrations are deferred; `defmigration` is reserved.
 
 ## 1) Vocabulary and Identity
 
@@ -203,7 +203,7 @@ Registers a WASM module with its interface contract.
 
 `EffectKind` and `CapType` are namespaced strings. The schema no longer hardcodes an enum; v1 ships a built-in catalog listed in §7, and adapters can introduce additional kinds as runtime support lands.
 
-**Built-in modules** live in `spec/defs/builtin-modules.air.json` (e.g., `sys/CapEnforceHttpOut@1`, `sys/CapEnforceLlmBasic@1`, `sys/Workspace@1`). `sys/*` module names are reserved: external manifests may **reference** them, but may not define them; the kernel supplies the definitions and hashes.
+**Built-in modules** live in `spec/defs/builtin-modules.air.json` (e.g., `sys/CapEnforceHttpOut@1`, `sys/CapEnforceLlmBasic@1`, `sys/Workspace@1`). The kernel ships the workspace reducer (`sys/Workspace@1`) and its cap enforcer (`sys/CapEnforceWorkspace@1`) to provide a versioned tree registry. `sys/*` module names are reserved: external manifests may **reference** them, but may not define them; the kernel supplies the definitions and hashes.
 
 The `key_schema` field (v1.1 addendum) documents the key type when this reducer is routed as keyed. The ABI remains a single `step` export; the kernel provides an envelope with optional call context. When routed as keyed, the reducer context includes `cell_mode=true` and the keyed `key`; returning `state=null` deletes the cell instance.
 
@@ -294,6 +294,48 @@ Built-in kinds in v1:
 - params: `{ alias:text, version:nat, binding_id:text, expected_digest:hash }`
 - receipt: `{ alias:text, version:nat, binding_id:text, digest:hash }`
 
+**workspace.resolve** (plan-only, cap_type `workspace`)
+- params: `{ workspace:text, version?:nat }`
+- receipt: `{ exists:bool, resolved_version?:nat, head?:nat, root_hash?:hash }`
+
+**workspace.empty_root** (plan-only, cap_type `workspace`)
+- params: `{ workspace:text }`
+- receipt: `{ root_hash:hash }`
+
+**workspace.list** (plan-only, cap_type `workspace`)
+- params: `{ root_hash:hash, path?:text, scope?:text, cursor?:text, limit:nat }`
+- receipt: `{ entries:[{ path, kind, hash?, size?, mode? }], next_cursor?:text }`
+
+**workspace.read_ref** (plan-only, cap_type `workspace`)
+- params: `{ root_hash:hash, path:text }`
+- receipt: `{ kind, hash, size, mode }` or `null` when missing
+
+**workspace.read_bytes** (plan-only, cap_type `workspace`)
+- params: `{ root_hash:hash, path:text, range?:{ start:nat, end:nat } }`
+- receipt: `bytes`
+
+**workspace.write_bytes** (plan-only, cap_type `workspace`)
+- params: `{ root_hash:hash, path:text, bytes:bytes, mode?:nat }`
+- receipt: `{ new_root_hash:hash, blob_hash:hash }`
+
+**workspace.remove** (plan-only, cap_type `workspace`)
+- params: `{ root_hash:hash, path:text }`
+- receipt: `{ new_root_hash:hash }`
+
+**workspace.diff** (plan-only, cap_type `workspace`)
+- params: `{ root_a:hash, root_b:hash, prefix?:text }`
+- receipt: `{ changes:[{ path, kind, old_hash?, new_hash? }] }`
+
+**workspace.annotations_get** (plan-only, cap_type `workspace`)
+- params: `{ root_hash:hash, path?:text }`
+- receipt: `{ annotations?:map<text,hash> }`
+
+**workspace.annotations_set** (plan-only, cap_type `workspace`)
+- params: `{ root_hash:hash, path?:text, annotations_patch:map<text,option<hash>> }`
+- receipt: `{ new_root_hash:hash, annotations_hash:hash }`
+
+Workspace paths are URL-safe relative paths: segments match `[A-Za-z0-9._~-]`, no empty segments, `.` or `..`, and no leading or trailing `/`. Tree nodes are `sys/WorkspaceTree@2`/`sys/WorkspaceEntry@2` (annotations stored via optional `annotations_hash` on directories and entries). Entries are lexicographically sorted, file modes are `0644`/`0755`, and directory mode is `0755`. `workspace.remove` errors on non-empty directories; `workspace.read_bytes.range` uses `[start,end)` and errors if `end` exceeds file size.
+
 **introspect.manifest / introspect.reducer_state / introspect.journal_head / introspect.list_cells** (plan-only, cap_type `query`)
 - Read-only effects served by an internal kernel adapter; receipts include consistency metadata used by governance and self-upgrade flows.
 - `introspect.manifest`: params `{ consistency: text }` (`head` | `exact:<h>` | `at_least:<h>`); receipt `{ manifest, journal_height, snapshot_hash?, manifest_hash }`
@@ -301,7 +343,7 @@ Built-in kinds in v1:
 - `introspect.journal_head`: params `{}`; receipt `{ journal_height, snapshot_hash?, manifest_hash }`
 - `introspect.list_cells`: params `{ reducer:text }`; receipt `{ cells:[{ key_b64, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`
 
-Built-in capability types paired with these effects (v1): `http.out`, `blob`, `timer`, `llm.basic`, `secret`, and `query`. The schema stays open to future types even though the kernel ships this curated set today.
+Built-in capability types paired with these effects (v1): `http.out`, `blob`, `timer`, `llm.basic`, `secret`, `query`, and `workspace`. The schema stays open to future types even though the kernel ships this curated set today.
 
 ### Built-in reducer receipt events
 
@@ -731,6 +773,7 @@ The journal records both design-time (governance) and runtime (execution) events
 - **ShadowReport** `{ proposal_id:u64, patch_hash, manifest_hash, effects_predicted:[EffectKind…], pending_receipts?:[PendingPlanReceipt], plan_results?:[PlanResultPreview], ledger_deltas?:[LedgerDelta] }`
 - **Approved** `{ proposal_id:u64, patch_hash, approver, decision:"approve"|"reject" }`
 - **Applied** `{ proposal_id:u64, patch_hash, manifest_hash_new }`
+- **Manifest** `{ manifest_hash }`
 
 Notes:
 - `proposal_id` is the world-local correlation key; `patch_hash` is the content key and may repeat if the same patch is resubmitted.
@@ -738,6 +781,7 @@ Notes:
 - `Applied.manifest_hash_new` is the new manifest root after apply (not the patch hash).
 - Apply is only valid after an `Approved` record whose `decision` is `approve`; a `reject` decision halts the proposal.
 - `GovProposeParams.manifest_base`, when supplied, **must** equal the patch document’s `base_manifest_hash`; handlers should reject proposals where they differ.
+- `Manifest` is appended whenever the active manifest changes (initial boot, governance apply, or `aos push`); replay applies these in-order to swap manifests without emitting new entries.
 
 ### Plan and Effect Lifecycle (Runtime)
 

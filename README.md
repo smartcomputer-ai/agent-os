@@ -49,6 +49,15 @@ All ladder demos live under `examples/` and share the `aos-examples` CLI.
 - Force a rebuild of reducer WASM/artifacts: add `--force-build`, e.g. `cargo run -p aos-examples -- --force-build counter`
 - Increase logging by exporting `RUST_LOG=debug` before invoking the CLI if you need cache/build insight
 
+## Workspaces and Sync
+
+AgentOS stores code and artifacts in **workspaces**: versioned trees managed by the built-in `sys/Workspace@1` reducer. Use `aos ws` for inspection/editing and `aos push`/`aos pull` to sync local directories via `aos.sync.json`.
+
+Examples:
+- `aos ws ls`
+- `aos ws cat alpha/README.txt`
+- `aos push`
+- `aos pull`
 
 ## Current Status
 
@@ -68,4 +77,3 @@ The runtime, kernel, adapters, and SDKs are available for free use and modificat
 The AIR specification and schema documents are published under the **Creative Commons Attribution 4.0 International (CC BY 4.0)** license with a royalty-free patent non-assert, so anyone can build compatible implementations.
 
 See [`LICENSE`](./LICENSE) and [`LICENSE-SPEC`](./LICENSE-SPEC) for full terms.
-

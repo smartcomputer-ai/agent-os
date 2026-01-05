@@ -14,12 +14,14 @@ This file provides guidance to coding agents when working with code in this repo
 4. **spec/04-reducers.md** — Reducer ABI/semantics; micro-effect rules.
 5. **spec/05-workflows.md** — Workflow patterns; see also **spec/07-workflow-patterns.md**.
 
-Reference shelves: **spec/schemas/** (JSON Schemas), **spec/defs/** (built-ins: Timer/Blob/HTTP/LLM), **spec/patch.md** (historical notes). Future/experimental material lives in 10+ (e.g., 11-cells, 12-plans-v1.1, 13-parallelism, 14-example-reducer-harness, 15-reducer-sdk, 16-query-interfaces, 17-secrets).
+Reference shelves: **spec/schemas/** (JSON Schemas), **spec/defs/** (built-ins: Timer/Blob/HTTP/LLM/Workspace/Introspect), **spec/patch.md** (historical notes). Future/experimental material lives in 10+ (e.g., 11-cells, 12-plans-v1.1, 13-parallelism, 14-example-reducer-harness, 15-reducer-sdk, 16-query-interfaces, 17-secrets).
 
 
 ## Core Architecture (TL;DR)
 
 **World**: Single-threaded deterministic event log. Replay journal + receipts = identical state.
+
+**Workspaces**: Versioned tree registry (`sys/Workspace@1`) for code/artifacts. Tree ops (`workspace.*`) are plan-only internal effects, cap-gated, and used by `aos ws` plus `aos push`/`aos pull`.
 
 **Three layers**:
 - **Reducers** (WASM state machines): Domain logic, business invariants, emit events. May emit micro-effects (timer, blob) ONLY. See spec/04-reducers.md
@@ -31,6 +33,7 @@ Reference shelves: **spec/schemas/** (JSON Schemas), **spec/defs/** (built-ins: 
 **Critical boundaries (v1)**:
 - **Reducers**: Own state and business logic. Emit DomainIntent events for external work. May emit at most ONE micro-effect per step (blob.{put,get}, timer.set). NO network effects.
 - **Plans**: Orchestrate effects (http, llm, payments, email) triggered by intents. Raise result events back to reducers. NO compute or business logic.
+- **Workspace ops**: `workspace.*` effects are plan-only internal effects; reducers never touch trees directly.
 - **Flow**: Reducer emits intent → Manifest trigger starts Plan → Plan performs effects → Plan raises result event → Reducer advances state.
 - **Rule**: NEVER orchestrate http/llm/payments/email in reducers. NEVER put business logic in plans. Keep responsibilities clear.
 
@@ -58,7 +61,9 @@ Reference shelves: **spec/schemas/** (JSON Schemas), **spec/defs/** (built-ins: 
 - Plan executor evaluates expressions, guards edges, awaits receipts deterministically
 - Effect manager routes intents through policy gates, invokes adapters, validates receipt signatures
 - Event ingress is normalized like effect params: every DomainEvent/ReceiptEvent is schema-validated, canonicalized once, journaled as canonical CBOR, and routing/correlation uses the schema-decoded value
+- Manifest changes are journaled as `Manifest` records; replay applies them in order to keep control plane state aligned.
 - Module build/cache: reducers compiled via `aos-wasm-build`, cached under `.aos/cache/{modules|wasmtime}`; kernel can warm-load cached compiled modules.
+- Workspace sync uses `aos.sync.json` plus `aos push`/`aos pull`; filesystem names are encoded per segment with `~`-hex when needed.
 - See `spec/02-architecture.md` for runtime components and `spec/03-air.md` for AIR semantics
 
 ## Project Structure (Rust workspace, edition 2024)
