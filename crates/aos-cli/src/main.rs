@@ -125,12 +125,14 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let opts = &cli.opts;
 
-    if let Ok(world) = resolve_world(opts) {
-        let _ = crate::util::load_world_env(&world);
+    if !matches!(cli.command, Command::Init(_)) {
+        if let Ok(world) = resolve_world(opts) {
+            let _ = crate::util::load_world_env(&world);
+        }
     }
 
     match cli.command {
-        Command::Init(args) => commands::init::cmd_init(&args),
+        Command::Init(args) => commands::init::cmd_init(opts, &args),
         Command::Status => commands::info::cmd_info(opts).await,
         Command::Run(args) => commands::run::cmd_run(opts, &args).await,
         Command::Stop => commands::stop::cmd_stop(opts).await,
