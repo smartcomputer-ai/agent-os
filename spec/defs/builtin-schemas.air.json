@@ -638,7 +638,7 @@
     "name": "sys/WorkspaceAnnotations@1",
     "type": {
       "map": {
-        "key": { "hash": {} },
+        "key": { "text": {} },
         "value": { "hash": {} }
       }
     }
@@ -648,7 +648,7 @@
     "name": "sys/WorkspaceAnnotationsPatch@1",
     "type": {
       "map": {
-        "key": { "hash": {} },
+        "key": { "text": {} },
         "value": { "option": { "hash": {} } }
       }
     }

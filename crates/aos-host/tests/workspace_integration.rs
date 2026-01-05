@@ -473,11 +473,11 @@ async fn workspace_annotations_roundtrip_on_root() {
         .put_node(&WorkspaceTree { entries: Vec::new() })
         .expect("root tree");
 
-    let key_hash = aos_cbor::Hash::of_bytes(b"sys/commit.message").to_hex();
+    let key = "sys/commit.message".to_string();
     let val_hash = aos_cbor::Hash::of_bytes(b"message body").to_hex();
 
     let mut patch_map = BTreeMap::new();
-    patch_map.insert(key_hash.clone(), Some(val_hash.clone()));
+    patch_map.insert(key.clone(), Some(val_hash.clone()));
     let set_params = WorkspaceAnnotationsSetParams {
         root_hash: empty_root.to_hex(),
         path: None,
@@ -506,10 +506,10 @@ async fn workspace_annotations_roundtrip_on_root() {
     .expect("intent");
     let get_receipt: WorkspaceAnnotationsGetReceipt = handle_internal(&mut world.kernel, intent);
     let annotations = get_receipt.annotations.expect("annotations");
-    assert_eq!(annotations.0.get(&key_hash), Some(&val_hash));
+    assert_eq!(annotations.0.get(&key), Some(&val_hash));
 
     let mut delete_patch = BTreeMap::new();
-    delete_patch.insert(key_hash.clone(), None);
+    delete_patch.insert(key.clone(), None);
     let delete_params = WorkspaceAnnotationsSetParams {
         root_hash: set_receipt.new_root_hash,
         path: None,
@@ -566,10 +566,10 @@ async fn workspace_annotations_survive_file_write() {
     .expect("intent");
     let write_receipt: WorkspaceWriteBytesReceipt = handle_internal(&mut world.kernel, intent);
 
-    let key_hash = aos_cbor::Hash::of_bytes(b"doc.tag").to_hex();
+    let key = "doc.tag".to_string();
     let val_hash = aos_cbor::Hash::of_bytes(b"draft").to_hex();
     let mut patch_map = BTreeMap::new();
-    patch_map.insert(key_hash.clone(), Some(val_hash.clone()));
+    patch_map.insert(key.clone(), Some(val_hash.clone()));
     let set_params = WorkspaceAnnotationsSetParams {
         root_hash: write_receipt.new_root_hash.clone(),
         path: Some("notes/readme.txt".into()),
@@ -612,5 +612,5 @@ async fn workspace_annotations_survive_file_write() {
     .expect("intent");
     let get_receipt: WorkspaceAnnotationsGetReceipt = handle_internal(&mut world.kernel, intent);
     let annotations = get_receipt.annotations.expect("annotations");
-    assert_eq!(annotations.0.get(&key_hash), Some(&val_hash));
+    assert_eq!(annotations.0.get(&key), Some(&val_hash));
 }

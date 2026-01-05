@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use aos_effects::{EffectKind, IntentBuilder, ReceiptStatus};
 use aos_host::control::{ControlClient, RequestEnvelope};
 use aos_host::host::WorldHost;
-use aos_store::FsStore;
+use aos_store::{FsStore, Store};
 use aos_sys::{WorkspaceCommit, WorkspaceCommitMeta, WorkspaceHistory};
 use base64::Engine;
 use clap::{Args, Subcommand};
@@ -177,8 +177,11 @@ pub struct WorkspaceAnnGetArgs {
 pub struct WorkspaceAnnSetArgs {
     /// Workspace ref: <workspace>[@<version>][/path]
     pub reference: String,
-    /// Annotation entries: <key>=<hash>
+    /// Annotation entries: <key>=<value>
     pub entries: Vec<String>,
+    /// Treat values as hash refs instead of text
+    #[arg(long)]
+    pub values_are_hashes: bool,
     /// Commit owner
     #[arg(long)]
     pub owner: Option<String>,
@@ -396,7 +399,7 @@ async fn ws_resolve(opts: &WorldOpts, args: &WorkspaceResolveArgs) -> Result<()>
 
     load_world_env(&dirs.world)?;
     let (store, loaded) = prepare_world(&dirs, opts)?;
-    let mut host = create_host(store, loaded, &dirs, opts)?;
+    let mut host = create_host(store.clone(), loaded, &dirs, opts)?;
     let receipt = batch_workspace_resolve(&mut host, &params)?;
     print_success(opts, serde_json::to_value(receipt)?, None, fallback_warning(opts))
 }
@@ -441,7 +444,7 @@ async fn ws_ls(opts: &WorldOpts, args: &WorkspaceLsArgs) -> Result<()> {
 
     load_world_env(&dirs.world)?;
     let (store, loaded) = prepare_world(&dirs, opts)?;
-    let mut host = create_host(store, loaded, &dirs, opts)?;
+    let mut host = create_host(store.clone(), loaded, &dirs, opts)?;
     let resolved = batch_workspace_resolve(
         &mut host,
         &WorkspaceResolveParams {
@@ -539,7 +542,7 @@ async fn ws_cat(opts: &WorldOpts, args: &WorkspaceCatArgs) -> Result<()> {
 
     load_world_env(&dirs.world)?;
     let (store, loaded) = prepare_world(&dirs, opts)?;
-    let mut host = create_host(store, loaded, &dirs, opts)?;
+    let mut host = create_host(store.clone(), loaded, &dirs, opts)?;
     let resolved = batch_workspace_resolve(
         &mut host,
         &WorkspaceResolveParams {
@@ -592,7 +595,7 @@ async fn ws_stat(opts: &WorldOpts, args: &WorkspaceStatArgs) -> Result<()> {
 
     load_world_env(&dirs.world)?;
     let (store, loaded) = prepare_world(&dirs, opts)?;
-    let mut host = create_host(store, loaded, &dirs, opts)?;
+    let mut host = create_host(store.clone(), loaded, &dirs, opts)?;
     let resolved = batch_workspace_resolve(
         &mut host,
         &WorkspaceResolveParams {
@@ -653,7 +656,7 @@ async fn ws_write(opts: &WorldOpts, args: &WorkspaceWriteArgs) -> Result<()> {
 
     load_world_env(&dirs.world)?;
     let (store, loaded) = prepare_world(&dirs, opts)?;
-    let mut host = create_host(store, loaded, &dirs, opts)?;
+    let mut host = create_host(store.clone(), loaded, &dirs, opts)?;
     let (base_root, expected_head) =
         resolve_or_init_workspace_batch(&mut host, &reference, &owner)?;
     let params = WorkspaceWriteBytesParams {
@@ -872,7 +875,8 @@ async fn ws_ann_get(opts: &WorldOpts, args: &WorkspaceAnnGetArgs) -> Result<()> 
                 path: reference.path.clone(),
             };
             let receipt = control_workspace_annotations_get(&mut client, &params).await?;
-            let data = serde_json::json!({ "annotations": receipt.annotations });
+            let entries = resolve_annotation_values_control(&mut client, receipt.annotations).await;
+            let data = serde_json::json!({ "annotations": entries });
             return print_success(opts, data, None, vec![]);
         } else if matches!(opts.mode, Mode::Daemon) {
             anyhow::bail!(
@@ -884,7 +888,7 @@ async fn ws_ann_get(opts: &WorldOpts, args: &WorkspaceAnnGetArgs) -> Result<()> 
 
     load_world_env(&dirs.world)?;
     let (store, loaded) = prepare_world(&dirs, opts)?;
-    let mut host = create_host(store, loaded, &dirs, opts)?;
+    let mut host = create_host(store.clone(), loaded, &dirs, opts)?;
     let resolved = batch_workspace_resolve(
         &mut host,
         &WorkspaceResolveParams {
@@ -898,7 +902,8 @@ async fn ws_ann_get(opts: &WorldOpts, args: &WorkspaceAnnGetArgs) -> Result<()> 
         path: reference.path.clone(),
     };
     let receipt = batch_workspace_annotations_get(&mut host, &params)?;
-    let data = serde_json::json!({ "annotations": receipt.annotations });
+    let entries = resolve_annotation_values_batch(store.as_ref(), receipt.annotations)?;
+    let data = serde_json::json!({ "annotations": entries });
     print_success(opts, data, None, fallback_warning(opts))
 }
 
@@ -906,10 +911,13 @@ async fn ws_ann_set(opts: &WorldOpts, args: &WorkspaceAnnSetArgs) -> Result<()> 
     let dirs = resolve_dirs(opts)?;
     let reference = parse_workspace_ref(&args.reference)?;
     let owner = resolve_owner(args.owner.as_deref());
-    let patch = parse_annotation_pairs(&args.entries)?;
+    let values_are_hashes = args.values_are_hashes;
 
     if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
+            let patch =
+                build_annotation_patch_control(&mut client, &args.entries, values_are_hashes)
+                    .await?;
             let (base_root, expected_head) = resolve_or_init_workspace_control(
                 &mut client,
                 &reference,
@@ -942,7 +950,8 @@ async fn ws_ann_set(opts: &WorldOpts, args: &WorkspaceAnnSetArgs) -> Result<()> 
 
     load_world_env(&dirs.world)?;
     let (store, loaded) = prepare_world(&dirs, opts)?;
-    let mut host = create_host(store, loaded, &dirs, opts)?;
+    let mut host = create_host(store.clone(), loaded, &dirs, opts)?;
+    let patch = build_annotation_patch_batch(store.as_ref(), &args.entries, values_are_hashes)?;
     let (base_root, expected_head) =
         resolve_or_init_workspace_batch(&mut host, &reference, &owner)?;
     let params = WorkspaceAnnotationsSetParams {
@@ -1590,20 +1599,126 @@ fn now_ns() -> u64 {
         .unwrap_or(0)
 }
 
-fn parse_annotation_pairs(entries: &[String]) -> Result<BTreeMap<String, Option<String>>> {
+fn parse_annotation_pairs(entries: &[String]) -> Result<Vec<(String, String)>> {
     if entries.is_empty() {
         anyhow::bail!("at least one annotation entry is required");
     }
-    let mut map = BTreeMap::new();
+    let mut pairs = Vec::new();
     for entry in entries {
         let (key, value) = entry
             .split_once('=')
             .ok_or_else(|| anyhow!("invalid annotation entry '{}'", entry))?;
-        let key = normalize_hash_ref(key)?;
-        let value = normalize_hash_ref(value)?;
-        map.insert(key, Some(value));
+        let key = normalize_annotation_key(key)?;
+        let value = value.trim().to_string();
+        pairs.push((key, value));
+    }
+    Ok(pairs)
+}
+
+fn build_annotation_patch_batch(
+    store: &FsStore,
+    entries: &[String],
+    values_are_hashes: bool,
+) -> Result<BTreeMap<String, Option<String>>> {
+    let pairs = parse_annotation_pairs(entries)?;
+    let mut map = BTreeMap::new();
+    for (key, value) in pairs {
+        let value_hash = if values_are_hashes {
+            normalize_hash_ref(&value)?
+        } else {
+            let hash = store.put_blob(value.as_bytes())?;
+            hash.to_hex()
+        };
+        map.insert(key, Some(value_hash));
     }
     Ok(map)
+}
+
+async fn build_annotation_patch_control(
+    client: &mut ControlClient,
+    entries: &[String],
+    values_are_hashes: bool,
+) -> Result<BTreeMap<String, Option<String>>> {
+    let pairs = parse_annotation_pairs(entries)?;
+    let mut map = BTreeMap::new();
+    for (key, value) in pairs {
+        let value_hash = if values_are_hashes {
+            normalize_hash_ref(&value)?
+        } else {
+            put_text_blob_control(client, value.as_bytes()).await?
+        };
+        map.insert(key, Some(value_hash));
+    }
+    Ok(map)
+}
+
+async fn put_text_blob_control(client: &mut ControlClient, bytes: &[u8]) -> Result<String> {
+    let resp = client.put_blob("cli-ws-ann-put", bytes).await?;
+    if !resp.ok {
+        anyhow::bail!(
+            "blob put failed: {:?}",
+            resp.error.map(|e| e.message)
+        );
+    }
+    let hash = match resp.result {
+        Some(value) => value
+            .get("hash")
+            .and_then(|h| h.as_str())
+            .map(|s| s.to_string()),
+        None => None,
+    }
+    .ok_or_else(|| anyhow!("blob put missing hash"))?;
+    Ok(hash)
+}
+
+fn resolve_annotation_values_batch(
+    store: &FsStore,
+    annotations: Option<WorkspaceAnnotations>,
+) -> Result<Vec<JsonValue>> {
+    let mut entries = Vec::new();
+    if let Some(annotations) = annotations {
+        for (key, value_hash) in annotations.0 {
+            let value_text = resolve_blob_text_batch(store, &value_hash);
+            entries.push(serde_json::json!({
+                "key": key,
+                "value_hash": value_hash,
+                "value_text": value_text,
+            }));
+        }
+    }
+    Ok(entries)
+}
+
+async fn resolve_annotation_values_control(
+    client: &mut ControlClient,
+    annotations: Option<WorkspaceAnnotations>,
+) -> Vec<JsonValue> {
+    let mut entries = Vec::new();
+    if let Some(annotations) = annotations {
+        for (key, value_hash) in annotations.0 {
+            let value_text = resolve_blob_text_control(client, &value_hash).await;
+            entries.push(serde_json::json!({
+                "key": key,
+                "value_hash": value_hash,
+                "value_text": value_text,
+            }));
+        }
+    }
+    entries
+}
+
+fn resolve_blob_text_batch(store: &FsStore, value_hash: &str) -> Option<String> {
+    let hash = aos_cbor::Hash::from_hex_str(value_hash).ok()?;
+    let bytes = store.get_blob(hash).ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+async fn resolve_blob_text_control(
+    client: &mut ControlClient,
+    value_hash: &str,
+) -> Option<String> {
+    let bytes = client.blob_get("cli-ws-ann-get", value_hash).await.ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 fn parse_annotation_deletes(keys: &[String]) -> Result<BTreeMap<String, Option<String>>> {
@@ -1612,10 +1727,18 @@ fn parse_annotation_deletes(keys: &[String]) -> Result<BTreeMap<String, Option<S
     }
     let mut map = BTreeMap::new();
     for key in keys {
-        let key = normalize_hash_ref(key)?;
+        let key = normalize_annotation_key(key)?;
         map.insert(key, None);
     }
     Ok(map)
+}
+
+fn normalize_annotation_key(input: &str) -> Result<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("invalid annotation key");
+    }
+    Ok(trimmed.to_string())
 }
 
 fn normalize_hash_ref(input: &str) -> Result<String> {

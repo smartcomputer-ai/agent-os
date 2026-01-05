@@ -261,11 +261,11 @@ struct WorkspaceDiffReceipt {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-struct WorkspaceAnnotations(BTreeMap<HashRef, HashRef>);
+struct WorkspaceAnnotations(BTreeMap<String, HashRef>);
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-struct WorkspaceAnnotationsPatch(BTreeMap<HashRef, Option<HashRef>>);
+struct WorkspaceAnnotationsPatch(BTreeMap<String, Option<HashRef>>);
 
 #[derive(Debug, Serialize, Deserialize)]
 struct WorkspaceAnnotationsGetParams {

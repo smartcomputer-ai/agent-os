@@ -19,7 +19,7 @@ a global ontology on the kernel.
 
 ## Decision Summary
 
-1) Introduce opaque annotations as **hash -> hash** mappings stored in CAS.
+1) Introduce opaque annotations as **text -> hash** mappings stored in CAS.
 2) Add `workspace.annotations_get` and `workspace.annotations_set` effects.
 3) The kernel **does not interpret** annotation keys or values.
 
@@ -40,14 +40,14 @@ Completed:
   "name": "sys/WorkspaceAnnotations@1",
   "type": {
     "map": {
-      "key": { "hash": {} },
+      "key": { "text": {} },
       "value": { "hash": {} }
     }
   }
 }
 ```
 Notes:
-- Keys are opaque annotation identifiers (hashes).
+- Keys are opaque annotation identifiers (text).
 - Values are hashes of blobs that carry the payload.
 
 ### 2) Annotations Patch (for updates)
@@ -57,7 +57,7 @@ Notes:
   "name": "sys/WorkspaceAnnotationsPatch@1",
   "type": {
     "map": {
-      "key": { "hash": {} },
+      "key": { "text": {} },
       "value": { "option": { "hash": {} } }
     }
   }
@@ -96,20 +96,27 @@ transition.
 
 For updates:
 - Directory annotations are stored on the directory node itself.
-- File annotations are stored on the parent entry for that file.
+- File annotations are stored on the entry for that file.
 
 ## Conventions
 
 - Commit-level annotations live on the root path (`path = none`) and version with
   the tree.
-- Suggested keys (hashes of namespaced identifiers):
+- Suggested keys (namespaced identifiers):
   - `sys/commit.message`
   - `sys/commit.title`
   - `sys/commit.notes`
   - `sys/tags`
   - `sys/commit.owner` (optional mirror of commit meta)
-Notes:
-- Key hash = `sha256(utf8(key_name))`, stored as a normal `hash` value.
+
+## CLI UX
+
+- `aos ws ann set <ref> key=value` stores the value text into CAS and uses the
+  resulting hash in the annotation map.
+- `aos ws ann set <ref> key=sha256:... --values-are-hashes` uses the hash
+  directly.
+- `aos ws ann get <ref>` returns entries with `key`, `value_hash`, and
+  `value_text` when the blob decodes as UTF-8.
 
 ## Tests
 
@@ -119,5 +126,4 @@ Notes:
 
 ## Open Questions
 
-- Do we want annotation keys to optionally be `text` namespaced (in addition to hash)?
 - Should annotation values support small inline CBOR for convenience?

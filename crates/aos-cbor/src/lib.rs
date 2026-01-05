@@ -193,7 +193,7 @@ mod tests {
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:e85950025d1e6339667f82cfb60605f1d6d91c30b72de6a058d989ade7c52859",
+                "sha256:c447fbc6e4fd2657b498fd0b9cfffdb598a3cafad94688423416a82832654dfe",
             ),
         ];
 
