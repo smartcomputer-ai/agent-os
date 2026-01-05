@@ -673,12 +673,43 @@ where
         };
         let prefix = prefix_segments.join("/");
         let store = self.store();
-        let root_a_hash = resolve_dir_hash(store.as_ref(), &root_a, &prefix_segments)?;
-        let root_b_hash = resolve_dir_hash(store.as_ref(), &root_b, &prefix_segments)?;
         let mut entries_a = Vec::new();
         let mut entries_b = Vec::new();
-        collect_subtree_entries(store.as_ref(), &root_a_hash, &prefix, &mut entries_a)?;
-        collect_subtree_entries(store.as_ref(), &root_b_hash, &prefix, &mut entries_b)?;
+        if prefix_segments.is_empty() {
+            collect_subtree_entries(store.as_ref(), &root_a, "", &mut entries_a)?;
+            collect_subtree_entries(store.as_ref(), &root_b, "", &mut entries_b)?;
+        } else {
+            let entry_a = resolve_entry(store.as_ref(), &root_a, &prefix_segments)?;
+            let entry_b = resolve_entry(store.as_ref(), &root_b, &prefix_segments)?;
+            if entry_a.is_none() && entry_b.is_none() {
+                return Err(KernelError::Query("path not found".into()));
+            }
+            let file_diff = entry_a
+                .as_ref()
+                .map(|entry| entry.kind == "file")
+                .unwrap_or(false)
+                || entry_b
+                    .as_ref()
+                    .map(|entry| entry.kind == "file")
+                    .unwrap_or(false);
+            if file_diff {
+                if let Some(entry) = entry_a {
+                    entries_a.push((prefix.clone(), entry));
+                }
+                if let Some(entry) = entry_b {
+                    entries_b.push((prefix.clone(), entry));
+                }
+            } else {
+                if let Some(entry) = entry_a {
+                    let root_a_hash = hash_from_ref(&entry.hash)?;
+                    collect_subtree_entries(store.as_ref(), &root_a_hash, &prefix, &mut entries_a)?;
+                }
+                if let Some(entry) = entry_b {
+                    let root_b_hash = hash_from_ref(&entry.hash)?;
+                    collect_subtree_entries(store.as_ref(), &root_b_hash, &prefix, &mut entries_b)?;
+                }
+            }
+        }
         let mut map_a = HashMap::new();
         let mut map_b = HashMap::new();
         for (path, entry) in entries_a {

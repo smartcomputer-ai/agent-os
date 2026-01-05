@@ -392,6 +392,21 @@ async fn workspace_tree_effects_roundtrip() {
         .iter()
         .any(|c| c.path == "README.md" && c.old_hash.is_none() && c.new_hash.is_some()));
 
+    let diff_params = WorkspaceDiffParams {
+        root_a: write_receipt.new_root_hash.clone(),
+        root_b: write_readme.new_root_hash.clone(),
+        prefix: Some("README.md".into()),
+    };
+    let intent =
+        IntentBuilder::new(EffectKind::workspace_diff(), "sys/workspace@1", &diff_params)
+            .build()
+            .expect("intent");
+    let diff: WorkspaceDiffReceipt = handle_internal(&mut world.kernel, intent);
+    assert_eq!(diff.changes.len(), 1);
+    assert_eq!(diff.changes[0].path, "README.md");
+    assert!(diff.changes[0].old_hash.is_none());
+    assert!(diff.changes[0].new_hash.is_some());
+
     let remove_params = WorkspaceRemoveParams {
         root_hash: write_readme.new_root_hash.clone(),
         path: "README.md".into(),
