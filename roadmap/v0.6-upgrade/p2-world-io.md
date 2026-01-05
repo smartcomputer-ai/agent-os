@@ -19,14 +19,13 @@ Create a single World IO path that canonicalizes AIR bundles, derives patch docs
 ## Principles
 1. **One import path**: all filesystem submissions go through the same canonicalization rules.
 2. **World as source of truth**: import produces canonical CBOR + hashes that match what the kernel runs.
-3. **AIR-only is a first-class filter**: patch submissions should be able to ignore modules/sources.
+3. **AIR-only is a first-class filter**: patch submissions should be able to ignore modules.
 4. **Deterministic outputs**: export must be stable across machines for the same manifest hash.
 
 ## Authoring surfaces vs canonical artifacts
 - **AIR**: authored as JSON in `air/`, canonicalized to CBOR nodes in CAS.
 - **WASM**: compiled externally; stored as blobs and referenced by `defmodule.wasm_hash`.
-- **Source code**: stored as a single deterministic tarball blob (the "source bundle"),
-  registered in workspace history; exported as a directory for local dev.
+- **Source code**: synced via workspaces (see `roadmap/v0.7-workspaces/p7-fs-sync.md`).
 - **Sys defs**: never authored; optionally exported as a read-only reference file
   (e.g., `air/sys.air.json`) when requested.
 
@@ -37,13 +36,12 @@ Add a shared module (e.g., `crates/aos-host/src/world_io.rs`) and re-export from
 - `WorldBundle`:
   - `manifest` + `defs` (schemas/modules/plans/caps/policies/effects/secrets)
   - `wasm_blobs` (optional, hash -> bytes)
-  - `source_bundle` (optional, hash -> bytes + metadata)
 - `ImportMode`:
   - `Genesis`: no base manifest; initialize a new world.
   - `Patch`: requires base manifest hash; emits PatchDocument.
 - `BundleFilter`:
-  - `AirOnly`: ignore modules/sources; use only AIR JSON.
-  - `Full`: include modules and sources.
+  - `AirOnly`: ignore modules; use only AIR JSON.
+  - `Full`: include modules.
 
 ### Core functions (sketch)
 - `load_air_bundle(dir, filter) -> WorldBundle`
@@ -52,7 +50,6 @@ Add a shared module (e.g., `crates/aos-host/src/world_io.rs`) and re-export from
 - `export_bundle(store, manifest_hash, options) -> WorldBundle`
   - Reads manifest + referenced defs from CAS.
   - Pulls wasm blobs for non-sys modules when requested.
-  - Optionally attaches the latest source bundle from workspace history.
   - Optionally includes built-in `sys/*` defs for reference-only export.
 - `import_bundle(store, bundle, mode) -> ImportPlan`
   - `Genesis`: store nodes + manifest, emit canonical manifest hash.
@@ -60,7 +57,6 @@ Add a shared module (e.g., `crates/aos-host/src/world_io.rs`) and re-export from
 - `write_air_layout(bundle, out_dir)`
   - Materialize stable `air/*.air.json` files.
   - Write `.aos/manifest.air.cbor` from canonical bytes.
-  - If a source bundle is present, unpack into `sources/` for local dev.
 - `resolve_base_manifest_hash(dirs, control) -> hash`
   - Prefer control `manifest-get`, fall back to store; `.aos/manifest.air.cbor` only as last resort.
 

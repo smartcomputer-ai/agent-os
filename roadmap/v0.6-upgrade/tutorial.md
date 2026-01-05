@@ -188,5 +188,5 @@ aos import --air /tmp/notes-checkout/air --import-mode patch --air-only \
 ```
 If you change `air/` or `reducer/`, restart `aos run` so the daemon reloads the assets.
 
-## 6) Optional: source bundles (deferred)
-Source bundle import/export is deferred to `roadmap/v0.7-workspaces/p7-fs-sync.md`.
+## 6) Optional: workspace sync (deferred)
+Source sync is handled by workspaces; see `roadmap/v0.7-workspaces/p7-fs-sync.md`.

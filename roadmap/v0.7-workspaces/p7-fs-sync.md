@@ -13,8 +13,7 @@ do not need to mirror AIR assets into workspaces.
 
 ## Current state (review)
 
-- `aos import/export` handles AIR only; source bundles are removed
-  (source bundles are never populated).
+- `aos import/export` handles AIR only; source bundles are removed.
 - `aos ws` supports per-file read/write but no folder sync.
 - `~`-hex path encoding is specified but not implemented in CLI or world IO.
 
@@ -115,8 +114,8 @@ Notes:
 
 ## Implementation notes
 
-- Do not resurrect SourceBundle/tar; remove `source_bundle` from `WorldBundle`
-  and `--with-sources` from `aos export`.
+- Do not resurrect SourceBundle/tar; source bundles are removed from `WorldBundle`
+  and `aos export`.
 - Add shared `~`-hex encode/decode helpers to CLI or a small utility crate.
 - Batch commits in sync; avoid per-file commits.
 

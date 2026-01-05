@@ -37,22 +37,6 @@ pub struct WorldBundle {
     pub effects: Vec<DefEffect>,
     pub secrets: Vec<DefSecret>,
     pub wasm_blobs: Option<std::collections::BTreeMap<String, Vec<u8>>>,
-    pub source_bundle: Option<SourceBundle>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SourceBundle {
-    pub hash: String,
-    pub bytes: Vec<u8>,
-    pub metadata: Option<SourceBundleMeta>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SourceBundleMeta {
-    pub name: String,
-    pub kind: String,
-    pub owner: String,
-    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -622,7 +606,6 @@ impl WorldBundle {
             effects: loaded.effects.into_values().collect(),
             secrets: Vec::new(),
             wasm_blobs: None,
-            source_bundle: None,
         };
         bundle.sort_defs();
         bundle
@@ -639,7 +622,6 @@ impl WorldBundle {
             effects: loaded.effects.into_values().collect(),
             secrets,
             wasm_blobs: None,
-            source_bundle: None,
         }
         .sorted()
     }
@@ -859,7 +841,6 @@ fn bundle_from_catalog(catalog: aos_store::Catalog, include_sys: bool) -> WorldB
         effects,
         secrets,
         wasm_blobs: None,
-        source_bundle: None,
     }
 }
 
@@ -1043,7 +1024,6 @@ mod tests {
             effects: Vec::new(),
             secrets: Vec::new(),
             wasm_blobs: None,
-            source_bundle: None,
         };
 
         let tmp = tempdir().expect("tempdir");

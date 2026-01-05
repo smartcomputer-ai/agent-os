@@ -29,10 +29,6 @@ pub struct ExportArgs {
     #[arg(long, conflicts_with = "air_only")]
     pub with_modules: bool,
 
-    /// Export source bundle into sources/ if available
-    #[arg(long, conflicts_with = "air_only")]
-    pub with_sources: bool,
-
     /// Include built-in sys/* defs as air/sys.air.json
     #[arg(long)]
     pub with_sys: bool,
@@ -41,7 +37,7 @@ pub struct ExportArgs {
     #[arg(long)]
     pub manifest: Option<String>,
 
-    /// Export AIR only (no modules/sources)
+    /// Export AIR only (no modules)
     #[arg(long)]
     pub air_only: bool,
 
@@ -49,7 +45,7 @@ pub struct ExportArgs {
     #[arg(long)]
     pub defs_bundle: bool,
 
-    /// Overwrite existing air/modules/sources in the output directory
+    /// Overwrite existing air/modules in the output directory
     #[arg(long)]
     pub force: bool,
 }
@@ -98,9 +94,6 @@ pub async fn cmd_export(opts: &WorldOpts, args: &ExportArgs) -> Result<()> {
     if args.with_modules {
         export_modules(&exported.bundle, &out_dir, &mut warnings)?;
     }
-    if args.with_sources {
-        export_sources(&exported.bundle, &out_dir, &mut warnings)?;
-    }
 
     print_success(
         opts,
@@ -143,12 +136,6 @@ fn ensure_export_target(out_dir: &Path, args: &ExportArgs) -> Result<()> {
         let modules_dir = out_dir.join("modules");
         if modules_dir.exists() {
             conflicts.push(format!("{}", modules_dir.display()));
-        }
-    }
-    if args.with_sources {
-        let sources_dir = out_dir.join("sources");
-        if sources_dir.exists() {
-            conflicts.push(format!("{}", sources_dir.display()));
         }
     }
     if conflicts.is_empty() {
@@ -199,22 +186,5 @@ fn export_modules(
         fs::write(&path, bytes)
             .with_context(|| format!("write module {}", path.display()))?;
     }
-    Ok(())
-}
-
-fn export_sources(
-    bundle: &aos_host::world_io::WorldBundle,
-    out_dir: &Path,
-    warnings: &mut Vec<String>,
-) -> Result<()> {
-    let Some(source) = &bundle.source_bundle else {
-        warnings.push("source export requested but no source bundle available".into());
-        return Ok(());
-    };
-    let sources_dir = out_dir.join("sources");
-    fs::create_dir_all(&sources_dir).context("create sources dir")?;
-    let cursor = std::io::Cursor::new(&source.bytes);
-    let mut archive = tar::Archive::new(cursor);
-    archive.unpack(&sources_dir).context("unpack source bundle")?;
     Ok(())
 }

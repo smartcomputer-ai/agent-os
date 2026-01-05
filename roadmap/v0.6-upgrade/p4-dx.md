@@ -18,9 +18,9 @@ to the active world dir (AOS_WORLD / --world), so the filesystem is the working 
    resolved hashes without running the world.
 5) [ ] Add `aos dev` alias for `run --watch --auto-reset` (or equivalent defaults).
 6) [ ] Change `aos import` defaults to read from `<world>/air` and `<world>/reducer`
-   (unless explicit `--air/--source` overrides are provided).
-7) [ ] Change `aos export` defaults to write to `<world>` (overwriting `air/`,
-   `modules/`, and `sources/` with `--force`).
+   (unless explicit `--air` overrides are provided).
+7) [ ] Change `aos export` defaults to write to `<world>` (overwriting `air/`
+   and `modules/` with `--force`).
 8) [ ] Add `AOS_DEV`/`--dev` mode to `aos import` to auto-apply patches (no shadow by
    default) and skip governance unless explicitly requested.
 9) [ ] Load `<world>/.env` for all CLI commands (not just run/import paths).
