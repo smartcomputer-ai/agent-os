@@ -14,6 +14,17 @@
             "version": { "null": {} }
           }
         },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_resolve" }
+              }
+            }
+          ]
+        },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "resolve_eff" }
       },
@@ -59,6 +70,17 @@
             "mode": { "null": {} }
           }
         },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_marker_existing" }
+              }
+            }
+          ]
+        },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "write_marker_existing" }
       },
@@ -91,6 +113,17 @@
             "bytes": { "bytes_b64": "c2VlZGVkIGJ5IHBsYW4K" },
             "mode": { "null": {} }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_readme_existing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "write_readme_existing" }
@@ -125,6 +158,17 @@
             "mode": { "null": {} }
           }
         },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_data_existing" }
+              }
+            }
+          ]
+        },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "write_data_existing" }
       },
@@ -158,6 +202,17 @@
             "cursor": { "null": {} },
             "limit": { "nat": 200 }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_list_existing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "list_existing" }
@@ -201,6 +256,17 @@
             "path": { "text": "README.txt" }
           }
         },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_read_ref_existing" }
+              }
+            }
+          ]
+        },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "read_ref_existing" }
       },
@@ -220,6 +286,17 @@
             "path": { "text": "README.txt" },
             "range": { "null": {} }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_read_bytes_existing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "read_bytes_existing" }
@@ -241,6 +318,17 @@
             "bytes": { "bytes_b64": "dXBkYXRlZCBieSBwbGFuCg==" },
             "mode": { "null": {} }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_readme_update_existing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "write_readme_update_existing" }
@@ -273,6 +361,17 @@
             "root_b": { "ref": "@var:root_after_update_existing" },
             "prefix": { "null": {} }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_diff_existing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "diff_existing" }
@@ -341,6 +440,17 @@
             "workspace": { "ref": "@plan.input.workspace" }
           }
         },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_empty_root" }
+              }
+            }
+          ]
+        },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "empty_root" }
       },
@@ -386,6 +496,17 @@
             "mode": { "null": {} }
           }
         },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_marker_missing" }
+              }
+            }
+          ]
+        },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "write_marker_missing" }
       },
@@ -418,6 +539,17 @@
             "bytes": { "bytes_b64": "c2VlZGVkIGJ5IHBsYW4K" },
             "mode": { "null": {} }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_readme_missing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "write_readme_missing" }
@@ -452,6 +584,17 @@
             "mode": { "null": {} }
           }
         },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_data_missing" }
+              }
+            }
+          ]
+        },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "write_data_missing" }
       },
@@ -485,6 +628,17 @@
             "cursor": { "null": {} },
             "limit": { "nat": 200 }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_list_missing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "list_missing" }
@@ -528,6 +682,17 @@
             "path": { "text": "README.txt" }
           }
         },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_read_ref_missing" }
+              }
+            }
+          ]
+        },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "read_ref_missing" }
       },
@@ -547,6 +712,17 @@
             "path": { "text": "README.txt" },
             "range": { "null": {} }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_read_bytes_missing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "read_bytes_missing" }
@@ -568,6 +744,17 @@
             "bytes": { "bytes_b64": "dXBkYXRlZCBieSBwbGFuCg==" },
             "mode": { "null": {} }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_readme_update_missing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "write_readme_update_missing" }
@@ -600,6 +787,17 @@
             "root_b": { "ref": "@var:root_after_update_missing" },
             "prefix": { "null": {} }
           }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_diff_missing" }
+              }
+            }
+          ]
         },
         "cap": "cap_workspace",
         "bind": { "effect_id_as": "diff_missing" }

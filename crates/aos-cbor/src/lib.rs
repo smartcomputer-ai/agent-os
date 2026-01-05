@@ -161,7 +161,7 @@ mod tests {
         let cases = [
             (
                 "spec/schemas/common.schema.json",
-                "sha256:f834638e7853dd81983f0113e955488bfe22e3041266a243490de7342b7d309e",
+                "sha256:4b4f31397ebecb79a501f7d596133bc22564411b9d53a97b375fb675ae019221",
             ),
             (
                 "spec/schemas/defschema.schema.json",

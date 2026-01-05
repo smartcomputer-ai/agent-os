@@ -88,13 +88,8 @@ pub fn resolve_placeholder_modules(
         if !is_placeholder_hash(module) {
             continue;
         }
-        if let Some(hash) = resolve_from_world_modules(store, world_root, name.as_str())? {
-            module.wasm_hash = hash;
-            patched += 1;
-            continue;
-        }
         if let Some(spec) = sys_module_spec(name.as_str()) {
-            match resolve_sys_module(store, world_root, spec)? {
+            match resolve_sys_module(store, spec)? {
                 Some(hash) => {
                     module.wasm_hash = hash;
                     patched += 1;
@@ -103,6 +98,11 @@ pub fn resolve_placeholder_modules(
                     unresolved_sys.push(name.to_string());
                 }
             }
+            continue;
+        }
+        if let Some(hash) = resolve_from_world_modules(store, world_root, name.as_str())? {
+            module.wasm_hash = hash;
+            patched += 1;
             continue;
         }
         unresolved_non_sys.push(name.to_string());
@@ -285,11 +285,7 @@ const SYS_MODULES: &[SysModuleSpec] = &[
     },
 ];
 
-fn resolve_sys_module(
-    store: &FsStore,
-    world_root: &Path,
-    spec: &SysModuleSpec,
-) -> Result<Option<HashRef>> {
+fn resolve_sys_module(store: &FsStore, spec: &SysModuleSpec) -> Result<Option<HashRef>> {
     let target_dir = resolve_target_dir();
     let profiles = ["debug", "release"];
     for profile in profiles {
@@ -310,7 +306,6 @@ fn resolve_sys_module(
                     hash_ref.as_str()
                 );
             }
-            persist_world_module(world_root, spec.name, hash_ref.as_str(), &bytes)?;
             return Ok(Some(hash_ref));
         }
     }
@@ -327,34 +322,6 @@ fn resolve_target_dir() -> PathBuf {
         return path;
     }
     workspace_root().join("target")
-}
-
-fn persist_world_module(
-    world_root: &Path,
-    module_name: &str,
-    hash: &str,
-    bytes: &[u8],
-) -> Result<()> {
-    let modules_dir = world_root.join("modules");
-    let path = modules_dir.join(format!("{module_name}-{hash}.wasm"));
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("create modules dir {}", parent.display()))?;
-    }
-    if path.exists() {
-        let existing =
-            fs::read(&path).with_context(|| format!("read existing module {}", path.display()))?;
-        let existing_hash = Hash::of_bytes(&existing).to_hex();
-        if existing_hash != hash {
-            anyhow::bail!(
-                "module file hash mismatch at {} (expected {hash}, found {existing_hash})",
-                path.display()
-            );
-        }
-        return Ok(());
-    }
-    fs::write(&path, bytes).with_context(|| format!("write module {}", path.display()))?;
-    Ok(())
 }
 
 fn workspace_root() -> PathBuf {

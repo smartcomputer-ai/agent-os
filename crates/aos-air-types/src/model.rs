@@ -366,6 +366,7 @@ pub enum ExprOpCode {
     Or,
     Not,
     Concat,
+    Hash,
     Add,
     Sub,
     Mul,

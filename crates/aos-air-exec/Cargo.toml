@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 aos-air-types = { path = "../aos-air-types" }
+aos-cbor = { path = "../aos-cbor" }
 indexmap = "2"
 thiserror = "1"
 base64 = "0.22"

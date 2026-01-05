@@ -101,6 +101,7 @@ name = "aos-air-exec"
 version = "0.1.0"
 dependencies = [
  "aos-air-types",
+ "aos-cbor",
  "base64 0.22.1",
  "indexmap",
  "serde",

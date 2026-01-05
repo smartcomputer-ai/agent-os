@@ -613,7 +613,8 @@ Loaders may optionally lift literals into constant expressions internally so dia
 
 ### Expr and Predicates
 
-**Expr** is side‑effect‑free over a typed Value: constants; refs (`@plan.input`, `@var:name`, `@step:ID.field…`); operators `len|get|has|eq|ne|lt|le|gt|ge|and|or|not|concat|add|sub|mul|div|mod|starts_with|ends_with|contains`.
+**Expr** is side‑effect‑free over a typed Value: constants; refs (`@plan.input`, `@var:name`, `@step:ID.field…`); operators `len|get|has|eq|ne|lt|le|gt|ge|and|or|not|concat|hash|add|sub|mul|div|mod|starts_with|ends_with|contains`.
+`hash(x)` returns the `sha256:` hash of the canonical CBOR encoding of `x`.
 
 **Predicates** are boolean Expr. Missing refs are errors (deterministic fail).
 

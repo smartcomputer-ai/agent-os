@@ -2,7 +2,9 @@ use std::cmp::Ordering;
 
 use aos_air_types::{
     Expr, ExprConst, ExprList, ExprMap, ExprOp, ExprOpCode, ExprRecord, ExprSet, ExprVariant,
+    HashRef,
 };
+use aos_cbor::Hash as CborHash;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use indexmap::IndexMap;
@@ -239,6 +241,18 @@ fn apply_op(op: ExprOpCode, args: &[Value]) -> EvalResult {
                 as_text(&args[0])?,
                 as_text(&args[1])?
             )))
+        }
+        Hash => {
+            require_args_exact(op, args, 1)?;
+            let hash = CborHash::of_cbor(&args[0]).map_err(|err| EvalError::OpError {
+                op,
+                message: err.to_string(),
+            })?;
+            let hash_ref = HashRef::new(hash.to_hex()).map_err(|err| EvalError::OpError {
+                op,
+                message: err.to_string(),
+            })?;
+            Ok(Value::Hash(hash_ref))
         }
         StartsWith | EndsWith | Contains => {
             require_args_exact(op, args, 2)?;
@@ -751,6 +765,24 @@ mod tests {
         });
         let value = eval_expr(&expr, &sample_env()).unwrap();
         assert_eq!(value, Value::Bool(true));
+    }
+
+    #[test]
+    fn hash_op_produces_hash_value() {
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::Hash,
+            args: vec![Expr::Const(ExprConst::Text {
+                text: "alpha".into(),
+            })],
+        });
+        let value = eval_expr(&expr, &sample_env()).unwrap();
+        let expected = CborHash::of_cbor(&Value::Text("alpha".into()))
+            .unwrap()
+            .to_hex();
+        match value {
+            Value::Hash(hash) => assert_eq!(hash.as_str(), expected),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]
