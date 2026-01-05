@@ -590,15 +590,18 @@ async fn handle_request(
                 Ok(value)
             }
             "workspace-empty-root" => {
-                let (tx, rx) = oneshot::channel();
-                let _ = control_tx
-                    .send(ControlMsg::WorkspaceEmptyRoot { resp: tx })
-                    .await;
-                let inner = rx
-                    .await
-                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
-                let root_hash = inner.map_err(ControlError::host)?;
-                Ok(serde_json::json!({ "root_hash": root_hash }))
+                let params: WorkspaceEmptyRootParams =
+                    serde_json::from_value(req.payload.clone())
+                        .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: WorkspaceEmptyRootReceipt = internal_effect(
+                    control_tx,
+                    EffectKind::workspace_empty_root(),
+                    &params,
+                )
+                .await?;
+                let value = serde_json::to_value(&receipt)
+                    .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
+                Ok(value)
             }
             "gov-propose" => {
                 let payload: ProposePayload = serde_json::from_value(req.payload.clone())
@@ -790,6 +793,16 @@ struct WorkspaceResolveReceipt {
     head: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     root_hash: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceEmptyRootParams {
+    workspace: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceEmptyRootReceipt {
+    root_hash: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

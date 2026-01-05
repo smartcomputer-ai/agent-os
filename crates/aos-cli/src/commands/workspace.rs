@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use aos_effects::{EffectKind, IntentBuilder, ReceiptStatus};
 use aos_host::control::{ControlClient, RequestEnvelope};
 use aos_host::host::WorldHost;
-use aos_store::{FsStore, Store};
+use aos_store::FsStore;
 use aos_sys::{WorkspaceCommit, WorkspaceCommitMeta, WorkspaceHistory};
 use base64::Engine;
 use clap::{Args, Subcommand};
@@ -217,6 +217,16 @@ struct WorkspaceResolveReceipt {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceEmptyRootParams {
+    workspace: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceEmptyRootReceipt {
+    root_hash: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct WorkspaceListParams {
     root_hash: String,
     path: Option<String>,
@@ -344,23 +354,6 @@ struct WorkspaceAnnotationsSetReceipt {
     annotations_hash: String,
 }
 
-#[derive(Debug, Serialize)]
-struct WorkspaceTree {
-    entries: Vec<WorkspaceEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    annotations_hash: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct WorkspaceEntry {
-    name: String,
-    kind: String,
-    hash: String,
-    size: u64,
-    mode: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    annotations_hash: Option<String>,
-}
 
 pub async fn cmd_ws(opts: &WorldOpts, args: &WorkspaceArgs) -> Result<()> {
     match &args.cmd {
@@ -1126,27 +1119,16 @@ async fn control_workspace_annotations_set(
     control_call(client, "workspace-annotations-set", params).await
 }
 
-async fn control_workspace_empty_root(client: &mut ControlClient) -> Result<String> {
-    let resp = client
-        .request(&RequestEnvelope {
-            v: 1,
-            id: "cli-ws-empty-root".into(),
-            cmd: "workspace-empty-root".into(),
-            payload: serde_json::json!({}),
-        })
-        .await?;
-    if !resp.ok {
-        anyhow::bail!(
-            "workspace empty-root failed: {:?}",
-            resp.error.map(|e| e.message)
-        );
-    }
-    let result = resp.result.unwrap_or_else(|| serde_json::json!({}));
-    let root_hash = result
-        .get("root_hash")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("workspace empty-root missing root_hash"))?;
-    Ok(root_hash.to_string())
+async fn control_workspace_empty_root(
+    client: &mut ControlClient,
+    workspace: &str,
+) -> Result<String> {
+    let params = WorkspaceEmptyRootParams {
+        workspace: workspace.to_string(),
+    };
+    let receipt: WorkspaceEmptyRootReceipt =
+        control_call(client, "workspace-empty-root", &params).await?;
+    Ok(receipt.root_hash)
 }
 
 fn batch_workspace_resolve(
@@ -1154,6 +1136,22 @@ fn batch_workspace_resolve(
     params: &WorkspaceResolveParams,
 ) -> Result<WorkspaceResolveReceipt> {
     handle_internal(host, EffectKind::workspace_resolve(), params, "workspace.resolve")
+}
+
+fn batch_workspace_empty_root(
+    host: &mut WorldHost<FsStore>,
+    workspace: &str,
+) -> Result<String> {
+    let params = WorkspaceEmptyRootParams {
+        workspace: workspace.to_string(),
+    };
+    let receipt: WorkspaceEmptyRootReceipt = handle_internal(
+        host,
+        EffectKind::workspace_empty_root(),
+        &params,
+        "workspace.empty_root",
+    )?;
+    Ok(receipt.root_hash)
 }
 
 fn batch_workspace_list(
@@ -1458,7 +1456,7 @@ async fn resolve_or_init_workspace_control(
         let root_hash = require_root_hash(&resolved)?;
         return Ok((root_hash, resolved.resolved_version));
     }
-    let root_hash = control_workspace_empty_root(client).await?;
+    let root_hash = control_workspace_empty_root(client, &reference.workspace).await?;
     commit_workspace_control(client, &reference.workspace, None, &root_hash, owner).await?;
     Ok((root_hash, Some(1)))
 }
@@ -1479,7 +1477,7 @@ fn resolve_or_init_workspace_batch(
         let root_hash = require_root_hash(&resolved)?;
         return Ok((root_hash, resolved.resolved_version));
     }
-    let root_hash = empty_workspace_root(host.store())?;
+    let root_hash = batch_workspace_empty_root(host, &reference.workspace)?;
     commit_workspace_batch(host, &reference.workspace, None, &root_hash, owner)?;
     Ok((root_hash, Some(1)))
 }
@@ -1534,14 +1532,6 @@ fn build_workspace_commit(
         },
     };
     serde_cbor::to_vec(&event).context("encode workspace commit")
-}
-
-fn empty_workspace_root<S: Store>(store: &S) -> Result<String> {
-    let hash = store.put_node(&WorkspaceTree {
-        entries: Vec::new(),
-        annotations_hash: None,
-    })?;
-    Ok(hash.to_hex())
 }
 
 fn resolve_owner(owner: Option<&str>) -> String {

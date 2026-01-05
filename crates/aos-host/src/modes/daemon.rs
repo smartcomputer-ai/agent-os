@@ -28,7 +28,6 @@ use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::{PatchDocument, compile_patch_document};
 use aos_kernel::shadow::ShadowSummary;
 use aos_kernel::KernelError;
-use serde::Serialize;
 
 /// Convert a `std::time::Instant` to a `tokio::time::Instant`.
 ///
@@ -104,9 +103,6 @@ pub enum ControlMsg {
         intent: EffectIntent,
         resp: oneshot::Sender<Result<EffectReceipt, HostError>>,
     },
-    WorkspaceEmptyRoot {
-        resp: oneshot::Sender<Result<String, HostError>>,
-    },
 
     GovPropose {
         patch: GovernancePatchInput,
@@ -138,13 +134,6 @@ pub enum ControlMsg {
         proposal_id: u64,
         resp: oneshot::Sender<Result<Proposal, HostError>>,
     },
-}
-
-#[derive(Debug, Serialize)]
-struct EmptyWorkspaceTree {
-    entries: Vec<()>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    annotations_hash: Option<String>,
 }
 
 #[derive(Debug)]
@@ -404,20 +393,6 @@ impl<S: Store + 'static> WorldDaemon<S> {
                             ))
                         })?;
                     Ok(receipt)
-                })();
-                let _ = resp.send(res);
-            }
-            ControlMsg::WorkspaceEmptyRoot { resp } => {
-                let res = (|| -> Result<String, HostError> {
-                    let hash = self
-                        .host
-                        .store()
-                        .put_node(&EmptyWorkspaceTree {
-                            entries: Vec::new(),
-                            annotations_hash: None,
-                        })
-                        .map_err(|e| HostError::Store(e.to_string()))?;
-                    Ok(hash.to_hex())
                 })();
                 let _ = resp.send(res);
             }

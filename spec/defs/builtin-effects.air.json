@@ -112,6 +112,15 @@
   },
   {
     "$kind": "defeffect",
+    "name": "sys/workspace.empty_root@1",
+    "kind": "workspace.empty_root",
+    "params_schema": "sys/WorkspaceEmptyRootParams@1",
+    "receipt_schema": "sys/WorkspaceEmptyRootReceipt@1",
+    "cap_type": "workspace",
+    "origin_scope": "plan"
+  },
+  {
+    "$kind": "defeffect",
     "name": "sys/workspace.list@1",
     "kind": "workspace.list",
     "params_schema": "sys/WorkspaceListParams@1",

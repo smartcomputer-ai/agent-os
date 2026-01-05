@@ -874,6 +874,24 @@
       }
     }
   },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceEmptyRootParams@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/WorkspaceEmptyRootReceipt@1",
+    "type": {
+      "record": {
+        "root_hash": { "hash": {} }
+      }
+    }
+  },
 
   {
     "$kind": "defschema",

@@ -40,6 +40,11 @@ struct WorkspaceResolveParams {
 }
 
 #[derive(Deserialize)]
+struct WorkspaceEmptyRootParams {
+    workspace: String,
+}
+
+#[derive(Deserialize)]
 struct WorkspaceListParams {
     path: Option<String>,
 }
@@ -113,6 +118,22 @@ impl PureModule for CapEnforceWorkspace {
         match input.effect_kind.as_str() {
             "workspace.resolve" => {
                 let params: WorkspaceResolveParams = match decode_cbor(&input.effect_params) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        return Ok(deny("effect_params_invalid", err.to_string()));
+                    }
+                };
+                if !allowlist_contains(&cap_params.workspaces, &params.workspace, |v| {
+                    v.to_string()
+                }) {
+                    return Ok(deny(
+                        "workspace_not_allowed",
+                        format!("workspace '{}' not allowed", params.workspace),
+                    ));
+                }
+            }
+            "workspace.empty_root" => {
+                let params: WorkspaceEmptyRootParams = match decode_cbor(&input.effect_params) {
                     Ok(value) => value,
                     Err(err) => {
                         return Ok(deny("effect_params_invalid", err.to_string()));
@@ -264,6 +285,7 @@ impl PureModule for CapEnforceWorkspace {
 fn op_for_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "workspace.resolve" => Some("resolve"),
+        "workspace.empty_root" => Some("write"),
         "workspace.list" => Some("list"),
         "workspace.read_ref" | "workspace.read_bytes" => Some("read"),
         "workspace.write_bytes" | "workspace.remove" => Some("write"),

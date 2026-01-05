@@ -871,6 +871,7 @@ impl EffectKind {
     pub const INTROSPECT_JOURNAL_HEAD: &'static str = "introspect.journal_head";
     pub const INTROSPECT_LIST_CELLS: &'static str = "introspect.list_cells";
     pub const WORKSPACE_RESOLVE: &'static str = "workspace.resolve";
+    pub const WORKSPACE_EMPTY_ROOT: &'static str = "workspace.empty_root";
     pub const WORKSPACE_LIST: &'static str = "workspace.list";
     pub const WORKSPACE_READ_REF: &'static str = "workspace.read_ref";
     pub const WORKSPACE_READ_BYTES: &'static str = "workspace.read_bytes";
@@ -934,6 +935,10 @@ impl EffectKind {
 
     pub fn workspace_resolve() -> Self {
         Self::new(Self::WORKSPACE_RESOLVE)
+    }
+
+    pub fn workspace_empty_root() -> Self {
+        Self::new(Self::WORKSPACE_EMPTY_ROOT)
     }
 
     pub fn workspace_list() -> Self {

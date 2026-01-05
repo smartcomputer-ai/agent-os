@@ -24,6 +24,7 @@ pub(crate) static INTERNAL_EFFECT_KINDS: &[&str] = &[
     "introspect.journal_head",
     "introspect.list_cells",
     "workspace.resolve",
+    "workspace.empty_root",
     "workspace.list",
     "workspace.read_ref",
     "workspace.read_bytes",
@@ -137,6 +138,16 @@ struct WorkspaceResolveReceipt {
     head: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     root_hash: Option<HashRef>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceEmptyRootParams {
+    workspace: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceEmptyRootReceipt {
+    root_hash: HashRef,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -332,6 +343,7 @@ where
             EffectKind::INTROSPECT_JOURNAL_HEAD => self.handle_journal_head(intent),
             EffectKind::INTROSPECT_LIST_CELLS => self.handle_list_cells(intent),
             "workspace.resolve" => self.handle_workspace_resolve(intent),
+            "workspace.empty_root" => self.handle_workspace_empty_root(intent),
             "workspace.list" => self.handle_workspace_list(intent),
             "workspace.read_ref" => self.handle_workspace_read_ref(intent),
             "workspace.read_bytes" => self.handle_workspace_read_bytes(intent),
@@ -469,6 +481,22 @@ where
             resolved_version: Some(target),
             head: Some(head),
             root_hash: Some(meta.root_hash.clone()),
+        };
+        Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
+    }
+
+    fn handle_workspace_empty_root(&self, intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
+        let params: WorkspaceEmptyRootParams = intent
+            .params()
+            .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
+        validate_workspace_name(&params.workspace)?;
+        let store = self.store();
+        let hash = store.put_node(&WorkspaceTree {
+            entries: Vec::new(),
+            annotations_hash: None,
+        })?;
+        let receipt = WorkspaceEmptyRootReceipt {
+            root_hash: hash_ref_from_hash(&hash)?,
         };
         Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
     }

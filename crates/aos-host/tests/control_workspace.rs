@@ -115,7 +115,7 @@ async fn control_workspace_internal_effects() {
         v: 1,
         id: "empty".into(),
         cmd: "workspace-empty-root".into(),
-        payload: json!({}),
+        payload: json!({ "workspace": "alpha" }),
     };
     let resp = client.request(&empty_root).await.unwrap();
     assert!(resp.ok, "workspace-empty-root failed: {:?}", resp.error);

@@ -261,6 +261,8 @@ mod tests {
         assert!(names.contains(&"sys/WorkspaceAnnotationsGetReceipt@1"));
         assert!(names.contains(&"sys/WorkspaceAnnotationsSetParams@1"));
         assert!(names.contains(&"sys/WorkspaceAnnotationsSetReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceEmptyRootParams@1"));
+        assert!(names.contains(&"sys/WorkspaceEmptyRootReceipt@1"));
         // Introspection
         assert!(names.contains(&"sys/ReadMeta@1"));
         assert!(names.contains(&"sys/IntrospectManifestParams@1"));
