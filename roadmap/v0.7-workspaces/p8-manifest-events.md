@@ -18,40 +18,34 @@ Track manifest changes in the journal so:
 - Kernel records a manifest when:
   - the journal is empty on first boot (after replay),
   - the manifest changes via `swap_manifest` (governance apply or `aos push`).
-- CLI now finds the boot manifest by scanning the journal:
-  - prefer the latest snapshot's `manifest_hash`,
-  - otherwise use the latest `Manifest` record.
-- Tests updated to account for the new manifest record occupying seq 0 in new journals.
+- Replay now applies manifest records in-order:
+  - `JournalRecord::Manifest` loads the referenced manifest and swaps it in
+    without emitting new records.
+  - Snapshot boot loads the snapshot manifest first, then applies later
+    manifest records as replay proceeds.
+  - Manifest loads are skipped if the hash matches the active manifest.
+- Added `apply_loaded_manifest` helper for replay-safe swaps.
+- Manifest persistence now canonicalizes refs:
+  - `persist_loaded_manifest` stores defs, updates manifest named refs to the
+    actual stored hashes, and then writes the manifest/`AirNode::Manifest`.
+  - Builtin modules can be overridden when a non-builtin hash is provided.
+  - `canonicalize_patch` normalizes patch manifest refs against patch nodes and
+    builtins to keep patch hashes stable.
+- Tests updated/added:
+  - Kernel replay tests cover manifest upgrades and snapshot + upgrade.
+  - Governance tests use canonicalized patch hashes.
+  - Snapshot tests updated for the TimerFired event schema variant.
 
-## Current behavior (gap)
+## Remaining work
 
-Replay treats `JournalRecord::Manifest` as a no-op. That means the kernel uses
-the latest manifest for the entire replay, even if the journal contains
-historical upgrades. This is incorrect because earlier events may require
-schemas/modules from earlier manifests.
+1) **Finish effect params normalization test**
+   - Update the reducer ABI event schema in
+     `crates/aos-host/tests/effect_params_normalization.rs` to use a variant
+     schema that includes both `Start` and `sys/TimerFired@1`.
+   - Add the variant schema definition to the test manifest so the replay
+     validator accepts timer receipts.
 
-## Required changes
-
-1) **Apply manifest records during replay**
-   - When `JournalRecord::Manifest` is encountered, load that manifest and swap
-     the kernel manifest in-place.
-   - Do not append new journal entries during replay (avoid recursive manifest
-     records). This likely needs a replay-safe swap path.
-   - Recompute schema index, reducer schemas, cap bindings, and effect manager
-     so subsequent events validate correctly.
-
-2) **Snapshot interaction**
-   - If a snapshot exists, start with the snapshot's `manifest_hash`.
-   - While replaying entries after the snapshot, apply any later manifest
-     records in order.
-
-3) **Tests**
-   - Replay with multiple manifest evolutions (event schemas change between
-     upgrades) should pass and end on the latest manifest.
-   - Snapshot + later manifest update should swap manifests during replay and
-     continue processing events.
-
-4) **Introspection/diagnostics (optional)**
+2) **Diagnostics (optional)**
    - Expose manifest record info for debugging (e.g., journal scan or `ws`/`gov`
      inspection commands).
 

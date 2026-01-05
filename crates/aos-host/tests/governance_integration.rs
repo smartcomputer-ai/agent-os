@@ -271,7 +271,9 @@ fn applied_records_manifest_root_not_patch_hash() {
         .unwrap();
     world.kernel.apply_proposal(proposal_id).unwrap();
 
-    let manifest_bytes = to_canonical_cbor(&patch.manifest).expect("manifest cbor");
+    let canonical = aos_kernel::world::canonicalize_patch(store.as_ref(), patch.clone())
+        .expect("canonicalize patch");
+    let manifest_bytes = to_canonical_cbor(&canonical.manifest).expect("manifest cbor");
     let expected_manifest_hash = Hash::of_bytes(&manifest_bytes).to_hex();
     let patch_hash = world
         .kernel

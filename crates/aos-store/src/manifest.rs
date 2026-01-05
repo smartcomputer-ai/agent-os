@@ -158,14 +158,25 @@ fn load_refs<S: Store>(
         }
         if kind == NodeKind::Module {
             if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
-                ensure_builtin_module_hash(reference, builtin)?;
-                nodes.insert(
-                    reference.name.clone(),
-                    CatalogEntry {
-                        hash: builtin.hash,
-                        node: AirNode::Defmodule(builtin.module.clone()),
-                    },
-                );
+                if reference.hash.as_str().is_empty() || reference.hash == builtin.hash_ref {
+                    nodes.insert(
+                        reference.name.clone(),
+                        CatalogEntry {
+                            hash: builtin.hash,
+                            node: AirNode::Defmodule(builtin.module.clone()),
+                        },
+                    );
+                    continue;
+                }
+                let hash = parse_hash_str(reference.hash.as_str())?;
+                let node: AirNode = store.get_node(hash)?;
+                if !kind.matches(&node) {
+                    return Err(StoreError::NodeKindMismatch {
+                        name: reference.name.clone(),
+                        expected: kind.label(),
+                    });
+                }
+                nodes.insert(reference.name.clone(), CatalogEntry { hash, node });
                 continue;
             }
         }
@@ -345,24 +356,6 @@ fn ensure_builtin_cap_hash(
             kind: EntryKind::Node,
             expected: builtin.hash,
             actual,
-        });
-    }
-    Ok(())
-}
-
-fn ensure_builtin_module_hash(
-    reference: &NamedRef,
-    builtin: &builtins::BuiltinModule,
-) -> StoreResult<()> {
-    if reference.hash.as_str().is_empty() || reference.hash == builtin.hash_ref {
-        return Ok(());
-    }
-    let expected = parse_hash_str(reference.hash.as_str())?;
-    if expected != builtin.hash {
-        return Err(StoreError::HashMismatch {
-            kind: EntryKind::Node,
-            expected,
-            actual: builtin.hash,
         });
     }
     Ok(())

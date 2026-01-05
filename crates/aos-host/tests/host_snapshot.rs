@@ -13,7 +13,8 @@ use serde_cbor;
 use serde_json;
 use tempfile::TempDir;
 
-use aos_air_types::{DefSchema, ReducerAbi};
+use aos_air_types::{DefSchema, ReducerAbi, TypeExpr, TypeRef, TypeVariant};
+use indexmap::IndexMap;
 
 use helpers::{def_text_record_schema, insert_test_schemas, text_type};
 /// Ensure WorldHost preserves queued intents across snapshot/reopen.
@@ -35,7 +36,7 @@ async fn worldhost_snapshot_preserves_effect_queue() {
     .unwrap();
 
     host.enqueue_external(ExternalEvent::DomainEvent {
-        schema: "demo/TimerEvent@1".into(),
+        schema: "demo/TimerStart@1".into(),
         value: serde_cbor::to_vec(&serde_json::json!({})).unwrap(),
         key: None,
     })
@@ -98,7 +99,26 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
     insert_test_schemas(
         &mut loaded,
         vec![
-            def_text_record_schema("demo/TimerEvent@1", vec![]),
+            def_text_record_schema("demo/TimerStart@1", vec![]),
+            DefSchema {
+                name: "demo/TimerEvent@1".into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema("demo/TimerStart@1"),
+                            }),
+                        ),
+                        (
+                            "Fired".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(fixtures::SYS_TIMER_FIRED),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
             DefSchema {
                 name: "demo/TimerState@1".into(),
                 ty: text_type(),

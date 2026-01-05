@@ -12,6 +12,8 @@ use aos_air_types::{
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::ReceiptStatus;
+use aos_kernel::Consistency;
+use aos_kernel::StateReader;
 use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::{EffectManager, EffectParamPreprocessor};
 use aos_kernel::error::KernelError;
@@ -38,17 +40,16 @@ fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), Ker
     hydrate_schema_hashes(&store, &mut loaded)?;
     attach_governance_cap_allow_all(&mut loaded);
 
-    let base_hash = Hash::of_cbor(&AirNode::Manifest(loaded.manifest.clone()))
+    let (mut effect_manager, grant) = build_effect_manager(store.clone(), &loaded)?;
+
+    let mut world = TestWorld::with_store(store, loaded)?;
+    let base_manifest = world.kernel.get_manifest(Consistency::Head)?.value;
+    let base_hash = Hash::of_cbor(&AirNode::Manifest(base_manifest))
         .map_err(|err| KernelError::Manifest(err.to_string()))?
         .to_hex();
     let patch_doc = patch_doc_add_schema(base_hash, "com.acme/UpgradeSchema@1");
     let patch_doc_bytes =
         serde_json::to_vec(&patch_doc).map_err(|err| KernelError::Manifest(err.to_string()))?;
-
-    let (mut effect_manager, grant) =
-        build_effect_manager(store.clone(), &loaded)?;
-
-    let mut world = TestWorld::with_store(store, loaded)?;
 
     let propose_intent = effect_manager.enqueue_plan_effect_with_grant(
         "upgrade-plan",
@@ -210,15 +211,15 @@ fn governance_action_requested_trigger_runs_plan() -> Result<(), KernelError> {
     let mut loaded = fixtures::build_loaded_manifest(vec![plan], vec![trigger], vec![], vec![]);
     attach_governance_cap_allow_all(&mut loaded);
 
-    let base_hash = Hash::of_cbor(&AirNode::Manifest(loaded.manifest.clone()))
+    let mut world = TestWorld::with_store(store, loaded)?;
+    let base_manifest = world.kernel.get_manifest(Consistency::Head)?.value;
+    let base_hash = Hash::of_cbor(&AirNode::Manifest(base_manifest))
         .map_err(|err| KernelError::Manifest(err.to_string()))?
         .to_hex();
     let patch_doc = patch_doc_add_schema(base_hash, "com.acme/UpgradeSchema@1");
     let patch_doc_bytes =
         serde_json::to_vec(&patch_doc).map_err(|err| KernelError::Manifest(err.to_string()))?;
     let event_payload = gov_action_requested_event_cbor(&patch_doc_bytes);
-
-    let mut world = TestWorld::with_store(store, loaded)?;
     world.submit_event_result("sys/GovActionRequested@1", &event_payload)?;
     world.tick_n(1)?;
 
