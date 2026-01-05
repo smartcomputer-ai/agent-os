@@ -1,5 +1,7 @@
 # P5: Workspace CLI (aos ws)
 
+**Status**: Complete
+
 **Goal**: replace the old object registry CLI with a workspace-native CLI.
 
 ## Scope (updated)
@@ -43,7 +45,7 @@ Commands:
    - If `ls` is invoked without a ref, skip resolve and list workspaces instead
 2) Call `workspace.resolve`:
    - If missing and op is **write/remove/ann-set/ann-del**, treat as empty tree:
-     - Create empty tree node in CAS (see control verb below)
+     - Call `workspace.empty_root` (internal effect) to get `root_hash`
      - Commit as version 1 with `expected_head = none`
      - Use that root for the op
    - If missing and op is **read/ls/cat/stat/diff/log/ann-get**, error
@@ -60,6 +62,7 @@ Commands:
 ## Control Protocol Additions (daemon path)
 Add control commands that map 1:1 to internal workspace effects:
 - `workspace-resolve`
+- `workspace-empty-root` (internal effect; params `{ workspace }`, returns `{ root_hash }`)
 - `workspace-list`
 - `workspace-read-ref`
 - `workspace-read-bytes`
@@ -68,7 +71,6 @@ Add control commands that map 1:1 to internal workspace effects:
 - `workspace-diff`
 - `workspace-annotations-get`
 - `workspace-annotations-set`
-- `workspace-empty-root` (returns the hash of an empty tree node)
 
 Each handler builds an `EffectIntent`, calls `kernel.handle_internal_intent`, and returns decoded receipt JSON.
 
