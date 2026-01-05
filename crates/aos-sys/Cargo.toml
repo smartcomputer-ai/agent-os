@@ -12,14 +12,6 @@ name = "workspace"
 path = "src/bin/workspace.rs"
 
 [[bin]]
-name = "agent_registry"
-path = "src/bin/agent_registry.rs"
-
-[[bin]]
-name = "notes_notebook"
-path = "src/bin/notes_notebook.rs"
-
-[[bin]]
 name = "cap_enforce_http_out"
 path = "src/bin/cap_enforce_http_out.rs"
 
