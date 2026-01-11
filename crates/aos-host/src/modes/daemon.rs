@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
-use aos_effects::EffectReceipt;
+use aos_effects::{EffectIntent, EffectReceipt};
 use aos_kernel::StateReader;
 use aos_store::Store;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -23,10 +23,11 @@ use crate::adapters::timer::TimerScheduler;
 use crate::error::HostError;
 use crate::host::{ExternalEvent, RunMode, WorldHost};
 use aos_kernel::cell_index::CellMeta;
-use aos_kernel::governance::ManifestPatch;
+use aos_kernel::governance::{ManifestPatch, Proposal};
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::{PatchDocument, compile_patch_document};
 use aos_kernel::shadow::ShadowSummary;
+use aos_kernel::KernelError;
 
 /// Convert a `std::time::Instant` to a `tokio::time::Instant`.
 ///
@@ -98,6 +99,10 @@ pub enum ControlMsg {
         hash_hex: String,
         resp: oneshot::Sender<Result<Vec<u8>, HostError>>,
     },
+    InternalEffect {
+        intent: EffectIntent,
+        resp: oneshot::Sender<Result<EffectReceipt, HostError>>,
+    },
 
     GovPropose {
         patch: GovernancePatchInput,
@@ -117,6 +122,17 @@ pub enum ControlMsg {
     GovApply {
         proposal_id: u64,
         resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    GovApplyDirect {
+        patch: GovernancePatchInput,
+        resp: oneshot::Sender<Result<String, HostError>>,
+    },
+    GovList {
+        resp: oneshot::Sender<Result<Vec<Proposal>, HostError>>,
+    },
+    GovGet {
+        proposal_id: u64,
+        resp: oneshot::Sender<Result<Proposal, HostError>>,
     },
 }
 
@@ -365,6 +381,21 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 })();
                 let _ = resp.send(res);
             }
+            ControlMsg::InternalEffect { intent, resp } => {
+                let res = (|| -> Result<EffectReceipt, HostError> {
+                    let receipt = self
+                        .host
+                        .kernel_mut()
+                        .handle_internal_intent(&intent)?
+                        .ok_or_else(|| {
+                            HostError::Kernel(KernelError::Query(
+                                "internal effect not handled".into(),
+                            ))
+                        })?;
+                    Ok(receipt)
+                })();
+                let _ = resp.send(res);
+            }
             ControlMsg::JournalHead { resp } => {
                 let meta = self.host.kernel().get_journal_head();
                 let _ = resp.send(Ok(meta));
@@ -441,6 +472,46 @@ impl<S: Store + 'static> WorldDaemon<S> {
                     .host
                     .kernel_mut()
                     .apply_proposal(proposal_id)
+                    .map_err(HostError::from);
+                let _ = resp.send(res);
+            }
+            ControlMsg::GovApplyDirect { patch, resp } => {
+                tracing::info!("Governance direct apply via control");
+                let res = match patch {
+                    GovernancePatchInput::Manifest(patch) => {
+                        self.host.kernel_mut().apply_patch_direct(patch)
+                    }
+                    GovernancePatchInput::PatchDoc(doc) => {
+                        let compiled = compile_patch_document(self.host.store(), doc)
+                            .map_err(HostError::from)?;
+                        self.host.kernel_mut().apply_patch_direct(compiled)
+                    }
+                };
+                let _ = resp.send(res.map_err(HostError::from));
+            }
+            ControlMsg::GovList { resp } => {
+                tracing::info!("Governance list via control");
+                let mut proposals: Vec<Proposal> = self
+                    .host
+                    .kernel()
+                    .governance()
+                    .proposals()
+                    .values()
+                    .cloned()
+                    .collect();
+                proposals.sort_by_key(|p| p.id);
+                let _ = resp.send(Ok(proposals));
+            }
+            ControlMsg::GovGet { proposal_id, resp } => {
+                tracing::info!("Governance get via control");
+                let res = self
+                    .host
+                    .kernel()
+                    .governance()
+                    .proposals()
+                    .get(&proposal_id)
+                    .cloned()
+                    .ok_or_else(|| KernelError::ProposalNotFound(proposal_id))
                     .map_err(HostError::from);
                 let _ = resp.send(res);
             }

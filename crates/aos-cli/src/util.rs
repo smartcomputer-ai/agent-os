@@ -10,6 +10,9 @@ use aos_cbor::Hash;
 use aos_host::config::HostConfig;
 use aos_host::util::is_placeholder_hash;
 use aos_kernel::{KernelConfig, LoadedManifest};
+use aos_kernel::journal::{JournalKind, SnapshotRecord, ManifestRecord};
+use aos_kernel::journal::Journal;
+use aos_kernel::journal::fs::FsJournal;
 use aos_store::{FsStore, Store};
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
@@ -18,13 +21,52 @@ use jsonschema::JSONSchema;
 use serde_json::Value;
 use walkdir::WalkDir;
 
+pub struct CompiledReducer {
+    pub hash: HashRef,
+    pub cache_hit: bool,
+}
+
+pub fn latest_manifest_hash_from_journal(store_root: &Path) -> Result<Option<Hash>> {
+    let journal = FsJournal::open(store_root).context("open journal")?;
+    let entries = journal.load_from(0).context("read journal")?;
+    let mut latest_snapshot: Option<String> = None;
+    let mut latest_manifest: Option<String> = None;
+    for entry in entries {
+        match entry.kind {
+            JournalKind::Snapshot => {
+                let record: SnapshotRecord =
+                    serde_cbor::from_slice(&entry.payload).context("decode snapshot record")?;
+                if let Some(hash) = record.manifest_hash {
+                    latest_snapshot = Some(hash);
+                }
+            }
+            JournalKind::Manifest => {
+                let record: ManifestRecord =
+                    serde_cbor::from_slice(&entry.payload).context("decode manifest record")?;
+                latest_manifest = Some(record.manifest_hash);
+            }
+            _ => {}
+        }
+    }
+    let hex = if latest_snapshot.is_some() {
+        latest_snapshot
+    } else {
+        latest_manifest
+    };
+    let Some(hex) = hex else {
+        return Ok(None);
+    };
+    let hash = Hash::from_hex_str(&hex).context("parse manifest hash")?;
+    Ok(Some(hash))
+}
+
 /// Compile a reducer crate to WASM and store the blob.
 pub fn compile_reducer(
     reducer_dir: &Path,
     store_root: &Path,
     store: &FsStore,
     force_build: bool,
-) -> Result<HashRef> {
+) -> Result<CompiledReducer> {
     let cache_dir = store_root.join(".aos/cache/modules");
     fs::create_dir_all(&cache_dir).context("create module cache directory")?;
 
@@ -40,14 +82,19 @@ pub fn compile_reducer(
     let hash = store
         .put_blob(&artifact.wasm_bytes)
         .context("store wasm blob")?;
-    HashRef::new(hash.to_hex()).context("create hash ref")
+    let hash_ref = HashRef::new(hash.to_hex()).context("create hash ref")?;
+    let cache_hit = artifact.build_log.as_deref() == Some("cache hit");
+    Ok(CompiledReducer {
+        hash: hash_ref,
+        cache_hit,
+    })
 }
 
 /// Resolve placeholder module hashes in a loaded manifest.
 ///
 /// Resolution order:
-/// 1) `modules/` directory in the world root (content-addressed wasm files)
-/// 2) Known system modules from workspace build artifacts
+/// 1) Known system modules from workspace build artifacts (fallback: sys-module cache)
+/// 2) `modules/` directory in the world root (content-addressed wasm files)
 /// 3) Compiled reducer hash (if provided) when exactly one non-sys placeholder remains
 ///
 /// If `specific_module` is provided, that module is patched with the compiled hash
@@ -56,6 +103,7 @@ pub fn resolve_placeholder_modules(
     loaded: &mut LoadedManifest,
     store: &FsStore,
     world_root: &Path,
+    store_root: &Path,
     compiled_hash: Option<&HashRef>,
     specific_module: Option<&str>,
 ) -> Result<usize> {
@@ -88,13 +136,8 @@ pub fn resolve_placeholder_modules(
         if !is_placeholder_hash(module) {
             continue;
         }
-        if let Some(hash) = resolve_from_world_modules(store, world_root, name.as_str())? {
-            module.wasm_hash = hash;
-            patched += 1;
-            continue;
-        }
         if let Some(spec) = sys_module_spec(name.as_str()) {
-            match resolve_sys_module(store, world_root, spec)? {
+            match resolve_sys_module(store, store_root, world_root, spec)? {
                 Some(hash) => {
                     module.wasm_hash = hash;
                     patched += 1;
@@ -103,6 +146,11 @@ pub fn resolve_placeholder_modules(
                     unresolved_sys.push(name.to_string());
                 }
             }
+            continue;
+        }
+        if let Some(hash) = resolve_from_world_modules(store, world_root, name.as_str())? {
+            module.wasm_hash = hash;
+            patched += 1;
             continue;
         }
         unresolved_non_sys.push(name.to_string());
@@ -194,6 +242,23 @@ fn resolve_from_world_modules(
     module_name: &str,
 ) -> Result<Option<HashRef>> {
     let modules_dir = world_root.join("modules");
+    resolve_from_modules_dir(store, &modules_dir, module_name)
+}
+
+fn resolve_from_sys_cache(
+    store: &FsStore,
+    store_root: &Path,
+    module_name: &str,
+) -> Result<Option<HashRef>> {
+    let modules_dir = sys_cache_dir(store_root);
+    resolve_from_modules_dir(store, &modules_dir, module_name)
+}
+
+fn resolve_from_modules_dir(
+    store: &FsStore,
+    modules_dir: &Path,
+    module_name: &str,
+) -> Result<Option<HashRef>> {
     if !modules_dir.exists() {
         return Ok(None);
     }
@@ -201,7 +266,7 @@ fn resolve_from_world_modules(
     let prefix = format!("{module_name}-");
     let mut matches: Vec<PathBuf> = Vec::new();
 
-    for entry in WalkDir::new(&modules_dir)
+    for entry in WalkDir::new(modules_dir)
         .into_iter()
         .filter_map(Result::ok)
     {
@@ -212,7 +277,7 @@ fn resolve_from_world_modules(
         if path.extension().and_then(|s| s.to_str()) != Some("wasm") {
             continue;
         }
-        let rel = path.strip_prefix(&modules_dir).unwrap_or(path);
+        let rel = path.strip_prefix(modules_dir).unwrap_or(path);
         let rel_str = rel.to_string_lossy();
         let rel_norm = rel_str.replace('\\', "/");
         if !rel_norm.starts_with(&prefix) {
@@ -240,15 +305,13 @@ fn resolve_from_world_modules(
     }
 
     let path = &matches[0];
-    let rel = path.strip_prefix(&modules_dir).unwrap_or(path);
+    let rel = path.strip_prefix(modules_dir).unwrap_or(path);
     let rel_str = rel.to_string_lossy();
     let rel_norm = rel_str.replace('\\', "/");
     let hash_str = rel_norm
         .strip_suffix(".wasm")
         .and_then(|s| s.strip_prefix(&prefix))
-        .ok_or_else(|| {
-            anyhow!("wasm filename does not match '{module_name}-<hash>.wasm' under modules/")
-        })?;
+        .ok_or_else(|| anyhow!("wasm filename does not match '{module_name}-<hash>.wasm'"))?;
 
     let expected = normalize_hash_str(hash_str)
         .ok_or_else(|| anyhow!("invalid hash in wasm filename '{rel_norm}'"))?;
@@ -274,13 +337,20 @@ fn sys_module_spec(name: &str) -> Option<&'static SysModuleSpec> {
     SYS_MODULES.iter().find(|spec| spec.name == name)
 }
 
-const SYS_MODULES: &[SysModuleSpec] = &[SysModuleSpec {
-    name: "sys/ObjectCatalog@1",
-    bin: "object_catalog",
-}];
+const SYS_MODULES: &[SysModuleSpec] = &[
+    SysModuleSpec {
+        name: "sys/Workspace@1",
+        bin: "workspace",
+    },
+    SysModuleSpec {
+        name: "sys/CapEnforceWorkspace@1",
+        bin: "cap_enforce_workspace",
+    },
+];
 
 fn resolve_sys_module(
     store: &FsStore,
+    store_root: &Path,
     world_root: &Path,
     spec: &SysModuleSpec,
 ) -> Result<Option<HashRef>> {
@@ -304,32 +374,23 @@ fn resolve_sys_module(
                     hash_ref.as_str()
                 );
             }
-            persist_world_module(world_root, spec.name, hash_ref.as_str(), &bytes)?;
+            persist_module_file(&sys_cache_dir(store_root), spec.name, hash_ref.as_str(), &bytes)?;
+            if should_copy_sys_modules() {
+                persist_module_file(&world_root.join("modules"), spec.name, hash_ref.as_str(), &bytes)?;
+            }
             return Ok(Some(hash_ref));
         }
     }
 
-    Ok(None)
+    resolve_from_sys_cache(store, store_root, spec.name)
 }
 
-fn resolve_target_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR") {
-        let mut path = PathBuf::from(dir);
-        if path.is_relative() {
-            path = workspace_root().join(path);
-        }
-        return path;
-    }
-    workspace_root().join("target")
-}
-
-fn persist_world_module(
-    world_root: &Path,
+fn persist_module_file(
+    modules_dir: &Path,
     module_name: &str,
     hash: &str,
     bytes: &[u8],
 ) -> Result<()> {
-    let modules_dir = world_root.join("modules");
     let path = modules_dir.join(format!("{module_name}-{hash}.wasm"));
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -349,6 +410,31 @@ fn persist_world_module(
     }
     fs::write(&path, bytes).with_context(|| format!("write module {}", path.display()))?;
     Ok(())
+}
+
+fn sys_cache_dir(store_root: &Path) -> PathBuf {
+    store_root.join(".aos").join("cache").join("sys-modules")
+}
+
+fn should_copy_sys_modules() -> bool {
+    match std::env::var("AOS_SYS_MODULES_COPY") {
+        Ok(val) => {
+            let val = val.to_lowercase();
+            !(val.is_empty() || val == "0" || val == "false" || val == "no")
+        }
+        Err(_) => false,
+    }
+}
+
+fn resolve_target_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR") {
+        let mut path = PathBuf::from(dir);
+        if path.is_relative() {
+            path = workspace_root().join(path);
+        }
+        return path;
+    }
+    workspace_root().join("target")
 }
 
 fn workspace_root() -> PathBuf {

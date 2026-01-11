@@ -12,8 +12,9 @@ mod helpers;
 use aos_air_types::{
     CapEnforcer, CapGrant, CapType, DefCap, DefPlan, EffectKind as AirEffectKind, EmptyObject,
     ExprOrValue, NamedRef, PlanBindEffect, PlanEdge, PlanStep, PlanStepEmitEffect, PlanStepEnd,
-    PlanStepKind, TypeExpr, TypeOption, TypePrimitive, TypePrimitiveNat, TypePrimitiveText,
-    TypeRecord, TypeSet, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueSet, ValueText,
+    PlanStepKind, TypeExpr, TypeList, TypeOption, TypePrimitive, TypePrimitiveNat,
+    TypePrimitiveText, TypeRecord, TypeSet, ValueList, ValueLiteral, ValueMap, ValueNull,
+    ValueRecord, ValueSet, ValueText,
 };
 use helpers::fixtures::{self, TestWorld};
 use indexmap::IndexMap;
@@ -151,6 +152,75 @@ fn llm_enforcer_module_denies_model() {
     );
 }
 
+#[test]
+fn workspace_enforcer_module_denies_workspace() {
+    let store = fixtures::new_mem_store();
+    let plan_name = "com.acme/WorkspacePlan@1".to_string();
+    let plan = workspace_resolve_plan(&plan_name, "cap_workspace", "alpha");
+
+    let enforcer = fixtures::pure_module_from_target(
+        &store,
+        "sys/CapEnforceWorkspace@1",
+        "cap_enforce_workspace.wasm",
+        "sys/CapCheckInput@1",
+        "sys/CapCheckOutput@1",
+    );
+
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![plan],
+        vec![fixtures::start_trigger(&plan_name)],
+        vec![enforcer],
+        vec![],
+    );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            helpers::def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", helpers::text_type())],
+            ),
+            helpers::def_text_record_schema(
+                "com.acme/WorkspacePlanIn@1",
+                vec![("id", helpers::text_type())],
+            ),
+        ],
+    );
+
+    if let Some(defaults) = loaded.manifest.defaults.as_mut() {
+        defaults.cap_grants.push(CapGrant {
+            name: "cap_workspace".into(),
+            cap: "sys/workspace@1".into(),
+            params: workspace_cap_params(&["beta"], &["resolve"]),
+            expiry_ns: None,
+        });
+    }
+    loaded.manifest.caps.push(NamedRef {
+        name: "sys/workspace@1".into(),
+        hash: fixtures::zero_hash(),
+    });
+    loaded.caps.insert("sys/workspace@1".into(), workspace_defcap());
+
+    let mut world = TestWorld::with_store(store, loaded).expect("world");
+    world
+        .submit_event_result(
+            fixtures::START_SCHEMA,
+            &serde_json::json!({ "id": "start" }),
+        )
+        .expect("submit start event");
+    let err = world.kernel.tick().expect_err("expected denial");
+    assert!(
+        matches!(
+            err,
+            aos_kernel::error::KernelError::CapabilityDenied {
+                cap: ref cap_name,
+                effect_kind: ref kind,
+                ..
+            } if cap_name == "cap_workspace" && kind == AirEffectKind::WORKSPACE_RESOLVE
+        ),
+        "unexpected error: {err:?}"
+    );
+}
+
 fn http_defcap() -> DefCap {
     DefCap {
         name: "sys/http.out@1".into(),
@@ -188,6 +258,23 @@ fn llm_defcap() -> DefCap {
     }
 }
 
+fn workspace_defcap() -> DefCap {
+    DefCap {
+        name: "sys/workspace@1".into(),
+        cap_type: CapType::workspace(),
+        schema: TypeExpr::Record(TypeRecord {
+            record: IndexMap::from([
+                ("workspaces".into(), opt_text_list()),
+                ("path_prefixes".into(), opt_text_list()),
+                ("ops".into(), opt_text_set()),
+            ]),
+        }),
+        enforcer: CapEnforcer {
+            module: "sys/CapEnforceWorkspace@1".into(),
+        },
+    }
+}
+
 fn hosts_param(hosts: &[&str]) -> ValueLiteral {
     ValueLiteral::Record(ValueRecord {
         record: IndexMap::from([(
@@ -206,6 +293,39 @@ fn hosts_param(hosts: &[&str]) -> ValueLiteral {
     })
 }
 
+fn workspace_cap_params(workspaces: &[&str], ops: &[&str]) -> ValueLiteral {
+    ValueLiteral::Record(ValueRecord {
+        record: IndexMap::from([
+            (
+                "workspaces".into(),
+                ValueLiteral::List(ValueList {
+                    list: workspaces
+                        .iter()
+                        .map(|workspace| {
+                            ValueLiteral::Text(ValueText {
+                                text: (*workspace).to_string(),
+                            })
+                        })
+                        .collect(),
+                }),
+            ),
+            (
+                "ops".into(),
+                ValueLiteral::Set(ValueSet {
+                    set: ops
+                        .iter()
+                        .map(|op| {
+                            ValueLiteral::Text(ValueText {
+                                text: (*op).to_string(),
+                            })
+                        })
+                        .collect(),
+                }),
+            ),
+        ]),
+    })
+}
+
 fn models_param(models: &[&str]) -> ValueLiteral {
     ValueLiteral::Record(ValueRecord {
         record: IndexMap::from([(
@@ -221,6 +341,18 @@ fn models_param(models: &[&str]) -> ValueLiteral {
                     .collect(),
             }),
         )]),
+    })
+}
+
+fn opt_text_list() -> TypeExpr {
+    TypeExpr::Option(TypeOption {
+        option: Box::new(TypeExpr::List(TypeList {
+            list: Box::new(TypeExpr::Primitive(TypePrimitive::Text(
+                TypePrimitiveText {
+                    text: EmptyObject {},
+                },
+            ))),
+        })),
     })
 }
 
@@ -289,6 +421,41 @@ fn http_plan(plan_name: &str, cap: &str, url: &str) -> DefPlan {
     }
 }
 
+fn workspace_resolve_plan(plan_name: &str, cap: &str, workspace: &str) -> DefPlan {
+    DefPlan {
+        name: plan_name.to_string(),
+        input: fixtures::schema("com.acme/WorkspacePlanIn@1"),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![
+            PlanStep {
+                id: "emit".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: AirEffectKind::workspace_resolve(),
+                    params: workspace_resolve_params_literal(workspace),
+                    cap: cap.to_string(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ],
+        edges: vec![PlanEdge {
+            from: "emit".into(),
+            to: "end".into(),
+            when: None,
+        }],
+        required_caps: vec![cap.to_string()],
+        allowed_effects: vec![AirEffectKind::workspace_resolve()],
+        invariants: vec![],
+    }
+}
+
 fn llm_plan(plan_name: &str, cap: &str, provider: &str, model: &str, max_tokens: u64) -> DefPlan {
     DefPlan {
         name: plan_name.to_string(),
@@ -341,6 +508,25 @@ fn http_params_literal(url: &str) -> ExprOrValue {
             ),
             (
                 "body_ref".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+        ]),
+    }))
+}
+
+fn workspace_resolve_params_literal(workspace: &str) -> ExprOrValue {
+    ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
+        record: IndexMap::from([
+            (
+                "workspace".into(),
+                ValueLiteral::Text(ValueText {
+                    text: workspace.to_string(),
+                }),
+            ),
+            (
+                "version".into(),
                 ValueLiteral::Null(ValueNull {
                     null: EmptyObject::default(),
                 }),

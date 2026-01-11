@@ -366,6 +366,7 @@ pub enum ExprOpCode {
     Or,
     Not,
     Concat,
+    Hash,
     Add,
     Sub,
     Mul,
@@ -640,6 +641,7 @@ impl CapType {
     pub const LLM_BASIC: &'static str = "llm.basic";
     pub const SECRET: &'static str = "secret";
     pub const QUERY: &'static str = "query";
+    pub const WORKSPACE: &'static str = "workspace";
 
     pub fn new(cap_type: impl Into<String>) -> Self {
         Self(cap_type.into())
@@ -671,6 +673,10 @@ impl CapType {
 
     pub fn query() -> Self {
         Self::new(Self::QUERY)
+    }
+
+    pub fn workspace() -> Self {
+        Self::new(Self::WORKSPACE)
     }
 }
 
@@ -865,6 +871,16 @@ impl EffectKind {
     pub const INTROSPECT_REDUCER_STATE: &'static str = "introspect.reducer_state";
     pub const INTROSPECT_JOURNAL_HEAD: &'static str = "introspect.journal_head";
     pub const INTROSPECT_LIST_CELLS: &'static str = "introspect.list_cells";
+    pub const WORKSPACE_RESOLVE: &'static str = "workspace.resolve";
+    pub const WORKSPACE_EMPTY_ROOT: &'static str = "workspace.empty_root";
+    pub const WORKSPACE_LIST: &'static str = "workspace.list";
+    pub const WORKSPACE_READ_REF: &'static str = "workspace.read_ref";
+    pub const WORKSPACE_READ_BYTES: &'static str = "workspace.read_bytes";
+    pub const WORKSPACE_WRITE_BYTES: &'static str = "workspace.write_bytes";
+    pub const WORKSPACE_REMOVE: &'static str = "workspace.remove";
+    pub const WORKSPACE_DIFF: &'static str = "workspace.diff";
+    pub const WORKSPACE_ANNOTATIONS_GET: &'static str = "workspace.annotations_get";
+    pub const WORKSPACE_ANNOTATIONS_SET: &'static str = "workspace.annotations_set";
 
     pub fn new(kind: impl Into<String>) -> Self {
         Self(kind.into())
@@ -916,6 +932,46 @@ impl EffectKind {
 
     pub fn introspect_list_cells() -> Self {
         Self::new(Self::INTROSPECT_LIST_CELLS)
+    }
+
+    pub fn workspace_resolve() -> Self {
+        Self::new(Self::WORKSPACE_RESOLVE)
+    }
+
+    pub fn workspace_empty_root() -> Self {
+        Self::new(Self::WORKSPACE_EMPTY_ROOT)
+    }
+
+    pub fn workspace_list() -> Self {
+        Self::new(Self::WORKSPACE_LIST)
+    }
+
+    pub fn workspace_read_ref() -> Self {
+        Self::new(Self::WORKSPACE_READ_REF)
+    }
+
+    pub fn workspace_read_bytes() -> Self {
+        Self::new(Self::WORKSPACE_READ_BYTES)
+    }
+
+    pub fn workspace_write_bytes() -> Self {
+        Self::new(Self::WORKSPACE_WRITE_BYTES)
+    }
+
+    pub fn workspace_remove() -> Self {
+        Self::new(Self::WORKSPACE_REMOVE)
+    }
+
+    pub fn workspace_diff() -> Self {
+        Self::new(Self::WORKSPACE_DIFF)
+    }
+
+    pub fn workspace_annotations_get() -> Self {
+        Self::new(Self::WORKSPACE_ANNOTATIONS_GET)
+    }
+
+    pub fn workspace_annotations_set() -> Self {
+        Self::new(Self::WORKSPACE_ANNOTATIONS_SET)
     }
 }
 

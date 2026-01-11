@@ -6,18 +6,18 @@
 
 ## Progress to Date
 - CLI now resolves placeholder module hashes from `world/modules/`, built system module artifacts, or a compiled local reducer when exactly one non‑system placeholder remains.
-- System modules like `sys/ObjectCatalog@1` autoload from workspace WASM artifacts and are cached into `world/modules/` for repeatable runs.
+- System modules like `sys/Workspace@1` autoload from workspace WASM artifacts and are cached into `world/modules/` for repeatable runs.
 - Unresolved placeholders fail with a clear, enumerated error and remediation hints.
 
 ## Problem
 - Today manifests often include placeholder hashes for modules.
-- `aos-cli` currently patches *all* placeholder modules with the single reducer it just compiled from `reducer/`, which breaks worlds that include multiple modules (e.g., system reducers like `sys/ObjectCatalog@1`).
+- `aos-cli` currently patches *all* placeholder modules with the single reducer it just compiled from `reducer/`, which breaks worlds that include multiple modules (e.g., system reducers like `sys/Workspace@1`).
 - Authors have to pin `wasm_hash` values (and populate blobs) in example worlds to prevent mispatching, which hurts authoring ergonomics and upgrade flow.
 
 ## Desired Behavior
 - CLI should resolve **all** placeholder module hashes without mispatching.
 - World modules should be resolved from `world/modules/<name>@<ver>-<hash>.wasm` when present.
-- Known system modules (ObjectCatalog, etc.) should be auto-resolved from built artifacts (e.g., `target/wasm32-unknown-unknown/*/object_catalog.wasm`) when their hash is missing, without requiring authors to copy hashes into `air/`.
+- Known system modules (Workspace, etc.) should be auto-resolved from built artifacts (e.g., `target/wasm32-unknown-unknown/*/workspace.wasm`) when their hash is missing, without requiring authors to copy hashes into `air/`.
 - Worlds can ship `air/` files with placeholder hashes and have a deterministic resolution path that avoids “wrong module patched” traps.
 
 ## Acceptance Criteria

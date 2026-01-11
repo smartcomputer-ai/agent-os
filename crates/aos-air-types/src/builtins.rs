@@ -176,7 +176,7 @@ pub fn find_builtin_cap(name: &str) -> Option<&'static BuiltinCap> {
         .and_then(|idx| BUILTIN_CAPS.get(*idx))
 }
 
-/// Finds a built-in module definition by name (e.g., `sys/ObjectCatalog@1`).
+/// Finds a built-in module definition by name (e.g., `sys/Workspace@1`).
 pub fn find_builtin_module(name: &str) -> Option<&'static BuiltinModule> {
     BUILTIN_MODULE_INDEX
         .get(name)
@@ -217,6 +217,8 @@ mod tests {
         assert!(names.contains(&"sys/VaultRotateParams@1"));
         assert!(names.contains(&"sys/VaultRotateReceipt@1"));
         // Governance
+        assert!(names.contains(&"sys/GovPatchInput@1"));
+        assert!(names.contains(&"sys/GovPatchSummary@1"));
         assert!(names.contains(&"sys/GovProposeParams@1"));
         assert!(names.contains(&"sys/GovProposeReceipt@1"));
         assert!(names.contains(&"sys/GovShadowParams@1"));
@@ -225,12 +227,42 @@ mod tests {
         assert!(names.contains(&"sys/GovApproveReceipt@1"));
         assert!(names.contains(&"sys/GovApplyParams@1"));
         assert!(names.contains(&"sys/GovApplyReceipt@1"));
-        // ObjectCatalog
-        assert!(names.contains(&"sys/ObjectKey@1"));
-        assert!(names.contains(&"sys/ObjectMeta@1"));
-        assert!(names.contains(&"sys/ObjectVersions@1"));
-        assert!(names.contains(&"sys/ObjectRegisteredPayload@1"));
-        assert!(names.contains(&"sys/ObjectRegistered@1"));
+        assert!(names.contains(&"sys/GovActionRequested@1"));
+        // Workspace
+        assert!(names.contains(&"sys/WorkspaceName@1"));
+        assert!(names.contains(&"sys/WorkspaceRef@1"));
+        assert!(names.contains(&"sys/WorkspaceCommitMeta@1"));
+        assert!(names.contains(&"sys/WorkspaceHistory@1"));
+        assert!(names.contains(&"sys/WorkspaceCommit@1"));
+        assert!(names.contains(&"sys/WorkspaceEntry@1"));
+        assert!(names.contains(&"sys/WorkspaceTree@1"));
+        assert!(names.contains(&"sys/WorkspaceEntry@2"));
+        assert!(names.contains(&"sys/WorkspaceTree@2"));
+        assert!(names.contains(&"sys/WorkspaceAnnotations@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsPatch@1"));
+        assert!(names.contains(&"sys/WorkspaceResolveParams@1"));
+        assert!(names.contains(&"sys/WorkspaceResolveReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceListParams@1"));
+        assert!(names.contains(&"sys/WorkspaceListEntry@1"));
+        assert!(names.contains(&"sys/WorkspaceListReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceReadRefParams@1"));
+        assert!(names.contains(&"sys/WorkspaceRefEntry@1"));
+        assert!(names.contains(&"sys/WorkspaceReadRefReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceReadBytesParams@1"));
+        assert!(names.contains(&"sys/WorkspaceReadBytesReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceWriteBytesParams@1"));
+        assert!(names.contains(&"sys/WorkspaceWriteBytesReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceRemoveParams@1"));
+        assert!(names.contains(&"sys/WorkspaceRemoveReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceDiffParams@1"));
+        assert!(names.contains(&"sys/WorkspaceDiffChange@1"));
+        assert!(names.contains(&"sys/WorkspaceDiffReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsGetParams@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsGetReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsSetParams@1"));
+        assert!(names.contains(&"sys/WorkspaceAnnotationsSetReceipt@1"));
+        assert!(names.contains(&"sys/WorkspaceEmptyRootParams@1"));
+        assert!(names.contains(&"sys/WorkspaceEmptyRootReceipt@1"));
         // Introspection
         assert!(names.contains(&"sys/ReadMeta@1"));
         assert!(names.contains(&"sys/IntrospectManifestParams@1"));
@@ -259,7 +291,8 @@ mod tests {
             "sys/http.out@1",
             "sys/llm.basic@1",
             "sys/secret@1",
-            "sys/catalog.write@1",
+            "sys/workspace@1",
+            "sys/governance@1",
         ] {
             assert!(names.contains(&name));
         }
@@ -274,7 +307,9 @@ mod tests {
         for name in [
             "sys/CapEnforceHttpOut@1",
             "sys/CapEnforceLlmBasic@1",
-            "sys/ObjectCatalog@1",
+            "sys/CapEnforceGovernance@1",
+            "sys/CapEnforceWorkspace@1",
+            "sys/Workspace@1",
         ] {
             assert!(names.contains(&name));
         }

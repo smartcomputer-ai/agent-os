@@ -32,7 +32,7 @@ impl ShadowExecutor {
             });
         }
 
-        let loaded = config.patch.to_loaded_manifest();
+        let loaded = config.patch.to_loaded_manifest(store.as_ref())?;
         let mut kernel = Kernel::from_loaded_manifest_with_config(
             store.clone(),
             loaded,
@@ -128,7 +128,10 @@ fn params_to_json(params_cbor: &[u8]) -> Option<JsonValue> {
 mod tests {
     use super::*;
     use crate::governance::ManifestPatch;
-    use aos_air_types::{HashRef, Manifest, NamedRef, SecretDecl, SecretEntry};
+    use aos_air_types::{
+        AirNode, CapEnforcer, CapType, DefCap, HashRef, Manifest, NamedRef, SecretDecl,
+        SecretEntry, TypeExpr, TypeRecord,
+    };
     use aos_store::MemStore;
 
     fn empty_manifest() -> Manifest {
@@ -183,18 +186,27 @@ mod tests {
     #[test]
     fn shadow_executor_sets_manifest_hash_on_summary() {
         let store = Arc::new(MemStore::new());
+        let cap = DefCap {
+            name: "cap@1".into(),
+            cap_type: CapType::new("custom"),
+            schema: TypeExpr::Record(TypeRecord {
+                record: Default::default(),
+            }),
+            enforcer: CapEnforcer {
+                module: "sys/CapAllowAll@1".into(),
+            },
+        };
+        let cap_hash =
+            HashRef::new(Hash::of_cbor(&AirNode::Defcap(cap.clone())).unwrap().to_hex()).unwrap();
         let patch = ManifestPatch {
             manifest: Manifest {
                 caps: vec![NamedRef {
-                    name: "cap@1".into(),
-                    hash: HashRef::new(
-                        "sha256:0000000000000000000000000000000000000000000000000000000000000001",
-                    )
-                    .unwrap(),
+                    name: cap.name.clone(),
+                    hash: cap_hash,
                 }],
                 ..empty_manifest()
             },
-            nodes: vec![],
+            nodes: vec![AirNode::Defcap(cap)],
         };
         let patch_hash = hash_of_patch(&patch);
         let manifest_hash = hash_of_manifest(&patch);

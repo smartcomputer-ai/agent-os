@@ -26,11 +26,23 @@ use walkdir::WalkDir;
 pub const ZERO_HASH_SENTINEL: &str =
     "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
+pub struct LoadedAssets {
+    pub loaded: LoadedManifest,
+    pub secrets: Vec<DefSecret>,
+}
+
 /// Attempts to load a manifest for the provided example directory by reading AIR JSON assets
 /// under `air/`, versioned `air.*` bundles, `plans/` (legacy), and `defs/`. The `asset_root`
 /// can itself be an AIR bundle (e.g., `examples/06-safe-upgrade/air.v2`). Returns `Ok(None)`
 /// if no manifest is found so callers can fall back to the legacy Rust-built manifests.
 pub fn load_from_assets(store: Arc<FsStore>, asset_root: &Path) -> Result<Option<LoadedManifest>> {
+    Ok(load_from_assets_with_defs(store, asset_root)?.map(|assets| assets.loaded))
+}
+
+pub fn load_from_assets_with_defs(
+    store: Arc<FsStore>,
+    asset_root: &Path,
+) -> Result<Option<LoadedAssets>> {
     let mut manifest: Option<Manifest> = None;
     let mut schemas: Vec<DefSchema> = Vec::new();
     let mut modules: Vec<DefModule> = Vec::new();
@@ -72,8 +84,16 @@ pub fn load_from_assets(store: Arc<FsStore>, asset_root: &Path) -> Result<Option
         None => return Ok(None),
     };
 
+    secrets.sort_by(|a, b| a.name.cmp(&b.name));
     let hashes = write_nodes(
-        &store, schemas, modules, plans, caps, policies, secrets, effects,
+        &store,
+        schemas,
+        modules,
+        plans,
+        caps,
+        policies,
+        secrets.clone(),
+        effects,
     )?;
     patch_manifest_refs(&mut manifest, &hashes)?;
     let catalog = manifest_catalog(&store, manifest)?;
@@ -89,7 +109,7 @@ pub fn load_from_assets(store: Arc<FsStore>, asset_root: &Path) -> Result<Option
     ) {
         bail!("manifest validation failed: {err}");
     }
-    Ok(Some(loaded))
+    Ok(Some(LoadedAssets { loaded, secrets }))
 }
 
 pub fn manifest_patch_from_loaded(loaded: &LoadedManifest) -> ManifestPatch {

@@ -15,10 +15,12 @@ use commands::event::EventArgs;
 use commands::gov::GovArgs;
 use commands::init::InitArgs;
 use commands::manifest::ManifestArgs;
-use commands::obj::ObjArgs;
+use commands::pull::PullArgs;
+use commands::push::PushArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
-use opts::WorldOpts;
+use commands::workspace::WorkspaceArgs;
+use opts::{WorldOpts, resolve_world};
 
 #[derive(Parser, Debug)]
 #[command(name = "aos", version, about = "AgentOS CLI")]
@@ -43,6 +45,12 @@ enum Command {
 
     /// Stop a running daemon
     Stop,
+
+    /// Push filesystem changes into the world
+    Push(PushArgs),
+
+    /// Pull world state to the filesystem
+    Pull(PullArgs),
 
     /// Event-related commands
     #[command(subcommand)]
@@ -73,8 +81,8 @@ enum Command {
     /// Blob commands
     Blob(BlobArgs),
 
-    /// Object catalog commands
-    Obj(ObjArgs),
+    /// Workspace commands
+    Ws(WorkspaceArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -117,11 +125,19 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let opts = &cli.opts;
 
+    if !matches!(cli.command, Command::Init(_)) {
+        if let Ok(world) = resolve_world(opts) {
+            let _ = crate::util::load_world_env(&world);
+        }
+    }
+
     match cli.command {
-        Command::Init(args) => commands::init::cmd_init(&args),
+        Command::Init(args) => commands::init::cmd_init(opts, &args),
         Command::Status => commands::info::cmd_info(opts).await,
         Command::Run(args) => commands::run::cmd_run(opts, &args).await,
         Command::Stop => commands::stop::cmd_stop(opts).await,
+        Command::Push(args) => commands::push::cmd_push(opts, &args).await,
+        Command::Pull(args) => commands::pull::cmd_pull(opts, &args).await,
         Command::Event(cmd) => match cmd {
             EventCommand::Send(args) => commands::event::cmd_event(opts, &args).await,
         },
@@ -142,6 +158,6 @@ async fn main() -> Result<()> {
         Command::Gov(args) => commands::gov::cmd_gov(opts, &args).await,
         Command::Defs(args) => commands::defs::cmd_defs(opts, &args).await,
         Command::Blob(args) => commands::blob::cmd_blob(opts, &args).await,
-        Command::Obj(args) => commands::obj::cmd_obj(opts, &args).await,
+        Command::Ws(args) => commands::workspace::cmd_ws(opts, &args).await,
     }
 }

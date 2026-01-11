@@ -10,7 +10,7 @@ pub enum RefError {
     InvalidName { value: String },
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct HashRef(String);
 
 impl HashRef {

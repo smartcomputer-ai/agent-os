@@ -770,11 +770,12 @@ pub fn validate_manifest(
                     }
                 }
             }
+            TypeExpr::Record(_) => {}
             _ => {
                 return Err(ValidationError::ReducerEventFamilyInvalid {
                     reducer: reducer_name.clone(),
                     event_schema: event_schema_name.to_string(),
-                    reason: "event family must be a ref or variant of refs".into(),
+                    reason: "event family must be a ref, variant of refs, or record".into(),
                 });
             }
         }
@@ -1455,6 +1456,81 @@ mod tests {
     }
 
     #[test]
+    fn manifest_allows_routing_with_record_event_family() {
+        let reducer_name = "com.acme/Reducer@1".to_string();
+        let mut modules = HashMap::new();
+        modules.insert(
+            reducer_name.clone(),
+            DefModule {
+                name: reducer_name.clone(),
+                module_kind: ModuleKind::Reducer,
+                wasm_hash: HashRef::new(
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+                )
+                .unwrap(),
+                key_schema: None,
+                abi: ModuleAbi {
+                    reducer: Some(ReducerAbi {
+                        state: SchemaRef::new("com.acme/State@1").unwrap(),
+                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                        annotations: None,
+                        effects_emitted: vec![],
+                        cap_slots: IndexMap::new(),
+                    }),
+                    pure: None,
+                },
+            },
+        );
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: Some(Routing {
+                events: vec![RoutingEvent {
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    reducer: reducer_name.clone(),
+                    key_field: None,
+                }],
+                inboxes: vec![],
+            }),
+            triggers: vec![],
+        };
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/Event@1".to_string(),
+            DefSchema {
+                name: "com.acme/Event@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        schemas.insert(
+            "com.acme/State@1".to_string(),
+            DefSchema {
+                name: "com.acme/State@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let caps = HashMap::new();
+        let policies = HashMap::new();
+        validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &caps, &policies)
+            .expect("record event family routing should validate");
+    }
+
+    #[test]
     fn manifest_rejects_missing_receipt_variant_for_micro_effect() {
         let reducer_name = "com.acme/Reducer@1".to_string();
         let mut modules = HashMap::new();
@@ -1514,6 +1590,152 @@ mod tests {
             "com.acme/Start@1".to_string(),
             DefSchema {
                 name: "com.acme/Start@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        schemas.insert(
+            "com.acme/State@1".to_string(),
+            DefSchema {
+                name: "com.acme/State@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let caps = HashMap::new();
+        let policies = HashMap::new();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::ReducerReceiptSchemaMissing { reducer, effect_kind, event_schema, receipt_schema }
+            if reducer == reducer_name
+                && effect_kind == "timer.set"
+                && event_schema == "com.acme/Event@1"
+                && receipt_schema == "sys/TimerFired@1"
+        ));
+    }
+
+    #[test]
+    fn manifest_allows_record_event_schema_without_micro_effects() {
+        let reducer_name = "com.acme/Reducer@1".to_string();
+        let mut modules = HashMap::new();
+        modules.insert(
+            reducer_name.clone(),
+            DefModule {
+                name: reducer_name.clone(),
+                module_kind: ModuleKind::Reducer,
+                wasm_hash: HashRef::new(
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+                )
+                .unwrap(),
+                key_schema: None,
+                abi: ModuleAbi {
+                    reducer: Some(ReducerAbi {
+                        state: SchemaRef::new("com.acme/State@1").unwrap(),
+                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                        annotations: None,
+                        effects_emitted: vec![],
+                        cap_slots: IndexMap::new(),
+                    }),
+                    pure: None,
+                },
+            },
+        );
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/Event@1".to_string(),
+            DefSchema {
+                name: "com.acme/Event@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        schemas.insert(
+            "com.acme/State@1".to_string(),
+            DefSchema {
+                name: "com.acme/State@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let caps = HashMap::new();
+        let policies = HashMap::new();
+        validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &caps, &policies)
+            .expect("record event schema should validate");
+    }
+
+    #[test]
+    fn manifest_rejects_record_event_schema_with_micro_effect() {
+        let reducer_name = "com.acme/Reducer@1".to_string();
+        let mut modules = HashMap::new();
+        modules.insert(
+            reducer_name.clone(),
+            DefModule {
+                name: reducer_name.clone(),
+                module_kind: ModuleKind::Reducer,
+                wasm_hash: HashRef::new(
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+                )
+                .unwrap(),
+                key_schema: None,
+                abi: ModuleAbi {
+                    reducer: Some(ReducerAbi {
+                        state: SchemaRef::new("com.acme/State@1").unwrap(),
+                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                        annotations: None,
+                        effects_emitted: vec![EffectKind::timer_set()],
+                        cap_slots: IndexMap::new(),
+                    }),
+                    pure: None,
+                },
+            },
+        );
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/Event@1".to_string(),
+            DefSchema {
+                name: "com.acme/Event@1".into(),
                 ty: TypeExpr::Record(TypeRecord {
                     record: IndexMap::new(),
                 }),

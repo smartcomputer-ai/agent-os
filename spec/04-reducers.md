@@ -86,7 +86,7 @@ Reducers consume two kinds of events:
 
 **DomainEvent**: Business events and intents. Produced by other reducers or plans via `raise_event`. Versioned by schema Name.
 
-**ReceiptEvent**: Adapter receipts converted to events by the kernel for micro-effects (e.g., `TimerFired` for `timer.set`). These are **wrapped into the reducer’s ABI event variant** before routing, so reducers should include the built-in receipt schemas as variant arms. If a reducer emits a micro-effect, its ABI event schema must either be that receipt schema itself or a variant with a `ref` to it. For complex external work, plans raise result DomainEvents instead of relying on raw receipts. Correlate using stable fields in your events/effect params (e.g., a key like `order_id` or an idempotency key). In v1.1 Cells, this key becomes a first-class route; see spec/06-cells.md.
+**ReceiptEvent**: Adapter receipts converted to events by the kernel for micro-effects (e.g., `TimerFired` for `timer.set`). These are **wrapped into the reducer’s ABI event variant** before routing, so reducers that emit micro-effects should include the built-in receipt schemas as variant arms. If a reducer emits a micro-effect, its ABI event schema must either be that receipt schema itself or a variant with a `ref` to it. Reducers that never emit micro-effects may use a record event schema instead of a variant. For complex external work, plans raise result DomainEvents instead of relying on raw receipts. Correlate using stable fields in your events/effect params (e.g., a key like `order_id` or an idempotency key). In v1.1 Cells, this key becomes a first-class route; see spec/06-cells.md.
 
 **Important**: Do not embed `$schema` fields inside reducer event payloads. The kernel determines schemas from manifest routing and capability bindings; self-describing payloads are rejected.
 
@@ -315,7 +315,7 @@ This cycle keeps domain logic in reducers and external effects in plans. The pla
 ## ReceiptEvent And Correlation
 
 - ReceiptEvent envelope (conceptual): `{ intent_hash, effect_kind, adapter_id, status, receipt: <EffectReceiptValue> }`.
-  - For micro-effects (timer, blob), the kernel converts receipts into standard payloads (`sys/TimerFired@1`, `sys/BlobPutResult@1`, …) and **wraps them into the reducer’s ABI event variant** before routing.
+  - For micro-effects (timer, blob), the kernel converts receipts into standard payloads (`sys/TimerFired@1`, `sys/BlobPutResult@1`, …) and **wraps them into the reducer’s ABI event variant** before routing. Reducers using record event schemas cannot receive these receipts.
   - For complex effects (payments/email/http/llm), prefer plans to raise explicit result DomainEvents instead of relying on raw receipts.
 - Correlation: include stable domain ids in effect params (e.g., `order_id` or idempotency keys). Reducers match on those fields in events.
 

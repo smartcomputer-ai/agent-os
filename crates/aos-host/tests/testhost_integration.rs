@@ -308,7 +308,7 @@ async fn testhost_kernel_escape_hatch() {
 
     // Access kernel directly via escape hatch
     let heights = host.kernel().heights();
-    assert_eq!(heights.head, 0);
+    assert_eq!(heights.head, 1);
 }
 
 #[tokio::test]
@@ -430,7 +430,7 @@ async fn testhost_replay_smoke() {
 
     // Initial heights
     let initial_heights = host.heights();
-    assert_eq!(initial_heights.head, 0);
+    assert_eq!(initial_heights.head, 1);
 
     // Send event and run
     let start_event = CounterEvent::Start { target: 3 };

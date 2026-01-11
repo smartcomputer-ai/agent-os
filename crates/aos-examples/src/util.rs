@@ -68,7 +68,7 @@ pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
 }
 
 /// Compile a specific binary in a workspace package to wasm32.
-/// Intended for built-in system reducers like sys/ObjectCatalog.
+/// Intended for built-in system reducers like sys/Workspace.
 pub fn compile_wasm_bin(
     workspace_root: &Path,
     package: &str,

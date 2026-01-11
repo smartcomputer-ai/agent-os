@@ -8,13 +8,15 @@ use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
 use aos_wasm_abi::ReducerEffect;
 use helpers::fixtures;
+use indexmap::IndexMap;
 use serde_cbor::Value as CborValue;
 use serde_json;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use aos_air_types::{
-    DefSchema, EffectKind, ReducerAbi, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex,
+    DefSchema, EffectKind, ReducerAbi, TypeExpr, TypeRef, TypeVariant, builtins,
+    catalog::EffectCatalog, plan_literals::SchemaIndex,
 };
 
 /// Plan-origin effects with semantically identical params but different CBOR shapes
@@ -203,6 +205,7 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
 #[test]
 fn reducer_params_round_trip_journal_replay() {
     // Build reducer that emits a timer.set micro-effect.
+    let reducer_event_schema = "com.acme/ReducerEvent@1";
     let params = timer_params_cbor(42, Some("k".into()));
     let effect = ReducerEffect::with_cap_slot(
         aos_effects::EffectKind::TIMER_SET,
@@ -222,7 +225,7 @@ fn reducer_params_round_trip_journal_replay() {
     );
     reducer.abi.reducer = Some(ReducerAbi {
         state: fixtures::schema("com.acme/ReducerState@1"),
-        event: fixtures::schema(fixtures::START_SCHEMA),
+        event: fixtures::schema(reducer_event_schema),
         context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
@@ -245,6 +248,25 @@ fn reducer_params_round_trip_journal_replay() {
                 fixtures::START_SCHEMA,
                 vec![("id", fixtures::text_type())],
             ),
+            DefSchema {
+                name: reducer_event_schema.into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(fixtures::START_SCHEMA),
+                            }),
+                        ),
+                        (
+                            "Fired".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(fixtures::SYS_TIMER_FIRED),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
             DefSchema {
                 name: "com.acme/ReducerState@1".into(),
                 ty: fixtures::text_type(),
@@ -282,7 +304,7 @@ fn reducer_params_round_trip_journal_replay() {
                     );
                     reducer.abi.reducer = Some(ReducerAbi {
                         state: fixtures::schema("com.acme/ReducerState@1"),
-                        event: fixtures::schema(fixtures::START_SCHEMA),
+                        event: fixtures::schema(reducer_event_schema),
                         context: Some(fixtures::schema("sys/ReducerContext@1")),
                         annotations: None,
                         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
@@ -299,6 +321,25 @@ fn reducer_params_round_trip_journal_replay() {
                         fixtures::START_SCHEMA,
                         vec![("id", fixtures::text_type())],
                     ),
+                    DefSchema {
+                        name: reducer_event_schema.into(),
+                        ty: TypeExpr::Variant(TypeVariant {
+                            variant: IndexMap::from([
+                                (
+                                    "Start".into(),
+                                    TypeExpr::Ref(TypeRef {
+                                        reference: fixtures::schema(fixtures::START_SCHEMA),
+                                    }),
+                                ),
+                                (
+                                    "Fired".into(),
+                                    TypeExpr::Ref(TypeRef {
+                                        reference: fixtures::schema(fixtures::SYS_TIMER_FIRED),
+                                    }),
+                                ),
+                            ]),
+                        }),
+                    },
                     DefSchema {
                         name: "com.acme/ReducerState@1".into(),
                         ty: fixtures::text_type(),
@@ -344,6 +385,7 @@ fn mgr_with_cap(cap_gate: CapabilityResolver) -> EffectManager {
         Box::new(AllowAllPolicy),
         effects,
         schemas,
+        None,
         None,
         None,
         None,

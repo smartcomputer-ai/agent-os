@@ -59,7 +59,7 @@ fn introspect_manifest_matches_kernel_manifest() {
         .expect("submit");
     world.tick_n(1).unwrap();
 
-    let kernel = &world.kernel;
+    let kernel = &mut world.kernel;
     let intent = IntentBuilder::new(
         EffectKind::introspect_manifest(),
         "sys/query@1",
@@ -104,7 +104,7 @@ fn introspect_reducer_state_returns_value_and_meta() {
         .expect("submit");
     world.tick_n(1).unwrap();
 
-    let kernel = &world.kernel;
+    let kernel = &mut world.kernel;
     let intent = IntentBuilder::new(
         EffectKind::introspect_reducer_state(),
         "sys/query@1",
@@ -139,7 +139,7 @@ fn introspect_list_cells_returns_sentinel_for_non_keyed() {
         .submit_event_result(fixtures::START_SCHEMA, &json!({ "id": "start" }))
         .expect("submit");
     world.tick_n(1).unwrap();
-    let kernel = &world.kernel;
+    let kernel = &mut world.kernel;
 
     let intent = IntentBuilder::new(
         EffectKind::introspect_list_cells(),
@@ -196,7 +196,7 @@ fn introspect_journal_head_matches_state_reader() {
         .expect("submit");
     world.tick_n(1).unwrap();
 
-    let kernel = &world.kernel;
+    let kernel = &mut world.kernel;
     let intent = IntentBuilder::new(
         EffectKind::introspect_journal_head(),
         "sys/query@1",

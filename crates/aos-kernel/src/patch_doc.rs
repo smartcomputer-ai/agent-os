@@ -4,14 +4,14 @@ use std::collections::HashMap;
 use aos_air_types::{AirNode, HashRef, Manifest, ManifestDefaults, NamedRef};
 use aos_cbor::Hash;
 use aos_store::Store;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::KernelError;
 use crate::governance::ManifestPatch;
 use crate::world::canonicalize_patch;
 
 /// Patch document as described in spec/03-air.md §15 and patch.schema.json.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PatchDocument {
     #[serde(default = "default_patch_version")]
     pub version: String,
@@ -23,7 +23,7 @@ fn default_patch_version() -> String {
     "1".to_string()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PatchOp {
     AddDef {
@@ -58,13 +58,13 @@ pub enum PatchOp {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AddDef {
     pub kind: String,
     pub node: AirNode,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ReplaceDef {
     pub kind: String,
     pub name: String,
@@ -72,14 +72,14 @@ pub struct ReplaceDef {
     pub pre_hash: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RemoveDef {
     pub kind: String,
     pub name: String,
     pub pre_hash: String,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct SetManifestRefs {
     #[serde(default)]
     pub add: Vec<ManifestRef>,
@@ -87,20 +87,20 @@ pub struct SetManifestRefs {
     pub remove: Vec<ManifestRefRemove>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ManifestRef {
     pub kind: String,
     pub name: String,
     pub hash: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ManifestRefRemove {
     pub kind: String,
     pub name: String,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct SetDefaults {
     /// None => omit; Some(None) => clear; Some(Some(name)) => set
     pub policy: Option<Option<String>>,
@@ -108,31 +108,31 @@ pub struct SetDefaults {
     pub cap_grants: Option<Vec<aos_air_types::CapGrant>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SetRoutingEvents {
     pub pre_hash: String,
     pub events: Vec<aos_air_types::RoutingEvent>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SetRoutingInboxes {
     pub pre_hash: String,
     pub inboxes: Vec<aos_air_types::InboxRoute>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SetTriggers {
     pub pre_hash: String,
     pub triggers: Vec<aos_air_types::Trigger>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SetModuleBindings {
     pub pre_hash: String,
     pub bindings: indexmap::IndexMap<String, aos_air_types::ModuleBinding>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SetSecrets {
     pub pre_hash: String,
     pub secrets: Vec<aos_air_types::SecretEntry>,
@@ -156,17 +156,9 @@ pub fn compile_patch_document<S: Store>(
     // Load base manifest
     let base_hash = Hash::from_hex_str(&doc.base_manifest_hash)
         .map_err(|e| KernelError::Manifest(format!("invalid base_manifest_hash: {e}")))?;
-    let manifest_node: AirNode = store
+    let mut manifest: Manifest = store
         .get_node(base_hash)
         .map_err(|e| KernelError::Manifest(format!("load base manifest: {e}")))?;
-    let mut manifest = match manifest_node {
-        AirNode::Manifest(m) => m,
-        _ => {
-            return Err(KernelError::Manifest(
-                "base_manifest_hash did not point to a manifest node".into(),
-            ));
-        }
-    };
 
     let mut nodes: Vec<AirNode> = Vec::new();
 

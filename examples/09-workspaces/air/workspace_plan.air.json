@@ -1,0 +1,974 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demo/workspace_seed_plan@1",
+    "input": "demo/WorkspaceSeed@1",
+    "steps": [
+      {
+        "id": "emit_resolve",
+        "op": "emit_effect",
+        "kind": "workspace.resolve",
+        "params": {
+          "record": {
+            "workspace": { "ref": "@plan.input.workspace" },
+            "version": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_resolve" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "resolve_eff" }
+      },
+      {
+        "id": "await_resolve",
+        "op": "await_receipt",
+        "for": { "ref": "@var:resolve_eff" },
+        "bind": { "as": "resolve" }
+      },
+      {
+        "id": "assign_root_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:resolve" },
+            { "text": "root_hash" }
+          ]
+        },
+        "bind": { "as": "root_existing" }
+      },
+      {
+        "id": "emit_write_marker_existing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_existing" },
+            "path": {
+              "op": "concat",
+              "args": [
+                { "text": "seed/" },
+                {
+                  "op": "concat",
+                  "args": [
+                    { "ref": "@plan.input.workspace" },
+                    { "text": ".txt" }
+                  ]
+                }
+              ]
+            },
+            "bytes": { "bytes_b64": "c2VlZCBtYXJrZXIK" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_marker_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_marker_existing" }
+      },
+      {
+        "id": "await_write_marker_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_marker_existing" },
+        "bind": { "as": "write_marker_receipt_existing" }
+      },
+      {
+        "id": "assign_root_after_marker_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_marker_receipt_existing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_marker_existing" }
+      },
+      {
+        "id": "emit_write_readme_existing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_marker_existing" },
+            "path": { "text": "README.txt" },
+            "bytes": { "bytes_b64": "c2VlZGVkIGJ5IHBsYW4K" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_readme_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_readme_existing" }
+      },
+      {
+        "id": "await_write_readme_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_readme_existing" },
+        "bind": { "as": "write_readme_receipt_existing" }
+      },
+      {
+        "id": "assign_root_after_readme_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_readme_receipt_existing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_readme_existing" }
+      },
+      {
+        "id": "emit_write_data_existing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_readme_existing" },
+            "path": { "text": "data.json" },
+            "bytes": { "bytes_b64": "eyJkZW1vIjp0cnVlLCJpdGVtcyI6WzEsMiwzXX0K" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_data_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_data_existing" }
+      },
+      {
+        "id": "await_write_data_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_data_existing" },
+        "bind": { "as": "write_data_receipt_existing" }
+      },
+      {
+        "id": "assign_root_after_data_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_data_receipt_existing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_data_existing" }
+      },
+      {
+        "id": "emit_list_existing",
+        "op": "emit_effect",
+        "kind": "workspace.list",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_data_existing" },
+            "path": { "null": {} },
+            "scope": { "text": "subtree" },
+            "cursor": { "null": {} },
+            "limit": { "nat": 200 }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_list_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "list_existing" }
+      },
+      {
+        "id": "await_list_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:list_existing" },
+        "bind": { "as": "list_receipt_existing" }
+      },
+      {
+        "id": "assign_entries_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:list_receipt_existing" },
+            { "text": "entries" }
+          ]
+        },
+        "bind": { "as": "entries_existing" }
+      },
+      {
+        "id": "assign_entry_count_existing",
+        "op": "assign",
+        "expr": {
+          "op": "len",
+          "args": [
+            { "ref": "@var:entries_existing" }
+          ]
+        },
+        "bind": { "as": "entry_count_existing" }
+      },
+      {
+        "id": "emit_read_ref_existing",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_data_existing" },
+            "path": { "text": "README.txt" }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_read_ref_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "read_ref_existing" }
+      },
+      {
+        "id": "await_read_ref_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:read_ref_existing" },
+        "bind": { "as": "read_ref_receipt_existing" }
+      },
+      {
+        "id": "emit_read_bytes_existing",
+        "op": "emit_effect",
+        "kind": "workspace.read_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_data_existing" },
+            "path": { "text": "README.txt" },
+            "range": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_read_bytes_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "read_bytes_existing" }
+      },
+      {
+        "id": "await_read_bytes_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:read_bytes_existing" },
+        "bind": { "as": "read_bytes_receipt_existing" }
+      },
+      {
+        "id": "emit_write_readme_update_existing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_data_existing" },
+            "path": { "text": "README.txt" },
+            "bytes": { "bytes_b64": "dXBkYXRlZCBieSBwbGFuCg==" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_readme_update_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_readme_update_existing" }
+      },
+      {
+        "id": "await_write_readme_update_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_readme_update_existing" },
+        "bind": { "as": "write_readme_update_receipt_existing" }
+      },
+      {
+        "id": "assign_root_after_update_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_readme_update_receipt_existing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_update_existing" }
+      },
+      {
+        "id": "emit_diff_existing",
+        "op": "emit_effect",
+        "kind": "workspace.diff",
+        "params": {
+          "record": {
+            "root_a": { "ref": "@var:root_after_data_existing" },
+            "root_b": { "ref": "@var:root_after_update_existing" },
+            "prefix": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_diff_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "diff_existing" }
+      },
+      {
+        "id": "await_diff_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:diff_existing" },
+        "bind": { "as": "diff_receipt_existing" }
+      },
+      {
+        "id": "assign_changes_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:diff_receipt_existing" },
+            { "text": "changes" }
+          ]
+        },
+        "bind": { "as": "changes_existing" }
+      },
+      {
+        "id": "assign_diff_count_existing",
+        "op": "assign",
+        "expr": {
+          "op": "len",
+          "args": [
+            { "ref": "@var:changes_existing" }
+          ]
+        },
+        "bind": { "as": "diff_count_existing" }
+      },
+      {
+        "id": "raise_seeded_existing",
+        "op": "raise_event",
+        "event": "demo/WorkspaceEvent@1",
+        "value": {
+          "variant": {
+            "tag": "Seeded",
+            "value": {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "expected_head": {
+                  "null": {}
+                },
+                "root_hash": { "ref": "@var:root_after_update_existing" },
+                "entry_count": { "ref": "@var:entry_count_existing" },
+                "diff_count": { "ref": "@var:diff_count_existing" },
+                "owner": { "ref": "@plan.input.owner" }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "end_existing",
+        "op": "end"
+      },
+      {
+        "id": "emit_empty_root",
+        "op": "emit_effect",
+        "kind": "workspace.empty_root",
+        "params": {
+          "record": {
+            "workspace": { "ref": "@plan.input.workspace" }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_empty_root" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "empty_root" }
+      },
+      {
+        "id": "await_empty_root",
+        "op": "await_receipt",
+        "for": { "ref": "@var:empty_root" },
+        "bind": { "as": "empty_root_receipt" }
+      },
+      {
+        "id": "assign_root_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:empty_root_receipt" },
+            { "text": "root_hash" }
+          ]
+        },
+        "bind": { "as": "root_missing" }
+      },
+      {
+        "id": "emit_write_marker_missing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_missing" },
+            "path": {
+              "op": "concat",
+              "args": [
+                { "text": "seed/" },
+                {
+                  "op": "concat",
+                  "args": [
+                    { "ref": "@plan.input.workspace" },
+                    { "text": ".txt" }
+                  ]
+                }
+              ]
+            },
+            "bytes": { "bytes_b64": "c2VlZCBtYXJrZXIK" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_marker_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_marker_missing" }
+      },
+      {
+        "id": "await_write_marker_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_marker_missing" },
+        "bind": { "as": "write_marker_receipt_missing" }
+      },
+      {
+        "id": "assign_root_after_marker_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_marker_receipt_missing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_marker_missing" }
+      },
+      {
+        "id": "emit_write_readme_missing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_marker_missing" },
+            "path": { "text": "README.txt" },
+            "bytes": { "bytes_b64": "c2VlZGVkIGJ5IHBsYW4K" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_readme_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_readme_missing" }
+      },
+      {
+        "id": "await_write_readme_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_readme_missing" },
+        "bind": { "as": "write_readme_receipt_missing" }
+      },
+      {
+        "id": "assign_root_after_readme_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_readme_receipt_missing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_readme_missing" }
+      },
+      {
+        "id": "emit_write_data_missing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_readme_missing" },
+            "path": { "text": "data.json" },
+            "bytes": { "bytes_b64": "eyJkZW1vIjp0cnVlLCJpdGVtcyI6WzEsMiwzXX0K" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_data_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_data_missing" }
+      },
+      {
+        "id": "await_write_data_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_data_missing" },
+        "bind": { "as": "write_data_receipt_missing" }
+      },
+      {
+        "id": "assign_root_after_data_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_data_receipt_missing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_data_missing" }
+      },
+      {
+        "id": "emit_list_missing",
+        "op": "emit_effect",
+        "kind": "workspace.list",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_data_missing" },
+            "path": { "null": {} },
+            "scope": { "text": "subtree" },
+            "cursor": { "null": {} },
+            "limit": { "nat": 200 }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_list_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "list_missing" }
+      },
+      {
+        "id": "await_list_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:list_missing" },
+        "bind": { "as": "list_receipt_missing" }
+      },
+      {
+        "id": "assign_entries_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:list_receipt_missing" },
+            { "text": "entries" }
+          ]
+        },
+        "bind": { "as": "entries_missing" }
+      },
+      {
+        "id": "assign_entry_count_missing",
+        "op": "assign",
+        "expr": {
+          "op": "len",
+          "args": [
+            { "ref": "@var:entries_missing" }
+          ]
+        },
+        "bind": { "as": "entry_count_missing" }
+      },
+      {
+        "id": "emit_read_ref_missing",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_data_missing" },
+            "path": { "text": "README.txt" }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_read_ref_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "read_ref_missing" }
+      },
+      {
+        "id": "await_read_ref_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:read_ref_missing" },
+        "bind": { "as": "read_ref_receipt_missing" }
+      },
+      {
+        "id": "emit_read_bytes_missing",
+        "op": "emit_effect",
+        "kind": "workspace.read_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_data_missing" },
+            "path": { "text": "README.txt" },
+            "range": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_read_bytes_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "read_bytes_missing" }
+      },
+      {
+        "id": "await_read_bytes_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:read_bytes_missing" },
+        "bind": { "as": "read_bytes_receipt_missing" }
+      },
+      {
+        "id": "emit_write_readme_update_missing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_data_missing" },
+            "path": { "text": "README.txt" },
+            "bytes": { "bytes_b64": "dXBkYXRlZCBieSBwbGFuCg==" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_readme_update_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_readme_update_missing" }
+      },
+      {
+        "id": "await_write_readme_update_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_readme_update_missing" },
+        "bind": { "as": "write_readme_update_receipt_missing" }
+      },
+      {
+        "id": "assign_root_after_update_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_readme_update_receipt_missing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_update_missing" }
+      },
+      {
+        "id": "emit_diff_missing",
+        "op": "emit_effect",
+        "kind": "workspace.diff",
+        "params": {
+          "record": {
+            "root_a": { "ref": "@var:root_after_data_missing" },
+            "root_b": { "ref": "@var:root_after_update_missing" },
+            "prefix": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_diff_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "diff_missing" }
+      },
+      {
+        "id": "await_diff_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:diff_missing" },
+        "bind": { "as": "diff_receipt_missing" }
+      },
+      {
+        "id": "assign_changes_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:diff_receipt_missing" },
+            { "text": "changes" }
+          ]
+        },
+        "bind": { "as": "changes_missing" }
+      },
+      {
+        "id": "assign_diff_count_missing",
+        "op": "assign",
+        "expr": {
+          "op": "len",
+          "args": [
+            { "ref": "@var:changes_missing" }
+          ]
+        },
+        "bind": { "as": "diff_count_missing" }
+      },
+      {
+        "id": "raise_seeded_missing",
+        "op": "raise_event",
+        "event": "demo/WorkspaceEvent@1",
+        "value": {
+          "variant": {
+            "tag": "Seeded",
+            "value": {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "expected_head": {
+                  "null": {}
+                },
+                "root_hash": { "ref": "@var:root_after_update_missing" },
+                "entry_count": { "ref": "@var:entry_count_missing" },
+                "diff_count": { "ref": "@var:diff_count_missing" },
+                "owner": { "ref": "@plan.input.owner" }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "end_missing",
+        "op": "end"
+      }
+    ],
+    "edges": [
+      { "from": "emit_resolve", "to": "await_resolve" },
+      {
+        "from": "await_resolve",
+        "to": "assign_root_existing",
+        "when": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:resolve" },
+            { "text": "exists" }
+          ]
+        }
+      },
+      {
+        "from": "await_resolve",
+        "to": "emit_empty_root",
+        "when": {
+          "op": "not",
+          "args": [
+            {
+              "op": "get",
+              "args": [
+                { "ref": "@var:resolve" },
+                { "text": "exists" }
+              ]
+            }
+          ]
+        }
+      },
+      { "from": "assign_root_existing", "to": "emit_write_marker_existing" },
+      { "from": "emit_write_marker_existing", "to": "await_write_marker_existing" },
+      { "from": "await_write_marker_existing", "to": "assign_root_after_marker_existing" },
+      {
+        "from": "assign_root_after_marker_existing",
+        "to": "emit_write_readme_existing"
+      },
+      { "from": "emit_write_readme_existing", "to": "await_write_readme_existing" },
+      { "from": "await_write_readme_existing", "to": "assign_root_after_readme_existing" },
+      { "from": "assign_root_after_readme_existing", "to": "emit_write_data_existing" },
+      { "from": "emit_write_data_existing", "to": "await_write_data_existing" },
+      { "from": "await_write_data_existing", "to": "assign_root_after_data_existing" },
+      { "from": "assign_root_after_data_existing", "to": "emit_list_existing" },
+      { "from": "emit_list_existing", "to": "await_list_existing" },
+      { "from": "await_list_existing", "to": "assign_entries_existing" },
+      { "from": "assign_entries_existing", "to": "assign_entry_count_existing" },
+      { "from": "assign_entry_count_existing", "to": "emit_read_ref_existing" },
+      { "from": "emit_read_ref_existing", "to": "await_read_ref_existing" },
+      { "from": "await_read_ref_existing", "to": "emit_read_bytes_existing" },
+      { "from": "emit_read_bytes_existing", "to": "await_read_bytes_existing" },
+      { "from": "await_read_bytes_existing", "to": "emit_write_readme_update_existing" },
+      {
+        "from": "emit_write_readme_update_existing",
+        "to": "await_write_readme_update_existing"
+      },
+      {
+        "from": "await_write_readme_update_existing",
+        "to": "assign_root_after_update_existing"
+      },
+      { "from": "assign_root_after_update_existing", "to": "emit_diff_existing" },
+      { "from": "emit_diff_existing", "to": "await_diff_existing" },
+      { "from": "await_diff_existing", "to": "assign_changes_existing" },
+      { "from": "assign_changes_existing", "to": "assign_diff_count_existing" },
+      { "from": "assign_diff_count_existing", "to": "raise_seeded_existing" },
+      { "from": "raise_seeded_existing", "to": "end_existing" },
+      { "from": "emit_empty_root", "to": "await_empty_root" },
+      { "from": "await_empty_root", "to": "assign_root_missing" },
+      { "from": "assign_root_missing", "to": "emit_write_marker_missing" },
+      { "from": "emit_write_marker_missing", "to": "await_write_marker_missing" },
+      { "from": "await_write_marker_missing", "to": "assign_root_after_marker_missing" },
+      {
+        "from": "assign_root_after_marker_missing",
+        "to": "emit_write_readme_missing"
+      },
+      { "from": "emit_write_readme_missing", "to": "await_write_readme_missing" },
+      { "from": "await_write_readme_missing", "to": "assign_root_after_readme_missing" },
+      { "from": "assign_root_after_readme_missing", "to": "emit_write_data_missing" },
+      { "from": "emit_write_data_missing", "to": "await_write_data_missing" },
+      { "from": "await_write_data_missing", "to": "assign_root_after_data_missing" },
+      { "from": "assign_root_after_data_missing", "to": "emit_list_missing" },
+      { "from": "emit_list_missing", "to": "await_list_missing" },
+      { "from": "await_list_missing", "to": "assign_entries_missing" },
+      { "from": "assign_entries_missing", "to": "assign_entry_count_missing" },
+      { "from": "assign_entry_count_missing", "to": "emit_read_ref_missing" },
+      { "from": "emit_read_ref_missing", "to": "await_read_ref_missing" },
+      { "from": "await_read_ref_missing", "to": "emit_read_bytes_missing" },
+      { "from": "emit_read_bytes_missing", "to": "await_read_bytes_missing" },
+      { "from": "await_read_bytes_missing", "to": "emit_write_readme_update_missing" },
+      {
+        "from": "emit_write_readme_update_missing",
+        "to": "await_write_readme_update_missing"
+      },
+      {
+        "from": "await_write_readme_update_missing",
+        "to": "assign_root_after_update_missing"
+      },
+      { "from": "assign_root_after_update_missing", "to": "emit_diff_missing" },
+      { "from": "emit_diff_missing", "to": "await_diff_missing" },
+      { "from": "await_diff_missing", "to": "assign_changes_missing" },
+      { "from": "assign_changes_missing", "to": "assign_diff_count_missing" },
+      { "from": "assign_diff_count_missing", "to": "raise_seeded_missing" },
+      { "from": "raise_seeded_missing", "to": "end_missing" }
+    ],
+    "required_caps": ["cap_workspace"],
+    "allowed_effects": [
+      "workspace.resolve",
+      "workspace.empty_root",
+      "workspace.write_bytes",
+      "workspace.list",
+      "workspace.read_ref",
+      "workspace.read_bytes",
+      "workspace.diff"
+    ]
+  }
+]

@@ -1,0 +1,68 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/workspace-policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "workspace.resolve",
+          "origin_kind": "plan",
+          "origin_name": "demo/workspace_seed_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.empty_root",
+          "origin_kind": "plan",
+          "origin_name": "demo/workspace_seed_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.write_bytes",
+          "origin_kind": "plan",
+          "origin_name": "demo/workspace_seed_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.list",
+          "origin_kind": "plan",
+          "origin_name": "demo/workspace_seed_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_ref",
+          "origin_kind": "plan",
+          "origin_name": "demo/workspace_seed_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_bytes",
+          "origin_kind": "plan",
+          "origin_name": "demo/workspace_seed_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.diff",
+          "origin_kind": "plan",
+          "origin_name": "demo/workspace_seed_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {},
+        "decision": "deny"
+      }
+    ]
+  }
+]

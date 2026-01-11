@@ -27,19 +27,45 @@
   },
   {
     "$kind": "defmodule",
-    "name": "sys/ObjectCatalog@1",
+    "name": "sys/CapEnforceGovernance@1",
+    "module_kind": "pure",
+    "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "abi": {
+      "pure": {
+        "input": "sys/CapCheckInput@1",
+        "output": "sys/CapCheckOutput@1"
+      }
+    },
+    "$comment": "Built-in cap enforcer module; wasm_hash patched at load time in examples."
+  },
+  {
+    "$kind": "defmodule",
+    "name": "sys/CapEnforceWorkspace@1",
+    "module_kind": "pure",
+    "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "abi": {
+      "pure": {
+        "input": "sys/CapCheckInput@1",
+        "output": "sys/CapCheckOutput@1"
+      }
+    },
+    "$comment": "Built-in cap enforcer module; wasm_hash patched at load time in examples."
+  },
+  {
+    "$kind": "defmodule",
+    "name": "sys/Workspace@1",
     "module_kind": "reducer",
     "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-    "key_schema": "sys/ObjectKey@1",
+    "key_schema": "sys/WorkspaceName@1",
     "abi": {
       "reducer": {
-        "state": "sys/ObjectVersions@1",
-        "event": "sys/ObjectRegistered@1",
+        "state": "sys/WorkspaceHistory@1",
+        "event": "sys/WorkspaceCommit@1",
         "context": "sys/ReducerContext@1",
         "effects_emitted": [],
         "cap_slots": {}
       }
     },
-    "$comment": "Built-in object catalog reducer; wasm_hash patched at load time in examples."
+    "$comment": "Built-in workspace reducer; wasm_hash patched at load time in examples."
   }
 ]

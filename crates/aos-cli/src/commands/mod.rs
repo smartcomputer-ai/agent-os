@@ -9,19 +9,22 @@ pub mod head;
 pub mod info;
 pub mod init;
 pub mod manifest;
-pub mod obj;
+pub mod pull;
+pub mod push;
+pub mod sync;
+pub mod workspace_sync;
 pub mod replay;
 pub mod run;
 pub mod snapshot;
 pub mod state;
 pub mod stop;
+pub mod workspace;
 
 use std::sync::Arc;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result};
 use aos_host::control::ControlClient;
 use aos_host::host::WorldHost;
-use aos_host::manifest_loader;
 use aos_kernel::LoadedManifest;
 use aos_store::FsStore;
 
@@ -43,12 +46,12 @@ pub fn should_use_control(opts: &WorldOpts) -> bool {
     matches!(opts.mode, Mode::Auto | Mode::Daemon)
 }
 
-/// Prepare the world for running: compile reducer, load manifest, patch modules.
+/// Prepare the world for running: load manifest from journal/CAS.
 ///
 /// Returns the store and loaded manifest ready to create a WorldHost.
 pub fn prepare_world(
     dirs: &ResolvedDirs,
-    opts: &WorldOpts,
+    _opts: &WorldOpts,
 ) -> Result<(Arc<FsStore>, LoadedManifest)> {
     // Validate world directory
     if !dirs.world.exists() {
@@ -64,37 +67,14 @@ pub fn prepare_world(
     // Open store
     let store = Arc::new(FsStore::open(&dirs.store_root).context("open store")?);
 
-    // Compile reducer if present
-    let wasm_hash = if dirs.reducer_dir.exists() {
-        println!("Compiling reducer from {}...", dirs.reducer_dir.display());
-        let hash = util::compile_reducer(
-            &dirs.reducer_dir,
-            &dirs.store_root,
-            &store,
-            opts.force_build,
-        )?;
-        println!("Reducer compiled: {}", hash.as_str());
-        Some(hash)
-    } else {
-        None
+    let Some(manifest_hash) = util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
+        anyhow::bail!(
+            "no manifest found in journal; run `aos push` to seed the world"
+        );
     };
 
-    // Load manifest from AIR assets
-    let mut loaded = manifest_loader::load_from_assets(store.clone(), &dirs.air_dir)
-        .context("load manifest from assets")?
-        .ok_or_else(|| anyhow!("no manifest found in {}", dirs.air_dir.display()))?;
-
-    // Resolve placeholder module hashes
-    let patched = util::resolve_placeholder_modules(
-        &mut loaded,
-        store.as_ref(),
-        &dirs.world,
-        wasm_hash.as_ref(),
-        opts.module.as_deref(),
-    )?;
-    if patched > 0 {
-        println!("Resolved {} module(s) with WASM hash", patched);
-    }
+    let loaded = aos_kernel::ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
+        .context("load manifest from CAS")?;
 
     Ok((store, loaded))
 }

@@ -21,3 +21,12 @@ Run it with:
 ```
 cargo run -p aos-examples -- safe-upgrade
 ```
+
+## Import/export workflow (CLI)
+From a world root, you can export the active AIR, edit it, and drive the upgrade via import:
+
+```
+aos export --out /tmp/safe-upgrade --with-sys
+# edit /tmp/safe-upgrade/air/*
+aos import --air /tmp/safe-upgrade/air --import-mode patch --air-only --propose --shadow --approve --apply
+```

@@ -100,7 +100,7 @@ pub struct ResolvedDirs {
 /// Priority:
 /// 1. `--world` / `-w` flag
 /// 2. `AOS_WORLD` env var (handled by Clap)
-/// 3. Walk up from CWD to find a world marker (air/, .aos/, manifest.air.json)
+/// 3. Walk up from CWD to find a world marker (aos.sync.json, air/, .aos/)
 /// 4. Error
 pub fn resolve_world(opts: &WorldOpts) -> Result<PathBuf> {
     // 1 & 2: Explicit flag or env var (Clap handles env with `env = "..."`)
@@ -117,7 +117,7 @@ pub fn resolve_world(opts: &WorldOpts) -> Result<PathBuf> {
     // 4: Error
     anyhow::bail!(
         "No world specified. Pass --world <DIR>, set AOS_WORLD env var, \
-         or run from a directory containing air/, .aos/, or manifest.air.json"
+         or run from a directory containing aos.sync.json, air/, or .aos/"
     );
 }
 
@@ -169,10 +169,7 @@ pub fn resolve_dirs(opts: &WorldOpts) -> Result<ResolvedDirs> {
 fn find_world_root(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start.to_path_buf());
     while let Some(dir) = current {
-        if dir.join("air").exists()
-            || dir.join(".aos").exists()
-            || dir.join("manifest.air.json").exists()
-        {
+        if dir.join("aos.sync.json").exists() || dir.join("air").exists() || dir.join(".aos").exists() {
             return Some(dir);
         }
         current = dir.parent().map(|p| p.to_path_buf());

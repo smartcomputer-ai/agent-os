@@ -101,6 +101,7 @@ name = "aos-air-exec"
 version = "0.1.0"
 dependencies = [
  "aos-air-types",
+ "aos-cbor",
  "base64 0.22.1",
  "indexmap",
  "serde",
@@ -143,6 +144,7 @@ dependencies = [
  "anyhow",
  "aos-air-types",
  "aos-cbor",
+ "aos-effects",
  "aos-host",
  "aos-kernel",
  "aos-store",
@@ -154,6 +156,7 @@ dependencies = [
  "clap",
  "dotenvy",
  "hex",
+ "ignore",
  "jsonschema",
  "serde",
  "serde_cbor",
@@ -237,6 +240,7 @@ dependencies = [
  "once_cell",
  "reqwest",
  "serde",
+ "serde_bytes",
  "serde_cbor",
  "serde_json",
  "sha2",
@@ -1128,6 +1132,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "globset"
+version = "0.4.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52dfc19153a48bde0cbd630453615c8151bce3a5adfac7a0aebfbf0a1e1f57e3"
+dependencies = [
+ "aho-corasick",
+ "bstr",
+ "log",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1366,6 +1383,22 @@ checksum = "3acae9609540aa318d1bc588455225fb2085b9ed0c4f6bd0d9d5bcd86f1a0344"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
+]
+
+[[package]]
+name = "ignore"
+version = "0.4.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3d782a365a015e0f5c04902246139249abf769125006fbe7649e2ee88169b4a"
+dependencies = [
+ "crossbeam-deque",
+ "globset",
+ "log",
+ "memchr",
+ "regex-automata",
+ "same-file",
+ "walkdir",
+ "winapi-util",
 ]
 
 [[package]]

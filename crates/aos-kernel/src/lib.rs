@@ -7,6 +7,7 @@ pub mod effects;
 pub mod error;
 pub mod event;
 pub mod governance;
+pub mod governance_effects;
 pub mod internal_effects;
 pub mod journal;
 pub mod manifest;

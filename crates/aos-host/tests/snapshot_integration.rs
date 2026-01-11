@@ -6,7 +6,6 @@ use aos_air_types::{
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
-use aos_kernel::error::KernelError;
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::JournalKind;
@@ -370,9 +369,9 @@ fn snapshot_creation_quiesces_runtime() {
     );
 }
 
-/// Restored effect intents should bypass new policy checks (they were already authorized).
+/// Manifest records in the journal override the supplied manifest on replay.
 #[test]
-fn restored_effects_bypass_new_policy_checks() {
+fn manifest_records_override_supplied_policy() {
     let store = fixtures::new_mem_store();
     let manifest = fulfillment_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
@@ -423,10 +422,9 @@ fn restored_effects_bypass_new_policy_checks() {
         Some(vec![0xEE])
     );
 
-    // New plan attempts should now be denied by the stricter policy.
+    // New plan attempts are still allowed because the journal manifest is authoritative.
     replay_world
         .submit_event_result(START_SCHEMA, &fixtures::start_event("blocked"))
         .expect("submit blocked start event");
-    let err = replay_world.kernel.tick_until_idle().unwrap_err();
-    assert!(matches!(err, KernelError::PolicyDenied { .. }));
+    replay_world.kernel.tick_until_idle().unwrap();
 }

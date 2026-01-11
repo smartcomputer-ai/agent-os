@@ -7,8 +7,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name, NamedRef,
-    PlanStepKind, SecretDecl, SecretEntry, TypeExpr, builtins,
+    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, HashRef, Manifest, Name,
+    NamedRef, PlanStepKind, SecretDecl, SecretEntry, TypeExpr, builtins,
     catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
@@ -25,7 +25,8 @@ use getrandom::getrandom;
 use crate::cap_enforcer::{CapEnforcerInvoker, PureCapEnforcer};
 use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::cell_index::{CellIndex, CellMeta};
-use crate::effects::EffectManager;
+use crate::effects::{EffectManager, EffectParamPreprocessor};
+use crate::governance_effects::GovernanceParamPreprocessor;
 use crate::error::KernelError;
 use crate::event::{IngressStamp, KernelEvent, ReducerEvent};
 use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
@@ -35,7 +36,7 @@ use crate::journal::{
     AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, DomainEventRecord, EffectIntentRecord,
     EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry, JournalKind,
     JournalRecord, JournalSeq, OwnedJournalEntry, PlanEndStatus, PlanEndedRecord, PlanResultRecord,
-    ProposedRecord, ShadowReportRecord, SnapshotRecord,
+    ProposedRecord, ShadowReportRecord, SnapshotRecord, ManifestRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
@@ -476,6 +477,7 @@ impl<S: Store + 'static> Kernel<S> {
         journal: Box<dyn Journal>,
         config: KernelConfig,
     ) -> Result<Self, KernelError> {
+        let mut loaded = loaded;
         let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
         let schema_index = Arc::new(build_schema_index_from_loaded(store.as_ref(), &loaded)?);
         let reducer_schemas = Arc::new(build_reducer_schemas(
@@ -534,7 +536,7 @@ impl<S: Store + 'static> Kernel<S> {
 
         // Persist the loaded manifest + defs into the store so governance/patch doc
         // compilation can resolve the base manifest hash from CAS.
-        persist_loaded_manifest(store.as_ref(), &loaded)?;
+        persist_loaded_manifest(store.as_ref(), &mut loaded)?;
 
         let manifest_bytes = to_canonical_cbor(&loaded.manifest)
             .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
@@ -548,6 +550,11 @@ impl<S: Store + 'static> Kernel<S> {
             PureCapEnforcer::new(Arc::new(loaded.modules.clone()), pures.clone()),
         ));
 
+        let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> =
+            Some(Arc::new(GovernanceParamPreprocessor::new(
+                store.clone(),
+                loaded.manifest.clone(),
+            )));
         let mut kernel = Self {
             store: store.clone(),
             manifest: loaded.manifest.clone(),
@@ -580,6 +587,7 @@ impl<S: Store + 'static> Kernel<S> {
                 policy_gate,
                 effect_catalog.clone(),
                 schema_index.clone(),
+                param_preprocessor,
                 enforcer_invoker,
                 if loaded.secrets.is_empty() {
                     None
@@ -616,7 +624,11 @@ impl<S: Store + 'static> Kernel<S> {
                 }
             }
         }
+        let journal_empty = kernel.journal.next_seq() == 0;
         kernel.replay_existing_entries()?;
+        if journal_empty {
+            kernel.record_manifest()?;
+        }
         Ok(kernel)
     }
 
@@ -1288,6 +1300,15 @@ impl<S: Store + 'static> Kernel<S> {
             JournalRecord::PolicyDecision(_) => {
                 // Policy decisions are audit-only; runtime state is rebuilt via replay.
             }
+            JournalRecord::Manifest(record) => {
+                let hash = Hash::from_hex_str(&record.manifest_hash).map_err(|err| {
+                    KernelError::Manifest(format!("invalid manifest hash: {err}"))
+                })?;
+                if hash != self.manifest_hash {
+                    let loaded = ManifestLoader::load_from_hash(self.store.as_ref(), hash)?;
+                    self.apply_loaded_manifest(loaded, false)?;
+                }
+            }
             JournalRecord::Snapshot(_) => {
                 // already handled separately
             }
@@ -1315,7 +1336,10 @@ impl<S: Store + 'static> Kernel<S> {
         self.last_snapshot_hash = Some(hash);
         if let Some(manifest_hex) = record.manifest_hash.as_ref() {
             if let Ok(h) = Hash::from_hex_str(manifest_hex) {
-                self.manifest_hash = h;
+                if h != self.manifest_hash {
+                    let loaded = ManifestLoader::load_from_hash(self.store.as_ref(), h)?;
+                    self.apply_loaded_manifest(loaded, false)?;
+                }
             }
         }
         self.snapshot_index.insert(
@@ -1547,6 +1571,18 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             Ok(None)
         }
+    }
+
+    pub(crate) fn canonical_key_bytes(
+        &self,
+        schema_name: &str,
+        value: &str,
+    ) -> Result<Vec<u8>, KernelError> {
+        let cbor =
+            serde_cbor::to_vec(&value).map_err(|e| KernelError::Manifest(e.to_string()))?;
+        let normalized = normalize_cbor_by_name(&self.schema_index, schema_name, &cbor)
+            .map_err(|err| KernelError::Manifest(err.to_string()))?;
+        Ok(normalized.bytes)
     }
 
     pub(crate) fn read_meta(&self) -> ReadMeta {
@@ -2036,6 +2072,23 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
+    /// Apply a manifest patch directly without governance (dev mode).
+    ///
+    /// The patch is canonicalized, stored in the CAS, and swapped into the live kernel.
+    pub fn apply_patch_direct(&mut self, patch: ManifestPatch) -> Result<String, KernelError> {
+        let canonical = canonicalize_patch(self.store.as_ref(), patch)?;
+
+        for node in &canonical.nodes {
+            self.store.put_node(node)?;
+        }
+        self.store.put_node(&canonical.manifest)?;
+        self.store
+            .put_node(&AirNode::Manifest(canonical.manifest.clone()))?;
+
+        self.swap_manifest(&canonical)?;
+        Ok(self.manifest_hash.to_hex())
+    }
+
     fn load_manifest_patch(&self, hash_hex: &str) -> Result<ManifestPatch, KernelError> {
         let hash = Hash::from_hex_str(hash_hex)
             .map_err(|err| KernelError::Manifest(format!("invalid patch hash: {err}")))?;
@@ -2046,7 +2099,15 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn swap_manifest(&mut self, patch: &ManifestPatch) -> Result<(), KernelError> {
-        let loaded = patch.to_loaded_manifest();
+        let loaded = patch.to_loaded_manifest(self.store.as_ref())?;
+        self.apply_loaded_manifest(loaded, true)
+    }
+
+    fn apply_loaded_manifest(
+        &mut self,
+        loaded: LoadedManifest,
+        record_manifest: bool,
+    ) -> Result<(), KernelError> {
         let schema_index = Arc::new(build_schema_index_from_loaded(
             self.store.as_ref(),
             &loaded,
@@ -2083,9 +2144,15 @@ impl<S: Store + 'static> Kernel<S> {
         let manifest_bytes = to_canonical_cbor(&self.manifest)
             .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
         self.manifest_hash = Hash::of_bytes(&manifest_bytes);
+        self.secrets = loaded.secrets;
         self.module_defs = loaded.modules;
+        self.plan_defs = loaded.plans;
+        self.cap_defs = loaded.caps;
+        self.effect_defs = loaded.effects;
+        self.policy_defs = loaded.policies;
+        self.schema_defs = loaded.schemas;
         self.plan_registry = PlanRegistry::default();
-        for plan in loaded.plans.values() {
+        for plan in self.plan_defs.values() {
             self.plan_registry.register(plan.clone());
         }
 
@@ -2129,17 +2196,26 @@ impl<S: Store + 'static> Kernel<S> {
         let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
             PureCapEnforcer::new(Arc::new(self.module_defs.clone()), self.pures.clone()),
         ));
+        let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> =
+            Some(Arc::new(GovernanceParamPreprocessor::new(
+                self.store.clone(),
+                self.manifest.clone(),
+            )));
         self.effect_manager = EffectManager::new(
             capability_resolver,
             policy_gate,
             effect_catalog,
             schema_index.clone(),
+            param_preprocessor,
             enforcer_invoker,
             secret_catalog,
             self.secret_resolver.clone(),
         );
         self.plan_cap_handles = plan_cap_handles;
         self.module_cap_bindings = module_cap_bindings;
+        if record_manifest {
+            self.record_manifest()?;
+        }
         Ok(())
     }
 
@@ -2522,6 +2598,12 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
+    fn record_manifest(&mut self) -> Result<(), KernelError> {
+        self.append_record(JournalRecord::Manifest(ManifestRecord {
+            manifest_hash: self.manifest_hash.to_hex(),
+        }))
+    }
+
     fn record_domain_event(
         &mut self,
         event: &DomainEvent,
@@ -2720,8 +2802,106 @@ pub fn canonicalize_patch<S: Store>(
             })?;
         }
     }
+    normalize_patch_manifest_refs(&mut canonical)?;
 
     Ok(canonical)
+}
+
+fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), KernelError> {
+    let mut schema_hashes = HashMap::new();
+    let mut module_hashes = HashMap::new();
+    let mut plan_hashes = HashMap::new();
+    let mut effect_hashes = HashMap::new();
+    let mut cap_hashes = HashMap::new();
+    let mut policy_hashes = HashMap::new();
+
+    for node in &patch.nodes {
+        match node {
+            AirNode::Defschema(schema) => {
+                let hash = Hash::of_cbor(&AirNode::Defschema(schema.clone()))
+                    .map_err(|err| KernelError::Manifest(format!("hash schema '{}': {err}", schema.name)))?;
+                schema_hashes.insert(schema.name.clone(), hash);
+            }
+            AirNode::Defmodule(module) => {
+                let hash = Hash::of_cbor(&AirNode::Defmodule(module.clone()))
+                    .map_err(|err| KernelError::Manifest(format!("hash module '{}': {err}", module.name)))?;
+                module_hashes.insert(module.name.clone(), hash);
+            }
+            AirNode::Defplan(plan) => {
+                let hash = Hash::of_cbor(&AirNode::Defplan(plan.clone()))
+                    .map_err(|err| KernelError::Manifest(format!("hash plan '{}': {err}", plan.name)))?;
+                plan_hashes.insert(plan.name.clone(), hash);
+            }
+            AirNode::Defeffect(effect) => {
+                let hash = Hash::of_cbor(&AirNode::Defeffect(effect.clone()))
+                    .map_err(|err| KernelError::Manifest(format!("hash effect '{}': {err}", effect.name)))?;
+                effect_hashes.insert(effect.name.clone(), hash);
+            }
+            AirNode::Defcap(cap) => {
+                let hash = Hash::of_cbor(&AirNode::Defcap(cap.clone()))
+                    .map_err(|err| KernelError::Manifest(format!("hash cap '{}': {err}", cap.name)))?;
+                cap_hashes.insert(cap.name.clone(), hash);
+            }
+            AirNode::Defpolicy(policy) => {
+                let hash = Hash::of_cbor(&AirNode::Defpolicy(policy.clone()))
+                    .map_err(|err| KernelError::Manifest(format!("hash policy '{}': {err}", policy.name)))?;
+                policy_hashes.insert(policy.name.clone(), hash);
+            }
+            _ => {}
+        }
+    }
+
+    for reference in patch.manifest.schemas.iter_mut() {
+        if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
+            reference.hash = builtin.hash_ref.clone();
+        } else if let Some(hash) = schema_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("schema hash '{}': {err}", reference.name)))?;
+        }
+    }
+
+    for reference in patch.manifest.modules.iter_mut() {
+        if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
+            reference.hash = builtin.hash_ref.clone();
+        } else if let Some(hash) = module_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("module hash '{}': {err}", reference.name)))?;
+        }
+    }
+
+    for reference in patch.manifest.plans.iter_mut() {
+        if let Some(hash) = plan_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("plan hash '{}': {err}", reference.name)))?;
+        }
+    }
+
+    for reference in patch.manifest.effects.iter_mut() {
+        if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
+            reference.hash = builtin.hash_ref.clone();
+        } else if let Some(hash) = effect_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("effect hash '{}': {err}", reference.name)))?;
+        }
+    }
+
+    for reference in patch.manifest.caps.iter_mut() {
+        if let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str()) {
+            reference.hash = builtin.hash_ref.clone();
+        } else if let Some(hash) = cap_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("cap hash '{}': {err}", reference.name)))?;
+        }
+    }
+
+    for reference in patch.manifest.policies.iter_mut() {
+        if let Some(hash) = policy_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("policy hash '{}': {err}", reference.name)))?;
+        }
+    }
+
+    Ok(())
 }
 
 fn extend_schema_map_from_store<S: Store>(
@@ -2989,6 +3169,113 @@ mod tests {
     }
 
     #[test]
+    fn replay_applies_manifest_records_in_order() {
+        let store = Arc::new(MemStore::default());
+        let (loaded_a, hash_a) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventA@1");
+        let (_loaded_b, hash_b) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventB@1");
+
+        let mut journal = MemJournal::default();
+        append_record(
+            &mut journal,
+            JournalRecord::Manifest(ManifestRecord {
+                manifest_hash: hash_a.to_hex(),
+            }),
+        );
+        append_record(
+            &mut journal,
+            JournalRecord::DomainEvent(event_record("com.acme/EventA@1", 1)),
+        );
+        append_record(
+            &mut journal,
+            JournalRecord::Manifest(ManifestRecord {
+                manifest_hash: hash_b.to_hex(),
+            }),
+        );
+        append_record(
+            &mut journal,
+            JournalRecord::DomainEvent(event_record("com.acme/EventB@1", 3)),
+        );
+
+        let kernel = Kernel::from_loaded_manifest_with_config(
+            store,
+            loaded_a,
+            Box::new(journal),
+            KernelConfig::default(),
+        )
+        .expect("replay");
+        assert_eq!(kernel.manifest_hash().to_hex(), hash_b.to_hex());
+    }
+
+    #[test]
+    fn replay_applies_manifest_after_snapshot() {
+        let store = Arc::new(MemStore::default());
+        let (loaded_a, hash_a) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventA@1");
+        let (_loaded_b, hash_b) = loaded_manifest_with_schema(store.as_ref(), "com.acme/EventB@1");
+
+        let mut journal = MemJournal::default();
+        append_record(
+            &mut journal,
+            JournalRecord::Manifest(ManifestRecord {
+                manifest_hash: hash_a.to_hex(),
+            }),
+        );
+        append_record(
+            &mut journal,
+            JournalRecord::DomainEvent(event_record("com.acme/EventA@1", 1)),
+        );
+
+        let snapshot_height = 2;
+        let snapshot = KernelSnapshot::new(
+            snapshot_height,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            0,
+            vec![],
+            vec![],
+            vec![],
+            0,
+            Some(*hash_a.as_bytes()),
+        );
+        let snap_bytes = serde_cbor::to_vec(&snapshot).expect("encode snapshot");
+        let snap_hash = store.put_blob(&snap_bytes).expect("store snapshot");
+        append_record(
+            &mut journal,
+            JournalRecord::Snapshot(SnapshotRecord {
+                snapshot_ref: snap_hash.to_hex(),
+                height: snapshot_height,
+                manifest_hash: Some(hash_a.to_hex()),
+            }),
+        );
+
+        append_record(
+            &mut journal,
+            JournalRecord::DomainEvent(event_record("com.acme/EventA@1", 3)),
+        );
+        append_record(
+            &mut journal,
+            JournalRecord::Manifest(ManifestRecord {
+                manifest_hash: hash_b.to_hex(),
+            }),
+        );
+        append_record(
+            &mut journal,
+            JournalRecord::DomainEvent(event_record("com.acme/EventB@1", 5)),
+        );
+
+        let kernel = Kernel::from_loaded_manifest_with_config(
+            store,
+            loaded_a,
+            Box::new(journal),
+            KernelConfig::default(),
+        )
+        .expect("replay");
+        assert_eq!(kernel.manifest_hash().to_hex(), hash_b.to_hex());
+    }
+
+    #[test]
     fn non_keyed_state_persisted_via_cell_index() {
         let mut kernel = minimal_kernel_non_keyed();
         let reducer = "com.acme/Reducer@1".to_string();
@@ -3045,6 +3332,74 @@ mod tests {
                 )]),
             }),
         }
+    }
+
+    fn loaded_manifest_with_schema(
+        store: &MemStore,
+        schema_name: &str,
+    ) -> (LoadedManifest, aos_cbor::Hash) {
+        let schema = schema_event_record(schema_name);
+        let schema_hash = store
+            .put_node(&AirNode::Defschema(schema.clone()))
+            .expect("store schema");
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![NamedRef {
+                name: schema_name.into(),
+                hash: HashRef::new(schema_hash.to_hex()).unwrap(),
+            }],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            effects: vec![],
+            policies: vec![],
+            secrets: vec![],
+            triggers: vec![],
+            module_bindings: Default::default(),
+            routing: None,
+            defaults: None,
+        };
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules: HashMap::new(),
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::from([(schema_name.into(), schema)]),
+            effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        };
+        let mut loaded = loaded;
+        persist_loaded_manifest(store, &mut loaded).expect("persist manifest");
+        let manifest_hash = store.put_node(&loaded.manifest).expect("store manifest");
+        (loaded, manifest_hash)
+    }
+
+    fn event_record(schema: &str, journal_height: u64) -> DomainEventRecord {
+        let payload = serde_cbor::to_vec(&CborValue::Map(BTreeMap::from([(
+            CborValue::Text("id".into()),
+            CborValue::Text("1".into()),
+        )])))
+        .unwrap();
+        DomainEventRecord {
+            schema: schema.to_string(),
+            value: payload,
+            key: None,
+            now_ns: 0,
+            logical_now_ns: 0,
+            journal_height,
+            entropy: vec![0u8; ENTROPY_LEN],
+            event_hash: String::new(),
+            manifest_hash: String::new(),
+        }
+    }
+
+    fn append_record(journal: &mut MemJournal, record: JournalRecord) {
+        let bytes = serde_cbor::to_vec(&record).expect("encode record");
+        journal
+            .append(JournalEntry::new(record.kind(), &bytes))
+            .expect("append record");
     }
 
     fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
@@ -3637,8 +3992,8 @@ mod tests {
         let scan = kernel.tail_scan_after(0).expect("tail scan");
         assert_eq!(scan.intents.len(), 1);
         assert_eq!(scan.receipts.len(), 1);
-        assert_eq!(scan.intents[0].seq, 0);
-        assert_eq!(scan.receipts[0].seq, 1);
+        assert_eq!(scan.intents[0].seq, 1);
+        assert_eq!(scan.receipts[0].seq, 2);
         assert_eq!(scan.intents[0].record.intent_hash, [1u8; 32]);
         assert_eq!(scan.receipts[0].record.intent_hash, [1u8; 32]);
     }
@@ -3895,26 +4250,129 @@ fn resolve_module_cap_bindings(
 
 fn persist_loaded_manifest<S: Store>(
     store: &S,
-    loaded: &LoadedManifest,
+    loaded: &mut LoadedManifest,
 ) -> Result<(), KernelError> {
+    let mut schema_hashes = HashMap::new();
+    let mut module_hashes = HashMap::new();
+    let mut plan_hashes = HashMap::new();
+    let mut effect_hashes = HashMap::new();
+    let mut cap_hashes = HashMap::new();
+    let mut policy_hashes = HashMap::new();
+
     for schema in loaded.schemas.values() {
-        store.put_node(&AirNode::Defschema(schema.clone()))?;
+        let hash = store.put_node(&AirNode::Defschema(schema.clone()))?;
+        schema_hashes.insert(schema.name.clone(), hash);
     }
     for module in loaded.modules.values() {
-        store.put_node(&AirNode::Defmodule(module.clone()))?;
+        let hash = store.put_node(&AirNode::Defmodule(module.clone()))?;
+        module_hashes.insert(module.name.clone(), hash);
     }
     for plan in loaded.plans.values() {
-        store.put_node(&AirNode::Defplan(plan.clone()))?;
+        let hash = store.put_node(&AirNode::Defplan(plan.clone()))?;
+        plan_hashes.insert(plan.name.clone(), hash);
     }
     for cap in loaded.caps.values() {
-        store.put_node(&AirNode::Defcap(cap.clone()))?;
+        let hash = store.put_node(&AirNode::Defcap(cap.clone()))?;
+        cap_hashes.insert(cap.name.clone(), hash);
     }
     for policy in loaded.policies.values() {
-        store.put_node(&AirNode::Defpolicy(policy.clone()))?;
+        let hash = store.put_node(&AirNode::Defpolicy(policy.clone()))?;
+        policy_hashes.insert(policy.name.clone(), hash);
     }
     for effect in loaded.effects.values() {
-        store.put_node(&AirNode::Defeffect(effect.clone()))?;
+        let hash = store.put_node(&AirNode::Defeffect(effect.clone()))?;
+        effect_hashes.insert(effect.name.clone(), hash);
     }
+
+    for reference in loaded.manifest.schemas.iter_mut() {
+        if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
+            reference.hash = builtin.hash_ref.clone();
+            continue;
+        }
+        if let Some(hash) = schema_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("schema hash '{}': {err}", reference.name)))?;
+            continue;
+        }
+        return Err(KernelError::Manifest(format!(
+            "manifest references unknown schema '{}'",
+            reference.name
+        )));
+    }
+
+    for reference in loaded.manifest.modules.iter_mut() {
+        if let Some(hash) = module_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("module hash '{}': {err}", reference.name)))?;
+            continue;
+        }
+        if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
+            reference.hash = builtin.hash_ref.clone();
+            continue;
+        }
+        return Err(KernelError::Manifest(format!(
+            "manifest references unknown module '{}'",
+            reference.name
+        )));
+    }
+
+    for reference in loaded.manifest.plans.iter_mut() {
+        if let Some(hash) = plan_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("plan hash '{}': {err}", reference.name)))?;
+        } else {
+            return Err(KernelError::Manifest(format!(
+                "manifest references unknown plan '{}'",
+                reference.name
+            )));
+        }
+    }
+
+    for reference in loaded.manifest.effects.iter_mut() {
+        if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
+            reference.hash = builtin.hash_ref.clone();
+            continue;
+        }
+        if let Some(hash) = effect_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("effect hash '{}': {err}", reference.name)))?;
+            continue;
+        }
+        return Err(KernelError::Manifest(format!(
+            "manifest references unknown effect '{}'",
+            reference.name
+        )));
+    }
+
+    for reference in loaded.manifest.caps.iter_mut() {
+        if let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str()) {
+            reference.hash = builtin.hash_ref.clone();
+            continue;
+        }
+        if let Some(hash) = cap_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("cap hash '{}': {err}", reference.name)))?;
+            continue;
+        }
+        return Err(KernelError::Manifest(format!(
+            "manifest references unknown cap '{}'",
+            reference.name
+        )));
+    }
+
+    for reference in loaded.manifest.policies.iter_mut() {
+        if let Some(hash) = policy_hashes.get(&reference.name) {
+            reference.hash = HashRef::new(hash.to_hex())
+                .map_err(|err| KernelError::Manifest(format!("policy hash '{}': {err}", reference.name)))?;
+        } else {
+            return Err(KernelError::Manifest(format!(
+                "manifest references unknown policy '{}'",
+                reference.name
+            )));
+        }
+    }
+
+    store.put_node(&loaded.manifest)?;
     store.put_node(&AirNode::Manifest(loaded.manifest.clone()))?;
     Ok(())
 }

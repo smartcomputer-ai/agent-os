@@ -3,9 +3,8 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use aos_host::manifest_loader;
 use aos_kernel;
-use aos_store::FsStore;
+use aos_store::{FsStore, Store};
 use clap::Args;
 
 use crate::commands::try_control_client;
@@ -54,17 +53,20 @@ pub async fn cmd_manifest(opts: &WorldOpts, args: &ManifestArgs) -> Result<()> {
         }
     }
 
-    // Load manifest from store
+    // Load manifest from store/journal
     let store = Arc::new(FsStore::open(&dirs.store_root).context("open store")?);
-    let loaded = manifest_loader::load_from_assets(store.clone(), &dirs.air_dir)
-        .context("load manifest from assets")?
-        .ok_or_else(|| anyhow::anyhow!("no manifest found in {}", dirs.air_dir.display()))?;
+    let Some(manifest_hash) =
+        crate::util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
+            anyhow::bail!("no manifest found in journal; run `aos push` first");
+        };
+    let manifest: aos_air_types::Manifest =
+        store.get_node(manifest_hash).context("load manifest from CAS")?;
 
     // Serialize and print
     let manifest_json = if args.raw {
-        serde_json::json!({ "manifest": loaded.manifest, "raw": true })
+        serde_json::json!({ "manifest": manifest, "raw": true })
     } else {
-        serde_json::to_value(&loaded.manifest)?
+        serde_json::to_value(&manifest)?
     };
     print_success(
         opts,

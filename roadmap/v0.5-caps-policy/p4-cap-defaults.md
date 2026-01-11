@@ -87,13 +87,6 @@ After steps (2) + (4), the following examples can be simplified:
   - Drop `sys/timer@1` from `manifest.caps`.
   - If reducer uses the default slot, remove `module_bindings`.
 
-- `examples/09-worldfs-lab`
-  - Remove `sys/blob@1` and `sys/query@1` from `air/capabilities.air.json`
-    (built-in); keep only the custom `notes/blob_cap@1`.
-  - Drop `sys/blob@1` + `sys/query@1` from `manifest.caps`.
-  - If `cap_sys_blob` / `cap_query` grants are unused, drop them too.
-  - Remove empty `module_bindings` from the manifest.
-
 - `examples/03-fetch-notify`
   - Keep custom `demo/http_fetch_cap@1`; still needs the HTTP enforcer.
   - Remove empty `module_bindings` from the manifest.

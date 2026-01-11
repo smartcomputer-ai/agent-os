@@ -8,16 +8,8 @@ publish = false
 path = "src/lib.rs"
 
 [[bin]]
-name = "object_catalog"
-path = "src/bin/object_catalog.rs"
-
-[[bin]]
-name = "agent_registry"
-path = "src/bin/agent_registry.rs"
-
-[[bin]]
-name = "notes_notebook"
-path = "src/bin/notes_notebook.rs"
+name = "workspace"
+path = "src/bin/workspace.rs"
 
 [[bin]]
 name = "cap_enforce_http_out"
@@ -26,6 +18,14 @@ path = "src/bin/cap_enforce_http_out.rs"
 [[bin]]
 name = "cap_enforce_llm_basic"
 path = "src/bin/cap_enforce_llm_basic.rs"
+
+[[bin]]
+name = "cap_enforce_workspace"
+path = "src/bin/cap_enforce_workspace.rs"
+
+[[bin]]
+name = "cap_enforce_governance"
+path = "src/bin/cap_enforce_governance.rs"
 
 [dependencies]
 aos-wasm-sdk = { path = "../aos-wasm-sdk" }

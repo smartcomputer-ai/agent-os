@@ -1,8 +1,0 @@
-[
-  {
-    "$kind": "defcap",
-    "name": "notes/blob_cap@1",
-    "cap_type": "blob",
-    "schema": { "record": {} }
-  }
-]

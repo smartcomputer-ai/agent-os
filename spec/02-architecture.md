@@ -21,6 +21,7 @@ Application logic runs inside sandboxed WASM modules (reducers and pure componen
 - Journal: append‑only log of all events (proposals, approvals, plan application, effect intents, receipts, snapshots).
 - Snapshotter: materializes state at intervals for fast restore; replay from journal remains authoritative.
 - Store (CAS): content‑addressed object store for AIR nodes, WASM modules, blobs, receipts, and snapshots.
+- Workspace Registry: built-in `sys/Workspace@1` reducer and CAS-backed tree nodes for versioned source/artifact trees; exposed via internal `workspace.*` effects (cap-gated).
 - AIR Loader/Validator: loads the manifest, validates forms, resolves references, and exposes a typed view to the kernel.
 - Plan Engine: executes AIR plans deterministically (evaluates guards, emits effects, raises/awaits events), supports shadow runs.
 - Capability Resolver: scoped capability grants (type, scope, expiry) bound to plans and reducers.
@@ -46,6 +47,7 @@ The kernel handles several categories of events. The first four are **design-tim
 - **ShadowReport** {proposal_id, patch_hash, manifest_hash, effects_predicted, pending_receipts?, plan_results?, ledger_deltas?}
 - **Approved** {proposal_id, patch_hash, approver, decision:"approve"|"reject"}
 - **Applied** {proposal_id, patch_hash, manifest_hash_new}
+- **Manifest** {manifest_hash} (appended whenever the active manifest changes; replay uses these to swap manifests in-order)
 
 **Runtime events:**
 - **EffectQueued** {intent_hash, kind, params_ref, cap_ref}
@@ -63,9 +65,11 @@ Receipts include the intent_hash and a logical height fence; late receipts that 
 
 The journal consists of segment files with monotonic sequence numbers. Events are length‑prefixed, canonical CBOR. Segments are validated on load; corrupt segments are quarantined with clear diagnostics.
 
+Manifest updates are also recorded as `Manifest` journal entries. These are appended on first boot (empty journal) and whenever the active manifest changes (governance apply or `aos push`). Replay applies manifest records in-order, swapping the active manifest without emitting new entries.
+
 ### Snapshots
 
-Snapshots persist control‑plane AIR state (manifest), reducer state bytes (canonical CBOR by declared schema), and pinned blob roots. They are created periodically or on demand. Restore operations replay from the last snapshot to head, using the journal as the authoritative source.
+Snapshots persist control‑plane AIR state (manifest hash + content), reducer state bytes (canonical CBOR by declared schema), and pinned blob roots. They are created periodically or on demand. Restore operations replay from the last snapshot to head, using the journal as the authoritative source; any later `Manifest` entries swap manifests during replay.
 
 ### Content‑Addressed Store (CAS)
 
@@ -208,7 +212,38 @@ Modules have no ambient access to time or randomness; all nondeterminism is isol
 
 ### CLI
 
-The command‑line interface provides: world init/info; propose/shadow/diff/approve/apply; run/tail; receipts ls/show; cap grant/revoke; policy set.
+The command‑line interface provides: world init/info; propose/shadow/diff/approve/apply; run/tail; receipts ls/show; cap grant/revoke; policy set; workspace inspection and edits (`aos ws`); filesystem sync via `aos push`/`aos pull` with `aos.sync.json`.
+
+### Workspace Sync (`aos push` / `aos pull`)
+
+Workspace sync is driven by a map file, `aos.sync.json` (world root by default). It declares how AIR assets, reducer builds, module exports, and workspace trees map to local directories.
+
+Example:
+```json
+{
+  "version": 1,
+  "air": { "dir": "air" },
+  "build": { "reducer_dir": "reducer", "module": "demo/Reducer@1" },
+  "modules": { "pull": false },
+  "workspaces": [
+    {
+      "ref": "reducer",
+      "dir": "reducer",
+      "ignore": ["target/", ".git/", ".aos/"],
+      "annotations": {
+        "README.md": { "sys/commit.title": "Notes Reducer" },
+        "src/lib.rs": { "sys/lang": "rust" },
+        "": { "sys/commit.message": "sync from local" }
+      }
+    }
+  ]
+}
+```
+
+Notes:
+- `workspaces[].ref` uses `<workspace>[@<version>][/path]`; `aos push` rejects versioned refs.
+- `annotations` values can be strings or JSON; strings are stored as UTF-8 blobs, JSON values are stored as canonical CBOR.
+- Workspace paths are URL-safe; filesystem sync encodes per-segment using `~`-hex on UTF-8 bytes for non URL-safe segments or segments starting with `~`. Non-UTF-8 names are rejected for determinism.
 
 ### SDK
 

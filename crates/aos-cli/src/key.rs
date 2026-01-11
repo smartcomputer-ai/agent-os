@@ -44,9 +44,12 @@ fn schema_index(schemas: &HashMap<aos_air_types::Name, DefSchema>) -> SchemaInde
 
 fn load_manifest_for_keys(dirs: &ResolvedDirs) -> Result<LoadedManifest> {
     let store = Arc::new(FsStore::open(&dirs.store_root).context("open store")?);
-    aos_host::manifest_loader::load_from_assets(store, &dirs.air_dir)
-        .context("load manifest for key encoding")?
-        .ok_or_else(|| anyhow!("no manifest found in {}", dirs.air_dir.display()))
+    let Some(manifest_hash) =
+        crate::util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
+            anyhow::bail!("no manifest found in journal; run `aos push` first");
+        };
+    aos_kernel::ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
+        .context("load manifest for key encoding")
 }
 
 fn encode_key_value_for_reducer(
@@ -196,6 +199,11 @@ fn normalize_err(err: ValueNormalizeError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aos_host::config::HostConfig;
+    use aos_host::host::WorldHost;
+    use aos_host::manifest_loader;
+    use aos_kernel::KernelConfig;
+    use aos_store::FsStore;
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
@@ -292,6 +300,7 @@ mod tests {
             store_root: store_root.clone(),
             control_socket: store_root.join("control.sock"),
         };
+        seed_world(&dirs);
         (tmp, dirs)
     }
 
@@ -321,7 +330,36 @@ mod tests {
 }"#,
         )
         .unwrap();
+        reset_journal(&dirs.store_root);
+        seed_world(&dirs);
         (tmp, dirs)
+    }
+
+    fn seed_world(dirs: &ResolvedDirs) {
+        let store = Arc::new(FsStore::open(&dirs.store_root).expect("open store"));
+        let assets = manifest_loader::load_from_assets_with_defs(store.clone(), &dirs.air_dir)
+            .expect("load assets")
+            .expect("manifest assets");
+        let mut host = WorldHost::from_loaded_manifest(
+            store,
+            assets.loaded,
+            &dirs.store_root,
+            HostConfig {
+                allow_placeholder_secrets: true,
+                ..HostConfig::default()
+            },
+            KernelConfig {
+                allow_placeholder_secrets: true,
+                ..KernelConfig::default()
+            },
+        )
+        .expect("create host");
+        host.kernel_mut().create_snapshot().expect("snapshot");
+    }
+
+    fn reset_journal(store_root: &PathBuf) {
+        let journal = store_root.join(".aos/journal/journal.log");
+        let _ = fs::remove_file(journal);
     }
 
     fn write_manifest(air_dir: &PathBuf) {

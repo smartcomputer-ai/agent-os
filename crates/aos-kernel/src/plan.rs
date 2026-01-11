@@ -634,10 +634,7 @@ impl PlanInstance {
         payload: &[u8],
     ) -> Result<bool, KernelError> {
         if let Some(wait) = self.receipt_waits.remove(&intent_hash) {
-            let value = match serde_cbor::from_slice(payload) {
-                Ok(v) => v,
-                Err(_) => ExprValue::Bytes(payload.to_vec()),
-            };
+            let value = decode_receipt_value(payload);
             self.receipt_values.insert(wait.step_id.clone(), value);
             self.step_states
                 .insert(wait.step_id.clone(), StepState::Pending);
@@ -1024,6 +1021,85 @@ fn expr_value_key_to_cbor_value(key: &ValueKey) -> CborValue {
     }
 }
 
+fn decode_receipt_value(payload: &[u8]) -> ExprValue {
+    if let Ok(value) = serde_cbor::from_slice::<ExprValue>(payload) {
+        return value;
+    }
+    if let Ok(cbor) = serde_cbor::from_slice::<CborValue>(payload) {
+        if let Some(value) = cbor_value_to_expr_value_loose(&cbor) {
+            return value;
+        }
+    }
+    ExprValue::Bytes(payload.to_vec())
+}
+
+fn cbor_value_to_expr_value_loose(value: &CborValue) -> Option<ExprValue> {
+    match value {
+        CborValue::Null => Some(ExprValue::Null),
+        CborValue::Bool(v) => Some(ExprValue::Bool(*v)),
+        CborValue::Integer(v) => {
+            if *v >= 0 {
+                u64::try_from(*v).ok().map(ExprValue::Nat)
+            } else {
+                i64::try_from(*v).ok().map(ExprValue::Int)
+            }
+        }
+        CborValue::Bytes(bytes) => Some(ExprValue::Bytes(bytes.clone())),
+        CborValue::Text(text) => {
+            if let Ok(hash) = HashRef::new(text.clone()) {
+                Some(ExprValue::Hash(hash))
+            } else {
+                Some(ExprValue::Text(text.clone()))
+            }
+        }
+        CborValue::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(cbor_value_to_expr_value_loose(item)?);
+            }
+            Some(ExprValue::List(out))
+        }
+        CborValue::Map(entries) => {
+            let all_text = entries
+                .iter()
+                .all(|(key, _)| matches!(key, CborValue::Text(_)));
+            if all_text {
+                let mut record = IndexMap::new();
+                for (key, value) in entries {
+                    let CborValue::Text(field) = key else {
+                        continue;
+                    };
+                    record.insert(field.clone(), cbor_value_to_expr_value_loose(value)?);
+                }
+                Some(ExprValue::Record(record))
+            } else {
+                let mut map = ExecValueMap::new();
+                for (key, value) in entries {
+                    let key = cbor_key_to_value_key(key)?;
+                    let value = cbor_value_to_expr_value_loose(value)?;
+                    map.insert(key, value);
+                }
+                Some(ExprValue::Map(map))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn cbor_key_to_value_key(value: &CborValue) -> Option<ValueKey> {
+    match value {
+        CborValue::Text(text) => Some(ValueKey::Text(text.clone())),
+        CborValue::Integer(v) => {
+            if *v >= 0 {
+                u64::try_from(*v).ok().map(ValueKey::Nat)
+            } else {
+                i64::try_from(*v).ok().map(ValueKey::Int)
+            }
+        }
+        _ => None,
+    }
+}
+
 fn value_key_to_literal(key: &ValueKey) -> ValueLiteral {
     match key {
         ValueKey::Int(v) => ValueLiteral::Int(ValueInt { int: *v }),
@@ -1179,6 +1255,7 @@ mod tests {
             Box::new(AllowAllPolicy),
             effect_catalog,
             builtin_schema_index(),
+            None,
             None,
             None,
             None,

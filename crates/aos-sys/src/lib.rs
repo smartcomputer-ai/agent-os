@@ -1,47 +1,62 @@
 //! Shared types for system reducers (`sys/*`).
 //!
 //! This crate provides common data structures used by built-in system reducers
-//! like `sys/ObjectCatalog@1`. The types mirror the schemas in
+//! like `sys/Workspace@1`. The types mirror the schemas in
 //! `spec/defs/builtin-schemas.air.json`.
 
 #![no_std]
 
 extern crate alloc;
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
-// ObjectCatalog types (sys/ObjectCatalog@1)
+// Workspace types (sys/Workspace@1)
 // ---------------------------------------------------------------------------
 
-/// Version counter for catalog entries.
-pub type Version = u64;
+/// Version counter for workspace commits.
+pub type WorkspaceVersion = u64;
 
-/// Metadata describing a single object version (`sys/ObjectMeta@1`).
+/// Commit metadata for a workspace version (`sys/WorkspaceCommitMeta@1`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ObjectMeta {
+pub struct WorkspaceCommitMeta {
+    pub root_hash: String,
+    pub owner: String,
+    pub created_at: u64,
+}
+
+/// Reducer state: append-only history of workspace commits (`sys/WorkspaceHistory@1`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WorkspaceHistory {
+    pub latest: WorkspaceVersion,
+    pub versions: BTreeMap<WorkspaceVersion, WorkspaceCommitMeta>,
+}
+
+/// Event to commit a new workspace version (`sys/WorkspaceCommit@1`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceCommit {
+    pub workspace: String,
+    pub expected_head: Option<WorkspaceVersion>,
+    pub meta: WorkspaceCommitMeta,
+}
+
+/// Tree entry within a workspace (`sys/WorkspaceEntry@1`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceEntry {
     pub name: String,
     pub kind: String,
     pub hash: String,
-    pub tags: BTreeSet<String>,
-    pub created_at: u64,
-    pub owner: String,
+    pub size: u64,
+    pub mode: u64,
 }
 
-/// Reducer state: append-only versions per object name (`sys/ObjectVersions@1`).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ObjectVersions {
-    pub latest: Version,
-    pub versions: BTreeMap<Version, ObjectMeta>,
-}
-
-/// Event to register an object in the catalog (`sys/ObjectRegistered@1`).
+/// Workspace tree node (`sys/WorkspaceTree@1`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ObjectRegistered {
-    pub meta: ObjectMeta,
+pub struct WorkspaceTree {
+    pub entries: Vec<WorkspaceEntry>,
 }
 
 // ---------------------------------------------------------------------------
