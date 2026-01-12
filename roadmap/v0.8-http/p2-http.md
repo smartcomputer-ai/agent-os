@@ -28,6 +28,19 @@ Provide a local HTTP server for interactive UI and tooling that:
    (no control socket hop).
 5) JSON is the default wire format; CBOR is supported via content negotiation.
 6) Streaming uses SSE for progress and journal tailing (ephemeral only).
+7) HTTP support is feature-gated in `aos-host` to keep dependencies optional.
+
+## Implementation Notes
+
+- Crate: `crates/aos-host`.
+- Feature flag: `http-server` (gates `axum`/`hyper`/`tower` deps).
+- Suggested modules:
+  - `crates/aos-host/src/http/mod.rs` (server startup + router)
+  - `crates/aos-host/src/http/api.rs` (maps `/api/*` to control handlers)
+  - `crates/aos-host/src/http/publish.rs` (publish registry routing + asset serving)
+- Integration point: `crates/aos-host/src/modes/daemon.rs` next to control server startup.
+- Shared logic: factor control request handling into a reusable helper so both
+  control socket and HTTP routes reuse the same validation and kernel calls.
 
 ## Transport and Content Types
 
