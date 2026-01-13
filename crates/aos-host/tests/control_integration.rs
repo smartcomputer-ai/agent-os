@@ -82,7 +82,7 @@ async fn control_channel_round_trip() {
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
     // Start daemon
-    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None);
+    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None, None);
     let daemon_handle = tokio::spawn(async move { daemon.run().await });
 
     // Start control server
@@ -224,7 +224,7 @@ async fn control_channel_errors() {
 
     let (control_tx, control_rx) = mpsc::channel(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None);
+    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None, None);
     let daemon_handle = tokio::spawn(async move { daemon.run().await });
 
     let sock_dir = TempDir::new().unwrap();
@@ -300,7 +300,7 @@ async fn control_channel_put_blob() {
 
     let (control_tx, control_rx) = mpsc::channel(4);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None);
+    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None, None);
     let daemon_handle = tokio::spawn(async move { daemon.run().await });
 
     let sock_dir = TempDir::new().unwrap();

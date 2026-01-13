@@ -163,8 +163,21 @@ async fn run_daemon(
         }
     });
 
+    let http_config = host.config().http_server.clone();
+    let http_handle = aos_host::http::spawn_http_server(
+        http_config,
+        control_tx.clone(),
+        shutdown_tx.clone(),
+    );
+
     // Create and run daemon
-    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, Some(server_handle));
+    let mut daemon = WorldDaemon::new(
+        host,
+        control_rx,
+        shutdown_rx,
+        Some(server_handle),
+        http_handle,
+    );
     daemon.run().await?;
 
     Ok(())

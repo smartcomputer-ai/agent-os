@@ -60,6 +60,11 @@ pub enum ControlMsg {
     JournalHead {
         resp: oneshot::Sender<Result<aos_kernel::ReadMeta, HostError>>,
     },
+    JournalTail {
+        from: u64,
+        limit: Option<u64>,
+        resp: oneshot::Sender<Result<crate::control::JournalTail, HostError>>,
+    },
     EventSend {
         event: ExternalEvent,
         resp: oneshot::Sender<Result<(), HostError>>,
@@ -155,6 +160,7 @@ pub struct WorldDaemon<S: Store + 'static> {
     control_rx: mpsc::Receiver<ControlMsg>,
     shutdown_rx: broadcast::Receiver<()>,
     control_server: Option<JoinHandle<()>>,
+    http_server: Option<JoinHandle<()>>,
 }
 
 impl<S: Store + 'static> WorldDaemon<S> {
@@ -169,6 +175,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
         control_rx: mpsc::Receiver<ControlMsg>,
         shutdown_rx: broadcast::Receiver<()>,
         control_server: Option<JoinHandle<()>>,
+        http_server: Option<JoinHandle<()>>,
     ) -> Self {
         let mut daemon = Self {
             host,
@@ -176,6 +183,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
             control_rx,
             shutdown_rx,
             control_server,
+            http_server,
         };
 
         // Automatically rehydrate timers from pending reducer receipts so callers
@@ -283,6 +291,9 @@ impl<S: Store + 'static> WorldDaemon<S> {
         tracing::info!("World daemon stopped");
         // Ensure control server task is joined if present
         if let Some(handle) = self.control_server.take() {
+            let _ = handle.await;
+        }
+        if let Some(handle) = self.http_server.take() {
             let _ = handle.await;
         }
         Ok(())
@@ -399,6 +410,34 @@ impl<S: Store + 'static> WorldDaemon<S> {
             ControlMsg::JournalHead { resp } => {
                 let meta = self.host.kernel().get_journal_head();
                 let _ = resp.send(Ok(meta));
+            }
+            ControlMsg::JournalTail { from, limit, resp } => {
+                let res = (|| -> Result<crate::control::JournalTail, HostError> {
+                    let scan = self.host.kernel().tail_scan_after(from)?;
+                    let mut entries = Vec::new();
+                    for intent in scan.intents {
+                        entries.push(crate::control::JournalTailEntry::Intent {
+                            seq: intent.seq,
+                            record: intent.record,
+                        });
+                    }
+                    for receipt in scan.receipts {
+                        entries.push(crate::control::JournalTailEntry::Receipt {
+                            seq: receipt.seq,
+                            record: receipt.record,
+                        });
+                    }
+                    entries.sort_by_key(|entry| entry.seq());
+                    if let Some(limit) = limit {
+                        entries.truncate(limit as usize);
+                    }
+                    Ok(crate::control::JournalTail {
+                        from: scan.from,
+                        to: scan.to,
+                        entries,
+                    })
+                })();
+                let _ = resp.send(res);
             }
             ControlMsg::PutBlob { data, resp } => {
                 let res = self.host.put_blob(&data);

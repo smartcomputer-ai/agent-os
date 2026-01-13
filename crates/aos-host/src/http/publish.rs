@@ -1,9 +1,17 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use aos_sys::HttpPublishRule;
+use aos_sys::{HttpPublishRegistry, HttpPublishRule};
+use axum::body::Body;
+use axum::extract::State;
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
+use base64::prelude::*;
+use serde::Deserialize;
 
 #[cfg(test)]
 use aos_sys::WorkspaceRef;
+
+use crate::http::{HttpState, control_call};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedPath {
@@ -126,6 +134,511 @@ pub fn join_workspace_path(base: Option<&str>, suffix: &str) -> String {
     format!("{base}/{suffix}")
 }
 
+pub async fn handler(
+    State(state): State<HttpState>,
+    req: axum::http::Request<Body>,
+) -> Response {
+    match handle_publish(state, req).await {
+        Ok(resp) => resp,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn handle_publish(
+    state: HttpState,
+    req: axum::http::Request<Body>,
+) -> Result<Response, PublishError> {
+    let path = req
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or_else(|| req.uri().path());
+    if path.starts_with("/api") {
+        return Err(PublishError::not_found());
+    }
+    let registry = load_registry(&state).await?;
+    let Some(registry) = registry else {
+        return Err(PublishError::not_found());
+    };
+    let matched = match_publish_rule(&registry.rules, path)
+        .map_err(|err| PublishError::invalid(format!("match publish rule: {err:?}")))?;
+    let Some(matched) = matched else {
+        return Err(PublishError::not_found());
+    };
+    let rule = matched.rule;
+    if rule.cache == "immutable" && rule.workspace.version.is_none() {
+        return Err(PublishError::invalid(
+            "cache=immutable requires pinned workspace.version",
+        ));
+    }
+
+    let base_path = rule.workspace.path.as_deref();
+    let target_path = join_workspace_path(base_path, &matched.suffix);
+    let resolve = workspace_resolve(&state, &rule.workspace).await?;
+    if !resolve.exists {
+        return Err(PublishError::not_found());
+    }
+    let root_hash = resolve
+        .root_hash
+        .ok_or_else(|| PublishError::invalid("workspace resolve missing root_hash"))?;
+
+    let (entry, entry_path) = match resolve_entry(
+        &state,
+        &root_hash,
+        &target_path,
+    )
+    .await?
+    {
+        Some(entry) => entry,
+        None => return Err(PublishError::not_found()),
+    };
+
+    if entry.kind == "file" {
+        if matched.request.had_trailing_slash {
+            return Err(PublishError::not_found());
+        }
+        let bytes = workspace_read_bytes(&state, &root_hash, &entry_path, None).await?;
+        let mut headers = resolve_headers(&state, &root_hash, &entry_path).await?;
+        apply_cache_headers(rule, &entry.hash, &mut headers);
+        headers.insert(
+            HeaderName::from_static("etag"),
+            HeaderValue::from_str(&entry.hash).map_err(|_| {
+                PublishError::invalid(format!("invalid etag value {}", entry.hash))
+            })?,
+        );
+        headers.insert(
+            HeaderName::from_static("content-length"),
+            HeaderValue::from_str(&bytes.len().to_string()).unwrap_or_else(|_| {
+                HeaderValue::from_static("0")
+            }),
+        );
+        if !headers.contains_key(HeaderName::from_static("content-type")) {
+            headers.insert(
+                HeaderName::from_static("content-type"),
+                HeaderValue::from_static("application/octet-stream"),
+            );
+        }
+        headers.insert(
+            HeaderName::from_static("x-aos-root-hash"),
+            HeaderValue::from_str(&root_hash).map_err(|_| {
+                PublishError::invalid("invalid x-aos-root-hash header")
+            })?,
+        );
+        let mut resp = Response::new(Body::from(bytes));
+        *resp.status_mut() = StatusCode::OK;
+        *resp.headers_mut() = headers;
+        return Ok(resp);
+    }
+
+    if entry.kind == "dir" {
+        if !matched.request.had_trailing_slash {
+            return Ok(redirect_with_slash(&matched.request));
+        }
+        if let Some(default_doc) = rule.default_doc.as_deref() {
+            let doc_path = join_workspace_path(Some(&entry_path), default_doc);
+            if let Some(doc_entry) =
+                workspace_read_ref(&state, &root_hash, &doc_path).await?
+            {
+                if doc_entry.kind == "file" {
+                    let bytes =
+                        workspace_read_bytes(&state, &root_hash, &doc_path, None).await?;
+                    let mut headers =
+                        resolve_headers(&state, &root_hash, &doc_path).await?;
+                    apply_cache_headers(rule, &doc_entry.hash, &mut headers);
+                    headers.insert(
+                        HeaderName::from_static("etag"),
+                        HeaderValue::from_str(&doc_entry.hash).map_err(|_| {
+                            PublishError::invalid("invalid etag value")
+                        })?,
+                    );
+                    headers.insert(
+                        HeaderName::from_static("content-length"),
+                        HeaderValue::from_str(&bytes.len().to_string()).unwrap_or_else(|_| {
+                            HeaderValue::from_static("0")
+                        }),
+                    );
+                    if !headers.contains_key(HeaderName::from_static("content-type")) {
+                        headers.insert(
+                            HeaderName::from_static("content-type"),
+                            HeaderValue::from_static("application/octet-stream"),
+                        );
+                    }
+                    headers.insert(
+                        HeaderName::from_static("x-aos-root-hash"),
+                        HeaderValue::from_str(&root_hash).map_err(|_| {
+                            PublishError::invalid("invalid x-aos-root-hash header")
+                        })?,
+                    );
+                    let mut resp = Response::new(Body::from(bytes));
+                    *resp.status_mut() = StatusCode::OK;
+                    *resp.headers_mut() = headers;
+                    resp.headers_mut().insert(
+                        HeaderName::from_static("x-aos-default-doc"),
+                        HeaderValue::from_static("true"),
+                    );
+                    return Ok(resp);
+                }
+            }
+        }
+        if rule.allow_dir_listing {
+            let listing =
+                workspace_list(&state, &root_hash, Some(&entry_path)).await?;
+            return Ok((
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                serde_json::to_vec(&listing).map_err(|e| {
+                    PublishError::invalid(format!("encode listing: {e}"))
+                })?,
+            )
+                .into_response());
+        }
+    }
+
+    Err(PublishError::not_found())
+}
+
+fn redirect_with_slash(request: &NormalizedPath) -> Response {
+    let mut location = if request.path == "/" {
+        "/".to_string()
+    } else {
+        format!("{}/", request.path)
+    };
+    if let Some(query) = &request.query {
+        location.push('?');
+        location.push_str(query);
+    }
+    (
+        StatusCode::PERMANENT_REDIRECT,
+        [(axum::http::header::LOCATION, location)],
+    )
+        .into_response()
+}
+
+async fn load_registry(
+    state: &HttpState,
+) -> Result<Option<HttpPublishRegistry>, PublishError> {
+    let result = control_call(
+        state,
+        "state-get",
+        serde_json::json!({
+            "reducer": "sys/HttpPublish@1",
+        }),
+    )
+    .await
+    .map_err(|err| PublishError::invalid(err.message))?;
+    let state_b64 = result.get("state_b64").and_then(|v| v.as_str());
+    let Some(state_b64) = state_b64 else {
+        return Ok(None);
+    };
+    let bytes = BASE64_STANDARD
+        .decode(state_b64)
+        .map_err(|e| PublishError::invalid(format!("decode state: {e}")))?;
+    let registry: HttpPublishRegistry = serde_cbor::from_slice(&bytes)
+        .map_err(|e| PublishError::invalid(format!("decode registry: {e}")))?;
+    Ok(Some(registry))
+}
+
+async fn resolve_entry(
+    state: &HttpState,
+    root_hash: &str,
+    target_path: &str,
+) -> Result<Option<(WorkspaceRefEntry, String)>, PublishError> {
+    if target_path.is_empty() {
+        return Ok(Some((
+            WorkspaceRefEntry {
+                kind: "dir".to_string(),
+                hash: root_hash.to_string(),
+                size: 0,
+                mode: 0,
+            },
+            "".to_string(),
+        )));
+    }
+    if let Some(entry) = workspace_read_ref(state, root_hash, target_path).await? {
+        return Ok(Some((entry, target_path.to_string())));
+    }
+    Ok(None)
+}
+
+async fn resolve_headers(
+    state: &HttpState,
+    root_hash: &str,
+    path: &str,
+) -> Result<HeaderMap, PublishError> {
+    let mut headers = HeaderMap::new();
+    let mut remaining = HashSet::from([
+        "http.content-type",
+        "http.content-encoding",
+        "http.content-language",
+        "http.content-disposition",
+        "http.cache-control",
+    ]);
+    let mut paths = Vec::new();
+    let mut cursor = if path.is_empty() { None } else { Some(path.to_string()) };
+    loop {
+        paths.push(cursor.clone());
+        match cursor {
+            Some(current) => cursor = parent_path(&current),
+            None => break,
+        }
+    }
+
+    for path in paths {
+        if remaining.is_empty() {
+            break;
+        }
+        let annotations = workspace_annotations_get(state, root_hash, path.as_deref()).await?;
+        if let Some(map) = annotations {
+            for (key, hash) in map {
+                if !remaining.contains(key.as_str()) {
+                    continue;
+                }
+                let bytes = blob_get(state, &hash).await?;
+                if let Ok(value) = std::str::from_utf8(&bytes) {
+                    let header_name = key.strip_prefix("http.").unwrap_or(&key);
+                    if let Ok(name) = HeaderName::from_bytes(header_name.as_bytes()) {
+                        if let Ok(header_value) = HeaderValue::from_str(value) {
+                            headers.insert(name, header_value);
+                            remaining.remove(key.as_str());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(headers)
+}
+
+fn parent_path(path: &str) -> Option<String> {
+    let mut parts: Vec<&str> = path.split('/').collect();
+    if parts.is_empty() {
+        return None;
+    }
+    parts.pop();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("/"))
+    }
+}
+
+fn apply_cache_headers(rule: &HttpPublishRule, entry_hash: &str, headers: &mut HeaderMap) {
+    match rule.cache.as_str() {
+        "immutable" => {
+            headers.insert(
+                HeaderName::from_static("cache-control"),
+                HeaderValue::from_static("public, max-age=31536000, immutable"),
+            );
+        }
+        "etag" => {
+            if !headers.contains_key(HeaderName::from_static("cache-control")) {
+                headers.insert(
+                    HeaderName::from_static("cache-control"),
+                    HeaderValue::from_static("no-cache"),
+                );
+            }
+        }
+        _ => {}
+    }
+    if !headers.contains_key(HeaderName::from_static("etag")) {
+        if let Ok(value) = HeaderValue::from_str(entry_hash) {
+            headers.insert(HeaderName::from_static("etag"), value);
+        }
+    }
+}
+
+async fn workspace_resolve(
+    state: &HttpState,
+    reference: &aos_sys::WorkspaceRef,
+) -> Result<WorkspaceResolveReceipt, PublishError> {
+    let result = control_call(
+        state,
+        "workspace-resolve",
+        serde_json::json!({
+            "workspace": reference.workspace.as_str(),
+            "version": reference.version,
+        }),
+    )
+    .await
+    .map_err(|err| PublishError::invalid(err.message))?;
+    serde_json::from_value(result)
+        .map_err(|e| PublishError::invalid(format!("decode resolve: {e}")))
+}
+
+async fn workspace_read_ref(
+    state: &HttpState,
+    root_hash: &str,
+    path: &str,
+) -> Result<Option<WorkspaceRefEntry>, PublishError> {
+    let result = control_call(
+        state,
+        "workspace-read-ref",
+        serde_json::json!({
+            "root_hash": root_hash,
+            "path": path,
+        }),
+    )
+    .await
+    .map_err(|err| PublishError::invalid(err.message))?;
+    serde_json::from_value(result)
+        .map_err(|e| PublishError::invalid(format!("decode read_ref: {e}")))
+}
+
+async fn workspace_read_bytes(
+    state: &HttpState,
+    root_hash: &str,
+    path: &str,
+    range: Option<(u64, u64)>,
+) -> Result<Vec<u8>, PublishError> {
+    let range_val = range.map(|(start, end)| serde_json::json!({ "start": start, "end": end }));
+    let result = control_call(
+        state,
+        "workspace-read-bytes",
+        serde_json::json!({
+            "root_hash": root_hash,
+            "path": path,
+            "range": range_val,
+        }),
+    )
+    .await
+    .map_err(|err| PublishError::invalid(err.message))?;
+    let data_b64 = result
+        .get("data_b64")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PublishError::invalid("missing data_b64"))?;
+    BASE64_STANDARD
+        .decode(data_b64)
+        .map_err(|e| PublishError::invalid(format!("decode bytes: {e}")))
+}
+
+async fn workspace_list(
+    state: &HttpState,
+    root_hash: &str,
+    path: Option<&str>,
+) -> Result<WorkspaceListReceipt, PublishError> {
+    let result = control_call(
+        state,
+        "workspace-list",
+        serde_json::json!({
+            "root_hash": root_hash,
+            "path": path,
+            "scope": "dir",
+            "limit": 1000,
+        }),
+    )
+    .await
+    .map_err(|err| PublishError::invalid(err.message))?;
+    serde_json::from_value(result)
+        .map_err(|e| PublishError::invalid(format!("decode list: {e}")))
+}
+
+async fn workspace_annotations_get(
+    state: &HttpState,
+    root_hash: &str,
+    path: Option<&str>,
+) -> Result<Option<HashMap<String, String>>, PublishError> {
+    let result = control_call(
+        state,
+        "workspace-annotations-get",
+        serde_json::json!({
+            "root_hash": root_hash,
+            "path": path,
+        }),
+    )
+    .await
+    .map_err(|err| PublishError::invalid(err.message))?;
+    let receipt: WorkspaceAnnotationsGetReceipt = serde_json::from_value(result)
+        .map_err(|e| PublishError::invalid(format!("decode annotations: {e}")))?;
+    Ok(receipt.annotations)
+}
+
+async fn blob_get(state: &HttpState, hash: &str) -> Result<Vec<u8>, PublishError> {
+    let result = control_call(
+        state,
+        "blob-get",
+        serde_json::json!({
+            "hash_hex": hash,
+        }),
+    )
+    .await
+    .map_err(|err| PublishError::invalid(err.message))?;
+    let data_b64 = result
+        .get("data_b64")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| PublishError::invalid("missing data_b64"))?;
+    BASE64_STANDARD
+        .decode(data_b64)
+        .map_err(|e| PublishError::invalid(format!("decode blob: {e}")))
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkspaceResolveReceipt {
+    exists: bool,
+    #[serde(default)]
+    root_hash: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+struct WorkspaceRefEntry {
+    kind: String,
+    hash: String,
+    size: u64,
+    mode: u64,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+struct WorkspaceListReceipt {
+    entries: Vec<WorkspaceListEntry>,
+    #[serde(default)]
+    next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+struct WorkspaceListEntry {
+    path: String,
+    kind: String,
+    #[serde(default)]
+    hash: Option<String>,
+    #[serde(default)]
+    size: Option<u64>,
+    #[serde(default)]
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WorkspaceAnnotationsGetReceipt {
+    annotations: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug)]
+struct PublishError {
+    status: StatusCode,
+    message: String,
+}
+
+impl PublishError {
+    fn invalid(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: msg.into(),
+        }
+    }
+
+    fn not_found() -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: "not found".into(),
+        }
+    }
+}
+
+impl IntoResponse for PublishError {
+    fn into_response(self) -> Response {
+        (self.status, self.message).into_response()
+    }
+}
+
 fn normalize_path(raw: &str, require_leading_slash: bool) -> Result<NormalizedPath, PathError> {
     let raw = raw.split('#').next().unwrap_or("");
     let (raw_path, query) = match raw.split_once('?') {
@@ -222,6 +735,9 @@ fn is_valid_segment(segment: &str) -> bool {
     if segment.is_empty() {
         return false;
     }
+    if segment == "." || segment == ".." {
+        return false;
+    }
     segment.chars().all(is_url_safe_char)
 }
 
@@ -265,6 +781,12 @@ mod tests {
     fn normalize_rejects_invalid_segment_chars() {
         let err = normalize_request_path("/foo/bar$").unwrap_err();
         assert_eq!(err, PathError::InvalidSegment("bar$".to_string()));
+    }
+
+    #[test]
+    fn normalize_rejects_dot_segments() {
+        let err = normalize_request_path("/foo/..").unwrap_err();
+        assert_eq!(err, PathError::InvalidSegment("..".to_string()));
     }
 
     #[test]

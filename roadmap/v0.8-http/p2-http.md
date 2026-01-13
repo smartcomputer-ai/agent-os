@@ -3,20 +3,19 @@
 **Priority**: P2  
 **Effort**: Medium  
 **Risk if deferred**: Medium (blocks local UI + browser tooling)  
-**Status**: Draft
+**Status**: Complete
 
 ## Goal
 
 Provide a local HTTP server for interactive UI and tooling that:
 - Serves published workspace assets using the publish registry (P1).
 - Exposes a stable, deterministic API for reads and controlled writes.
-- Streams ephemeral progress for long-running effects.
 
 ## Non-Goals (v0.8)
 
 - Remote, multi-tenant hosting or public auth.
 - Arbitrary compute or reducer logic inside the host.
-- Rich websocket protocols beyond basic streaming.
+- Streaming (deferred to P4).
 
 ## Decision Summary
 
@@ -27,13 +26,13 @@ Provide a local HTTP server for interactive UI and tooling that:
 4) HTTP handlers call the same in-process control handlers used by the daemon
    (no control socket hop).
 5) JSON is the default wire format; CBOR is supported via content negotiation.
-6) Streaming uses SSE for progress and journal tailing (ephemeral only).
-7) HTTP support is feature-gated in `aos-host` to keep dependencies optional.
+6) HTTP support is built-in; enable/disable and bind via host config/env.
+7) Streaming endpoints are implemented in P4.
 
 ## Implementation Notes
 
 - Crate: `crates/aos-host`.
-- Feature flag: `http-server` (gates `axum`/`hyper`/`tower` deps).
+- Config: `HostConfig.http_server`, `AOS_HTTP_BIND`, `AOS_HTTP_DISABLE`.
 - Suggested modules:
   - `crates/aos-host/src/http/mod.rs` (server startup + router)
   - `crates/aos-host/src/http/api.rs` (maps `/api/*` to control handlers)
@@ -62,6 +61,8 @@ Provide a local HTTP server for interactive UI and tooling that:
 - `/api/*` is reserved and never served via publish rules.
 
 ## API Routes (v0.8)
+
+Streaming endpoints are defined in P4 (`p4-stream.md`).
 
 ### General
 - `GET /api/health` -> `{ ok: true, manifest_hash, journal_height }`
@@ -93,7 +94,7 @@ Provide a local HTTP server for interactive UI and tooling that:
 - `GET /api/workspace/read-bytes?root_hash=...&path=...&range=start-end`
 - `GET /api/workspace/annotations?root_hash=...&path=...`
 
-### Workspace (write, local/admin only)
+### Workspace (write)
 - `POST /api/workspace/write-bytes`
   - body: `{ root_hash, path, bytes_b64, mode? }`
 - `POST /api/workspace/remove`
@@ -105,24 +106,18 @@ Provide a local HTTP server for interactive UI and tooling that:
 - `POST /api/blob` -> `{ hash }`
 - `GET /api/blob/<hash>` -> bytes
 
-### Governance (local/admin only)
+### Governance
 - `POST /api/gov/propose`
 - `POST /api/gov/shadow`
 - `POST /api/gov/approve`
 - `POST /api/gov/apply`
 
-### Streaming (SSE)
-- `GET /api/stream?topics=journal,effects,plans`
-  - `journal`: append-only events with cursor
-  - `effects`: adapter progress (ephemeral)
-  - `plans`: plan step transitions (ephemeral)
-
 ## Security
 
 - Default bind is loopback only.
 - Optional token auth can be added for non-local binds.
-- Write endpoints are local/admin only (events, receipts, workspace writes,
-  governance). Reads may be public when explicitly enabled.
+- Write endpoint hardening (auth/gating) is deferred; v0.8 relies on loopback
+  binding and operator trust.
 
 ## Notes
 
@@ -132,8 +127,9 @@ Provide a local HTTP server for interactive UI and tooling that:
   separate transport for non-HTTP clients.
 - CBOR payloads must be canonical; JSON inputs are canonicalized server-side.
 
-## Open Questions
+## Done
 
-- Do we expose all control verbs over HTTP or only a curated subset?
-- Should the API support `Range` headers for byte reads instead of query params?
-- Do we need a dedicated publish update endpoint, or rely on normal events?
+- HTTP server bootstraps in daemon mode with shared control handling.
+- `/api/*` routes wired for manifest/defs/state/events/receipts/journal/workspace/blob/gov.
+- Publish handler integrated as router fallback with normalized path matching.
+- CBOR/JSON content negotiation implemented for requests/responses.

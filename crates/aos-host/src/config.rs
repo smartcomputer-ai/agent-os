@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 #[derive(Debug, Clone)]
@@ -12,6 +13,8 @@ pub struct HostConfig {
     pub allow_placeholder_secrets: bool,
     /// HTTP adapter configuration (always present).
     pub http: HttpAdapterConfig,
+    /// HTTP server configuration.
+    pub http_server: HttpServerConfig,
     /// LLM adapter configuration (None disables registration).
     pub llm: Option<LlmAdapterConfig>,
 }
@@ -24,6 +27,7 @@ impl Default for HostConfig {
             eager_module_load: false,
             allow_placeholder_secrets: false,
             http: HttpAdapterConfig::default(),
+            http_server: HttpServerConfig::default(),
             llm: LlmAdapterConfig::from_env().ok(),
         }
     }
@@ -32,7 +36,18 @@ impl Default for HostConfig {
 impl HostConfig {
     /// Build HostConfig using environment defaults (currently same as Default).
     pub fn from_env() -> Self {
-        Self::default()
+        let mut cfg = Self::default();
+        if let Ok(bind) = std::env::var("AOS_HTTP_BIND") {
+            if let Ok(addr) = bind.parse::<SocketAddr>() {
+                cfg.http_server.bind = addr;
+            }
+        }
+        if let Ok(disable) = std::env::var("AOS_HTTP_DISABLE") {
+            if matches!(disable.as_str(), "1" | "true" | "yes") {
+                cfg.http_server.enabled = false;
+            }
+        }
+        cfg
     }
 }
 
@@ -43,6 +58,22 @@ pub struct HttpAdapterConfig {
     pub timeout: Duration,
     /// Maximum response body size in bytes.
     pub max_body_size: usize,
+}
+
+/// Configuration for the HTTP server.
+#[derive(Debug, Clone)]
+pub struct HttpServerConfig {
+    pub enabled: bool,
+    pub bind: SocketAddr,
+}
+
+impl Default for HttpServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bind: SocketAddr::from(([127, 0, 0, 1], 7777)),
+        }
+    }
 }
 
 impl Default for HttpAdapterConfig {

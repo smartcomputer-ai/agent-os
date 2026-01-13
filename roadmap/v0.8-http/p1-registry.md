@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: Medium  
 **Risk if deferred**: High (blocks deterministic HTTP publishing)  
-**Status**: Draft
+**Status**: Complete
 
 ## Goal
 
@@ -204,4 +204,9 @@ On request:
 - Annotation header mapping (UTF-8 decoding and precedence).
 - Cache headers for `etag` vs `immutable`.
 
-## Open Questions
+## Done
+
+- Built-in schemas/types for publish rules and registry.
+- `sys/HttpPublish@1` reducer and built-in module wiring.
+- Host matcher helpers: normalization, longest-prefix selection, suffix handling.
+- Publish serving logic: workspace resolve, default-doc fallback, dir listing, headers, caching.
