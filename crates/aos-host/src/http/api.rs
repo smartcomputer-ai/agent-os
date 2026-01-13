@@ -29,7 +29,6 @@ use crate::http::{HttpState, control_call};
         state_get,
         state_cells,
         events_post,
-        receipts_post,
         journal_head,
         journal_tail,
         workspace_resolve,
@@ -64,7 +63,6 @@ use crate::http::{HttpState, control_call};
             JournalTailResponse,
             JournalTailEntryResponse,
             EventPayload,
-            ReceiptPayload,
             WorkspaceResolveResponse,
             WorkspaceListEntry,
             WorkspaceListResponse,
@@ -339,7 +337,6 @@ pub fn router() -> Router<HttpState> {
         .route("/state/{reducer}", get(state_get))
         .route("/state/{reducer}/cells", get(state_cells))
         .route("/events", post(events_post))
-        .route("/receipts", post(receipts_post))
         .route("/journal/head", get(journal_head))
         .route("/journal", get(journal_tail))
         .route("/workspace/resolve", get(workspace_resolve))
@@ -673,52 +670,6 @@ async fn events_post(
         "key_b64": payload.key_b64,
     });
     let result = control_call(&state, "event-send", payload).await?;
-    Ok(Json(result))
-}
-
-#[derive(Debug, Deserialize, ToSchema)]
-struct ReceiptPayload {
-    intent_hash: String,
-    adapter_id: String,
-    #[serde(default)]
-    payload: Option<serde_json::Value>,
-    #[serde(default)]
-    payload_b64: Option<String>,
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/receipts",
-    tag = "events",
-    request_body = ReceiptPayload,
-    responses(
-        (status = 200, body = EmptyResponse),
-        (status = 400, body = ApiErrorResponse),
-        (status = 500, body = ApiErrorResponse)
-    )
-)]
-async fn receipts_post(
-    State(state): State<HttpState>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Result<impl IntoResponse, ApiError> {
-    let payload: ReceiptPayload = parse_body(&headers, &body)?;
-    let payload_b64 = match (payload.payload_b64, payload.payload) {
-        (Some(b64), _) => b64,
-        (None, Some(value)) => {
-            let bytes = serde_cbor::to_vec(&value)
-                .map_err(|e| ApiError::bad_request(format!("encode cbor: {e}")))?;
-            BASE64_STANDARD.encode(bytes)
-        }
-        _ => return Err(ApiError::bad_request("missing payload or payload_b64")),
-    };
-    let hash = decode_hash_hex(&payload.intent_hash)?;
-    let payload = serde_json::json!({
-        "intent_hash": hash_to_json_array(&hash),
-        "adapter_id": payload.adapter_id,
-        "payload_b64": payload_b64,
-    });
-    let result = control_call(&state, "receipt-inject", payload).await?;
     Ok(Json(result))
 }
 
@@ -1343,19 +1294,4 @@ async fn resolve_root_hash(
     response
         .root_hash
         .ok_or_else(|| ApiError::bad_request("workspace resolve missing root_hash"))
-}
-
-fn decode_hash_hex(raw: &str) -> Result<[u8; 32], ApiError> {
-    let bytes = hex::decode(raw)
-        .map_err(|e| ApiError::bad_request(format!("invalid hash hex: {e}")))?;
-    if bytes.len() != 32 {
-        return Err(ApiError::bad_request("intent_hash must be 32 bytes"));
-    }
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&bytes);
-    Ok(out)
-}
-
-fn hash_to_json_array(hash: &[u8; 32]) -> serde_json::Value {
-    serde_json::Value::Array(hash.iter().map(|b| serde_json::json!(*b)).collect())
 }

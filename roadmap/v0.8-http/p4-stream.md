@@ -52,6 +52,8 @@ activity.
 - Effect/plan topics should be wired to in-process host events only; never write
   to the journal.
 - The stream is best-effort; clients must tolerate missed events and reconnect.
+- Define SSE framing (`event`, `id`, `data`), heartbeat cadence, and resume
+  behavior (align cursor with `/api/journal`; consider `Last-Event-ID`).
 
 ## Tests
 

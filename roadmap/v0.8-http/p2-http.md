@@ -79,11 +79,9 @@ Streaming endpoints are defined in P4 (`p4-stream.md`).
 - `GET /api/state/<reducer>?key_b64=...&consistency=...`
 - `GET /api/state/<reducer>/cells`
 
-### Events and Receipts
+### Events
 - `POST /api/events`
   - body: `{ schema, value?, value_b64? }`
-- `POST /api/receipts`
-  - body: `{ intent_hash, adapter_id, payload?, payload_b64? }`
 
 ### Journal
 - `GET /api/journal/head`
@@ -133,6 +131,6 @@ Streaming endpoints are defined in P4 (`p4-stream.md`).
 ## Done
 
 - HTTP server bootstraps in daemon mode with shared control handling.
-- `/api/*` routes wired for manifest/defs/state/events/receipts/journal/workspace/blob/gov.
+- `/api/*` routes wired for manifest/defs/state/events/journal/workspace/blob/gov.
 - Publish handler integrated as router fallback with normalized path matching.
 - CBOR/JSON content negotiation implemented for requests/responses.
