@@ -92,6 +92,7 @@ Streaming endpoints are defined in P4 (`p4-stream.md`).
 ### Workspace (read)
 - `GET /api/workspace/resolve?workspace=...&version=...`
 - `GET /api/workspace/list?root_hash=...|workspace=...&version=...&path=...&scope=dir|subtree&cursor=...&limit=...`
+  - If neither `root_hash` nor `workspace` is provided, list workspace names.
 - `GET /api/workspace/read-ref?root_hash=...|workspace=...&version=...&path=...`
 - `GET /api/workspace/read-bytes?root_hash=...|workspace=...&version=...&path=...&range=start-end`
 - `GET /api/workspace/annotations?root_hash=...|workspace=...&version=...&path=...`

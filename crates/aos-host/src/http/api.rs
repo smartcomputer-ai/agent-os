@@ -198,6 +198,7 @@ struct WorkspaceResolveResponse {
 
 #[derive(Debug, Serialize, ToSchema)]
 struct WorkspaceListEntry {
+    /// Entry kind: `file`, `dir`, or `workspace` when listing workspaces.
     path: String,
     kind: String,
     hash: Option<String>,
@@ -825,6 +826,12 @@ async fn workspace_list(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceListQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    if query.root_hash.is_none() && query.workspace.is_none() {
+        let response = list_workspaces(&state).await?;
+        let value = serde_json::to_value(response)
+            .map_err(|e| ApiError::bad_request(format!("encode workspace list: {e}")))?;
+        return Ok(Json(value));
+    }
     let root_hash = resolve_root_hash(
         &state,
         query.root_hash,
@@ -1274,6 +1281,43 @@ fn parse_range(raw: &str) -> Option<(u64, u64)> {
     let start = start.parse().ok()?;
     let end = end.parse().ok()?;
     Some((start, end))
+}
+
+async fn list_workspaces(state: &HttpState) -> Result<WorkspaceListResponse, ApiError> {
+    let result = control_call(
+        state,
+        "state-list",
+        serde_json::json!({ "reducer": "sys/Workspace@1" }),
+    )
+    .await?;
+    let cells = result
+        .get("cells")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut names = Vec::new();
+    for cell in cells {
+        let key_b64 = cell.get("key_b64").and_then(|v| v.as_str()).unwrap_or("");
+        let key_bytes = BASE64_STANDARD.decode(key_b64).unwrap_or_default();
+        if let Ok(name) = serde_cbor::from_slice::<String>(&key_bytes) {
+            names.push(name);
+        }
+    }
+    names.sort();
+    let entries = names
+        .into_iter()
+        .map(|name| WorkspaceListEntry {
+            path: name,
+            kind: "workspace".into(),
+            hash: None,
+            size: None,
+            mode: None,
+        })
+        .collect();
+    Ok(WorkspaceListResponse {
+        entries,
+        next_cursor: None,
+    })
 }
 
 async fn resolve_root_hash(
