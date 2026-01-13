@@ -30,7 +30,7 @@ Publishing should not be a bespoke host config. It should be:
 ## Concepts
 
 - **Route**: `path_prefix` with longest-prefix match.
-- **Pinned vs HEAD**: a pinned version can be cached as immutable.
+- **Pinned vs HEAD**: immutable caching is only allowed for pinned versions.
 - **Path normalization**: request paths are normalized before matching.
 
 ## Data Model (Schemas)
@@ -53,6 +53,7 @@ Publishing should not be a bespoke host config. It should be:
 ```
 Notes:
 - `cache` is one of: `"immutable" | "etag"`.
+- `cache = "immutable"` is only valid when `workspace.version` is pinned.
 - `workspace.path` is joined with the request suffix path if set.
 - `workspace.path` follows workspace path rules (no leading `/`).
 - `workspace.version = none` resolves to HEAD.
@@ -62,13 +63,22 @@ Notes:
 
 1) Strip query and fragment from the request URI.
 2) Percent-decode the path.
-3) Normalize slashes: collapse multiple `/` into one, and remove a trailing `/`
-   unless the path is exactly `/`.
-4) Validate segments against workspace path rules (`[A-Za-z0-9._~-]`).
+3) Normalize slashes: collapse multiple `/` into one. Record whether the path
+   ends with `/` (after normalization).
+4) For matching only, remove a trailing `/` unless the path is exactly `/`.
+5) Validate segments against workspace path rules (`[A-Za-z0-9._~-]`).
    If any segment is invalid, return 404.
-5) Match rules by path prefix *by segment*: `/app` matches `/app` and
+6) Match rules by path prefix *by segment*: `/app` matches `/app` and
    `/app/...` but not `/apple`.
-6) Choose the longest-prefix match (most segments).
+7) Choose the longest-prefix match (most segments).
+
+## Trailing Slash Canonicalization
+
+- Path normalization is for matching only; the original trailing slash is
+  preserved for response decisions.
+- If the resolved target is a directory and the request URL did not end in `/`,
+  return a 308 redirect to the slash version (preserve the query string).
+- If the resolved target is a file and the request URL ends in `/`, return 404.
 
 ## File vs Directory Semantics
 
@@ -136,28 +146,46 @@ Notes:
 ## Host Behavior (Serving)
 
 On request:
-1) Select the best rule by `(host?, path_prefix)` using longest-prefix match.
+1) Select the best rule by `path_prefix` using longest-prefix match.
 2) Compute `WorkspaceRef`:
    - `workspace = rule.workspace.workspace`
    - `version = rule.workspace.version`
    - `path = join(rule.workspace.path, request_suffix)`
 3) Call `workspace.resolve`.
-4) Serve via tree effects:
+4) If the resolved target is a directory and the request URL did not end in
+   `/`, return a 308 redirect to the slash version (preserve the query string).
+5) Serve via tree effects:
    - file: `workspace.read_bytes`
    - directory: `workspace.list` (`scope = subtree`) or export archive
-5) If a requested file is missing under a directory path and `default_doc` is
+6) If a requested file is missing under a directory path and `default_doc` is
    set, serve `default_doc` instead. Otherwise return 404.
-6) If the request targets a directory path (empty suffix) and
+7) If the request targets a directory path (empty suffix) and
    `allow_dir_listing = true`, the host may return a directory listing instead
    of a file response.
-7) If serving bytes, read workspace annotations at the resolved path and map
-   known keys to HTTP headers (e.g., `http.content-type`,
-   `http.content-encoding`, `http.cache-control`).
+8) If serving bytes, read workspace annotations at the resolved path and map
+   known keys to HTTP headers (see HTTP Annotation Semantics). Rule-derived
+   headers (Cache-Control, ETag) override annotation values.
+
+## HTTP Annotation Semantics
+
+- Workspace annotations are `map<text, hash>`; for `http.*` keys the referenced
+  blob must be UTF-8 bytes representing the header value exactly.
+- If the blob is not valid UTF-8, ignore the header.
+- Header precedence is by path proximity: file annotation overrides the nearest
+  directory annotation, which overrides none.
+- The host should honor a safe allowlist of headers:
+  `http.content-type`, `http.content-encoding`, `http.content-language`,
+  `http.content-disposition`, `http.cache-control`.
 
 ## Caching Semantics
 
-- **Pinned version**: `Cache-Control: immutable`, `ETag = root_hash`.
-- **HEAD**: `ETag = root_hash`, revalidate on change.
+- `cache = "etag"`: set `ETag = entry_hash` and `Cache-Control: no-cache` (or
+  `max-age=0`) to force revalidation. `http.cache-control` may be honored when
+  `cache = "etag"` to override the default.
+- `cache = "immutable"`: only allowed when `workspace.version` is pinned.
+  Set `Cache-Control: public, max-age=31536000, immutable` and
+  `ETag = entry_hash`. Ignore `http.cache-control` in this mode.
+- The host may include `X-AOS-Root-Hash = root_hash` for debugging.
 
 ## Security and Policy
 
@@ -171,7 +199,9 @@ On request:
 - Registry apply/remove: rules present/removed deterministically.
 - Longest-prefix route match.
 - Path normalization and segment-boundary matching.
+- Trailing-slash redirect for directory targets.
 - Serving: workspace.resolve + file vs directory behavior.
-- Cache headers for pinned vs HEAD.
+- Annotation header mapping (UTF-8 decoding and precedence).
+- Cache headers for `etag` vs `immutable`.
 
 ## Open Questions

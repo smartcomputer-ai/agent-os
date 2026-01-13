@@ -4,6 +4,7 @@ pub mod config;
 pub mod control;
 pub mod error;
 pub mod host;
+pub mod http;
 pub mod manifest_loader;
 pub mod modes;
 pub mod util;
