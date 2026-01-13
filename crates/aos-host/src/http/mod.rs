@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use axum::Router;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
+use utoipa_swagger_ui::SwaggerUi;
 
 use crate::config::HttpServerConfig;
 use crate::control::{ControlError, RequestEnvelope, handle_request};
@@ -48,6 +49,7 @@ pub fn spawn_http_server(
     }
     let state = HttpState::new(control_tx, shutdown_tx.clone());
     let app = Router::new()
+        .merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api::openapi()))
         .nest("/api", api::router())
         .fallback(publish::handler)
         .with_state(state);

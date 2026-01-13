@@ -10,7 +10,6 @@ use axum::Router;
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
-use utoipa_swagger_ui::SwaggerUi;
 
 use crate::control::ControlError;
 use crate::http::{HttpState, control_call};
@@ -316,7 +315,6 @@ struct EmptyResponse {}
 
 pub fn router() -> Router<HttpState> {
     Router::new()
-        .merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health))
         .route("/info", get(info))
         .route("/manifest", get(manifest))
@@ -343,6 +341,10 @@ pub fn router() -> Router<HttpState> {
         .route("/gov/shadow", post(gov_shadow))
         .route("/gov/approve", post(gov_approve))
         .route("/gov/apply", post(gov_apply))
+}
+
+pub fn openapi() -> utoipa::openapi::OpenApi {
+    ApiDoc::openapi()
 }
 
 #[derive(Debug)]
