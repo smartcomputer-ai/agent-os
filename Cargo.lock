@@ -229,6 +229,7 @@ dependencies = [
  "aos-effects",
  "aos-kernel",
  "aos-store",
+ "aos-sys",
  "aos-wasm-abi",
  "async-trait",
  "base64 0.21.7",

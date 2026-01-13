@@ -1,3 +1,10 @@
+use std::collections::BTreeMap;
+
+use aos_sys::HttpPublishRule;
+
+#[cfg(test)]
+use aos_sys::WorkspaceRef;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedPath {
     pub path: String,
@@ -12,6 +19,12 @@ pub enum PathError {
     InvalidPercentEncoding,
     InvalidUtf8,
     InvalidSegment(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchError {
+    RequestPath(PathError),
+    RulePrefix { id: String, error: PathError },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -58,6 +71,59 @@ pub fn select_longest_prefix<'a, T>(
         }
     }
     best
+}
+
+#[derive(Debug, Clone)]
+pub struct PublishMatch<'a> {
+    pub rule_id: &'a str,
+    pub rule: &'a HttpPublishRule,
+    pub request: NormalizedPath,
+    pub suffix_segments: Vec<String>,
+    pub suffix: String,
+}
+
+pub fn match_publish_rule<'a>(
+    rules: &'a BTreeMap<String, HttpPublishRule>,
+    request_path: &str,
+) -> Result<Option<PublishMatch<'a>>, MatchError> {
+    let request = normalize_request_path(request_path).map_err(MatchError::RequestPath)?;
+    let mut best: Option<PublishMatch<'a>> = None;
+    let mut best_len = 0usize;
+    for (id, rule) in rules {
+        let prefix = normalize_route_prefix(&rule.route_prefix)
+            .map_err(|error| MatchError::RulePrefix {
+                id: id.clone(),
+                error,
+            })?;
+        if !prefix_matches(&prefix, &request) {
+            continue;
+        }
+        let len = prefix.segments.len();
+        if best.is_none() || len > best_len {
+            let suffix_segments = request.segments[len..].to_vec();
+            let suffix = suffix_segments.join("/");
+            best = Some(PublishMatch {
+                rule_id: id.as_str(),
+                rule,
+                request: request.clone(),
+                suffix_segments,
+                suffix,
+            });
+            best_len = len;
+        }
+    }
+    Ok(best)
+}
+
+pub fn join_workspace_path(base: Option<&str>, suffix: &str) -> String {
+    let base = base.unwrap_or("").trim_matches('/');
+    if base.is_empty() {
+        return suffix.to_string();
+    }
+    if suffix.is_empty() {
+        return base.to_string();
+    }
+    format!("{base}/{suffix}")
 }
 
 fn normalize_path(raw: &str, require_leading_slash: bool) -> Result<NormalizedPath, PathError> {
@@ -251,5 +317,83 @@ mod tests {
         let matched = select_longest_prefix(&path, rules).expect("match");
         assert_eq!(matched.id, "assets");
         assert_eq!(*matched.rule, 3);
+    }
+
+    #[test]
+    fn match_publish_rule_returns_suffix_and_trailing_slash() {
+        let rules = publish_rules(vec![
+            ("/", "root"),
+            ("/app", "app"),
+            ("/app/assets", "assets"),
+        ]);
+        let matched = match_publish_rule(&rules, "/app/assets/logo.png?x=1")
+            .unwrap()
+            .expect("match");
+        assert_eq!(matched.rule_id, "assets");
+        assert_eq!(
+            matched.suffix_segments,
+            vec!["logo.png".to_string()]
+        );
+        assert_eq!(matched.suffix, "logo.png");
+        assert_eq!(matched.request.query, Some("x=1".to_string()));
+    }
+
+    #[test]
+    fn match_publish_rule_rejects_invalid_prefix() {
+        let mut rules = publish_rules(vec![("/", "root")]);
+        let mut bad = HttpPublishRule {
+            route_prefix: "app".to_string(),
+            workspace: workspace_ref("shell"),
+            default_doc: None,
+            allow_dir_listing: false,
+            cache: "etag".to_string(),
+        };
+        rules.insert("bad".to_string(), bad.clone());
+        let err = match_publish_rule(&rules, "/app").unwrap_err();
+        assert_eq!(
+            err,
+            MatchError::RulePrefix {
+                id: "bad".to_string(),
+                error: PathError::MissingLeadingSlash
+            }
+        );
+        bad.route_prefix = "/ok".to_string();
+        rules.insert("bad".to_string(), bad);
+        let matched = match_publish_rule(&rules, "/ok/").unwrap().expect("match");
+        assert_eq!(matched.rule_id, "bad");
+        assert!(matched.request.had_trailing_slash);
+    }
+
+    #[test]
+    fn join_workspace_path_handles_empty_components() {
+        assert_eq!(join_workspace_path(None, "index.html"), "index.html");
+        assert_eq!(join_workspace_path(Some("app"), ""), "app");
+        assert_eq!(join_workspace_path(Some("app"), "index.html"), "app/index.html");
+        assert_eq!(join_workspace_path(Some("/app/"), "assets/logo.png"), "app/assets/logo.png");
+    }
+
+    fn publish_rules(entries: Vec<(&str, &str)>) -> BTreeMap<String, HttpPublishRule> {
+        let mut rules = BTreeMap::new();
+        for (prefix, id) in entries {
+            rules.insert(
+                id.to_string(),
+                HttpPublishRule {
+                    route_prefix: prefix.to_string(),
+                    workspace: workspace_ref("shell"),
+                    default_doc: None,
+                    allow_dir_listing: false,
+                    cache: "etag".to_string(),
+                },
+            );
+        }
+        rules
+    }
+
+    fn workspace_ref(name: &str) -> WorkspaceRef {
+        WorkspaceRef {
+            workspace: name.to_string(),
+            version: None,
+            path: None,
+        }
     }
 }

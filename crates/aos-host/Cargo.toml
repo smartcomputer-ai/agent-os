@@ -17,6 +17,7 @@ aos-effects = { path = "../aos-effects" }
 aos-cbor = { path = "../aos-cbor" }
 aos-store = { path = "../aos-store" }
 aos-air-types = { path = "../aos-air-types" }
+aos-sys = { path = "../aos-sys" }
 
 walkdir = "2"
 log = "0.4"
