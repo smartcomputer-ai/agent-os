@@ -91,18 +91,18 @@ Streaming endpoints are defined in P4 (`p4-stream.md`).
 
 ### Workspace (read)
 - `GET /api/workspace/resolve?workspace=...&version=...`
-- `GET /api/workspace/list?root_hash=...&path=...&scope=dir|subtree&cursor=...&limit=...`
-- `GET /api/workspace/read-ref?root_hash=...&path=...`
-- `GET /api/workspace/read-bytes?root_hash=...&path=...&range=start-end`
-- `GET /api/workspace/annotations?root_hash=...&path=...`
+- `GET /api/workspace/list?root_hash=...|workspace=...&version=...&path=...&scope=dir|subtree&cursor=...&limit=...`
+- `GET /api/workspace/read-ref?root_hash=...|workspace=...&version=...&path=...`
+- `GET /api/workspace/read-bytes?root_hash=...|workspace=...&version=...&path=...&range=start-end`
+- `GET /api/workspace/annotations?root_hash=...|workspace=...&version=...&path=...`
 
 ### Workspace (write)
 - `POST /api/workspace/write-bytes`
-  - body: `{ root_hash, path, bytes_b64, mode? }`
+  - body: `{ root_hash?|workspace?, version?, path, bytes_b64, mode? }`
 - `POST /api/workspace/remove`
-  - body: `{ root_hash, path }`
+  - body: `{ root_hash?|workspace?, version?, path }`
 - `POST /api/workspace/annotations`
-  - body: `{ root_hash, path?, annotations_patch }`
+  - body: `{ root_hash?|workspace?, version?, path?, annotations_patch }`
 
 ### Blobs
 - `POST /api/blob` -> `{ hash }`

@@ -188,7 +188,7 @@ struct JournalTailEntryResponse {
     record: serde_json::Value,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct WorkspaceResolveResponse {
     exists: bool,
     resolved_version: Option<u64>,
@@ -224,39 +224,54 @@ struct WorkspaceAnnotationsResponse {
     annotations: Option<BTreeMap<String, String>>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct WorkspaceWriteBytesRequest {
-    root_hash: String,
+    /// Provide either `root_hash` or (`workspace`, `version`).
+    root_hash: Option<String>,
+    /// Workspace name (used when `root_hash` is omitted).
+    workspace: Option<String>,
+    /// Workspace version (used when `root_hash` is omitted).
+    version: Option<u64>,
     path: String,
     bytes_b64: String,
     mode: Option<u64>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct WorkspaceWriteBytesResponse {
     new_root_hash: String,
     blob_hash: String,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct WorkspaceRemoveRequest {
-    root_hash: String,
+    /// Provide either `root_hash` or (`workspace`, `version`).
+    root_hash: Option<String>,
+    /// Workspace name (used when `root_hash` is omitted).
+    workspace: Option<String>,
+    /// Workspace version (used when `root_hash` is omitted).
+    version: Option<u64>,
     path: String,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct WorkspaceRemoveResponse {
     new_root_hash: String,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct WorkspaceAnnotationsSetRequest {
-    root_hash: String,
+    /// Provide either `root_hash` or (`workspace`, `version`).
+    root_hash: Option<String>,
+    /// Workspace name (used when `root_hash` is omitted).
+    workspace: Option<String>,
+    /// Workspace version (used when `root_hash` is omitted).
+    version: Option<u64>,
     path: Option<String>,
     annotations_patch: BTreeMap<String, Option<String>>,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 struct WorkspaceAnnotationsSetResponse {
     new_root_hash: String,
     annotations_hash: String,
@@ -351,11 +366,16 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
 enum ApiError {
     Control(ControlError),
     Invalid(String),
+    NotFound(String),
 }
 
 impl ApiError {
     fn bad_request(msg: impl Into<String>) -> Self {
         ApiError::Invalid(msg.into())
+    }
+
+    fn not_found(msg: impl Into<String>) -> Self {
+        ApiError::NotFound(msg.into())
     }
 }
 
@@ -377,6 +397,7 @@ impl IntoResponse for ApiError {
                 (status, err.code, err.message)
             }
             ApiError::Invalid(msg) => (StatusCode::BAD_REQUEST, "invalid_request".into(), msg),
+            ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found".into(), msg),
         };
         let body = serde_json::json!({ "code": code, "message": message });
         (status, Json(body)).into_response()
@@ -777,7 +798,12 @@ async fn workspace_resolve(
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 struct WorkspaceListQuery {
-    root_hash: String,
+    /// Provide either `root_hash` or (`workspace`, `version`).
+    root_hash: Option<String>,
+    /// Workspace name (used when `root_hash` is omitted).
+    workspace: Option<String>,
+    /// Workspace version (used when `root_hash` is omitted).
+    version: Option<u64>,
     path: Option<String>,
     scope: Option<String>,
     cursor: Option<String>,
@@ -799,8 +825,15 @@ async fn workspace_list(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceListQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let root_hash = resolve_root_hash(
+        &state,
+        query.root_hash,
+        query.workspace,
+        query.version,
+    )
+    .await?;
     let payload = serde_json::json!({
-        "root_hash": query.root_hash,
+        "root_hash": root_hash,
         "path": query.path,
         "scope": query.scope,
         "cursor": query.cursor,
@@ -813,7 +846,12 @@ async fn workspace_list(
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 struct WorkspaceReadRefQuery {
-    root_hash: String,
+    /// Provide either `root_hash` or (`workspace`, `version`).
+    root_hash: Option<String>,
+    /// Workspace name (used when `root_hash` is omitted).
+    workspace: Option<String>,
+    /// Workspace version (used when `root_hash` is omitted).
+    version: Option<u64>,
     path: String,
 }
 
@@ -832,8 +870,15 @@ async fn workspace_read_ref(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceReadRefQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let root_hash = resolve_root_hash(
+        &state,
+        query.root_hash,
+        query.workspace,
+        query.version,
+    )
+    .await?;
     let payload = serde_json::json!({
-        "root_hash": query.root_hash,
+        "root_hash": root_hash,
         "path": query.path,
     });
     let result = control_call(&state, "workspace-read-ref", payload).await?;
@@ -843,7 +888,12 @@ async fn workspace_read_ref(
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 struct WorkspaceReadBytesQuery {
-    root_hash: String,
+    /// Provide either `root_hash` or (`workspace`, `version`).
+    root_hash: Option<String>,
+    /// Workspace name (used when `root_hash` is omitted).
+    workspace: Option<String>,
+    /// Workspace version (used when `root_hash` is omitted).
+    version: Option<u64>,
     path: String,
     range: Option<String>,
 }
@@ -863,13 +913,20 @@ async fn workspace_read_bytes(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceReadBytesQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let root_hash = resolve_root_hash(
+        &state,
+        query.root_hash,
+        query.workspace,
+        query.version,
+    )
+    .await?;
     let range = query
         .range
         .as_deref()
         .and_then(parse_range)
         .map(|(start, end)| serde_json::json!({ "start": start, "end": end }));
     let payload = serde_json::json!({
-        "root_hash": query.root_hash,
+        "root_hash": root_hash,
         "path": query.path,
         "range": range,
     });
@@ -890,7 +947,12 @@ async fn workspace_read_bytes(
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 struct WorkspaceAnnotationsQuery {
-    root_hash: String,
+    /// Provide either `root_hash` or (`workspace`, `version`).
+    root_hash: Option<String>,
+    /// Workspace name (used when `root_hash` is omitted).
+    workspace: Option<String>,
+    /// Workspace version (used when `root_hash` is omitted).
+    version: Option<u64>,
     path: Option<String>,
 }
 
@@ -909,8 +971,15 @@ async fn workspace_annotations_get(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceAnnotationsQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let root_hash = resolve_root_hash(
+        &state,
+        query.root_hash,
+        query.workspace,
+        query.version,
+    )
+    .await?;
     let payload = serde_json::json!({
-        "root_hash": query.root_hash,
+        "root_hash": root_hash,
         "path": query.path,
     });
     let result = control_call(&state, "workspace-annotations-get", payload).await?;
@@ -933,7 +1002,20 @@ async fn workspace_write_bytes(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
-    let payload = parse_body::<serde_json::Value>(&headers, &body)?;
+    let payload = parse_body::<WorkspaceWriteBytesRequest>(&headers, &body)?;
+    let root_hash = resolve_root_hash(
+        &state,
+        payload.root_hash,
+        payload.workspace,
+        payload.version,
+    )
+    .await?;
+    let payload = serde_json::json!({
+        "root_hash": root_hash,
+        "path": payload.path,
+        "bytes_b64": payload.bytes_b64,
+        "mode": payload.mode,
+    });
     let result = control_call(&state, "workspace-write-bytes", payload).await?;
     Ok(Json(result))
 }
@@ -954,7 +1036,18 @@ async fn workspace_remove(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
-    let payload = parse_body::<serde_json::Value>(&headers, &body)?;
+    let payload = parse_body::<WorkspaceRemoveRequest>(&headers, &body)?;
+    let root_hash = resolve_root_hash(
+        &state,
+        payload.root_hash,
+        payload.workspace,
+        payload.version,
+    )
+    .await?;
+    let payload = serde_json::json!({
+        "root_hash": root_hash,
+        "path": payload.path,
+    });
     let result = control_call(&state, "workspace-remove", payload).await?;
     Ok(Json(result))
 }
@@ -975,7 +1068,19 @@ async fn workspace_annotations_set(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
-    let payload = parse_body::<serde_json::Value>(&headers, &body)?;
+    let payload = parse_body::<WorkspaceAnnotationsSetRequest>(&headers, &body)?;
+    let root_hash = resolve_root_hash(
+        &state,
+        payload.root_hash,
+        payload.workspace,
+        payload.version,
+    )
+    .await?;
+    let payload = serde_json::json!({
+        "root_hash": root_hash,
+        "path": payload.path,
+        "annotations_patch": payload.annotations_patch,
+    });
     let result = control_call(&state, "workspace-annotations-set", payload).await?;
     Ok(Json(result))
 }
@@ -1169,6 +1274,31 @@ fn parse_range(raw: &str) -> Option<(u64, u64)> {
     let start = start.parse().ok()?;
     let end = end.parse().ok()?;
     Some((start, end))
+}
+
+async fn resolve_root_hash(
+    state: &HttpState,
+    root_hash: Option<String>,
+    workspace: Option<String>,
+    version: Option<u64>,
+) -> Result<String, ApiError> {
+    if let Some(root_hash) = root_hash {
+        return Ok(root_hash);
+    }
+    let workspace = workspace.ok_or_else(|| ApiError::bad_request("missing root_hash or workspace"))?;
+    let payload = serde_json::json!({
+        "workspace": workspace,
+        "version": version,
+    });
+    let result = control_call(state, "workspace-resolve", payload).await?;
+    let response: WorkspaceResolveResponse = serde_json::from_value(result)
+        .map_err(|e| ApiError::bad_request(format!("decode resolve: {e}")))?;
+    if !response.exists {
+        return Err(ApiError::not_found("workspace does not exist"));
+    }
+    response
+        .root_hash
+        .ok_or_else(|| ApiError::bad_request("workspace resolve missing root_hash"))
 }
 
 fn decode_hash_hex(raw: &str) -> Result<[u8; 32], ApiError> {
