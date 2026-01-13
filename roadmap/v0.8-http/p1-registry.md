@@ -157,6 +157,8 @@ On request:
 5) Serve via tree effects:
    - file: `workspace.read_bytes`
    - directory: `workspace.list` (`scope = subtree`) or export archive
+   - if `Range: bytes=start-end` is present for files, serve a single range via
+     `workspace.read_bytes.range` and return `206` with `Content-Range`.
 6) If a requested file is missing under a directory path and `default_doc` is
    set, serve `default_doc` instead. Otherwise return 404.
 7) If the request targets a directory path (empty suffix) and

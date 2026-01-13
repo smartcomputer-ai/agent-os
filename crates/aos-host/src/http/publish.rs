@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use aos_sys::{HttpPublishRegistry, HttpPublishRule};
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use base64::prelude::*;
 use serde::Deserialize;
@@ -33,6 +33,12 @@ pub enum PathError {
 pub enum MatchError {
     RequestPath(PathError),
     RulePrefix { id: String, error: PathError },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RangeError {
+    Invalid,
+    Unsatisfiable,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -153,6 +159,7 @@ async fn handle_publish(
         .path_and_query()
         .map(|pq| pq.as_str())
         .unwrap_or_else(|| req.uri().path());
+    let request_headers = req.headers().clone();
     if path.starts_with("/api") {
         return Err(PublishError::not_found());
     }
@@ -197,37 +204,16 @@ async fn handle_publish(
         if matched.request.had_trailing_slash {
             return Err(PublishError::not_found());
         }
-        let bytes = workspace_read_bytes(&state, &root_hash, &entry_path, None).await?;
-        let mut headers = resolve_headers(&state, &root_hash, &entry_path).await?;
-        apply_cache_headers(rule, &entry.hash, &mut headers);
-        headers.insert(
-            HeaderName::from_static("etag"),
-            HeaderValue::from_str(&entry.hash).map_err(|_| {
-                PublishError::invalid(format!("invalid etag value {}", entry.hash))
-            })?,
-        );
-        headers.insert(
-            HeaderName::from_static("content-length"),
-            HeaderValue::from_str(&bytes.len().to_string()).unwrap_or_else(|_| {
-                HeaderValue::from_static("0")
-            }),
-        );
-        if !headers.contains_key(HeaderName::from_static("content-type")) {
-            headers.insert(
-                HeaderName::from_static("content-type"),
-                HeaderValue::from_static("application/octet-stream"),
-            );
-        }
-        headers.insert(
-            HeaderName::from_static("x-aos-root-hash"),
-            HeaderValue::from_str(&root_hash).map_err(|_| {
-                PublishError::invalid("invalid x-aos-root-hash header")
-            })?,
-        );
-        let mut resp = Response::new(Body::from(bytes));
-        *resp.status_mut() = StatusCode::OK;
-        *resp.headers_mut() = headers;
-        return Ok(resp);
+        return serve_file(
+            &state,
+            &root_hash,
+            &entry_path,
+            &entry,
+            rule,
+            &request_headers,
+            false,
+        )
+        .await;
     }
 
     if entry.kind == "dir" {
@@ -240,43 +226,16 @@ async fn handle_publish(
                 workspace_read_ref(&state, &root_hash, &doc_path).await?
             {
                 if doc_entry.kind == "file" {
-                    let bytes =
-                        workspace_read_bytes(&state, &root_hash, &doc_path, None).await?;
-                    let mut headers =
-                        resolve_headers(&state, &root_hash, &doc_path).await?;
-                    apply_cache_headers(rule, &doc_entry.hash, &mut headers);
-                    headers.insert(
-                        HeaderName::from_static("etag"),
-                        HeaderValue::from_str(&doc_entry.hash).map_err(|_| {
-                            PublishError::invalid("invalid etag value")
-                        })?,
-                    );
-                    headers.insert(
-                        HeaderName::from_static("content-length"),
-                        HeaderValue::from_str(&bytes.len().to_string()).unwrap_or_else(|_| {
-                            HeaderValue::from_static("0")
-                        }),
-                    );
-                    if !headers.contains_key(HeaderName::from_static("content-type")) {
-                        headers.insert(
-                            HeaderName::from_static("content-type"),
-                            HeaderValue::from_static("application/octet-stream"),
-                        );
-                    }
-                    headers.insert(
-                        HeaderName::from_static("x-aos-root-hash"),
-                        HeaderValue::from_str(&root_hash).map_err(|_| {
-                            PublishError::invalid("invalid x-aos-root-hash header")
-                        })?,
-                    );
-                    let mut resp = Response::new(Body::from(bytes));
-                    *resp.status_mut() = StatusCode::OK;
-                    *resp.headers_mut() = headers;
-                    resp.headers_mut().insert(
-                        HeaderName::from_static("x-aos-default-doc"),
-                        HeaderValue::from_static("true"),
-                    );
-                    return Ok(resp);
+                    return serve_file(
+                        &state,
+                        &root_hash,
+                        &doc_path,
+                        &doc_entry,
+                        rule,
+                        &request_headers,
+                        true,
+                    )
+                    .await;
                 }
             }
         }
@@ -295,6 +254,74 @@ async fn handle_publish(
     }
 
     Err(PublishError::not_found())
+}
+
+async fn serve_file(
+    state: &HttpState,
+    root_hash: &str,
+    path: &str,
+    entry: &WorkspaceRefEntry,
+    rule: &HttpPublishRule,
+    request_headers: &HeaderMap,
+    is_default: bool,
+) -> Result<Response, PublishError> {
+    let range = match parse_range_header(request_headers, entry.size) {
+        Ok(range) => range,
+        Err(RangeError::Invalid) => return Ok(range_invalid_response()),
+        Err(RangeError::Unsatisfiable) => return Ok(range_unsatisfiable_response(entry.size)),
+    };
+    let bytes = workspace_read_bytes(state, root_hash, path, range).await?;
+    let mut headers = resolve_headers(state, root_hash, path).await?;
+    apply_cache_headers(rule, &entry.hash, &mut headers);
+    headers.insert(
+        HeaderName::from_static("etag"),
+        HeaderValue::from_str(&entry.hash)
+            .map_err(|_| PublishError::invalid("invalid etag value"))?,
+    );
+    headers.insert(
+        HeaderName::from_static("content-length"),
+        HeaderValue::from_str(&bytes.len().to_string()).unwrap_or_else(|_| {
+            HeaderValue::from_static("0")
+        }),
+    );
+    if !headers.contains_key(HeaderName::from_static("content-type")) {
+        headers.insert(
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("application/octet-stream"),
+        );
+    }
+    headers.insert(
+        HeaderName::from_static("x-aos-root-hash"),
+        HeaderValue::from_str(root_hash)
+            .map_err(|_| PublishError::invalid("invalid x-aos-root-hash header"))?,
+    );
+    headers.insert(
+        header::ACCEPT_RANGES,
+        HeaderValue::from_static("bytes"),
+    );
+    let status = if let Some((start, end)) = range {
+        let end_inclusive = end.saturating_sub(1);
+        let value = format!("bytes {start}-{end_inclusive}/{}", entry.size);
+        headers.insert(
+            header::CONTENT_RANGE,
+            HeaderValue::from_str(&value)
+                .map_err(|_| PublishError::invalid("invalid content-range header"))?,
+        );
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    };
+
+    let mut resp = Response::new(Body::from(bytes));
+    *resp.status_mut() = status;
+    *resp.headers_mut() = headers;
+    if is_default {
+        resp.headers_mut().insert(
+            HeaderName::from_static("x-aos-default-doc"),
+            HeaderValue::from_static("true"),
+        );
+    }
+    Ok(resp)
 }
 
 fn redirect_with_slash(request: &NormalizedPath) -> Response {
@@ -445,6 +472,69 @@ fn apply_cache_headers(rule: &HttpPublishRule, entry_hash: &str, headers: &mut H
             headers.insert(HeaderName::from_static("etag"), value);
         }
     }
+}
+
+fn parse_range_header(
+    headers: &HeaderMap,
+    size: u64,
+) -> Result<Option<(u64, u64)>, RangeError> {
+    let value = match headers.get(header::RANGE) {
+        Some(value) => value,
+        None => return Ok(None),
+    };
+    let value = value.to_str().map_err(|_| RangeError::Invalid)?;
+    let value = value.trim();
+    let Some(range_spec) = value.strip_prefix("bytes=") else {
+        return Ok(None);
+    };
+    if range_spec.contains(',') {
+        return Err(RangeError::Invalid);
+    }
+    let (start_str, end_str) = range_spec
+        .split_once('-')
+        .ok_or(RangeError::Invalid)?;
+    if start_str.is_empty() {
+        let suffix: u64 = end_str.parse().map_err(|_| RangeError::Invalid)?;
+        if suffix == 0 {
+            return Err(RangeError::Invalid);
+        }
+        if suffix >= size {
+            return Ok(Some((0, size)));
+        }
+        return Ok(Some((size - suffix, size)));
+    }
+    let start: u64 = start_str.parse().map_err(|_| RangeError::Invalid)?;
+    if start >= size {
+        return Err(RangeError::Unsatisfiable);
+    }
+    if end_str.is_empty() {
+        return Ok(Some((start, size)));
+    }
+    let end_inclusive: u64 = end_str.parse().map_err(|_| RangeError::Invalid)?;
+    if end_inclusive < start {
+        return Err(RangeError::Invalid);
+    }
+    let end_exclusive = end_inclusive
+        .saturating_add(1)
+        .min(size);
+    Ok(Some((start, end_exclusive)))
+}
+
+fn range_invalid_response() -> Response {
+    (StatusCode::BAD_REQUEST, "invalid range").into_response()
+}
+
+fn range_unsatisfiable_response(size: u64) -> Response {
+    let mut resp = Response::new(Body::from("range not satisfiable"));
+    *resp.status_mut() = StatusCode::RANGE_NOT_SATISFIABLE;
+    let value = format!("bytes */{size}");
+    if let Ok(header_value) = HeaderValue::from_str(&value) {
+        resp.headers_mut()
+            .insert(header::CONTENT_RANGE, header_value);
+    }
+    resp.headers_mut()
+        .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    resp
 }
 
 async fn workspace_resolve(
