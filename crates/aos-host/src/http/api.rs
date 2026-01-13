@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -6,13 +8,315 @@ use axum::routing::{get, post};
 use axum::Json;
 use axum::Router;
 use base64::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, OpenApi, ToSchema};
 
 use crate::control::ControlError;
 use crate::http::{HttpState, control_call};
 
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "AOS API",
+        version = "0.1.0"
+    ),
+    paths(
+        health,
+        info,
+        manifest,
+        defs_list,
+        defs_get,
+        state_get,
+        state_cells,
+        events_post,
+        receipts_post,
+        journal_head,
+        journal_tail,
+        workspace_resolve,
+        workspace_list,
+        workspace_read_ref,
+        workspace_read_bytes,
+        workspace_annotations_get,
+        workspace_write_bytes,
+        workspace_remove,
+        workspace_annotations_set,
+        workspace_empty_root,
+        blob_put,
+        blob_get,
+        gov_propose,
+        gov_shadow,
+        gov_approve,
+        gov_apply,
+        openapi,
+    ),
+    components(
+        schemas(
+            ApiErrorResponse,
+            HealthResponse,
+            InfoResponse,
+            MetaResponse,
+            DefListingResponse,
+            DefsListResponse,
+            DefGetResponse,
+            StateGetResponse,
+            StateCell,
+            StateListResponse,
+            JournalHeadResponse,
+            JournalTailResponse,
+            JournalTailEntryResponse,
+            EventPayload,
+            ReceiptPayload,
+            WorkspaceResolveResponse,
+            WorkspaceListEntry,
+            WorkspaceListResponse,
+            WorkspaceRefEntryResponse,
+            WorkspaceAnnotationsResponse,
+            WorkspaceWriteBytesRequest,
+            WorkspaceWriteBytesResponse,
+            WorkspaceRemoveRequest,
+            WorkspaceRemoveResponse,
+            WorkspaceAnnotationsSetRequest,
+            WorkspaceAnnotationsSetResponse,
+            WorkspaceEmptyRootRequest,
+            WorkspaceEmptyRootResponse,
+            BlobPutRequest,
+            BlobPutResponse,
+            GovProposeRequest,
+            GovProposeResponse,
+            GovShadowRequest,
+            GovApproveRequest,
+            GovApplyRequest,
+            EmptyResponse
+        )
+    ),
+    tags(
+        (name = "general", description = "Health/info/manifest/defs/state"),
+        (name = "events", description = "Event and receipt ingress"),
+        (name = "journal", description = "Journal read APIs"),
+        (name = "workspace", description = "Workspace read/write APIs"),
+        (name = "blob", description = "Blob storage APIs"),
+        (name = "governance", description = "Governance APIs")
+    )
+)]
+struct ApiDoc;
+
+#[derive(Debug, Serialize, ToSchema)]
+struct ApiErrorResponse {
+    code: String,
+    message: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct HealthResponse {
+    ok: bool,
+    manifest_hash: String,
+    journal_height: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct InfoResponse {
+    version: String,
+    world_id: Option<String>,
+    manifest_hash: String,
+    snapshot_hash: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct MetaResponse {
+    journal_height: u64,
+    snapshot_hash: Option<String>,
+    manifest_hash: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct DefListingResponse {
+    kind: String,
+    name: String,
+    cap_type: Option<String>,
+    params_schema: Option<String>,
+    receipt_schema: Option<String>,
+    plan_steps: Option<usize>,
+    policy_rules: Option<usize>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct DefsListResponse {
+    defs: Vec<DefListingResponse>,
+    meta: MetaResponse,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct DefGetResponse {
+    def: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct StateGetResponse {
+    state_b64: Option<String>,
+    meta: MetaResponse,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct StateCell {
+    key_b64: String,
+    state_hash_hex: String,
+    size: u64,
+    last_active_ns: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct StateListResponse {
+    cells: Vec<StateCell>,
+    meta: MetaResponse,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct JournalHeadResponse {
+    meta: MetaResponse,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct JournalTailResponse {
+    from: u64,
+    to: u64,
+    entries: Vec<JournalTailEntryResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct JournalTailEntryResponse {
+    kind: String,
+    seq: u64,
+    record: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceResolveResponse {
+    exists: bool,
+    resolved_version: Option<u64>,
+    head: Option<u64>,
+    root_hash: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceListEntry {
+    path: String,
+    kind: String,
+    hash: Option<String>,
+    size: Option<u64>,
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceListResponse {
+    entries: Vec<WorkspaceListEntry>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceRefEntryResponse {
+    kind: String,
+    hash: String,
+    size: u64,
+    mode: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceAnnotationsResponse {
+    annotations: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceWriteBytesRequest {
+    root_hash: String,
+    path: String,
+    bytes_b64: String,
+    mode: Option<u64>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceWriteBytesResponse {
+    new_root_hash: String,
+    blob_hash: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceRemoveRequest {
+    root_hash: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceRemoveResponse {
+    new_root_hash: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceAnnotationsSetRequest {
+    root_hash: String,
+    path: Option<String>,
+    annotations_patch: BTreeMap<String, Option<String>>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceAnnotationsSetResponse {
+    new_root_hash: String,
+    annotations_hash: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceEmptyRootRequest {
+    workspace: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct WorkspaceEmptyRootResponse {
+    root_hash: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct BlobPutRequest {
+    data_b64: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct BlobPutResponse {
+    hash: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct GovProposeRequest {
+    patch_b64: String,
+    description: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct GovProposeResponse {
+    proposal_id: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct GovShadowRequest {
+    proposal_id: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct GovApproveRequest {
+    proposal_id: u64,
+    decision: String,
+    approver: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct GovApplyRequest {
+    proposal_id: u64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct EmptyResponse {}
+
 pub fn router() -> Router<HttpState> {
     Router::new()
+        .route("/openapi.json", get(openapi))
         .route("/health", get(health))
         .route("/info", get(info))
         .route("/manifest", get(manifest))
@@ -77,6 +381,27 @@ impl IntoResponse for ApiError {
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/openapi.json",
+    tag = "general",
+    responses(
+        (status = 200, content_type = "application/json", body = serde_json::Value)
+    )
+)]
+async fn openapi() -> impl IntoResponse {
+    Json(ApiDoc::openapi())
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/health",
+    tag = "general",
+    responses(
+        (status = 200, body = HealthResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn health(State(state): State<HttpState>) -> Result<impl IntoResponse, ApiError> {
     let result = control_call(&state, "journal-head", serde_json::json!({})).await?;
     let meta = result
@@ -97,6 +422,15 @@ async fn health(State(state): State<HttpState>) -> Result<impl IntoResponse, Api
     })))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/info",
+    tag = "general",
+    responses(
+        (status = 200, body = InfoResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn info(State(state): State<HttpState>) -> Result<impl IntoResponse, ApiError> {
     let result = control_call(&state, "journal-head", serde_json::json!({})).await?;
     let meta = result
@@ -115,11 +449,23 @@ async fn info(State(state): State<HttpState>) -> Result<impl IntoResponse, ApiEr
     })))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct ManifestQuery {
     consistency: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/manifest",
+    tag = "general",
+    params(ManifestQuery),
+    responses(
+        (status = 200, body = serde_json::Value),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn manifest(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -151,12 +497,24 @@ async fn manifest(
     .into_response())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct DefsQuery {
     kinds: Option<String>,
     prefix: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/defs",
+    tag = "general",
+    params(DefsQuery),
+    responses(
+        (status = 200, body = DefsListResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn defs_list(
     State(state): State<HttpState>,
     Query(query): Query<DefsQuery>,
@@ -175,6 +533,21 @@ async fn defs_list(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/defs/{kind}/{name}",
+    tag = "general",
+    params(
+        ("kind" = String, Path, description = "Def kind"),
+        ("name" = String, Path, description = "Def name")
+    ),
+    responses(
+        (status = 200, body = DefGetResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 404, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn defs_get(
     State(state): State<HttpState>,
     Path((kind, name)): Path<(String, String)>,
@@ -186,12 +559,28 @@ async fn defs_get(
     Ok(Json(result))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct StateQuery {
     key_b64: Option<String>,
     consistency: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/state/{reducer}",
+    tag = "general",
+    params(
+        ("reducer" = String, Path, description = "Reducer name"),
+        StateQuery
+    ),
+    responses(
+        (status = 200, body = StateGetResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 404, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn state_get(
     State(state): State<HttpState>,
     Path(reducer): Path<String>,
@@ -206,6 +595,20 @@ async fn state_get(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/state/{reducer}/cells",
+    tag = "general",
+    params(
+        ("reducer" = String, Path, description = "Reducer name")
+    ),
+    responses(
+        (status = 200, body = StateListResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 404, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn state_cells(
     State(state): State<HttpState>,
     Path(reducer): Path<String>,
@@ -215,7 +618,7 @@ async fn state_cells(
     Ok(Json(result))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct EventPayload {
     schema: String,
     #[serde(default)]
@@ -226,6 +629,17 @@ struct EventPayload {
     key_b64: Option<String>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/events",
+    tag = "events",
+    request_body = EventPayload,
+    responses(
+        (status = 200, body = EmptyResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn events_post(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -250,7 +664,7 @@ async fn events_post(
     Ok(Json(result))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct ReceiptPayload {
     intent_hash: String,
     adapter_id: String,
@@ -260,6 +674,17 @@ struct ReceiptPayload {
     payload_b64: Option<String>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/receipts",
+    tag = "events",
+    request_body = ReceiptPayload,
+    responses(
+        (status = 200, body = EmptyResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn receipts_post(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -285,17 +710,38 @@ async fn receipts_post(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/journal/head",
+    tag = "journal",
+    responses(
+        (status = 200, body = JournalHeadResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn journal_head(State(state): State<HttpState>) -> Result<impl IntoResponse, ApiError> {
     let result = control_call(&state, "journal-head", serde_json::json!({})).await?;
     Ok(Json(result))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct JournalQuery {
     from: Option<u64>,
     limit: Option<u64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/journal",
+    tag = "journal",
+    params(JournalQuery),
+    responses(
+        (status = 200, body = JournalTailResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn journal_tail(
     State(state): State<HttpState>,
     Query(query): Query<JournalQuery>,
@@ -308,12 +754,24 @@ async fn journal_tail(
     Ok(Json(result))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct WorkspaceResolveQuery {
     workspace: String,
     version: Option<u64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/workspace/resolve",
+    tag = "workspace",
+    params(WorkspaceResolveQuery),
+    responses(
+        (status = 200, body = WorkspaceResolveResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn workspace_resolve(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceResolveQuery>,
@@ -326,7 +784,8 @@ async fn workspace_resolve(
     Ok(Json(result))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct WorkspaceListQuery {
     root_hash: String,
     path: Option<String>,
@@ -335,6 +794,17 @@ struct WorkspaceListQuery {
     limit: Option<u64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/workspace/list",
+    tag = "workspace",
+    params(WorkspaceListQuery),
+    responses(
+        (status = 200, body = WorkspaceListResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn workspace_list(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceListQuery>,
@@ -350,12 +820,24 @@ async fn workspace_list(
     Ok(Json(result))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct WorkspaceReadRefQuery {
     root_hash: String,
     path: String,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/workspace/read-ref",
+    tag = "workspace",
+    params(WorkspaceReadRefQuery),
+    responses(
+        (status = 200, body = Option<WorkspaceRefEntryResponse>),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn workspace_read_ref(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceReadRefQuery>,
@@ -368,13 +850,25 @@ async fn workspace_read_ref(
     Ok(Json(result))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct WorkspaceReadBytesQuery {
     root_hash: String,
     path: String,
     range: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/workspace/read-bytes",
+    tag = "workspace",
+    params(WorkspaceReadBytesQuery),
+    responses(
+        (status = 200, content_type = "application/octet-stream", body = String),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn workspace_read_bytes(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceReadBytesQuery>,
@@ -403,12 +897,24 @@ async fn workspace_read_bytes(
     ))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct WorkspaceAnnotationsQuery {
     root_hash: String,
     path: Option<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/workspace/annotations",
+    tag = "workspace",
+    params(WorkspaceAnnotationsQuery),
+    responses(
+        (status = 200, body = WorkspaceAnnotationsResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn workspace_annotations_get(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceAnnotationsQuery>,
@@ -421,6 +927,17 @@ async fn workspace_annotations_get(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/workspace/write-bytes",
+    tag = "workspace",
+    request_body = WorkspaceWriteBytesRequest,
+    responses(
+        (status = 200, body = WorkspaceWriteBytesResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn workspace_write_bytes(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -431,6 +948,17 @@ async fn workspace_write_bytes(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/workspace/remove",
+    tag = "workspace",
+    request_body = WorkspaceRemoveRequest,
+    responses(
+        (status = 200, body = WorkspaceRemoveResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn workspace_remove(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -441,6 +969,17 @@ async fn workspace_remove(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/workspace/annotations",
+    tag = "workspace",
+    request_body = WorkspaceAnnotationsSetRequest,
+    responses(
+        (status = 200, body = WorkspaceAnnotationsSetResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn workspace_annotations_set(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -451,6 +990,17 @@ async fn workspace_annotations_set(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/workspace/empty-root",
+    tag = "workspace",
+    request_body = WorkspaceEmptyRootRequest,
+    responses(
+        (status = 200, body = WorkspaceEmptyRootResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn workspace_empty_root(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -461,6 +1011,17 @@ async fn workspace_empty_root(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/blob",
+    tag = "blob",
+    request_body = BlobPutRequest,
+    responses(
+        (status = 200, body = BlobPutResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn blob_put(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -471,6 +1032,20 @@ async fn blob_put(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/blob/{hash}",
+    tag = "blob",
+    params(
+        ("hash" = String, Path, description = "Blob hash hex")
+    ),
+    responses(
+        (status = 200, content_type = "application/octet-stream", body = String),
+        (status = 400, body = ApiErrorResponse),
+        (status = 404, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn blob_get(
     State(state): State<HttpState>,
     Path(hash): Path<String>,
@@ -490,6 +1065,17 @@ async fn blob_get(
     ))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/gov/propose",
+    tag = "governance",
+    request_body = GovProposeRequest,
+    responses(
+        (status = 200, body = GovProposeResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn gov_propose(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -500,6 +1086,17 @@ async fn gov_propose(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/gov/shadow",
+    tag = "governance",
+    request_body = GovShadowRequest,
+    responses(
+        (status = 200, body = serde_json::Value),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn gov_shadow(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -510,6 +1107,17 @@ async fn gov_shadow(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/gov/approve",
+    tag = "governance",
+    request_body = GovApproveRequest,
+    responses(
+        (status = 200, body = EmptyResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn gov_approve(
     State(state): State<HttpState>,
     headers: HeaderMap,
@@ -520,6 +1128,17 @@ async fn gov_approve(
     Ok(Json(result))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/gov/apply",
+    tag = "governance",
+    request_body = GovApplyRequest,
+    responses(
+        (status = 200, body = EmptyResponse),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
 async fn gov_apply(
     State(state): State<HttpState>,
     headers: HeaderMap,

@@ -65,6 +65,7 @@ Provide a local HTTP server for interactive UI and tooling that:
 Streaming endpoints are defined in P4 (`p4-stream.md`).
 
 ### General
+- `GET /api/openapi.json` -> OpenAPI document
 - `GET /api/health` -> `{ ok: true, manifest_hash, journal_height }`
 - `GET /api/info` -> `{ version, world_id?, manifest_hash, snapshot_hash? }`
 
