@@ -343,6 +343,10 @@ const SYS_MODULES: &[SysModuleSpec] = &[
         bin: "workspace",
     },
     SysModuleSpec {
+        name: "sys/HttpPublish@1",
+        bin: "http_publish",
+    },
+    SysModuleSpec {
         name: "sys/CapEnforceWorkspace@1",
         bin: "cap_enforce_workspace",
     },

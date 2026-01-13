@@ -59,6 +59,42 @@ pub struct WorkspaceTree {
     pub entries: Vec<WorkspaceEntry>,
 }
 
+/// Workspace reference for publish rules (`sys/WorkspaceRef@1`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceRef {
+    pub workspace: String,
+    pub version: Option<u64>,
+    pub path: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// HTTP publish registry types (sys/HttpPublish@1)
+// ---------------------------------------------------------------------------
+
+/// Publish rule mapping (`sys/HttpPublishRule@1`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpPublishRule {
+    pub host: Option<String>,
+    pub route_prefix: String,
+    pub workspace: WorkspaceRef,
+    pub default_doc: Option<String>,
+    pub allow_dir_listing: bool,
+    pub cache: String,
+}
+
+/// Registry state (`sys/HttpPublishRegistry@1`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HttpPublishRegistry {
+    pub rules: BTreeMap<String, HttpPublishRule>,
+}
+
+/// Registry update event (`sys/HttpPublishSet@1`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpPublishSet {
+    pub id: String,
+    pub rule: Option<HttpPublishRule>,
+}
+
 // ---------------------------------------------------------------------------
 // Cap enforcer ABI types (sys/CapCheckInput@1, sys/CapCheckOutput@1)
 // ---------------------------------------------------------------------------

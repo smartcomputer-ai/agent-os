@@ -67,5 +67,21 @@
       }
     },
     "$comment": "Built-in workspace reducer; wasm_hash patched at load time in examples."
+  },
+  {
+    "$kind": "defmodule",
+    "name": "sys/HttpPublish@1",
+    "module_kind": "reducer",
+    "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "abi": {
+      "reducer": {
+        "state": "sys/HttpPublishRegistry@1",
+        "event": "sys/HttpPublishSet@1",
+        "context": "sys/ReducerContext@1",
+        "effects_emitted": [],
+        "cap_slots": {}
+      }
+    },
+    "$comment": "Built-in HTTP publish registry reducer; wasm_hash patched at load time in examples."
   }
 ]
