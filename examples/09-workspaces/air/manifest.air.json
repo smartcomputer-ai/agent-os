@@ -11,10 +11,14 @@
     { "name": "sys/WorkspaceHistory@1" },
     { "name": "sys/WorkspaceCommitMeta@1" },
     { "name": "sys/WorkspaceCommit@1" },
+    { "name": "sys/WorkspaceRef@1" },
     { "name": "sys/WorkspaceResolveParams@1" },
     { "name": "sys/WorkspaceResolveReceipt@1" },
     { "name": "sys/WorkspaceEmptyRootParams@1" },
     { "name": "sys/WorkspaceEmptyRootReceipt@1" },
+    { "name": "sys/WorkspaceAnnotationsPatch@1" },
+    { "name": "sys/WorkspaceAnnotationsSetParams@1" },
+    { "name": "sys/WorkspaceAnnotationsSetReceipt@1" },
     { "name": "sys/WorkspaceListParams@1" },
     { "name": "sys/WorkspaceListEntry@1" },
     { "name": "sys/WorkspaceListReceipt@1" },
@@ -27,12 +31,16 @@
     { "name": "sys/WorkspaceWriteBytesReceipt@1" },
     { "name": "sys/WorkspaceDiffParams@1" },
     { "name": "sys/WorkspaceDiffChange@1" },
-    { "name": "sys/WorkspaceDiffReceipt@1" }
+    { "name": "sys/WorkspaceDiffReceipt@1" },
+    { "name": "sys/HttpPublishRule@1" },
+    { "name": "sys/HttpPublishRegistry@1" },
+    { "name": "sys/HttpPublishSet@1" }
   ],
   "modules": [
     { "name": "demo/WorkspaceDemo@1" },
     { "name": "sys/Workspace@1" },
-    { "name": "sys/CapEnforceWorkspace@1" }
+    { "name": "sys/CapEnforceWorkspace@1" },
+    { "name": "sys/HttpPublish@1" }
   ],
   "plans": [
     { "name": "demo/workspace_seed_plan@1" }
@@ -79,7 +87,8 @@
         "event": "sys/WorkspaceCommit@1",
         "reducer": "sys/Workspace@1",
         "key_field": "workspace"
-      }
+      },
+      { "event": "sys/HttpPublishSet@1", "reducer": "sys/HttpPublish@1" }
     ],
     "inboxes": []
   },
@@ -94,6 +103,7 @@
     { "name": "sys/workspace.list@1" },
     { "name": "sys/workspace.read_ref@1" },
     { "name": "sys/workspace.read_bytes@1" },
-    { "name": "sys/workspace.diff@1" }
+    { "name": "sys/workspace.diff@1" },
+    { "name": "sys/workspace.annotations_set@1" }
   ]
 }

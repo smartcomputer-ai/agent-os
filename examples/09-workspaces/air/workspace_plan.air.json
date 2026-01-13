@@ -352,13 +352,165 @@
         "bind": { "as": "root_after_update_existing" }
       },
       {
+        "id": "emit_write_index_existing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_update_existing" },
+            "path": { "text": "index.html" },
+            "bytes": {
+              "bytes_b64": "PCFkb2N0eXBlIGh0bWw+CjxodG1sPgogIDxoZWFkPgogICAgPG1ldGEgY2hhcnNldD0idXRmLTgiIC8+CiAgICA8dGl0bGU+QU9TIFdvcmtzcGFjZTwvdGl0bGU+CiAgPC9oZWFkPgogIDxib2R5PgogICAgPGgxPldvcmtzcGFjZSBkZW1vPC9oMT4KICAgIDxwPlNlcnZlZCBmcm9tIHRoZSB3b3Jrc3BhY2UgcmVnaXN0cnkuPC9wPgogIDwvYm9keT4KPC9odG1sPgo="
+            },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_index_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_index_existing" }
+      },
+      {
+        "id": "await_write_index_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_index_existing" },
+        "bind": { "as": "write_index_receipt_existing" }
+      },
+      {
+        "id": "assign_root_after_index_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_index_receipt_existing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_index_existing" }
+      },
+      {
+        "id": "emit_write_content_type_existing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_index_existing" },
+            "path": { "text": "meta/content-type.txt" },
+            "bytes": { "bytes_b64": "dGV4dC9odG1sOyBjaGFyc2V0PXV0Zi04" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_content_type_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_content_type_existing" }
+      },
+      {
+        "id": "await_write_content_type_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_content_type_existing" },
+        "bind": { "as": "write_content_type_receipt_existing" }
+      },
+      {
+        "id": "assign_root_after_content_type_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_content_type_receipt_existing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_content_type_existing" }
+      },
+      {
+        "id": "assign_content_type_hash_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_content_type_receipt_existing" },
+            { "text": "blob_hash" }
+          ]
+        },
+        "bind": { "as": "content_type_hash_existing" }
+      },
+      {
+        "id": "emit_annotations_set_existing",
+        "op": "emit_effect",
+        "kind": "workspace.annotations_set",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_content_type_existing" },
+            "path": { "text": "index.html" },
+            "annotations_patch": {
+              "map": [
+                {
+                  "key": { "text": "http.content-type" },
+                  "value": { "ref": "@var:content_type_hash_existing" }
+                }
+              ]
+            }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_annotations_set_existing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "annotations_set_existing" }
+      },
+      {
+        "id": "await_annotations_set_existing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:annotations_set_existing" },
+        "bind": { "as": "annotations_set_receipt_existing" }
+      },
+      {
+        "id": "assign_root_after_publish_existing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:annotations_set_receipt_existing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_publish_existing" }
+      },
+      {
         "id": "emit_diff_existing",
         "op": "emit_effect",
         "kind": "workspace.diff",
         "params": {
           "record": {
             "root_a": { "ref": "@var:root_after_data_existing" },
-            "root_b": { "ref": "@var:root_after_update_existing" },
+            "root_b": { "ref": "@var:root_after_publish_existing" },
             "prefix": { "null": {} }
           }
         },
@@ -406,6 +558,37 @@
         "bind": { "as": "diff_count_existing" }
       },
       {
+        "id": "raise_publish_existing",
+        "op": "raise_event",
+        "event": "sys/HttpPublishSet@1",
+        "value": {
+          "record": {
+            "id": { "ref": "@plan.input.workspace" },
+            "rule": {
+              "record": {
+                "route_prefix": {
+                  "op": "concat",
+                  "args": [
+                    { "text": "/" },
+                    { "ref": "@plan.input.workspace" }
+                  ]
+                },
+                "workspace": {
+                  "record": {
+                    "workspace": { "ref": "@plan.input.workspace" },
+                    "version": { "null": {} },
+                    "path": { "null": {} }
+                  }
+                },
+                "default_doc": { "text": "index.html" },
+                "allow_dir_listing": { "bool": true },
+                "cache": { "text": "etag" }
+              }
+            }
+          }
+        }
+      },
+      {
         "id": "raise_seeded_existing",
         "op": "raise_event",
         "event": "demo/WorkspaceEvent@1",
@@ -418,7 +601,7 @@
                 "expected_head": {
                   "null": {}
                 },
-                "root_hash": { "ref": "@var:root_after_update_existing" },
+                "root_hash": { "ref": "@var:root_after_publish_existing" },
                 "entry_count": { "ref": "@var:entry_count_existing" },
                 "diff_count": { "ref": "@var:diff_count_existing" },
                 "owner": { "ref": "@plan.input.owner" }
@@ -778,13 +961,165 @@
         "bind": { "as": "root_after_update_missing" }
       },
       {
+        "id": "emit_write_index_missing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_update_missing" },
+            "path": { "text": "index.html" },
+            "bytes": {
+              "bytes_b64": "PCFkb2N0eXBlIGh0bWw+CjxodG1sPgogIDxoZWFkPgogICAgPG1ldGEgY2hhcnNldD0idXRmLTgiIC8+CiAgICA8dGl0bGU+QU9TIFdvcmtzcGFjZTwvdGl0bGU+CiAgPC9oZWFkPgogIDxib2R5PgogICAgPGgxPldvcmtzcGFjZSBkZW1vPC9oMT4KICAgIDxwPlNlcnZlZCBmcm9tIHRoZSB3b3Jrc3BhY2UgcmVnaXN0cnkuPC9wPgogIDwvYm9keT4KPC9odG1sPgo="
+            },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_index_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_index_missing" }
+      },
+      {
+        "id": "await_write_index_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_index_missing" },
+        "bind": { "as": "write_index_receipt_missing" }
+      },
+      {
+        "id": "assign_root_after_index_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_index_receipt_missing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_index_missing" }
+      },
+      {
+        "id": "emit_write_content_type_missing",
+        "op": "emit_effect",
+        "kind": "workspace.write_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_index_missing" },
+            "path": { "text": "meta/content-type.txt" },
+            "bytes": { "bytes_b64": "dGV4dC9odG1sOyBjaGFyc2V0PXV0Zi04" },
+            "mode": { "null": {} }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_write_content_type_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "write_content_type_missing" }
+      },
+      {
+        "id": "await_write_content_type_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:write_content_type_missing" },
+        "bind": { "as": "write_content_type_receipt_missing" }
+      },
+      {
+        "id": "assign_root_after_content_type_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_content_type_receipt_missing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_content_type_missing" }
+      },
+      {
+        "id": "assign_content_type_hash_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:write_content_type_receipt_missing" },
+            { "text": "blob_hash" }
+          ]
+        },
+        "bind": { "as": "content_type_hash_missing" }
+      },
+      {
+        "id": "emit_annotations_set_missing",
+        "op": "emit_effect",
+        "kind": "workspace.annotations_set",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:root_after_content_type_missing" },
+            "path": { "text": "index.html" },
+            "annotations_patch": {
+              "map": [
+                {
+                  "key": { "text": "http.content-type" },
+                  "value": { "ref": "@var:content_type_hash_missing" }
+                }
+              ]
+            }
+          }
+        },
+        "idempotency_key": {
+          "op": "hash",
+          "args": [
+            {
+              "record": {
+                "workspace": { "ref": "@plan.input.workspace" },
+                "step": { "text": "emit_annotations_set_missing" }
+              }
+            }
+          ]
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "annotations_set_missing" }
+      },
+      {
+        "id": "await_annotations_set_missing",
+        "op": "await_receipt",
+        "for": { "ref": "@var:annotations_set_missing" },
+        "bind": { "as": "annotations_set_receipt_missing" }
+      },
+      {
+        "id": "assign_root_after_publish_missing",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:annotations_set_receipt_missing" },
+            { "text": "new_root_hash" }
+          ]
+        },
+        "bind": { "as": "root_after_publish_missing" }
+      },
+      {
         "id": "emit_diff_missing",
         "op": "emit_effect",
         "kind": "workspace.diff",
         "params": {
           "record": {
             "root_a": { "ref": "@var:root_after_data_missing" },
-            "root_b": { "ref": "@var:root_after_update_missing" },
+            "root_b": { "ref": "@var:root_after_publish_missing" },
             "prefix": { "null": {} }
           }
         },
@@ -832,6 +1167,37 @@
         "bind": { "as": "diff_count_missing" }
       },
       {
+        "id": "raise_publish_missing",
+        "op": "raise_event",
+        "event": "sys/HttpPublishSet@1",
+        "value": {
+          "record": {
+            "id": { "ref": "@plan.input.workspace" },
+            "rule": {
+              "record": {
+                "route_prefix": {
+                  "op": "concat",
+                  "args": [
+                    { "text": "/" },
+                    { "ref": "@plan.input.workspace" }
+                  ]
+                },
+                "workspace": {
+                  "record": {
+                    "workspace": { "ref": "@plan.input.workspace" },
+                    "version": { "null": {} },
+                    "path": { "null": {} }
+                  }
+                },
+                "default_doc": { "text": "index.html" },
+                "allow_dir_listing": { "bool": true },
+                "cache": { "text": "etag" }
+              }
+            }
+          }
+        }
+      },
+      {
         "id": "raise_seeded_missing",
         "op": "raise_event",
         "event": "demo/WorkspaceEvent@1",
@@ -844,7 +1210,7 @@
                 "expected_head": {
                   "null": {}
                 },
-                "root_hash": { "ref": "@var:root_after_update_missing" },
+                "root_hash": { "ref": "@var:root_after_publish_missing" },
                 "entry_count": { "ref": "@var:entry_count_missing" },
                 "diff_count": { "ref": "@var:diff_count_missing" },
                 "owner": { "ref": "@plan.input.owner" }
@@ -916,11 +1282,43 @@
         "from": "await_write_readme_update_existing",
         "to": "assign_root_after_update_existing"
       },
-      { "from": "assign_root_after_update_existing", "to": "emit_diff_existing" },
+      { "from": "assign_root_after_update_existing", "to": "emit_write_index_existing" },
+      { "from": "emit_write_index_existing", "to": "await_write_index_existing" },
+      { "from": "await_write_index_existing", "to": "assign_root_after_index_existing" },
+      {
+        "from": "assign_root_after_index_existing",
+        "to": "emit_write_content_type_existing"
+      },
+      {
+        "from": "emit_write_content_type_existing",
+        "to": "await_write_content_type_existing"
+      },
+      {
+        "from": "await_write_content_type_existing",
+        "to": "assign_root_after_content_type_existing"
+      },
+      {
+        "from": "assign_root_after_content_type_existing",
+        "to": "assign_content_type_hash_existing"
+      },
+      {
+        "from": "assign_content_type_hash_existing",
+        "to": "emit_annotations_set_existing"
+      },
+      {
+        "from": "emit_annotations_set_existing",
+        "to": "await_annotations_set_existing"
+      },
+      {
+        "from": "await_annotations_set_existing",
+        "to": "assign_root_after_publish_existing"
+      },
+      { "from": "assign_root_after_publish_existing", "to": "emit_diff_existing" },
       { "from": "emit_diff_existing", "to": "await_diff_existing" },
       { "from": "await_diff_existing", "to": "assign_changes_existing" },
       { "from": "assign_changes_existing", "to": "assign_diff_count_existing" },
-      { "from": "assign_diff_count_existing", "to": "raise_seeded_existing" },
+      { "from": "assign_diff_count_existing", "to": "raise_publish_existing" },
+      { "from": "raise_publish_existing", "to": "raise_seeded_existing" },
       { "from": "raise_seeded_existing", "to": "end_existing" },
       { "from": "emit_empty_root", "to": "await_empty_root" },
       { "from": "await_empty_root", "to": "assign_root_missing" },
@@ -953,11 +1351,43 @@
         "from": "await_write_readme_update_missing",
         "to": "assign_root_after_update_missing"
       },
-      { "from": "assign_root_after_update_missing", "to": "emit_diff_missing" },
+      { "from": "assign_root_after_update_missing", "to": "emit_write_index_missing" },
+      { "from": "emit_write_index_missing", "to": "await_write_index_missing" },
+      { "from": "await_write_index_missing", "to": "assign_root_after_index_missing" },
+      {
+        "from": "assign_root_after_index_missing",
+        "to": "emit_write_content_type_missing"
+      },
+      {
+        "from": "emit_write_content_type_missing",
+        "to": "await_write_content_type_missing"
+      },
+      {
+        "from": "await_write_content_type_missing",
+        "to": "assign_root_after_content_type_missing"
+      },
+      {
+        "from": "assign_root_after_content_type_missing",
+        "to": "assign_content_type_hash_missing"
+      },
+      {
+        "from": "assign_content_type_hash_missing",
+        "to": "emit_annotations_set_missing"
+      },
+      {
+        "from": "emit_annotations_set_missing",
+        "to": "await_annotations_set_missing"
+      },
+      {
+        "from": "await_annotations_set_missing",
+        "to": "assign_root_after_publish_missing"
+      },
+      { "from": "assign_root_after_publish_missing", "to": "emit_diff_missing" },
       { "from": "emit_diff_missing", "to": "await_diff_missing" },
       { "from": "await_diff_missing", "to": "assign_changes_missing" },
       { "from": "assign_changes_missing", "to": "assign_diff_count_missing" },
-      { "from": "assign_diff_count_missing", "to": "raise_seeded_missing" },
+      { "from": "assign_diff_count_missing", "to": "raise_publish_missing" },
+      { "from": "raise_publish_missing", "to": "raise_seeded_missing" },
       { "from": "raise_seeded_missing", "to": "end_missing" }
     ],
     "required_caps": ["cap_workspace"],
@@ -968,7 +1398,8 @@
       "workspace.list",
       "workspace.read_ref",
       "workspace.read_bytes",
-      "workspace.diff"
+      "workspace.diff",
+      "workspace.annotations_set"
     ]
   }
 ]
