@@ -164,11 +164,19 @@ async fn run_daemon(
     });
 
     let http_config = host.config().http_server.clone();
+    let http_bind = http_config.bind;
+    let http_enabled = http_config.enabled;
     let http_handle = aos_host::http::spawn_http_server(
         http_config,
         control_tx.clone(),
         shutdown_tx.clone(),
     );
+    if http_enabled {
+        tracing::info!(
+            "HTTP docs available at http://{}/api/docs/ (OpenAPI: /api/openapi.json)",
+            http_bind
+        );
+    }
 
     // Create and run daemon
     let mut daemon = WorldDaemon::new(

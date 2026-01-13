@@ -10,6 +10,7 @@ use axum::Router;
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
+use utoipa_swagger_ui::SwaggerUi;
 
 use crate::control::ControlError;
 use crate::http::{HttpState, control_call};
@@ -47,7 +48,6 @@ use crate::http::{HttpState, control_call};
         gov_shadow,
         gov_approve,
         gov_apply,
-        openapi,
     ),
     components(
         schemas(
@@ -316,14 +316,14 @@ struct EmptyResponse {}
 
 pub fn router() -> Router<HttpState> {
     Router::new()
-        .route("/openapi.json", get(openapi))
+        .merge(SwaggerUi::new("/docs").url("/api/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health))
         .route("/info", get(info))
         .route("/manifest", get(manifest))
         .route("/defs", get(defs_list))
-        .route("/defs/:kind/:name", get(defs_get))
-        .route("/state/:reducer", get(state_get))
-        .route("/state/:reducer/cells", get(state_cells))
+        .route("/defs/{kind}/{name}", get(defs_get))
+        .route("/state/{reducer}", get(state_get))
+        .route("/state/{reducer}/cells", get(state_cells))
         .route("/events", post(events_post))
         .route("/receipts", post(receipts_post))
         .route("/journal/head", get(journal_head))
@@ -338,7 +338,7 @@ pub fn router() -> Router<HttpState> {
         .route("/workspace/annotations", post(workspace_annotations_set))
         .route("/workspace/empty-root", post(workspace_empty_root))
         .route("/blob", post(blob_put))
-        .route("/blob/:hash", get(blob_get))
+        .route("/blob/{hash}", get(blob_get))
         .route("/gov/propose", post(gov_propose))
         .route("/gov/shadow", post(gov_shadow))
         .route("/gov/approve", post(gov_approve))
@@ -379,18 +379,6 @@ impl IntoResponse for ApiError {
         let body = serde_json::json!({ "code": code, "message": message });
         (status, Json(body)).into_response()
     }
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/openapi.json",
-    tag = "general",
-    responses(
-        (status = 200, content_type = "application/json", body = serde_json::Value)
-    )
-)]
-async fn openapi() -> impl IntoResponse {
-    Json(ApiDoc::openapi())
 }
 
 #[utoipa::path(
