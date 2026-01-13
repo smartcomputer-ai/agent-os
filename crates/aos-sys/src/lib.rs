@@ -74,7 +74,6 @@ pub struct WorkspaceRef {
 /// Publish rule mapping (`sys/HttpPublishRule@1`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpPublishRule {
-    pub host: Option<String>,
     pub route_prefix: String,
     pub workspace: WorkspaceRef,
     pub default_doc: Option<String>,

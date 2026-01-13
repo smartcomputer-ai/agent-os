@@ -555,7 +555,6 @@
     "name": "sys/HttpPublishRule@1",
     "type": {
       "record": {
-        "host": { "option": { "text": {} } },
         "route_prefix": { "text": {} },
         "workspace": { "ref": "sys/WorkspaceRef@1" },
         "default_doc": { "option": { "text": {} } },

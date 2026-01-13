@@ -29,7 +29,7 @@ Publishing should not be a bespoke host config. It should be:
 
 ## Concepts
 
-- **Route**: `(host?, path_prefix)` with longest-prefix match.
+- **Route**: `path_prefix` with longest-prefix match.
 - **Pinned vs HEAD**: a pinned version can be cached as immutable.
 - **Path normalization**: request paths are normalized before matching.
 
@@ -41,12 +41,11 @@ Publishing should not be a bespoke host config. It should be:
   "$kind": "defschema",
   "name": "sys/HttpPublishRule@1",
   "type": {
-    "record": {
-      "host": { "option": { "text": {} } },
-      "route_prefix": { "text": {} },
-      "workspace": { "ref": "sys/WorkspaceRef@1" },
-      "default_doc": { "option": { "text": {} } },
-      "allow_dir_listing": { "bool": {} },
+      "record": {
+        "route_prefix": { "text": {} },
+        "workspace": { "ref": "sys/WorkspaceRef@1" },
+        "default_doc": { "option": { "text": {} } },
+        "allow_dir_listing": { "bool": {} },
       "cache": { "text": {} }
     }
   }
@@ -67,8 +66,8 @@ Notes:
    unless the path is exactly `/`.
 4) Validate segments against workspace path rules (`[A-Za-z0-9._~-]`).
    If any segment is invalid, return 404.
-5) Match rules by host (exact match if present) and path prefix *by segment*:
-   `/app` matches `/app` and `/app/...` but not `/apple`.
+5) Match rules by path prefix *by segment*: `/app` matches `/app` and
+   `/app/...` but not `/apple`.
 6) Choose the longest-prefix match (most segments).
 
 ## File vs Directory Semantics
@@ -134,6 +133,46 @@ Notes:
 - This reducer is intended as a single-instance registry; `key_schema` is
   optional and omitted here.
 
+## Capability (Publish Updates)
+
+To gate mutations to `sys/HttpPublish@1`, add a dedicated publish capability
+type. This is intended for plans/CLI flows that update the registry (not for
+serving).
+
+```jsonc
+{
+  "$kind": "defcap",
+  "name": "sys/http.publish@1",
+  "cap_type": "http.publish",
+  "schema": {
+    "record": {
+      "route_prefixes": { "option": { "set": { "text": {} } } },
+      "workspaces": { "option": { "set": { "text": {} } } },
+      "workspace_path_prefixes": { "option": { "set": { "text": {} } } },
+      "cache_modes": { "option": { "set": { "text": {} } } },
+      "allow_dir_listing": { "option": { "bool": {} } },
+      "default_docs": { "option": { "set": { "text": {} } } },
+      "ops": { "option": { "set": { "text": {} } } }
+    }
+  }
+}
+```
+
+Enforcement intent:
+- `route_prefixes`: if set, rule values must match one of the allowed entries
+  (prefix match by segment).
+- `workspaces` / `workspace_path_prefixes`: if set, rule workspace + resolved
+  path must fall under an allowed scope.
+- `cache_modes`: if set, rule cache must be in the allowlist.
+- `allow_dir_listing`: if set to `false`, reject rules that enable listing.
+- `default_docs`: if set, `default_doc` must be in the allowlist.
+- `ops`: allowlist of `"set" | "remove"`; omit to allow both.
+
+Planned enforcement surface:
+- Use a plan-only internal effect (e.g., `http.publish.set`) that accepts
+  `sys/HttpPublishSet@1` params and is guarded by `cap_type = http.publish`.
+  The effect applies the registry update deterministically after cap checks.
+
 ## Host Behavior (Serving)
 
 On request:
@@ -164,8 +203,8 @@ On request:
 
 - The host process must hold `sys/workspace@1` caps with `read/list` scoped to
   the published workspaces and prefixes.
-- Registry updates should be gated by a plan/cap (e.g., `publish` op) and not
-  performed by arbitrary reducers.
+- Registry updates should be gated by a plan/cap (e.g., `http.publish`) and not
+  performed by arbitrary reducers or unauthenticated event injection.
 
 ## Tests
 
@@ -177,5 +216,6 @@ On request:
 
 ## Open Questions
 
-- Should publish rules support host wildcards or only exact match?
-- Do we want a dedicated `sys/http@1` cap type for publish operations?
+- Should `route_prefixes` in caps be exact match or prefix match by segment?
+- Do we want `http.publish.set` as an internal effect, or a different gating
+  mechanism for plan-issued registry updates?
