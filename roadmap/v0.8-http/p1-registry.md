@@ -16,7 +16,7 @@ references, so host serving is a thin, deterministic layer over
 Publishing should not be a bespoke host config. It should be:
 - **Deterministic** (route -> workspace ref -> root hash),
 - **Auditable** (stored in reducer state), and
-- **Policy-friendly** (cap gated and scoped).
+- **Policy-friendly** (governance/routing gated and scoped).
 
 ## Decision Summary
 
@@ -133,46 +133,6 @@ Notes:
 - This reducer is intended as a single-instance registry; `key_schema` is
   optional and omitted here.
 
-## Capability (Publish Updates)
-
-To gate mutations to `sys/HttpPublish@1`, add a dedicated publish capability
-type. This is intended for plans/CLI flows that update the registry (not for
-serving).
-
-```jsonc
-{
-  "$kind": "defcap",
-  "name": "sys/http.publish@1",
-  "cap_type": "http.publish",
-  "schema": {
-    "record": {
-      "route_prefixes": { "option": { "set": { "text": {} } } },
-      "workspaces": { "option": { "set": { "text": {} } } },
-      "workspace_path_prefixes": { "option": { "set": { "text": {} } } },
-      "cache_modes": { "option": { "set": { "text": {} } } },
-      "allow_dir_listing": { "option": { "bool": {} } },
-      "default_docs": { "option": { "set": { "text": {} } } },
-      "ops": { "option": { "set": { "text": {} } } }
-    }
-  }
-}
-```
-
-Enforcement intent:
-- `route_prefixes`: if set, rule values must match one of the allowed entries
-  (prefix match by segment).
-- `workspaces` / `workspace_path_prefixes`: if set, rule workspace + resolved
-  path must fall under an allowed scope.
-- `cache_modes`: if set, rule cache must be in the allowlist.
-- `allow_dir_listing`: if set to `false`, reject rules that enable listing.
-- `default_docs`: if set, `default_doc` must be in the allowlist.
-- `ops`: allowlist of `"set" | "remove"`; omit to allow both.
-
-Planned enforcement surface:
-- Use a plan-only internal effect (e.g., `http.publish.set`) that accepts
-  `sys/HttpPublishSet@1` params and is guarded by `cap_type = http.publish`.
-  The effect applies the registry update deterministically after cap checks.
-
 ## Host Behavior (Serving)
 
 On request:
@@ -203,7 +163,7 @@ On request:
 
 - The host process must hold `sys/workspace@1` caps with `read/list` scoped to
   the published workspaces and prefixes.
-- Registry updates should be gated by a plan/cap (e.g., `http.publish`) and not
+- Registry updates should be gated by governance/manifest routing and not
   performed by arbitrary reducers or unauthenticated event injection.
 
 ## Tests
@@ -215,7 +175,3 @@ On request:
 - Cache headers for pinned vs HEAD.
 
 ## Open Questions
-
-- Should `route_prefixes` in caps be exact match or prefix match by segment?
-- Do we want `http.publish.set` as an internal effect, or a different gating
-  mechanism for plan-issued registry updates?
