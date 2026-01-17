@@ -53,6 +53,7 @@ export function useHealth(
   return useQuery({
     queryKey: queryKeys.health(),
     queryFn: () => endpoints.health(),
+    refetchInterval: (query) => (query.state.data?.ok ? 15000 : 2000),
     ...options,
   });
 }
@@ -63,6 +64,7 @@ export function useInfo(
   return useQuery({
     queryKey: queryKeys.info(),
     queryFn: () => endpoints.info(),
+    refetchInterval: (query) => (query.state.data ? 30000 : 5000),
     ...options,
   });
 }

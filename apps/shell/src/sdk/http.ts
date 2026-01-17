@@ -1,7 +1,9 @@
 import type { paths } from "./types";
 
 const DEFAULT_API_BASE = "http://localhost:7777";
-const API_BASE = import.meta.env.VITE_API_BASE || DEFAULT_API_BASE;
+const API_BASE =
+  import.meta.env.VITE_API_BASE ??
+  (typeof window === "undefined" ? DEFAULT_API_BASE : window.location.origin);
 
 type HttpMethod = "get" | "post" | "put" | "delete" | "patch";
 
