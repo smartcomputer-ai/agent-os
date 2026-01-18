@@ -559,10 +559,12 @@ async fn defs_list(
 )]
 async fn defs_get(
     State(state): State<HttpState>,
-    Path((kind, name)): Path<(String, String)>,
+    Path((_kind, name)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // The `kind` path param is used for routing/documentation but the kernel
+    // looks up defs by name only (names are unique across all def kinds).
     let payload = serde_json::json!({
-        "name": format!("{kind}/{name}"),
+        "name": name,
     });
     let result = control_call(&state, "def-get", payload).await?;
     Ok(Json(result))
