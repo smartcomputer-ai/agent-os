@@ -31,10 +31,9 @@ const syncRuns = [
 
 export function WorkspacesIndexPage() {
   return (
-    <div className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2">
+    <div className="min-h-[calc(100dvh-7.5rem)] space-y-6 animate-in fade-in-0 slide-in-from-bottom-2">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-2">
-          <Badge variant="secondary">Storage</Badge>
           <h1 className="text-3xl font-semibold tracking-tight text-foreground font-[var(--font-display)]">
             Workspaces
           </h1>

@@ -142,6 +142,10 @@ a {
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    /* Matches gradient end color to prevent white flash on overscroll */
+    background-color: #f2ebe0;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);

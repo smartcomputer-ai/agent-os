@@ -53,9 +53,8 @@ const pinnedDefs = [
 
 export function ExplorerOverview() {
   return (
-    <div className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2">
+    <div className="min-h-[calc(100dvh-7.5rem)] space-y-6 animate-in fade-in-0 slide-in-from-bottom-2">
       <header className="space-y-2">
-        <Badge variant="secondary">Read only</Badge>
         <h1 className="text-3xl font-semibold tracking-tight text-foreground font-[var(--font-display)]">
           World Explorer
         </h1>
