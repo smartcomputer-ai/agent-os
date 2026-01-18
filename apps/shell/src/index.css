@@ -1,19 +1,19 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-display: "Space Grotesk", "Segoe UI", sans-serif;
   line-height: 1.4;
   font-weight: 400;
-  color: #1a1916;
-  background-color: #f7f4ee;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --radius: 0.625rem;
+  --radius: 0.75rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.147 0.004 49.25);
   --card: oklch(1 0 0);
@@ -56,154 +56,11 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f7f4ee;
 }
 
 a {
   color: inherit;
   text-decoration: none;
-}
-
-ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.shell {
-  display: flex;
-  min-height: 100vh;
-  color: #1a1916;
-}
-
-.shell-sidebar {
-  width: 240px;
-  border-right: 1px solid #d8d1c6;
-  padding: 16px;
-  background: #fdfbf7;
-}
-
-.shell-brand {
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.shell-status {
-  font-size: 12px;
-  color: #6d675d;
-}
-
-.shell-nav {
-  margin-top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.nav-item {
-  display: block;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 14px;
-  color: #2d2924;
-  transition: background-color 120ms ease;
-}
-
-.nav-item:hover {
-  background: #efe9df;
-}
-
-.nav-item-active {
-  background: #e5ded2;
-  font-weight: 600;
-}
-
-.shell-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.shell-header {
-  height: 48px;
-  border-bottom: 1px solid #d8d1c6;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #ffffff;
-}
-
-.shell-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.shell-subtitle {
-  font-size: 12px;
-  color: #7c756a;
-  margin-left: 8px;
-}
-
-.shell-header-meta {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid #cfc6b8;
-  border-radius: 999px;
-  padding: 2px 10px;
-  font-size: 11px;
-  color: #3c3832;
-  background: #f8f4ee;
-}
-
-.shell-content {
-  flex: 1;
-  padding: 20px;
-}
-
-.page h1 {
-  margin: 0 0 8px;
-  font-size: 24px;
-}
-
-.page p {
-  margin: 0 0 12px;
-  color: #534d44;
-}
-
-.placeholder {
-  border: 1px dashed #cfc6b8;
-  border-radius: 12px;
-  padding: 16px;
-  background: #ffffff;
-  color: #4e473d;
-}
-
-.section-title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  margin-bottom: 8px;
-  color: #5b554c;
-}
-
-.link-list {
-  display: grid;
-  gap: 6px;
-  list-style: none;
-  padding-left: 0;
-}
-
-.link-list a {
-  text-decoration: underline;
 }
 
 @theme inline {
@@ -287,5 +144,6 @@ ul {
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
   }
 }
