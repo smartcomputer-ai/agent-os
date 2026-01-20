@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: Medium  
 **Risk if deferred**: High (blocks real LLM calls)  
-**Status**: Draft
+**Status**: Complete
 
 ## Goal
 
@@ -55,5 +55,7 @@ API keys via `SecretRef` without ever writing plaintext to journals or receipts.
 
 ## Done
 
-- Host/CLI support env-backed resolver with `.env` loading.
-- LLM secret can be injected via `SecretRef` end-to-end.
+- Host bootstraps an env-backed resolver when manifest secrets exist (env bindings only).
+- CLI loads `.env` and defaults `allow_placeholder_secrets` to false; placeholders must be explicit dev config.
+- LLM secret injection via `SecretRef` works end-to-end without plaintext in receipts.
+- Tests cover env resolver injection, missing env handling, and secret ACL enforcement.
