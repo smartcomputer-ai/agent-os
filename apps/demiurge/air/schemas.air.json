@@ -1,0 +1,94 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatRole@1",
+    "type": {
+      "variant": {
+        "User": { "unit": {} },
+        "Assistant": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/TokenUsage@1",
+    "type": {
+      "record": {
+        "prompt": { "nat": {} },
+        "completion": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatMessage@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "role": { "ref": "demiurge/ChatRole@1" },
+        "text": { "option": { "text": {} } },
+        "input_ref": { "option": { "hash": {} } },
+        "output_ref": { "option": { "hash": {} } },
+        "token_usage": { "option": { "ref": "demiurge/TokenUsage@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatState@1",
+    "type": {
+      "record": {
+        "messages": { "list": { "ref": "demiurge/ChatMessage@1" } },
+        "last_request_id": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/UserMessage@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "text": { "text": {} },
+        "input_ref": { "hash": {} },
+        "model": { "text": {} },
+        "provider": { "text": {} },
+        "max_tokens": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatRequest@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "input_ref": { "hash": {} },
+        "model": { "text": {} },
+        "provider": { "text": {} },
+        "max_tokens": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatResult@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "output_ref": { "hash": {} },
+        "token_usage": { "ref": "demiurge/TokenUsage@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatEvent@1",
+    "type": {
+      "variant": {
+        "UserMessage": { "ref": "demiurge/UserMessage@1" },
+        "ChatResult": { "ref": "demiurge/ChatResult@1" }
+      }
+    }
+  }
+]

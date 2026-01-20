@@ -1,0 +1,15 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demiurge/Demiurge@1",
+    "module_kind": "reducer",
+    "abi": {
+      "reducer": {
+        "state": "demiurge/ChatState@1",
+        "event": "demiurge/ChatEvent@1",
+        "effects_emitted": [],
+        "cap_slots": {}
+      }
+    }
+  }
+]

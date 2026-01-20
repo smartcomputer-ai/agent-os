@@ -1,0 +1,20 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demiurge/llm_policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "llm.generate",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/chat_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {},
+        "decision": "deny"
+      }
+    ]
+  }
+]

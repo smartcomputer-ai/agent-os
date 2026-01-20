@@ -1,0 +1,118 @@
+{
+  "$kind": "manifest",
+  "schemas": [
+    {
+      "name": "demiurge/ChatRole@1"
+    },
+    {
+      "name": "demiurge/TokenUsage@1"
+    },
+    {
+      "name": "demiurge/ChatMessage@1"
+    },
+    {
+      "name": "demiurge/ChatState@1"
+    },
+    {
+      "name": "demiurge/UserMessage@1"
+    },
+    {
+      "name": "demiurge/ChatRequest@1"
+    },
+    {
+      "name": "demiurge/ChatResult@1"
+    },
+    {
+      "name": "demiurge/ChatEvent@1"
+    },
+    {
+      "name": "sys/LlmGenerateParams@1"
+    },
+    {
+      "name": "sys/LlmGenerateReceipt@1"
+    },
+    {
+      "name": "sys/SecretRef@1"
+    },
+    {
+      "name": "sys/TextOrSecretRef@1"
+    },
+    {
+      "name": "sys/BytesOrSecretRef@1"
+    }
+  ],
+  "modules": [
+    {
+      "name": "demiurge/Demiurge@1"
+    },
+    {
+      "name": "sys/CapEnforceLlmBasic@1"
+    }
+  ],
+  "plans": [
+    {
+      "name": "demiurge/chat_plan@1"
+    }
+  ],
+  "caps": [
+    {
+      "name": "demiurge/llm_basic@1"
+    }
+  ],
+  "policies": [
+    {
+      "name": "demiurge/llm_policy@1"
+    }
+  ],
+  "secrets": [
+    {
+      "name": "demiurge/llm_api@1",
+      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "defaults": {
+    "policy": "demiurge/llm_policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_llm",
+        "cap": "demiurge/llm_basic@1",
+        "params": {
+          "record": {
+            "models": {
+              "set": [
+                {
+                  "text": "gpt-mock"
+                }
+              ]
+            },
+            "max_tokens": {
+              "nat": 2048
+            }
+          }
+        }
+      }
+    ]
+  },
+  "routing": {
+    "events": [
+      {
+        "event": "demiurge/ChatEvent@1",
+        "reducer": "demiurge/Demiurge@1"
+      }
+    ],
+    "inboxes": []
+  },
+  "triggers": [
+    {
+      "event": "demiurge/ChatRequest@1",
+      "plan": "demiurge/chat_plan@1",
+      "correlate_by": "request_id"
+    }
+  ],
+  "air_version": "1",
+  "effects": [
+    {
+      "name": "sys/llm.generate@1"
+    }
+  ]
+}
