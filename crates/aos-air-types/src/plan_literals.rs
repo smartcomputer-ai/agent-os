@@ -884,7 +884,7 @@ mod tests {
                         "model": "gpt-4",
                         "temperature": "0.5",
                         "max_tokens": 128,
-                        "input_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "message_refs": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
                         "tools": ["function.call"],
                         "api_key": null
                     })),

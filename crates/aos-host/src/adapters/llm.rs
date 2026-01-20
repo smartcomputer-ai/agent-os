@@ -5,6 +5,8 @@ use aos_cbor::Hash;
 use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, TokenUsage};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine;
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -99,37 +101,17 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             _ => return Ok(self.error_receipt(intent, &provider_id, "api_key missing")),
         };
 
-        // Load prompt/messages from CAS
-        let input_hash = match Hash::from_hex_str(params.input_ref.as_str()) {
-            Ok(h) => h,
-            Err(e) => {
-                return Ok(self.error_receipt(
-                    intent,
-                    &provider_id,
-                    format!("invalid input_ref: {e}"),
-                ));
-            }
-        };
-        let input_bytes = match self.store.get_blob(input_hash) {
-            Ok(b) => b,
-            Err(e) => {
-                return Ok(self.error_receipt(
-                    intent,
-                    &provider_id,
-                    format!("input_ref not found: {e}"),
-                ));
-            }
-        };
+        if params.message_refs.is_empty() {
+            return Ok(self.error_receipt(
+                intent,
+                &provider_id,
+                "message_refs empty",
+            ));
+        }
 
-        let messages: serde_json::Value = match serde_json::from_slice(&input_bytes) {
-            Ok(v) => v,
-            Err(e) => {
-                return Ok(self.error_receipt(
-                    intent,
-                    &provider_id,
-                    format!("invalid input JSON: {e}"),
-                ));
-            }
+        let messages = match self.load_messages(&params.message_refs) {
+            Ok(messages) => messages,
+            Err(err) => return Ok(self.error_receipt(intent, &provider_id, err)),
         };
 
         let temperature: f64 = params.temperature.parse().unwrap_or(0.7);
@@ -196,7 +178,24 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             .and_then(|c| c.message.content.clone())
             .unwrap_or_default();
 
-        let output_ref = match self.store.put_blob(content.as_bytes()) {
+        let output_message = serde_json::json!({
+            "role": "assistant",
+            "content": [
+                { "type": "text", "text": content }
+            ]
+        });
+        let output_bytes = match serde_json::to_vec(&output_message) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return Ok(self.error_receipt(
+                    intent,
+                    &provider_id,
+                    format!("encode output message failed: {e}"),
+                ));
+            }
+        };
+
+        let output_ref = match self.store.put_blob(&output_bytes) {
             Ok(h) => match HashRef::new(h.to_hex()) {
                 Ok(hr) => hr,
                 Err(e) => {
@@ -236,6 +235,172 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             cost_cents: None,
             signature: vec![0; 64],
         })
+    }
+}
+
+impl<S: Store> LlmAdapter<S> {
+    fn load_messages(&self, refs: &[HashRef]) -> Result<Vec<serde_json::Value>, String> {
+        let mut messages = Vec::new();
+        for reference in refs {
+            let mut loaded = self.load_message(reference)?;
+            messages.append(&mut loaded);
+        }
+        Ok(messages)
+    }
+
+    fn load_message(&self, reference: &HashRef) -> Result<Vec<serde_json::Value>, String> {
+        let hash =
+            Hash::from_hex_str(reference.as_str()).map_err(|e| format!("invalid message_ref: {e}"))?;
+        let bytes = self
+            .store
+            .get_blob(hash)
+            .map_err(|e| format!("message_ref not found: {e}"))?;
+
+        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            match value {
+                serde_json::Value::Array(items) => {
+                    let mut messages = Vec::with_capacity(items.len());
+                    for item in items {
+                        messages.push(normalize_message(item, self.store.as_ref())?);
+                    }
+                    return Ok(messages);
+                }
+                serde_json::Value::Object(_) => {
+                    return Ok(vec![normalize_message(value, self.store.as_ref())?]);
+                }
+                _ => {}
+            }
+        }
+
+        let text = String::from_utf8(bytes)
+            .map_err(|e| format!("message blob is not utf8 or JSON: {e}"))?;
+        Ok(vec![serde_json::json!({
+            "role": "user",
+            "content": [ { "type": "text", "text": text } ]
+        })])
+    }
+}
+
+fn normalize_message<S: Store>(
+    value: serde_json::Value,
+    store: &S,
+) -> Result<serde_json::Value, String> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| "message blob must be a JSON object".to_string())?;
+    let role = obj
+        .get("role")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "message missing role".to_string())?;
+    let content = obj
+        .get("content")
+        .ok_or_else(|| "message missing content".to_string())?;
+
+    let content = normalize_content(content, store)?;
+    let mut msg = serde_json::json!({
+        "role": role,
+        "content": content,
+    });
+
+    if let Some(tool_calls) = obj.get("tool_calls") {
+        msg["tool_calls"] = tool_calls.clone();
+    }
+    if let Some(name) = obj.get("name") {
+        msg["name"] = name.clone();
+    }
+
+    Ok(msg)
+}
+
+fn normalize_content<S: Store>(
+    value: &serde_json::Value,
+    store: &S,
+) -> Result<serde_json::Value, String> {
+    match value {
+        serde_json::Value::String(text) => Ok(serde_json::json!([{ "type": "text", "text": text }])),
+        serde_json::Value::Array(items) => {
+            let mut parts = Vec::with_capacity(items.len());
+            for item in items {
+                parts.push(normalize_part(item, store)?);
+            }
+            Ok(serde_json::Value::Array(parts))
+        }
+        _ => Err("message content must be string or list".to_string()),
+    }
+}
+
+fn normalize_part<S: Store>(
+    value: &serde_json::Value,
+    store: &S,
+) -> Result<serde_json::Value, String> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| "content part must be an object".to_string())?;
+    let part_type = obj
+        .get("type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "content part missing type".to_string())?;
+
+    match part_type {
+        "text" => {
+            let text = obj
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "text part missing text".to_string())?;
+            Ok(serde_json::json!({ "type": "text", "text": text }))
+        }
+        "image" => {
+            let mime = obj
+                .get("mime")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "image part missing mime".to_string())?;
+            let bytes_ref = obj
+                .get("bytes_ref")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "image part missing bytes_ref".to_string())?;
+            let hash = Hash::from_hex_str(bytes_ref)
+                .map_err(|e| format!("invalid image bytes_ref: {e}"))?;
+            let bytes = store
+                .get_blob(hash)
+                .map_err(|e| format!("image bytes_ref not found: {e}"))?;
+            let data_url = format!("data:{};base64,{}", mime, B64.encode(bytes));
+            Ok(serde_json::json!({
+                "type": "image_url",
+                "image_url": { "url": data_url }
+            }))
+        }
+        "audio" => {
+            let mime = obj
+                .get("mime")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "audio part missing mime".to_string())?;
+            let bytes_ref = obj
+                .get("bytes_ref")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "audio part missing bytes_ref".to_string())?;
+            let hash = Hash::from_hex_str(bytes_ref)
+                .map_err(|e| format!("invalid audio bytes_ref: {e}"))?;
+            let bytes = store
+                .get_blob(hash)
+                .map_err(|e| format!("audio bytes_ref not found: {e}"))?;
+            let format = audio_format_from_mime(mime)
+                .ok_or_else(|| format!("unsupported audio mime '{mime}'"))?;
+            Ok(serde_json::json!({
+                "type": "input_audio",
+                "input_audio": { "data": B64.encode(bytes), "format": format }
+            }))
+        }
+        other => Err(format!("unsupported content part type '{other}'")),
+    }
+}
+
+fn audio_format_from_mime(mime: &str) -> Option<&'static str> {
+    match mime {
+        "audio/wav" | "audio/wave" | "audio/x-wav" => Some("wav"),
+        "audio/mpeg" => Some("mp3"),
+        "audio/mp4" => Some("m4a"),
+        "audio/ogg" => Some("ogg"),
+        _ => None,
     }
 }
 

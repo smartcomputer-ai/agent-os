@@ -14,7 +14,7 @@
             "model": { "ref": "@plan.input.model" },
             "temperature": { "text": "0.2" },
             "max_tokens": { "ref": "@plan.input.max_tokens" },
-            "input_ref": { "ref": "@plan.input.input_ref" },
+            "message_refs": { "ref": "@plan.input.message_refs" },
             "tools": { "list": [] },
             "api_key": {
               "variant": {

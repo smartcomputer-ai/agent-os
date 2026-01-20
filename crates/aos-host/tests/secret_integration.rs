@@ -326,8 +326,8 @@ fn env_resolver_injects_llm_api_key() {
     params.insert(Value::Text("temperature".into()), Value::Text("0.7".into()));
     params.insert(Value::Text("max_tokens".into()), Value::Integer(16));
     params.insert(
-        Value::Text("input_ref".into()),
-        Value::Text(Hash::of_bytes(b"input").to_hex()),
+        Value::Text("message_refs".into()),
+        Value::Array(vec![Value::Text(Hash::of_bytes(b"input").to_hex())]),
     );
     params.insert(Value::Text("api_key".into()), secret_ref_value("llm/api", 1));
     let params_cbor = serde_cbor::to_vec(&Value::Map(params)).unwrap();

@@ -35,8 +35,7 @@ struct ChatMessage {
     request_id: u64,
     role: ChatRole,
     text: Option<String>,
-    input_ref: Option<String>,
-    output_ref: Option<String>,
+    message_ref: Option<String>,
     token_usage: Option<TokenUsage>,
 }
 
@@ -52,7 +51,7 @@ aos_variant! {
 struct UserMessage {
     request_id: u64,
     text: String,
-    input_ref: String,
+    message_ref: String,
     model: String,
     provider: String,
     max_tokens: u64,
@@ -61,7 +60,7 @@ struct UserMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChatRequest {
     request_id: u64,
-    input_ref: String,
+    message_refs: Vec<String>,
     model: String,
     provider: String,
     max_tokens: u64,
@@ -101,7 +100,7 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
     let UserMessage {
         request_id,
         text,
-        input_ref,
+        message_ref,
         model,
         provider,
         max_tokens,
@@ -116,14 +115,25 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
         request_id,
         role: ChatRole::User,
         text: Some(text),
-        input_ref: Some(input_ref.clone()),
-        output_ref: None,
+        message_ref: Some(message_ref.clone()),
         token_usage: None,
     });
 
+    let mut message_refs: Vec<String> = ctx
+        .state
+        .messages
+        .iter()
+        .filter_map(|msg| msg.message_ref.clone())
+        .collect();
+    const MAX_MESSAGE_REFS: usize = 32;
+    if message_refs.len() > MAX_MESSAGE_REFS {
+        let start = message_refs.len() - MAX_MESSAGE_REFS;
+        message_refs = message_refs.split_off(start);
+    }
+
     let intent_value = ChatRequest {
         request_id,
-        input_ref,
+        message_refs,
         model,
         provider,
         max_tokens,
@@ -163,8 +173,7 @@ fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
         request_id: result.request_id,
         role: ChatRole::Assistant,
         text: None,
-        input_ref: None,
-        output_ref: Some(result.output_ref),
+        message_ref: Some(result.output_ref),
         token_usage: Some(result.token_usage),
     });
 }
@@ -219,7 +228,7 @@ mod tests {
         let event = ChatEvent::UserMessage(UserMessage {
             request_id: 1,
             text: "hello".into(),
-            input_ref: TEST_HASH.into(),
+            message_ref: TEST_HASH.into(),
             model: "gpt-mock".into(),
             provider: "mock".into(),
             max_tokens: 128,
@@ -233,15 +242,14 @@ mod tests {
         let message = &state.messages[0];
         assert!(matches!(message.role, ChatRole::User));
         assert_eq!(message.text.as_deref(), Some("hello"));
-        assert_eq!(message.input_ref.as_deref(), Some(TEST_HASH));
-        assert!(message.output_ref.is_none());
+        assert_eq!(message.message_ref.as_deref(), Some(TEST_HASH));
 
         assert_eq!(output.domain_events.len(), 1);
         assert_eq!(output.domain_events[0].schema, REQUEST_SCHEMA);
         let request: ChatRequest =
             serde_cbor::from_slice(&output.domain_events[0].value).expect("request decode");
         assert_eq!(request.request_id, 1);
-        assert_eq!(request.input_ref, TEST_HASH);
+        assert_eq!(request.message_refs, vec![String::from(TEST_HASH)]);
         assert_eq!(request.model, "gpt-mock");
         assert_eq!(request.provider, "mock");
         assert_eq!(request.max_tokens, 128);
@@ -254,8 +262,7 @@ mod tests {
                 request_id: 2,
                 role: ChatRole::User,
                 text: Some("hi".into()),
-                input_ref: Some(TEST_HASH.into()),
-                output_ref: None,
+                message_ref: Some(TEST_HASH.into()),
                 token_usage: None,
             }],
             last_request_id: 2,
@@ -263,7 +270,7 @@ mod tests {
         let event = ChatEvent::UserMessage(UserMessage {
             request_id: 1,
             text: "late".into(),
-            input_ref: TEST_HASH.into(),
+            message_ref: TEST_HASH.into(),
             model: "gpt-mock".into(),
             provider: "mock".into(),
             max_tokens: 64,
@@ -283,8 +290,7 @@ mod tests {
                 request_id: 1,
                 role: ChatRole::User,
                 text: Some("ping".into()),
-                input_ref: Some(TEST_HASH.into()),
-                output_ref: None,
+                message_ref: Some(TEST_HASH.into()),
                 token_usage: None,
             }],
             last_request_id: 1,
@@ -304,7 +310,7 @@ mod tests {
         assert_eq!(state.messages.len(), 2);
         let message = &state.messages[1];
         assert!(matches!(message.role, ChatRole::Assistant));
-        assert_eq!(message.output_ref.as_deref(), Some(TEST_HASH));
+        assert_eq!(message.message_ref.as_deref(), Some(TEST_HASH));
         assert_eq!(
             message.token_usage,
             Some(TokenUsage {

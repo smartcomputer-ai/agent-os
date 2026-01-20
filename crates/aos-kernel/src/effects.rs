@@ -865,10 +865,10 @@ mod tests {
             model: "gpt-4".into(),
             temperature: "0.5".into(),
             max_tokens: 50,
-            input_ref: aos_air_types::HashRef::new(
+            message_refs: vec![aos_air_types::HashRef::new(
                 "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )
-            .expect("hash ref"),
+            .expect("hash ref")],
             tools: None,
             api_key: None,
         };
@@ -887,10 +887,10 @@ mod tests {
             model: "gpt-4".into(),
             temperature: "0.5".into(),
             max_tokens: 55,
-            input_ref: aos_air_types::HashRef::new(
+            message_refs: vec![aos_air_types::HashRef::new(
                 "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
             )
-            .expect("hash ref"),
+            .expect("hash ref")],
             tools: None,
             api_key: None,
         };

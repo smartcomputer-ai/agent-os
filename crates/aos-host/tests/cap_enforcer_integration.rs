@@ -561,9 +561,11 @@ fn llm_params_literal(provider: &str, model: &str, max_tokens: u64) -> ExprOrVal
                 ValueLiteral::Nat(aos_air_types::ValueNat { nat: max_tokens }),
             ),
             (
-                "input_ref".into(),
-                ValueLiteral::Hash(aos_air_types::ValueHash {
-                    hash: fixtures::fake_hash(0x11),
+                "message_refs".into(),
+                ValueLiteral::List(aos_air_types::ValueList {
+                    list: vec![ValueLiteral::Hash(aos_air_types::ValueHash {
+                        hash: fixtures::fake_hash(0x11),
+                    })],
                 }),
             ),
             (

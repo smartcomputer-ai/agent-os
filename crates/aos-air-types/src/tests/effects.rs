@@ -95,8 +95,10 @@ fn llm_generate_params_literal_matches_builtin_schema() {
         ),
         ("max_tokens", nat(256)),
         (
-            "input_ref",
-            hash("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            "message_refs",
+            list(vec![hash(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )]),
         ),
         ("tools", list(vec![text("function.call")])),
         ("api_key", null()),

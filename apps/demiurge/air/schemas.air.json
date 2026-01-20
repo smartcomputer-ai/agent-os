@@ -27,8 +27,7 @@
         "request_id": { "nat": {} },
         "role": { "ref": "demiurge/ChatRole@1" },
         "text": { "option": { "text": {} } },
-        "input_ref": { "option": { "hash": {} } },
-        "output_ref": { "option": { "hash": {} } },
+        "message_ref": { "option": { "hash": {} } },
         "token_usage": { "option": { "ref": "demiurge/TokenUsage@1" } }
       }
     }
@@ -50,7 +49,7 @@
       "record": {
         "request_id": { "nat": {} },
         "text": { "text": {} },
-        "input_ref": { "hash": {} },
+        "message_ref": { "hash": {} },
         "model": { "text": {} },
         "provider": { "text": {} },
         "max_tokens": { "nat": {} }
@@ -63,7 +62,7 @@
     "type": {
       "record": {
         "request_id": { "nat": {} },
-        "input_ref": { "hash": {} },
+        "message_refs": { "list": { "hash": {} } },
         "model": { "text": {} },
         "provider": { "text": {} },
         "max_tokens": { "nat": {} }

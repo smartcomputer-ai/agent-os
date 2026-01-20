@@ -257,12 +257,19 @@ impl<S: Store + 'static> MockLlmHarness<S> {
 
     /// Respond to an LLM request with a synthetic response.
     pub fn respond_with(&self, kernel: &mut Kernel<S>, ctx: LlmRequestContext) -> Result<()> {
-        let prompt_hash = hash_from_ref(&ctx.params.input_ref)?;
-        let prompt_bytes = self
-            .store
-            .get_blob(prompt_hash)
-            .context("load prompt blob for llm.generate")?;
-        let prompt_text = String::from_utf8(prompt_bytes)?;
+        if ctx.params.message_refs.is_empty() {
+            return Err(anyhow!("llm.mock missing message_refs"));
+        }
+        let mut prompt_parts = Vec::with_capacity(ctx.params.message_refs.len());
+        for reference in &ctx.params.message_refs {
+            let prompt_hash = hash_from_ref(reference)?;
+            let prompt_bytes = self
+                .store
+                .get_blob(prompt_hash)
+                .context("load message blob for llm.generate")?;
+            prompt_parts.push(message_text_from_bytes(&prompt_bytes)?);
+        }
+        let prompt_text = prompt_parts.join("\n");
 
         if let Some(api_key) = &ctx.params.api_key {
             let fingerprint = hash_key(api_key);
@@ -288,9 +295,17 @@ impl<S: Store + 'static> MockLlmHarness<S> {
         }
 
         let summary_text = summarize(&prompt_text);
+        let output_message = serde_json::json!({
+            "role": "assistant",
+            "content": [
+                { "type": "text", "text": summary_text }
+            ]
+        });
+        let output_bytes = serde_json::to_vec(&output_message)
+            .context("encode llm.generate output message")?;
         let output_hash = self
             .store
-            .put_blob(summary_text.as_bytes())
+            .put_blob(&output_bytes)
             .context("store llm.generate output blob")?;
         let output_ref = HashRef::new(output_hash.to_hex())?;
 
@@ -340,17 +355,23 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             None => Err(anyhow!("field '{field}' missing from llm.generate params")),
         }
     };
-    let input_ref = match map.get(&serde_cbor::Value::Text("input_ref".into())) {
-        Some(serde_cbor::Value::Text(t)) => HashRef::new(t.clone()).context("parse hash ref")?,
+    let message_refs = match map.get(&serde_cbor::Value::Text("message_refs".into())) {
+        Some(serde_cbor::Value::Array(items)) => items
+            .iter()
+            .map(|v| match v {
+                serde_cbor::Value::Text(t) => HashRef::new(t.clone()).context("parse hash ref"),
+                other => Err(anyhow!("message_refs entries must be hash text, got {:?}", other)),
+            })
+            .collect::<Result<Vec<_>>>()?,
         Some(other) => {
             return Err(anyhow!(
-                "field 'input_ref' must be text hash ref, got {:?}",
+                "field 'message_refs' must be list<hash>, got {:?}",
                 other
             ));
         }
         None => {
             return Err(anyhow!(
-                "field 'input_ref' missing from llm.generate params"
+                "field 'message_refs' missing from llm.generate params"
             ));
         }
     };
@@ -378,7 +399,7 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
         model: text("model")?,
         temperature: text("temperature")?,
         max_tokens: nat("max_tokens")?,
-        input_ref,
+        message_refs,
         tools,
         api_key,
     })
@@ -464,4 +485,88 @@ fn build_receipt_value(output_ref: &HashRef, summary: &str) -> ExprValue {
 
 fn hash_from_ref(reference: &HashRef) -> Result<Hash> {
     Hash::from_hex_str(reference.as_str()).context("parse hash from ref")
+}
+
+fn message_text_from_bytes(bytes: &[u8]) -> Result<String> {
+    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) {
+        match value {
+            serde_json::Value::Object(_) => return message_text_from_value(&value),
+            serde_json::Value::Array(items) => {
+                let mut parts = Vec::with_capacity(items.len());
+                for item in items {
+                    parts.push(message_text_from_value(&item)?);
+                }
+                return Ok(parts.join("\n"));
+            }
+            _ => {}
+        }
+    }
+    Ok(String::from_utf8(bytes.to_vec())?)
+}
+
+fn message_text_from_value(value: &serde_json::Value) -> Result<String> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| anyhow!("message blob must be an object"))?;
+    let role = obj
+        .get("role")
+        .and_then(|v| v.as_str())
+        .unwrap_or("message");
+    let content = obj
+        .get("content")
+        .ok_or_else(|| anyhow!("message blob missing content"))?;
+    let text = match content {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Array(parts) => {
+            let mut buf = String::new();
+            for part in parts {
+                let part_obj = part.as_object().ok_or_else(|| {
+                    anyhow!("content parts must be objects")
+                })?;
+                let part_type = part_obj
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("text");
+                match part_type {
+                    "text" => {
+                        if let Some(text) = part_obj.get("text").and_then(|v| v.as_str()) {
+                            if !buf.is_empty() {
+                                buf.push(' ');
+                            }
+                            buf.push_str(text);
+                        }
+                    }
+                    "image" => {
+                        let mime = part_obj
+                            .get("mime")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("image");
+                        if !buf.is_empty() {
+                            buf.push(' ');
+                        }
+                        buf.push_str(&format!("[image:{mime}]"));
+                    }
+                    "audio" => {
+                        let mime = part_obj
+                            .get("mime")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("audio");
+                        if !buf.is_empty() {
+                            buf.push(' ');
+                        }
+                        buf.push_str(&format!("[audio:{mime}]"));
+                    }
+                    other => {
+                        if !buf.is_empty() {
+                            buf.push(' ');
+                        }
+                        buf.push_str(&format!("[{other}]"));
+                    }
+                }
+            }
+            buf
+        }
+        _ => return Err(anyhow!("message content must be string or list")),
+    };
+    Ok(format!("{role}: {text}"))
 }

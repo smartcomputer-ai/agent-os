@@ -420,10 +420,10 @@ fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
         CborValue::Integer(16.into()),
     );
     map.insert(
-        CborValue::Text("input_ref".into()),
-        CborValue::Text(
+        CborValue::Text("message_refs".into()),
+        CborValue::Array(vec![CborValue::Text(
             "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
-        ),
+        )]),
     );
     map.insert(
         CborValue::Text("tools".into()),
@@ -443,10 +443,10 @@ fn llm_params_cbor_reordered(temp_value: CborValue) -> Vec<u8> {
         CborValue::Array(Vec::new()),
     );
     map.insert(
-        CborValue::Text("input_ref".into()),
-        CborValue::Text(
+        CborValue::Text("message_refs".into()),
+        CborValue::Array(vec![CborValue::Text(
             "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
-        ),
+        )]),
     );
     map.insert(
         CborValue::Text("max_tokens".into()),

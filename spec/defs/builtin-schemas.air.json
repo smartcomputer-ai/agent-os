@@ -190,7 +190,7 @@
         "model": { "text": {} },
         "temperature": { "dec128": {} },
         "max_tokens": { "nat": {} },
-        "input_ref": { "hash": {} },
+        "message_refs": { "list": { "hash": {} } },
         "tools": { "option": { "list": { "text": {} } } },
         "api_key": { "option": { "ref": "sys/TextOrSecretRef@1" } }
       }
