@@ -5,10 +5,10 @@ import {
   FolderTree,
   Search,
   ShieldCheck,
-  Sparkles,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import aosIcon from "@/assets/aos-icon.svg";
 import { useWorld } from "@/app/world-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,7 +88,11 @@ export function Navbar() {
         ) : (
           <div className="flex items-center gap-2 pl-2">
             <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <Sparkles className="size-4" />
+              <img
+                src={aosIcon}
+                alt="AgentOS"
+                className="size-5 [filter:brightness(0)_invert(1)]"
+              />
             </div>
             <span className="font-semibold tracking-tight">AgentOS</span>
           </div>
