@@ -66,8 +66,7 @@
   ],
   "secrets": [
     {
-      "name": "demiurge/llm_api@1",
-      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      "name": "llm/api@1"
     }
   ],
   "defaults": {
@@ -81,7 +80,7 @@
             "models": {
               "set": [
                 {
-                  "text": "gpt-mock"
+                  "text": "gpt-4o-mini"
                 }
               ]
             },

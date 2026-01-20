@@ -21,7 +21,7 @@
                 "tag": "secret",
                 "value": {
                   "record": {
-                    "alias": { "text": "demiurge/llm_api" },
+                    "alias": { "text": "llm/api" },
                     "version": { "nat": 1 }
                   }
                 }

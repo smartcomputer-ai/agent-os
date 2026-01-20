@@ -78,6 +78,17 @@ send -> respond.
 - Plan validation test: `llm.generate` params are normalized and cap-checked.
 - Integration test with mock LLM adapter and secret resolver.
 
+## CLI Smoke Test (Pre-UI)
+
+1) Store chat messages JSON (OpenAI format) as a blob:
+   - `echo '[{"role":"user","content":"Hello from AOS"}]' | aos blob put @-`
+2) Send a user event (use `$tag`/`$value` variant encoding):
+   - `aos event send demiurge/ChatEvent@1 '{"$tag":"UserMessage","$value":{"request_id":1,"text":"Hello","input_ref":"sha256:...","model":"gpt-4o-mini","provider":"openai","max_tokens":128}}'`
+3) Read reducer state:
+   - `aos state get demiurge/Demiurge@1`
+4) Fetch assistant output:
+   - `aos blob get <output_ref> --raw`
+
 ## Open Questions
 
 - Should the reducer store assistant text directly (requires blob read path),
