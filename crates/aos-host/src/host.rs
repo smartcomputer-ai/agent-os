@@ -78,6 +78,13 @@ impl<S: Store + 'static> WorldHost<S> {
         kernel_config: KernelConfig,
     ) -> Result<Self, HostError> {
         let root = manifest_path.parent().unwrap_or(Path::new("."));
+        let loaded = ManifestLoader::load_from_path(store.as_ref(), manifest_path)?;
+        let mut kernel_config = kernel_config;
+        if kernel_config.secret_resolver.is_none() {
+            if let Some(resolver) = crate::util::env_secret_resolver_from_manifest(&loaded) {
+                kernel_config.secret_resolver = Some(resolver);
+            }
+        }
         let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(root)?;
 
         if let Some(dir) = host_config
@@ -93,7 +100,7 @@ impl<S: Store + 'static> WorldHost<S> {
         }
         builder = builder.allow_placeholder_secrets(host_config.allow_placeholder_secrets);
 
-        let mut kernel = builder.from_manifest_path(manifest_path)?;
+        let mut kernel = builder.from_loaded_manifest(loaded)?;
 
         // Rehydrate dispatch queue: queued_effects snapshot + tail intents lacking receipts.
         let heights = kernel.heights();
@@ -185,6 +192,12 @@ impl WorldHost<FsStore> {
         host_config: HostConfig,
         kernel_config: KernelConfig,
     ) -> Result<Self, HostError> {
+        let mut kernel_config = kernel_config;
+        if kernel_config.secret_resolver.is_none() {
+            if let Some(resolver) = crate::util::env_secret_resolver_from_manifest(&loaded) {
+                kernel_config.secret_resolver = Some(resolver);
+            }
+        }
         let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(world_root)?;
 
         if let Some(dir) = host_config

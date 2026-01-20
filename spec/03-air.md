@@ -286,6 +286,27 @@ Built-in kinds in v1:
 - params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, input_ref:hash, tools?:list<text>, api_key?:TextOrSecretRef }`
 - receipt: `{ output_ref:hash, token_usage:{prompt:nat,completion:nat}, cost_cents:nat, provider_id:text }`
 
+LLM secrets use `defsecret` + `SecretRef` so plans never carry plaintext. v0.9 resolvers read
+`env:VAR_NAME` bindings from process env (and `.env` when loaded).
+
+Example `defsecret` for an LLM API key:
+```json
+{
+  "$kind": "defsecret",
+  "name": "llm/api@1",
+  "binding_id": "env:LLM_API_KEY",
+  "allowed_caps": ["cap_llm"],
+  "allowed_plans": ["demiurge/chat_plan@1"]
+}
+```
+
+Example secret ref in `llm.generate` params:
+```json
+{
+  "api_key": { "secret": { "alias": "llm/api", "version": 1 } }
+}
+```
+
 **vault.put**
 - params: `{ alias:text, binding_id:text, value_ref:hash, expected_digest:hash }`
 - receipt: `{ alias:text, version:nat, binding_id:text, digest:hash }`

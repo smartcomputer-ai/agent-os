@@ -202,7 +202,7 @@ pub fn resolve_placeholder_modules(
 
 /// Create a kernel configuration for CLI usage.
 ///
-/// Unlike the examples, CLI allows placeholder secrets and doesn't inject demo keys.
+/// CLI doesn't inject demo keys; secrets are resolved from env during host boot when available.
 pub fn make_kernel_config(store_root: &Path) -> Result<KernelConfig> {
     let cache_dir = store_root.join(".aos/cache/wasmtime");
     fs::create_dir_all(&cache_dir).context("create wasmtime cache directory")?;
@@ -210,7 +210,7 @@ pub fn make_kernel_config(store_root: &Path) -> Result<KernelConfig> {
         module_cache_dir: Some(cache_dir),
         eager_module_load: true,
         secret_resolver: None,
-        allow_placeholder_secrets: true,
+        allow_placeholder_secrets: false,
     })
 }
 

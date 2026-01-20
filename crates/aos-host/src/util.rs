@@ -1,10 +1,13 @@
 //! Shared utilities for working with manifests and world directories.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use aos_air_types::{DefModule, HashRef};
+use aos_kernel::secret::{MapSecretResolver, SharedSecretResolver};
 use aos_kernel::LoadedManifest;
 
 use crate::manifest_loader::ZERO_HASH_SENTINEL;
@@ -59,4 +62,26 @@ pub fn reset_journal(world_root: &Path) -> Result<()> {
         fs::remove_dir_all(&journal_dir).context("remove journal directory")?;
     }
     Ok(())
+}
+
+/// Build an env-backed secret resolver from declared secrets.
+///
+/// Returns None if no secrets are declared or any env binding is missing/unsupported.
+pub fn env_secret_resolver_from_manifest(
+    loaded: &LoadedManifest,
+) -> Option<SharedSecretResolver> {
+    if loaded.secrets.is_empty() {
+        return None;
+    }
+    let mut values = HashMap::new();
+    for secret in &loaded.secrets {
+        let binding = secret.binding_id.as_str();
+        let var_name = binding.strip_prefix("env:")?;
+        if var_name.is_empty() {
+            return None;
+        }
+        let value = std::env::var(var_name).ok()?;
+        values.insert(binding.to_string(), value.into_bytes());
+    }
+    Some(Arc::new(MapSecretResolver::new(values)))
 }
