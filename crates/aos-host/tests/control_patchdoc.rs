@@ -84,7 +84,7 @@ async fn setup_daemon_with_control() -> (
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
     // Start daemon
-    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, None);
+    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, None, None);
     let daemon_handle = tokio::spawn(async move { daemon.run().await });
 
     // Start control server

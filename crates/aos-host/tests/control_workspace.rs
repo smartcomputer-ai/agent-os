@@ -71,7 +71,7 @@ async fn control_workspace_internal_effects() {
     let (control_tx, control_rx) = mpsc::channel(8);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
-    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None);
+    let mut daemon = aos_host::WorldDaemon::new(host, control_rx, shutdown_rx, None, None);
     let daemon_handle = tokio::spawn(async move { daemon.run().await });
 
     let sock_dir = TempDir::new().unwrap();

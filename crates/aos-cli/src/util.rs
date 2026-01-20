@@ -10,7 +10,7 @@ use aos_cbor::Hash;
 use aos_host::config::HostConfig;
 use aos_host::util::is_placeholder_hash;
 use aos_kernel::{KernelConfig, LoadedManifest};
-use aos_kernel::journal::{JournalKind, SnapshotRecord, ManifestRecord};
+use aos_kernel::journal::{JournalKind, JournalRecord, SnapshotRecord, ManifestRecord};
 use aos_kernel::journal::Journal;
 use aos_kernel::journal::fs::FsJournal;
 use aos_store::{FsStore, Store};
@@ -29,31 +29,40 @@ pub struct CompiledReducer {
 pub fn latest_manifest_hash_from_journal(store_root: &Path) -> Result<Option<Hash>> {
     let journal = FsJournal::open(store_root).context("open journal")?;
     let entries = journal.load_from(0).context("read journal")?;
-    let mut latest_snapshot: Option<String> = None;
-    let mut latest_manifest: Option<String> = None;
+    let mut latest_hash: Option<String> = None;
     for entry in entries {
+        let decoded: Result<JournalRecord, _> = serde_cbor::from_slice(&entry.payload);
+        if let Ok(record) = decoded {
+            match record {
+                JournalRecord::Snapshot(snapshot) => {
+                    if let Some(hash) = snapshot.manifest_hash {
+                        latest_hash = Some(hash);
+                    }
+                }
+                JournalRecord::Manifest(record) => {
+                    latest_hash = Some(record.manifest_hash);
+                }
+                _ => {}
+            }
+            continue;
+        }
         match entry.kind {
             JournalKind::Snapshot => {
                 let record: SnapshotRecord =
                     serde_cbor::from_slice(&entry.payload).context("decode snapshot record")?;
                 if let Some(hash) = record.manifest_hash {
-                    latest_snapshot = Some(hash);
+                    latest_hash = Some(hash);
                 }
             }
             JournalKind::Manifest => {
                 let record: ManifestRecord =
                     serde_cbor::from_slice(&entry.payload).context("decode manifest record")?;
-                latest_manifest = Some(record.manifest_hash);
+                latest_hash = Some(record.manifest_hash);
             }
             _ => {}
         }
     }
-    let hex = if latest_snapshot.is_some() {
-        latest_snapshot
-    } else {
-        latest_manifest
-    };
-    let Some(hex) = hex else {
+    let Some(hex) = latest_hash else {
         return Ok(None);
     };
     let hash = Hash::from_hex_str(&hex).context("parse manifest hash")?;
@@ -343,6 +352,10 @@ const SYS_MODULES: &[SysModuleSpec] = &[
         bin: "workspace",
     },
     SysModuleSpec {
+        name: "sys/HttpPublish@1",
+        bin: "http_publish",
+    },
+    SysModuleSpec {
         name: "sys/CapEnforceWorkspace@1",
         bin: "cap_enforce_workspace",
     },
@@ -383,6 +396,23 @@ fn resolve_sys_module(
     }
 
     resolve_from_sys_cache(store, store_root, spec.name)
+}
+
+pub fn resolve_sys_module_wasm_hash(
+    store: &FsStore,
+    store_root: &Path,
+    world_root: &Path,
+    module_name: &str,
+) -> Result<HashRef> {
+    let Some(spec) = sys_module_spec(module_name) else {
+        anyhow::bail!("unknown system module '{module_name}'");
+    };
+    if let Some(hash) = resolve_sys_module(store, store_root, world_root, spec)? {
+        return Ok(hash);
+    }
+    anyhow::bail!(
+        "system wasm for '{module_name}' not found; build with `cargo build -p aos-sys --target wasm32-unknown-unknown`"
+    );
 }
 
 fn persist_module_file(

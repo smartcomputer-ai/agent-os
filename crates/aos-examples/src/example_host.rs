@@ -294,6 +294,7 @@ fn maybe_patch_sys_enforcers(
 ) -> Result<()> {
     for (module_name, bin_name) in [
         ("sys/Workspace@1", "workspace"),
+        ("sys/HttpPublish@1", "http_publish"),
         ("sys/CapEnforceHttpOut@1", "cap_enforce_http_out"),
         ("sys/CapEnforceLlmBasic@1", "cap_enforce_llm_basic"),
         ("sys/CapEnforceWorkspace@1", "cap_enforce_workspace"),

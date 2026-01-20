@@ -185,6 +185,7 @@ pub struct KernelHeights {
 pub struct DefListing {
     pub kind: String,
     pub name: String,
+    pub hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cap_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1635,6 +1636,11 @@ impl<S: Store + 'static> Kernel<S> {
         });
 
         let mut entries = Vec::new();
+        let hash_def = |node: AirNode| -> String {
+            Hash::of_cbor(&node)
+                .expect("hash def")
+                .to_hex()
+        };
 
         fn push_if<F>(
             entries: &mut Vec<DefListing>,
@@ -1655,7 +1661,7 @@ impl<S: Store + 'static> Kernel<S> {
             entries.push(build());
         }
 
-        for (name, _def) in self.schema_defs.iter() {
+        for (name, def) in self.schema_defs.iter() {
             push_if(
                 &mut entries,
                 "defschema",
@@ -1663,6 +1669,7 @@ impl<S: Store + 'static> Kernel<S> {
                 || DefListing {
                     kind: "defschema".into(),
                     name: name.clone(),
+                    hash: hash_def(AirNode::Defschema(def.clone())),
                     cap_type: None,
                     params_schema: None,
                     receipt_schema: None,
@@ -1674,7 +1681,7 @@ impl<S: Store + 'static> Kernel<S> {
             );
         }
 
-        for (name, _def) in self.module_defs.iter() {
+        for (name, def) in self.module_defs.iter() {
             push_if(
                 &mut entries,
                 "defmodule",
@@ -1682,6 +1689,7 @@ impl<S: Store + 'static> Kernel<S> {
                 || DefListing {
                     kind: "defmodule".into(),
                     name: name.clone(),
+                    hash: hash_def(AirNode::Defmodule(def.clone())),
                     cap_type: None,
                     params_schema: None,
                     receipt_schema: None,
@@ -1702,6 +1710,7 @@ impl<S: Store + 'static> Kernel<S> {
                 || DefListing {
                     kind: "defplan".into(),
                     name: name.clone(),
+                    hash: hash_def(AirNode::Defplan(def.clone())),
                     cap_type: None,
                     params_schema: None,
                     receipt_schema: None,
@@ -1721,6 +1730,7 @@ impl<S: Store + 'static> Kernel<S> {
                 || DefListing {
                     kind: "defcap".into(),
                     name: name.clone(),
+                    hash: hash_def(AirNode::Defcap(def.clone())),
                     cap_type: Some(def.cap_type.as_str().to_string()),
                     params_schema: None,
                     receipt_schema: None,
@@ -1740,6 +1750,7 @@ impl<S: Store + 'static> Kernel<S> {
                 || DefListing {
                     kind: "defeffect".into(),
                     name: name.clone(),
+                    hash: hash_def(AirNode::Defeffect(def.clone())),
                     cap_type: Some(def.cap_type.as_str().to_string()),
                     params_schema: Some(def.params_schema.as_str().to_string()),
                     receipt_schema: Some(def.receipt_schema.as_str().to_string()),
@@ -1759,6 +1770,7 @@ impl<S: Store + 'static> Kernel<S> {
                 || DefListing {
                     kind: "defpolicy".into(),
                     name: name.clone(),
+                    hash: hash_def(AirNode::Defpolicy(def.clone())),
                     cap_type: None,
                     params_schema: None,
                     receipt_schema: None,

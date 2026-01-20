@@ -5,6 +5,7 @@
 .store/
 .aos/
 notes-world/
+.playwright-mcp/
 
 # ===========================================================================
 # Rust.gitignore

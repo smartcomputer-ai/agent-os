@@ -957,6 +957,10 @@ fn handle_internal<T: serde::de::DeserializeOwned, P: Serialize>(
         .handle_internal_intent(&intent)?
         .ok_or_else(|| anyhow!("{label} not handled as internal effect"))?;
     if receipt.status != ReceiptStatus::Ok {
+        let err_msg = serde_cbor::from_slice::<String>(&receipt.payload_cbor).ok();
+        if let Some(message) = err_msg {
+            anyhow::bail!("{label} failed: {message}");
+        }
         anyhow::bail!("{label} failed");
     }
     receipt

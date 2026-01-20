@@ -60,6 +60,14 @@
         "decision": "allow"
       },
       {
+        "when": {
+          "effect_kind": "workspace.annotations_set",
+          "origin_kind": "plan",
+          "origin_name": "demo/workspace_seed_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
         "when": {},
         "decision": "deny"
       }

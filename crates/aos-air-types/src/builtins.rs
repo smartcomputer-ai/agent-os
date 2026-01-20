@@ -231,6 +231,9 @@ mod tests {
         // Workspace
         assert!(names.contains(&"sys/WorkspaceName@1"));
         assert!(names.contains(&"sys/WorkspaceRef@1"));
+        assert!(names.contains(&"sys/HttpPublishRule@1"));
+        assert!(names.contains(&"sys/HttpPublishRegistry@1"));
+        assert!(names.contains(&"sys/HttpPublishSet@1"));
         assert!(names.contains(&"sys/WorkspaceCommitMeta@1"));
         assert!(names.contains(&"sys/WorkspaceHistory@1"));
         assert!(names.contains(&"sys/WorkspaceCommit@1"));
@@ -310,6 +313,7 @@ mod tests {
             "sys/CapEnforceGovernance@1",
             "sys/CapEnforceWorkspace@1",
             "sys/Workspace@1",
+            "sys/HttpPublish@1",
         ] {
             assert!(names.contains(&name));
         }

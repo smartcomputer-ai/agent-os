@@ -32,7 +32,7 @@ async fn daemon_fires_timer_and_routes_event() {
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
     // Spawn daemon; it returns itself so we can inspect final state.
-    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, None);
+    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, None, None);
     let handle = tokio::spawn(async move { (daemon.run().await, daemon) });
 
     // Kick off the reducer that emits timer.set.

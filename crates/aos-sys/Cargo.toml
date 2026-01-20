@@ -12,6 +12,10 @@ name = "workspace"
 path = "src/bin/workspace.rs"
 
 [[bin]]
+name = "http_publish"
+path = "src/bin/http_publish.rs"
+
+[[bin]]
 name = "cap_enforce_http_out"
 path = "src/bin/cap_enforce_http_out.rs"
 

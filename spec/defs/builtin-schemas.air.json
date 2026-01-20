@@ -552,6 +552,43 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/HttpPublishRule@1",
+    "type": {
+      "record": {
+        "route_prefix": { "text": {} },
+        "workspace": { "ref": "sys/WorkspaceRef@1" },
+        "default_doc": { "option": { "text": {} } },
+        "allow_dir_listing": { "bool": {} },
+        "cache": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HttpPublishRegistry@1",
+    "type": {
+      "record": {
+        "rules": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "ref": "sys/HttpPublishRule@1" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/HttpPublishSet@1",
+    "type": {
+      "record": {
+        "id": { "text": {} },
+        "rule": { "option": { "ref": "sys/HttpPublishRule@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/WorkspaceCommitMeta@1",
     "type": {
       "record": {

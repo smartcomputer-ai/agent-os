@@ -23,7 +23,7 @@ async fn control_governance_propose_shadow_apply_flow() {
 
     let (control_tx, control_rx) = mpsc::channel(8);
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, None);
+    let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, None, None);
     let daemon_handle = tokio::spawn(async move { daemon.run().await });
 
     // Build a tiny patch: add a defschema and set manifest refs to include it.
