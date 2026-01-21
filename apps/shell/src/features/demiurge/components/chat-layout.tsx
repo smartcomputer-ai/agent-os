@@ -25,11 +25,23 @@ export function ChatLayout({
           selectedChatId={selectedChatId}
           onChatSelect={onChatSelect}
           onNewChat={onNewChat}
-          onSettingsOpen={onSettingsOpen}
         />
-        <SidebarInset className="h-screen pt-24">
+        <SidebarInset className="h-screen bg-transparent relative">
+          {/* Settings Button - Floating Top Left */}
+          <div className="absolute top-24 left-4 z-10">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onSettingsOpen}
+              title="Settings"
+              className="size-9 bg-background/80 backdrop-blur shadow-sm hover:bg-background/95"
+            >
+              <Settings className="size-5" />
+            </Button>
+          </div>
+
           {/* Mobile Header with Menu Button */}
-          <div className="md:hidden border-b p-4 flex items-center justify-between">
+          <div className="md:hidden border-b p-4 flex items-center justify-between bg-background/80">
             <SidebarTrigger />
             <h1 className="text-lg font-semibold">Demiurge</h1>
             <Button variant="ghost" size="icon" onClick={onSettingsOpen}>
