@@ -1,4 +1,6 @@
-export type ChatRole = "User" | "Assistant";
+export type ChatRole =
+  | { $tag: "User"; $value?: null }
+  | { $tag: "Assistant"; $value?: null };
 
 export interface TokenUsage {
   prompt: number;

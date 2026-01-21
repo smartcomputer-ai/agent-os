@@ -9,7 +9,7 @@ interface ChatMessageProps {
 }
 
 export function ChatMessage({ message }: ChatMessageProps) {
-  const isUser = message.role === "User";
+  const isUser = message.role.$tag === "User";
   const { data: blobData } = useBlobGet(message.message_ref ?? "", {
     enabled: !!message.message_ref,
   });
@@ -35,7 +35,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
     <div
       className={cn(
         "flex gap-3 p-3 rounded-lg",
-        isUser ? "bg-primary/10 ml-12" : "bg-muted mr-12",
+        isUser ? "bg-primary/10 ml-12" : "bg-card/80 mr-12",
       )}
     >
       <div className="flex-1">

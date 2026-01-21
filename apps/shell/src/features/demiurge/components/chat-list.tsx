@@ -1,7 +1,7 @@
-import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { displayKeyFromBase64 } from "@/sdk/cbor";
+import { cn } from "@/lib/utils";
 
 interface StateCell {
   key_b64: string;
@@ -12,51 +12,52 @@ interface StateCell {
 
 interface ChatListProps {
   chats: StateCell[];
+  selectedChatId: string | null;
+  onChatSelect: (chatId: string) => void;
 }
 
-export function ChatList({ chats }: ChatListProps) {
+export function ChatList({ chats, selectedChatId, onChatSelect }: ChatListProps) {
   if (chats.length === 0) {
     return (
-      <Card className="bg-card/80">
-        <CardContent className="py-12">
-          <div className="text-center space-y-2">
-            <div className="text-muted-foreground">No chats yet</div>
-            <div className="text-sm text-muted-foreground">
-              Create a new chat to get started
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="text-center py-8 text-muted-foreground text-sm">
+        No chats yet. Create one to get started.
+      </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {chats.map((chat) => {
         const chatId = displayKeyFromBase64(chat.key_b64);
         const lastActiveDate = new Date(chat.last_active_ns / 1_000_000);
         const timeAgo = getTimeAgo(lastActiveDate);
+        const isSelected = chatId === selectedChatId;
 
         return (
-          <Link key={chat.key_b64} to={`/chat/${chatId}`}>
-            <Card className="bg-card/80 hover:bg-card transition-colors cursor-pointer">
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-foreground truncate">
-                      {chatId}
-                    </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      <Badge variant="secondary">{chat.size} bytes</Badge>
-                      <span className="text-xs text-muted-foreground">
-                        {timeAgo}
-                      </span>
-                    </div>
-                  </div>
+          <Card
+            key={chat.key_b64}
+            className={cn(
+              "cursor-pointer transition-colors hover:bg-accent",
+              isSelected && "bg-accent border-primary"
+            )}
+            onClick={() => onChatSelect(chatId)}
+          >
+            <CardContent className="p-3">
+              <div className="space-y-2">
+                <div className="font-medium text-sm truncate">
+                  {chatId}
                 </div>
-              </CardContent>
-            </Card>
-          </Link>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs">
+                    {chat.size}b
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {timeAgo}
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         );
       })}
     </div>

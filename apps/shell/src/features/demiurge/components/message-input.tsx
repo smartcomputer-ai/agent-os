@@ -4,6 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useBlobPut, useEventsPost } from "@/sdk/mutations";
 import { createMessageBlob, encodeMessageBlob } from "../lib/message-utils";
 import type { ChatSettings } from "../types";
+import { cn } from "@/lib/utils";
 
 interface MessageInputProps {
   chatId: string;
@@ -11,6 +12,7 @@ interface MessageInputProps {
   onMessageSent?: () => void;
   disabled?: boolean;
   settings: ChatSettings;
+  variant?: "floating" | "fixed";
 }
 
 export function MessageInput({
@@ -19,6 +21,7 @@ export function MessageInput({
   onMessageSent,
   disabled,
   settings,
+  variant = "fixed",
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -74,19 +77,28 @@ export function MessageInput({
   };
 
   return (
-    <div className="flex gap-2">
+    <div
+      className={cn(
+        "relative rounded-2xl bg-background shadow-lg border",
+        variant === "floating" && "shadow-xl"
+      )}
+    >
       <Textarea
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
         disabled={disabled || isSending}
-        className="min-h-[60px] max-h-[200px] resize-none"
+        className={cn(
+          "resize-none border-0 focus-visible:ring-0 rounded-2xl pr-20",
+          variant === "floating" ? "min-h-30" : "min-h-15 max-h-50"
+        )}
       />
       <Button
         onClick={handleSend}
         disabled={!message.trim() || disabled || isSending}
-        className="self-end"
+        className="absolute bottom-2 right-2 rounded-xl"
+        size="sm"
       >
         {isSending ? "Sending..." : "Send"}
       </Button>

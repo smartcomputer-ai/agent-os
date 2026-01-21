@@ -1,8 +1,6 @@
 import type { RouteObject } from "react-router-dom";
-import { ChatsIndexPage } from "./pages/index";
-import { ChatPage } from "./pages/chat";
+import { UnifiedChatPage } from "./pages/unified-chat";
 
 export const demiurgeRoutes: RouteObject[] = [
-  { path: "/chat", element: <ChatsIndexPage /> },
-  { path: "/chat/:chatId", element: <ChatPage /> },
+  { path: "/chat", element: <UnifiedChatPage /> },
 ];
