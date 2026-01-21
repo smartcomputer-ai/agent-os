@@ -10,18 +10,19 @@ React-based web UI for browsing and managing AgentOS worlds.
 - **shadcn/ui** components (Radix primitives)
 - **Vite 7** with SWC for fast builds
 - **TypeScript 5.9**
+- Use `npm`
 
 ## Development
 
 ```bash
 # Start dev server (runs on port 7778)
-pnpm dev
+npm dev
 
 # Regenerate API types from running backend
-pnpm openapi:types
+npm openapi:types
 
 # Build for production
-pnpm build
+npm build
 ```
 
 **Backend requirement**: The API server must be running on `localhost:7777`. The Vite dev server proxies `/api/*` requests to it.
@@ -47,7 +48,7 @@ Claude Code can interact with the running app via Playwright MCP tools. This ena
 
 ### Starting a Debug Session
 
-1. Ensure the dev server is running: `pnpm dev` (port 7778)
+1. Ensure the dev server is running: `npm dev` (port 7778)
 2. Ensure the API backend is running on port 7777
 3. Ask Claude to navigate to the app:
    ```
