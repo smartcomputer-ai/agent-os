@@ -885,7 +885,8 @@ mod tests {
                         "temperature": "0.5",
                         "max_tokens": 128,
                         "message_refs": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
-                        "tools": ["function.call"],
+                        "tool_refs": null,
+                        "tool_choice": null,
                         "api_key": null
                     })),
                     cap: "cap_llm".into(),

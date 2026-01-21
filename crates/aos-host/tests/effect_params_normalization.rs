@@ -426,9 +426,10 @@ fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
         )]),
     );
     map.insert(
-        CborValue::Text("tools".into()),
-        CborValue::Array(Vec::new()),
+        CborValue::Text("tool_refs".into()),
+        CborValue::Null,
     );
+    map.insert(CborValue::Text("tool_choice".into()), CborValue::Null);
     map.insert(CborValue::Text("api_key".into()), CborValue::Null);
     serde_cbor::to_vec(&CborValue::Map(map)).expect("encode params")
 }
@@ -438,10 +439,8 @@ fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
 fn llm_params_cbor_reordered(temp_value: CborValue) -> Vec<u8> {
     let mut map = BTreeMap::new();
     map.insert(CborValue::Text("api_key".into()), CborValue::Null);
-    map.insert(
-        CborValue::Text("tools".into()),
-        CborValue::Array(Vec::new()),
-    );
+    map.insert(CborValue::Text("tool_choice".into()), CborValue::Null);
+    map.insert(CborValue::Text("tool_refs".into()), CborValue::Null);
     map.insert(
         CborValue::Text("message_refs".into()),
         CborValue::Array(vec![CborValue::Text(

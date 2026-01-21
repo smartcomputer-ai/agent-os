@@ -156,7 +156,8 @@ async fn llm_errors_missing_api_key() {
         temperature: "0".into(),
         max_tokens: 16,
         message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
-        tools: None,
+        tool_refs: None,
+        tool_choice: None,
         api_key: None,
     };
     let intent = build_intent(
@@ -182,7 +183,8 @@ async fn llm_unknown_provider_errors() {
         temperature: "0".into(),
         max_tokens: 16,
         message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
-        tools: None,
+        tool_refs: None,
+        tool_choice: None,
         api_key: Some("key".into()),
     };
     let intent = build_intent(
@@ -221,7 +223,8 @@ async fn llm_message_ref_missing_errors() {
         temperature: "0".into(),
         max_tokens: 16,
         message_refs: vec![missing_ref],
-        tools: None,
+        tool_refs: None,
+        tool_choice: None,
         api_key: Some("key".into()),
     };
     let intent = build_intent(
@@ -273,7 +276,8 @@ async fn llm_happy_path_ok_receipt() {
         temperature: "0".into(),
         max_tokens: 8,
         message_refs: vec![message_ref],
-        tools: None,
+        tool_refs: None,
+        tool_choice: None,
         api_key: Some("key".into()),
     };
     let intent = build_intent(

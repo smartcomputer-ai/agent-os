@@ -375,32 +375,32 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             ));
         }
     };
-    let tools = match map.get(&serde_cbor::Value::Text("tools".into())) {
+    let tool_refs = match map.get(&serde_cbor::Value::Text("tool_refs".into())) {
         Some(serde_cbor::Value::Array(items)) => items
             .iter()
             .map(|v| match v {
-                serde_cbor::Value::Text(t) => Ok(t.clone()),
-                other => Err(anyhow!("tools entries must be text, got {:?}", other)),
+                serde_cbor::Value::Text(t) => Ok(HashRef::new(t.clone())?),
+                other => Err(anyhow!("tool_refs entries must be hash text, got {:?}", other)),
             })
             .collect::<Result<Vec<_>>>()?,
         Some(serde_cbor::Value::Null) | None => Vec::new(),
         Some(other) => {
             return Err(anyhow!(
-                "field 'tools' must be list<text> or null, got {:?}",
+                "field 'tool_refs' must be list<hash> or null, got {:?}",
                 other
             ));
         }
     };
     let api_key = decode_api_key(map.get(&serde_cbor::Value::Text("api_key".into())))?;
 
-    let tools = if tools.is_empty() { None } else { Some(tools) };
     Ok(LlmGenerateParams {
         provider: text("provider")?,
         model: text("model")?,
         temperature: text("temperature")?,
         max_tokens: nat("max_tokens")?,
         message_refs,
-        tools,
+        tool_refs: if tool_refs.is_empty() { None } else { Some(tool_refs) },
+        tool_choice: None,
         api_key,
     })
 }

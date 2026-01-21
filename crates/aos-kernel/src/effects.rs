@@ -513,7 +513,17 @@ struct LlmGenerateParamsView {
     model: String,
     max_tokens: u64,
     #[serde(default)]
-    tools: Option<Vec<String>>,
+    tool_choice: Option<LlmToolChoiceView>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "$tag", content = "$value")]
+enum LlmToolChoiceView {
+    Auto,
+    #[serde(rename = "None")]
+    NoneChoice,
+    Required,
+    Tool { name: String },
 }
 
 fn cap_constraints_only(
@@ -733,12 +743,17 @@ fn builtin_llm_enforcer(
         }
     }
     if let Some(allowed) = &cap_params.tools_allow {
-        let tools = effect_params.tools.as_deref().unwrap_or(&[]);
-        if !allowed.is_empty() && !tools.iter().all(|tool| allowed.iter().any(|t| t == tool)) {
-            return Err(CapDenyReason {
-                code: "tool_not_allowed".into(),
-                message: "tool not allowed".into(),
-            });
+        if !allowed.is_empty() {
+            if let Some(choice) = &effect_params.tool_choice {
+                if let LlmToolChoiceView::Tool { name } = choice {
+                    if !allowed.iter().any(|t| t == name) {
+                        return Err(CapDenyReason {
+                            code: "tool_not_allowed".into(),
+                            message: "tool not allowed".into(),
+                        });
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -869,7 +884,8 @@ mod tests {
                 "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )
             .expect("hash ref")],
-            tools: None,
+            tool_refs: None,
+            tool_choice: None,
             api_key: None,
         };
         let params_cbor = serde_cbor::to_vec(&params).expect("encode params");
@@ -891,7 +907,8 @@ mod tests {
                 "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
             )
             .expect("hash ref")],
-            tools: None,
+            tool_refs: None,
+            tool_choice: None,
             api_key: None,
         };
         let over_cbor = serde_cbor::to_vec(&over_limit).expect("encode params");

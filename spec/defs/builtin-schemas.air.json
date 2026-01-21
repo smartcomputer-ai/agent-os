@@ -183,6 +183,22 @@
 
   {
     "$kind": "defschema",
+    "name": "sys/LlmToolChoice@1",
+    "type": {
+      "variant": {
+        "Auto": { "unit": {} },
+        "None": { "unit": {} },
+        "Required": { "unit": {} },
+        "Tool": {
+          "record": {
+            "name": { "text": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/LlmGenerateParams@1",
     "type": {
       "record": {
@@ -191,7 +207,8 @@
         "temperature": { "dec128": {} },
         "max_tokens": { "nat": {} },
         "message_refs": { "list": { "hash": {} } },
-        "tools": { "option": { "list": { "text": {} } } },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
         "api_key": { "option": { "ref": "sys/TextOrSecretRef@1" } }
       }
     }

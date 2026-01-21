@@ -100,7 +100,8 @@ fn llm_generate_params_literal_matches_builtin_schema() {
                 "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )]),
         ),
-        ("tools", list(vec![text("function.call")])),
+        ("tool_refs", null()),
+        ("tool_choice", null()),
         ("api_key", null()),
     ]);
     validate_value_literal(&literal, &schema.schema.ty).expect("literal matches schema");

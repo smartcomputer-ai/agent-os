@@ -26,6 +26,17 @@ aos_variant! {
     }
 }
 
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    enum LlmToolChoice {
+        Auto,
+        #[serde(rename = "None")]
+        NoneChoice,
+        Required,
+        Tool { name: String },
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct TokenUsage {
     prompt: u64,
@@ -66,6 +77,8 @@ struct UserMessage {
     model: String,
     provider: String,
     max_tokens: u64,
+    tool_refs: Option<Vec<String>>,
+    tool_choice: Option<LlmToolChoice>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +89,8 @@ struct ChatRequest {
     model: String,
     provider: String,
     max_tokens: u64,
+    tool_refs: Option<Vec<String>>,
+    tool_choice: Option<LlmToolChoice>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +143,8 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
         model,
         provider,
         max_tokens,
+        tool_refs,
+        tool_choice,
     } = message;
 
     if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
@@ -166,6 +183,8 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
         model,
         provider,
         max_tokens,
+        tool_refs,
+        tool_choice,
     };
     let key = request_id.to_be_bytes();
     ctx.intent(REQUEST_SCHEMA)

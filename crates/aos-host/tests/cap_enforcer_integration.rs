@@ -569,7 +569,13 @@ fn llm_params_literal(provider: &str, model: &str, max_tokens: u64) -> ExprOrVal
                 }),
             ),
             (
-                "tools".into(),
+                "tool_refs".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+            (
+                "tool_choice".into(),
                 ValueLiteral::Null(ValueNull {
                     null: EmptyObject::default(),
                 }),

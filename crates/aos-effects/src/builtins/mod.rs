@@ -79,7 +79,9 @@ pub struct LlmGenerateParams {
     pub max_tokens: u64,
     pub message_refs: Vec<HashRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<String>>,
+    pub tool_refs: Option<Vec<HashRef>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<LlmToolChoice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
 }
@@ -97,4 +99,14 @@ pub struct LlmGenerateReceipt {
 pub struct TokenUsage {
     pub prompt: u64,
     pub completion: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum LlmToolChoice {
+    Auto,
+    #[serde(rename = "None")]
+    NoneChoice,
+    Required,
+    Tool { name: String },
 }

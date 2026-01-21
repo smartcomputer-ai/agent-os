@@ -41,7 +41,17 @@ struct LlmGenerateParams {
     model: String,
     max_tokens: u64,
     #[serde(default)]
-    tools: Option<Vec<String>>,
+    tool_choice: Option<LlmToolChoice>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "$tag", content = "$value")]
+enum LlmToolChoice {
+    Auto,
+    #[serde(rename = "None")]
+    NoneChoice,
+    Required,
+    Tool { name: String },
 }
 
 impl PureModule for CapEnforceLlmBasic {
@@ -101,9 +111,14 @@ impl PureModule for CapEnforceLlmBasic {
             }
         }
         if let Some(allowed) = &cap_params.tools_allow {
-            let tools = effect_params.tools.as_deref().unwrap_or(&[]);
-            if !allowed.is_empty() && !tools.iter().all(|tool| allowed.iter().any(|t| t == tool)) {
-                return Ok(deny("tool_not_allowed", "tool not allowed"));
+            if !allowed.is_empty() {
+                if let Some(choice) = &effect_params.tool_choice {
+                    if let LlmToolChoice::Tool { name } = choice {
+                        if !allowed.iter().any(|t| t == name) {
+                            return Ok(deny("tool_not_allowed", "tool not allowed"));
+                        }
+                    }
+                }
             }
         }
 

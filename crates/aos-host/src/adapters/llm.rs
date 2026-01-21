@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, TokenUsage};
+use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmToolChoice, TokenUsage};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use async_trait::async_trait;
 use base64::engine::general_purpose::STANDARD as B64;
@@ -142,10 +142,22 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        if let Some(tools) = params.tools.as_ref() {
-            if !tools.is_empty() {
-                body["tools"] = serde_json::json!(tools);
+        if let Some(tool_refs) = params.tool_refs.as_ref() {
+            match self.load_tools_blobs(tool_refs) {
+                Ok((tools, tool_choice_from_blob)) => {
+                    if let Some(tools) = tools {
+                        body["tools"] = tools;
+                    }
+                    if tool_choice_from_blob.is_some() && params.tool_choice.is_none() {
+                        body["tool_choice"] = tool_choice_from_blob.unwrap();
+                    }
+                }
+                Err(err) => return Ok(self.error_receipt(intent, &provider_id, err)),
             }
+        }
+
+        if let Some(tool_choice) = params.tool_choice.as_ref() {
+            body["tool_choice"] = tool_choice_json(tool_choice);
         }
 
         let response = self
@@ -311,6 +323,53 @@ impl<S: Store> LlmAdapter<S> {
             "content": [ { "type": "text", "text": text } ]
         })])
     }
+
+    fn load_tools_blobs(
+        &self,
+        references: &[HashRef],
+    ) -> Result<(Option<serde_json::Value>, Option<serde_json::Value>), String> {
+        let mut merged_tools: Vec<serde_json::Value> = Vec::new();
+        let mut merged_choice: Option<serde_json::Value> = None;
+
+        for reference in references {
+            let hash = Hash::from_hex_str(reference.as_str())
+                .map_err(|e| format!("invalid tool_ref: {e}"))?;
+            let bytes = self
+                .store
+                .get_blob(hash)
+                .map_err(|e| format!("tool_ref not found: {e}"))?;
+            let value: serde_json::Value = serde_json::from_slice(&bytes)
+                .map_err(|e| format!("tool_ref invalid JSON: {e}"))?;
+
+            match value {
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        merged_tools.push(item);
+                    }
+                }
+                serde_json::Value::Object(map) => {
+                    if let Some(tools) = map.get("tools").and_then(|v| v.as_array()) {
+                        for tool in tools {
+                            merged_tools.push(tool.clone());
+                        }
+                    }
+                    if let Some(choice) = map.get("tool_choice") {
+                        merged_choice = Some(choice.clone());
+                    }
+                }
+                _ => return Err("tool_ref must be JSON array or object".to_string()),
+            }
+        }
+
+        let tools_value = if merged_tools.is_empty() {
+            None
+        } else {
+            Some(serde_json::Value::Array(merged_tools))
+        };
+
+        Ok((tools_value, merged_choice))
+    }
+
 }
 
 fn normalize_message<S: Store>(
@@ -497,6 +556,19 @@ fn extract_responses_usage(value: &serde_json::Value) -> TokenUsage {
         .unwrap_or(0);
     TokenUsage { prompt, completion }
 }
+
+fn tool_choice_json(choice: &LlmToolChoice) -> serde_json::Value {
+    match choice {
+        LlmToolChoice::Auto => serde_json::json!("auto"),
+        LlmToolChoice::NoneChoice => serde_json::json!("none"),
+        LlmToolChoice::Required => serde_json::json!("required"),
+        LlmToolChoice::Tool { name } => serde_json::json!({
+            "type": "function",
+            "function": { "name": name }
+        }),
+    }
+}
+
 
 fn zero_hashref() -> HashRef {
     HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
