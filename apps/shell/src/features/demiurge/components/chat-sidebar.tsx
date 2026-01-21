@@ -1,9 +1,7 @@
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -27,7 +25,7 @@ export function ChatSidebar({
   const chats = chatsData?.cells ?? [];
 
   return (
-    <Sidebar collapsible="none" className="pt-24 h-screen">
+    <Sidebar collapsible="none" className="pt-24 h-screen pl-4 sm:pl-6">
       <SidebarHeader className="shrink-0">
         <Button onClick={onNewChat} className="w-full">
           <Plus className="size-4 mr-2" />
@@ -52,13 +50,6 @@ export function ChatSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-
-      <SidebarFooter className="shrink-0">
-        <div className="flex items-center justify-between text-sm px-2">
-          <span className="text-muted-foreground">Total chats</span>
-          <Badge variant="secondary">{chats.length}</Badge>
-        </div>
-      </SidebarFooter>
     </Sidebar>
   );
 }
