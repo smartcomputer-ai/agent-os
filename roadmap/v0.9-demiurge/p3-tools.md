@@ -92,6 +92,9 @@ Guidelines:
 - Keep tool specs provider-specific.
 - Use one blob per toolset to allow reuse across chats.
 - Cache by hash; plans can re-use the same `tool_refs`.
+- For `openai-responses`, tool entries should use the Responses shape
+  (`{ "type": "function", "name": "...", "parameters": ... }`). The adapter
+  will normalize Chat-style function wrappers if present.
 
 ## Runtime Flow (Happy Path)
 

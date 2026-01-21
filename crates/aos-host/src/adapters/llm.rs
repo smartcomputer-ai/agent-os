@@ -109,7 +109,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             ));
         }
 
-        let messages = match self.load_messages(&params.message_refs) {
+        let messages = match self.load_messages(&params.message_refs, provider.api_kind) {
             Ok(messages) => messages,
             Err(err) => return Ok(self.error_receipt(intent, &provider_id, err)),
         };
@@ -146,10 +146,30 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             match self.load_tools_blobs(tool_refs) {
                 Ok((tools, tool_choice_from_blob)) => {
                     if let Some(tools) = tools {
+                        let tools = if provider.api_kind == LlmApiKind::Responses {
+                            match normalize_responses_tools(&tools) {
+                                Ok(value) => value,
+                                Err(err) => {
+                                    return Ok(self.error_receipt(intent, &provider_id, err))
+                                }
+                            }
+                        } else {
+                            tools
+                        };
                         body["tools"] = tools;
                     }
                     if tool_choice_from_blob.is_some() && params.tool_choice.is_none() {
-                        body["tool_choice"] = tool_choice_from_blob.unwrap();
+                        let choice = if provider.api_kind == LlmApiKind::Responses {
+                            match normalize_responses_tool_choice(tool_choice_from_blob.unwrap()) {
+                                Ok(value) => value,
+                                Err(err) => {
+                                    return Ok(self.error_receipt(intent, &provider_id, err))
+                                }
+                            }
+                        } else {
+                            tool_choice_from_blob.unwrap()
+                        };
+                        body["tool_choice"] = choice;
                     }
                 }
                 Err(err) => return Ok(self.error_receipt(intent, &provider_id, err)),
@@ -157,7 +177,11 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         }
 
         if let Some(tool_choice) = params.tool_choice.as_ref() {
-            body["tool_choice"] = tool_choice_json(tool_choice);
+            body["tool_choice"] = if provider.api_kind == LlmApiKind::Responses {
+                tool_choice_json_for_responses(tool_choice)
+            } else {
+                tool_choice_json(tool_choice)
+            };
         }
 
         let response = self
@@ -283,16 +307,24 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
 }
 
 impl<S: Store> LlmAdapter<S> {
-    fn load_messages(&self, refs: &[HashRef]) -> Result<Vec<serde_json::Value>, String> {
+    fn load_messages(
+        &self,
+        refs: &[HashRef],
+        api_kind: LlmApiKind,
+    ) -> Result<Vec<serde_json::Value>, String> {
         let mut messages = Vec::new();
         for reference in refs {
-            let mut loaded = self.load_message(reference)?;
+            let mut loaded = self.load_message(reference, api_kind)?;
             messages.append(&mut loaded);
         }
         Ok(messages)
     }
 
-    fn load_message(&self, reference: &HashRef) -> Result<Vec<serde_json::Value>, String> {
+    fn load_message(
+        &self,
+        reference: &HashRef,
+        api_kind: LlmApiKind,
+    ) -> Result<Vec<serde_json::Value>, String> {
         let hash =
             Hash::from_hex_str(reference.as_str()).map_err(|e| format!("invalid message_ref: {e}"))?;
         let bytes = self
@@ -305,12 +337,16 @@ impl<S: Store> LlmAdapter<S> {
                 serde_json::Value::Array(items) => {
                     let mut messages = Vec::with_capacity(items.len());
                     for item in items {
-                        messages.push(normalize_message(item, self.store.as_ref())?);
+                        messages.push(normalize_message(
+                            item,
+                            self.store.as_ref(),
+                            api_kind,
+                        )?);
                     }
                     return Ok(messages);
                 }
                 serde_json::Value::Object(_) => {
-                    return Ok(vec![normalize_message(value, self.store.as_ref())?]);
+                    return Ok(vec![normalize_message(value, self.store.as_ref(), api_kind)?]);
                 }
                 _ => {}
             }
@@ -320,7 +356,7 @@ impl<S: Store> LlmAdapter<S> {
             .map_err(|e| format!("message blob is not utf8 or JSON: {e}"))?;
         Ok(vec![serde_json::json!({
             "role": "user",
-            "content": [ { "type": "text", "text": text } ]
+            "content": [ { "type": content_text_type(api_kind), "text": text } ]
         })])
     }
 
@@ -375,6 +411,7 @@ impl<S: Store> LlmAdapter<S> {
 fn normalize_message<S: Store>(
     value: serde_json::Value,
     store: &S,
+    api_kind: LlmApiKind,
 ) -> Result<serde_json::Value, String> {
     let obj = value
         .as_object()
@@ -387,7 +424,7 @@ fn normalize_message<S: Store>(
         .get("content")
         .ok_or_else(|| "message missing content".to_string())?;
 
-    let content = normalize_content(content, store)?;
+    let content = normalize_content(content, store, api_kind)?;
     let mut msg = serde_json::json!({
         "role": role,
         "content": content,
@@ -406,13 +443,17 @@ fn normalize_message<S: Store>(
 fn normalize_content<S: Store>(
     value: &serde_json::Value,
     store: &S,
+    api_kind: LlmApiKind,
 ) -> Result<serde_json::Value, String> {
     match value {
-        serde_json::Value::String(text) => Ok(serde_json::json!([{ "type": "text", "text": text }])),
+        serde_json::Value::String(text) => Ok(serde_json::json!([{
+            "type": content_text_type(api_kind),
+            "text": text
+        }])),
         serde_json::Value::Array(items) => {
             let mut parts = Vec::with_capacity(items.len());
             for item in items {
-                parts.push(normalize_part(item, store)?);
+                parts.push(normalize_part(item, store, api_kind)?);
             }
             Ok(serde_json::Value::Array(parts))
         }
@@ -423,6 +464,7 @@ fn normalize_content<S: Store>(
 fn normalize_part<S: Store>(
     value: &serde_json::Value,
     store: &S,
+    api_kind: LlmApiKind,
 ) -> Result<serde_json::Value, String> {
     let obj = value
         .as_object()
@@ -438,7 +480,20 @@ fn normalize_part<S: Store>(
                 .get("text")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "text part missing text".to_string())?;
-            Ok(serde_json::json!({ "type": "text", "text": text }))
+            Ok(serde_json::json!({
+                "type": content_text_type(api_kind),
+                "text": text
+            }))
+        }
+        "input_text" => {
+            let text = obj
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "input_text part missing text".to_string())?;
+            Ok(serde_json::json!({
+                "type": content_text_type(api_kind),
+                "text": text
+            }))
         }
         "image" => {
             let mime = obj
@@ -455,9 +510,30 @@ fn normalize_part<S: Store>(
                 .get_blob(hash)
                 .map_err(|e| format!("image bytes_ref not found: {e}"))?;
             let data_url = format!("data:{};base64,{}", mime, B64.encode(bytes));
+            match api_kind {
+                LlmApiKind::Responses => Ok(serde_json::json!({
+                    "type": "input_image",
+                    "image_url": { "url": data_url }
+                })),
+                LlmApiKind::ChatCompletions => Ok(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": { "url": data_url }
+                })),
+            }
+        }
+        "input_image" | "image_url" => {
+            let image_url = obj
+                .get("image_url")
+                .and_then(|v| v.get("url"))
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "image_url part missing url".to_string())?;
+            let target_type = match api_kind {
+                LlmApiKind::Responses => "input_image",
+                LlmApiKind::ChatCompletions => "image_url",
+            };
             Ok(serde_json::json!({
-                "type": "image_url",
-                "image_url": { "url": data_url }
+                "type": target_type,
+                "image_url": { "url": image_url }
             }))
         }
         "audio" => {
@@ -476,9 +552,22 @@ fn normalize_part<S: Store>(
                 .map_err(|e| format!("audio bytes_ref not found: {e}"))?;
             let format = audio_format_from_mime(mime)
                 .ok_or_else(|| format!("unsupported audio mime '{mime}'"))?;
+            let audio = serde_json::json!({
+                "data": B64.encode(bytes),
+                "format": format
+            });
             Ok(serde_json::json!({
                 "type": "input_audio",
-                "input_audio": { "data": B64.encode(bytes), "format": format }
+                "input_audio": audio
+            }))
+        }
+        "input_audio" => {
+            let input_audio = obj
+                .get("input_audio")
+                .ok_or_else(|| "input_audio part missing input_audio".to_string())?;
+            Ok(serde_json::json!({
+                "type": "input_audio",
+                "input_audio": input_audio
             }))
         }
         other => Err(format!("unsupported content part type '{other}'")),
@@ -557,6 +646,13 @@ fn extract_responses_usage(value: &serde_json::Value) -> TokenUsage {
     TokenUsage { prompt, completion }
 }
 
+fn content_text_type(api_kind: LlmApiKind) -> &'static str {
+    match api_kind {
+        LlmApiKind::Responses => "input_text",
+        LlmApiKind::ChatCompletions => "text",
+    }
+}
+
 fn tool_choice_json(choice: &LlmToolChoice) -> serde_json::Value {
     match choice {
         LlmToolChoice::Auto => serde_json::json!("auto"),
@@ -567,6 +663,71 @@ fn tool_choice_json(choice: &LlmToolChoice) -> serde_json::Value {
             "function": { "name": name }
         }),
     }
+}
+
+fn tool_choice_json_for_responses(choice: &LlmToolChoice) -> serde_json::Value {
+    match choice {
+        LlmToolChoice::Auto => serde_json::json!("auto"),
+        LlmToolChoice::NoneChoice => serde_json::json!("none"),
+        LlmToolChoice::Required => serde_json::json!("required"),
+        LlmToolChoice::Tool { name } => serde_json::json!({
+            "type": "function",
+            "name": name
+        }),
+    }
+}
+
+fn normalize_responses_tools(value: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let array = value
+        .as_array()
+        .ok_or_else(|| "tools must be a list".to_string())?;
+    let mut tools = Vec::with_capacity(array.len());
+    for tool in array {
+        let obj = tool
+            .as_object()
+            .ok_or_else(|| "tool must be an object".to_string())?;
+        let tool_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or_default();
+        if tool_type == "function" && obj.contains_key("function") {
+            let function = obj
+                .get("function")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| "function tool missing function object".to_string())?;
+            let name = function
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "function tool missing name".to_string())?;
+            let mut out = serde_json::Map::new();
+            out.insert("type".into(), serde_json::Value::String("function".into()));
+            out.insert("name".into(), serde_json::Value::String(name.to_string()));
+            if let Some(desc) = function.get("description") {
+                out.insert("description".into(), desc.clone());
+            }
+            if let Some(params) = function.get("parameters") {
+                out.insert("parameters".into(), params.clone());
+            }
+            if let Some(strict) = function.get("strict") {
+                out.insert("strict".into(), strict.clone());
+            }
+            tools.push(serde_json::Value::Object(out));
+        } else {
+            tools.push(serde_json::Value::Object(obj.clone()));
+        }
+    }
+    Ok(serde_json::Value::Array(tools))
+}
+
+fn normalize_responses_tool_choice(value: serde_json::Value) -> Result<serde_json::Value, String> {
+    if let Some(name) = value
+        .get("function")
+        .and_then(|v| v.get("name"))
+        .and_then(|v| v.as_str())
+    {
+        return Ok(serde_json::json!({
+            "type": "function",
+            "name": name
+        }));
+    }
+    Ok(value)
 }
 
 
