@@ -105,7 +105,7 @@ LLM effect schema update (global):
 1) Store a user message blob:
    - `echo '{"role":"user","content":[{"type":"text","text":"Hello from AOS"}]}' | cargo run -p aos-cli -- blob put @-`
 2) Send a user event (use `$tag`/`$value` variant encoding):
-   - `cargo run -p aos-cli -- event send demiurge/ChatEvent@1 '{"$tag":"UserMessage","$value":{"chat_id":"chat-1","request_id":1,"text":"Hello","message_ref":"sha256:...","model":"gpt-4o-mini","provider":"openai","max_tokens":128}}'`
+   - `cargo run -p aos-cli -- event send demiurge/ChatEvent@1 '{"$tag":"UserMessage","$value":{"chat_id":"chat-1","request_id":1,"text":"Hello","message_ref":"sha256:...","model":"gpt-4o-mini","provider":"openai-responses","max_tokens":128}}'`
 3) Read reducer state:
    - `cargo run -p aos-cli -- state get demiurge/Demiurge@1`
 4) Fetch assistant output:

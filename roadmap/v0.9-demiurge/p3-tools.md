@@ -9,8 +9,8 @@
 
 Add tool usage to the Demiurge chat agent by:
 - Storing large tool specs in CAS and referencing them from `llm.generate`.
-- Returning tool calls from the LLM adapter.
-- Orchestrating tool execution via plans (not reducers).
+- Returning tool calls from the LLM adapter as CAS refs.
+- Interpreting tool calls in the reducer; plans only execute approved tool intents.
 - Shipping initial tools: **Introspect** and **Workspace**.
 
 ## Non-Goals (v0.9)
@@ -28,11 +28,14 @@ Add tool usage to the Demiurge chat agent by:
    - `tool_choice` uses a small generic schema; adapter maps to provider shape.
 3) **LLM adapter targets the Responses API** (`POST /v1/responses`).
 4) **LLM adapter loads `tools_ref` and injects into provider request**.
-5) **LLM adapter returns `output_items` + `tool_calls` in the receipt** (in addition to `output_ref`).
-5) **Tool execution is plan-only**:
-   - Plan reads `tool_calls`, invokes tool effects, writes tool result message blobs,
+5) **LLM adapter stores tool calls in CAS and returns `tool_call_refs`** (optionally `output_items_ref`).
+6) **Reducer interprets tool calls**:
+   - Loads tool call blobs, validates/normalizes parameters, applies allowlists.
+   - Emits `demiurge/ToolCallRequested@1` intents for approved calls.
+7) **Tool execution is plan-only**:
+   - Plan executes tool effects from `ToolCallRequested`, writes tool result message blobs,
      emits `demiurge/ToolResult@1` for the reducer.
-6) **Reducer owns state**:
+8) **Reducer owns state**:
    - Appends tool call/result message refs.
    - Emits the next `ChatRequest` when tool results are ready.
 
@@ -70,8 +73,8 @@ record {
   token_usage: { prompt: nat, completion: nat }
   cost_cents: nat
   provider_id: text
-  tool_calls?: list<sys/LlmToolCall@1>
-  output_items?: list<sys/LlmOutputItem@1>
+  tool_call_refs?: list<hash>
+  output_items_ref?: hash
 }
 ```
 
@@ -81,6 +84,7 @@ record { id: text, name: text, arguments_json: text }
 ```
 
 Notes:
+- `sys/LlmToolCall@1` blobs are stored in CAS; receipts only reference them.
 - `arguments_json` is raw JSON string from the provider for determinism.
 - Provider mapping rules live in the adapter, not the schema.
 - `id` should map to Responses `call_id` where available.
@@ -95,6 +99,9 @@ union {
 }
 ```
 
+Notes:
+- `output_items_ref` points to a CAS blob holding `list<sys/LlmOutputItem@1>`.
+
 ### `sys/LlmTextFormat@1`
 ```
 union {
@@ -108,7 +115,7 @@ Store a single JSON object that the adapter can inject directly:
 
 ```
 {
-  "provider": "openai",
+  "provider": "openai-responses",
   "tools": [ ...provider schema... ],
   "tool_choice": { ...provider schema... }
 }
@@ -119,6 +126,16 @@ Guidelines:
 - Use one blob per toolset to allow reuse across chats.
 - Cache by hash; plans can re-use the same `tools_ref`.
 
+## Tool Call Blob (CAS)
+
+Each tool call is stored as a blob using `sys/LlmToolCall@1`:
+
+```
+{ "id": "...", "name": "...", "arguments_json": "{...raw json...}" }
+```
+
+This keeps large tool calls out of receipts while preserving deterministic replay.
+
 ## Runtime Flow (Happy Path)
 
 0) UI stores tool spec JSON in CAS and receives `tools_ref`.
@@ -126,10 +143,14 @@ Guidelines:
 2) Reducer emits `demiurge/ChatRequest@1` with `tools_ref` + `tool_choice`.
 3) Plan calls `llm.generate` (Responses API) with `tools_ref` and `tool_choice`.
 4) LLM adapter loads tool spec from CAS and sends it to the provider.
-5) Receipt returns `output_items` + `tool_calls` if any; plan emits `demiurge/ToolRequested@1`.
-6) Tool plan executes introspect/workspace effects, writes a tool-result message
+5) Receipt returns `output_ref` + `tool_call_refs` (and optional `output_items_ref`);
+   plan emits `demiurge/ChatResult@1` containing the refs.
+6) Reducer appends the assistant message and, if `tool_call_refs` exist, loads each
+   tool call blob, validates/normalizes parameters, and emits
+   `demiurge/ToolCallRequested@1` for approved calls.
+7) Tool plan executes introspect/workspace effects, writes a tool-result message
    blob (`role=tool`, `tool_call_id`, `content`), emits `demiurge/ToolResult@1`.
-7) Reducer appends tool result and emits a new `ChatRequest` to continue.
+8) Reducer appends tool result and emits a new `ChatRequest` to continue.
 
 ## Tool Set v1
 
@@ -152,16 +173,17 @@ Guidelines:
 
 ## Manifest Updates
 
-- New plan: `demiurge/tool_plan@1` (dispatch by `ToolRequested` event).
-- New schemas for `ToolRequested` and `ToolResult`.
+- New plan: `demiurge/tool_plan@1` (dispatch by `ToolCallRequested` event).
+- New schemas for `ToolCallRequested` and `ToolResult`.
+- Update `demiurge/ChatResult@1` to include `tool_call_refs` + `output_items_ref`.
 - Update LLM policy to allow tool usage via `tools_ref`.
 
 ## Tests
 
-- Adapter: tool spec load from CAS, tool_choice mapping, tool_calls decoding.
+- Adapter: tool spec load from CAS, tool_choice mapping, tool_call_refs decoding.
 - Adapter: Responses output items parsing (message/tool_call/tool_output).
-- Plan: tool dispatch for introspect/workspace.
-- Reducer: tool result append + re-request flow.
+- Plan: tool dispatch for introspect/workspace from `ToolCallRequested`.
+- Reducer: tool call validation/allowlist + result append + re-request flow.
 - Integration: end-to-end tool call with mock adapter.
 
 ## Open Questions

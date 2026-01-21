@@ -11,10 +11,10 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use super::traits::AsyncEffectAdapter;
-use crate::config::{LlmAdapterConfig, ProviderConfig};
+use crate::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_store::Store;
 
-/// LLM adapter that targets OpenAI-compatible chat/completions API.
+/// LLM adapter that targets OpenAI-compatible chat/completions and responses APIs.
 pub struct LlmAdapter<S: Store> {
     client: Client,
     store: Arc<S>,
@@ -116,23 +116,37 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
 
         let temperature: f64 = params.temperature.parse().unwrap_or(0.7);
 
-        let mut body = serde_json::json!({
-            "model": params.model,
-            "messages": messages,
-            "max_tokens": params.max_tokens,
-            "temperature": temperature,
-        });
+        let (url, mut body) = match provider.api_kind {
+            LlmApiKind::ChatCompletions => {
+                let body = serde_json::json!({
+                    "model": params.model,
+                    "messages": messages,
+                    "max_tokens": params.max_tokens,
+                    "temperature": temperature,
+                });
+                let url = format!(
+                    "{}/chat/completions",
+                    provider.base_url.trim_end_matches('/')
+                );
+                (url, body)
+            }
+            LlmApiKind::Responses => {
+                let body = serde_json::json!({
+                    "model": params.model,
+                    "input": messages,
+                    "max_output_tokens": params.max_tokens,
+                    "temperature": temperature,
+                });
+                let url = format!("{}/responses", provider.base_url.trim_end_matches('/'));
+                (url, body)
+            }
+        };
 
         if let Some(tools) = params.tools.as_ref() {
             if !tools.is_empty() {
                 body["tools"] = serde_json::json!(tools);
             }
         }
-
-        let url = format!(
-            "{}/chat/completions",
-            provider.base_url.trim_end_matches('/')
-        );
 
         let response = self
             .client
@@ -165,18 +179,41 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             ));
         }
 
-        let api_response: OpenAiResponse = match response.json().await {
-            Ok(r) => r,
-            Err(e) => {
-                return Ok(self.error_receipt(intent, &provider_id, format!("parse error: {e}")));
+        let (content, usage) = match provider.api_kind {
+            LlmApiKind::ChatCompletions => {
+                let api_response: OpenAiChatResponse = match response.json().await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Ok(
+                            self.error_receipt(intent, &provider_id, format!("parse error: {e}")),
+                        );
+                    }
+                };
+                let content = api_response
+                    .choices
+                    .first()
+                    .and_then(|c| c.message.content.clone())
+                    .unwrap_or_default();
+                let usage = TokenUsage {
+                    prompt: api_response.usage.prompt_tokens,
+                    completion: api_response.usage.completion_tokens,
+                };
+                (content, usage)
+            }
+            LlmApiKind::Responses => {
+                let api_response: serde_json::Value = match response.json().await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Ok(
+                            self.error_receipt(intent, &provider_id, format!("parse error: {e}")),
+                        );
+                    }
+                };
+                let content = extract_responses_text(&api_response);
+                let usage = extract_responses_usage(&api_response);
+                (content, usage)
             }
         };
-
-        let content = api_response
-            .choices
-            .first()
-            .and_then(|c| c.message.content.clone())
-            .unwrap_or_default();
 
         let output_message = serde_json::json!({
             "role": "assistant",
@@ -213,11 +250,6 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                     format!("store output failed: {e}"),
                 ));
             }
-        };
-
-        let usage = TokenUsage {
-            prompt: api_response.usage.prompt_tokens,
-            completion: api_response.usage.completion_tokens,
         };
 
         let receipt = LlmGenerateReceipt {
@@ -405,7 +437,7 @@ fn audio_format_from_mime(mime: &str) -> Option<&'static str> {
 }
 
 #[derive(Deserialize)]
-struct OpenAiResponse {
+struct OpenAiChatResponse {
     choices: Vec<Choice>,
     usage: OpenAiUsage,
 }
@@ -426,6 +458,44 @@ struct OpenAiUsage {
     completion_tokens: u64,
     #[serde(rename = "total_tokens")]
     _total_tokens: u64,
+}
+
+fn extract_responses_text(value: &serde_json::Value) -> String {
+    if let Some(text) = value.get("output_text").and_then(|v| v.as_str()) {
+        return text.to_string();
+    }
+
+    let mut parts = Vec::new();
+    if let Some(items) = value.get("output").and_then(|v| v.as_array()) {
+        for item in items {
+            if let Some(content) = item.get("content").and_then(|v| v.as_array()) {
+                for part in content {
+                    let part_type = part.get("type").and_then(|v| v.as_str());
+                    if matches!(part_type, Some("output_text") | Some("text")) {
+                        if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                            parts.push(text.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    parts.join("")
+}
+
+fn extract_responses_usage(value: &serde_json::Value) -> TokenUsage {
+    let prompt = value
+        .get("usage")
+        .and_then(|v| v.get("input_tokens"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let completion = value
+        .get("usage")
+        .and_then(|v| v.get("output_tokens"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    TokenUsage { prompt, completion }
 }
 
 fn zero_hashref() -> HashRef {

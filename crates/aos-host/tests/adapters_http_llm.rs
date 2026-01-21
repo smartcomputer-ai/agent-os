@@ -9,7 +9,7 @@ use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_host::adapters::http::HttpAdapter;
 use aos_host::adapters::llm::LlmAdapter;
 use aos_host::adapters::traits::AsyncEffectAdapter;
-use aos_host::config::{HttpAdapterConfig, LlmAdapterConfig, ProviderConfig};
+use aos_host::config::{HttpAdapterConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_store::{MemStore, Store};
 use serde_cbor;
 use serde_json::json;
@@ -140,6 +140,7 @@ async fn llm_errors_missing_api_key() {
         ProviderConfig {
             base_url: "http://127.0.0.1:0".into(),
             timeout: Duration::from_secs(5),
+            api_kind: LlmApiKind::ChatCompletions,
         },
     );
     let cfg = LlmAdapterConfig {
@@ -201,6 +202,7 @@ async fn llm_message_ref_missing_errors() {
         ProviderConfig {
             base_url: "http://127.0.0.1:0".into(),
             timeout: Duration::from_secs(5),
+            api_kind: LlmApiKind::ChatCompletions,
         },
     );
     let cfg = LlmAdapterConfig {
@@ -256,6 +258,7 @@ async fn llm_happy_path_ok_receipt() {
         ProviderConfig {
             base_url: format!("http://{}", addr),
             timeout: Duration::from_secs(2),
+            api_kind: LlmApiKind::ChatCompletions,
         },
     );
     let cfg = LlmAdapterConfig {

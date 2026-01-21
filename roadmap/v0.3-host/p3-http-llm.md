@@ -5,7 +5,7 @@
 ## Status (2025-12-03)
 
 - ✅ HTTP adapter implemented with canonical params/receipt, CAS body_ref in/out, monotonic timings, size cap, and error receipts for network/timeout/invalid refs.
-- ✅ LLM adapter implemented (OpenAI-compatible) with canonical params/receipt, CAS input/output, token_usage; cost_cents currently left `None` to avoid nondeterministic estimates; provider map (openai default). API keys must come from params (secret/literal); no host-side fallback.
+- ✅ LLM adapter implemented (OpenAI-compatible) with canonical params/receipt, CAS input/output, token_usage; cost_cents currently left `None` to avoid nondeterministic estimates; provider map (openai-responses default; openai-chat supported; openai alias for chat). API keys must come from params (secret/literal); no host-side fallback.
 - ✅ Feature gates `adapter-http` / `adapter-llm` added (default on); registry wires real adapters, falls back to stubs if disabled.
 - ✅ HostConfig extended with `http` and `llm`; default constructed from env for URLs/timeouts (no keys).
 - ✅ CLI flags/env: `--http-timeout-ms` / `AOS_HTTP_TIMEOUT_MS`, `--http-max-body-bytes` / `AOS_HTTP_MAX_BODY_BYTES`, `--no-llm` / `AOS_DISABLE_LLM`; world-local `.env` at world root (not `.aos`) is loaded if present without overriding existing env vars.
@@ -249,16 +249,23 @@ pub struct LlmAdapter<S: Store> {
     config: LlmAdapterConfig,
 }
 
+pub enum LlmApiKind {
+    ChatCompletions,
+    Responses,
+}
+
 /// Per-provider configuration (no keys here; keys come from params as TextOrSecretRef)
 pub struct ProviderConfig {
     /// OpenAI-compatible API base URL
     pub base_url: String,
     /// Request timeout
     pub timeout: Duration,
+    /// API shape to use for this provider
+    pub api_kind: LlmApiKind,
 }
 
 pub struct LlmAdapterConfig {
-    /// Provider configs keyed by provider id (e.g., "openai", "anthropic", "local")
+    /// Provider configs keyed by provider id (e.g., "openai-chat", "openai-responses", "local")
     pub providers: HashMap<String, ProviderConfig>,
     /// Default provider if not specified in params
     pub default_provider: String,
@@ -270,14 +277,23 @@ impl LlmAdapterConfig {
             .unwrap_or_else(|_| "https://api.openai.com/v1".into());
 
         let mut providers = HashMap::new();
-        providers.insert("openai".into(), ProviderConfig {
+        let openai_chat = ProviderConfig {
+            base_url: base_url.clone(),
+            timeout: Duration::from_secs(120),
+            api_kind: LlmApiKind::ChatCompletions,
+        };
+        let openai_responses = ProviderConfig {
             base_url,
             timeout: Duration::from_secs(120),
-        });
+            api_kind: LlmApiKind::Responses,
+        };
+        providers.insert("openai-chat".into(), openai_chat.clone());
+        providers.insert("openai-responses".into(), openai_responses);
+        providers.insert("openai".into(), openai_chat);
 
         Ok(Self {
             providers,
-            default_provider: "openai".into(),
+            default_provider: "openai-responses".into(),
         })
     }
 
@@ -352,13 +368,27 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         let temperature: f64 = params.temperature.parse()
             .unwrap_or(0.7);
 
-        // Build OpenAI-compatible request
-        let mut request_body = serde_json::json!({
-            "model": params.model,
-            "messages": messages,
-            "max_tokens": params.max_tokens,
-            "temperature": temperature,
-        });
+        // Build OpenAI-compatible request (chat/completions or responses)
+        let (url, mut request_body) = match provider_config.api_kind {
+            LlmApiKind::ChatCompletions => {
+                let body = serde_json::json!({
+                    "model": params.model,
+                    "messages": messages,
+                    "max_tokens": params.max_tokens,
+                    "temperature": temperature,
+                });
+                (format!("{}/chat/completions", provider_config.base_url), body)
+            }
+            LlmApiKind::Responses => {
+                let body = serde_json::json!({
+                    "model": params.model,
+                    "input": messages,
+                    "max_output_tokens": params.max_tokens,
+                    "temperature": temperature,
+                });
+                (format!("{}/responses", provider_config.base_url), body)
+            }
+        };
 
         // Add tools if specified
         if !params.tools.is_empty() {
@@ -369,7 +399,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
 
         // Reuse adapter's client, set per-request timeout
         let response = self.client
-            .post(format!("{}/chat/completions", provider_config.base_url))
+            .post(url)
             .timeout(provider_config.timeout)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
