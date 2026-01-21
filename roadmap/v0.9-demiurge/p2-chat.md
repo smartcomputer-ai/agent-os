@@ -3,7 +3,7 @@
 **Priority**: P2  
 **Effort**: Medium  
 **Risk if deferred**: Medium (blocks first-agent UX)  
-**Status**: Draft
+**Status**: Mostly Done
 
 ## Goal
 
@@ -100,15 +100,15 @@ LLM effect schema update (global):
 
 ## CLI Smoke Test (Pre-UI)
 
-0) [ ] Create a chat:
+0) Create a chat:
    - `cargo run -p aos-cli -- event send demiurge/ChatEvent@1 '{"$tag":"ChatCreated","$value":{"chat_id":"chat-1","title":"First chat","created_at_ms":1737460000000}}'`
-1) [ ] Store a user message blob:
+1) Store a user message blob:
    - `echo '{"role":"user","content":[{"type":"text","text":"Hello from AOS"}]}' | cargo run -p aos-cli -- blob put @-`
-2) [ ] Send a user event (use `$tag`/`$value` variant encoding):
+2) Send a user event (use `$tag`/`$value` variant encoding):
    - `cargo run -p aos-cli -- event send demiurge/ChatEvent@1 '{"$tag":"UserMessage","$value":{"chat_id":"chat-1","request_id":1,"text":"Hello","message_ref":"sha256:...","model":"gpt-4o-mini","provider":"openai","max_tokens":128}}'`
-3) [ ] Read reducer state:
+3) Read reducer state:
    - `cargo run -p aos-cli -- state get demiurge/Demiurge@1`
-4) [ ] Fetch assistant output:
+4) Fetch assistant output:
    - `cargo run -p aos-cli -- blob get <output_ref> --raw`
 
 ## Open Questions
