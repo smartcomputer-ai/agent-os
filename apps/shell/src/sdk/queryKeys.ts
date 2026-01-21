@@ -41,4 +41,8 @@ export const queryKeys = {
     ["workspace_read_ref", params] as const,
   workspaceResolve: (params: WorkspaceResolveQuery) =>
     ["workspace_resolve", params.workspace, params.version ?? null] as const,
+  chatState: (chatId: string) =>
+    ["state_get", "demiurge/Demiurge@1", { key: chatId }] as const,
+  chatList: () =>
+    ["state_cells", "demiurge/Demiurge@1"] as const,
 };

@@ -250,3 +250,30 @@ export function useWorkspaceResolve(
     ...options,
   });
 }
+
+export function useChatState(
+  chatId: string,
+  options?: QueryOptions<StateGetResponse, ReturnType<typeof queryKeys.chatState>>,
+) {
+  return useQuery({
+    queryKey: queryKeys.chatState(chatId),
+    queryFn: () =>
+      endpoints.stateGet(
+        { reducer: "demiurge/Demiurge@1" },
+        { key_b64: btoa(chatId) },
+      ),
+    refetchInterval: 3000,
+    ...options,
+  });
+}
+
+export function useChatList(
+  options?: QueryOptions<StateCellsResponse, ReturnType<typeof queryKeys.chatList>>,
+) {
+  return useQuery({
+    queryKey: queryKeys.chatList(),
+    queryFn: () => endpoints.stateCells({ reducer: "demiurge/Demiurge@1" }),
+    refetchInterval: 5000,
+    ...options,
+  });
+}
