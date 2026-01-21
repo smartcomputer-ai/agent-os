@@ -28,17 +28,20 @@ send -> respond.
    - `apps/demiurge/air/` for schemas, plan, caps, policy, manifest, secrets.
    - `apps/demiurge/reducer/` for the WASM reducer crate.
 2) **Frontend lives in the shell** under `apps/shell/src/features/demiurge/`.
-3) **Reducer owns chat state**; plans only orchestrate `llm.generate`.
-4) **Each message is a CAS blob**, and the reducer stores ordered `message_refs`.
+3) **Reducer is keyed by `chat_id`** to support multiple chats; creation is explicit.
+4) **Reducer owns chat state**; plans only orchestrate `llm.generate`.
+5) **Each message is a CAS blob**, and the reducer stores ordered `message_refs`.
    User events carry the new `message_ref`; reducer emits `message_refs` in the intent.
-5) **Plan emits a result event** with `output_ref` (assistant message blob) and
+6) **Plan emits a result event** with `output_ref` (assistant message blob) and
    token usage; reducer stores it and the UI reads the blob when rendering.
 
 ## Runtime Flow (Happy Path)
 
+0) UI creates a chat by sending `demiurge/ChatCreated@1` with `chat_id`, `title`,
+   and `created_at_ms` (external time).
 1) UI writes the user message to CAS as a message blob and gets `message_ref`.
 2) UI posts `demiurge/UserMessage@1` to `POST /api/events`, including
-   `message_ref`, model/provider settings, and the user text (for state display).
+   `chat_id`, `message_ref`, model/provider settings, and the user text (for state display).
 3) Reducer appends the user message and emits `demiurge/ChatRequest@1`
    (intent) with ordered `message_refs` (last N turns) and settings.
 4) Plan triggers on `demiurge/ChatRequest@1`, calls `llm.generate` with
@@ -49,11 +52,13 @@ send -> respond.
 
 ## Schemas (Minimal)
 
-- `demiurge/ChatState@1`: `{ messages: list<Message>, last_request_id: nat }`
-- `demiurge/UserMessage@1`: `{ request_id, text, message_ref, model, provider, max_tokens }`
-- `demiurge/ChatRequest@1`: `{ request_id, message_refs, model, provider, max_tokens }`
-- `demiurge/ChatResult@1`: `{ request_id, output_ref, token_usage }`
-- `demiurge/ChatEvent@1`: union for reducer routing.
+- `demiurge/ChatId@1`: `{ text }`
+- `demiurge/ChatState@1`: `{ messages: list<Message>, last_request_id: nat, title?: text, created_at_ms?: nat }`
+- `demiurge/ChatCreated@1`: `{ chat_id, title, created_at_ms }`
+- `demiurge/UserMessage@1`: `{ chat_id, request_id, text, message_ref, model, provider, max_tokens }`
+- `demiurge/ChatRequest@1`: `{ chat_id, request_id, message_refs, model, provider, max_tokens }`
+- `demiurge/ChatResult@1`: `{ chat_id, request_id, output_ref, token_usage }`
+- `demiurge/ChatEvent@1`: union for reducer routing (`ChatCreated`, `UserMessage`, `ChatResult`).
 
 Message blob (CAS):
 - Store one message per blob. Use a stable JSON shape such as:
@@ -71,13 +76,13 @@ LLM effect schema update (global):
 
 ## Manifest Pieces
 
-- Module: `demiurge/Demiurge@1`
+- Module: `demiurge/Demiurge@1` (keyed by `demiurge/ChatId@1`)
 - Plan: `demiurge/chat_plan@1` (single node: `llm.generate`)
 - Cap: `demiurge/llm_basic@1` (cap type `sys/llm.basic@1`)
 - Policy: allow `llm.generate` only from the plan
 - Secret: `llm/api@1` with `binding_id = env:LLM_API_KEY`
 - Trigger: `demiurge/ChatRequest@1` -> `demiurge/chat_plan@1`
-- Routing: `demiurge/ChatEvent@1` -> reducer
+- Routing: `demiurge/ChatEvent@1` -> reducer with `key_field="$value.chat_id"`
 
 ## UI Integration
 
@@ -95,10 +100,12 @@ LLM effect schema update (global):
 
 ## CLI Smoke Test (Pre-UI)
 
+0) Create a chat:
+   - `aos event send demiurge/ChatEvent@1 '{"$tag":"ChatCreated","$value":{"chat_id":"chat-1","title":"First chat","created_at_ms":1737460000000}}'`
 1) Store a user message blob:
    - `echo '{"role":"user","content":[{"type":"text","text":"Hello from AOS"}]}' | aos blob put @-`
 2) Send a user event (use `$tag`/`$value` variant encoding):
-   - `aos event send demiurge/ChatEvent@1 '{"$tag":"UserMessage","$value":{"request_id":1,"text":"Hello","message_ref":"sha256:...","model":"gpt-4o-mini","provider":"openai","max_tokens":128}}'`
+   - `aos event send demiurge/ChatEvent@1 '{"$tag":"UserMessage","$value":{"chat_id":"chat-1","request_id":1,"text":"Hello","message_ref":"sha256:...","model":"gpt-4o-mini","provider":"openai","max_tokens":128}}'`
 3) Read reducer state:
    - `aos state get demiurge/Demiurge@1`
 4) Fetch assistant output:

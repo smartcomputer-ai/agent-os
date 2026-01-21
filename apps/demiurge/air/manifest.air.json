@@ -5,6 +5,9 @@
       "name": "demiurge/ChatRole@1"
     },
     {
+      "name": "demiurge/ChatId@1"
+    },
+    {
       "name": "demiurge/TokenUsage@1"
     },
     {
@@ -12,6 +15,9 @@
     },
     {
       "name": "demiurge/ChatState@1"
+    },
+    {
+      "name": "demiurge/ChatCreated@1"
     },
     {
       "name": "demiurge/UserMessage@1"
@@ -96,7 +102,8 @@
     "events": [
       {
         "event": "demiurge/ChatEvent@1",
-        "reducer": "demiurge/Demiurge@1"
+        "reducer": "demiurge/Demiurge@1",
+        "key_field": "$value.chat_id"
       }
     ],
     "inboxes": []

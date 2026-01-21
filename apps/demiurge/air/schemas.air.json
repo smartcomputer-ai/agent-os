@@ -11,6 +11,11 @@
   },
   {
     "$kind": "defschema",
+    "name": "demiurge/ChatId@1",
+    "type": { "text": {} }
+  },
+  {
+    "$kind": "defschema",
     "name": "demiurge/TokenUsage@1",
     "type": {
       "record": {
@@ -38,7 +43,20 @@
     "type": {
       "record": {
         "messages": { "list": { "ref": "demiurge/ChatMessage@1" } },
-        "last_request_id": { "nat": {} }
+        "last_request_id": { "nat": {} },
+        "title": { "option": { "text": {} } },
+        "created_at_ms": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatCreated@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "title": { "text": {} },
+        "created_at_ms": { "nat": {} }
       }
     }
   },
@@ -47,6 +65,7 @@
     "name": "demiurge/UserMessage@1",
     "type": {
       "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
         "request_id": { "nat": {} },
         "text": { "text": {} },
         "message_ref": { "hash": {} },
@@ -61,6 +80,7 @@
     "name": "demiurge/ChatRequest@1",
     "type": {
       "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
         "request_id": { "nat": {} },
         "message_refs": { "list": { "hash": {} } },
         "model": { "text": {} },
@@ -74,6 +94,7 @@
     "name": "demiurge/ChatResult@1",
     "type": {
       "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
         "request_id": { "nat": {} },
         "output_ref": { "hash": {} },
         "token_usage": { "ref": "demiurge/TokenUsage@1" }
@@ -85,6 +106,7 @@
     "name": "demiurge/ChatEvent@1",
     "type": {
       "variant": {
+        "ChatCreated": { "ref": "demiurge/ChatCreated@1" },
         "UserMessage": { "ref": "demiurge/UserMessage@1" },
         "ChatResult": { "ref": "demiurge/ChatResult@1" }
       }

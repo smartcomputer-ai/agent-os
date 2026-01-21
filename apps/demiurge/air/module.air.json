@@ -3,6 +3,7 @@
     "$kind": "defmodule",
     "name": "demiurge/Demiurge@1",
     "module_kind": "reducer",
+    "key_schema": "demiurge/ChatId@1",
     "abi": {
       "reducer": {
         "state": "demiurge/ChatState@1",

@@ -72,6 +72,7 @@
             "value": {
               "record": {
                 "request_id": { "ref": "@plan.input.request_id" },
+                "chat_id": { "ref": "@plan.input.chat_id" },
                 "output_ref": { "ref": "@var:output_ref" },
                 "token_usage": { "ref": "@var:token_usage" }
               }

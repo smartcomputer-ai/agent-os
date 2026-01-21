@@ -14,6 +14,8 @@ const REQUEST_SCHEMA: &str = "demiurge/ChatRequest@1";
 struct ChatState {
     messages: Vec<ChatMessage>,
     last_request_id: u64,
+    title: Option<String>,
+    created_at_ms: Option<u64>,
 }
 
 aos_variant! {
@@ -42,13 +44,22 @@ struct ChatMessage {
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     enum ChatEvent {
+        ChatCreated(ChatCreated),
         UserMessage(UserMessage),
         ChatResult(ChatResult),
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChatCreated {
+    chat_id: String,
+    title: String,
+    created_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct UserMessage {
+    chat_id: String,
     request_id: u64,
     text: String,
     message_ref: String,
@@ -59,6 +70,7 @@ struct UserMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChatRequest {
+    chat_id: String,
     request_id: u64,
     message_refs: Vec<String>,
     model: String,
@@ -68,6 +80,7 @@ struct ChatRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ChatResult {
+    chat_id: String,
     request_id: u64,
     output_ref: String,
     token_usage: TokenUsage,
@@ -89,6 +102,7 @@ impl Reducer for DemiurgeReducer {
         ctx: &mut ReducerCtx<Self::State, ()>,
     ) -> Result<(), ReduceError> {
         match event {
+            ChatEvent::ChatCreated(created) => handle_chat_created(ctx, created),
             ChatEvent::UserMessage(message) => handle_user_message(ctx, message),
             ChatEvent::ChatResult(result) => handle_chat_result(ctx, result),
         }
@@ -96,8 +110,18 @@ impl Reducer for DemiurgeReducer {
     }
 }
 
+fn handle_chat_created(ctx: &mut ReducerCtx<ChatState, ()>, created: ChatCreated) {
+    if ctx.state.title.is_some() {
+        return;
+    }
+
+    ctx.state.title = Some(created.title);
+    ctx.state.created_at_ms = Some(created.created_at_ms);
+}
+
 fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage) {
     let UserMessage {
+        chat_id,
         request_id,
         text,
         message_ref,
@@ -105,6 +129,10 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
         provider,
         max_tokens,
     } = message;
+
+    if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
+        return;
+    }
 
     if request_id <= ctx.state.last_request_id {
         return;
@@ -132,6 +160,7 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
     }
 
     let intent_value = ChatRequest {
+        chat_id,
         request_id,
         message_refs,
         model,
@@ -146,6 +175,10 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
 }
 
 fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
+    if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
+        return;
+    }
+
     if result.request_id > ctx.state.last_request_id {
         return;
     }
@@ -224,8 +257,30 @@ mod tests {
     }
 
     #[test]
+    fn chat_created_sets_title_and_created_at() {
+        let event = ChatEvent::ChatCreated(ChatCreated {
+            chat_id: "chat-1".into(),
+            title: "First chat".into(),
+            created_at_ms: 1234,
+        });
+        let output = run_with_state(None, event);
+        let state: ChatState =
+            serde_cbor::from_slice(output.state.as_ref().expect("state")).expect("state decode");
+
+        assert_eq!(state.title.as_deref(), Some("First chat"));
+        assert_eq!(state.created_at_ms, Some(1234));
+    }
+
+    #[test]
     fn user_message_appends_and_emits_request() {
+        let state = ChatState {
+            messages: vec![],
+            last_request_id: 0,
+            title: Some("First chat".into()),
+            created_at_ms: Some(1234),
+        };
         let event = ChatEvent::UserMessage(UserMessage {
+            chat_id: "chat-1".into(),
             request_id: 1,
             text: "hello".into(),
             message_ref: TEST_HASH.into(),
@@ -233,7 +288,7 @@ mod tests {
             provider: "mock".into(),
             max_tokens: 128,
         });
-        let output = run_with_state(None, event);
+        let output = run_with_state(Some(state), event);
         let state: ChatState =
             serde_cbor::from_slice(output.state.as_ref().expect("state")).expect("state decode");
 
@@ -248,6 +303,7 @@ mod tests {
         assert_eq!(output.domain_events[0].schema, REQUEST_SCHEMA);
         let request: ChatRequest =
             serde_cbor::from_slice(&output.domain_events[0].value).expect("request decode");
+        assert_eq!(request.chat_id, "chat-1");
         assert_eq!(request.request_id, 1);
         assert_eq!(request.message_refs, vec![String::from(TEST_HASH)]);
         assert_eq!(request.model, "gpt-mock");
@@ -266,8 +322,11 @@ mod tests {
                 token_usage: None,
             }],
             last_request_id: 2,
+            title: Some("First chat".into()),
+            created_at_ms: Some(1234),
         };
         let event = ChatEvent::UserMessage(UserMessage {
+            chat_id: "chat-1".into(),
             request_id: 1,
             text: "late".into(),
             message_ref: TEST_HASH.into(),
@@ -294,8 +353,11 @@ mod tests {
                 token_usage: None,
             }],
             last_request_id: 1,
+            title: Some("First chat".into()),
+            created_at_ms: Some(1234),
         };
         let event = ChatEvent::ChatResult(ChatResult {
+            chat_id: "chat-1".into(),
             request_id: 1,
             output_ref: TEST_HASH.into(),
             token_usage: TokenUsage {
