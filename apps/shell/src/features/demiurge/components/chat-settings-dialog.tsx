@@ -80,8 +80,8 @@ export function ChatSettingsDialog({
               onChange={(e) => handleChange("provider", e.target.value)}
               className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
+              <option value="openai-responses">OpenAI (Responses)</option>
+              <option value="openai-chat">OpenAI (Chat)</option>
             </select>
           </div>
 

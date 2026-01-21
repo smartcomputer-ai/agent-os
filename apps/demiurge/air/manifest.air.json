@@ -29,7 +29,16 @@
       "name": "demiurge/ChatResult@1"
     },
     {
+      "name": "demiurge/ToolCallRequested@1"
+    },
+    {
+      "name": "demiurge/ToolResult@1"
+    },
+    {
       "name": "demiurge/ChatEvent@1"
+    },
+    {
+      "name": "sys/LlmToolChoice@1"
     },
     {
       "name": "sys/LlmGenerateParams@1"

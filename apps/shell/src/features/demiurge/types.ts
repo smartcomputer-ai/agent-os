@@ -36,6 +36,8 @@ export interface UserMessageEvent {
   model: string;
   provider: string;
   max_tokens: number;
+  tool_refs: string[] | null;
+  tool_choice: LlmToolChoice | null;
 }
 
 export interface ChatSettings {
@@ -46,9 +48,15 @@ export interface ChatSettings {
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   model: "gpt-4o-mini",
-  provider: "openai",
+  provider: "openai-responses",
   max_tokens: 1024,
 };
+
+export type LlmToolChoice =
+  | { $tag: "Auto"; $value?: null }
+  | { $tag: "None"; $value?: null }
+  | { $tag: "Required"; $value?: null }
+  | { $tag: "Tool"; $value: { name: string } };
 
 export interface MessageBlob {
   role: "user" | "assistant" | "system" | "tool";

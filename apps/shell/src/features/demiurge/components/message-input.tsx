@@ -56,6 +56,8 @@ export function MessageInput({
             model: settings.model,
             provider: settings.provider,
             max_tokens: settings.max_tokens,
+            tool_refs: null,
+            tool_choice: null,
           },
         },
       });
