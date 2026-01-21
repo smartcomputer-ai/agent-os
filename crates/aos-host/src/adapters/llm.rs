@@ -337,11 +337,7 @@ impl<S: Store> LlmAdapter<S> {
                 serde_json::Value::Array(items) => {
                     let mut messages = Vec::with_capacity(items.len());
                     for item in items {
-                        messages.push(normalize_message(
-                            item,
-                            self.store.as_ref(),
-                            api_kind,
-                        )?);
+                        messages.push(normalize_message(item, self.store.as_ref(), api_kind)?);
                     }
                     return Ok(messages);
                 }
@@ -356,7 +352,7 @@ impl<S: Store> LlmAdapter<S> {
             .map_err(|e| format!("message blob is not utf8 or JSON: {e}"))?;
         Ok(vec![serde_json::json!({
             "role": "user",
-            "content": [ { "type": content_text_type(api_kind), "text": text } ]
+            "content": [ { "type": content_text_type(api_kind, "user"), "text": text } ]
         })])
     }
 
@@ -424,11 +420,14 @@ fn normalize_message<S: Store>(
         .get("content")
         .ok_or_else(|| "message missing content".to_string())?;
 
-    let content = normalize_content(content, store, api_kind)?;
+    let content = normalize_content(content, store, api_kind, role)?;
     let mut msg = serde_json::json!({
         "role": role,
         "content": content,
     });
+    if api_kind == LlmApiKind::Responses {
+        msg["type"] = serde_json::Value::String("message".into());
+    }
 
     if let Some(tool_calls) = obj.get("tool_calls") {
         msg["tool_calls"] = tool_calls.clone();
@@ -444,16 +443,17 @@ fn normalize_content<S: Store>(
     value: &serde_json::Value,
     store: &S,
     api_kind: LlmApiKind,
+    role: &str,
 ) -> Result<serde_json::Value, String> {
     match value {
         serde_json::Value::String(text) => Ok(serde_json::json!([{
-            "type": content_text_type(api_kind),
+            "type": content_text_type(api_kind, role),
             "text": text
         }])),
         serde_json::Value::Array(items) => {
             let mut parts = Vec::with_capacity(items.len());
             for item in items {
-                parts.push(normalize_part(item, store, api_kind)?);
+                parts.push(normalize_part(item, store, api_kind, role)?);
             }
             Ok(serde_json::Value::Array(parts))
         }
@@ -465,6 +465,7 @@ fn normalize_part<S: Store>(
     value: &serde_json::Value,
     store: &S,
     api_kind: LlmApiKind,
+    role: &str,
 ) -> Result<serde_json::Value, String> {
     let obj = value
         .as_object()
@@ -481,7 +482,7 @@ fn normalize_part<S: Store>(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "text part missing text".to_string())?;
             Ok(serde_json::json!({
-                "type": content_text_type(api_kind),
+                "type": content_text_type(api_kind, role),
                 "text": text
             }))
         }
@@ -491,7 +492,17 @@ fn normalize_part<S: Store>(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "input_text part missing text".to_string())?;
             Ok(serde_json::json!({
-                "type": content_text_type(api_kind),
+                "type": content_text_type(api_kind, role),
+                "text": text
+            }))
+        }
+        "output_text" => {
+            let text = obj
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "output_text part missing text".to_string())?;
+            Ok(serde_json::json!({
+                "type": content_text_type(api_kind, role),
                 "text": text
             }))
         }
@@ -646,9 +657,15 @@ fn extract_responses_usage(value: &serde_json::Value) -> TokenUsage {
     TokenUsage { prompt, completion }
 }
 
-fn content_text_type(api_kind: LlmApiKind) -> &'static str {
+fn content_text_type(api_kind: LlmApiKind, role: &str) -> &'static str {
     match api_kind {
-        LlmApiKind::Responses => "input_text",
+        LlmApiKind::Responses => {
+            if role == "assistant" {
+                "output_text"
+            } else {
+                "input_text"
+            }
+        }
         LlmApiKind::ChatCompletions => "text",
     }
 }
