@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -11,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useChatState } from "@/sdk/queries";
+import { decodeCborFromBase64 } from "@/sdk/cbor";
 import { ChatMessage } from "../components/chat-message";
 import { MessageInput } from "../components/message-input";
 import { ChatSettingsComponent } from "../components/chat-settings";
@@ -29,9 +29,16 @@ export function ChatPage() {
     enabled: !!chatId,
   });
 
-  const chatState = chatData?.state_b64
-    ? (JSON.parse(atob(chatData.state_b64)) as ChatState)
-    : undefined;
+  let chatState: ChatState | undefined;
+  let decodeError: Error | undefined;
+  if (chatData?.state_b64) {
+    try {
+      chatState = decodeCborFromBase64<ChatState>(chatData.state_b64);
+    } catch (err) {
+      decodeError =
+        err instanceof Error ? err : new Error("Failed to decode chat state");
+    }
+  }
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -53,14 +60,16 @@ export function ChatPage() {
     );
   }
 
-  if (error) {
+  if (error || decodeError) {
     return (
       <div className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2">
         <Card className="bg-card/80">
           <CardContent className="py-12">
             <div className="text-center space-y-2">
               <div className="text-destructive">Failed to load chat</div>
-              <div className="text-sm text-muted-foreground">{error.message}</div>
+              <div className="text-sm text-muted-foreground">
+                {error?.message ?? decodeError?.message}
+              </div>
               <div className="pt-4">
                 <Link to="/chat">
                   <Button variant="outline">Back to chats</Button>
@@ -94,20 +103,10 @@ export function ChatPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in-0 slide-in-from-bottom-2">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Link to="/chat">
-              <Button variant="outline" size="sm">
-                Back
-              </Button>
-            </Link>
-            <Badge variant="secondary">Chat</Badge>
-          </div>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground font-[var(--font-display)]">
-            {chatState?.title || chatId}
-          </h1>
-        </div>
+      <header className="space-y-2">
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground font-[var(--font-display)]">
+          {chatState?.title || chatId}
+        </h1>
       </header>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">

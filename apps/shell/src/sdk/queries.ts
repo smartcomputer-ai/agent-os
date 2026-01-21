@@ -2,6 +2,7 @@ import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type { ApiError } from "./http";
 import { queryKeys } from "./queryKeys";
 import * as endpoints from "./endpoints";
+import { encodeCborTextToBase64 } from "./cbor";
 import type {
   DefsGetPath,
   DefsGetResponse,
@@ -260,7 +261,7 @@ export function useChatState(
     queryFn: () =>
       endpoints.stateGet(
         { reducer: "demiurge/Demiurge@1" },
-        { key_b64: btoa(chatId) },
+        { key_b64: encodeCborTextToBase64(chatId) },
       ),
     refetchInterval: 3000,
     ...options,

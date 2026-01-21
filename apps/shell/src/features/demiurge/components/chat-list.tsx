@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { displayKeyFromBase64 } from "@/sdk/cbor";
 
 interface StateCell {
   key_b64: string;
@@ -32,7 +33,7 @@ export function ChatList({ chats }: ChatListProps) {
   return (
     <div className="space-y-3">
       {chats.map((chat) => {
-        const chatId = atob(chat.key_b64);
+        const chatId = displayKeyFromBase64(chat.key_b64);
         const lastActiveDate = new Date(chat.last_active_ns / 1_000_000);
         const timeAgo = getTimeAgo(lastActiveDate);
 
