@@ -1,11 +1,46 @@
 import { useMemo } from "react";
 import { useBlobGet } from "@/sdk/queries";
 import { cn } from "@/lib/utils";
-import type { ChatMessage as ChatMessageType, MessageBlob } from "../types";
+import type { ChatMessage as ChatMessageType } from "../types";
 
 interface ChatMessageProps {
   message: ChatMessageType;
   isLatest?: boolean;
+}
+
+function extractTextFromContent(content: unknown): string[] {
+  if (typeof content === "string") return [content];
+  if (!Array.isArray(content)) return [];
+  const parts: string[] = [];
+  for (const part of content) {
+    if (!part || typeof part !== "object") continue;
+    const type = (part as { type?: string }).type;
+    if (type !== "text" && type !== "input_text" && type !== "output_text") continue;
+    const text = (part as { text?: string }).text;
+    if (typeof text === "string" && text.length > 0) {
+      parts.push(text);
+    }
+  }
+  return parts;
+}
+
+function extractTextFromBlob(blob: unknown): string | null {
+  if (!blob) return null;
+  if (Array.isArray(blob)) {
+    const parts: string[] = [];
+    for (const item of blob) {
+      if (!item || typeof item !== "object") continue;
+      const content = (item as { content?: unknown }).content;
+      parts.push(...extractTextFromContent(content));
+    }
+    return parts.length ? parts.join("\n\n") : null;
+  }
+  if (typeof blob === "object") {
+    const content = (blob as { content?: unknown }).content;
+    const parts = extractTextFromContent(content);
+    return parts.length ? parts.join("\n\n") : null;
+  }
+  return null;
 }
 
 export function ChatMessage({ message }: ChatMessageProps) {
@@ -17,13 +52,9 @@ export function ChatMessage({ message }: ChatMessageProps) {
   const messageText = useMemo(() => {
     if (blobData) {
       try {
-        const blob = JSON.parse(
-          new TextDecoder().decode(blobData),
-        ) as MessageBlob;
-        const textPart = blob.content.find((p) => p.type === "text");
-        if (textPart && textPart.type === "text") {
-          return textPart.text;
-        }
+        const blob = JSON.parse(new TextDecoder().decode(blobData)) as unknown;
+        const text = extractTextFromBlob(blob);
+        if (text) return text;
       } catch (e) {
         console.error("Failed to decode message blob:", e);
       }

@@ -26,6 +26,9 @@
       "name": "demiurge/ChatRequest@1"
     },
     {
+      "name": "demiurge/ToolCall@1"
+    },
+    {
       "name": "demiurge/ChatResult@1"
     },
     {

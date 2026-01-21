@@ -28,9 +28,9 @@ Add tool usage to the Demiurge chat agent by:
    - `tool_choice` uses a small generic schema; adapter maps to provider shape.
 3) **LLM adapter targets the Responses API** (`POST /v1/responses`).
 4) **LLM adapter loads `tool_refs` and injects into provider request**.
-5) **LLM adapter returns `output_ref` only**.
-6) **Reducer interprets tool calls from the assistant message blob**:
-   - Loads `output_ref`, parses `tool_calls`, validates/normalizes parameters, applies allowlists.
+5) **LLM adapter returns `output_ref` with full Responses `output` array**.
+6) **Reducer interprets tool calls**:
+   - Validates/normalizes parameters, applies allowlists.
    - Emits `demiurge/ToolCallRequested@1` intents for approved calls.
 7) **Tool execution is plan-only**:
    - Plan executes tool effects from `ToolCallRequested`, writes tool result message blobs,
@@ -104,8 +104,8 @@ Guidelines:
 3) Plan calls `llm.generate` (Responses API) with `tool_refs` and `tool_choice`.
 4) LLM adapter loads tool spec from CAS and sends it to the provider.
 5) Receipt returns `output_ref`; plan emits `demiurge/ChatResult@1`.
-6) Reducer appends the assistant message and, if `tool_calls` are present, parses them,
-   validates/normalizes parameters, and emits `demiurge/ToolCallRequested@1` for approved calls.
+6) Reducer appends the assistant message and, when tool parsing is enabled, validates/normalizes
+   parameters and emits `demiurge/ToolCallRequested@1` for approved calls.
 7) Tool plan executes introspect/workspace effects, writes a tool-result message
    blob (`role=tool`, `tool_call_id`, `content`), emits `demiurge/ToolResult@1`.
 8) Reducer appends tool result and emits a new `ChatRequest` to continue.

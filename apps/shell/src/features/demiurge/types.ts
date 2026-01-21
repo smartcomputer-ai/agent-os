@@ -20,6 +20,11 @@ export interface ChatState {
   last_request_id: number;
   title: string | null;
   created_at_ms: number | null;
+  model?: string | null;
+  provider?: string | null;
+  max_tokens?: number | null;
+  tool_refs?: string[] | null;
+  tool_choice?: LlmToolChoice | null;
 }
 
 export interface ChatCreatedEvent {
@@ -67,7 +72,7 @@ export interface MessageBlob {
 export type ContentPart = TextPart | ImagePart | AudioPart;
 
 export interface TextPart {
-  type: "text";
+  type: "text" | "input_text" | "output_text";
   text: string;
 }
 

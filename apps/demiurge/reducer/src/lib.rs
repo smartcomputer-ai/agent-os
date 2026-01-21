@@ -16,6 +16,11 @@ struct ChatState {
     last_request_id: u64,
     title: Option<String>,
     created_at_ms: Option<u64>,
+    model: Option<String>,
+    provider: Option<String>,
+    max_tokens: Option<u64>,
+    tool_refs: Option<Vec<String>>,
+    tool_choice: Option<LlmToolChoice>,
 }
 
 aos_variant! {
@@ -58,6 +63,7 @@ aos_variant! {
         ChatCreated(ChatCreated),
         UserMessage(UserMessage),
         ChatResult(ChatResult),
+        ToolResult(ToolResult),
     }
 }
 
@@ -99,6 +105,31 @@ struct ChatResult {
     request_id: u64,
     output_ref: String,
     token_usage: TokenUsage,
+    tool_calls: Option<Vec<ToolCall>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ToolCall {
+    id: String,
+    name: String,
+    arguments_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolResult {
+    chat_id: String,
+    request_id: u64,
+    tool_call_id: String,
+    result_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolCallRequested {
+    chat_id: String,
+    request_id: u64,
+    tool_call_id: String,
+    name: String,
+    arguments_json: String,
 }
 
 aos_reducer!(DemiurgeReducer);
@@ -120,6 +151,7 @@ impl Reducer for DemiurgeReducer {
             ChatEvent::ChatCreated(created) => handle_chat_created(ctx, created),
             ChatEvent::UserMessage(message) => handle_user_message(ctx, message),
             ChatEvent::ChatResult(result) => handle_chat_result(ctx, result),
+            ChatEvent::ToolResult(result) => handle_tool_result(ctx, result),
         }
         Ok(())
     }
@@ -156,6 +188,11 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
     }
 
     ctx.state.last_request_id = request_id;
+    ctx.state.model = Some(model.clone());
+    ctx.state.provider = Some(provider.clone());
+    ctx.state.max_tokens = Some(max_tokens);
+    ctx.state.tool_refs = tool_refs.clone();
+    ctx.state.tool_choice = tool_choice.clone();
     ctx.state.messages.push(ChatMessage {
         request_id,
         role: ChatRole::User,
@@ -228,6 +265,73 @@ fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
         message_ref: Some(result.output_ref),
         token_usage: Some(result.token_usage),
     });
+
+    if let Some(tool_calls) = result.tool_calls {
+        for call in tool_calls {
+            let intent_value = ToolCallRequested {
+                chat_id: result.chat_id.clone(),
+                request_id: result.request_id,
+                tool_call_id: call.id,
+                name: call.name,
+                arguments_json: call.arguments_json,
+            };
+            let key = result.request_id.to_be_bytes();
+            ctx.intent("demiurge/ToolCallRequested@1")
+                .key_bytes(&key)
+                .payload(&intent_value)
+                .send();
+        }
+    }
+}
+
+fn handle_tool_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ToolResult) {
+    if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
+        return;
+    }
+
+    ctx.state.messages.push(ChatMessage {
+        request_id: result.request_id,
+        role: ChatRole::Assistant,
+        text: None,
+        message_ref: Some(result.result_ref),
+        token_usage: None,
+    });
+
+    let mut message_refs: Vec<String> = ctx
+        .state
+        .messages
+        .iter()
+        .filter_map(|msg| msg.message_ref.clone())
+        .collect();
+    const MAX_MESSAGE_REFS: usize = 32;
+    if message_refs.len() > MAX_MESSAGE_REFS {
+        let start = message_refs.len() - MAX_MESSAGE_REFS;
+        message_refs = message_refs.split_off(start);
+    }
+
+    let (Some(model), Some(provider), Some(max_tokens)) = (
+        ctx.state.model.clone(),
+        ctx.state.provider.clone(),
+        ctx.state.max_tokens,
+    ) else {
+        return;
+    };
+
+    let intent_value = ChatRequest {
+        chat_id: result.chat_id,
+        request_id: result.request_id,
+        message_refs,
+        model,
+        provider,
+        max_tokens,
+        tool_refs: ctx.state.tool_refs.clone(),
+        tool_choice: ctx.state.tool_choice.clone(),
+    };
+    let key = result.request_id.to_be_bytes();
+    ctx.intent(REQUEST_SCHEMA)
+        .key_bytes(&key)
+        .payload(&intent_value)
+        .send();
 }
 
 #[cfg(test)]
@@ -297,6 +401,11 @@ mod tests {
             last_request_id: 0,
             title: Some("First chat".into()),
             created_at_ms: Some(1234),
+            model: None,
+            provider: None,
+            max_tokens: None,
+            tool_refs: None,
+            tool_choice: None,
         };
         let event = ChatEvent::UserMessage(UserMessage {
             chat_id: "chat-1".into(),
@@ -306,6 +415,8 @@ mod tests {
             model: "gpt-mock".into(),
             provider: "mock".into(),
             max_tokens: 128,
+            tool_refs: None,
+            tool_choice: None,
         });
         let output = run_with_state(Some(state), event);
         let state: ChatState =
@@ -343,6 +454,11 @@ mod tests {
             last_request_id: 2,
             title: Some("First chat".into()),
             created_at_ms: Some(1234),
+            model: None,
+            provider: None,
+            max_tokens: None,
+            tool_refs: None,
+            tool_choice: None,
         };
         let event = ChatEvent::UserMessage(UserMessage {
             chat_id: "chat-1".into(),
@@ -352,6 +468,8 @@ mod tests {
             model: "gpt-mock".into(),
             provider: "mock".into(),
             max_tokens: 64,
+            tool_refs: None,
+            tool_choice: None,
         });
         let output = run_with_state(Some(state.clone()), event);
         let next: ChatState =
@@ -374,6 +492,11 @@ mod tests {
             last_request_id: 1,
             title: Some("First chat".into()),
             created_at_ms: Some(1234),
+            model: None,
+            provider: None,
+            max_tokens: None,
+            tool_refs: None,
+            tool_choice: None,
         };
         let event = ChatEvent::ChatResult(ChatResult {
             chat_id: "chat-1".into(),
@@ -383,6 +506,7 @@ mod tests {
                 prompt: 10,
                 completion: 20,
             },
+            tool_calls: None,
         });
         let output = run_with_state(Some(state), event);
         let state: ChatState =

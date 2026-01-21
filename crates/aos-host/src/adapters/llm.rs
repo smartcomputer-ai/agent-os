@@ -215,7 +215,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             ));
         }
 
-        let (content, usage) = match provider.api_kind {
+        let (output_value, usage) = match provider.api_kind {
             LlmApiKind::ChatCompletions => {
                 let api_response: OpenAiChatResponse = match response.json().await {
                     Ok(r) => r,
@@ -230,11 +230,17 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                     .first()
                     .and_then(|c| c.message.content.clone())
                     .unwrap_or_default();
+                let output_value = serde_json::json!({
+                    "role": "assistant",
+                    "content": [
+                        { "type": "text", "text": content }
+                    ]
+                });
                 let usage = TokenUsage {
                     prompt: api_response.usage.prompt_tokens,
                     completion: api_response.usage.completion_tokens,
                 };
-                (content, usage)
+                (output_value, usage)
             }
             LlmApiKind::Responses => {
                 let api_response: serde_json::Value = match response.json().await {
@@ -245,19 +251,16 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                         );
                     }
                 };
-                let content = extract_responses_text(&api_response);
                 let usage = extract_responses_usage(&api_response);
-                (content, usage)
+                let output_value = api_response
+                    .get("output")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+                (output_value, usage)
             }
         };
 
-        let output_message = serde_json::json!({
-            "role": "assistant",
-            "content": [
-                { "type": "text", "text": content }
-            ]
-        });
-        let output_bytes = match serde_json::to_vec(&output_message) {
+        let output_bytes = match serde_json::to_vec(&output_value) {
             Ok(bytes) => bytes,
             Err(e) => {
                 return Ok(self.error_receipt(
@@ -337,7 +340,16 @@ impl<S: Store> LlmAdapter<S> {
                 serde_json::Value::Array(items) => {
                     let mut messages = Vec::with_capacity(items.len());
                     for item in items {
-                        messages.push(normalize_message(item, self.store.as_ref(), api_kind)?);
+                        if api_kind == LlmApiKind::Responses
+                            && item
+                                .as_object()
+                                .and_then(|obj| obj.get("type"))
+                                .is_some()
+                        {
+                            messages.push(item);
+                        } else {
+                            messages.push(normalize_message(item, self.store.as_ref(), api_kind)?);
+                        }
                     }
                     return Ok(messages);
                 }
@@ -619,29 +631,6 @@ struct OpenAiUsage {
     _total_tokens: u64,
 }
 
-fn extract_responses_text(value: &serde_json::Value) -> String {
-    if let Some(text) = value.get("output_text").and_then(|v| v.as_str()) {
-        return text.to_string();
-    }
-
-    let mut parts = Vec::new();
-    if let Some(items) = value.get("output").and_then(|v| v.as_array()) {
-        for item in items {
-            if let Some(content) = item.get("content").and_then(|v| v.as_array()) {
-                for part in content {
-                    let part_type = part.get("type").and_then(|v| v.as_str());
-                    if matches!(part_type, Some("output_text") | Some("text")) {
-                        if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
-                            parts.push(text.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    parts.join("")
-}
 
 fn extract_responses_usage(value: &serde_json::Value) -> TokenUsage {
     let prompt = value

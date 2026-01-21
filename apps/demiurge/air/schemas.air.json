@@ -45,7 +45,12 @@
         "messages": { "list": { "ref": "demiurge/ChatMessage@1" } },
         "last_request_id": { "nat": {} },
         "title": { "option": { "text": {} } },
-        "created_at_ms": { "option": { "nat": {} } }
+        "created_at_ms": { "option": { "nat": {} } },
+        "model": { "option": { "text": {} } },
+        "provider": { "option": { "text": {} } },
+        "max_tokens": { "option": { "nat": {} } },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }
       }
     }
   },
@@ -95,13 +100,25 @@
   },
   {
     "$kind": "defschema",
+    "name": "demiurge/ToolCall@1",
+    "type": {
+      "record": {
+        "id": { "text": {} },
+        "name": { "text": {} },
+        "arguments_json": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demiurge/ChatResult@1",
     "type": {
       "record": {
         "chat_id": { "ref": "demiurge/ChatId@1" },
         "request_id": { "nat": {} },
         "output_ref": { "hash": {} },
-        "token_usage": { "ref": "demiurge/TokenUsage@1" }
+        "token_usage": { "ref": "demiurge/TokenUsage@1" },
+        "tool_calls": { "option": { "list": { "ref": "demiurge/ToolCall@1" } } }
       }
     }
   },
