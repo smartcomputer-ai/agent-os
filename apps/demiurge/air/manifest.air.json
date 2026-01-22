@@ -17,6 +17,9 @@
       "name": "demiurge/ChatState@1"
     },
     {
+      "name": "demiurge/PendingOutput@1"
+    },
+    {
       "name": "demiurge/ChatCreated@1"
     },
     {
@@ -39,6 +42,15 @@
     },
     {
       "name": "demiurge/ChatEvent@1"
+    },
+    {
+      "name": "sys/BlobGetParams@1"
+    },
+    {
+      "name": "sys/BlobGetReceipt@1"
+    },
+    {
+      "name": "sys/BlobGetResult@1"
     },
     {
       "name": "sys/LlmToolChoice@1"
@@ -107,8 +119,22 @@
             }
           }
         }
+      },
+      {
+        "name": "blob_grant",
+        "cap": "sys/blob@1",
+        "params": {
+          "record": {}
+        }
       }
     ]
+  },
+  "module_bindings": {
+    "demiurge/Demiurge@1": {
+      "slots": {
+        "blob": "blob_grant"
+      }
+    }
   },
   "routing": {
     "events": [
@@ -116,6 +142,10 @@
         "event": "demiurge/ChatEvent@1",
         "reducer": "demiurge/Demiurge@1",
         "key_field": "$value.chat_id"
+      },
+      {
+        "event": "sys/BlobGetResult@1",
+        "reducer": "demiurge/Demiurge@1"
       }
     ],
     "inboxes": []
@@ -131,6 +161,9 @@
   "effects": [
     {
       "name": "sys/llm.generate@1"
+    },
+    {
+      "name": "sys/blob.get@1"
     }
   ]
 }

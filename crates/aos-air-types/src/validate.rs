@@ -634,6 +634,12 @@ pub fn validate_manifest(
         }
         Some(current)
     };
+    let receipt_schema_allows_missing_key_field = |event_schema: &str| {
+        matches!(
+            event_schema,
+            "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
+        )
+    };
     let key_type_matches = |field_ty: &TypeExpr, key_schema: &TypeExpr| {
         let resolved_field = resolve_type(field_ty)?;
         let resolved_key = resolve_type(key_schema)?;
@@ -681,9 +687,11 @@ pub fn validate_manifest(
             let keyed = module.key_schema.is_some();
             match (keyed, key_field.is_some()) {
                 (true, false) => {
-                    return Err(ValidationError::RoutingMissingKeyField {
-                        reducer: reducer.clone(),
-                    });
+                    if !receipt_schema_allows_missing_key_field(event.as_str()) {
+                        return Err(ValidationError::RoutingMissingKeyField {
+                            reducer: reducer.clone(),
+                        });
+                    }
                 }
                 (false, true) => {
                     return Err(ValidationError::RoutingUnexpectedKeyField {

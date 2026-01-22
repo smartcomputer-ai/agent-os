@@ -26,15 +26,12 @@ const ADAPTER_ID: &str = "adapter.blob.fake";
 
 #[derive(Debug, Clone)]
 struct BlobEchoInput {
-    namespace: String,
-    key: String,
     data: Vec<u8>,
 }
 
 #[derive(Default)]
 struct BlobHarnessStore {
     pending_blobs: HashMap<String, Vec<u8>>,
-    key_to_blob: HashMap<(String, String), String>,
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
@@ -47,8 +44,6 @@ pub fn run(example_root: &Path) -> Result<()> {
     })?;
 
     let input = BlobEchoInput {
-        namespace: "demo".into(),
-        key: "echo".into(),
         data: b"Blob Echo Example".to_vec(),
     };
 
@@ -71,13 +66,8 @@ fn drive_blob_echo(host: &mut ExampleHost, input: BlobEchoInput) -> Result<()> {
     harness
         .pending_blobs
         .insert(blob_ref.clone(), input.data.clone());
-    harness
-        .key_to_blob
-        .insert((input.namespace.clone(), input.key.clone()), blob_ref);
 
     let start_event = BlobEchoEvent::Start(StartEvent {
-        namespace: input.namespace,
-        key: input.key,
         data: input.data,
     });
     host.send_event(&start_event)?;
@@ -144,28 +134,21 @@ fn handle_blob_get(
     intent: EffectIntent,
 ) -> Result<()> {
     let params: BlobGetParams = serde_cbor::from_slice(&intent.params_cbor)?;
-    let key = (params.namespace.clone(), params.key.clone());
-    let blob_ref = harness.key_to_blob.get(&key).ok_or_else(|| {
-        anyhow!(
-            "no blob stored for namespace={} key={}",
-            params.namespace,
-            params.key
-        )
-    })?;
+    let blob_ref = params.blob_ref.as_str().to_string();
     let data = harness
         .pending_blobs
-        .get(blob_ref)
+        .get(&blob_ref)
         .ok_or_else(|| anyhow!("missing blob bytes for {blob_ref}"))?;
     println!(
-        "     blob.get -> namespace={} key={} size={} bytes",
-        params.namespace,
-        params.key,
+        "     blob.get -> blob_ref={} size={} bytes",
+        blob_ref,
         data.len()
     );
 
     let receipt_payload = BlobGetReceipt {
         blob_ref: HashRef::new(blob_ref.clone()).map_err(|err| anyhow!("invalid hash: {err}"))?,
         size: data.len() as u64,
+        bytes: data.clone(),
     };
     let receipt = EffectReceipt {
         intent_hash: intent.intent_hash,
@@ -199,8 +182,6 @@ aos_variant! {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartEvent {
-    namespace: String,
-    key: String,
     #[serde(with = "serde_bytes")]
     data: Vec<u8>,
 }

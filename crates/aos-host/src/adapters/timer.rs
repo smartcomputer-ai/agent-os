@@ -322,6 +322,7 @@ mod tests {
                 reducer: "demo/Timer@1".into(),
                 effect_kind: "timer.set".into(),
                 params_cbor: params_cbor.clone(),
+                key: None,
             },
             // Non-timer effect should be ignored
             ReducerReceiptSnapshot {
@@ -329,6 +330,7 @@ mod tests {
                 reducer: "demo/Other@1".into(),
                 effect_kind: "blob.put".into(),
                 params_cbor: vec![],
+                key: None,
             },
         ];
 

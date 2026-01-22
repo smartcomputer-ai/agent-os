@@ -275,8 +275,8 @@ Built-in kinds in v1:
 - receipt: `{ blob_ref:hash, size:nat }`
 
 **blob.get**
-- params: `{ namespace:text, key:text }`
-- receipt: `{ blob_ref:hash, size:nat }`
+- params: `{ blob_ref:hash }`
+- receipt: `{ blob_ref:hash, size:nat, bytes:bytes }`
 
 **timer.set**
 - params: `{ deliver_at_ns:nat, key?:text }` (`deliver_at_ns` uses logical time)

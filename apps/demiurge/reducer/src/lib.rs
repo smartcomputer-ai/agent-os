@@ -5,7 +5,8 @@ extern crate alloc;
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use aos_wasm_sdk::{aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
+use core::str;
+use aos_wasm_sdk::{aos_event_union, aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
 use serde::{Deserialize, Serialize};
 
 const REQUEST_SCHEMA: &str = "demiurge/ChatRequest@1";
@@ -21,6 +22,8 @@ struct ChatState {
     max_tokens: Option<u64>,
     tool_refs: Option<Vec<String>>,
     tool_choice: Option<LlmToolChoice>,
+    #[serde(default)]
+    pending_outputs: Vec<PendingOutput>,
 }
 
 aos_variant! {
@@ -57,13 +60,21 @@ struct ChatMessage {
     token_usage: Option<TokenUsage>,
 }
 
-aos_variant! {
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PendingOutput {
+    chat_id: String,
+    request_id: u64,
+    output_ref: String,
+}
+
+aos_event_union! {
+    #[derive(Debug, Clone, Serialize)]
     enum ChatEvent {
         ChatCreated(ChatCreated),
         UserMessage(UserMessage),
         ChatResult(ChatResult),
         ToolResult(ToolResult),
+        BlobGetResult(BlobGetResult),
     }
 }
 
@@ -116,6 +127,26 @@ struct ToolCall {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct BlobGetParams {
+    blob_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BlobGetReceipt {
+    blob_ref: String,
+    size: u64,
+    #[serde(with = "serde_bytes")]
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BlobGetResult {
+    status: String,
+    requested: BlobGetParams,
+    receipt: BlobGetReceipt,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ToolResult {
     chat_id: String,
     request_id: u64,
@@ -152,6 +183,7 @@ impl Reducer for DemiurgeReducer {
             ChatEvent::UserMessage(message) => handle_user_message(ctx, message),
             ChatEvent::ChatResult(result) => handle_chat_result(ctx, result),
             ChatEvent::ToolResult(result) => handle_tool_result(ctx, result),
+            ChatEvent::BlobGetResult(result) => handle_blob_get_result(ctx, result),
         }
         Ok(())
     }
@@ -266,21 +298,22 @@ fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
         token_usage: Some(result.token_usage),
     });
 
-    if let Some(tool_calls) = result.tool_calls {
-        for call in tool_calls {
-            let intent_value = ToolCallRequested {
-                chat_id: result.chat_id.clone(),
-                request_id: result.request_id,
-                tool_call_id: call.id,
-                name: call.name,
-                arguments_json: call.arguments_json,
-            };
-            let key = result.request_id.to_be_bytes();
-            ctx.intent("demiurge/ToolCallRequested@1")
-                .key_bytes(&key)
-                .payload(&intent_value)
-                .send();
-        }
+    let should_parse = ctx
+        .state
+        .tool_refs
+        .as_ref()
+        .map(|refs| !refs.is_empty())
+        .unwrap_or(false);
+    if should_parse {
+        ctx.state.pending_outputs.push(PendingOutput {
+            chat_id: result.chat_id,
+            request_id: result.request_id,
+            output_ref: result.output_ref.clone(),
+        });
+        let params = BlobGetParams {
+            blob_ref: result.output_ref,
+        };
+        ctx.effects().emit_raw("blob.get", &params, Some("blob"));
     }
 }
 
@@ -332,6 +365,364 @@ fn handle_tool_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ToolResult) {
         .key_bytes(&key)
         .payload(&intent_value)
         .send();
+}
+
+fn handle_blob_get_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobGetResult) {
+    if result.status != "ok" {
+        return;
+    }
+
+    let Some(index) = ctx
+        .state
+        .pending_outputs
+        .iter()
+        .position(|pending| pending.output_ref == result.requested.blob_ref)
+    else {
+        return;
+    };
+    let pending = ctx.state.pending_outputs.remove(index);
+
+    let tool_calls = extract_tool_calls_from_output(&result.receipt.bytes);
+    if tool_calls.is_empty() {
+        return;
+    }
+
+    for call in tool_calls {
+        let intent_value = ToolCallRequested {
+            chat_id: pending.chat_id.clone(),
+            request_id: pending.request_id,
+            tool_call_id: call.id,
+            name: call.name,
+            arguments_json: call.arguments_json,
+        };
+        let key = pending.request_id.to_be_bytes();
+        ctx.intent("demiurge/ToolCallRequested@1")
+            .key_bytes(&key)
+            .payload(&intent_value)
+            .send();
+    }
+}
+
+fn extract_tool_calls_from_output(bytes: &[u8]) -> Vec<ToolCall> {
+    let mut parser = JsonToolCallParser::new(bytes);
+    parser.parse();
+    parser.calls
+}
+
+#[derive(Default)]
+struct ObjectCtx {
+    expecting_key: bool,
+    current_key: Option<String>,
+    type_value: Option<String>,
+    name: Option<String>,
+    arguments_json: Option<String>,
+    call_id: Option<String>,
+    id: Option<String>,
+}
+
+impl ObjectCtx {
+    fn new() -> Self {
+        Self {
+            expecting_key: true,
+            ..Self::default()
+        }
+    }
+
+    fn into_tool_call(self) -> Option<ToolCall> {
+        if self.type_value.as_deref() != Some("function_call") {
+            return None;
+        }
+        let name = self.name?;
+        if name.is_empty() {
+            return None;
+        }
+        let id = self.call_id.or(self.id)?;
+        if id.is_empty() {
+            return None;
+        }
+        let arguments_json = self.arguments_json.unwrap_or_else(|| "{}".into());
+        Some(ToolCall {
+            id,
+            name,
+            arguments_json,
+        })
+    }
+}
+
+enum Container {
+    Object(ObjectCtx),
+    Array,
+}
+
+struct JsonToolCallParser<'a> {
+    bytes: &'a [u8],
+    idx: usize,
+    stack: Vec<Container>,
+    calls: Vec<ToolCall>,
+}
+
+impl<'a> JsonToolCallParser<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self {
+            bytes,
+            idx: 0,
+            stack: Vec::new(),
+            calls: Vec::new(),
+        }
+    }
+
+    fn parse(&mut self) {
+        while self.idx < self.bytes.len() {
+            self.skip_ws();
+            if self.idx >= self.bytes.len() {
+                break;
+            }
+
+            if self.try_capture_arguments_object() {
+                continue;
+            }
+
+            match self.bytes[self.idx] {
+                b'{' => {
+                    self.stack.push(Container::Object(ObjectCtx::new()));
+                    self.idx += 1;
+                }
+                b'}' => {
+                    if let Some(Container::Object(obj)) = self.stack.pop() {
+                        if let Some(call) = obj.into_tool_call() {
+                            self.calls.push(call);
+                        }
+                    }
+                    self.idx += 1;
+                    self.finish_value();
+                }
+                b'[' => {
+                    self.stack.push(Container::Array);
+                    self.idx += 1;
+                }
+                b']' => {
+                    self.stack.pop();
+                    self.idx += 1;
+                    self.finish_value();
+                }
+                b'"' => {
+                    if let Some((value, next)) = parse_json_string(self.bytes, self.idx) {
+                        self.idx = next;
+                        if let Some(obj) = self.current_object_mut() {
+                            if obj.expecting_key {
+                                obj.current_key = Some(value);
+                                obj.expecting_key = false;
+                            } else {
+                                self.record_string_value(obj, value);
+                                self.finish_value();
+                            }
+                        } else {
+                            self.finish_value();
+                        }
+                    } else {
+                        self.idx += 1;
+                    }
+                }
+                b':' => {
+                    self.idx += 1;
+                }
+                b',' => {
+                    self.idx += 1;
+                    if let Some(obj) = self.current_object_mut() {
+                        obj.expecting_key = true;
+                        obj.current_key = None;
+                    }
+                }
+                _ => {
+                    if let Some(obj) = self.current_object_mut() {
+                        if !obj.expecting_key {
+                            let start = self.idx;
+                            let end = consume_nonstring_value(self.bytes, start);
+                            if let Some(key) = obj.current_key.as_deref() {
+                                if key == "arguments" {
+                                    if let Ok(raw) = str::from_utf8(&self.bytes[start..end]) {
+                                        obj.arguments_json = Some(String::from(raw));
+                                    }
+                                }
+                            }
+                            self.idx = end;
+                            self.finish_value();
+                            continue;
+                        }
+                    }
+                    self.idx += 1;
+                }
+            }
+        }
+    }
+
+    fn current_object_mut(&mut self) -> Option<&mut ObjectCtx> {
+        match self.stack.last_mut() {
+            Some(Container::Object(obj)) => Some(obj),
+            _ => None,
+        }
+    }
+
+    fn finish_value(&mut self) {
+        if let Some(obj) = self.current_object_mut() {
+            if !obj.expecting_key {
+                obj.expecting_key = true;
+                obj.current_key = None;
+            }
+        }
+    }
+
+    fn record_string_value(&mut self, obj: &mut ObjectCtx, value: String) {
+        if let Some(key) = obj.current_key.as_deref() {
+            match key {
+                "type" => obj.type_value = Some(value),
+                "name" => obj.name = Some(value),
+                "arguments" => obj.arguments_json = Some(value),
+                "call_id" => obj.call_id = Some(value),
+                "id" => obj.id = Some(value),
+                _ => {}
+            }
+        }
+    }
+
+    fn try_capture_arguments_object(&mut self) -> bool {
+        let Some(obj) = self.current_object_mut() else {
+            return false;
+        };
+        if obj.expecting_key {
+            return false;
+        }
+        let Some(key) = obj.current_key.as_deref() else {
+            return false;
+        };
+        if key != "arguments" {
+            return false;
+        }
+        let byte = self.bytes[self.idx];
+        if byte != b'{' && byte != b'[' {
+            return false;
+        }
+        let Some((raw, end)) = extract_raw_json(self.bytes, self.idx) else {
+            return false;
+        };
+        obj.arguments_json = Some(raw);
+        self.idx = end;
+        self.finish_value();
+        true
+    }
+
+    fn skip_ws(&mut self) {
+        while self.idx < self.bytes.len() && is_ws(self.bytes[self.idx]) {
+            self.idx += 1;
+        }
+    }
+}
+
+fn consume_nonstring_value(bytes: &[u8], start: usize) -> usize {
+    let mut i = start;
+    while i < bytes.len() {
+        match bytes[i] {
+            b',' | b'}' | b']' | b' ' | b'\n' | b'\r' | b'\t' => break,
+            _ => i += 1,
+        }
+    }
+    i
+}
+
+fn extract_raw_json(bytes: &[u8], start: usize) -> Option<(String, usize)> {
+    let mut i = start;
+    let mut depth = 0u32;
+    let mut in_string = false;
+    let mut escaped = false;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    i += 1;
+                    let raw = String::from(str::from_utf8(&bytes[start..i]).ok()?);
+                    return Some((raw, i));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn parse_json_string(bytes: &[u8], start: usize) -> Option<(String, usize)> {
+    if bytes.get(start) != Some(&b'"') {
+        return None;
+    }
+    let mut out = String::new();
+    let mut i = start + 1;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'"' => return Some((out, i + 1)),
+            b'\\' => {
+                i += 1;
+                if i >= bytes.len() {
+                    return None;
+                }
+                match bytes[i] {
+                    b'"' => out.push('"'),
+                    b'\\' => out.push('\\'),
+                    b'/' => out.push('/'),
+                    b'b' => out.push('\x08'),
+                    b'f' => out.push('\x0c'),
+                    b'n' => out.push('\n'),
+                    b'r' => out.push('\r'),
+                    b't' => out.push('\t'),
+                    b'u' => {
+                        if i + 4 >= bytes.len() {
+                            return None;
+                        }
+                        let mut code: u16 = 0;
+                        for _ in 0..4 {
+                            i += 1;
+                            code = (code << 4) | hex_val(bytes[i])?;
+                        }
+                        if let Some(ch) = core::char::from_u32(code as u32) {
+                            out.push(ch);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => out.push(b as char),
+        }
+        i += 1;
+    }
+    None
+}
+
+fn hex_val(byte: u8) -> Option<u16> {
+    match byte {
+        b'0'..=b'9' => Some((byte - b'0') as u16),
+        b'a'..=b'f' => Some((byte - b'a' + 10) as u16),
+        b'A'..=b'F' => Some((byte - b'A' + 10) as u16),
+        _ => None,
+    }
+}
+
+fn is_ws(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\n' | b'\r' | b'\t')
 }
 
 #[cfg(test)]
@@ -406,6 +797,7 @@ mod tests {
             max_tokens: None,
             tool_refs: None,
             tool_choice: None,
+            pending_outputs: vec![],
         };
         let event = ChatEvent::UserMessage(UserMessage {
             chat_id: "chat-1".into(),
@@ -459,6 +851,7 @@ mod tests {
             max_tokens: None,
             tool_refs: None,
             tool_choice: None,
+            pending_outputs: vec![],
         };
         let event = ChatEvent::UserMessage(UserMessage {
             chat_id: "chat-1".into(),
@@ -497,6 +890,7 @@ mod tests {
             max_tokens: None,
             tool_refs: None,
             tool_choice: None,
+            pending_outputs: vec![],
         };
         let event = ChatEvent::ChatResult(ChatResult {
             chat_id: "chat-1".into(),

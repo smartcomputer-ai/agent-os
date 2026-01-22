@@ -45,14 +45,15 @@ pub struct BlobPutReceipt {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlobGetParams {
-    pub namespace: String,
-    pub key: String,
+    pub blob_ref: HashRef,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlobGetReceipt {
     pub blob_ref: HashRef,
     pub size: u64,
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

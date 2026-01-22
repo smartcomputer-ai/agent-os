@@ -12,6 +12,14 @@
         "decision": "allow"
       },
       {
+        "when": {
+          "effect_kind": "blob.get",
+          "origin_kind": "reducer",
+          "origin_name": "demiurge/Demiurge@1"
+        },
+        "decision": "allow"
+      },
+      {
         "when": {},
         "decision": "deny"
       }

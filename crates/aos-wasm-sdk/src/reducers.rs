@@ -318,8 +318,7 @@ pub struct BlobPutParams {
 /// Blob.get parameters.
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct BlobGetParams {
-    pub namespace: String,
-    pub key: String,
+    pub blob_ref: HashRef,
 }
 
 /// Content-addressed blob reference.

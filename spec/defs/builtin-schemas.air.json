@@ -90,8 +90,7 @@
     "name": "sys/BlobGetParams@1",
     "type": {
       "record": {
-        "namespace": { "text": {} },
-        "key": { "text": {} }
+        "blob_ref": { "hash": {} }
       }
     }
   },
@@ -101,7 +100,8 @@
     "type": {
       "record": {
         "blob_ref": { "hash": {} },
-        "size": { "nat": {} }
+        "size": { "nat": {} },
+        "bytes": { "bytes": {} }
       }
     }
   },

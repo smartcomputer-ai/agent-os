@@ -788,10 +788,12 @@ impl<S: Store + 'static> Kernel<S> {
 
             match (keyed, &binding.key_field) {
                 (true, None) => {
-                    return Err(KernelError::Manifest(format!(
-                        "route to keyed reducer '{}' is missing key_field",
-                        binding.reducer
-                    )));
+                    if event.key.is_none() {
+                        return Err(KernelError::Manifest(format!(
+                            "route to keyed reducer '{}' is missing key_field",
+                            binding.reducer
+                        )));
+                    }
                 }
                 (false, Some(_)) => {
                     return Err(KernelError::Manifest(format!(
@@ -821,32 +823,36 @@ impl<S: Store + 'static> Kernel<S> {
                 ))
             })?;
 
-            let key_bytes = if let Some(field) = &binding.key_field {
-                let key_schema_ref = module_def
-                    .key_schema
-                    .as_ref()
-                    .expect("keyed reducers have key_schema");
-                let key_schema =
-                    self.schema_index
-                        .get(key_schema_ref.as_str())
-                        .ok_or_else(|| {
-                            KernelError::Manifest(format!(
-                                "key schema '{}' not found for reducer '{}'",
-                                key_schema_ref.as_str(),
-                                binding.reducer
-                            ))
-                        })?;
-                let value_for_key = if binding.route_event_schema == event.schema {
-                    &event_value
+            let key_bytes = if keyed {
+                if let Some(field) = &binding.key_field {
+                    let key_schema_ref = module_def
+                        .key_schema
+                        .as_ref()
+                        .expect("keyed reducers have key_schema");
+                    let key_schema =
+                        self.schema_index
+                            .get(key_schema_ref.as_str())
+                            .ok_or_else(|| {
+                                KernelError::Manifest(format!(
+                                    "key schema '{}' not found for reducer '{}'",
+                                    key_schema_ref.as_str(),
+                                    binding.reducer
+                                ))
+                            })?;
+                    let value_for_key = if binding.route_event_schema == event.schema {
+                        &event_value
+                    } else {
+                        &normalized_for_reducer.value
+                    };
+                    Some(self.extract_key_bytes(
+                        field,
+                        key_schema,
+                        value_for_key,
+                        binding.route_event_schema.as_str(),
+                    )?)
                 } else {
-                    &normalized_for_reducer.value
-                };
-                Some(self.extract_key_bytes(
-                    field,
-                    key_schema,
-                    value_for_key,
-                    binding.route_event_schema.as_str(),
-                )?)
+                    event.key.clone()
+                }
             } else {
                 None
             };
@@ -1107,6 +1113,7 @@ impl<S: Store + 'static> Kernel<S> {
                     reducer_name.clone(),
                     effect.kind.clone(),
                     effect.params_cbor.clone(),
+                    key.clone(),
                 ),
             );
         }
@@ -1505,7 +1512,7 @@ impl<S: Store + 'static> Kernel<S> {
                 }
                 self.pending_reducer_receipts
                     .entry(record.intent_hash)
-                    .or_insert_with(|| ReducerEffectContext::new(name, effect_kind, params_cbor));
+                    .or_insert_with(|| ReducerEffectContext::new(name, effect_kind, params_cbor, None));
             }
             IntentOriginRecord::Plan { name: _, plan_id } => {
                 self.reconcile_plan_replay_identity(plan_id, record.intent_hash);

@@ -871,8 +871,7 @@ fn blob_get_receipt_routes_event_to_handler() {
             effects: vec![ReducerEffect::new(
                 aos_effects::EffectKind::BLOB_GET,
                 serde_cbor::to_vec(&BlobGetParams {
-                    namespace: "docs".into(),
-                    key: "readme".into(),
+                    blob_ref: fake_hash(0x10),
                 })
                 .unwrap(),
             )],
@@ -975,6 +974,7 @@ fn blob_get_receipt_routes_event_to_handler() {
         payload_cbor: serde_cbor::to_vec(&BlobGetReceipt {
             blob_ref: fake_hash(0x22),
             size: 128,
+            bytes: vec![0; 128],
         })
         .unwrap(),
         cost_cents: None,

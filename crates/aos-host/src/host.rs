@@ -17,9 +17,8 @@ use crate::adapters::registry::AdapterRegistry;
 use crate::adapters::registry::AdapterRegistryConfig;
 #[cfg(not(feature = "adapter-http"))]
 use crate::adapters::stub::StubHttpAdapter;
-use crate::adapters::stub::{
-    StubBlobAdapter, StubBlobGetAdapter, StubLlmAdapter, StubTimerAdapter,
-};
+use crate::adapters::blob_get::BlobGetAdapter;
+use crate::adapters::stub::{StubBlobAdapter, StubLlmAdapter, StubTimerAdapter};
 use crate::adapters::timer::TimerScheduler;
 use crate::config::HostConfig;
 use crate::error::HostError;
@@ -503,7 +502,7 @@ fn default_registry<S: Store + 'static>(store: Arc<S>, config: &HostConfig) -> A
     });
     registry.register(Box::new(StubTimerAdapter));
     registry.register(Box::new(StubBlobAdapter));
-    registry.register(Box::new(StubBlobGetAdapter));
+    registry.register(Box::new(BlobGetAdapter::new(store.clone())));
 
     #[cfg(feature = "adapter-http")]
     {

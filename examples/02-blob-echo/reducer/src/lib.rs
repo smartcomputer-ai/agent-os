@@ -47,8 +47,6 @@ impl Reducer for BlobEchoSm {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct EchoState {
     pc: EchoPc,
-    namespace: Option<String>,
-    key: Option<String>,
     pending_blob_ref: Option<String>,
     stored_blob_ref: Option<String>,
     retrieved_blob_ref: Option<String>,
@@ -72,8 +70,6 @@ impl Default for EchoPc {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartEvent {
-    namespace: String,
-    key: String,
     #[serde(with = "serde_bytes")]
     data: Vec<u8>,
 }
@@ -108,8 +104,6 @@ fn handle_start(ctx: &mut ReducerCtx<EchoState>, event: StartEvent) {
     }
     let blob_ref = hash_bytes(&event.data);
     ctx.state.pc = EchoPc::Putting;
-    ctx.state.namespace = Some(event.namespace.clone());
-    ctx.state.key = Some(event.key.clone());
     ctx.state.pending_blob_ref = Some(blob_ref.clone());
 
     let params = BlobPutParams {
@@ -134,10 +128,9 @@ fn handle_put_result(ctx: &mut ReducerCtx<EchoState>, event: BlobPutResultEvent)
         ctx.state.stored_blob_ref = Some(expected.clone());
     }
     ctx.state.pc = EchoPc::Getting;
-    if let (Some(namespace), Some(key)) = (&ctx.state.namespace, &ctx.state.key) {
+    if let Some(stored_blob_ref) = &ctx.state.stored_blob_ref {
         let params = BlobGetParams {
-            namespace: namespace.clone(),
-            key: key.clone(),
+            blob_ref: HashRef::new(stored_blob_ref.clone()).expect("blob hash"),
         };
         ctx.effects().emit_raw("blob.get", &params, Some("default"));
     }

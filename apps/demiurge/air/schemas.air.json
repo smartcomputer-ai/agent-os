@@ -39,6 +39,17 @@
   },
   {
     "$kind": "defschema",
+    "name": "demiurge/PendingOutput@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "output_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demiurge/ChatState@1",
     "type": {
       "record": {
@@ -50,7 +61,10 @@
         "provider": { "option": { "text": {} } },
         "max_tokens": { "option": { "nat": {} } },
         "tool_refs": { "option": { "list": { "hash": {} } } },
-        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "pending_outputs": {
+          "option": { "list": { "ref": "demiurge/PendingOutput@1" } }
+        }
       }
     }
   },
@@ -155,7 +169,8 @@
         "ChatCreated": { "ref": "demiurge/ChatCreated@1" },
         "UserMessage": { "ref": "demiurge/UserMessage@1" },
         "ChatResult": { "ref": "demiurge/ChatResult@1" },
-        "ToolResult": { "ref": "demiurge/ToolResult@1" }
+        "ToolResult": { "ref": "demiurge/ToolResult@1" },
+        "BlobGetResult": { "ref": "sys/BlobGetResult@1" }
       }
     }
   }
