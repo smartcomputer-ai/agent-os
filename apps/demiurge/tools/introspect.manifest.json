@@ -1,7 +1,7 @@
 [
   {
     "type": "function",
-    "name": "introspect.manifest",
+    "name": "introspect_manifest",
     "description": "Fetch the current manifest bytes for this world.",
     "parameters": {
       "type": "object",

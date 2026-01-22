@@ -66,7 +66,7 @@ impl<S: aos_store::Store + Send + Sync + 'static> AsyncEffectAdapter for ToolLlm
             json!([
                 {
                     "type": "function_call",
-                    "name": "introspect.manifest",
+                    "name": "introspect_manifest",
                     "arguments": "{\"consistency\":\"head\"}",
                     "call_id": TOOL_CALL_ID
                 }

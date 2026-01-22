@@ -563,7 +563,7 @@ fn parse_tool_call_params(name: &str, arguments_json: &str) -> Option<ToolCallPa
     let args: JsonValue = serde_json::from_str(arguments_json).ok()?;
     let obj = args.as_object()?;
     match name {
-        "introspect.manifest" => {
+        "introspect.manifest" | "introspect_manifest" => {
             let consistency = obj
                 .get("consistency")
                 .and_then(|value| value.as_str())
