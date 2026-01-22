@@ -295,12 +295,72 @@
           ]
         }
       },
-      { "from": "emit_introspect_manifest", "to": "await_introspect_manifest" },
-      { "from": "await_introspect_manifest", "to": "assign_manifest_bytes" },
-      { "from": "assign_manifest_bytes", "to": "emit_store_manifest" },
-      { "from": "emit_store_manifest", "to": "await_store_manifest" },
-      { "from": "await_store_manifest", "to": "assign_manifest_ref" },
-      { "from": "assign_manifest_ref", "to": "raise_tool_result" },
+      {
+        "from": "emit_introspect_manifest",
+        "to": "await_introspect_manifest",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "IntrospectManifest" }
+          ]
+        }
+      },
+      {
+        "from": "await_introspect_manifest",
+        "to": "assign_manifest_bytes",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "IntrospectManifest" }
+          ]
+        }
+      },
+      {
+        "from": "assign_manifest_bytes",
+        "to": "emit_store_manifest",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "IntrospectManifest" }
+          ]
+        }
+      },
+      {
+        "from": "emit_store_manifest",
+        "to": "await_store_manifest",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "IntrospectManifest" }
+          ]
+        }
+      },
+      {
+        "from": "await_store_manifest",
+        "to": "assign_manifest_ref",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "IntrospectManifest" }
+          ]
+        }
+      },
+      {
+        "from": "assign_manifest_ref",
+        "to": "raise_tool_result",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "IntrospectManifest" }
+          ]
+        }
+      },
 
       {
         "from": "assign_empty_root_hash",
@@ -313,15 +373,105 @@
           ]
         }
       },
-      { "from": "emit_workspace_resolve", "to": "await_workspace_resolve" },
-      { "from": "await_workspace_resolve", "to": "assign_workspace_root" },
-      { "from": "assign_workspace_root", "to": "emit_workspace_read_bytes" },
-      { "from": "emit_workspace_read_bytes", "to": "await_workspace_read_bytes" },
-      { "from": "await_workspace_read_bytes", "to": "assign_workspace_bytes" },
-      { "from": "assign_workspace_bytes", "to": "emit_store_workspace_bytes" },
-      { "from": "emit_store_workspace_bytes", "to": "await_store_workspace_bytes" },
-      { "from": "await_store_workspace_bytes", "to": "assign_workspace_ref" },
-      { "from": "assign_workspace_ref", "to": "raise_tool_result" },
+      {
+        "from": "emit_workspace_resolve",
+        "to": "await_workspace_resolve",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "WorkspaceReadBytes" }
+          ]
+        }
+      },
+      {
+        "from": "await_workspace_resolve",
+        "to": "assign_workspace_root",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "WorkspaceReadBytes" }
+          ]
+        }
+      },
+      {
+        "from": "assign_workspace_root",
+        "to": "emit_workspace_read_bytes",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "WorkspaceReadBytes" }
+          ]
+        }
+      },
+      {
+        "from": "emit_workspace_read_bytes",
+        "to": "await_workspace_read_bytes",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "WorkspaceReadBytes" }
+          ]
+        }
+      },
+      {
+        "from": "await_workspace_read_bytes",
+        "to": "assign_workspace_bytes",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "WorkspaceReadBytes" }
+          ]
+        }
+      },
+      {
+        "from": "assign_workspace_bytes",
+        "to": "emit_store_workspace_bytes",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "WorkspaceReadBytes" }
+          ]
+        }
+      },
+      {
+        "from": "emit_store_workspace_bytes",
+        "to": "await_store_workspace_bytes",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "WorkspaceReadBytes" }
+          ]
+        }
+      },
+      {
+        "from": "await_store_workspace_bytes",
+        "to": "assign_workspace_ref",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "WorkspaceReadBytes" }
+          ]
+        }
+      },
+      {
+        "from": "assign_workspace_ref",
+        "to": "raise_tool_result",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@var:tool_tag" },
+            { "text": "WorkspaceReadBytes" }
+          ]
+        }
+      },
 
       { "from": "raise_tool_result", "to": "finish" }
     ],

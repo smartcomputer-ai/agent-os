@@ -64,6 +64,13 @@ pub enum StepState {
     Completed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepReadiness {
+    Ready,
+    Blocked,
+    Skip,
+}
+
 pub struct PlanInstance {
     pub id: u64,
     pub name: String,
@@ -768,34 +775,56 @@ impl PlanInstance {
         Ok(None)
     }
 
-    fn ready_steps(&self) -> Result<Vec<String>, KernelError> {
+    fn ready_steps(&mut self) -> Result<Vec<String>, KernelError> {
         let mut ready = Vec::new();
+        let mut skip = Vec::new();
         for id in &self.step_order {
             if matches!(self.step_states[id], StepState::Pending)
-                && self.predecessors_satisfied(id)?
             {
-                ready.push(id.clone());
+                match self.step_readiness(id)? {
+                    StepReadiness::Ready => ready.push(id.clone()),
+                    StepReadiness::Skip => skip.push(id.clone()),
+                    StepReadiness::Blocked => {}
+                }
             }
+        }
+        for id in skip {
+            self.mark_completed(&id);
         }
         Ok(ready)
     }
 
-    fn predecessors_satisfied(&self, step_id: &str) -> Result<bool, KernelError> {
-        if let Some(deps) = self.predecessors.get(step_id) {
-            for dep in deps {
-                if !matches!(self.step_states.get(&dep.pred), Some(StepState::Completed)) {
-                    return Ok(false);
-                }
-                if let Some(expr) = &dep.guard {
-                    let value = eval_expr(expr, &self.env)
-                        .map_err(|err| KernelError::Manifest(format!("guard eval error: {err}")))?;
-                    if !value_to_bool(value)? {
-                        return Ok(false);
-                    }
-                }
+    fn step_readiness(&self, step_id: &str) -> Result<StepReadiness, KernelError> {
+        let Some(deps) = self.predecessors.get(step_id) else {
+            return Ok(StepReadiness::Ready);
+        };
+
+        let mut active_dep = false;
+        let mut pending_dep = false;
+        for dep in deps {
+            if !matches!(self.step_states.get(&dep.pred), Some(StepState::Completed)) {
+                pending_dep = true;
+                continue;
+            }
+            let guard_true = if let Some(expr) = &dep.guard {
+                let value = eval_expr(expr, &self.env)
+                    .map_err(|err| KernelError::Manifest(format!("guard eval error: {err}")))?;
+                value_to_bool(value)?
+            } else {
+                true
+            };
+            if guard_true {
+                active_dep = true;
             }
         }
-        Ok(true)
+
+        if pending_dep {
+            Ok(StepReadiness::Blocked)
+        } else if active_dep {
+            Ok(StepReadiness::Ready)
+        } else {
+            Ok(StepReadiness::Skip)
+        }
     }
 
     fn mark_completed(&mut self, step_id: &str) {

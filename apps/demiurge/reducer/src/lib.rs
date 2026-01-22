@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::str;
@@ -340,11 +341,12 @@ fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
         return;
     }
 
+    let output_ref = result.output_ref.clone();
     ctx.state.messages.push(ChatMessage {
         request_id: result.request_id,
         role: ChatRole::Assistant,
         text: None,
-        message_ref: Some(result.output_ref),
+        message_ref: Some(output_ref.clone()),
         token_usage: Some(result.token_usage),
     });
 
@@ -358,10 +360,10 @@ fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
         ctx.state.pending_outputs.push(PendingOutput {
             chat_id: result.chat_id,
             request_id: result.request_id,
-            output_ref: result.output_ref.clone(),
+            output_ref: output_ref.clone(),
         });
         let params = BlobGetParams {
-            blob_ref: result.output_ref,
+            blob_ref: output_ref,
         };
         ctx.effects().emit_raw("blob.get", &params, Some("blob"));
     }
@@ -516,9 +518,45 @@ fn handle_blob_get_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobGetRe
 }
 
 fn extract_tool_calls_from_output(bytes: &[u8]) -> Vec<ToolCall> {
-    let mut parser = JsonToolCallParser::new(bytes);
-    parser.parse();
-    parser.calls
+    let value: JsonValue = match serde_json::from_slice(bytes) {
+        Ok(value) => value,
+        Err(_) => return Vec::new(),
+    };
+    let items = match value.as_array() {
+        Some(items) => items,
+        None => return Vec::new(),
+    };
+
+    let mut calls = Vec::new();
+    for item in items {
+        if item.get("type").and_then(|value| value.as_str()) != Some("function_call") {
+            continue;
+        }
+        let name = match item.get("name").and_then(|value| value.as_str()) {
+            Some(name) if !name.is_empty() => name,
+            _ => continue,
+        };
+        let id = item
+            .get("call_id")
+            .and_then(|value| value.as_str())
+            .or_else(|| item.get("id").and_then(|value| value.as_str()));
+        let id = match id {
+            Some(id) if !id.is_empty() => id,
+            _ => continue,
+        };
+        let arguments_json = match item.get("arguments") {
+            Some(JsonValue::String(value)) => value.clone(),
+            Some(other) => serde_json::to_string(other).unwrap_or_else(|_| "{}".into()),
+            None => "{}".into(),
+        };
+
+        calls.push(ToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments_json,
+        });
+    }
+    calls
 }
 
 fn parse_tool_call_params(name: &str, arguments_json: &str) -> Option<ToolCallParams> {
@@ -547,11 +585,22 @@ fn parse_tool_call_params(name: &str, arguments_json: &str) -> Option<ToolCallPa
     }
 }
 
+const MAX_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
+
 fn decode_tool_output(bytes: &[u8]) -> String {
-    match core::str::from_utf8(bytes) {
+    let (slice, truncated) = if bytes.len() > MAX_TOOL_OUTPUT_BYTES {
+        (&bytes[..MAX_TOOL_OUTPUT_BYTES], true)
+    } else {
+        (bytes, false)
+    };
+    let mut text = match core::str::from_utf8(slice) {
         Ok(text) => text.to_string(),
-        Err(_) => String::from_utf8_lossy(bytes).to_string(),
+        Err(_) => String::from_utf8_lossy(slice).to_string(),
+    };
+    if truncated {
+        text.push_str("\n...[truncated]");
     }
+    text
 }
 
 fn build_tool_message_bytes(tool_call_id: &str, output: &str) -> Vec<u8> {
@@ -570,322 +619,6 @@ fn hash_bytes(bytes: &[u8]) -> String {
     hasher.update(bytes);
     let digest = hasher.finalize();
     format!("sha256:{}", hex::encode(digest))
-}
-
-#[derive(Default)]
-struct ObjectCtx {
-    expecting_key: bool,
-    current_key: Option<String>,
-    type_value: Option<String>,
-    name: Option<String>,
-    arguments_json: Option<String>,
-    call_id: Option<String>,
-    id: Option<String>,
-}
-
-impl ObjectCtx {
-    fn new() -> Self {
-        Self {
-            expecting_key: true,
-            ..Self::default()
-        }
-    }
-
-    fn into_tool_call(self) -> Option<ToolCall> {
-        if self.type_value.as_deref() != Some("function_call") {
-            return None;
-        }
-        let name = self.name?;
-        if name.is_empty() {
-            return None;
-        }
-        let id = self.call_id.or(self.id)?;
-        if id.is_empty() {
-            return None;
-        }
-        let arguments_json = self.arguments_json.unwrap_or_else(|| "{}".into());
-        Some(ToolCall {
-            id,
-            name,
-            arguments_json,
-        })
-    }
-}
-
-enum Container {
-    Object(ObjectCtx),
-    Array,
-}
-
-struct JsonToolCallParser<'a> {
-    bytes: &'a [u8],
-    idx: usize,
-    stack: Vec<Container>,
-    calls: Vec<ToolCall>,
-}
-
-impl<'a> JsonToolCallParser<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self {
-            bytes,
-            idx: 0,
-            stack: Vec::new(),
-            calls: Vec::new(),
-        }
-    }
-
-    fn parse(&mut self) {
-        while self.idx < self.bytes.len() {
-            self.skip_ws();
-            if self.idx >= self.bytes.len() {
-                break;
-            }
-
-            if self.try_capture_arguments_object() {
-                continue;
-            }
-
-            match self.bytes[self.idx] {
-                b'{' => {
-                    self.stack.push(Container::Object(ObjectCtx::new()));
-                    self.idx += 1;
-                }
-                b'}' => {
-                    if let Some(Container::Object(obj)) = self.stack.pop() {
-                        if let Some(call) = obj.into_tool_call() {
-                            self.calls.push(call);
-                        }
-                    }
-                    self.idx += 1;
-                    self.finish_value();
-                }
-                b'[' => {
-                    self.stack.push(Container::Array);
-                    self.idx += 1;
-                }
-                b']' => {
-                    self.stack.pop();
-                    self.idx += 1;
-                    self.finish_value();
-                }
-                b'"' => {
-                    if let Some((value, next)) = parse_json_string(self.bytes, self.idx) {
-                        self.idx = next;
-                        if let Some(obj) = self.current_object_mut() {
-                            if obj.expecting_key {
-                                obj.current_key = Some(value);
-                                obj.expecting_key = false;
-                            } else {
-                                self.record_string_value(obj, value);
-                                self.finish_value();
-                            }
-                        } else {
-                            self.finish_value();
-                        }
-                    } else {
-                        self.idx += 1;
-                    }
-                }
-                b':' => {
-                    self.idx += 1;
-                }
-                b',' => {
-                    self.idx += 1;
-                    if let Some(obj) = self.current_object_mut() {
-                        obj.expecting_key = true;
-                        obj.current_key = None;
-                    }
-                }
-                _ => {
-                    if let Some(obj) = self.current_object_mut() {
-                        if !obj.expecting_key {
-                            let start = self.idx;
-                            let end = consume_nonstring_value(self.bytes, start);
-                            if let Some(key) = obj.current_key.as_deref() {
-                                if key == "arguments" {
-                                    if let Ok(raw) = str::from_utf8(&self.bytes[start..end]) {
-                                        obj.arguments_json = Some(String::from(raw));
-                                    }
-                                }
-                            }
-                            self.idx = end;
-                            self.finish_value();
-                            continue;
-                        }
-                    }
-                    self.idx += 1;
-                }
-            }
-        }
-    }
-
-    fn current_object_mut(&mut self) -> Option<&mut ObjectCtx> {
-        match self.stack.last_mut() {
-            Some(Container::Object(obj)) => Some(obj),
-            _ => None,
-        }
-    }
-
-    fn finish_value(&mut self) {
-        if let Some(obj) = self.current_object_mut() {
-            if !obj.expecting_key {
-                obj.expecting_key = true;
-                obj.current_key = None;
-            }
-        }
-    }
-
-    fn record_string_value(&mut self, obj: &mut ObjectCtx, value: String) {
-        if let Some(key) = obj.current_key.as_deref() {
-            match key {
-                "type" => obj.type_value = Some(value),
-                "name" => obj.name = Some(value),
-                "arguments" => obj.arguments_json = Some(value),
-                "call_id" => obj.call_id = Some(value),
-                "id" => obj.id = Some(value),
-                _ => {}
-            }
-        }
-    }
-
-    fn try_capture_arguments_object(&mut self) -> bool {
-        let Some(obj) = self.current_object_mut() else {
-            return false;
-        };
-        if obj.expecting_key {
-            return false;
-        }
-        let Some(key) = obj.current_key.as_deref() else {
-            return false;
-        };
-        if key != "arguments" {
-            return false;
-        }
-        let byte = self.bytes[self.idx];
-        if byte != b'{' && byte != b'[' {
-            return false;
-        }
-        let Some((raw, end)) = extract_raw_json(self.bytes, self.idx) else {
-            return false;
-        };
-        obj.arguments_json = Some(raw);
-        self.idx = end;
-        self.finish_value();
-        true
-    }
-
-    fn skip_ws(&mut self) {
-        while self.idx < self.bytes.len() && is_ws(self.bytes[self.idx]) {
-            self.idx += 1;
-        }
-    }
-}
-
-fn consume_nonstring_value(bytes: &[u8], start: usize) -> usize {
-    let mut i = start;
-    while i < bytes.len() {
-        match bytes[i] {
-            b',' | b'}' | b']' | b' ' | b'\n' | b'\r' | b'\t' => break,
-            _ => i += 1,
-        }
-    }
-    i
-}
-
-fn extract_raw_json(bytes: &[u8], start: usize) -> Option<(String, usize)> {
-    let mut i = start;
-    let mut depth = 0u32;
-    let mut in_string = false;
-    let mut escaped = false;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if b == b'\\' {
-                escaped = true;
-            } else if b == b'"' {
-                in_string = false;
-            }
-            i += 1;
-            continue;
-        }
-        match b {
-            b'"' => in_string = true,
-            b'{' | b'[' => depth += 1,
-            b'}' | b']' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    i += 1;
-                    let raw = String::from(str::from_utf8(&bytes[start..i]).ok()?);
-                    return Some((raw, i));
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    None
-}
-
-fn parse_json_string(bytes: &[u8], start: usize) -> Option<(String, usize)> {
-    if bytes.get(start) != Some(&b'"') {
-        return None;
-    }
-    let mut out = String::new();
-    let mut i = start + 1;
-    while i < bytes.len() {
-        let b = bytes[i];
-        match b {
-            b'"' => return Some((out, i + 1)),
-            b'\\' => {
-                i += 1;
-                if i >= bytes.len() {
-                    return None;
-                }
-                match bytes[i] {
-                    b'"' => out.push('"'),
-                    b'\\' => out.push('\\'),
-                    b'/' => out.push('/'),
-                    b'b' => out.push('\x08'),
-                    b'f' => out.push('\x0c'),
-                    b'n' => out.push('\n'),
-                    b'r' => out.push('\r'),
-                    b't' => out.push('\t'),
-                    b'u' => {
-                        if i + 4 >= bytes.len() {
-                            return None;
-                        }
-                        let mut code: u16 = 0;
-                        for _ in 0..4 {
-                            i += 1;
-                            code = (code << 4) | hex_val(bytes[i])?;
-                        }
-                        if let Some(ch) = core::char::from_u32(code as u32) {
-                            out.push(ch);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            _ => out.push(b as char),
-        }
-        i += 1;
-    }
-    None
-}
-
-fn hex_val(byte: u8) -> Option<u16> {
-    match byte {
-        b'0'..=b'9' => Some((byte - b'0') as u16),
-        b'a'..=b'f' => Some((byte - b'a' + 10) as u16),
-        b'A'..=b'F' => Some((byte - b'A' + 10) as u16),
-        _ => None,
-    }
-}
-
-fn is_ws(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\n' | b'\r' | b'\t')
 }
 
 #[cfg(test)]

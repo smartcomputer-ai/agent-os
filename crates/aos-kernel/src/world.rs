@@ -4088,6 +4088,12 @@ fn build_router(
     reducer_schemas: &HashMap<Name, ReducerSchema>,
 ) -> Result<HashMap<String, Vec<RouteBinding>>, KernelError> {
     let mut router = HashMap::new();
+    let receipt_schema_allows_missing_key_field = |event_schema: &str| {
+        matches!(
+            event_schema,
+            "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
+        )
+    };
     let Some(routing) = manifest.routing.as_ref() else {
         return Ok(router);
     };
@@ -4127,6 +4133,13 @@ fn build_router(
                 TypeExpr::Variant(variant) => {
                     for (tag, ty) in &variant.variant {
                         if let TypeExpr::Ref(reference) = ty {
+                            if route.key_field.is_some()
+                                && receipt_schema_allows_missing_key_field(
+                                    reference.reference.as_str(),
+                                )
+                            {
+                                continue;
+                            }
                             push_route_binding(
                                 &mut router,
                                 reference.reference.as_str(),

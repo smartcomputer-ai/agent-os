@@ -579,6 +579,12 @@ pub fn validate_manifest(
             _ => false,
         }
     };
+    let receipt_schema_allows_missing_key_field = |event_schema: &str| {
+        matches!(
+            event_schema,
+            "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
+        )
+    };
     let key_field_type = |event_schema: &TypeExpr, key_field: &str| {
         let segments: Vec<&str> = key_field.split('.').filter(|s| !s.is_empty()).collect();
         if segments.is_empty() {
@@ -593,6 +599,11 @@ pub fn validate_manifest(
                 }
                 let mut found: Option<TypeExpr> = None;
                 for ty in variant.variant.values() {
+                    if let TypeExpr::Ref(reference) = ty {
+                        if receipt_schema_allows_missing_key_field(reference.reference.as_str()) {
+                            continue;
+                        }
+                    }
                     let resolved_arm = resolve_type(ty)?;
                     let mut current = resolved_arm;
                     for seg in remaining {
@@ -633,12 +644,6 @@ pub fn validate_manifest(
             };
         }
         Some(current)
-    };
-    let receipt_schema_allows_missing_key_field = |event_schema: &str| {
-        matches!(
-            event_schema,
-            "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
-        )
     };
     let key_type_matches = |field_ty: &TypeExpr, key_schema: &TypeExpr| {
         let resolved_field = resolve_type(field_ty)?;

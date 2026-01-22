@@ -1,0 +1,25 @@
+[
+  {
+    "type": "function",
+    "name": "workspace.read_bytes",
+    "description": "Read a file from a workspace by path and return its bytes.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "Workspace name."
+        },
+        "version": {
+          "type": "integer",
+          "description": "Optional workspace version; omit for latest."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the file within the workspace."
+        }
+      },
+      "required": ["workspace", "path"]
+    }
+  }
+]

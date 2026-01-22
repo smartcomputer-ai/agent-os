@@ -50,6 +50,7 @@ struct EchoState {
     pending_blob_ref: Option<String>,
     stored_blob_ref: Option<String>,
     retrieved_blob_ref: Option<String>,
+    retrieved_blob_hash: Option<String>,
 }
 
 aos_variant! {
@@ -142,7 +143,14 @@ fn handle_get_result(ctx: &mut ReducerCtx<EchoState>, event: BlobGetResultEvent)
         return;
     }
     if event.status == "ok" {
-        ctx.state.retrieved_blob_ref = Some(event.receipt.blob_ref.as_str().to_string());
+        let receipt_ref = event.receipt.blob_ref.as_str().to_string();
+        let receipt_hash = hash_bytes(&event.receipt.bytes);
+        ctx.state.retrieved_blob_hash = Some(receipt_hash.clone());
+        if let Some(expected) = &ctx.state.stored_blob_ref {
+            if *expected == receipt_ref && *expected == receipt_hash {
+                ctx.state.retrieved_blob_ref = Some(receipt_ref);
+            }
+        }
     }
     ctx.state.pc = EchoPc::Done;
 }

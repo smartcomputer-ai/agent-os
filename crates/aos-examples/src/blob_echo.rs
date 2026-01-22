@@ -16,7 +16,6 @@ use aos_store::FsStore;
 use aos_wasm_sdk::{aos_event_union, aos_variant};
 use serde::{Deserialize, Serialize};
 use serde_cbor;
-use sha2::{Digest, Sha256};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
@@ -51,9 +50,14 @@ pub fn run(example_root: &Path) -> Result<()> {
     drive_blob_echo(&mut host, input)?;
 
     let final_state: ReducerEchoState = host.read_state()?;
+    let data_ok = final_state.retrieved_blob_hash.as_deref() == final_state.stored_blob_ref.as_deref();
     println!(
-        "   final state: pc={:?}, stored_ref={:?}, retrieved_ref={:?}",
-        final_state.pc, final_state.stored_blob_ref, final_state.retrieved_blob_ref
+        "   final state: pc={:?}, stored_ref={:?}, retrieved_ref={:?}, retrieved_hash={:?}, data_ok={}",
+        final_state.pc,
+        final_state.stored_blob_ref,
+        final_state.retrieved_blob_ref,
+        final_state.retrieved_blob_hash,
+        data_ok
     );
 
     host.finish()?.verify_replay()?;
@@ -159,8 +163,10 @@ fn handle_blob_get(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ReducerEchoState {
     pc: ReducerPc,
+    pending_blob_ref: Option<String>,
     stored_blob_ref: Option<String>,
     retrieved_blob_ref: Option<String>,
+    retrieved_blob_hash: Option<String>,
 }
 
 aos_variant! {
@@ -184,11 +190,4 @@ aos_event_union! {
     enum BlobEchoEvent {
         Start(StartEvent),
     }
-}
-
-fn hash_bytes(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let digest = hasher.finalize();
-    format!("sha256:{}", hex::encode(digest))
 }

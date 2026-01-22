@@ -1,10 +1,39 @@
 import { useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { workspaceList, workspaceReadRef } from "@/sdk/endpoints";
 import { useBlobPut, useEventsPost } from "@/sdk/mutations";
 import { createMessageBlob, encodeMessageBlob } from "../lib/message-utils";
 import type { ChatSettings } from "../types";
 import { cn } from "@/lib/utils";
+
+const TOOL_WORKSPACE = "demiurge";
+const TOOL_FOLDER = "tools";
+
+async function loadToolRefs(): Promise<string[] | null> {
+  try {
+    const list = await workspaceList({
+      workspace: TOOL_WORKSPACE,
+      path: TOOL_FOLDER,
+      limit: 100,
+    });
+    const refs: string[] = [];
+    for (const entry of list.entries) {
+      if (entry.kind !== "file") continue;
+      const ref = await workspaceReadRef({
+        workspace: TOOL_WORKSPACE,
+        path: entry.path,
+      });
+      if (ref?.hash) {
+        refs.push(ref.hash);
+      }
+    }
+    return refs.length ? refs : null;
+  } catch (error) {
+    console.warn("Failed to load tool refs from workspace:", error);
+    return null;
+  }
+}
 
 interface MessageInputProps {
   chatId: string;
@@ -43,6 +72,8 @@ export function MessageInput({
       });
 
       const requestId = lastRequestId + 1;
+      const toolRefs = await loadToolRefs();
+      const toolChoice = toolRefs ? { $tag: "Auto" as const } : null;
 
       await eventsPostMutation.mutateAsync({
         schema: "demiurge/ChatEvent@1",
@@ -56,8 +87,8 @@ export function MessageInput({
             model: settings.model,
             provider: settings.provider,
             max_tokens: settings.max_tokens,
-            tool_refs: null,
-            tool_choice: null,
+            tool_refs: toolRefs,
+            tool_choice: toolChoice,
           },
         },
       });
