@@ -18,6 +18,14 @@
         ".aos/"
       ],
       "ref": "reducer"
+    },
+    {
+      "dir": "tools",
+      "ignore": [
+        ".git/",
+        ".aos/"
+      ],
+      "ref": "demiurge"
     }
   ]
 }

@@ -586,7 +586,7 @@ fn parse_tool_call_params(name: &str, arguments_json: &str) -> Option<ToolCallPa
                 .to_string();
             Some(ToolCallParams::IntrospectManifest { consistency })
         }
-        "workspace.read" | "workspace.read_bytes" => {
+        "workspace.read" | "workspace.read_bytes" | "workspace_read_bytes" => {
             let workspace = obj.get("workspace").and_then(|value| value.as_str())?;
             let path = obj.get("path").and_then(|value| value.as_str())?;
             let version = obj.get("version").and_then(|value| value.as_u64());

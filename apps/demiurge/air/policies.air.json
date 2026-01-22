@@ -77,6 +77,14 @@
       },
       {
         "when": {
+          "effect_kind": "workspace.read_bytes",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/chat_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
           "effect_kind": "workspace.write_bytes",
           "origin_kind": "plan",
           "origin_name": "demiurge/tool_plan@1"

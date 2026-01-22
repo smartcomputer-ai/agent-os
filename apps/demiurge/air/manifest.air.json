@@ -59,6 +59,18 @@
       "name": "sys/BlobPutParams@1"
     },
     {
+      "name": "sys/WorkspaceName@1"
+    },
+    {
+      "name": "sys/WorkspaceCommitMeta@1"
+    },
+    {
+      "name": "sys/WorkspaceCommit@1"
+    },
+    {
+      "name": "sys/WorkspaceHistory@1"
+    },
+    {
       "name": "sys/BlobGetReceipt@1"
     },
     {
@@ -128,6 +140,9 @@
     },
     {
       "name": "sys/CapEnforceWorkspace@1"
+    },
+    {
+      "name": "sys/Workspace@1"
     }
   ],
   "plans": [
@@ -245,6 +260,11 @@
       {
         "event": "sys/BlobPutResult@1",
         "reducer": "demiurge/Demiurge@1"
+      },
+      {
+        "event": "sys/WorkspaceCommit@1",
+        "reducer": "sys/Workspace@1",
+        "key_field": "workspace"
       }
     ],
     "inboxes": []

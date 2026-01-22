@@ -1,7 +1,7 @@
 [
   {
     "type": "function",
-    "name": "workspace.read_bytes",
+    "name": "workspace_read_bytes",
     "description": "Read a file from a workspace by path and return its bytes.",
     "parameters": {
       "type": "object",

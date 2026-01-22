@@ -42,7 +42,7 @@
         "params": {
           "record": {
             "root_hash": { "ref": "@var:workspace_root" },
-            "path": { "text": "tools/introspect.manifest.json" }
+            "path": { "text": "introspect.manifest.json" }
           }
         },
         "cap": "cap_workspace",
@@ -73,7 +73,7 @@
         "params": {
           "record": {
             "root_hash": { "ref": "@var:workspace_root" },
-            "path": { "text": "tools/workspace.read_bytes.json" }
+            "path": { "text": "workspace.read_bytes.json" }
           }
         },
         "cap": "cap_workspace",

@@ -93,6 +93,7 @@ USER_MESSAGE_JSON="$(printf '{"$tag":"UserMessage","$value":{"chat_id":"%s","req
 
 STATE_JSON=""
 for _ in $(seq 1 60); do
+  "${AOS_BIN}" --quiet -w "${WORLD_DIR}" run --batch >/dev/null
   STATE_JSON="$("${AOS_BIN}" --json --quiet -w "${WORLD_DIR}" state get demiurge/Demiurge@1 --key "${CHAT_ID}" 2>/dev/null || true)"
   STATE_JSON_TRIM="$(printf '%s' "${STATE_JSON}" | tr -d '[:space:]')"
   if [ -z "${STATE_JSON_TRIM}" ]; then
@@ -111,8 +112,16 @@ if not isinstance(data, dict):
     print("no")
     sys.exit(0)
 messages=data.get("messages", [])
-assistant_refs=[m.get("message_ref") for m in messages if isinstance(m, dict)]
-ready=any(assistant_refs)
+def role_tag(role):
+    if isinstance(role, dict):
+        return role.get("$tag") or role.get("tag")
+    return role
+ready=any(
+    isinstance(msg, dict)
+    and role_tag(msg.get("role")) == "Assistant"
+    and msg.get("message_ref")
+    for msg in messages
+)
 print("yes" if ready else "no")
 '
 )"
