@@ -279,6 +279,9 @@
       "name": "sys/workspace.resolve@1"
     },
     {
+      "name": "sys/workspace.read_ref@1"
+    },
+    {
       "name": "sys/workspace.read_bytes@1"
     },
     {

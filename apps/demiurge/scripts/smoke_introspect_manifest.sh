@@ -129,7 +129,7 @@ if [ "${READY}" != "yes" ]; then
   exit 1
 fi
 
-OUTPUT_REF="$(
+ASSISTANT_REFS="$(
   echo "${STATE_JSON}" | "${PYTHON_BIN}" -c '
 import json,sys
 raw=sys.stdin.read()
@@ -147,17 +147,18 @@ for msg in messages:
         ref=msg.get("message_ref")
         if ref:
             print(ref)
-            break
 '
 )"
 
-if [ -z "${OUTPUT_REF}" ]; then
+if [ -z "${ASSISTANT_REFS}" ]; then
   echo "No assistant output_ref found." >&2
   exit 1
 fi
 
-if ! "${AOS_BIN}" -w "${WORLD_DIR}" blob get --raw "${OUTPUT_REF}" \
-  | "${PYTHON_BIN}" -c '
+TOOL_CALL_REF=""
+for ref in ${ASSISTANT_REFS}; do
+  if "${AOS_BIN}" -w "${WORLD_DIR}" blob get --raw "${ref}" \
+    | "${PYTHON_BIN}" -c '
 import json,sys
 items=json.load(sys.stdin)
 ok=any(
@@ -168,10 +169,108 @@ ok=any(
 )
 sys.exit(0 if ok else 1)
 '
-then
+  then
+    TOOL_CALL_REF="${ref}"
+    break
+  fi
+done
+
+if [ -z "${TOOL_CALL_REF}" ]; then
   echo "Tool call not found in LLM output." >&2
   exit 1
 fi
 
-echo "Smoke test passed: tool call detected for ${CHAT_ID}."
+TOOL_OUTPUT_REF=""
+FOLLOWUP_REF=""
+for _ in $(seq 1 60); do
+  "${AOS_BIN}" --quiet -w "${WORLD_DIR}" run --batch >/dev/null
+  STATE_JSON="$("${AOS_BIN}" --json --quiet -w "${WORLD_DIR}" state get demiurge/Demiurge@1 --key "${CHAT_ID}" 2>/dev/null || true)"
+  if [ -z "$(printf '%s' "${STATE_JSON}" | tr -d '[:space:]')" ]; then
+    sleep 1
+    continue
+  fi
+  ASSISTANT_REFS="$(
+    echo "${STATE_JSON}" | "${PYTHON_BIN}" -c '
+import json,sys
+raw=sys.stdin.read()
+start=raw.find("{")
+if start == -1:
+    sys.exit(1)
+data=json.loads(raw[start:])["data"]
+messages=data.get("messages", [])
+def role_tag(role):
+    if isinstance(role, dict):
+        return role.get("$tag") or role.get("tag")
+    return role
+for msg in messages:
+    if role_tag(msg.get("role")) == "Assistant":
+        ref=msg.get("message_ref")
+        if ref:
+            print(ref)
+'
+  )"
+  for ref in ${ASSISTANT_REFS}; do
+    IS_TOOL_OUTPUT="no"
+    if "${AOS_BIN}" -w "${WORLD_DIR}" blob get --raw "${ref}" \
+      | "${PYTHON_BIN}" -c '
+import json,sys
+items=json.load(sys.stdin)
+ok=any(
+    isinstance(item, dict) and item.get("type") == "function_call_output"
+    for item in items
+)
+sys.exit(0 if ok else 1)
+'
+    then
+      IS_TOOL_OUTPUT="yes"
+    fi
+    if [ -z "${TOOL_OUTPUT_REF}" ] && [ "${IS_TOOL_OUTPUT}" = "yes" ]; then
+      TOOL_OUTPUT_REF="${ref}"
+      continue
+    fi
+    if [ -n "${TOOL_OUTPUT_REF}" ] && [ "${IS_TOOL_OUTPUT}" = "no" ]; then
+      if "${AOS_BIN}" -w "${WORLD_DIR}" blob get --raw "${ref}" \
+        | "${PYTHON_BIN}" -c '
+import json,sys
+items=json.load(sys.stdin)
+def has_text(items):
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        content=item.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            ptype=part.get("type")
+            text=part.get("text")
+            if ptype in ("output_text", "text") and text:
+                return True
+    return False
+sys.exit(0 if has_text(items) else 1)
+'
+      then
+        FOLLOWUP_REF="${ref}"
+        break
+      fi
+    fi
+  done
+  if [ -n "${TOOL_OUTPUT_REF}" ] && [ -n "${FOLLOWUP_REF}" ]; then
+    break
+  fi
+  sleep 1
+done
+
+if [ -z "${TOOL_OUTPUT_REF}" ]; then
+  echo "Tool output not found in assistant messages." >&2
+  exit 1
+fi
+
+if [ -z "${FOLLOWUP_REF}" ]; then
+  echo "LLM follow-up response not found after tool output." >&2
+  exit 1
+fi
+
+echo "Smoke test passed: tool call, tool output, and follow-up LLM response detected for ${CHAT_ID}."
 popd >/dev/null

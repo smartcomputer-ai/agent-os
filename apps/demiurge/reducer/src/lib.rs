@@ -323,21 +323,25 @@ fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
     }
 
     let mut has_user = false;
-    let mut has_assistant = false;
+    let mut has_output = false;
     for message in &ctx.state.messages {
         if message.request_id != result.request_id {
             continue;
         }
         match message.role {
             ChatRole::User => has_user = true,
-            ChatRole::Assistant => has_assistant = true,
+            ChatRole::Assistant => {
+                if message.message_ref.as_deref() == Some(result.output_ref.as_str()) {
+                    has_output = true;
+                }
+            }
         }
-        if has_user && has_assistant {
+        if has_user && has_output {
             break;
         }
     }
 
-    if !has_user || has_assistant {
+    if !has_user || has_output {
         return;
     }
 
@@ -369,7 +373,12 @@ fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
     }
 }
 
-fn emit_chat_request(ctx: &mut ReducerCtx<ChatState, ()>, chat_id: String, request_id: u64) {
+fn emit_chat_request(
+    ctx: &mut ReducerCtx<ChatState, ()>,
+    chat_id: String,
+    request_id: u64,
+    tool_choice_override: Option<LlmToolChoice>,
+) {
     let mut message_refs: Vec<String> = ctx
         .state
         .messages
@@ -390,6 +399,7 @@ fn emit_chat_request(ctx: &mut ReducerCtx<ChatState, ()>, chat_id: String, reque
         return;
     };
 
+    let tool_choice = tool_choice_override.or_else(|| ctx.state.tool_choice.clone());
     let intent_value = ChatRequest {
         chat_id,
         request_id,
@@ -398,7 +408,7 @@ fn emit_chat_request(ctx: &mut ReducerCtx<ChatState, ()>, chat_id: String, reque
         provider,
         max_tokens,
         tool_refs: ctx.state.tool_refs.clone(),
-        tool_choice: ctx.state.tool_choice.clone(),
+        tool_choice,
     };
     let key = request_id.to_be_bytes();
     ctx.intent(REQUEST_SCHEMA)
@@ -452,7 +462,12 @@ fn handle_blob_put_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobPutRe
         token_usage: None,
     });
 
-    emit_chat_request(ctx, pending.chat_id, pending.request_id);
+    emit_chat_request(
+        ctx,
+        pending.chat_id,
+        pending.request_id,
+        Some(LlmToolChoice::Auto),
+    );
 }
 
 fn handle_blob_get_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobGetResult) {
