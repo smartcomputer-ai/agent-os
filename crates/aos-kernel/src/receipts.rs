@@ -249,6 +249,7 @@ mod tests {
     fn blob_put_receipt_event_is_structured() {
         let params = BlobPutParams {
             blob_ref: fake_hash(0x10),
+            bytes: Vec::new(),
         };
         let ctx = ReducerEffectContext::new(
             "com.acme/Reducer@1".into(),

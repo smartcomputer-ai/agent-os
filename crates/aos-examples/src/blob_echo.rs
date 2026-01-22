@@ -62,11 +62,6 @@ pub fn run(example_root: &Path) -> Result<()> {
 
 fn drive_blob_echo(host: &mut ExampleHost, input: BlobEchoInput) -> Result<()> {
     let mut harness = BlobHarnessStore::default();
-    let blob_ref = hash_bytes(&input.data);
-    harness
-        .pending_blobs
-        .insert(blob_ref.clone(), input.data.clone());
-
     let start_event = BlobEchoEvent::Start(StartEvent {
         data: input.data,
     });
@@ -101,10 +96,8 @@ fn handle_blob_put(
 ) -> Result<()> {
     let params: BlobPutParams = serde_cbor::from_slice(&intent.params_cbor)?;
     let blob_ref = params.blob_ref.as_str().to_string();
-    let data = harness
-        .pending_blobs
-        .get(&blob_ref)
-        .ok_or_else(|| anyhow!("missing blob data for {blob_ref}"))?;
+    let data = params.bytes.clone();
+    harness.pending_blobs.insert(blob_ref.clone(), data.clone());
     println!(
         "     blob.put -> blob_ref={} size={} bytes",
         blob_ref,

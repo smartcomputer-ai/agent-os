@@ -3,11 +3,13 @@
 
 extern crate alloc;
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::str;
 use aos_wasm_sdk::{aos_event_union, aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+use sha2::{Digest, Sha256};
 
 const REQUEST_SCHEMA: &str = "demiurge/ChatRequest@1";
 
@@ -24,6 +26,10 @@ struct ChatState {
     tool_choice: Option<LlmToolChoice>,
     #[serde(default)]
     pending_outputs: Vec<PendingOutput>,
+    #[serde(default)]
+    pending_tool_outputs: Vec<PendingToolOutput>,
+    #[serde(default)]
+    pending_tool_messages: Vec<PendingToolMessage>,
 }
 
 aos_variant! {
@@ -67,6 +73,21 @@ struct PendingOutput {
     output_ref: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PendingToolOutput {
+    chat_id: String,
+    request_id: u64,
+    tool_call_id: String,
+    output_ref: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PendingToolMessage {
+    chat_id: String,
+    request_id: u64,
+    expected_ref: String,
+}
+
 aos_event_union! {
     #[derive(Debug, Clone, Serialize)]
     enum ChatEvent {
@@ -75,6 +96,7 @@ aos_event_union! {
         ChatResult(ChatResult),
         ToolResult(ToolResult),
         BlobGetResult(BlobGetResult),
+        BlobPutResult(BlobPutResult),
     }
 }
 
@@ -126,6 +148,14 @@ struct ToolCall {
     arguments_json: String,
 }
 
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+    enum ToolCallParams {
+        IntrospectManifest { consistency: String },
+        WorkspaceReadBytes { workspace: String, version: Option<u64>, path: String },
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct BlobGetParams {
     blob_ref: String,
@@ -147,6 +177,26 @@ struct BlobGetResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct BlobPutParams {
+    blob_ref: String,
+    #[serde(with = "serde_bytes")]
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BlobPutReceipt {
+    blob_ref: String,
+    size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BlobPutResult {
+    status: String,
+    requested: BlobPutParams,
+    receipt: BlobPutReceipt,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ToolResult {
     chat_id: String,
     request_id: u64,
@@ -159,8 +209,7 @@ struct ToolCallRequested {
     chat_id: String,
     request_id: u64,
     tool_call_id: String,
-    name: String,
-    arguments_json: String,
+    params: ToolCallParams,
 }
 
 aos_reducer!(DemiurgeReducer);
@@ -184,6 +233,7 @@ impl Reducer for DemiurgeReducer {
             ChatEvent::ChatResult(result) => handle_chat_result(ctx, result),
             ChatEvent::ToolResult(result) => handle_tool_result(ctx, result),
             ChatEvent::BlobGetResult(result) => handle_blob_get_result(ctx, result),
+            ChatEvent::BlobPutResult(result) => handle_blob_put_result(ctx, result),
         }
         Ok(())
     }
@@ -317,19 +367,7 @@ fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
     }
 }
 
-fn handle_tool_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ToolResult) {
-    if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
-        return;
-    }
-
-    ctx.state.messages.push(ChatMessage {
-        request_id: result.request_id,
-        role: ChatRole::Assistant,
-        text: None,
-        message_ref: Some(result.result_ref),
-        token_usage: None,
-    });
-
+fn emit_chat_request(ctx: &mut ReducerCtx<ChatState, ()>, chat_id: String, request_id: u64) {
     let mut message_refs: Vec<String> = ctx
         .state
         .messages
@@ -351,8 +389,8 @@ fn handle_tool_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ToolResult) {
     };
 
     let intent_value = ChatRequest {
-        chat_id: result.chat_id,
-        request_id: result.request_id,
+        chat_id,
+        request_id,
         message_refs,
         model,
         provider,
@@ -360,11 +398,59 @@ fn handle_tool_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ToolResult) {
         tool_refs: ctx.state.tool_refs.clone(),
         tool_choice: ctx.state.tool_choice.clone(),
     };
-    let key = result.request_id.to_be_bytes();
+    let key = request_id.to_be_bytes();
     ctx.intent(REQUEST_SCHEMA)
         .key_bytes(&key)
         .payload(&intent_value)
         .send();
+}
+
+fn handle_tool_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ToolResult) {
+    if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
+        return;
+    }
+
+    ctx.state.pending_tool_outputs.push(PendingToolOutput {
+        chat_id: result.chat_id,
+        request_id: result.request_id,
+        tool_call_id: result.tool_call_id,
+        output_ref: result.result_ref.clone(),
+    });
+
+    let params = BlobGetParams {
+        blob_ref: result.result_ref,
+    };
+    ctx.effects().emit_raw("blob.get", &params, Some("blob"));
+}
+
+fn handle_blob_put_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobPutResult) {
+    if result.status != "ok" {
+        return;
+    }
+
+    if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
+        return;
+    }
+
+    let Some(index) = ctx
+        .state
+        .pending_tool_messages
+        .iter()
+        .position(|pending| pending.expected_ref == result.receipt.blob_ref)
+    else {
+        return;
+    };
+    let pending = ctx.state.pending_tool_messages.remove(index);
+
+    ctx.state.messages.push(ChatMessage {
+        request_id: pending.request_id,
+        role: ChatRole::Assistant,
+        text: None,
+        message_ref: Some(result.receipt.blob_ref),
+        token_usage: None,
+    });
+
+    emit_chat_request(ctx, pending.chat_id, pending.request_id);
 }
 
 fn handle_blob_get_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobGetResult) {
@@ -372,41 +458,118 @@ fn handle_blob_get_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobGetRe
         return;
     }
 
-    let Some(index) = ctx
+    if let Some(index) = ctx
         .state
         .pending_outputs
+        .iter()
+        .position(|pending| pending.output_ref == result.requested.blob_ref)
+    {
+        let pending = ctx.state.pending_outputs.remove(index);
+
+        let tool_calls = extract_tool_calls_from_output(&result.receipt.bytes);
+        if tool_calls.is_empty() {
+            return;
+        }
+
+        for call in tool_calls {
+            if let Some(params) = parse_tool_call_params(&call.name, &call.arguments_json) {
+                let intent_value = ToolCallRequested {
+                    chat_id: pending.chat_id.clone(),
+                    request_id: pending.request_id,
+                    tool_call_id: call.id,
+                    params,
+                };
+                let key = pending.request_id.to_be_bytes();
+                ctx.intent("demiurge/ToolCallRequested@1")
+                    .key_bytes(&key)
+                    .payload(&intent_value)
+                    .send();
+            }
+        }
+        return;
+    }
+
+    let Some(index) = ctx
+        .state
+        .pending_tool_outputs
         .iter()
         .position(|pending| pending.output_ref == result.requested.blob_ref)
     else {
         return;
     };
-    let pending = ctx.state.pending_outputs.remove(index);
+    let pending = ctx.state.pending_tool_outputs.remove(index);
 
-    let tool_calls = extract_tool_calls_from_output(&result.receipt.bytes);
-    if tool_calls.is_empty() {
-        return;
-    }
+    let output_text = decode_tool_output(&result.receipt.bytes);
+    let message_bytes = build_tool_message_bytes(&pending.tool_call_id, &output_text);
+    let message_ref = hash_bytes(&message_bytes);
+    ctx.state.pending_tool_messages.push(PendingToolMessage {
+        chat_id: pending.chat_id,
+        request_id: pending.request_id,
+        expected_ref: message_ref.clone(),
+    });
 
-    for call in tool_calls {
-        let intent_value = ToolCallRequested {
-            chat_id: pending.chat_id.clone(),
-            request_id: pending.request_id,
-            tool_call_id: call.id,
-            name: call.name,
-            arguments_json: call.arguments_json,
-        };
-        let key = pending.request_id.to_be_bytes();
-        ctx.intent("demiurge/ToolCallRequested@1")
-            .key_bytes(&key)
-            .payload(&intent_value)
-            .send();
-    }
+    let params = BlobPutParams {
+        blob_ref: message_ref,
+        bytes: message_bytes,
+    };
+    ctx.effects().emit_raw("blob.put", &params, Some("blob"));
 }
 
 fn extract_tool_calls_from_output(bytes: &[u8]) -> Vec<ToolCall> {
     let mut parser = JsonToolCallParser::new(bytes);
     parser.parse();
     parser.calls
+}
+
+fn parse_tool_call_params(name: &str, arguments_json: &str) -> Option<ToolCallParams> {
+    let args: JsonValue = serde_json::from_str(arguments_json).ok()?;
+    let obj = args.as_object()?;
+    match name {
+        "introspect.manifest" => {
+            let consistency = obj
+                .get("consistency")
+                .and_then(|value| value.as_str())
+                .unwrap_or("head")
+                .to_string();
+            Some(ToolCallParams::IntrospectManifest { consistency })
+        }
+        "workspace.read" | "workspace.read_bytes" => {
+            let workspace = obj.get("workspace").and_then(|value| value.as_str())?;
+            let path = obj.get("path").and_then(|value| value.as_str())?;
+            let version = obj.get("version").and_then(|value| value.as_u64());
+            Some(ToolCallParams::WorkspaceReadBytes {
+                workspace: workspace.to_string(),
+                version,
+                path: path.to_string(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn decode_tool_output(bytes: &[u8]) -> String {
+    match core::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_) => String::from_utf8_lossy(bytes).to_string(),
+    }
+}
+
+fn build_tool_message_bytes(tool_call_id: &str, output: &str) -> Vec<u8> {
+    let message = serde_json::json!([
+        {
+            "type": "function_call_output",
+            "call_id": tool_call_id,
+            "output": output,
+        }
+    ]);
+    serde_json::to_vec(&message).unwrap_or_else(|_| Vec::new())
+}
+
+fn hash_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    format!("sha256:{}", hex::encode(digest))
 }
 
 #[derive(Default)]
@@ -798,6 +961,8 @@ mod tests {
             tool_refs: None,
             tool_choice: None,
             pending_outputs: vec![],
+            pending_tool_outputs: vec![],
+            pending_tool_messages: vec![],
         };
         let event = ChatEvent::UserMessage(UserMessage {
             chat_id: "chat-1".into(),
@@ -852,6 +1017,8 @@ mod tests {
             tool_refs: None,
             tool_choice: None,
             pending_outputs: vec![],
+            pending_tool_outputs: vec![],
+            pending_tool_messages: vec![],
         };
         let event = ChatEvent::UserMessage(UserMessage {
             chat_id: "chat-1".into(),
@@ -891,6 +1058,8 @@ mod tests {
             tool_refs: None,
             tool_choice: None,
             pending_outputs: vec![],
+            pending_tool_outputs: vec![],
+            pending_tool_messages: vec![],
         };
         let event = ChatEvent::ChatResult(ChatResult {
             chat_id: "chat-1".into(),

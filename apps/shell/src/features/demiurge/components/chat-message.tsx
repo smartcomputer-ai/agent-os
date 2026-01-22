@@ -30,12 +30,27 @@ function extractTextFromBlob(blob: unknown): string | null {
     const parts: string[] = [];
     for (const item of blob) {
       if (!item || typeof item !== "object") continue;
+      const type = (item as { type?: string }).type;
+      if (type === "function_call_output") {
+        const output = (item as { output?: unknown }).output;
+        if (typeof output === "string" && output.length > 0) {
+          parts.push(output);
+        }
+        continue;
+      }
       const content = (item as { content?: unknown }).content;
       parts.push(...extractTextFromContent(content));
     }
     return parts.length ? parts.join("\n\n") : null;
   }
   if (typeof blob === "object") {
+    const type = (blob as { type?: string }).type;
+    if (type === "function_call_output") {
+      const output = (blob as { output?: unknown }).output;
+      if (typeof output === "string" && output.length > 0) {
+        return output;
+      }
+    }
     const content = (blob as { content?: unknown }).content;
     const parts = extractTextFromContent(content);
     return parts.length ? parts.join("\n\n") : null;

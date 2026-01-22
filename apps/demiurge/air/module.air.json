@@ -8,7 +8,7 @@
       "reducer": {
         "state": "demiurge/ChatState@1",
         "event": "demiurge/ChatEvent@1",
-        "effects_emitted": ["blob.get"],
+        "effects_emitted": ["blob.get", "blob.put"],
         "cap_slots": {
           "blob": "blob"
         }

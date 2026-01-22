@@ -108,6 +108,7 @@ fn handle_start(ctx: &mut ReducerCtx<EchoState>, event: StartEvent) {
 
     let params = BlobPutParams {
         blob_ref: HashRef::new(blob_ref).expect("blob hash"),
+        bytes: event.data.clone(),
     };
     ctx.effects().emit_raw("blob.put", &params, Some("default"));
 }

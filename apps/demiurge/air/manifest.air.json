@@ -20,6 +20,12 @@
       "name": "demiurge/PendingOutput@1"
     },
     {
+      "name": "demiurge/PendingToolOutput@1"
+    },
+    {
+      "name": "demiurge/PendingToolMessage@1"
+    },
+    {
       "name": "demiurge/ChatCreated@1"
     },
     {
@@ -30,6 +36,9 @@
     },
     {
       "name": "demiurge/ToolCall@1"
+    },
+    {
+      "name": "demiurge/ToolCallParams@1"
     },
     {
       "name": "demiurge/ChatResult@1"
@@ -47,10 +56,19 @@
       "name": "sys/BlobGetParams@1"
     },
     {
+      "name": "sys/BlobPutParams@1"
+    },
+    {
       "name": "sys/BlobGetReceipt@1"
     },
     {
+      "name": "sys/BlobPutReceipt@1"
+    },
+    {
       "name": "sys/BlobGetResult@1"
+    },
+    {
+      "name": "sys/BlobPutResult@1"
     },
     {
       "name": "sys/LlmToolChoice@1"
@@ -60,6 +78,36 @@
     },
     {
       "name": "sys/LlmGenerateReceipt@1"
+    },
+    {
+      "name": "sys/WorkspaceEmptyRootParams@1"
+    },
+    {
+      "name": "sys/WorkspaceEmptyRootReceipt@1"
+    },
+    {
+      "name": "sys/WorkspaceResolveParams@1"
+    },
+    {
+      "name": "sys/WorkspaceResolveReceipt@1"
+    },
+    {
+      "name": "sys/WorkspaceReadBytesParams@1"
+    },
+    {
+      "name": "sys/WorkspaceReadBytesReceipt@1"
+    },
+    {
+      "name": "sys/WorkspaceWriteBytesParams@1"
+    },
+    {
+      "name": "sys/WorkspaceWriteBytesReceipt@1"
+    },
+    {
+      "name": "sys/IntrospectManifestParams@1"
+    },
+    {
+      "name": "sys/IntrospectManifestReceipt@1"
     },
     {
       "name": "sys/SecretRef@1"
@@ -77,16 +125,28 @@
     },
     {
       "name": "sys/CapEnforceLlmBasic@1"
+    },
+    {
+      "name": "sys/CapEnforceWorkspace@1"
     }
   ],
   "plans": [
     {
       "name": "demiurge/chat_plan@1"
+    },
+    {
+      "name": "demiurge/tool_plan@1"
     }
   ],
   "caps": [
     {
       "name": "demiurge/llm_basic@1"
+    },
+    {
+      "name": "sys/query@1"
+    },
+    {
+      "name": "sys/workspace@1"
     }
   ],
   "policies": [
@@ -121,6 +181,41 @@
         }
       },
       {
+        "name": "cap_query",
+        "cap": "sys/query@1",
+        "params": {
+          "record": {}
+        }
+      },
+      {
+        "name": "cap_workspace",
+        "cap": "sys/workspace@1",
+        "params": {
+          "record": {
+            "workspaces": {
+              "list": [
+                {
+                  "text": "demiurge"
+                }
+              ]
+            },
+            "ops": {
+              "set": [
+                {
+                  "text": "resolve"
+                },
+                {
+                  "text": "read"
+                },
+                {
+                  "text": "write"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
         "name": "blob_grant",
         "cap": "sys/blob@1",
         "params": {
@@ -146,6 +241,10 @@
       {
         "event": "sys/BlobGetResult@1",
         "reducer": "demiurge/Demiurge@1"
+      },
+      {
+        "event": "sys/BlobPutResult@1",
+        "reducer": "demiurge/Demiurge@1"
       }
     ],
     "inboxes": []
@@ -154,6 +253,11 @@
     {
       "event": "demiurge/ChatRequest@1",
       "plan": "demiurge/chat_plan@1",
+      "correlate_by": "request_id"
+    },
+    {
+      "event": "demiurge/ToolCallRequested@1",
+      "plan": "demiurge/tool_plan@1",
       "correlate_by": "request_id"
     }
   ],
@@ -164,6 +268,24 @@
     },
     {
       "name": "sys/blob.get@1"
+    },
+    {
+      "name": "sys/blob.put@1"
+    },
+    {
+      "name": "sys/workspace.empty_root@1"
+    },
+    {
+      "name": "sys/workspace.resolve@1"
+    },
+    {
+      "name": "sys/workspace.read_bytes@1"
+    },
+    {
+      "name": "sys/workspace.write_bytes@1"
+    },
+    {
+      "name": "sys/introspect.manifest@1"
     }
   ]
 }

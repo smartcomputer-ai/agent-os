@@ -71,7 +71,8 @@
     "name": "sys/BlobPutParams@1",
     "type": {
       "record": {
-        "blob_ref": { "hash": {} }
+        "blob_ref": { "hash": {} },
+        "bytes": { "bytes": {} }
       }
     }
   },

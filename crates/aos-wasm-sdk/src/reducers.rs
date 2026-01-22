@@ -313,6 +313,8 @@ pub struct TimerSetParams {
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct BlobPutParams {
     pub blob_ref: HashRef,
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>,
 }
 
 /// Blob.get parameters.
