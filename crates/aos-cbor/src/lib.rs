@@ -161,7 +161,7 @@ mod tests {
         let cases = [
             (
                 "spec/schemas/common.schema.json",
-                "sha256:4b4f31397ebecb79a501f7d596133bc22564411b9d53a97b375fb675ae019221",
+                "sha256:7a3d5eed21ccafe9b2a210f3483700ee4e43f1d92dac0857e106bf904734892d",
             ),
             (
                 "spec/schemas/defschema.schema.json",
@@ -193,7 +193,7 @@ mod tests {
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:3870ce2ee57777a21343024694e5843d995312cfe9e2e96696a2311857a0c9e2",
+                "sha256:cfa1ba4cfcff82c2aaacf0ce398e6a71cdde5eebedc1e13ea7bdc944f38c3c48",
             ),
         ];
 

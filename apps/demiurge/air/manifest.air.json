@@ -101,12 +101,6 @@
       "name": "sys/LlmGenerateReceipt@1"
     },
     {
-      "name": "sys/WorkspaceEmptyRootParams@1"
-    },
-    {
-      "name": "sys/WorkspaceEmptyRootReceipt@1"
-    },
-    {
       "name": "sys/WorkspaceResolveParams@1"
     },
     {
@@ -126,12 +120,6 @@
     },
     {
       "name": "sys/WorkspaceListReceipt@1"
-    },
-    {
-      "name": "sys/WorkspaceWriteBytesParams@1"
-    },
-    {
-      "name": "sys/WorkspaceWriteBytesReceipt@1"
     },
     {
       "name": "sys/IntrospectManifestParams@1"
@@ -245,9 +233,6 @@
                 },
                 {
                   "text": "read"
-                },
-                {
-                  "text": "write"
                 }
               ]
             }
@@ -322,22 +307,13 @@
       "name": "sys/blob.put@1"
     },
     {
-      "name": "sys/workspace.empty_root@1"
-    },
-    {
       "name": "sys/workspace.resolve@1"
     },
     {
       "name": "sys/workspace.list@1"
     },
     {
-      "name": "sys/workspace.read_ref@1"
-    },
-    {
       "name": "sys/workspace.read_bytes@1"
-    },
-    {
-      "name": "sys/workspace.write_bytes@1"
     },
     {
       "name": "sys/introspect.manifest@1"
