@@ -17,36 +17,6 @@
         "bind": { "as": "tool_tag" }
       },
       {
-        "id": "emit_empty_root",
-        "op": "emit_effect",
-        "kind": "workspace.empty_root",
-        "params": {
-          "record": {
-            "workspace": { "text": "demiurge" }
-          }
-        },
-        "cap": "cap_workspace",
-        "bind": { "effect_id_as": "empty_root" }
-      },
-      {
-        "id": "await_empty_root",
-        "op": "await_receipt",
-        "for": { "ref": "@var:empty_root" },
-        "bind": { "as": "empty_root_receipt" }
-      },
-      {
-        "id": "assign_empty_root_hash",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:empty_root_receipt" },
-            { "text": "root_hash" }
-          ]
-        },
-        "bind": { "as": "empty_root_hash" }
-      },
-      {
         "id": "emit_introspect_manifest",
         "op": "emit_effect",
         "kind": "introspect.manifest",
@@ -87,45 +57,6 @@
           ]
         },
         "bind": { "as": "tool_bytes" }
-      },
-      {
-        "id": "emit_store_manifest",
-        "op": "emit_effect",
-        "kind": "workspace.write_bytes",
-        "params": {
-          "record": {
-            "root_hash": { "ref": "@var:empty_root_hash" },
-            "path": {
-              "op": "concat",
-              "args": [
-                { "text": "tool-output-" },
-                { "ref": "@plan.input.tool_call_id" }
-              ]
-            },
-            "bytes": { "ref": "@var:tool_bytes" },
-            "mode": { "null": {} }
-          }
-        },
-        "cap": "cap_workspace",
-        "bind": { "effect_id_as": "store_manifest" }
-      },
-      {
-        "id": "await_store_manifest",
-        "op": "await_receipt",
-        "for": { "ref": "@var:store_manifest" },
-        "bind": { "as": "store_manifest_receipt" }
-      },
-      {
-        "id": "assign_manifest_ref",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:store_manifest_receipt" },
-            { "text": "blob_hash" }
-          ]
-        },
-        "bind": { "as": "result_ref" }
       },
       {
         "id": "emit_workspace_resolve",
@@ -221,40 +152,37 @@
         "bind": { "as": "tool_bytes" }
       },
       {
-        "id": "emit_store_workspace_bytes",
+        "id": "emit_blob_put",
         "op": "emit_effect",
-        "kind": "workspace.write_bytes",
+        "kind": "blob.put",
         "params": {
           "record": {
-            "root_hash": { "ref": "@var:empty_root_hash" },
-            "path": {
-              "op": "concat",
+            "blob_ref": {
+              "op": "hash_bytes",
               "args": [
-                { "text": "tool-output-" },
-                { "ref": "@plan.input.tool_call_id" }
+                { "ref": "@var:tool_bytes" }
               ]
             },
-            "bytes": { "ref": "@var:tool_bytes" },
-            "mode": { "null": {} }
+            "bytes": { "ref": "@var:tool_bytes" }
           }
         },
-        "cap": "cap_workspace",
-        "bind": { "effect_id_as": "store_workspace_bytes" }
+        "cap": "blob_grant",
+        "bind": { "effect_id_as": "blob_put" }
       },
       {
-        "id": "await_store_workspace_bytes",
+        "id": "await_blob_put",
         "op": "await_receipt",
-        "for": { "ref": "@var:store_workspace_bytes" },
-        "bind": { "as": "store_workspace_bytes_receipt" }
+        "for": { "ref": "@var:blob_put" },
+        "bind": { "as": "blob_put_receipt" }
       },
       {
-        "id": "assign_workspace_ref",
+        "id": "assign_result_ref",
         "op": "assign",
         "expr": {
           "op": "get",
           "args": [
-            { "ref": "@var:store_workspace_bytes_receipt" },
-            { "text": "blob_hash" }
+            { "ref": "@var:blob_put_receipt" },
+            { "text": "blob_ref" }
           ]
         },
         "bind": { "as": "result_ref" }
@@ -280,12 +208,8 @@
       { "id": "finish", "op": "end" }
     ],
     "edges": [
-      { "from": "assign_tool_tag", "to": "emit_empty_root" },
-      { "from": "emit_empty_root", "to": "await_empty_root" },
-      { "from": "await_empty_root", "to": "assign_empty_root_hash" },
-
       {
-        "from": "assign_empty_root_hash",
+        "from": "assign_tool_tag",
         "to": "emit_introspect_manifest",
         "when": {
           "op": "eq",
@@ -319,7 +243,7 @@
       },
       {
         "from": "assign_manifest_bytes",
-        "to": "emit_store_manifest",
+        "to": "emit_blob_put",
         "when": {
           "op": "eq",
           "args": [
@@ -329,41 +253,7 @@
         }
       },
       {
-        "from": "emit_store_manifest",
-        "to": "await_store_manifest",
-        "when": {
-          "op": "eq",
-          "args": [
-            { "ref": "@var:tool_tag" },
-            { "text": "IntrospectManifest" }
-          ]
-        }
-      },
-      {
-        "from": "await_store_manifest",
-        "to": "assign_manifest_ref",
-        "when": {
-          "op": "eq",
-          "args": [
-            { "ref": "@var:tool_tag" },
-            { "text": "IntrospectManifest" }
-          ]
-        }
-      },
-      {
-        "from": "assign_manifest_ref",
-        "to": "raise_tool_result",
-        "when": {
-          "op": "eq",
-          "args": [
-            { "ref": "@var:tool_tag" },
-            { "text": "IntrospectManifest" }
-          ]
-        }
-      },
-
-      {
-        "from": "assign_empty_root_hash",
+        "from": "assign_tool_tag",
         "to": "emit_workspace_resolve",
         "when": {
           "op": "eq",
@@ -430,7 +320,7 @@
       },
       {
         "from": "assign_workspace_bytes",
-        "to": "emit_store_workspace_bytes",
+        "to": "emit_blob_put",
         "when": {
           "op": "eq",
           "args": [
@@ -439,49 +329,17 @@
           ]
         }
       },
-      {
-        "from": "emit_store_workspace_bytes",
-        "to": "await_store_workspace_bytes",
-        "when": {
-          "op": "eq",
-          "args": [
-            { "ref": "@var:tool_tag" },
-            { "text": "WorkspaceReadBytes" }
-          ]
-        }
-      },
-      {
-        "from": "await_store_workspace_bytes",
-        "to": "assign_workspace_ref",
-        "when": {
-          "op": "eq",
-          "args": [
-            { "ref": "@var:tool_tag" },
-            { "text": "WorkspaceReadBytes" }
-          ]
-        }
-      },
-      {
-        "from": "assign_workspace_ref",
-        "to": "raise_tool_result",
-        "when": {
-          "op": "eq",
-          "args": [
-            { "ref": "@var:tool_tag" },
-            { "text": "WorkspaceReadBytes" }
-          ]
-        }
-      },
-
+      { "from": "emit_blob_put", "to": "await_blob_put" },
+      { "from": "await_blob_put", "to": "assign_result_ref" },
+      { "from": "assign_result_ref", "to": "raise_tool_result" },
       { "from": "raise_tool_result", "to": "finish" }
     ],
-    "required_caps": ["cap_query", "cap_workspace"],
+    "required_caps": ["cap_query", "cap_workspace", "blob_grant"],
     "allowed_effects": [
       "introspect.manifest",
-      "workspace.empty_root",
       "workspace.resolve",
       "workspace.read_bytes",
-      "workspace.write_bytes"
+      "blob.put"
     ]
   }
 ]

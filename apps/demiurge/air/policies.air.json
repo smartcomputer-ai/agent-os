@@ -29,7 +29,7 @@
       },
       {
         "when": {
-          "effect_kind": "introspect.manifest",
+          "effect_kind": "blob.put",
           "origin_kind": "plan",
           "origin_name": "demiurge/tool_plan@1"
         },
@@ -37,7 +37,7 @@
       },
       {
         "when": {
-          "effect_kind": "workspace.empty_root",
+          "effect_kind": "introspect.manifest",
           "origin_kind": "plan",
           "origin_name": "demiurge/tool_plan@1"
         },
@@ -70,14 +70,6 @@
       {
         "when": {
           "effect_kind": "workspace.read_bytes",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/tool_plan@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.write_bytes",
           "origin_kind": "plan",
           "origin_name": "demiurge/tool_plan@1"
         },

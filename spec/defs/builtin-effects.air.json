@@ -15,7 +15,7 @@
     "params_schema": "sys/BlobPutParams@1",
     "receipt_schema": "sys/BlobPutReceipt@1",
     "cap_type": "blob",
-    "origin_scope": "reducer"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
