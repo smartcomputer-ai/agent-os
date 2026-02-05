@@ -25,6 +25,7 @@ struct ChatState {
     provider: Option<String>,
     max_tokens: Option<u64>,
     tool_refs: Option<Vec<String>>,
+    tool_registry_version: Option<u64>,
     tool_choice: Option<LlmToolChoice>,
     #[serde(default)]
     pending_chat_requests: Vec<PendingChatRequest>,
@@ -89,6 +90,7 @@ struct PendingToolOutput {
 struct PendingToolMessage {
     chat_id: String,
     request_id: u64,
+    tool_call_id: String,
     expected_ref: String,
 }
 
@@ -111,6 +113,8 @@ aos_event_union! {
         ChatResult(ChatResult),
         ToolResult(ToolResult),
         ToolRegistrySnapshot(ToolRegistrySnapshot),
+        ToolRegistryUnchanged(ToolRegistryUnchanged),
+        ToolError(ToolError),
         BlobGetResult(BlobGetResult),
         BlobPutResult(BlobPutResult),
     }
@@ -168,13 +172,32 @@ struct ToolCall {
 struct ToolRegistryScanRequested {
     chat_id: String,
     request_id: u64,
+    known_version: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ToolRegistrySnapshot {
     chat_id: String,
     request_id: u64,
+    version: Option<u64>,
     entries: Vec<WorkspaceListEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolRegistryUnchanged {
+    chat_id: String,
+    request_id: u64,
+    version: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolError {
+    chat_id: String,
+    request_id: u64,
+    #[serde(default)]
+    tool_call_id: Option<String>,
+    stage: String,
+    detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,6 +296,10 @@ impl Reducer for DemiurgeReducer {
             ChatEvent::ToolRegistrySnapshot(snapshot) => {
                 handle_tool_registry_snapshot(ctx, snapshot)
             }
+            ChatEvent::ToolRegistryUnchanged(unchanged) => {
+                handle_tool_registry_unchanged(ctx, unchanged)
+            }
+            ChatEvent::ToolError(error) => handle_tool_error(ctx, error),
             ChatEvent::BlobGetResult(result) => handle_blob_get_result(ctx, result),
             ChatEvent::BlobPutResult(result) => handle_blob_put_result(ctx, result),
         }
@@ -335,42 +362,7 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
         message_refs = message_refs.split_off(start);
     }
 
-    if let Some(explicit_refs) = tool_refs {
-        ctx.state.tool_refs = Some(explicit_refs.clone());
-        emit_chat_request_with_refs(
-            ctx,
-            PendingChatRequest {
-                chat_id,
-                request_id,
-                message_refs,
-                model,
-                provider,
-                max_tokens,
-                tool_choice,
-            },
-            Some(explicit_refs),
-        );
-        return;
-    }
-
-    if let Some(cached_refs) = ctx.state.tool_refs.clone() {
-        emit_chat_request_with_refs(
-            ctx,
-            PendingChatRequest {
-                chat_id,
-                request_id,
-                message_refs,
-                model,
-                provider,
-                max_tokens,
-                tool_choice,
-            },
-            Some(cached_refs),
-        );
-        return;
-    }
-
-    ctx.state.pending_chat_requests.push(PendingChatRequest {
+    let pending_request = PendingChatRequest {
         chat_id: chat_id.clone(),
         request_id,
         message_refs,
@@ -378,9 +370,25 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
         provider,
         max_tokens,
         tool_choice,
-    });
+    };
 
-    let intent_value = ToolRegistryScanRequested { chat_id, request_id };
+    if let Some(explicit_refs) = tool_refs {
+        ctx.state.tool_refs = Some(explicit_refs.clone());
+        ctx.state.tool_registry_version = None;
+        emit_chat_request_with_refs(ctx, pending_request, Some(explicit_refs));
+        return;
+    }
+
+    ctx.state.pending_chat_requests.push(pending_request);
+    if ctx.state.pending_chat_requests.len() > 1 {
+        return;
+    }
+
+    let intent_value = ToolRegistryScanRequested {
+        chat_id,
+        request_id,
+        known_version: ctx.state.tool_registry_version,
+    };
     let key = request_id.to_be_bytes();
     ctx.intent(TOOL_REGISTRY_SCAN_SCHEMA)
         .key_bytes(&key)
@@ -538,6 +546,7 @@ fn handle_tool_registry_snapshot(
 
     let tool_refs = extract_tool_refs(&snapshot.entries);
     ctx.state.tool_refs = Some(tool_refs.clone());
+    ctx.state.tool_registry_version = snapshot.version;
 
     if ctx.state.pending_chat_requests.is_empty() {
         return;
@@ -547,6 +556,47 @@ fn handle_tool_registry_snapshot(
     for request in pending {
         emit_chat_request_with_refs(ctx, request, Some(tool_refs.clone()));
     }
+}
+
+fn handle_tool_registry_unchanged(
+    ctx: &mut ReducerCtx<ChatState, ()>,
+    unchanged: ToolRegistryUnchanged,
+) {
+    if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
+        return;
+    }
+
+    if let Some(version) = unchanged.version {
+        ctx.state.tool_registry_version = Some(version);
+    }
+
+    let Some(tool_refs) = ctx.state.tool_refs.clone() else {
+        return;
+    };
+
+    if ctx.state.pending_chat_requests.is_empty() {
+        return;
+    }
+
+    let pending = core::mem::take(&mut ctx.state.pending_chat_requests);
+    for request in pending {
+        emit_chat_request_with_refs(ctx, request, Some(tool_refs.clone()));
+    }
+}
+
+fn handle_tool_error(ctx: &mut ReducerCtx<ChatState, ()>, error: ToolError) {
+    if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
+        return;
+    }
+
+    let text = format!("Tool error ({}): {}", error.stage, error.detail);
+    ctx.state.messages.push(ChatMessage {
+        request_id: error.request_id,
+        role: ChatRole::Assistant,
+        text: Some(text),
+        message_ref: None,
+        token_usage: None,
+    });
 }
 
 fn extract_tool_refs(entries: &[WorkspaceListEntry]) -> Vec<String> {
@@ -565,8 +615,54 @@ fn extract_tool_refs(entries: &[WorkspaceListEntry]) -> Vec<String> {
     refs
 }
 
+#[derive(Serialize)]
+struct TaggedEvent<'a, T: Serialize> {
+    #[serde(rename = "$tag")]
+    tag: &'static str,
+    #[serde(rename = "$value")]
+    value: &'a T,
+}
+
+fn emit_tool_error(
+    ctx: &mut ReducerCtx<ChatState, ()>,
+    chat_id: String,
+    request_id: u64,
+    tool_call_id: Option<String>,
+    stage: &str,
+    detail: String,
+) {
+    let error = ToolError {
+        chat_id,
+        request_id,
+        tool_call_id,
+        stage: stage.to_string(),
+        detail,
+    };
+    let tagged = TaggedEvent {
+        tag: "ToolError",
+        value: &error,
+    };
+    ctx.intent("demiurge/ChatEvent@1").payload(&tagged).send();
+}
+
 fn handle_blob_put_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobPutResult) {
     if result.status != "ok" {
+        if let Some(index) = ctx
+            .state
+            .pending_tool_messages
+            .iter()
+            .position(|pending| pending.expected_ref == result.requested.blob_ref)
+        {
+            let pending = ctx.state.pending_tool_messages.remove(index);
+            emit_tool_error(
+                ctx,
+                pending.chat_id,
+                pending.request_id,
+                Some(pending.tool_call_id),
+                "tool_output_blob_put",
+                result.status,
+            );
+        }
         return;
     }
 
@@ -602,6 +698,39 @@ fn handle_blob_put_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobPutRe
 
 fn handle_blob_get_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobGetResult) {
     if result.status != "ok" {
+        if let Some(index) = ctx
+            .state
+            .pending_outputs
+            .iter()
+            .position(|pending| pending.output_ref == result.requested.blob_ref)
+        {
+            let pending = ctx.state.pending_outputs.remove(index);
+            emit_tool_error(
+                ctx,
+                pending.chat_id,
+                pending.request_id,
+                None,
+                "llm_output_blob_get",
+                result.status.clone(),
+            );
+            return;
+        }
+        if let Some(index) = ctx
+            .state
+            .pending_tool_outputs
+            .iter()
+            .position(|pending| pending.output_ref == result.requested.blob_ref)
+        {
+            let pending = ctx.state.pending_tool_outputs.remove(index);
+            emit_tool_error(
+                ctx,
+                pending.chat_id,
+                pending.request_id,
+                Some(pending.tool_call_id),
+                "tool_output_blob_get",
+                result.status.clone(),
+            );
+        }
         return;
     }
 
@@ -631,6 +760,15 @@ fn handle_blob_get_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobGetRe
                     .key_bytes(&key)
                     .payload(&intent_value)
                     .send();
+            } else {
+                emit_tool_error(
+                    ctx,
+                    pending.chat_id.clone(),
+                    pending.request_id,
+                    Some(call.id),
+                    "unsupported_tool",
+                    format!("Unsupported tool '{}'", call.name),
+                );
             }
         }
         return;
@@ -652,6 +790,7 @@ fn handle_blob_get_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobGetRe
     ctx.state.pending_tool_messages.push(PendingToolMessage {
         chat_id: pending.chat_id,
         request_id: pending.request_id,
+        tool_call_id: pending.tool_call_id,
         expected_ref: message_ref.clone(),
     });
 
@@ -667,41 +806,93 @@ fn extract_tool_calls_from_output(bytes: &[u8]) -> Vec<ToolCall> {
         Ok(value) => value,
         Err(_) => return Vec::new(),
     };
-    let items = match value.as_array() {
-        Some(items) => items,
-        None => return Vec::new(),
-    };
-
     let mut calls = Vec::new();
-    for item in items {
-        if item.get("type").and_then(|value| value.as_str()) != Some("function_call") {
-            continue;
+    collect_tool_calls(&value, &mut calls);
+    calls
+}
+
+fn collect_tool_calls(value: &JsonValue, calls: &mut Vec<ToolCall>) {
+    match value {
+        JsonValue::Array(items) => {
+            for item in items {
+                collect_tool_calls(item, calls);
+            }
         }
-        let name = match item.get("name").and_then(|value| value.as_str()) {
-            Some(name) if !name.is_empty() => name,
-            _ => continue,
-        };
-        let id = item
+        JsonValue::Object(obj) => {
+            if let Some(call) = parse_tool_call_item(value) {
+                calls.push(call);
+            }
+            for key in ["output", "tool_calls", "content"] {
+                if let Some(JsonValue::Array(items)) = obj.get(key) {
+                    for item in items {
+                        collect_tool_calls(item, calls);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parse_tool_call_item(item: &JsonValue) -> Option<ToolCall> {
+    let obj = item.as_object()?;
+    let type_tag = obj.get("type").and_then(|value| value.as_str());
+
+    if matches!(type_tag, Some("function_call") | Some("tool_call")) {
+        let name = obj.get("name").and_then(|value| value.as_str())?;
+        let id = obj
             .get("call_id")
             .and_then(|value| value.as_str())
-            .or_else(|| item.get("id").and_then(|value| value.as_str()));
-        let id = match id {
-            Some(id) if !id.is_empty() => id,
-            _ => continue,
-        };
-        let arguments_json = match item.get("arguments") {
-            Some(JsonValue::String(value)) => value.clone(),
-            Some(other) => serde_json::to_string(other).unwrap_or_else(|_| "{}".into()),
-            None => "{}".into(),
-        };
-
-        calls.push(ToolCall {
+            .or_else(|| obj.get("id").and_then(|value| value.as_str()))?;
+        let arguments_json = arguments_to_json(obj.get("arguments_json").or_else(|| obj.get("arguments")));
+        return Some(ToolCall {
             id: id.to_string(),
             name: name.to_string(),
             arguments_json,
         });
     }
-    calls
+
+    if let Some(function_obj) = obj.get("function").and_then(|value| value.as_object()) {
+        let name = function_obj.get("name").and_then(|value| value.as_str())?;
+        let id = obj
+            .get("call_id")
+            .and_then(|value| value.as_str())
+            .or_else(|| obj.get("id").and_then(|value| value.as_str()))?;
+        let arguments_json =
+            arguments_to_json(function_obj.get("arguments").or_else(|| obj.get("arguments")));
+        return Some(ToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments_json,
+        });
+    }
+
+    if let (Some(name), Some(id)) = (
+        obj.get("name").and_then(|value| value.as_str()),
+        obj.get("id")
+            .and_then(|value| value.as_str())
+            .or_else(|| obj.get("call_id").and_then(|value| value.as_str())),
+    ) {
+        if obj.contains_key("arguments") || obj.contains_key("arguments_json") {
+            let arguments_json =
+                arguments_to_json(obj.get("arguments_json").or_else(|| obj.get("arguments")));
+            return Some(ToolCall {
+                id: id.to_string(),
+                name: name.to_string(),
+                arguments_json,
+            });
+        }
+    }
+
+    None
+}
+
+fn arguments_to_json(value: Option<&JsonValue>) -> String {
+    match value {
+        Some(JsonValue::String(text)) => text.clone(),
+        Some(other) => serde_json::to_string(other).unwrap_or_else(|_| "{}".into()),
+        None => "{}".into(),
+    }
 }
 
 fn parse_tool_call_params(name: &str, arguments_json: &str) -> Option<ToolCallParams> {
@@ -808,6 +999,10 @@ mod tests {
                 ChatEvent::ToolRegistrySnapshot(value) => {
                     serde_cbor::to_vec(&value).expect("event bytes")
                 }
+                ChatEvent::ToolRegistryUnchanged(value) => {
+                    serde_cbor::to_vec(&value).expect("event bytes")
+                }
+                ChatEvent::ToolError(value) => serde_cbor::to_vec(&value).expect("event bytes"),
                 ChatEvent::BlobGetResult(value) => serde_cbor::to_vec(&value).expect("event bytes"),
                 ChatEvent::BlobPutResult(value) => serde_cbor::to_vec(&value).expect("event bytes"),
             }
@@ -849,6 +1044,7 @@ mod tests {
             provider: None,
             max_tokens: None,
             tool_refs: None,
+            tool_registry_version: None,
             tool_choice: None,
             pending_chat_requests: vec![],
             pending_outputs: vec![],
@@ -883,6 +1079,7 @@ mod tests {
             serde_cbor::from_slice(&output.domain_events[0].value).expect("scan decode");
         assert_eq!(scan.chat_id, "chat-1");
         assert_eq!(scan.request_id, 1);
+        assert_eq!(scan.known_version, None);
 
         assert_eq!(state.pending_chat_requests.len(), 1);
         let pending = &state.pending_chat_requests[0];
@@ -911,6 +1108,7 @@ mod tests {
             provider: None,
             max_tokens: None,
             tool_refs: None,
+            tool_registry_version: None,
             tool_choice: None,
             pending_chat_requests: vec![],
             pending_outputs: vec![],
@@ -953,6 +1151,7 @@ mod tests {
             provider: None,
             max_tokens: None,
             tool_refs: None,
+            tool_registry_version: None,
             tool_choice: None,
             pending_chat_requests: vec![],
             pending_outputs: vec![],
@@ -1004,6 +1203,7 @@ mod tests {
             provider: Some("mock".into()),
             max_tokens: Some(128),
             tool_refs: None,
+            tool_registry_version: None,
             tool_choice: None,
             pending_chat_requests: vec![PendingChatRequest {
                 chat_id: "chat-1".into(),
@@ -1021,6 +1221,7 @@ mod tests {
         let event = ChatEvent::ToolRegistrySnapshot(ToolRegistrySnapshot {
             chat_id: "chat-1".into(),
             request_id: 1,
+            version: Some(2),
             entries: vec![WorkspaceListEntry {
                 path: "introspect.manifest.json".into(),
                 kind: "file".into(),
@@ -1035,6 +1236,7 @@ mod tests {
 
         assert!(state.pending_chat_requests.is_empty());
         assert_eq!(state.tool_refs, Some(vec![TEST_HASH.into()]));
+        assert_eq!(state.tool_registry_version, Some(2));
 
         assert_eq!(output.domain_events.len(), 1);
         assert_eq!(output.domain_events[0].schema, REQUEST_SCHEMA);

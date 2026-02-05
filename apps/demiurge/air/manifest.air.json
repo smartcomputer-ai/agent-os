@@ -47,6 +47,12 @@
       "name": "demiurge/ToolRegistrySnapshot@1"
     },
     {
+      "name": "demiurge/ToolRegistryUnchanged@1"
+    },
+    {
+      "name": "demiurge/ToolError@1"
+    },
+    {
       "name": "demiurge/ToolCallParams@1"
     },
     {

@@ -67,6 +67,7 @@
       "record": {
         "chat_id": { "ref": "demiurge/ChatId@1" },
         "request_id": { "nat": {} },
+        "tool_call_id": { "text": {} },
         "expected_ref": { "hash": {} }
       }
     }
@@ -99,6 +100,7 @@
         "provider": { "option": { "text": {} } },
         "max_tokens": { "option": { "nat": {} } },
         "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_registry_version": { "option": { "nat": {} } },
         "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
         "pending_chat_requests": {
           "option": { "list": { "ref": "demiurge/PendingChatRequest@1" } }
@@ -176,7 +178,8 @@
     "type": {
       "record": {
         "chat_id": { "ref": "demiurge/ChatId@1" },
-        "request_id": { "nat": {} }
+        "request_id": { "nat": {} },
+        "known_version": { "option": { "nat": {} } }
       }
     }
   },
@@ -187,7 +190,32 @@
       "record": {
         "chat_id": { "ref": "demiurge/ChatId@1" },
         "request_id": { "nat": {} },
+        "version": { "option": { "nat": {} } },
         "entries": { "list": { "ref": "sys/WorkspaceListEntry@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolRegistryUnchanged@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "version": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolError@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "tool_call_id": { "option": { "text": {} } },
+        "stage": { "text": {} },
+        "detail": { "text": {} }
       }
     }
   },
@@ -258,6 +286,8 @@
         "ChatResult": { "ref": "demiurge/ChatResult@1" },
         "ToolResult": { "ref": "demiurge/ToolResult@1" },
         "ToolRegistrySnapshot": { "ref": "demiurge/ToolRegistrySnapshot@1" },
+        "ToolRegistryUnchanged": { "ref": "demiurge/ToolRegistryUnchanged@1" },
+        "ToolError": { "ref": "demiurge/ToolError@1" },
         "BlobGetResult": { "ref": "sys/BlobGetResult@1" },
         "BlobPutResult": { "ref": "sys/BlobPutResult@1" }
       }
