@@ -86,7 +86,7 @@ fn llm_generate_params_literal_matches_builtin_schema() {
     let schema = find_builtin_schema("sys/LlmGenerateParams@1").expect("llm params schema");
     let literal = record(vec![
         ("provider", text("openai")),
-        ("model", text("gpt-4")),
+        ("model", text("gpt-5.2")),
         (
             "temperature",
             ValueLiteral::Dec128(crate::ValueDec128 {

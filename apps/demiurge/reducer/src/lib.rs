@@ -605,6 +605,9 @@ fn extract_tool_refs(entries: &[WorkspaceListEntry]) -> Vec<String> {
         if entry.kind != "file" {
             continue;
         }
+        if !entry.path.starts_with("tools/") {
+            continue;
+        }
         if !entry.path.ends_with(".json") {
             continue;
         }

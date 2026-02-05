@@ -52,9 +52,9 @@ export interface ChatSettings {
 }
 
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
-  model: "gpt-4o-mini",
+  model: "gpt-5.2",
   provider: "openai-responses",
-  max_tokens: 1024,
+  max_tokens: 1024*16,
 };
 
 export type LlmToolChoice =

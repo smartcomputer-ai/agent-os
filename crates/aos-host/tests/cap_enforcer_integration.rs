@@ -87,7 +87,7 @@ fn http_enforcer_module_denies_host() {
 fn llm_enforcer_module_denies_model() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/LlmPlan@1".to_string();
-    let plan = llm_plan(&plan_name, "cap_llm", "openai", "gpt-4", 10);
+    let plan = llm_plan(&plan_name, "cap_llm", "openai", "gpt-5.2", 10);
 
     let enforcer = fixtures::pure_module_from_target(
         &store,

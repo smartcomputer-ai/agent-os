@@ -881,7 +881,7 @@ mod tests {
                     kind: EffectKind::llm_generate(),
                     params: ExprOrValue::Json(json!({
                         "provider": "openai",
-                        "model": "gpt-4",
+                        "model": "gpt-5.2",
                         "temperature": "0.5",
                         "max_tokens": 128,
                         "message_refs": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],

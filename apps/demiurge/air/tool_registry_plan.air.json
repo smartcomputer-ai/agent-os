@@ -55,7 +55,7 @@
           "record": {
             "root_hash": { "ref": "@var:workspace_root" },
             "path": { "null": {} },
-            "scope": { "text": "dir" },
+            "scope": { "text": "subtree" },
             "cursor": { "null": {} },
             "limit": { "nat": 0 }
           }

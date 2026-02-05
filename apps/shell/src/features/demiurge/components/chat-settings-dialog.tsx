@@ -63,7 +63,7 @@ export function ChatSettingsDialog({
               onChange={(e) => handleChange("model", e.target.value)}
               className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             >
-              <option value="gpt-4o-mini">GPT-4o Mini</option>
+              <option value="gpt-5.2">GPT-5.2</option>
               <option value="gpt-4o">GPT-4o</option>
               <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
               <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>

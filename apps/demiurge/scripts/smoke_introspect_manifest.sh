@@ -84,7 +84,7 @@ CHAT_CREATED_JSON="$(printf '{"$tag":"ChatCreated","$value":{"chat_id":"%s","tit
   "demiurge/ChatEvent@1" \
   "${CHAT_CREATED_JSON}"
 
-USER_MESSAGE_JSON="$(printf '{"$tag":"UserMessage","$value":{"chat_id":"%s","request_id":1,"text":"tool smoke","message_ref":"%s","model":"gpt-4o-mini","provider":"openai-responses","max_tokens":512,"tool_refs":["%s"],"tool_choice":{"$tag":"Required"}}}' "${CHAT_ID}" "${MSG_HASH}" "${TOOL_HASH}")"
+USER_MESSAGE_JSON="$(printf '{"$tag":"UserMessage","$value":{"chat_id":"%s","request_id":1,"text":"tool smoke","message_ref":"%s","model":"gpt-5.2","provider":"openai-responses","max_tokens":512,"tool_refs":["%s"],"tool_choice":{"$tag":"Required"}}}' "${CHAT_ID}" "${MSG_HASH}" "${TOOL_HASH}")"
 "${AOS_BIN}" -w "${WORLD_DIR}" event send \
   "demiurge/ChatEvent@1" \
   "${USER_MESSAGE_JSON}"

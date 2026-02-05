@@ -412,7 +412,7 @@ fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
     );
     map.insert(
         CborValue::Text("model".into()),
-        CborValue::Text("gpt-4".into()),
+        CborValue::Text("gpt-5.2".into()),
     );
     map.insert(CborValue::Text("temperature".into()), temp_value);
     map.insert(
@@ -454,7 +454,7 @@ fn llm_params_cbor_reordered(temp_value: CborValue) -> Vec<u8> {
     map.insert(CborValue::Text("temperature".into()), temp_value);
     map.insert(
         CborValue::Text("model".into()),
-        CborValue::Text("gpt-4".into()),
+        CborValue::Text("gpt-5.2".into()),
     );
     map.insert(
         CborValue::Text("provider".into()),

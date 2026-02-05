@@ -885,7 +885,7 @@ mod tests {
 
         let params = LlmGenerateParams {
             provider: "openai".into(),
-            model: "gpt-4".into(),
+            model: "gpt-5.2".into(),
             temperature: "0.5".into(),
             max_tokens: 50,
             message_refs: vec![aos_air_types::HashRef::new(
@@ -908,7 +908,7 @@ mod tests {
 
         let over_limit = LlmGenerateParams {
             provider: "openai".into(),
-            model: "gpt-4".into(),
+            model: "gpt-5.2".into(),
             temperature: "0.5".into(),
             max_tokens: 55,
             message_refs: vec![aos_air_types::HashRef::new(

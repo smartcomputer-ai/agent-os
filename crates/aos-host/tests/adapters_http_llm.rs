@@ -152,9 +152,9 @@ async fn llm_errors_missing_api_key() {
     // Missing api_key
     let params = LlmGenerateParams {
         provider: "openai".into(),
-        model: "gpt-4o-mini".into(),
+        model: "gpt-5.2".into(),
         temperature: "0".into(),
-        max_tokens: 16,
+        max_tokens: 1024*16,
         message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
         tool_refs: None,
         tool_choice: None,
