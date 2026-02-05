@@ -420,6 +420,11 @@ impl<S: Store + 'static> WorldHost<S> {
         })
     }
 
+    /// Returns true if the kernel has pending effects that need processing.
+    pub fn has_pending_effects(&self) -> bool {
+        self.kernel.has_pending_effects()
+    }
+
     pub fn heights(&self) -> KernelHeights {
         self.kernel.heights()
     }

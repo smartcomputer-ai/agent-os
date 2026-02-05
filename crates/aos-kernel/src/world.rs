@@ -1124,6 +1124,11 @@ impl<S: Store + 'static> Kernel<S> {
         self.effect_manager.drain()
     }
 
+    /// Returns true when the effect queue is non-empty and a cycle is needed.
+    pub fn has_pending_effects(&self) -> bool {
+        self.effect_manager.has_pending()
+    }
+
     pub fn restore_effect_queue(&mut self, intents: Vec<aos_effects::EffectIntent>) {
         self.effect_manager.restore_queue(intents);
     }

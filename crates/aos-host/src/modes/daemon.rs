@@ -299,21 +299,33 @@ impl<S: Store + 'static> WorldDaemon<S> {
         Ok(())
     }
 
-    /// Run a cycle in daemon mode.
+    /// Run cycles in daemon mode until quiescent (no more pending effects).
+    ///
+    /// A single cycle may apply receipts whose reducer handlers emit new
+    /// effects (e.g. a blob.get receipt triggers a reducer that emits
+    /// blob.put).  Without re-cycling, those effects would sit in the queue
+    /// until the next external event, causing the system to appear stuck.
     async fn run_daemon_cycle(&mut self) -> Result<(), HostError> {
-        let outcome = self
-            .host
-            .run_cycle(RunMode::Daemon {
-                scheduler: &mut self.timer_scheduler,
-            })
-            .await?;
+        const MAX_ROUNDS: usize = 64;
+        for _round in 0..MAX_ROUNDS {
+            let outcome = self
+                .host
+                .run_cycle(RunMode::Daemon {
+                    scheduler: &mut self.timer_scheduler,
+                })
+                .await?;
 
-        if outcome.effects_dispatched > 0 || outcome.receipts_applied > 0 {
-            tracing::debug!(
-                "Cycle: {} effects, {} receipts",
-                outcome.effects_dispatched,
-                outcome.receipts_applied
-            );
+            if outcome.effects_dispatched > 0 || outcome.receipts_applied > 0 {
+                tracing::debug!(
+                    "Cycle: {} effects, {} receipts",
+                    outcome.effects_dispatched,
+                    outcome.receipts_applied
+                );
+            }
+
+            if !self.host.has_pending_effects() {
+                break;
+            }
         }
         Ok(())
     }

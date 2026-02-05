@@ -38,6 +38,10 @@ impl EffectQueue {
         std::mem::take(&mut self.intents)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.intents.is_empty()
+    }
+
     pub fn as_slice(&self) -> &[EffectIntent] {
         &self.intents
     }
@@ -368,6 +372,10 @@ impl EffectManager {
             }
         }
         intents
+    }
+
+    pub fn has_pending(&self) -> bool {
+        !self.queue.is_empty()
     }
 
     pub fn restore_queue(&mut self, intents: Vec<EffectIntent>) {
