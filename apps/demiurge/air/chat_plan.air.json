@@ -5,110 +5,6 @@
     "input": "demiurge/ChatRequest@1",
     "steps": [
       {
-        "id": "emit_workspace_resolve",
-        "op": "emit_effect",
-        "kind": "workspace.resolve",
-        "params": {
-          "record": {
-            "workspace": { "text": "demiurge" },
-            "version": { "null": {} }
-          }
-        },
-        "cap": "cap_workspace",
-        "bind": { "effect_id_as": "workspace_resolve" }
-      },
-      {
-        "id": "await_workspace_resolve",
-        "op": "await_receipt",
-        "for": { "ref": "@var:workspace_resolve" },
-        "bind": { "as": "workspace_resolve_receipt" }
-      },
-      {
-        "id": "assign_workspace_root",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:workspace_resolve_receipt" },
-            { "text": "root_hash" }
-          ]
-        },
-        "bind": { "as": "workspace_root" }
-      },
-      {
-        "id": "emit_read_tool_manifest",
-        "op": "emit_effect",
-        "kind": "workspace.read_ref",
-        "params": {
-          "record": {
-            "root_hash": { "ref": "@var:workspace_root" },
-            "path": { "text": "introspect.manifest.json" }
-          }
-        },
-        "cap": "cap_workspace",
-        "bind": { "effect_id_as": "tool_manifest_read" }
-      },
-      {
-        "id": "await_read_tool_manifest",
-        "op": "await_receipt",
-        "for": { "ref": "@var:tool_manifest_read" },
-        "bind": { "as": "tool_manifest_receipt" }
-      },
-      {
-        "id": "assign_tool_manifest_hash",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:tool_manifest_receipt" },
-            { "text": "hash" }
-          ]
-        },
-        "bind": { "as": "tool_manifest_hash" }
-      },
-      {
-        "id": "emit_read_tool_workspace",
-        "op": "emit_effect",
-        "kind": "workspace.read_ref",
-        "params": {
-          "record": {
-            "root_hash": { "ref": "@var:workspace_root" },
-            "path": { "text": "workspace.read_bytes.json" }
-          }
-        },
-        "cap": "cap_workspace",
-        "bind": { "effect_id_as": "tool_workspace_read" }
-      },
-      {
-        "id": "await_read_tool_workspace",
-        "op": "await_receipt",
-        "for": { "ref": "@var:tool_workspace_read" },
-        "bind": { "as": "tool_workspace_receipt" }
-      },
-      {
-        "id": "assign_tool_workspace_hash",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [
-            { "ref": "@var:tool_workspace_receipt" },
-            { "text": "hash" }
-          ]
-        },
-        "bind": { "as": "tool_workspace_hash" }
-      },
-      {
-        "id": "assign_tool_refs",
-        "op": "assign",
-        "expr": {
-          "list": [
-            { "ref": "@var:tool_manifest_hash" },
-            { "ref": "@var:tool_workspace_hash" }
-          ]
-        },
-        "bind": { "as": "tool_refs" }
-      },
-      {
         "id": "emit_llm",
         "op": "emit_effect",
         "kind": "llm.generate",
@@ -119,7 +15,7 @@
             "temperature": { "text": "0.2" },
             "max_tokens": { "ref": "@plan.input.max_tokens" },
             "message_refs": { "ref": "@plan.input.message_refs" },
-            "tool_refs": { "ref": "@var:tool_refs" },
+            "tool_refs": { "ref": "@plan.input.tool_refs" },
             "tool_choice": { "ref": "@plan.input.tool_choice" },
             "api_key": {
               "variant": {
@@ -189,23 +85,13 @@
       { "id": "finish", "op": "end" }
     ],
     "edges": [
-      { "from": "emit_workspace_resolve", "to": "await_workspace_resolve" },
-      { "from": "await_workspace_resolve", "to": "assign_workspace_root" },
-      { "from": "assign_workspace_root", "to": "emit_read_tool_manifest" },
-      { "from": "emit_read_tool_manifest", "to": "await_read_tool_manifest" },
-      { "from": "await_read_tool_manifest", "to": "assign_tool_manifest_hash" },
-      { "from": "assign_tool_manifest_hash", "to": "emit_read_tool_workspace" },
-      { "from": "emit_read_tool_workspace", "to": "await_read_tool_workspace" },
-      { "from": "await_read_tool_workspace", "to": "assign_tool_workspace_hash" },
-      { "from": "assign_tool_workspace_hash", "to": "assign_tool_refs" },
-      { "from": "assign_tool_refs", "to": "emit_llm" },
       { "from": "emit_llm", "to": "await_llm" },
       { "from": "await_llm", "to": "assign_output_ref" },
       { "from": "assign_output_ref", "to": "assign_token_usage" },
       { "from": "assign_token_usage", "to": "raise_result" },
       { "from": "raise_result", "to": "finish" }
     ],
-    "required_caps": ["cap_llm", "cap_workspace"],
-    "allowed_effects": ["llm.generate", "workspace.resolve", "workspace.read_ref"]
+    "required_caps": ["cap_llm"],
+    "allowed_effects": ["llm.generate"]
   }
 ]

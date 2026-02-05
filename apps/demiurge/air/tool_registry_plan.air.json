@@ -1,0 +1,103 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demiurge/tool_registry_plan@1",
+    "input": "demiurge/ToolRegistryScanRequested@1",
+    "steps": [
+      {
+        "id": "emit_workspace_resolve",
+        "op": "emit_effect",
+        "kind": "workspace.resolve",
+        "params": {
+          "record": {
+            "workspace": { "text": "demiurge" },
+            "version": { "null": {} }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_resolve" }
+      },
+      {
+        "id": "await_workspace_resolve",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_resolve" },
+        "bind": { "as": "workspace_resolve_receipt" }
+      },
+      {
+        "id": "assign_workspace_root",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_resolve_receipt" },
+            { "text": "root_hash" }
+          ]
+        },
+        "bind": { "as": "workspace_root" }
+      },
+      {
+        "id": "emit_workspace_list",
+        "op": "emit_effect",
+        "kind": "workspace.list",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:workspace_root" },
+            "path": { "null": {} },
+            "scope": { "text": "dir" },
+            "cursor": { "null": {} },
+            "limit": { "nat": 0 }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_list" }
+      },
+      {
+        "id": "await_workspace_list",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_list" },
+        "bind": { "as": "workspace_list_receipt" }
+      },
+      {
+        "id": "assign_entries",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_list_receipt" },
+            { "text": "entries" }
+          ]
+        },
+        "bind": { "as": "entries" }
+      },
+      {
+        "id": "raise_snapshot",
+        "op": "raise_event",
+        "event": "demiurge/ChatEvent@1",
+        "value": {
+          "variant": {
+            "tag": "ToolRegistrySnapshot",
+            "value": {
+              "record": {
+                "chat_id": { "ref": "@plan.input.chat_id" },
+                "request_id": { "ref": "@plan.input.request_id" },
+                "entries": { "ref": "@var:entries" }
+              }
+            }
+          }
+        }
+      },
+      { "id": "finish", "op": "end" }
+    ],
+    "edges": [
+      { "from": "emit_workspace_resolve", "to": "await_workspace_resolve" },
+      { "from": "await_workspace_resolve", "to": "assign_workspace_root" },
+      { "from": "assign_workspace_root", "to": "emit_workspace_list" },
+      { "from": "emit_workspace_list", "to": "await_workspace_list" },
+      { "from": "await_workspace_list", "to": "assign_entries" },
+      { "from": "assign_entries", "to": "raise_snapshot" },
+      { "from": "raise_snapshot", "to": "finish" }
+    ],
+    "required_caps": ["cap_workspace"],
+    "allowed_effects": ["workspace.resolve", "workspace.list"]
+  }
+]

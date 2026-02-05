@@ -13,6 +13,7 @@ use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 
 const REQUEST_SCHEMA: &str = "demiurge/ChatRequest@1";
+const TOOL_REGISTRY_SCAN_SCHEMA: &str = "demiurge/ToolRegistryScanRequested@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct ChatState {
@@ -25,6 +26,8 @@ struct ChatState {
     max_tokens: Option<u64>,
     tool_refs: Option<Vec<String>>,
     tool_choice: Option<LlmToolChoice>,
+    #[serde(default)]
+    pending_chat_requests: Vec<PendingChatRequest>,
     #[serde(default)]
     pending_outputs: Vec<PendingOutput>,
     #[serde(default)]
@@ -89,6 +92,17 @@ struct PendingToolMessage {
     expected_ref: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct PendingChatRequest {
+    chat_id: String,
+    request_id: u64,
+    message_refs: Vec<String>,
+    model: String,
+    provider: String,
+    max_tokens: u64,
+    tool_choice: Option<LlmToolChoice>,
+}
+
 aos_event_union! {
     #[derive(Debug, Clone, Serialize)]
     enum ChatEvent {
@@ -96,6 +110,7 @@ aos_event_union! {
         UserMessage(UserMessage),
         ChatResult(ChatResult),
         ToolResult(ToolResult),
+        ToolRegistrySnapshot(ToolRegistrySnapshot),
         BlobGetResult(BlobGetResult),
         BlobPutResult(BlobPutResult),
     }
@@ -147,6 +162,28 @@ struct ToolCall {
     id: String,
     name: String,
     arguments_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolRegistryScanRequested {
+    chat_id: String,
+    request_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolRegistrySnapshot {
+    chat_id: String,
+    request_id: u64,
+    entries: Vec<WorkspaceListEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceListEntry {
+    path: String,
+    kind: String,
+    hash: Option<String>,
+    size: Option<u64>,
+    mode: Option<u64>,
 }
 
 aos_variant! {
@@ -233,6 +270,9 @@ impl Reducer for DemiurgeReducer {
             ChatEvent::UserMessage(message) => handle_user_message(ctx, message),
             ChatEvent::ChatResult(result) => handle_chat_result(ctx, result),
             ChatEvent::ToolResult(result) => handle_tool_result(ctx, result),
+            ChatEvent::ToolRegistrySnapshot(snapshot) => {
+                handle_tool_registry_snapshot(ctx, snapshot)
+            }
             ChatEvent::BlobGetResult(result) => handle_blob_get_result(ctx, result),
             ChatEvent::BlobPutResult(result) => handle_blob_put_result(ctx, result),
         }
@@ -274,7 +314,6 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
     ctx.state.model = Some(model.clone());
     ctx.state.provider = Some(provider.clone());
     ctx.state.max_tokens = Some(max_tokens);
-    ctx.state.tool_refs = tool_refs.clone();
     ctx.state.tool_choice = tool_choice.clone();
     ctx.state.messages.push(ChatMessage {
         request_id,
@@ -296,18 +335,54 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
         message_refs = message_refs.split_off(start);
     }
 
-    let intent_value = ChatRequest {
-        chat_id,
+    if let Some(explicit_refs) = tool_refs {
+        ctx.state.tool_refs = Some(explicit_refs.clone());
+        emit_chat_request_with_refs(
+            ctx,
+            PendingChatRequest {
+                chat_id,
+                request_id,
+                message_refs,
+                model,
+                provider,
+                max_tokens,
+                tool_choice,
+            },
+            Some(explicit_refs),
+        );
+        return;
+    }
+
+    if let Some(cached_refs) = ctx.state.tool_refs.clone() {
+        emit_chat_request_with_refs(
+            ctx,
+            PendingChatRequest {
+                chat_id,
+                request_id,
+                message_refs,
+                model,
+                provider,
+                max_tokens,
+                tool_choice,
+            },
+            Some(cached_refs),
+        );
+        return;
+    }
+
+    ctx.state.pending_chat_requests.push(PendingChatRequest {
+        chat_id: chat_id.clone(),
         request_id,
         message_refs,
         model,
         provider,
         max_tokens,
-        tool_refs,
         tool_choice,
-    };
+    });
+
+    let intent_value = ToolRegistryScanRequested { chat_id, request_id };
     let key = request_id.to_be_bytes();
-    ctx.intent(REQUEST_SCHEMA)
+    ctx.intent(TOOL_REGISTRY_SCAN_SCHEMA)
         .key_bytes(&key)
         .payload(&intent_value)
         .send();
@@ -400,17 +475,35 @@ fn emit_chat_request(
     };
 
     let tool_choice = tool_choice_override.or_else(|| ctx.state.tool_choice.clone());
-    let intent_value = ChatRequest {
+    let pending = PendingChatRequest {
         chat_id,
         request_id,
         message_refs,
         model,
         provider,
         max_tokens,
-        tool_refs: ctx.state.tool_refs.clone(),
         tool_choice,
     };
-    let key = request_id.to_be_bytes();
+    emit_chat_request_with_refs(ctx, pending, ctx.state.tool_refs.clone());
+}
+
+fn emit_chat_request_with_refs(
+    ctx: &mut ReducerCtx<ChatState, ()>,
+    pending: PendingChatRequest,
+    tool_refs: Option<Vec<String>>,
+) {
+    ctx.state.tool_refs = tool_refs.clone();
+    let intent_value = ChatRequest {
+        chat_id: pending.chat_id,
+        request_id: pending.request_id,
+        message_refs: pending.message_refs,
+        model: pending.model,
+        provider: pending.provider,
+        max_tokens: pending.max_tokens,
+        tool_refs,
+        tool_choice: pending.tool_choice,
+    };
+    let key = intent_value.request_id.to_be_bytes();
     ctx.intent(REQUEST_SCHEMA)
         .key_bytes(&key)
         .payload(&intent_value)
@@ -433,6 +526,43 @@ fn handle_tool_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ToolResult) {
         blob_ref: result.result_ref,
     };
     ctx.effects().emit_raw("blob.get", &params, Some("blob"));
+}
+
+fn handle_tool_registry_snapshot(
+    ctx: &mut ReducerCtx<ChatState, ()>,
+    snapshot: ToolRegistrySnapshot,
+) {
+    if ctx.state.title.is_none() || ctx.state.created_at_ms.is_none() {
+        return;
+    }
+
+    let tool_refs = extract_tool_refs(&snapshot.entries);
+    ctx.state.tool_refs = Some(tool_refs.clone());
+
+    if ctx.state.pending_chat_requests.is_empty() {
+        return;
+    }
+
+    let pending = core::mem::take(&mut ctx.state.pending_chat_requests);
+    for request in pending {
+        emit_chat_request_with_refs(ctx, request, Some(tool_refs.clone()));
+    }
+}
+
+fn extract_tool_refs(entries: &[WorkspaceListEntry]) -> Vec<String> {
+    let mut refs = Vec::new();
+    for entry in entries {
+        if entry.kind != "file" {
+            continue;
+        }
+        if !entry.path.ends_with(".json") {
+            continue;
+        }
+        if let Some(hash) = &entry.hash {
+            refs.push(hash.clone());
+        }
+    }
+    refs
 }
 
 fn handle_blob_put_result(ctx: &mut ReducerCtx<ChatState, ()>, result: BlobPutResult) {
@@ -667,13 +797,25 @@ mod tests {
     }
 
     fn run_with_state(state: Option<ChatState>, event: ChatEvent) -> ReducerOutput {
+        fn encode_event_payload(event: ChatEvent) -> Vec<u8> {
+            match event {
+                ChatEvent::ChatCreated(value) => {
+                    serde_cbor::to_vec(&value).expect("event bytes")
+                }
+                ChatEvent::UserMessage(value) => serde_cbor::to_vec(&value).expect("event bytes"),
+                ChatEvent::ChatResult(value) => serde_cbor::to_vec(&value).expect("event bytes"),
+                ChatEvent::ToolResult(value) => serde_cbor::to_vec(&value).expect("event bytes"),
+                ChatEvent::ToolRegistrySnapshot(value) => {
+                    serde_cbor::to_vec(&value).expect("event bytes")
+                }
+                ChatEvent::BlobGetResult(value) => serde_cbor::to_vec(&value).expect("event bytes"),
+                ChatEvent::BlobPutResult(value) => serde_cbor::to_vec(&value).expect("event bytes"),
+            }
+        }
         let input = ReducerInput {
             version: ABI_VERSION,
             state: state.map(|s| serde_cbor::to_vec(&s).expect("state bytes")),
-            event: DomainEvent::new(
-                "demiurge/ChatEvent@1",
-                serde_cbor::to_vec(&event).expect("event bytes"),
-            ),
+            event: DomainEvent::new("demiurge/ChatEvent@1", encode_event_payload(event)),
             ctx: Some(context_bytes("demiurge/Demiurge@1")),
         };
         let bytes = input.encode().expect("input bytes");
@@ -708,6 +850,7 @@ mod tests {
             max_tokens: None,
             tool_refs: None,
             tool_choice: None,
+            pending_chat_requests: vec![],
             pending_outputs: vec![],
             pending_tool_outputs: vec![],
             pending_tool_messages: vec![],
@@ -735,15 +878,20 @@ mod tests {
         assert_eq!(message.message_ref.as_deref(), Some(TEST_HASH));
 
         assert_eq!(output.domain_events.len(), 1);
-        assert_eq!(output.domain_events[0].schema, REQUEST_SCHEMA);
-        let request: ChatRequest =
-            serde_cbor::from_slice(&output.domain_events[0].value).expect("request decode");
-        assert_eq!(request.chat_id, "chat-1");
-        assert_eq!(request.request_id, 1);
-        assert_eq!(request.message_refs, vec![String::from(TEST_HASH)]);
-        assert_eq!(request.model, "gpt-mock");
-        assert_eq!(request.provider, "mock");
-        assert_eq!(request.max_tokens, 128);
+        assert_eq!(output.domain_events[0].schema, TOOL_REGISTRY_SCAN_SCHEMA);
+        let scan: ToolRegistryScanRequested =
+            serde_cbor::from_slice(&output.domain_events[0].value).expect("scan decode");
+        assert_eq!(scan.chat_id, "chat-1");
+        assert_eq!(scan.request_id, 1);
+
+        assert_eq!(state.pending_chat_requests.len(), 1);
+        let pending = &state.pending_chat_requests[0];
+        assert_eq!(pending.chat_id, "chat-1");
+        assert_eq!(pending.request_id, 1);
+        assert_eq!(pending.message_refs, vec![String::from(TEST_HASH)]);
+        assert_eq!(pending.model, "gpt-mock");
+        assert_eq!(pending.provider, "mock");
+        assert_eq!(pending.max_tokens, 128);
     }
 
     #[test]
@@ -764,6 +912,7 @@ mod tests {
             max_tokens: None,
             tool_refs: None,
             tool_choice: None,
+            pending_chat_requests: vec![],
             pending_outputs: vec![],
             pending_tool_outputs: vec![],
             pending_tool_messages: vec![],
@@ -805,6 +954,7 @@ mod tests {
             max_tokens: None,
             tool_refs: None,
             tool_choice: None,
+            pending_chat_requests: vec![],
             pending_outputs: vec![],
             pending_tool_outputs: vec![],
             pending_tool_messages: vec![],
@@ -835,5 +985,67 @@ mod tests {
             })
         );
         assert!(output.domain_events.is_empty());
+    }
+
+    #[test]
+    fn tool_registry_snapshot_emits_chat_request() {
+        let state = ChatState {
+            messages: vec![ChatMessage {
+                request_id: 1,
+                role: ChatRole::User,
+                text: Some("ping".into()),
+                message_ref: Some(TEST_HASH.into()),
+                token_usage: None,
+            }],
+            last_request_id: 1,
+            title: Some("First chat".into()),
+            created_at_ms: Some(1234),
+            model: Some("gpt-mock".into()),
+            provider: Some("mock".into()),
+            max_tokens: Some(128),
+            tool_refs: None,
+            tool_choice: None,
+            pending_chat_requests: vec![PendingChatRequest {
+                chat_id: "chat-1".into(),
+                request_id: 1,
+                message_refs: vec![TEST_HASH.into()],
+                model: "gpt-mock".into(),
+                provider: "mock".into(),
+                max_tokens: 128,
+                tool_choice: None,
+            }],
+            pending_outputs: vec![],
+            pending_tool_outputs: vec![],
+            pending_tool_messages: vec![],
+        };
+        let event = ChatEvent::ToolRegistrySnapshot(ToolRegistrySnapshot {
+            chat_id: "chat-1".into(),
+            request_id: 1,
+            entries: vec![WorkspaceListEntry {
+                path: "introspect.manifest.json".into(),
+                kind: "file".into(),
+                hash: Some(TEST_HASH.into()),
+                size: None,
+                mode: None,
+            }],
+        });
+        let output = run_with_state(Some(state), event);
+        let state: ChatState =
+            serde_cbor::from_slice(output.state.as_ref().expect("state")).expect("state decode");
+
+        assert!(state.pending_chat_requests.is_empty());
+        assert_eq!(state.tool_refs, Some(vec![TEST_HASH.into()]));
+
+        assert_eq!(output.domain_events.len(), 1);
+        assert_eq!(output.domain_events[0].schema, REQUEST_SCHEMA);
+        let request: ChatRequest =
+            serde_cbor::from_slice(&output.domain_events[0].value).expect("request decode");
+        assert_eq!(request.chat_id, "chat-1");
+        assert_eq!(request.request_id, 1);
+        assert_eq!(request.message_refs, vec![String::from(TEST_HASH)]);
+        assert_eq!(request.model, "gpt-mock");
+        assert_eq!(request.provider, "mock");
+        assert_eq!(request.max_tokens, 128);
+        assert_eq!(request.tool_refs, Some(vec![String::from(TEST_HASH)]));
     }
 }

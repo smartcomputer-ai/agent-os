@@ -26,6 +26,9 @@
       "name": "demiurge/PendingToolMessage@1"
     },
     {
+      "name": "demiurge/PendingChatRequest@1"
+    },
+    {
       "name": "demiurge/ChatCreated@1"
     },
     {
@@ -36,6 +39,12 @@
     },
     {
       "name": "demiurge/ToolCall@1"
+    },
+    {
+      "name": "demiurge/ToolRegistryScanRequested@1"
+    },
+    {
+      "name": "demiurge/ToolRegistrySnapshot@1"
     },
     {
       "name": "demiurge/ToolCallParams@1"
@@ -110,6 +119,15 @@
       "name": "sys/WorkspaceReadBytesReceipt@1"
     },
     {
+      "name": "sys/WorkspaceListParams@1"
+    },
+    {
+      "name": "sys/WorkspaceListEntry@1"
+    },
+    {
+      "name": "sys/WorkspaceListReceipt@1"
+    },
+    {
       "name": "sys/WorkspaceWriteBytesParams@1"
     },
     {
@@ -151,6 +169,9 @@
     },
     {
       "name": "demiurge/tool_plan@1"
+    },
+    {
+      "name": "demiurge/tool_registry_plan@1"
     }
   ],
   "caps": [
@@ -220,6 +241,9 @@
                   "text": "resolve"
                 },
                 {
+                  "text": "list"
+                },
+                {
                   "text": "read"
                 },
                 {
@@ -279,6 +303,11 @@
       "event": "demiurge/ToolCallRequested@1",
       "plan": "demiurge/tool_plan@1",
       "correlate_by": "request_id"
+    },
+    {
+      "event": "demiurge/ToolRegistryScanRequested@1",
+      "plan": "demiurge/tool_registry_plan@1",
+      "correlate_by": "request_id"
     }
   ],
   "air_version": "1",
@@ -297,6 +326,9 @@
     },
     {
       "name": "sys/workspace.resolve@1"
+    },
+    {
+      "name": "sys/workspace.list@1"
     },
     {
       "name": "sys/workspace.read_ref@1"

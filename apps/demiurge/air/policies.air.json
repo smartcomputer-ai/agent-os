@@ -55,7 +55,15 @@
         "when": {
           "effect_kind": "workspace.resolve",
           "origin_kind": "plan",
-          "origin_name": "demiurge/chat_plan@1"
+          "origin_name": "demiurge/tool_registry_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.list",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_registry_plan@1"
         },
         "decision": "allow"
       },
@@ -64,22 +72,6 @@
           "effect_kind": "workspace.read_bytes",
           "origin_kind": "plan",
           "origin_name": "demiurge/tool_plan@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.read_ref",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/chat_plan@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.read_bytes",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/chat_plan@1"
         },
         "decision": "allow"
       },

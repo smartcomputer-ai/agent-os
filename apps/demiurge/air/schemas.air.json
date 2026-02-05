@@ -73,6 +73,21 @@
   },
   {
     "$kind": "defschema",
+    "name": "demiurge/PendingChatRequest@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "message_refs": { "list": { "hash": {} } },
+        "model": { "text": {} },
+        "provider": { "text": {} },
+        "max_tokens": { "nat": {} },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demiurge/ChatState@1",
     "type": {
       "record": {
@@ -85,6 +100,9 @@
         "max_tokens": { "option": { "nat": {} } },
         "tool_refs": { "option": { "list": { "hash": {} } } },
         "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "pending_chat_requests": {
+          "option": { "list": { "ref": "demiurge/PendingChatRequest@1" } }
+        },
         "pending_outputs": {
           "option": { "list": { "ref": "demiurge/PendingOutput@1" } }
         },
@@ -154,6 +172,27 @@
   },
   {
     "$kind": "defschema",
+    "name": "demiurge/ToolRegistryScanRequested@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolRegistrySnapshot@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "entries": { "list": { "ref": "sys/WorkspaceListEntry@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demiurge/ToolCallParams@1",
     "type": {
       "variant": {
@@ -218,6 +257,7 @@
         "UserMessage": { "ref": "demiurge/UserMessage@1" },
         "ChatResult": { "ref": "demiurge/ChatResult@1" },
         "ToolResult": { "ref": "demiurge/ToolResult@1" },
+        "ToolRegistrySnapshot": { "ref": "demiurge/ToolRegistrySnapshot@1" },
         "BlobGetResult": { "ref": "sys/BlobGetResult@1" },
         "BlobPutResult": { "ref": "sys/BlobPutResult@1" }
       }
