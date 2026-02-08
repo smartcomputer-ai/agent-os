@@ -122,6 +122,61 @@ async fn control_channel_round_trip() {
     let resp = client.request(&evt).await.unwrap();
     assert!(resp.ok, "event-send failed: {:?}", resp.error);
 
+    // journal-list should include domain_event entries
+    let journal_all = RequestEnvelope {
+        v: 1,
+        id: "journal-all".into(),
+        cmd: "journal-list".into(),
+        payload: json!({ "from": 0, "limit": 100 }),
+    };
+    let resp = client.request(&journal_all).await.unwrap();
+    assert!(resp.ok, "journal-list failed: {:?}", resp.error);
+    let entries = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("entries"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        entries.iter().any(|entry| {
+            entry
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .map(|k| k == "domain_event")
+                .unwrap_or(false)
+        }),
+        "journal-list should include domain_event entries"
+    );
+
+    // journal-list filter should restrict to requested kinds
+    let journal_filtered = RequestEnvelope {
+        v: 1,
+        id: "journal-filtered".into(),
+        cmd: "journal-list".into(),
+        payload: json!({ "from": 0, "limit": 100, "kinds": ["domain_event"] }),
+    };
+    let resp = client.request(&journal_filtered).await.unwrap();
+    assert!(resp.ok, "journal-list filtered failed: {:?}", resp.error);
+    let filtered_entries = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("entries"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(!filtered_entries.is_empty(), "expected filtered entries");
+    assert!(
+        filtered_entries.iter().all(|entry| {
+            entry
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .map(|k| k == "domain_event")
+                .unwrap_or(false)
+        }),
+        "filtered journal-list should only include domain_event entries"
+    );
+
     // state-get
     let query = RequestEnvelope {
         v: 1,

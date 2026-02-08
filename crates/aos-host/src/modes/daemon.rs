@@ -63,6 +63,7 @@ pub enum ControlMsg {
     JournalTail {
         from: u64,
         limit: Option<u64>,
+        kinds: Option<Vec<String>>,
         resp: oneshot::Sender<Result<crate::control::JournalTail, HostError>>,
     },
     EventSend {
@@ -423,20 +424,25 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let meta = self.host.kernel().get_journal_head();
                 let _ = resp.send(Ok(meta));
             }
-            ControlMsg::JournalTail { from, limit, resp } => {
+            ControlMsg::JournalTail {
+                from,
+                limit,
+                kinds,
+                resp,
+            } => {
                 let res = (|| -> Result<crate::control::JournalTail, HostError> {
                     let scan = self.host.kernel().tail_scan_after(from)?;
                     let mut entries = Vec::new();
-                    for intent in scan.intents {
-                        entries.push(crate::control::JournalTailEntry::Intent {
-                            seq: intent.seq,
-                            record: intent.record,
-                        });
-                    }
-                    for receipt in scan.receipts {
-                        entries.push(crate::control::JournalTailEntry::Receipt {
-                            seq: receipt.seq,
-                            record: receipt.record,
+                    for entry in scan.entries {
+                        if !journal_kind_matches_filter(entry.kind, kinds.as_deref()) {
+                            continue;
+                        }
+                        let record = serde_json::to_value(entry.record)
+                            .map_err(|e| HostError::External(format!("encode journal record: {e}")))?;
+                        entries.push(crate::control::JournalTailEntry {
+                            kind: journal_kind_name(entry.kind).to_string(),
+                            seq: entry.seq,
+                            record,
                         });
                     }
                     entries.sort_by_key(|entry| entry.seq());
@@ -606,4 +612,38 @@ fn parse_consistency<S: Store + 'static>(host: &WorldHost<S>, s: &str) -> aos_ke
         "at_least" => aos_kernel::Consistency::AtLeast(host.kernel().journal_head()),
         _ => aos_kernel::Consistency::Head,
     }
+}
+
+fn journal_kind_name(kind: aos_kernel::journal::JournalKind) -> &'static str {
+    use aos_kernel::journal::JournalKind;
+    match kind {
+        JournalKind::DomainEvent => "domain_event",
+        JournalKind::EffectIntent => "effect_intent",
+        JournalKind::EffectReceipt => "effect_receipt",
+        JournalKind::CapDecision => "cap_decision",
+        JournalKind::Manifest => "manifest",
+        JournalKind::Snapshot => "snapshot",
+        JournalKind::PolicyDecision => "policy_decision",
+        JournalKind::Governance => "governance",
+        JournalKind::PlanResult => "plan_result",
+        JournalKind::PlanEnded => "plan_ended",
+        JournalKind::Custom => "custom",
+    }
+}
+
+fn journal_kind_matches_filter(
+    kind: aos_kernel::journal::JournalKind,
+    filter: Option<&[String]>,
+) -> bool {
+    let Some(filter) = filter else {
+        return true;
+    };
+    let name = journal_kind_name(kind);
+    filter.iter().any(|raw| {
+        let normalized = raw.trim().to_ascii_lowercase();
+        normalized == name
+            || (normalized == "intent" && name == "effect_intent")
+            || (normalized == "receipt" && name == "effect_receipt")
+            || (normalized == "event" && name == "domain_event")
+    })
 }

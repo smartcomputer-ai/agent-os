@@ -735,6 +735,7 @@ async fn journal_head(State(state): State<HttpState>) -> Result<impl IntoRespons
 struct JournalQuery {
     from: Option<u64>,
     limit: Option<u64>,
+    kinds: Option<String>,
 }
 
 #[utoipa::path(
@@ -752,9 +753,16 @@ async fn journal_tail(
     State(state): State<HttpState>,
     Query(query): Query<JournalQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let kinds = query.kinds.as_ref().map(|raw| {
+        raw.split(',')
+            .filter(|k| !k.is_empty())
+            .map(|k| k.to_string())
+            .collect::<Vec<_>>()
+    });
     let payload = serde_json::json!({
         "from": query.from.unwrap_or(0),
         "limit": query.limit,
+        "kinds": kinds,
     });
     let result = control_call(&state, "journal-list", payload).await?;
     Ok(Json(result))

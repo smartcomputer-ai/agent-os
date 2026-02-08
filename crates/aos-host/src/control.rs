@@ -5,7 +5,6 @@ use aos_cbor::Hash;
 use aos_effects::{EffectKind, EffectReceipt, IntentBuilder, ReceiptStatus};
 use aos_kernel::DefListing;
 use aos_kernel::{KernelError, KernelHeights, ReadMeta};
-use aos_kernel::journal::{EffectIntentRecord, EffectReceiptRecord};
 use aos_kernel::governance::{ManifestPatch, Proposal, ProposalState};
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::PatchDocument;
@@ -58,18 +57,15 @@ pub struct JournalTail {
 }
 
 #[derive(Debug, Serialize, Clone)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum JournalTailEntry {
-    Intent { seq: u64, record: EffectIntentRecord },
-    Receipt { seq: u64, record: EffectReceiptRecord },
+pub struct JournalTailEntry {
+    pub kind: String,
+    pub seq: u64,
+    pub record: serde_json::Value,
 }
 
 impl JournalTailEntry {
     pub fn seq(&self) -> u64 {
-        match self {
-            JournalTailEntry::Intent { seq, .. } => *seq,
-            JournalTailEntry::Receipt { seq, .. } => *seq,
-        }
+        self.seq
     }
 }
 
@@ -269,9 +265,24 @@ pub(crate) async fn handle_request(
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
                 let limit = req.payload.get("limit").and_then(|v| v.as_u64());
+                let kinds = req
+                    .payload
+                    .get("kinds")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>()
+                    });
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::JournalTail { from, limit, resp: tx })
+                    .send(ControlMsg::JournalTail {
+                        from,
+                        limit,
+                        kinds,
+                        resp: tx,
+                    })
                     .await;
                 let inner = rx
                     .await

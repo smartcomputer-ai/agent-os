@@ -210,10 +210,18 @@ pub struct TailReceipt {
     pub record: EffectReceiptRecord,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TailEntry {
+    pub seq: JournalSeq,
+    pub kind: JournalKind,
+    pub record: JournalRecord,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct TailScan {
     pub from: JournalSeq,
     pub to: JournalSeq,
+    pub entries: Vec<TailEntry>,
     pub intents: Vec<TailIntent>,
     pub receipts: Vec<TailReceipt>,
 }
@@ -1871,6 +1879,7 @@ impl<S: Store + 'static> Kernel<S> {
             return Ok(TailScan {
                 from: height,
                 to: head,
+                entries: Vec::new(),
                 intents: Vec::new(),
                 receipts: Vec::new(),
             });
@@ -1880,27 +1889,25 @@ impl<S: Store + 'static> Kernel<S> {
         let mut scan = TailScan {
             from: height,
             to: head,
+            entries: Vec::new(),
             intents: Vec::new(),
             receipts: Vec::new(),
         };
 
         for entry in entries {
-            match entry.kind {
-                JournalKind::EffectIntent => {
-                    let record: EffectIntentRecord = serde_cbor::from_slice(&entry.payload)
-                        .map_err(|err| KernelError::Journal(err.to_string()))?;
-                    scan.intents.push(TailIntent {
-                        seq: entry.seq,
-                        record,
-                    });
+            let record = decode_tail_record(entry.kind, &entry.payload)?;
+            scan.entries.push(TailEntry {
+                seq: entry.seq,
+                kind: entry.kind,
+                record: record.clone(),
+            });
+
+            match record {
+                JournalRecord::EffectIntent(record) => {
+                    scan.intents.push(TailIntent { seq: entry.seq, record });
                 }
-                JournalKind::EffectReceipt => {
-                    let record: EffectReceiptRecord = serde_cbor::from_slice(&entry.payload)
-                        .map_err(|err| KernelError::Journal(err.to_string()))?;
-                    scan.receipts.push(TailReceipt {
-                        seq: entry.seq,
-                        record,
-                    });
+                JournalRecord::EffectReceipt(record) => {
+                    scan.receipts.push(TailReceipt { seq: entry.seq, record });
                 }
                 _ => {}
             }
@@ -2703,6 +2710,49 @@ impl<S: Store + 'static> Kernel<S> {
             self.append_record(JournalRecord::PolicyDecision(record))?;
         }
         Ok(())
+    }
+}
+
+fn decode_tail_record(kind: JournalKind, payload: &[u8]) -> Result<JournalRecord, KernelError> {
+    if let Ok(record) = serde_cbor::from_slice::<JournalRecord>(payload) {
+        return Ok(record);
+    }
+    // Backward-compatible fallback for older payloads that were encoded as raw records.
+    let err = |e: serde_cbor::Error| KernelError::Journal(e.to_string());
+    match kind {
+        JournalKind::DomainEvent => serde_cbor::from_slice(payload)
+            .map(JournalRecord::DomainEvent)
+            .map_err(err),
+        JournalKind::EffectIntent => serde_cbor::from_slice(payload)
+            .map(JournalRecord::EffectIntent)
+            .map_err(err),
+        JournalKind::EffectReceipt => serde_cbor::from_slice(payload)
+            .map(JournalRecord::EffectReceipt)
+            .map_err(err),
+        JournalKind::CapDecision => serde_cbor::from_slice(payload)
+            .map(JournalRecord::CapDecision)
+            .map_err(err),
+        JournalKind::PolicyDecision => serde_cbor::from_slice(payload)
+            .map(JournalRecord::PolicyDecision)
+            .map_err(err),
+        JournalKind::Manifest => serde_cbor::from_slice(payload)
+            .map(JournalRecord::Manifest)
+            .map_err(err),
+        JournalKind::Snapshot => serde_cbor::from_slice(payload)
+            .map(JournalRecord::Snapshot)
+            .map_err(err),
+        JournalKind::Governance => serde_cbor::from_slice(payload)
+            .map(JournalRecord::Governance)
+            .map_err(err),
+        JournalKind::PlanResult => serde_cbor::from_slice(payload)
+            .map(JournalRecord::PlanResult)
+            .map_err(err),
+        JournalKind::PlanEnded => serde_cbor::from_slice(payload)
+            .map(JournalRecord::PlanEnded)
+            .map_err(err),
+        JournalKind::Custom => serde_cbor::from_slice(payload)
+            .map(JournalRecord::Custom)
+            .map_err(err),
     }
 }
 
@@ -4014,8 +4064,19 @@ mod tests {
             .unwrap();
 
         let scan = kernel.tail_scan_after(0).expect("tail scan");
+        assert!(scan.entries.len() >= 2);
         assert_eq!(scan.intents.len(), 1);
         assert_eq!(scan.receipts.len(), 1);
+        assert!(
+            scan.entries
+                .iter()
+                .any(|entry| entry.kind == JournalKind::EffectIntent)
+        );
+        assert!(
+            scan.entries
+                .iter()
+                .any(|entry| entry.kind == JournalKind::EffectReceipt)
+        );
         assert_eq!(scan.intents[0].seq, 1);
         assert_eq!(scan.receipts[0].seq, 2);
         assert_eq!(scan.intents[0].record.intent_hash, [1u8; 32]);
