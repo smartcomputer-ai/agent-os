@@ -162,22 +162,39 @@ function CopyValueButton({ label, value }: { label: string; value: string | null
 export function ChatMessage({ chatId, message }: ChatMessageProps) {
   const isUser = message.role.$tag === "User";
   const [debugOpen, setDebugOpen] = useState(false);
+  const [showRawBlob, setShowRawBlob] = useState(false);
   const { data: blobData } = useBlobGet(message.message_ref ?? "", {
     enabled: !!message.message_ref,
   });
 
   const messageText = useMemo(() => {
     if (blobData) {
+      const decoded = new TextDecoder().decode(blobData);
       try {
-        const blob = JSON.parse(new TextDecoder().decode(blobData)) as unknown;
+        const blob = JSON.parse(decoded) as unknown;
         const text = extractTextFromBlob(blob);
         if (text) return text;
       } catch (e) {
         console.error("Failed to decode message blob:", e);
+        if (decoded.trim().length > 0) {
+          return decoded;
+        }
       }
     }
     return message.text;
   }, [blobData, message.text]);
+
+  const rawBlobText = useMemo(() => {
+    if (!blobData) return null;
+    const decoded = new TextDecoder().decode(blobData);
+    if (!decoded.trim()) return "(empty blob)";
+    try {
+      const parsed = JSON.parse(decoded) as unknown;
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return decoded;
+    }
+  }, [blobData]);
 
   const correlateBy = isUser && message.message_ref
     ? "$value.message_ref"
@@ -261,7 +278,22 @@ export function ChatMessage({ chatId, message }: ChatMessageProps) {
                   <CopyValueButton label="event hash" value={eventHash ?? null} />
                   <CopyValueButton label="intent hash" value={intentHash} />
                   <CopyValueButton label="output ref" value={message.message_ref} />
+                  {message.message_ref && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowRawBlob((v) => !v)}
+                      className="text-[11px] h-6"
+                    >
+                      {showRawBlob ? "Hide Raw Blob" : "Show Raw Blob"}
+                    </Button>
+                  )}
                 </div>
+                {showRawBlob && (
+                  <pre className="max-h-56 overflow-auto rounded border bg-background p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                    {rawBlobText ?? "(blob unavailable)"}
+                  </pre>
+                )}
                 <div className="text-xs text-muted-foreground">
                   waits plan_receipts=
                   {Array.isArray(liveWait.pending_plan_receipts)

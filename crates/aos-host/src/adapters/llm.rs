@@ -478,6 +478,11 @@ fn normalize_responses_input_item<S: Store>(
 }
 
 fn rewrite_message_content_types_for_responses_input(value: &mut serde_json::Value) {
+    let role = value
+        .get("role")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
     let Some(content) = value.get_mut("content") else {
         return;
     };
@@ -494,10 +499,14 @@ fn rewrite_message_content_types_for_responses_input(value: &mut serde_json::Val
             .and_then(|v| v.as_str())
             .is_some_and(|t| t == "output_text")
         {
-            obj.insert(
-                "type".into(),
-                serde_json::Value::String("input_text".into()),
-            );
+            // Responses API requires assistant history items to stay as output_text.
+            // Convert only non-assistant messages to input_text.
+            if role != "assistant" {
+                obj.insert(
+                    "type".into(),
+                    serde_json::Value::String("input_text".into()),
+                );
+            }
         }
     }
 }
@@ -789,4 +798,32 @@ fn normalize_responses_tool_choice(value: serde_json::Value) -> Result<serde_jso
 fn zero_hashref() -> HashRef {
     HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
         .expect("static zero hashref")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_message_content_types_for_responses_input;
+    use serde_json::json;
+
+    #[test]
+    fn rewrite_keeps_assistant_output_text() {
+        let mut value = json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [{ "type": "output_text", "text": "hello" }]
+        });
+        rewrite_message_content_types_for_responses_input(&mut value);
+        assert_eq!(value["content"][0]["type"], "output_text");
+    }
+
+    #[test]
+    fn rewrite_converts_user_output_text_to_input_text() {
+        let mut value = json!({
+            "type": "message",
+            "role": "user",
+            "content": [{ "type": "output_text", "text": "hello" }]
+        });
+        rewrite_message_content_types_for_responses_input(&mut value);
+        assert_eq!(value["content"][0]["type"], "input_text");
+    }
 }

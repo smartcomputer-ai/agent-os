@@ -177,8 +177,12 @@ fn render_human(result: &Value) {
 
 fn json_path_get<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
     let normalized = path.trim();
-    let normalized = normalized.strip_prefix("$.").unwrap_or(normalized);
-    let normalized = normalized.strip_prefix('$').unwrap_or(normalized);
+    // Preserve "$value"/"$tag" AIR union keys while still allowing "$.foo" syntax.
+    let normalized = if let Some(rest) = normalized.strip_prefix("$.") {
+        rest
+    } else {
+        normalized
+    };
     if normalized.is_empty() {
         return Some(value);
     }
@@ -192,4 +196,26 @@ fn json_path_get<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
         current = obj.get(segment)?;
     }
     Some(current)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::json_path_get;
+    use serde_json::json;
+
+    #[test]
+    fn json_path_get_supports_air_union_fields() {
+        let value = json!({
+            "$tag": "UserMessage",
+            "$value": { "request_id": 2 }
+        });
+        assert_eq!(
+            json_path_get(&value, "$value.request_id"),
+            Some(&json!(2))
+        );
+        assert_eq!(
+            json_path_get(&value, "$.value.request_id"),
+            None
+        );
+    }
 }
