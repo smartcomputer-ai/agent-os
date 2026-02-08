@@ -183,6 +183,13 @@ struct ToolRegistryUnchanged {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolRegistryScanRequested {
+    chat_id: String,
+    request_id: u64,
+    known_version: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ToolError {
     chat_id: String,
     request_id: u64,
@@ -371,8 +378,22 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
         return;
     }
 
-    let _ = (chat_id, request_id);
-    emit_chat_request_with_refs(ctx, pending_request, ctx.state.tool_refs.clone());
+    if let Some(existing_refs) = ctx.state.tool_refs.clone() {
+        emit_chat_request_with_refs(ctx, pending_request, Some(existing_refs));
+        return;
+    }
+
+    ctx.state.pending_chat_requests.push(pending_request);
+    let scan = ToolRegistryScanRequested {
+        chat_id,
+        request_id,
+        known_version: ctx.state.tool_registry_version,
+    };
+    let key = request_id.to_be_bytes();
+    ctx.intent("demiurge/ToolRegistryScanRequested@1")
+        .key_bytes(&key)
+        .payload(&scan)
+        .send();
 }
 
 fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
@@ -911,14 +932,73 @@ fn decode_tool_output(bytes: &[u8]) -> String {
     } else {
         (bytes, false)
     };
-    let mut text = match core::str::from_utf8(slice) {
-        Ok(text) => text.to_string(),
-        Err(_) => String::from_utf8_lossy(slice).to_string(),
+
+    // Prefer structured decoding so tool outputs like canonical CBOR manifests
+    // are readable by both UI and the follow-up LLM turn.
+    let mut text = if let Ok(value) = serde_json::from_slice::<JsonValue>(slice) {
+        serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string())
+    } else if let Ok(value) = serde_cbor::from_slice::<serde_cbor::Value>(slice) {
+        let json = cbor_to_json(&value);
+        serde_json::to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+    } else if let Ok(text) = core::str::from_utf8(slice) {
+        text.to_string()
+    } else {
+        String::from_utf8_lossy(slice).to_string()
     };
+
     if truncated {
         text.push_str("\n...[truncated]");
     }
     text
+}
+
+fn cbor_to_json(value: &serde_cbor::Value) -> JsonValue {
+    match value {
+        serde_cbor::Value::Null => JsonValue::Null,
+        serde_cbor::Value::Bool(v) => JsonValue::Bool(*v),
+        serde_cbor::Value::Integer(v) => {
+            if *v >= 0 {
+                JsonValue::from(*v as u64)
+            } else {
+                JsonValue::from(*v as i64)
+            }
+        }
+        serde_cbor::Value::Float(v) => JsonValue::from(*v),
+        serde_cbor::Value::Bytes(bytes) => {
+            if let Ok(text) = core::str::from_utf8(bytes) {
+                JsonValue::String(text.to_string())
+            } else {
+                JsonValue::String(format!("hex:{}", hex::encode(bytes)))
+            }
+        }
+        serde_cbor::Value::Text(v) => JsonValue::String(v.clone()),
+        serde_cbor::Value::Array(items) => JsonValue::Array(items.iter().map(cbor_to_json).collect()),
+        serde_cbor::Value::Map(map) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in map {
+                out.insert(cbor_key_to_string(k), cbor_to_json(v));
+            }
+            JsonValue::Object(out)
+        }
+        serde_cbor::Value::Tag(tag, inner) => {
+            let mut out = serde_json::Map::new();
+            out.insert("$cbor_tag".to_string(), JsonValue::from(*tag));
+            out.insert("value".to_string(), cbor_to_json(inner));
+            JsonValue::Object(out)
+        }
+        _ => JsonValue::String(format!("{value:?}")),
+    }
+}
+
+fn cbor_key_to_string(value: &serde_cbor::Value) -> String {
+    match value {
+        serde_cbor::Value::Text(v) => v.clone(),
+        serde_cbor::Value::Integer(v) => v.to_string(),
+        serde_cbor::Value::Bool(v) => v.to_string(),
+        serde_cbor::Value::Bytes(bytes) => format!("hex:{}", hex::encode(bytes)),
+        serde_cbor::Value::Tag(tag, inner) => format!("tag:{tag}:{}", cbor_key_to_string(inner)),
+        _ => format!("{value:?}"),
+    }
 }
 
 fn build_tool_message_bytes(tool_call_id: &str, output: &str) -> Vec<u8> {
@@ -1001,6 +1081,28 @@ mod tests {
     }
 
     #[test]
+    fn decode_tool_output_decodes_cbor_map_as_json_text() {
+        let cbor_bytes = serde_cbor::to_vec(&serde_json::json!({
+            "routing": {
+                "events": ["demiurge/ChatEvent@1", "sys/BlobGetResult@1"]
+            }
+        }))
+        .expect("cbor");
+        let decoded = decode_tool_output(&cbor_bytes);
+        assert!(decoded.contains("\"routing\""));
+        assert!(decoded.contains("\"events\""));
+        assert!(decoded.contains("demiurge/ChatEvent@1"));
+    }
+
+    #[test]
+    fn decode_tool_output_decodes_json_pretty() {
+        let json_bytes = br#"{"ok":true,"value":42}"#;
+        let decoded = decode_tool_output(json_bytes);
+        assert!(decoded.contains("\"ok\": true"));
+        assert!(decoded.contains("\"value\": 42"));
+    }
+
+    #[test]
     fn chat_created_sets_title_and_created_at() {
         let event = ChatEvent::ChatCreated(ChatCreated {
             chat_id: "chat-1".into(),
@@ -1016,7 +1118,7 @@ mod tests {
     }
 
     #[test]
-    fn user_message_appends_and_emits_request() {
+    fn user_message_without_tool_refs_triggers_registry_scan() {
         let state = ChatState {
             messages: vec![],
             last_request_id: 0,
@@ -1056,16 +1158,68 @@ mod tests {
         assert_eq!(message.message_ref.as_deref(), Some(TEST_HASH));
 
         assert_eq!(output.domain_events.len(), 1);
+        assert_eq!(
+            output.domain_events[0].schema,
+            "demiurge/ToolRegistryScanRequested@1"
+        );
+        let scan: ToolRegistryScanRequested =
+            serde_cbor::from_slice(&output.domain_events[0].value).expect("scan decode");
+        assert_eq!(scan.chat_id, "chat-1");
+        assert_eq!(scan.request_id, 1);
+        assert_eq!(scan.known_version, None);
+
+        assert_eq!(state.pending_chat_requests.len(), 1);
+        let pending = &state.pending_chat_requests[0];
+        assert_eq!(pending.chat_id, "chat-1");
+        assert_eq!(pending.request_id, 1);
+        assert_eq!(pending.message_refs, vec![String::from(TEST_HASH)]);
+        assert_eq!(pending.model, "gpt-mock");
+        assert_eq!(pending.provider, "mock");
+        assert_eq!(pending.max_tokens, 128);
+        assert_eq!(pending.tool_choice, None);
+    }
+
+    #[test]
+    fn user_message_with_cached_tool_refs_emits_chat_request() {
+        let state = ChatState {
+            messages: vec![],
+            last_request_id: 0,
+            title: Some("First chat".into()),
+            created_at_ms: Some(1234),
+            model: None,
+            provider: None,
+            max_tokens: None,
+            tool_refs: Some(vec![TEST_HASH.into()]),
+            tool_registry_version: Some(3),
+            tool_choice: None,
+            pending_chat_requests: vec![],
+            pending_outputs: vec![],
+            pending_tool_outputs: vec![],
+            pending_tool_messages: vec![],
+        };
+        let event = ChatEvent::UserMessage(UserMessage {
+            chat_id: "chat-1".into(),
+            request_id: 1,
+            text: "hello".into(),
+            message_ref: TEST_HASH.into(),
+            model: "gpt-mock".into(),
+            provider: "mock".into(),
+            max_tokens: 128,
+            tool_refs: None,
+            tool_choice: None,
+        });
+        let output = run_with_state(Some(state), event);
+        let state: ChatState =
+            serde_cbor::from_slice(output.state.as_ref().expect("state")).expect("state decode");
+
+        assert_eq!(output.domain_events.len(), 1);
         assert_eq!(output.domain_events[0].schema, REQUEST_SCHEMA);
         let request: ChatRequest =
             serde_cbor::from_slice(&output.domain_events[0].value).expect("request decode");
         assert_eq!(request.chat_id, "chat-1");
         assert_eq!(request.request_id, 1);
-        assert_eq!(request.message_refs, vec![String::from(TEST_HASH)]);
-        assert_eq!(request.model, "gpt-mock");
-        assert_eq!(request.provider, "mock");
-        assert_eq!(request.max_tokens, 128);
-        assert!(request.tool_refs.is_none());
+        assert_eq!(request.tool_refs, Some(vec![String::from(TEST_HASH)]));
+        assert_eq!(request.tool_choice, None);
         assert!(state.pending_chat_requests.is_empty());
     }
 

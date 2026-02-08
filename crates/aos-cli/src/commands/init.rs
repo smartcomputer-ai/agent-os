@@ -37,6 +37,10 @@ pub struct InitArgs {
     /// Overwrite sync file even if it exists
     #[arg(long)]
     pub sync_force: bool,
+
+    /// Start from scratch by deleting <store>/.aos before initializing
+    #[arg(long)]
+    pub fresh: bool,
 }
 
 pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
@@ -45,6 +49,7 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
     let reducer_dir = resolve_opt_path(&world_root, opts.reducer.as_deref(), "reducer");
     let store_root = resolve_opt_path(&world_root, opts.store.as_deref(), "");
     let modules_dir = world_root.join("modules");
+    let store_dir = store_root.join(".aos");
 
     let any_scoped =
         args.dirs || args.manifest || args.manifest_force || args.sync || args.sync_force;
@@ -77,7 +82,15 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
         reducer_root_status
     };
     let modules_status = init_dir(&modules_dir, do_modules_dir)?;
-    let store_status = init_dir(&store_root.join(".aos"), do_dirs)?;
+    let store_was_reset = if args.fresh {
+        reset_store_dir(&store_dir)?
+    } else {
+        false
+    };
+    let mut store_status = init_dir(&store_dir, do_dirs)?;
+    if store_was_reset {
+        store_status = InitStatus::Overwritten;
+    }
 
     let manifest_path = air_dir.join("manifest.air.json");
     let manifest_status = init_file(&manifest_path, do_manifest, args.manifest_force, || {
@@ -113,7 +126,7 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
     );
     println!(
         "  Store:      {} ({})",
-        store_root.join(".aos").display(),
+        store_dir.display(),
         store_status.label()
     );
     println!(
@@ -257,6 +270,17 @@ fn init_dir(path: &Path, enabled: bool) -> Result<InitStatus> {
     } else {
         Ok(InitStatus::Missing)
     }
+}
+
+fn reset_store_dir(path: &Path) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    if !path.is_dir() {
+        anyhow::bail!("store path is not a directory: {}", path.display());
+    }
+    fs::remove_dir_all(path).with_context(|| format!("remove {}", path.display()))?;
+    Ok(true)
 }
 
 fn init_file<F>(path: &Path, enabled: bool, force: bool, write: F) -> Result<InitStatus>
