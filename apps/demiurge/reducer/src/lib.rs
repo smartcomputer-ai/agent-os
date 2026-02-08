@@ -372,10 +372,12 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
     };
 
     if let Some(explicit_refs) = tool_refs {
-        ctx.state.tool_refs = Some(explicit_refs.clone());
-        ctx.state.tool_registry_version = None;
-        emit_chat_request_with_refs(ctx, pending_request, Some(explicit_refs));
-        return;
+        if !explicit_refs.is_empty() {
+            ctx.state.tool_refs = Some(explicit_refs.clone());
+            ctx.state.tool_registry_version = None;
+            emit_chat_request_with_refs(ctx, pending_request, Some(explicit_refs));
+            return;
+        }
     }
 
     if let Some(existing_refs) = ctx.state.tool_refs.clone() {
@@ -1221,6 +1223,47 @@ mod tests {
         assert_eq!(request.tool_refs, Some(vec![String::from(TEST_HASH)]));
         assert_eq!(request.tool_choice, None);
         assert!(state.pending_chat_requests.is_empty());
+    }
+
+    #[test]
+    fn user_message_with_empty_explicit_tool_refs_triggers_registry_scan() {
+        let state = ChatState {
+            messages: vec![],
+            last_request_id: 0,
+            title: Some("First chat".into()),
+            created_at_ms: Some(1234),
+            model: None,
+            provider: None,
+            max_tokens: None,
+            tool_refs: None,
+            tool_registry_version: None,
+            tool_choice: None,
+            pending_chat_requests: vec![],
+            pending_outputs: vec![],
+            pending_tool_outputs: vec![],
+            pending_tool_messages: vec![],
+        };
+        let event = ChatEvent::UserMessage(UserMessage {
+            chat_id: "chat-1".into(),
+            request_id: 1,
+            text: "hello".into(),
+            message_ref: TEST_HASH.into(),
+            model: "gpt-mock".into(),
+            provider: "mock".into(),
+            max_tokens: 128,
+            tool_refs: Some(vec![]),
+            tool_choice: None,
+        });
+        let output = run_with_state(Some(state), event);
+        let state: ChatState =
+            serde_cbor::from_slice(output.state.as_ref().expect("state")).expect("state decode");
+
+        assert_eq!(output.domain_events.len(), 1);
+        assert_eq!(
+            output.domain_events[0].schema,
+            "demiurge/ToolRegistryScanRequested@1"
+        );
+        assert_eq!(state.pending_chat_requests.len(), 1);
     }
 
     #[test]

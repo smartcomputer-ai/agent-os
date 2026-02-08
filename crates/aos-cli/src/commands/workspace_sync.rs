@@ -718,7 +718,7 @@ impl IgnoreMatcher {
             .strip_prefix(&root)
             .map(Path::to_path_buf)
             .unwrap_or_else(|_| PathBuf::new());
-        let gitignore = build_gitignore(&root)?;
+        let gitignore = build_gitignore(&root, &scope)?;
         let config = build_config_ignore(&root, &prefix, patterns)?;
         Ok(Self {
             gitignore,
@@ -769,21 +769,44 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
     None
 }
 
-fn build_gitignore(root: &Path) -> Result<Gitignore> {
+fn build_gitignore(root: &Path, scope: &Path) -> Result<Gitignore> {
     let mut builder = GitignoreBuilder::new(root);
-    let walk = WalkDir::new(root)
+    // Include root + ancestor .gitignore files relevant to `scope`.
+    let mut current = Some(scope);
+    while let Some(dir) = current {
+        add_gitignore_if_exists(&mut builder, dir)?;
+        if dir == root {
+            break;
+        }
+        current = dir.parent();
+    }
+    // Include nested .gitignore files under `scope`.
+    let walk = WalkDir::new(scope)
         .follow_links(false)
         .into_iter()
         .filter_entry(|entry| !is_git_dir(entry));
     for entry in walk {
         let entry = entry?;
         if entry.file_type().is_file() && entry.file_name() == ".gitignore" {
-            if let Some(err) = builder.add(entry.path()) {
-                return Err(anyhow!("parse {}: {err}", entry.path().display()));
-            }
+            add_gitignore_if_exists(&mut builder, entry.path())?;
         }
     }
     builder.build().context("build gitignore matcher")
+}
+
+fn add_gitignore_if_exists(builder: &mut GitignoreBuilder, path: &Path) -> Result<()> {
+    let gitignore_path = if path.file_name().is_some_and(|name| name == ".gitignore") {
+        path.to_path_buf()
+    } else {
+        path.join(".gitignore")
+    };
+    if !gitignore_path.is_file() {
+        return Ok(());
+    }
+    if let Some(err) = builder.add(&gitignore_path) {
+        return Err(anyhow!("parse {}: {err}", gitignore_path.display()));
+    }
+    Ok(())
 }
 
 fn build_config_ignore(root: &Path, prefix: &Path, patterns: &[String]) -> Result<Gitignore> {
@@ -1070,6 +1093,7 @@ fn set_file_mode(path: &Path, mode: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn encode_segment_keeps_safe_tokens() {
@@ -1117,5 +1141,20 @@ mod tests {
     fn encode_relative_path_rejects_empty() {
         assert!(encode_relative_path(Path::new("")).is_err());
         assert!(encode_relative_path(Path::new(".")).is_err());
+    }
+
+    #[test]
+    fn ignore_matcher_ignores_unrelated_gitignore_files() {
+        let temp = TempDir::new().expect("temp dir");
+        let root = temp.path();
+        fs::create_dir_all(root.join(".git")).expect("git dir");
+        fs::create_dir_all(root.join(".venv-cbor")).expect("venv dir");
+        fs::write(root.join(".venv-cbor/.gitignore"), "*\n").expect("venv ignore");
+        let scope = root.join("apps/demiurge/tools");
+        fs::create_dir_all(&scope).expect("scope dir");
+        fs::write(scope.join("tool.json"), "{}").expect("tool file");
+
+        let matcher = IgnoreMatcher::new(&scope, &[]).expect("matcher");
+        assert!(!matcher.is_ignored(Path::new("tool.json"), false));
     }
 }
