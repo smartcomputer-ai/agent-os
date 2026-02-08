@@ -105,7 +105,7 @@ export function ChatMainView({
             <div className="space-y-3 max-w-4xl mx-auto mt-28 mb-24">
               {chatState?.messages.map((message, index) => (
                 <ChatMessage
-                  key={`${message.request_id}-${message.role.$tag}`}
+                  key={`${message.request_id}-${message.role.$tag}-${message.message_ref ?? "inline"}-${index}`}
                   message={message}
                   isLatest={index === chatState.messages.length - 1}
                 />

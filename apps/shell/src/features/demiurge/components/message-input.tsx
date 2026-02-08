@@ -9,8 +9,9 @@ import { cn } from "@/lib/utils";
 
 const TOOL_WORKSPACE = "demiurge";
 const TOOL_FOLDER = "tools";
+const MAX_TOKENS_CAP = 2048;
 
-async function loadToolRefs(): Promise<string[] | null> {
+async function loadToolRefs(): Promise<string[]> {
   try {
     const list = await workspaceList({
       workspace: TOOL_WORKSPACE,
@@ -28,10 +29,10 @@ async function loadToolRefs(): Promise<string[] | null> {
         refs.push(ref.hash);
       }
     }
-    return refs.length ? refs : null;
+    return refs;
   } catch (error) {
     console.warn("Failed to load tool refs from workspace:", error);
-    return null;
+    return [];
   }
 }
 
@@ -73,7 +74,7 @@ export function MessageInput({
 
       const requestId = lastRequestId + 1;
       const toolRefs = await loadToolRefs();
-      const toolChoice = toolRefs ? { $tag: "Auto" as const } : null;
+      const toolChoice = toolRefs.length > 0 ? { $tag: "Auto" as const } : null;
 
       await eventsPostMutation.mutateAsync({
         schema: "demiurge/ChatEvent@1",
@@ -86,7 +87,7 @@ export function MessageInput({
             message_ref: blobResult.hash,
             model: settings.model,
             provider: settings.provider,
-            max_tokens: settings.max_tokens,
+            max_tokens: Math.min(settings.max_tokens, MAX_TOKENS_CAP),
             tool_refs: toolRefs,
             tool_choice: toolChoice,
           },

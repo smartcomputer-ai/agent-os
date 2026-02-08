@@ -10,5 +10,15 @@
       }
     },
     "enforcer": { "module": "sys/CapEnforceLlmBasic@1" }
+  },
+  {
+    "$kind": "defcap",
+    "name": "demiurge/blob@1",
+    "cap_type": "blob",
+    "schema": {
+      "record": {
+        "namespaces": { "option": { "set": { "text": {} } } }
+      }
+    }
   }
 ]

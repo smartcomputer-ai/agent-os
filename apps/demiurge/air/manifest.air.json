@@ -173,6 +173,9 @@
       "name": "demiurge/llm_basic@1"
     },
     {
+      "name": "demiurge/blob@1"
+    },
+    {
       "name": "sys/query@1"
     },
     {
@@ -247,7 +250,7 @@
       },
       {
         "name": "blob_grant",
-        "cap": "sys/blob@1",
+        "cap": "demiurge/blob@1",
         "params": {
           "record": {}
         }

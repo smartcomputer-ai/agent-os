@@ -13,7 +13,6 @@ use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 
 const REQUEST_SCHEMA: &str = "demiurge/ChatRequest@1";
-const TOOL_REGISTRY_SCAN_SCHEMA: &str = "demiurge/ToolRegistryScanRequested@1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct ChatState {
@@ -166,13 +165,6 @@ struct ToolCall {
     id: String,
     name: String,
     arguments_json: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ToolRegistryScanRequested {
-    chat_id: String,
-    request_id: u64,
-    known_version: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -379,21 +371,8 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
         return;
     }
 
-    ctx.state.pending_chat_requests.push(pending_request);
-    if ctx.state.pending_chat_requests.len() > 1 {
-        return;
-    }
-
-    let intent_value = ToolRegistryScanRequested {
-        chat_id,
-        request_id,
-        known_version: ctx.state.tool_registry_version,
-    };
-    let key = request_id.to_be_bytes();
-    ctx.intent(TOOL_REGISTRY_SCAN_SCHEMA)
-        .key_bytes(&key)
-        .payload(&intent_value)
-        .send();
+    let _ = (chat_id, request_id);
+    emit_chat_request_with_refs(ctx, pending_request, ctx.state.tool_refs.clone());
 }
 
 fn handle_chat_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ChatResult) {
@@ -1077,21 +1056,17 @@ mod tests {
         assert_eq!(message.message_ref.as_deref(), Some(TEST_HASH));
 
         assert_eq!(output.domain_events.len(), 1);
-        assert_eq!(output.domain_events[0].schema, TOOL_REGISTRY_SCAN_SCHEMA);
-        let scan: ToolRegistryScanRequested =
-            serde_cbor::from_slice(&output.domain_events[0].value).expect("scan decode");
-        assert_eq!(scan.chat_id, "chat-1");
-        assert_eq!(scan.request_id, 1);
-        assert_eq!(scan.known_version, None);
-
-        assert_eq!(state.pending_chat_requests.len(), 1);
-        let pending = &state.pending_chat_requests[0];
-        assert_eq!(pending.chat_id, "chat-1");
-        assert_eq!(pending.request_id, 1);
-        assert_eq!(pending.message_refs, vec![String::from(TEST_HASH)]);
-        assert_eq!(pending.model, "gpt-mock");
-        assert_eq!(pending.provider, "mock");
-        assert_eq!(pending.max_tokens, 128);
+        assert_eq!(output.domain_events[0].schema, REQUEST_SCHEMA);
+        let request: ChatRequest =
+            serde_cbor::from_slice(&output.domain_events[0].value).expect("request decode");
+        assert_eq!(request.chat_id, "chat-1");
+        assert_eq!(request.request_id, 1);
+        assert_eq!(request.message_refs, vec![String::from(TEST_HASH)]);
+        assert_eq!(request.model, "gpt-mock");
+        assert_eq!(request.provider, "mock");
+        assert_eq!(request.max_tokens, 128);
+        assert!(request.tool_refs.is_none());
+        assert!(state.pending_chat_requests.is_empty());
     }
 
     #[test]
@@ -1223,13 +1198,13 @@ mod tests {
         };
         let event = ChatEvent::ToolRegistrySnapshot(ToolRegistrySnapshot {
             chat_id: "chat-1".into(),
-            request_id: 1,
-            version: Some(2),
-            entries: vec![WorkspaceListEntry {
-                path: "introspect.manifest.json".into(),
-                kind: "file".into(),
-                hash: Some(TEST_HASH.into()),
-                size: None,
+                request_id: 1,
+                version: Some(2),
+                entries: vec![WorkspaceListEntry {
+                    path: "tools/introspect.manifest.json".into(),
+                    kind: "file".into(),
+                    hash: Some(TEST_HASH.into()),
+                    size: None,
                 mode: None,
             }],
         });
