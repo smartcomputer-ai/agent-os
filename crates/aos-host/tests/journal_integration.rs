@@ -360,3 +360,110 @@ fn fs_journal_persists_across_restarts() {
     );
     assert!(!replay_world.kernel.dump_journal().unwrap().is_empty());
 }
+
+/// Trace terminal classification derived from journal + live wait state should match after replay.
+#[test]
+fn trace_terminal_classification_matches_after_replay() {
+    let store = fixtures::new_mem_store();
+    let manifest = fulfillment_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    world
+        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "trace-parity" }))
+        .expect("submit start event");
+    world.tick_n(2).unwrap();
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let event_hash = journal_entries
+        .iter()
+        .find(|entry| entry.kind == JournalKind::DomainEvent)
+        .and_then(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok())
+        .and_then(|record| match record {
+            JournalRecord::DomainEvent(event) => Some(event.event_hash),
+            _ => None,
+        })
+        .expect("domain event hash missing from journal");
+    assert!(
+        !event_hash.is_empty(),
+        "domain event hash should be populated for trace classification"
+    );
+
+    let original_terminal = classify_trace_terminal_state(&world.kernel, &event_hash)
+        .expect("classify terminal state before replay");
+
+    let replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        fulfillment_manifest(&store),
+        Box::new(MemJournal::from_entries(&journal_entries)),
+    )
+    .unwrap();
+
+    let replay_terminal = classify_trace_terminal_state(&replay_world.kernel, &event_hash)
+        .expect("classify terminal state after replay");
+
+    assert_eq!(
+        original_terminal, replay_terminal,
+        "terminal trace classification should be replay-stable"
+    );
+    assert_eq!(
+        original_terminal, "waiting_receipt",
+        "fixture should be pending receipt before external adapter response"
+    );
+}
+
+fn classify_trace_terminal_state(
+    kernel: &aos_kernel::Kernel<helpers::fixtures::TestStore>,
+    event_hash: &str,
+) -> Option<&'static str> {
+    let entries = kernel.dump_journal().ok()?;
+    let root_seq = entries.iter().find_map(|entry| {
+        if entry.kind != JournalKind::DomainEvent {
+            return None;
+        }
+        let record = serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok()?;
+        match record {
+            JournalRecord::DomainEvent(event) if event.event_hash == event_hash => Some(entry.seq),
+            _ => None,
+        }
+    })?;
+
+    let mut has_receipt_error = false;
+    let mut has_plan_error = false;
+    let mut has_window_entries = false;
+    for entry in entries.into_iter().filter(|entry| entry.seq >= root_seq) {
+        let record = serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok()?;
+        has_window_entries = true;
+        if let JournalRecord::EffectReceipt(receipt) = &record {
+            if !matches!(receipt.status, ReceiptStatus::Ok) {
+                has_receipt_error = true;
+            }
+        }
+        if let JournalRecord::PlanEnded(ended) = &record {
+            if matches!(ended.status, aos_kernel::journal::PlanEndStatus::Error) {
+                has_plan_error = true;
+            }
+        }
+    }
+
+    let waiting_receipt_count = kernel.pending_plan_receipts().len()
+        + kernel.pending_reducer_receipts_snapshot().len()
+        + kernel.queued_effects_snapshot().len()
+        + kernel
+            .debug_plan_waits()
+            .iter()
+            .map(|(_, waits)| waits.len())
+            .sum::<usize>();
+    let waiting_event_count = kernel.debug_plan_waiting_events().len();
+
+    Some(if has_receipt_error || has_plan_error {
+        "failed"
+    } else if waiting_receipt_count > 0 {
+        "waiting_receipt"
+    } else if waiting_event_count > 0 {
+        "waiting_event"
+    } else if has_window_entries {
+        "completed"
+    } else {
+        "unknown"
+    })
+}

@@ -15,6 +15,7 @@ use aos_host::fixtures;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
 use aos_host::testhost::TestHost;
+use aos_kernel::journal::{JournalKind, JournalRecord};
 use aos_kernel::{Kernel, KernelConfig, cap_enforcer::CapCheckOutput};
 use aos_store::{FsStore, Store};
 use aos_wasm_abi::PureOutput;
@@ -124,6 +125,153 @@ struct ChatMessage {
 enum ChatRole {
     User,
     Assistant,
+}
+
+#[derive(Debug)]
+struct TraceAssertions {
+    terminal_state: &'static str,
+    waiting_receipt_count: usize,
+    waiting_event_count: usize,
+    policy_denied: bool,
+    cap_denied: bool,
+    has_receipt_error: bool,
+    has_receipt_timeout: bool,
+    has_plan_error: bool,
+}
+
+fn user_message_event_hash(
+    kernel: &aos_kernel::Kernel<FsStore>,
+    chat_id: &str,
+    request_id: u64,
+) -> Result<String> {
+    let entries = kernel.dump_journal().context("dump journal")?;
+    for entry in entries {
+        if entry.kind != JournalKind::DomainEvent {
+            continue;
+        }
+        let record: JournalRecord =
+            serde_cbor::from_slice(&entry.payload).context("decode journal record")?;
+        let JournalRecord::DomainEvent(domain) = record else {
+            continue;
+        };
+        if domain.schema != "demiurge/ChatEvent@1" {
+            continue;
+        }
+        let Ok(value) = serde_cbor::from_slice::<serde_json::Value>(&domain.value) else {
+            continue;
+        };
+        let is_user_message =
+            value.get("$tag").and_then(|v| v.as_str()) == Some("UserMessage");
+        let same_chat = value
+            .get("$value")
+            .and_then(|v| v.get("chat_id"))
+            .and_then(|v| v.as_str())
+            == Some(chat_id);
+        let same_request = value
+            .get("$value")
+            .and_then(|v| v.get("request_id"))
+            .and_then(|v| v.as_u64())
+            == Some(request_id);
+        if is_user_message && same_chat && same_request && !domain.event_hash.is_empty() {
+            return Ok(domain.event_hash);
+        }
+    }
+    anyhow::bail!(
+        "missing demiurge UserMessage root event hash for chat_id={} request_id={}",
+        chat_id,
+        request_id
+    );
+}
+
+fn analyze_trace(kernel: &aos_kernel::Kernel<FsStore>, event_hash: &str) -> Result<TraceAssertions> {
+    let entries = kernel.dump_journal().context("dump journal")?;
+    let root_seq = entries
+        .iter()
+        .find_map(|entry| {
+            if entry.kind != JournalKind::DomainEvent {
+                return None;
+            }
+            let record: JournalRecord = serde_cbor::from_slice(&entry.payload).ok()?;
+            match record {
+                JournalRecord::DomainEvent(domain) if domain.event_hash == event_hash => Some(entry.seq),
+                _ => None,
+            }
+        })
+        .ok_or_else(|| anyhow::anyhow!("trace root event hash not found: {event_hash}"))?;
+
+    let mut has_window_entries = false;
+    let mut policy_denied = false;
+    let mut cap_denied = false;
+    let mut has_receipt_error = false;
+    let mut has_receipt_timeout = false;
+    let mut has_plan_error = false;
+    for entry in entries.into_iter().filter(|entry| entry.seq >= root_seq) {
+        let record: JournalRecord =
+            serde_cbor::from_slice(&entry.payload).context("decode trace window record")?;
+        has_window_entries = true;
+        match record {
+            JournalRecord::PolicyDecision(policy) => {
+                if matches!(
+                    policy.decision,
+                    aos_kernel::journal::PolicyDecisionOutcome::Deny
+                ) {
+                    policy_denied = true;
+                }
+            }
+            JournalRecord::CapDecision(cap) => {
+                if matches!(
+                    cap.decision,
+                    aos_kernel::journal::CapDecisionOutcome::Deny
+                ) {
+                    cap_denied = true;
+                }
+            }
+            JournalRecord::EffectReceipt(receipt) => match receipt.status {
+                ReceiptStatus::Error => has_receipt_error = true,
+                ReceiptStatus::Timeout => has_receipt_timeout = true,
+                ReceiptStatus::Ok => {}
+            },
+            JournalRecord::PlanEnded(ended) => {
+                if matches!(ended.status, aos_kernel::journal::PlanEndStatus::Error) {
+                    has_plan_error = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let waiting_receipt_count = kernel.pending_plan_receipts().len()
+        + kernel.pending_reducer_receipts_snapshot().len()
+        + kernel.queued_effects_snapshot().len()
+        + kernel
+            .debug_plan_waits()
+            .iter()
+            .map(|(_, waits)| waits.len())
+            .sum::<usize>();
+    let waiting_event_count = kernel.debug_plan_waiting_events().len();
+
+    let terminal_state = if has_receipt_error || has_receipt_timeout || has_plan_error {
+        "failed"
+    } else if waiting_receipt_count > 0 {
+        "waiting_receipt"
+    } else if waiting_event_count > 0 {
+        "waiting_event"
+    } else if has_window_entries {
+        "completed"
+    } else {
+        "unknown"
+    };
+
+    Ok(TraceAssertions {
+        terminal_state,
+        waiting_receipt_count,
+        waiting_event_count,
+        policy_denied,
+        cap_denied,
+        has_receipt_error,
+        has_receipt_timeout,
+        has_plan_error,
+    })
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -291,6 +439,38 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         call_count.load(Ordering::SeqCst) >= 2,
         "expected llm adapter to be called twice"
     );
+
+    // Trace-driven assertions: verify the request lineage is complete and not stuck/denied.
+    let root_hash = user_message_event_hash(host.kernel(), "chat-1", 1)?;
+    let trace = analyze_trace(host.kernel(), &root_hash)?;
+    assert_eq!(
+        trace.terminal_state, "completed",
+        "trace terminal state should be completed for successful flow: {:?}",
+        trace
+    );
+    assert_eq!(
+        trace.waiting_receipt_count, 0,
+        "trace should not have pending receipt waits at end: {:?}",
+        trace
+    );
+    assert_eq!(
+        trace.waiting_event_count, 0,
+        "trace should not have pending event waits at end: {:?}",
+        trace
+    );
+    assert!(!trace.policy_denied, "unexpected policy deny in trace: {:?}", trace);
+    assert!(!trace.cap_denied, "unexpected capability deny in trace: {:?}", trace);
+    assert!(
+        !trace.has_receipt_error,
+        "unexpected error receipt in trace: {:?}",
+        trace
+    );
+    assert!(
+        !trace.has_receipt_timeout,
+        "unexpected timeout receipt in trace: {:?}",
+        trace
+    );
+    assert!(!trace.has_plan_error, "unexpected plan error in trace: {:?}", trace);
 
     Ok(())
 }

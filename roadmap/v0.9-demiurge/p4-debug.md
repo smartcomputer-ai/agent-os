@@ -3,7 +3,7 @@
 **Priority**: P4  
 **Effort**: Medium  
 **Risk if deferred**: High (feature work stays slow because failures are opaque)  
-**Status**: In Progress
+**Status**: Complete
 
 ## Goal
 
@@ -171,6 +171,10 @@ Completed:
   - `apps/demiurge/scripts/smoke_introspect_manifest.sh` now emits debug artifacts on failure:
     - `journal-tail.json`
     - best-effort `trace.json` for latest Demiurge domain event
+- Phase 4 replay parity guardrail:
+  - Added replay parity test in `crates/aos-host/tests/journal_integration.rs` asserting trace terminal classification matches before/after replay.
+- Phase 4 trace-driven Demiurge e2e guardrail:
+  - `crates/aos-host/tests/demiurge_introspect_manifest_e2e.rs` now asserts trace terminal state/reason signals for request lineage (completed, no pending waits, no deny/error/timeout).
 
 Remaining:
-- Replay parity test for trace classification and broader trace-driven e2e assertions.
+- None for P4 baseline.
