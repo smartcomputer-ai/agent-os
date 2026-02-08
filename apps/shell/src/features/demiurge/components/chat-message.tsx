@@ -11,6 +11,19 @@ interface ChatMessageProps {
   isLatest?: boolean;
 }
 
+type ToolActivity = {
+  kind: "call" | "result";
+  title: string;
+  details: string | null;
+  preview: string | null;
+};
+
+function previewText(text: string, max = 180): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= max) return collapsed;
+  return `${collapsed.slice(0, max - 1)}…`;
+}
+
 function extractTextFromContent(content: unknown): string[] {
   if (typeof content === "string") return [content];
   if (!Array.isArray(content)) return [];
@@ -66,6 +79,57 @@ function extractTextFromBlob(blob: unknown): string | null {
     const content = (blob as { content?: unknown }).content;
     const parts = extractTextFromContent(content);
     return parts.length ? parts.join("\n\n") : null;
+  }
+  return null;
+}
+
+function extractToolActivityFromBlob(blob: unknown): ToolActivity | null {
+  const calls: string[] = [];
+  const outputs: string[] = [];
+
+  const collectFromItem = (item: unknown) => {
+    if (!item || typeof item !== "object") return;
+    const obj = item as Record<string, unknown>;
+    const type = obj.type;
+    if (type === "function_call" || type === "tool_call") {
+      const name = typeof obj.name === "string" ? obj.name : "unknown_tool";
+      calls.push(name);
+      return;
+    }
+    if (type === "function_call_output") {
+      const output = obj.output;
+      if (typeof output === "string" && output.trim().length > 0) {
+        outputs.push(output);
+      }
+    }
+  };
+
+  if (Array.isArray(blob)) {
+    for (const item of blob) collectFromItem(item);
+  } else {
+    collectFromItem(blob);
+  }
+
+  if (outputs.length > 0) {
+    const details = outputs.join("\n\n");
+    return {
+      kind: "result",
+      title: "Tool result",
+      details,
+      preview: previewText(details),
+    };
+  }
+  if (calls.length > 0) {
+    const uniqueCalls = [...new Set(calls)];
+    return {
+      kind: "call",
+      title:
+        uniqueCalls.length === 1
+          ? `Tool call: ${uniqueCalls[0]}`
+          : `Tool calls: ${uniqueCalls.join(", ")}`,
+      details: null,
+      preview: null,
+    };
   }
   return null;
 }
@@ -163,38 +227,42 @@ export function ChatMessage({ chatId, message }: ChatMessageProps) {
   const isUser = message.role.$tag === "User";
   const [debugOpen, setDebugOpen] = useState(false);
   const [showRawBlob, setShowRawBlob] = useState(false);
+  const [toolDetailsOpen, setToolDetailsOpen] = useState(false);
   const { data: blobData } = useBlobGet(message.message_ref ?? "", {
     enabled: !!message.message_ref,
   });
 
-  const messageText = useMemo(() => {
+  const parsedBlob = useMemo(() => {
     if (blobData) {
       const decoded = new TextDecoder().decode(blobData);
       try {
         const blob = JSON.parse(decoded) as unknown;
+        const toolActivity = extractToolActivityFromBlob(blob);
         const text = extractTextFromBlob(blob);
-        if (text) return text;
+        return {
+          messageText: text,
+          rawBlobText: JSON.stringify(blob, null, 2),
+          toolActivity,
+        };
       } catch (e) {
         console.error("Failed to decode message blob:", e);
-        if (decoded.trim().length > 0) {
-          return decoded;
-        }
+        return {
+          messageText: decoded.trim().length > 0 ? decoded : null,
+          rawBlobText: decoded.trim().length > 0 ? decoded : "(empty blob)",
+          toolActivity: null,
+        };
       }
     }
-    return message.text;
-  }, [blobData, message.text]);
-
-  const rawBlobText = useMemo(() => {
-    if (!blobData) return null;
-    const decoded = new TextDecoder().decode(blobData);
-    if (!decoded.trim()) return "(empty blob)";
-    try {
-      const parsed = JSON.parse(decoded) as unknown;
-      return JSON.stringify(parsed, null, 2);
-    } catch {
-      return decoded;
-    }
+    return {
+      messageText: message.text,
+      rawBlobText: null as string | null,
+      toolActivity: null as ToolActivity | null,
+    };
   }, [blobData]);
+  const messageText = parsedBlob.messageText ?? message.text;
+  const rawBlobText = parsedBlob.rawBlobText;
+  const toolActivity = parsedBlob.toolActivity;
+  const isToolActivity = !isUser && toolActivity !== null;
 
   const correlateBy = isUser && message.message_ref
     ? "$value.message_ref"
@@ -235,15 +303,47 @@ export function ChatMessage({ chatId, message }: ChatMessageProps) {
   return (
     <div
       className={cn(
-        "flex gap-3 p-3 rounded-lg",
-        isUser ? "bg-primary/10 ml-12" : "bg-card/80 mr-12",
+        "flex gap-3 rounded-lg",
+        isToolActivity
+          ? "mr-12 px-1 py-1"
+          : isUser
+            ? "bg-primary/10 ml-12 p-3"
+            : "bg-card/80 mr-12 p-3",
       )}
     >
       <div className="flex-1">
         <div className="text-xs text-muted-foreground mb-1">
-          {isUser ? "You" : "Assistant"}
+          {isToolActivity ? "Assistant tool" : isUser ? "You" : "Assistant"}
         </div>
-        <div className="text-sm whitespace-pre-wrap">{messageText}</div>
+        {isToolActivity && toolActivity ? (
+          <div className="rounded-md border border-border/70 bg-muted/25 px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-medium">{toolActivity.title}</div>
+              {toolActivity.details && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-[11px] h-6"
+                  onClick={() => setToolDetailsOpen((v) => !v)}
+                >
+                  {toolDetailsOpen ? "Hide details" : "Show details"}
+                </Button>
+              )}
+            </div>
+            {toolActivity.preview && (
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {toolActivity.preview}
+              </div>
+            )}
+            {toolActivity.details && toolDetailsOpen && (
+              <pre className="mt-2 max-h-56 overflow-auto rounded border bg-background p-2 text-[11px] font-mono whitespace-pre-wrap break-all">
+                {toolActivity.details}
+              </pre>
+            )}
+          </div>
+        ) : (
+          <div className="text-sm whitespace-pre-wrap">{messageText}</div>
+        )}
         <div className="mt-2 flex items-center gap-2">
           <Button
             size="sm"
