@@ -18,7 +18,19 @@ use super::try_control_client;
 pub struct TraceArgs {
     /// Root domain event hash to trace
     #[arg(long)]
-    pub event_hash: String,
+    pub event_hash: Option<String>,
+
+    /// Root event schema for correlation mode
+    #[arg(long)]
+    pub schema: Option<String>,
+
+    /// Correlation field path (example: $value.chat_id)
+    #[arg(long)]
+    pub correlate_by: Option<String>,
+
+    /// Correlation value as JSON (fallback: plain string)
+    #[arg(long)]
+    pub value: Option<String>,
 
     /// Maximum journal records included around the trace
     #[arg(long)]
@@ -42,6 +54,29 @@ pub struct TraceArgs {
 }
 
 pub async fn cmd_trace(opts: &WorldOpts, args: &TraceArgs) -> Result<()> {
+    let correlation_value = if let Some(raw) = &args.value {
+        serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.clone()))
+    } else {
+        Value::Null
+    };
+    match (
+        args.event_hash.is_some(),
+        args.schema.is_some(),
+        args.correlate_by.is_some(),
+        args.value.is_some(),
+    ) {
+        (true, false, false, false) => {}
+        (false, true, true, true) => {}
+        (false, false, false, false) => {
+            anyhow::bail!("trace requires either --event-hash or --schema + --correlate-by + --value");
+        }
+        _ => {
+            anyhow::bail!(
+                "trace requires exactly one mode: --event-hash OR --schema + --correlate-by + --value"
+            );
+        }
+    }
+
     let dirs = resolve_dirs(opts)?;
     let mut client = try_control_client(&dirs).await.ok_or_else(|| {
         if matches!(opts.mode, Mode::Daemon) {
@@ -67,6 +102,9 @@ pub async fn cmd_trace(opts: &WorldOpts, args: &TraceArgs) -> Result<()> {
             cmd: "trace-get".into(),
             payload: json!({
                 "event_hash": args.event_hash,
+                "schema": args.schema,
+                "correlate_by": args.correlate_by,
+                "value": if args.value.is_some() { Some(correlation_value.clone()) } else { None },
                 "window_limit": args.window_limit,
             }),
         };

@@ -16,6 +16,7 @@ use aos_cbor::Hash;
 use aos_effects::{EffectIntent, EffectReceipt};
 use aos_kernel::StateReader;
 use aos_store::Store;
+use base64::Engine as _;
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -68,7 +69,10 @@ pub enum ControlMsg {
         resp: oneshot::Sender<Result<crate::control::JournalTail, HostError>>,
     },
     TraceGet {
-        event_hash: String,
+        event_hash: Option<String>,
+        schema: Option<String>,
+        correlate_by: Option<String>,
+        correlate_value: Option<serde_json::Value>,
         window_limit: Option<u64>,
         resp: oneshot::Sender<Result<serde_json::Value, HostError>>,
     },
@@ -466,40 +470,82 @@ impl<S: Store + 'static> WorldDaemon<S> {
             }
             ControlMsg::TraceGet {
                 event_hash,
+                schema,
+                correlate_by,
+                correlate_value,
                 window_limit,
                 resp,
             } => {
                 let res = (|| -> Result<serde_json::Value, HostError> {
                     let entries = self.host.kernel().dump_journal()?;
                     let mut root_seq: Option<u64> = None;
-                    let mut root_record_json = serde_json::Value::Null;
+                    let mut root_domain: Option<aos_kernel::journal::DomainEventRecord> = None;
 
-                    for entry in &entries {
-                        if entry.kind != aos_kernel::journal::JournalKind::DomainEvent {
-                            continue;
+                    if let Some(hash) = event_hash.clone() {
+                        for entry in &entries {
+                            if entry.kind != aos_kernel::journal::JournalKind::DomainEvent {
+                                continue;
+                            }
+                            let Ok(record) = serde_cbor::from_slice::<aos_kernel::journal::JournalRecord>(
+                                &entry.payload,
+                            ) else {
+                                continue;
+                            };
+                            let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record else {
+                                continue;
+                            };
+                            if domain.event_hash == hash {
+                                root_seq = Some(entry.seq);
+                                root_domain = Some(domain);
+                                break;
+                            }
                         }
-                        let Ok(record) = serde_cbor::from_slice::<aos_kernel::journal::JournalRecord>(
-                            &entry.payload,
-                        ) else {
-                            continue;
-                        };
-                        let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record else {
-                            continue;
-                        };
-                        if domain.event_hash == event_hash {
-                            root_seq = Some(entry.seq);
-                            root_record_json = serde_json::to_value(&domain).map_err(|e| {
-                                HostError::External(format!("encode root event record: {e}"))
-                            })?;
-                            break;
+                    } else if let (Some(schema), Some(correlate_by), Some(correlate_value)) =
+                        (schema.clone(), correlate_by.clone(), correlate_value.clone())
+                    {
+                        for entry in entries.iter().rev() {
+                            if entry.kind != aos_kernel::journal::JournalKind::DomainEvent {
+                                continue;
+                            }
+                            let Ok(record) = serde_cbor::from_slice::<aos_kernel::journal::JournalRecord>(
+                                &entry.payload,
+                            ) else {
+                                continue;
+                            };
+                            let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record else {
+                                continue;
+                            };
+                            if domain.schema != schema {
+                                continue;
+                            }
+                            let Ok(value_json) =
+                                serde_cbor::from_slice::<serde_json::Value>(&domain.value)
+                            else {
+                                continue;
+                            };
+                            let Some(found) = json_path_get(&value_json, &correlate_by) else {
+                                continue;
+                            };
+                            if found == &correlate_value {
+                                root_seq = Some(entry.seq);
+                                root_domain = Some(domain);
+                                break;
+                            }
                         }
                     }
 
+                    let root_domain = root_domain.ok_or_else(|| {
+                        if let Some(hash) = event_hash.clone() {
+                            HostError::External(format!("trace root event_hash '{}' not found", hash))
+                        } else {
+                            HostError::External("trace root event not found for correlation query".into())
+                        }
+                    })?;
                     let root_seq = root_seq.ok_or_else(|| {
-                        HostError::External(format!(
-                            "trace root event_hash '{}' not found",
-                            event_hash
-                        ))
+                        HostError::External("trace root sequence missing".into())
+                    })?;
+                    let root_record_json = serde_json::to_value(&root_domain).map_err(|e| {
+                        HostError::External(format!("encode root event record: {e}"))
                     })?;
 
                     let limit = window_limit.unwrap_or(400) as usize;
@@ -564,10 +610,22 @@ impl<S: Store + 'static> WorldDaemon<S> {
                     };
 
                     let meta = self.host.kernel().get_journal_head();
+                    let root_value_json =
+                        serde_cbor::from_slice::<serde_json::Value>(&root_domain.value).ok();
                     Ok(json!({
                         "query": {
                             "event_hash": event_hash,
+                            "schema": schema,
+                            "correlate_by": correlate_by,
+                            "value": correlate_value,
                             "window_limit": window_limit.unwrap_or(400),
+                        },
+                        "root": {
+                            "schema": root_domain.schema,
+                            "event_hash": root_domain.event_hash,
+                            "seq": root_seq,
+                            "key_b64": root_domain.key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
+                            "value": root_value_json,
                         },
                         "root_event": {
                             "seq": root_seq,
@@ -814,6 +872,25 @@ fn journal_kind_matches_filter(
             || (normalized == "receipt" && name == "effect_receipt")
             || (normalized == "event" && name == "domain_event")
     })
+}
+
+fn json_path_get<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let normalized = path.trim();
+    let normalized = normalized.strip_prefix("$.").unwrap_or(normalized);
+    let normalized = normalized.strip_prefix('$').unwrap_or(normalized);
+    if normalized.is_empty() {
+        return Some(value);
+    }
+
+    let mut current = value;
+    for segment in normalized.split('.') {
+        if segment.is_empty() {
+            continue;
+        }
+        let obj = current.as_object()?;
+        current = obj.get(segment)?;
+    }
+    Some(current)
 }
 
 fn hash_bytes_hex(hash: &[u8; 32]) -> String {

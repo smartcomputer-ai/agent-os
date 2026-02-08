@@ -29,7 +29,14 @@ export const queryKeys = {
   journalTail: (params?: JournalTailQuery) =>
     ["journal_tail", params ?? {}] as const,
   debugTrace: (params: DebugTraceQuery) =>
-    ["debug_trace", params.event_hash, params.window_limit ?? null] as const,
+    [
+      "debug_trace",
+      params.event_hash ?? null,
+      params.schema ?? null,
+      params.correlate_by ?? null,
+      params.value ?? null,
+      params.window_limit ?? null,
+    ] as const,
   manifest: (params?: ManifestQuery) => ["manifest", params ?? {}] as const,
   stateGet: (path: StateGetPath, query?: StateGetQuery) =>
     ["state_get", path.reducer, query ?? {}] as const,

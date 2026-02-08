@@ -162,11 +162,15 @@ Completed:
 - Phase 2 CLI baseline:
   - `aos journal tail --from --limit --kinds [--out]`
   - `aos trace --event-hash [--window-limit] [--follow] [--out]`
+  - `aos trace --schema --correlate-by --value` correlation mode
+- Phase 3 shell debug UX baseline:
+  - Per-message Debug drawer in Demiurge chat.
+  - Drawer fetches `/api/debug/trace` using generic correlation fields.
+  - Shows timeline, wait state, copyable hashes, and basic failure hints.
 - Phase 4 initial smoke artifact support:
   - `apps/demiurge/scripts/smoke_introspect_manifest.sh` now emits debug artifacts on failure:
     - `journal-tail.json`
     - best-effort `trace.json` for latest Demiurge domain event
 
 Remaining:
-- Shell Debug drawer (Phase 3 thin adapter) wired to `/api/debug/trace`.
 - Replay parity test for trace classification and broader trace-driven e2e assertions.

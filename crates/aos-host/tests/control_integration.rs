@@ -231,9 +231,30 @@ async fn control_channel_round_trip() {
     assert!(resp.ok, "trace-get failed: {:?}", resp.error);
     let trace = resp.result.expect("trace result");
     assert!(trace.get("root_event").is_some());
+    assert!(trace.get("root").is_some());
     assert!(trace.get("journal_window").is_some());
     assert!(trace.get("live_wait").is_some());
     assert!(trace.get("terminal_state").is_some());
+
+    // trace-get by correlation (schema + field + value)
+    let trace = RequestEnvelope {
+        v: 1,
+        id: "trace-correlation".into(),
+        cmd: "trace-get".into(),
+        payload: json!({
+            "schema": START_SCHEMA,
+            "correlate_by": "id",
+            "value": "x",
+            "window_limit": 64
+        }),
+    };
+    let resp = client.request(&trace).await.unwrap();
+    assert!(resp.ok, "trace-get correlation failed: {:?}", resp.error);
+    let trace = resp.result.expect("trace correlation result");
+    assert_eq!(trace["query"]["schema"], START_SCHEMA);
+    assert_eq!(trace["query"]["correlate_by"], "id");
+    assert_eq!(trace["query"]["value"], "x");
+    assert_eq!(trace["root"]["event_hash"], event_hash);
 
     // journal-list should include domain_event entries
     // state-get

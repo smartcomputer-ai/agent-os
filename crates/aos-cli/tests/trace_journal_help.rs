@@ -7,7 +7,15 @@ fn trace_help_mentions_debug_flags() {
     assert!(output.status.success(), "trace --help should succeed");
     let text = String::from_utf8_lossy(&output.stdout);
 
-    for needle in ["--event-hash", "--follow", "--out", "--window-limit"] {
+    for needle in [
+        "--event-hash",
+        "--schema",
+        "--correlate-by",
+        "--value",
+        "--follow",
+        "--out",
+        "--window-limit",
+    ] {
         assert!(
             text.contains(needle),
             "trace help output should contain '{needle}'"

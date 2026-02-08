@@ -296,13 +296,49 @@ pub(crate) async fn handle_request(
                     .payload
                     .get("event_hash")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing event_hash"))?;
+                    .map(|s| s.to_string());
+                let schema = req
+                    .payload
+                    .get("schema")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let correlate_by = req
+                    .payload
+                    .get("correlate_by")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let correlate_value = req
+                    .payload
+                    .get("value")
+                    .filter(|v| !v.is_null())
+                    .cloned();
+                match (
+                    event_hash.is_some(),
+                    schema.is_some(),
+                    correlate_by.is_some(),
+                    correlate_value.is_some(),
+                ) {
+                    (true, false, false, false) => {}
+                    (false, true, true, true) => {}
+                    (false, false, false, false) => {
+                        return Err(ControlError::invalid_request(
+                            "trace-get requires either event_hash or schema+correlate_by+value",
+                        ));
+                    }
+                    _ => {
+                        return Err(ControlError::invalid_request(
+                            "trace-get requires exactly one mode: event_hash or schema+correlate_by+value",
+                        ));
+                    }
+                }
                 let window_limit = req.payload.get("window_limit").and_then(|v| v.as_u64());
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
                     .send(ControlMsg::TraceGet {
                         event_hash,
+                        schema,
+                        correlate_by,
+                        correlate_value,
                         window_limit,
                         resp: tx,
                     })

@@ -52,7 +52,10 @@ import type {
 } from "./apiTypes";
 
 export interface DebugTraceQuery {
-  event_hash: string;
+  event_hash?: string;
+  schema?: string;
+  correlate_by?: string;
+  value?: string;
   window_limit?: number;
 }
 

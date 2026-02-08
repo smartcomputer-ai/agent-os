@@ -744,7 +744,10 @@ struct JournalQuery {
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 struct DebugTraceQuery {
-    event_hash: String,
+    event_hash: Option<String>,
+    schema: Option<String>,
+    correlate_by: Option<String>,
+    value: Option<String>,
     window_limit: Option<u64>,
 }
 
@@ -793,8 +796,16 @@ async fn debug_trace_get(
     State(state): State<HttpState>,
     Query(query): Query<DebugTraceQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let value = query.value.and_then(|raw| {
+        serde_json::from_str::<serde_json::Value>(&raw)
+            .ok()
+            .or_else(|| Some(serde_json::Value::String(raw)))
+    });
     let payload = serde_json::json!({
         "event_hash": query.event_hash,
+        "schema": query.schema,
+        "correlate_by": query.correlate_by,
+        "value": value,
         "window_limit": query.window_limit,
     });
     let result = control_call(&state, "trace-get", payload).await?;
