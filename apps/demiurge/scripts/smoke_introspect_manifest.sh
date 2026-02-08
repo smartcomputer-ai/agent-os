@@ -7,6 +7,8 @@ REPO_DIR="$(cd "${WORLD_DIR}/../.." && pwd)"
 
 export AOS_WORLD="${WORLD_DIR}"
 export AOS_TIMEOUT_MS="${AOS_TIMEOUT_MS:-180000}"
+# Ensure this smoke run is isolated to the demiurge world layout.
+unset AOS_STORE AOS_AIR AOS_REDUCER AOS_CONTROL
 
 if [ -f "${WORLD_DIR}/.env" ]; then
   set -a
