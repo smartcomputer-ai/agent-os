@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Bug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBlobGet } from "@/sdk/queries";
 import { useDebugTrace } from "@/sdk/queries";
@@ -312,8 +313,34 @@ export function ChatMessage({ chatId, message }: ChatMessageProps) {
       )}
     >
       <div className="flex-1">
-        <div className="text-xs text-muted-foreground mb-1">
-          {isToolActivity ? "Assistant tool" : isUser ? "You" : "Assistant"}
+        <div className="mb-1 flex items-start justify-between gap-2">
+          <div className="text-xs text-muted-foreground">
+            {isToolActivity ? "Assistant tool" : isUser ? "You" : "Assistant"}
+          </div>
+          <div className="flex items-center justify-end gap-2 text-[11px] text-muted-foreground">
+            {debugOpen && (
+              <>
+                <span className="truncate max-w-[22rem]">
+                  chat={chatId} request={message.request_id}
+                </span>
+                {message.token_usage && (
+                  <span>
+                    {message.token_usage.prompt + message.token_usage.completion} tokens
+                  </span>
+                )}
+              </>
+            )}
+            <Button
+              size="icon"
+              variant="outline"
+              onClick={() => setDebugOpen((v) => !v)}
+              className="h-6 w-6 shrink-0"
+              aria-label={debugOpen ? "Hide debug" : "Show debug"}
+              title={debugOpen ? "Hide Debug" : "Show Debug"}
+            >
+              <Bug className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
         {isToolActivity && toolActivity ? (
           <div className="rounded-md border border-border/70 bg-muted/25 px-3 py-2">
@@ -344,19 +371,6 @@ export function ChatMessage({ chatId, message }: ChatMessageProps) {
         ) : (
           <div className="text-sm whitespace-pre-wrap">{messageText}</div>
         )}
-        <div className="mt-2 flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setDebugOpen((v) => !v)}
-            className="text-[11px] h-6"
-          >
-            {debugOpen ? "Hide Debug" : "Debug"}
-          </Button>
-          <span className="text-[11px] text-muted-foreground">
-            chat={chatId} request={message.request_id}
-          </span>
-        </div>
         {debugOpen && (
           <div className="mt-2 rounded border bg-muted/20 p-2 space-y-2">
             {traceQuery.isLoading && (
@@ -431,11 +445,6 @@ export function ChatMessage({ chatId, message }: ChatMessageProps) {
                 </div>
               </>
             )}
-          </div>
-        )}
-        {message.token_usage && (
-          <div className="text-xs text-muted-foreground mt-2">
-            {message.token_usage.prompt + message.token_usage.completion} tokens
           </div>
         )}
       </div>
