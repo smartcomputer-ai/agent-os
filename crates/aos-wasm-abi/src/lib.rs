@@ -269,8 +269,8 @@ mod tests {
             entropy: vec![0x11; 64],
             event_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
                 .into(),
-            manifest_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-                .into(),
+            manifest_hash:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             reducer: "com.acme/Reducer@1".into(),
             key: Some(vec![0x01, 0x02]),
             cell_mode: true,
@@ -296,8 +296,8 @@ mod tests {
             entropy: vec![0x11; 64],
             event_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
                 .into(),
-            manifest_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-                .into(),
+            manifest_hash:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             reducer: "com.acme/Reducer@1".into(),
             key: None,
             cell_mode: false,
@@ -333,8 +333,8 @@ mod tests {
         let ctx = PureContext {
             logical_now_ns: 9,
             journal_height: 3,
-            manifest_hash: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-                .into(),
+            manifest_hash:
+                "sha256:2222222222222222222222222222222222222222222222222222222222222222".into(),
             module: "com.acme/Pure@1".into(),
         };
         let ctx_bytes = serde_cbor::to_vec(&ctx).expect("ctx bytes");

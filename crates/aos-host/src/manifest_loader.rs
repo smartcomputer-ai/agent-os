@@ -343,7 +343,9 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in ["schemas", "modules", "plans", "caps", "policies", "effects", "secrets"] {
+    for key in [
+        "schemas", "modules", "plans", "caps", "policies", "effects", "secrets",
+    ] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {

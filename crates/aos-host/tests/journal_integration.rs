@@ -1,12 +1,12 @@
 use aos_air_exec::Value as ExprValue;
-use aos_air_types::{EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch, PolicyRule};
+use aos_air_types::{
+    EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch, PolicyRule,
+};
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
-use aos_kernel::journal::{
-    IntentOriginRecord, JournalKind, JournalRecord, PolicyDecisionOutcome,
-};
+use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord, PolicyDecisionOutcome};
 use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 use serde_cbor;
 use serde_cbor::Value as CborValue;
@@ -272,8 +272,7 @@ fn cap_decision_includes_grant_hash() {
 
     let params_cbor =
         aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new())).expect("params cbor");
-    let expected =
-        compute_grant_hash("sys/http.out@1", "http.out", &params_cbor, None);
+    let expected = compute_grant_hash("sys/http.out@1", "http.out", &params_cbor, None);
     assert_eq!(decision.grant_hash, expected);
 }
 

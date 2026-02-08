@@ -109,10 +109,7 @@ impl PureModule for CapEnforceWorkspace {
             }
         };
         if !allowlist_contains(&cap_params.ops, op, |v| v.to_lowercase()) {
-            return Ok(deny(
-                "op_not_allowed",
-                format!("op '{op}' not allowed"),
-            ));
+            return Ok(deny("op_not_allowed", format!("op '{op}' not allowed")));
         }
 
         match input.effect_kind.as_str() {
@@ -123,9 +120,8 @@ impl PureModule for CapEnforceWorkspace {
                         return Ok(deny("effect_params_invalid", err.to_string()));
                     }
                 };
-                if !allowlist_contains(&cap_params.workspaces, &params.workspace, |v| {
-                    v.to_string()
-                }) {
+                if !allowlist_contains(&cap_params.workspaces, &params.workspace, |v| v.to_string())
+                {
                     return Ok(deny(
                         "workspace_not_allowed",
                         format!("workspace '{}' not allowed", params.workspace),
@@ -139,9 +135,8 @@ impl PureModule for CapEnforceWorkspace {
                         return Ok(deny("effect_params_invalid", err.to_string()));
                     }
                 };
-                if !allowlist_contains(&cap_params.workspaces, &params.workspace, |v| {
-                    v.to_string()
-                }) {
+                if !allowlist_contains(&cap_params.workspaces, &params.workspace, |v| v.to_string())
+                {
                     return Ok(deny(
                         "workspace_not_allowed",
                         format!("workspace '{}' not allowed", params.workspace),
@@ -235,7 +230,8 @@ impl PureModule for CapEnforceWorkspace {
                 }
             }
             "workspace.annotations_get" => {
-                let params: WorkspaceAnnotationsGetParams = match decode_cbor(&input.effect_params) {
+                let params: WorkspaceAnnotationsGetParams = match decode_cbor(&input.effect_params)
+                {
                     Ok(value) => value,
                     Err(err) => {
                         return Ok(deny("effect_params_invalid", err.to_string()));
@@ -250,7 +246,8 @@ impl PureModule for CapEnforceWorkspace {
                 }
             }
             "workspace.annotations_set" => {
-                let params: WorkspaceAnnotationsSetParams = match decode_cbor(&input.effect_params) {
+                let params: WorkspaceAnnotationsSetParams = match decode_cbor(&input.effect_params)
+                {
                     Ok(value) => value,
                     Err(err) => {
                         return Ok(deny("effect_params_invalid", err.to_string()));

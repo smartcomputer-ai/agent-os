@@ -262,7 +262,7 @@ fn apply_op(op: ExprOpCode, args: &[Value]) -> EvalResult {
                     return Err(EvalError::OpError {
                         op,
                         message: format!("expected bytes, got {}", other.kind()),
-                    })
+                    });
                 }
             };
             let hash = CborHash::of_bytes(bytes);

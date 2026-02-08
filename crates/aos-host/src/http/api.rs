@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
+use axum::Json;
+use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::Json;
-use axum::Router;
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -31,6 +31,7 @@ use crate::http::{HttpState, control_call};
         events_post,
         journal_head,
         journal_tail,
+        debug_trace_get,
         workspace_resolve,
         workspace_list,
         workspace_read_ref,
@@ -378,6 +379,7 @@ pub fn router() -> Router<HttpState> {
         .route("/events", post(events_post))
         .route("/journal/head", get(journal_head))
         .route("/journal", get(journal_tail))
+        .route("/debug/trace", get(debug_trace_get))
         .route("/workspace/resolve", get(workspace_resolve))
         .route("/workspace/list", get(workspace_list))
         .route("/workspace/read-ref", get(workspace_read_ref))
@@ -541,9 +543,10 @@ async fn manifest(
     }
     let manifest: aos_air_types::Manifest = serde_cbor::from_slice(&bytes)
         .map_err(|e| ApiError::bad_request(format!("decode manifest: {e}")))?;
-    Ok(Json(serde_json::to_value(manifest).map_err(|e| {
-        ApiError::bad_request(format!("encode manifest json: {e}"))
-    })?)
+    Ok(Json(
+        serde_json::to_value(manifest)
+            .map_err(|e| ApiError::bad_request(format!("encode manifest json: {e}")))?,
+    )
     .into_response())
 }
 
@@ -738,6 +741,13 @@ struct JournalQuery {
     kinds: Option<String>,
 }
 
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+struct DebugTraceQuery {
+    event_hash: String,
+    window_limit: Option<u64>,
+}
+
 #[utoipa::path(
     get,
     path = "/api/journal",
@@ -765,6 +775,29 @@ async fn journal_tail(
         "kinds": kinds,
     });
     let result = control_call(&state, "journal-list", payload).await?;
+    Ok(Json(result))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/debug/trace",
+    tag = "journal",
+    params(DebugTraceQuery),
+    responses(
+        (status = 200, body = serde_json::Value),
+        (status = 400, body = ApiErrorResponse),
+        (status = 500, body = ApiErrorResponse)
+    )
+)]
+async fn debug_trace_get(
+    State(state): State<HttpState>,
+    Query(query): Query<DebugTraceQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let payload = serde_json::json!({
+        "event_hash": query.event_hash,
+        "window_limit": query.window_limit,
+    });
+    let result = control_call(&state, "trace-get", payload).await?;
     Ok(Json(result))
 }
 
@@ -834,13 +867,8 @@ async fn workspace_list(
             .map_err(|e| ApiError::bad_request(format!("encode workspace list: {e}")))?;
         return Ok(Json(value));
     }
-    let root_hash = resolve_root_hash(
-        &state,
-        query.root_hash,
-        query.workspace,
-        query.version,
-    )
-    .await?;
+    let root_hash =
+        resolve_root_hash(&state, query.root_hash, query.workspace, query.version).await?;
     let payload = serde_json::json!({
         "root_hash": root_hash,
         "path": query.path,
@@ -879,13 +907,8 @@ async fn workspace_read_ref(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceReadRefQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let root_hash = resolve_root_hash(
-        &state,
-        query.root_hash,
-        query.workspace,
-        query.version,
-    )
-    .await?;
+    let root_hash =
+        resolve_root_hash(&state, query.root_hash, query.workspace, query.version).await?;
     let payload = serde_json::json!({
         "root_hash": root_hash,
         "path": query.path,
@@ -922,13 +945,8 @@ async fn workspace_read_bytes(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceReadBytesQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let root_hash = resolve_root_hash(
-        &state,
-        query.root_hash,
-        query.workspace,
-        query.version,
-    )
-    .await?;
+    let root_hash =
+        resolve_root_hash(&state, query.root_hash, query.workspace, query.version).await?;
     let range = query
         .range
         .as_deref()
@@ -980,13 +998,8 @@ async fn workspace_annotations_get(
     State(state): State<HttpState>,
     Query(query): Query<WorkspaceAnnotationsQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let root_hash = resolve_root_hash(
-        &state,
-        query.root_hash,
-        query.workspace,
-        query.version,
-    )
-    .await?;
+    let root_hash =
+        resolve_root_hash(&state, query.root_hash, query.workspace, query.version).await?;
     let payload = serde_json::json!({
         "root_hash": root_hash,
         "path": query.path,
@@ -1313,11 +1326,9 @@ fn parse_body<T: serde::de::DeserializeOwned>(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/json");
     if content_type.starts_with("application/cbor") {
-        serde_cbor::from_slice(body)
-            .map_err(|e| ApiError::bad_request(format!("decode cbor: {e}")))
+        serde_cbor::from_slice(body).map_err(|e| ApiError::bad_request(format!("decode cbor: {e}")))
     } else {
-        serde_json::from_slice(body)
-            .map_err(|e| ApiError::bad_request(format!("decode json: {e}")))
+        serde_json::from_slice(body).map_err(|e| ApiError::bad_request(format!("decode json: {e}")))
     }
 }
 
@@ -1382,7 +1393,8 @@ async fn resolve_root_hash(
     if let Some(root_hash) = root_hash {
         return Ok(root_hash);
     }
-    let workspace = workspace.ok_or_else(|| ApiError::bad_request("missing root_hash or workspace"))?;
+    let workspace =
+        workspace.ok_or_else(|| ApiError::bad_request("missing root_hash or workspace"))?;
     let payload = serde_json::json!({
         "workspace": workspace,
         "version": version,

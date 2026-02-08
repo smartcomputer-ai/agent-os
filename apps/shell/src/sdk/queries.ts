@@ -2,6 +2,7 @@ import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type { ApiError } from "./http";
 import { queryKeys } from "./queryKeys";
 import * as endpoints from "./endpoints";
+import type { DebugTraceQuery, DebugTraceResponse } from "./endpoints";
 import { encodeCborTextToBase64 } from "./cbor";
 import type {
   DefsGetPath,
@@ -39,7 +40,6 @@ type QueryOptions<TData, TQueryKey extends readonly unknown[]> = Omit<
   UseQueryOptions<TData, ApiError, TData, TQueryKey>,
   "queryKey" | "queryFn"
 >;
-
 
 export function useBlobGet(
   hash: string,
@@ -141,6 +141,20 @@ export function useJournalTail(
   return useQuery({
     queryKey: queryKeys.journalTail(params),
     queryFn: () => endpoints.journalTail(params),
+    ...options,
+  });
+}
+
+export function useDebugTrace(
+  params: DebugTraceQuery,
+  options?: QueryOptions<
+    DebugTraceResponse,
+    ReturnType<typeof queryKeys.debugTrace>
+  >,
+) {
+  return useQuery({
+    queryKey: queryKeys.debugTrace(params),
+    queryFn: () => endpoints.debugTrace(params),
     ...options,
   });
 }

@@ -8,8 +8,8 @@ mod hello_timer;
 mod llm_summarizer;
 mod retry_backoff;
 mod safe_upgrade;
-mod workspaces;
 mod util;
+mod workspaces;
 
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};

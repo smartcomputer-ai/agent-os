@@ -16,18 +16,19 @@ use aos_cbor::Hash;
 use aos_effects::{EffectIntent, EffectReceipt};
 use aos_kernel::StateReader;
 use aos_store::Store;
+use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::adapters::timer::TimerScheduler;
 use crate::error::HostError;
 use crate::host::{ExternalEvent, RunMode, WorldHost};
+use aos_kernel::KernelError;
 use aos_kernel::cell_index::CellMeta;
 use aos_kernel::governance::{ManifestPatch, Proposal};
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::{PatchDocument, compile_patch_document};
 use aos_kernel::shadow::ShadowSummary;
-use aos_kernel::KernelError;
 
 /// Convert a `std::time::Instant` to a `tokio::time::Instant`.
 ///
@@ -65,6 +66,11 @@ pub enum ControlMsg {
         limit: Option<u64>,
         kinds: Option<Vec<String>>,
         resp: oneshot::Sender<Result<crate::control::JournalTail, HostError>>,
+    },
+    TraceGet {
+        event_hash: String,
+        window_limit: Option<u64>,
+        resp: oneshot::Sender<Result<serde_json::Value, HostError>>,
     },
     EventSend {
         event: ExternalEvent,
@@ -437,8 +443,9 @@ impl<S: Store + 'static> WorldDaemon<S> {
                         if !journal_kind_matches_filter(entry.kind, kinds.as_deref()) {
                             continue;
                         }
-                        let record = serde_json::to_value(entry.record)
-                            .map_err(|e| HostError::External(format!("encode journal record: {e}")))?;
+                        let record = serde_json::to_value(entry.record).map_err(|e| {
+                            HostError::External(format!("encode journal record: {e}"))
+                        })?;
                         entries.push(crate::control::JournalTailEntry {
                             kind: journal_kind_name(entry.kind).to_string(),
                             seq: entry.seq,
@@ -454,6 +461,167 @@ impl<S: Store + 'static> WorldDaemon<S> {
                         to: scan.to,
                         entries,
                     })
+                })();
+                let _ = resp.send(res);
+            }
+            ControlMsg::TraceGet {
+                event_hash,
+                window_limit,
+                resp,
+            } => {
+                let res = (|| -> Result<serde_json::Value, HostError> {
+                    let entries = self.host.kernel().dump_journal()?;
+                    let mut root_seq: Option<u64> = None;
+                    let mut root_record_json = serde_json::Value::Null;
+
+                    for entry in &entries {
+                        if entry.kind != aos_kernel::journal::JournalKind::DomainEvent {
+                            continue;
+                        }
+                        let Ok(record) = serde_cbor::from_slice::<aos_kernel::journal::JournalRecord>(
+                            &entry.payload,
+                        ) else {
+                            continue;
+                        };
+                        let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record else {
+                            continue;
+                        };
+                        if domain.event_hash == event_hash {
+                            root_seq = Some(entry.seq);
+                            root_record_json = serde_json::to_value(&domain).map_err(|e| {
+                                HostError::External(format!("encode root event record: {e}"))
+                            })?;
+                            break;
+                        }
+                    }
+
+                    let root_seq = root_seq.ok_or_else(|| {
+                        HostError::External(format!(
+                            "trace root event_hash '{}' not found",
+                            event_hash
+                        ))
+                    })?;
+
+                    let limit = window_limit.unwrap_or(400) as usize;
+                    let mut window = Vec::new();
+                    let mut has_receipt_error = false;
+                    let mut has_plan_error = false;
+                    for entry in entries
+                        .into_iter()
+                        .filter(|entry| entry.seq >= root_seq)
+                        .take(limit)
+                    {
+                        let record: aos_kernel::journal::JournalRecord =
+                            serde_cbor::from_slice(&entry.payload).map_err(|e| {
+                                HostError::External(format!("decode journal record: {e}"))
+                            })?;
+                        if let aos_kernel::journal::JournalRecord::EffectReceipt(receipt) = &record
+                        {
+                            if !matches!(receipt.status, aos_effects::ReceiptStatus::Ok) {
+                                has_receipt_error = true;
+                            }
+                        }
+                        if let aos_kernel::journal::JournalRecord::PlanEnded(ended) = &record {
+                            if matches!(ended.status, aos_kernel::journal::PlanEndStatus::Error) {
+                                has_plan_error = true;
+                            }
+                        }
+                        window.push(crate::control::JournalTailEntry {
+                            kind: journal_kind_name(entry.kind).to_string(),
+                            seq: entry.seq,
+                            record: serde_json::to_value(record).map_err(|e| {
+                                HostError::External(format!("encode journal record: {e}"))
+                            })?,
+                        });
+                    }
+
+                    let pending_plan_receipts = self.host.kernel().pending_plan_receipts();
+                    let plan_wait_receipts = self.host.kernel().debug_plan_waits();
+                    let plan_wait_events = self.host.kernel().debug_plan_waiting_events();
+                    let pending_reducer_receipts =
+                        self.host.kernel().pending_reducer_receipts_snapshot();
+                    let queued_effects = self.host.kernel().queued_effects_snapshot();
+
+                    let waiting_receipt_count = pending_plan_receipts.len()
+                        + pending_reducer_receipts.len()
+                        + queued_effects.len()
+                        + plan_wait_receipts
+                            .iter()
+                            .map(|(_, waits)| waits.len())
+                            .sum::<usize>();
+                    let waiting_event_count = plan_wait_events.len();
+
+                    let terminal_state = if has_receipt_error || has_plan_error {
+                        "failed"
+                    } else if waiting_receipt_count > 0 {
+                        "waiting_receipt"
+                    } else if waiting_event_count > 0 {
+                        "waiting_event"
+                    } else if window.is_empty() {
+                        "unknown"
+                    } else {
+                        "completed"
+                    };
+
+                    let meta = self.host.kernel().get_journal_head();
+                    Ok(json!({
+                        "query": {
+                            "event_hash": event_hash,
+                            "window_limit": window_limit.unwrap_or(400),
+                        },
+                        "root_event": {
+                            "seq": root_seq,
+                            "record": root_record_json,
+                        },
+                        "journal_window": {
+                            "from_seq": root_seq,
+                            "to_seq": window.last().map(|e| e.seq).unwrap_or(root_seq),
+                            "entries": window,
+                        },
+                        "live_wait": {
+                            "pending_plan_receipts": pending_plan_receipts.into_iter().map(|(plan_id, intent_hash)| {
+                                json!({
+                                    "plan_id": plan_id,
+                                    "plan_name": self.host.kernel().plan_name_for_instance(plan_id),
+                                    "intent_hash": hash_bytes_hex(&intent_hash),
+                                })
+                            }).collect::<Vec<_>>(),
+                            "plan_waiting_receipts": plan_wait_receipts.into_iter().map(|(plan_id, waits)| {
+                                json!({
+                                    "plan_id": plan_id,
+                                    "plan_name": self.host.kernel().plan_name_for_instance(plan_id),
+                                    "intent_hashes": waits.into_iter().map(|h| hash_bytes_hex(&h)).collect::<Vec<_>>(),
+                                })
+                            }).collect::<Vec<_>>(),
+                            "plan_waiting_events": plan_wait_events.into_iter().map(|(plan_id, schema)| {
+                                json!({
+                                    "plan_id": plan_id,
+                                    "plan_name": self.host.kernel().plan_name_for_instance(plan_id),
+                                    "event_schema": schema,
+                                })
+                            }).collect::<Vec<_>>(),
+                            "pending_reducer_receipts": pending_reducer_receipts.into_iter().map(|pending| {
+                                json!({
+                                    "intent_hash": hash_bytes_hex(&pending.intent_hash),
+                                    "reducer": pending.reducer,
+                                    "effect_kind": pending.effect_kind,
+                                })
+                            }).collect::<Vec<_>>(),
+                            "queued_effects": queued_effects.into_iter().map(|queued| {
+                                json!({
+                                    "intent_hash": hash_bytes_hex(&queued.intent_hash),
+                                    "kind": queued.kind,
+                                    "cap_name": queued.cap_name,
+                                })
+                            }).collect::<Vec<_>>(),
+                        },
+                        "terminal_state": terminal_state,
+                        "meta": {
+                            "journal_height": meta.journal_height,
+                            "manifest_hash": meta.manifest_hash.to_hex(),
+                            "snapshot_hash": meta.snapshot_hash.map(|h| h.to_hex()),
+                        },
+                    }))
                 })();
                 let _ = resp.send(res);
             }
@@ -646,4 +814,10 @@ fn journal_kind_matches_filter(
             || (normalized == "receipt" && name == "effect_receipt")
             || (normalized == "event" && name == "domain_event")
     })
+}
+
+fn hash_bytes_hex(hash: &[u8; 32]) -> String {
+    aos_cbor::Hash::from_bytes(hash)
+        .map(|h| h.to_hex())
+        .unwrap_or_else(|_| hex::encode(hash))
 }

@@ -114,7 +114,10 @@ impl PureModule for CapEnforceGovernance {
         }
         if let Some(prefixes) = non_empty_list(&cap_params.name_prefixes) {
             for change in &params.summary.def_changes {
-                if !prefixes.iter().any(|prefix| change.name.starts_with(prefix)) {
+                if !prefixes
+                    .iter()
+                    .any(|prefix| change.name.starts_with(prefix))
+                {
                     return Ok(deny(
                         "name_prefix_not_allowed",
                         format!("def name '{}' not allowed", change.name),

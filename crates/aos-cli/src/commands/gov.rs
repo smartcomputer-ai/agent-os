@@ -11,7 +11,9 @@ use aos_air_types::AirNode;
 use aos_cbor::Hash;
 use aos_host::control::{ControlClient, RequestEnvelope, ResponseEnvelope};
 use aos_host::manifest_loader::ZERO_HASH_SENTINEL;
-use aos_host::world_io::{BundleFilter, build_patch_document, load_air_bundle, resolve_base_manifest};
+use aos_host::world_io::{
+    BundleFilter, build_patch_document, load_air_bundle, resolve_base_manifest,
+};
 use aos_store::FsStore;
 use base64::prelude::*;
 use clap::{Args, Subcommand};
@@ -154,11 +156,8 @@ pub async fn cmd_gov(opts: &WorldOpts, args: &GovArgs) -> Result<()> {
                     &manifest_path,
                 )
                 .await?;
-                let doc = build_patch_document(
-                    &bundle,
-                    &base_manifest.manifest,
-                    &base_manifest.hash,
-                )?;
+                let doc =
+                    build_patch_document(&bundle, &base_manifest.manifest, &base_manifest.hash)?;
                 let mut doc_json = serde_json::to_value(&doc).context("serialize patch doc")?;
                 autofill_patchdoc_hashes(&mut doc_json, propose_args.require_hashes)?;
                 validate_patch_json(&doc_json)?;
@@ -406,7 +405,6 @@ fn node_name(node: &AirNode) -> Option<&str> {
         AirNode::Manifest(_) => None,
     }
 }
-
 
 pub async fn send_req(
     client: &mut ControlClient,

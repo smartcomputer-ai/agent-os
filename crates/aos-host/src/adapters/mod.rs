@@ -1,9 +1,9 @@
+pub mod blob_get;
+pub mod blob_put;
 pub mod registry;
 pub mod stub;
 pub mod timer;
 pub mod traits;
-pub mod blob_put;
-pub mod blob_get;
 
 #[cfg(feature = "adapter-http")]
 pub mod http;

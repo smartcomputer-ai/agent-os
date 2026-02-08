@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use aos_air_types::{DefModule, HashRef};
-use aos_kernel::secret::{MapSecretResolver, SharedSecretResolver};
 use aos_kernel::LoadedManifest;
+use aos_kernel::secret::{MapSecretResolver, SharedSecretResolver};
 
 use crate::manifest_loader::ZERO_HASH_SENTINEL;
 
@@ -67,9 +67,7 @@ pub fn reset_journal(world_root: &Path) -> Result<()> {
 /// Build an env-backed secret resolver from declared secrets.
 ///
 /// Returns None if no secrets are declared or any env binding is missing/unsupported.
-pub fn env_secret_resolver_from_manifest(
-    loaded: &LoadedManifest,
-) -> Option<SharedSecretResolver> {
+pub fn env_secret_resolver_from_manifest(loaded: &LoadedManifest) -> Option<SharedSecretResolver> {
     if loaded.secrets.is_empty() {
         return None;
     }

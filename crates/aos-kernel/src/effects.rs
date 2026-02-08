@@ -328,9 +328,9 @@ impl EffectManager {
                 grant.name.as_str(),
             )?;
         }
-        let policy_detail = self
-            .policy_gate
-            .decide(&intent, &grant, &source, &resolved.cap_type)?;
+        let policy_detail =
+            self.policy_gate
+                .decide(&intent, &grant, &source, &resolved.cap_type)?;
         let policy_decision = policy_detail.decision;
         self.record_policy_decision(intent.intent_hash, &policy_detail);
         match policy_decision {
@@ -461,11 +461,7 @@ impl EffectManager {
         });
     }
 
-    fn record_policy_decision(
-        &mut self,
-        intent_hash: [u8; 32],
-        detail: &PolicyDecisionDetail,
-    ) {
+    fn record_policy_decision(&mut self, intent_hash: [u8; 32], detail: &PolicyDecisionDetail) {
         let outcome = match detail.decision {
             aos_effects::traits::PolicyDecision::Allow => PolicyDecisionOutcome::Allow,
             aos_effects::traits::PolicyDecision::Deny => PolicyDecisionOutcome::Deny,
@@ -531,7 +527,9 @@ enum LlmToolChoiceView {
     #[serde(rename = "None")]
     NoneChoice,
     Required,
-    Tool { name: String },
+    Tool {
+        name: String,
+    },
 }
 
 fn cap_constraints_only(
@@ -888,10 +886,12 @@ mod tests {
             model: "gpt-5.2".into(),
             temperature: "0.5".into(),
             max_tokens: 50,
-            message_refs: vec![aos_air_types::HashRef::new(
-                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            )
-            .expect("hash ref")],
+            message_refs: vec![
+                aos_air_types::HashRef::new(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                )
+                .expect("hash ref"),
+            ],
             tool_refs: None,
             tool_choice: None,
             api_key: None,
@@ -911,10 +911,12 @@ mod tests {
             model: "gpt-5.2".into(),
             temperature: "0.5".into(),
             max_tokens: 55,
-            message_refs: vec![aos_air_types::HashRef::new(
-                "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-            )
-            .expect("hash ref")],
+            message_refs: vec![
+                aos_air_types::HashRef::new(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                )
+                .expect("hash ref"),
+            ],
             tool_refs: None,
             tool_choice: None,
             api_key: None,

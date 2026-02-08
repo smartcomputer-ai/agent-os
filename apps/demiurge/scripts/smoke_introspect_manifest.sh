@@ -21,6 +21,78 @@ if [ -z "${LLM_API_KEY:-}" ]; then
   exit 1
 fi
 
+DEBUG_ARTIFACT_DIR=""
+
+emit_debug_artifacts() {
+  if [ -n "${DEBUG_ARTIFACT_DIR}" ]; then
+    return
+  fi
+  DEBUG_ARTIFACT_DIR="${WORLD_DIR}/.aos/debug/smoke-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "${DEBUG_ARTIFACT_DIR}"
+
+  "${AOS_BIN}" --json --quiet -w "${WORLD_DIR}" journal tail --limit 500 \
+    >"${DEBUG_ARTIFACT_DIR}/journal-tail.json" 2>/dev/null || true
+
+  local event_hash
+  event_hash="$(
+    "${PYTHON_BIN}" - <<'PY' "${DEBUG_ARTIFACT_DIR}/journal-tail.json"
+import json,sys
+from pathlib import Path
+
+path=Path(sys.argv[1])
+if not path.exists():
+    sys.exit(0)
+try:
+    payload=json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    sys.exit(0)
+
+entries=((payload.get("data") or {}).get("entries") or [])
+
+def find_str(node, key):
+    if isinstance(node, dict):
+        v=node.get(key)
+        if isinstance(v, str):
+            return v
+        for child in node.values():
+            out=find_str(child, key)
+            if out:
+                return out
+    elif isinstance(node, list):
+        for child in node:
+            out=find_str(child, key)
+            if out:
+                return out
+    return None
+
+for entry in reversed(entries):
+    if (entry.get("kind") or "") != "domain_event":
+        continue
+    record=entry.get("record")
+    schema=find_str(record, "schema") or ""
+    event_hash=find_str(record, "event_hash") or ""
+    if schema.startswith("demiurge/") and event_hash.startswith("sha256:"):
+        print(event_hash)
+        sys.exit(0)
+sys.exit(0)
+PY
+  )"
+
+  if [ -n "${event_hash}" ]; then
+    "${AOS_BIN}" --json --quiet -w "${WORLD_DIR}" trace --event-hash "${event_hash}" --window-limit 500 \
+      >"${DEBUG_ARTIFACT_DIR}/trace.json" 2>/dev/null || true
+  fi
+
+  echo "Debug artifacts: ${DEBUG_ARTIFACT_DIR}" >&2
+}
+
+fail() {
+  local msg="${1:-smoke failed}"
+  echo "${msg}" >&2
+  emit_debug_artifacts
+  exit 1
+}
+
 run_json_file() {
   local out
   out="$(mktemp -t demiurge-json-XXXX)"
@@ -135,9 +207,8 @@ print("yes" if ready else "no")
 done
 
 if [ "${READY}" != "yes" ]; then
-  echo "Timed out waiting for assistant/tool messages." >&2
   echo "${STATE_JSON}" >&2
-  exit 1
+  fail "Timed out waiting for assistant/tool messages."
 fi
 
 ASSISTANT_REFS="$(
@@ -162,8 +233,7 @@ for msg in messages:
 )"
 
 if [ -z "${ASSISTANT_REFS}" ]; then
-  echo "No assistant output_ref found." >&2
-  exit 1
+  fail "No assistant output_ref found."
 fi
 
 TOOL_CALL_REF=""
@@ -187,8 +257,7 @@ sys.exit(0 if ok else 1)
 done
 
 if [ -z "${TOOL_CALL_REF}" ]; then
-  echo "Tool call not found in LLM output." >&2
-  exit 1
+  fail "Tool call not found in LLM output."
 fi
 
 TOOL_OUTPUT_REF=""
@@ -274,13 +343,11 @@ sys.exit(0 if has_text(items) else 1)
 done
 
 if [ -z "${TOOL_OUTPUT_REF}" ]; then
-  echo "Tool output not found in assistant messages." >&2
-  exit 1
+  fail "Tool output not found in assistant messages."
 fi
 
 if [ -z "${FOLLOWUP_REF}" ]; then
-  echo "LLM follow-up response not found after tool output." >&2
-  exit 1
+  fail "LLM follow-up response not found after tool output."
 fi
 
 echo "Smoke test passed: tool call, tool output, and follow-up LLM response detected for ${CHAT_ID}."

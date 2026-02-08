@@ -53,8 +53,8 @@ pub fn load_sync_config(world_root: &Path, map: Option<&Path>) -> Result<(PathBu
         Some(path) => path.to_path_buf(),
         None => world_root.join("aos.sync.json"),
     };
-    let bytes = std::fs::read(&path)
-        .with_context(|| format!("read sync config {}", path.display()))?;
+    let bytes =
+        std::fs::read(&path).with_context(|| format!("read sync config {}", path.display()))?;
     let config: SyncConfig = serde_json::from_slice(&bytes)
         .with_context(|| format!("parse sync config {}", path.display()))?;
     if config.version != 1 {

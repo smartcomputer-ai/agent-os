@@ -23,9 +23,9 @@ use serde::{Deserialize, Serialize};
 use serde_cbor::{self, Value as CborValue};
 
 use crate::capability::CapGrantResolution;
-use crate::event::IngressStamp;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
+use crate::event::IngressStamp;
 use crate::schema_value::cbor_to_expr_value;
 
 #[derive(Default)]
@@ -779,8 +779,7 @@ impl PlanInstance {
         let mut ready = Vec::new();
         let mut skip = Vec::new();
         for id in &self.step_order {
-            if matches!(self.step_states[id], StepState::Pending)
-            {
+            if matches!(self.step_states[id], StepState::Pending) {
                 match self.step_readiness(id)? {
                     StepReadiness::Ready => ready.push(id.clone()),
                     StepReadiness::Skip => skip.push(id.clone()),
@@ -1337,7 +1336,14 @@ mod tests {
 
     fn new_plan_instance(plan: DefPlan) -> PlanInstance {
         let cap_handles = test_cap_handles(&plan);
-        PlanInstance::new(1, plan, default_env(), empty_schema_index(), None, cap_handles)
+        PlanInstance::new(
+            1,
+            plan,
+            default_env(),
+            empty_schema_index(),
+            None,
+            cap_handles,
+        )
     }
 
     fn http_params_value_literal(tag: &str) -> ValueLiteral {

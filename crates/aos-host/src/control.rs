@@ -4,15 +4,15 @@ use std::path::Path;
 use aos_cbor::Hash;
 use aos_effects::{EffectKind, EffectReceipt, IntentBuilder, ReceiptStatus};
 use aos_kernel::DefListing;
-use aos_kernel::{KernelError, KernelHeights, ReadMeta};
 use aos_kernel::governance::{ManifestPatch, Proposal, ProposalState};
 use aos_kernel::journal::ApprovalDecisionRecord;
 use aos_kernel::patch_doc::PatchDocument;
 use aos_kernel::shadow::ShadowSummary;
+use aos_kernel::{KernelError, KernelHeights, ReadMeta};
 use base64::prelude::*;
 use jsonschema::JSONSchema;
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_cbor;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
@@ -290,6 +290,27 @@ pub(crate) async fn handle_request(
                 let tail = inner.map_err(ControlError::host)?;
                 Ok(serde_json::to_value(tail)
                     .map_err(|e| ControlError::decode(format!("encode journal: {e}")))?)
+            }
+            "trace-get" => {
+                let event_hash = req
+                    .payload
+                    .get("event_hash")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| ControlError::invalid_request("missing event_hash"))?;
+                let window_limit = req.payload.get("window_limit").and_then(|v| v.as_u64());
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::TraceGet {
+                        event_hash,
+                        window_limit,
+                        resp: tx,
+                    })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)
             }
             "event-send" => {
                 let schema = req
@@ -620,12 +641,9 @@ pub(crate) async fn handle_request(
                 let params: WorkspaceAnnotationsGetParams =
                     serde_json::from_value(req.payload.clone())
                         .map_err(|e| ControlError::decode(format!("{e}")))?;
-                let receipt: WorkspaceAnnotationsGetReceipt = internal_effect(
-                    control_tx,
-                    EffectKind::workspace_annotations_get(),
-                    &params,
-                )
-                .await?;
+                let receipt: WorkspaceAnnotationsGetReceipt =
+                    internal_effect(control_tx, EffectKind::workspace_annotations_get(), &params)
+                        .await?;
                 let value = serde_json::to_value(&receipt)
                     .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
                 Ok(value)
@@ -634,26 +652,19 @@ pub(crate) async fn handle_request(
                 let params: WorkspaceAnnotationsSetParams =
                     serde_json::from_value(req.payload.clone())
                         .map_err(|e| ControlError::decode(format!("{e}")))?;
-                let receipt: WorkspaceAnnotationsSetReceipt = internal_effect(
-                    control_tx,
-                    EffectKind::workspace_annotations_set(),
-                    &params,
-                )
-                .await?;
+                let receipt: WorkspaceAnnotationsSetReceipt =
+                    internal_effect(control_tx, EffectKind::workspace_annotations_set(), &params)
+                        .await?;
                 let value = serde_json::to_value(&receipt)
                     .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
                 Ok(value)
             }
             "workspace-empty-root" => {
-                let params: WorkspaceEmptyRootParams =
-                    serde_json::from_value(req.payload.clone())
-                        .map_err(|e| ControlError::decode(format!("{e}")))?;
-                let receipt: WorkspaceEmptyRootReceipt = internal_effect(
-                    control_tx,
-                    EffectKind::workspace_empty_root(),
-                    &params,
-                )
-                .await?;
+                let params: WorkspaceEmptyRootParams = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let receipt: WorkspaceEmptyRootReceipt =
+                    internal_effect(control_tx, EffectKind::workspace_empty_root(), &params)
+                        .await?;
                 let value = serde_json::to_value(&receipt)
                     .map_err(|e| ControlError::decode(format!("encode receipt: {e}")))?;
                 Ok(value)
@@ -1081,7 +1092,9 @@ fn decode_governance_patch(
 ) -> Result<crate::modes::daemon::GovernancePatchInput, ControlError> {
     // Try ManifestPatch CBOR first; fallback to PatchDocument JSON (validated).
     if let Ok(manifest) = serde_cbor::from_slice::<ManifestPatch>(patch_bytes) {
-        return Ok(crate::modes::daemon::GovernancePatchInput::Manifest(manifest));
+        return Ok(crate::modes::daemon::GovernancePatchInput::Manifest(
+            manifest,
+        ));
     }
     if let Ok(doc_json) = serde_json::from_slice::<serde_json::Value>(patch_bytes) {
         validate_patch_doc(&doc_json)?;
@@ -1217,12 +1230,9 @@ async fn internal_effect<T: DeserializeOwned, P: Serialize>(
                     .to_string()
             })
             .unwrap_or_else(|| "unknown error".to_string());
-        return Err(ControlError::host(HostError::Kernel(
-            KernelError::Query(format!(
-                "internal effect '{}' failed: {message}",
-                kind.as_str()
-            )),
-        )));
+        return Err(ControlError::host(HostError::Kernel(KernelError::Query(
+            format!("internal effect '{}' failed: {message}", kind.as_str()),
+        ))));
     }
     receipt
         .payload::<T>()

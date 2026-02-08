@@ -27,11 +27,9 @@ fn plan_effect_params_canonicalize_before_hashing() {
     let grant = CapabilityGrant::builder("cap_llm", "sys/llm.basic@1", &serde_json::json!({}))
         .build()
         .expect("grant");
-    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
-        grant,
-        aos_air_types::CapType::llm_basic(),
-    )])
-    .expect("grant resolver");
+    let cap_gate =
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::llm_basic())])
+            .expect("grant resolver");
     let mut mgr = mgr_with_cap(cap_gate);
 
     // Params variant A: valid dec128 encoded as string
@@ -148,11 +146,9 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
         .build()
         .expect("grant");
-    let cap_gate = CapabilityResolver::from_runtime_grants(vec![(
-        grant,
-        aos_air_types::CapType::http_out(),
-    )])
-    .expect("grant resolver");
+    let cap_gate =
+        CapabilityResolver::from_runtime_grants(vec![(grant, aos_air_types::CapType::http_out())])
+            .expect("grant resolver");
     let mut mgr = mgr_with_cap(cap_gate);
 
     // Sugar A: body_ref null, headers absent
@@ -425,10 +421,7 @@ fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
             "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
         )]),
     );
-    map.insert(
-        CborValue::Text("tool_refs".into()),
-        CborValue::Null,
-    );
+    map.insert(CborValue::Text("tool_refs".into()), CborValue::Null);
     map.insert(CborValue::Text("tool_choice".into()), CborValue::Null);
     map.insert(CborValue::Text("api_key".into()), CborValue::Null);
     serde_cbor::to_vec(&CborValue::Map(map)).expect("encode params")

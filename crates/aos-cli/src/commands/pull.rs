@@ -10,18 +10,20 @@ use serde_json::json;
 
 use aos_cbor::Hash;
 use aos_host::util::is_placeholder_hash;
-use aos_host::world_io::{WriteOptions, manifest_node_bytes, write_air_layout_with_options, WorldBundle};
+use aos_host::world_io::{
+    WorldBundle, WriteOptions, manifest_node_bytes, write_air_layout_with_options,
+};
 use aos_kernel::ManifestLoader;
 use aos_store::{FsStore, Store};
 
 use crate::opts::WorldOpts;
-use crate::output::print_success;
 use crate::opts::resolve_dirs;
+use crate::output::print_success;
 use crate::util::latest_manifest_hash_from_journal;
 
-use super::workspace_sync::{SyncPullOptions, SyncStats, sync_workspace_pull};
-use super::sync::load_sync_config;
 use super::create_host;
+use super::sync::load_sync_config;
+use super::workspace_sync::{SyncPullOptions, SyncStats, sync_workspace_pull};
 
 #[derive(Args, Debug)]
 pub struct PullArgs {
@@ -72,7 +74,14 @@ pub async fn cmd_pull(opts: &WorldOpts, args: &PullArgs) -> Result<()> {
         .map(|dir| resolve_map_path(map_root, dir))
         .unwrap_or_else(|| dirs.air_dir.clone());
     let mut warnings = Vec::new();
-    if !args.dry_run && (args.modules || config.modules.as_ref().and_then(|m| m.pull).unwrap_or(false)) {
+    if !args.dry_run
+        && (args.modules
+            || config
+                .modules
+                .as_ref()
+                .and_then(|m| m.pull)
+                .unwrap_or(false))
+    {
         let modules_dir = config
             .modules
             .as_ref()
@@ -80,7 +89,14 @@ pub async fn cmd_pull(opts: &WorldOpts, args: &PullArgs) -> Result<()> {
             .map(|dir| resolve_map_path(map_root, dir))
             .unwrap_or_else(|| dirs.world.join("modules"));
         export_modules(store.as_ref(), &loaded, &modules_dir, &mut warnings)?;
-    } else if args.dry_run && (args.modules || config.modules.as_ref().and_then(|m| m.pull).unwrap_or(false)) {
+    } else if args.dry_run
+        && (args.modules
+            || config
+                .modules
+                .as_ref()
+                .and_then(|m| m.pull)
+                .unwrap_or(false))
+    {
         warnings.push("dry-run: skipped module export".into());
     }
 
@@ -194,13 +210,7 @@ fn sync_workspaces(
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     for entry in entries {
-        let stats = sync_workspace_pull(
-            host,
-            &entry.reference,
-            &entry.dir,
-            &entry.ignore,
-            opts,
-        )?;
+        let stats = sync_workspace_pull(host, &entry.reference, &entry.dir, &entry.ignore, opts)?;
         if should_report_workspace(&stats) {
             warnings.push(format!(
                 "workspace '{}' synced (writes {}, removes {})",

@@ -258,8 +258,8 @@ impl<'de> Deserialize<'de> for GovPatchInput {
                 let value = inner.ok_or_else(|| {
                     serde::de::Error::custom("variant 'patch_blob_ref' missing value")
                 })?;
-                let blob_ref = serde_cbor::value::from_value(value)
-                    .map_err(serde::de::Error::custom)?;
+                let blob_ref =
+                    serde_cbor::value::from_value(value).map_err(serde::de::Error::custom)?;
                 Ok(GovPatchInput::PatchBlobRef(blob_ref))
             }
             other => Err(serde::de::Error::custom(format!(
@@ -516,7 +516,10 @@ fn compile_patch_doc<S: Store>(
     Ok((patch, base_hash))
 }
 
-fn store_patch<S: Store>(store: &S, patch: &ManifestPatch) -> Result<(HashRef, Vec<u8>), KernelError> {
+fn store_patch<S: Store>(
+    store: &S,
+    patch: &ManifestPatch,
+) -> Result<(HashRef, Vec<u8>), KernelError> {
     let patch_bytes = to_canonical_cbor(patch)
         .map_err(|err| KernelError::Manifest(format!("encode patch: {err}")))?;
     let hash = store
@@ -562,13 +565,47 @@ fn build_patch_summary(
     let mut def_changes = Vec::new();
     let mut refs_changed = false;
 
-    refs_changed |= diff_named_refs("defschema", &base_manifest.schemas, &patch.manifest.schemas, &mut def_changes)?;
-    refs_changed |= diff_named_refs("defmodule", &base_manifest.modules, &patch.manifest.modules, &mut def_changes)?;
-    refs_changed |= diff_named_refs("defplan", &base_manifest.plans, &patch.manifest.plans, &mut def_changes)?;
-    refs_changed |= diff_named_refs("defeffect", &base_manifest.effects, &patch.manifest.effects, &mut def_changes)?;
-    refs_changed |= diff_named_refs("defcap", &base_manifest.caps, &patch.manifest.caps, &mut def_changes)?;
-    refs_changed |= diff_named_refs("defpolicy", &base_manifest.policies, &patch.manifest.policies, &mut def_changes)?;
-    refs_changed |= diff_secret_refs(&base_manifest.secrets, &patch.manifest.secrets, &mut def_changes)?;
+    refs_changed |= diff_named_refs(
+        "defschema",
+        &base_manifest.schemas,
+        &patch.manifest.schemas,
+        &mut def_changes,
+    )?;
+    refs_changed |= diff_named_refs(
+        "defmodule",
+        &base_manifest.modules,
+        &patch.manifest.modules,
+        &mut def_changes,
+    )?;
+    refs_changed |= diff_named_refs(
+        "defplan",
+        &base_manifest.plans,
+        &patch.manifest.plans,
+        &mut def_changes,
+    )?;
+    refs_changed |= diff_named_refs(
+        "defeffect",
+        &base_manifest.effects,
+        &patch.manifest.effects,
+        &mut def_changes,
+    )?;
+    refs_changed |= diff_named_refs(
+        "defcap",
+        &base_manifest.caps,
+        &patch.manifest.caps,
+        &mut def_changes,
+    )?;
+    refs_changed |= diff_named_refs(
+        "defpolicy",
+        &base_manifest.policies,
+        &patch.manifest.policies,
+        &mut def_changes,
+    )?;
+    refs_changed |= diff_secret_refs(
+        &base_manifest.secrets,
+        &patch.manifest.secrets,
+        &mut def_changes,
+    )?;
 
     def_changes.sort_by(|a, b| {
         let a_key = (&a.kind, &a.name, change_rank(a.action));
@@ -580,21 +617,14 @@ fn build_patch_summary(
     if section_changed(&base_manifest.defaults, &patch.manifest.defaults)? {
         manifest_sections.insert("defaults".to_string());
     }
-    let base_routing = base_manifest
-        .routing
-        .clone()
-        .unwrap_or_else(|| Routing {
-            events: Vec::new(),
-            inboxes: Vec::new(),
-        });
-    let next_routing = patch
-        .manifest
-        .routing
-        .clone()
-        .unwrap_or_else(|| Routing {
-            events: Vec::new(),
-            inboxes: Vec::new(),
-        });
+    let base_routing = base_manifest.routing.clone().unwrap_or_else(|| Routing {
+        events: Vec::new(),
+        inboxes: Vec::new(),
+    });
+    let next_routing = patch.manifest.routing.clone().unwrap_or_else(|| Routing {
+        events: Vec::new(),
+        inboxes: Vec::new(),
+    });
     if section_changed(&base_routing.events, &next_routing.events)? {
         manifest_sections.insert("routing_events".to_string());
     }
@@ -604,7 +634,10 @@ fn build_patch_summary(
     if section_changed(&base_manifest.triggers, &patch.manifest.triggers)? {
         manifest_sections.insert("triggers".to_string());
     }
-    if section_changed(&base_manifest.module_bindings, &patch.manifest.module_bindings)? {
+    if section_changed(
+        &base_manifest.module_bindings,
+        &patch.manifest.module_bindings,
+    )? {
         manifest_sections.insert("module_bindings".to_string());
     }
     if section_changed(&base_manifest.secrets, &patch.manifest.secrets)? {

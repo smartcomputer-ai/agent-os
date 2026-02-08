@@ -14,6 +14,7 @@ import type {
   WorkspaceReadRefQuery,
   WorkspaceResolveQuery,
 } from "./apiTypes";
+import type { DebugTraceQuery } from "./endpoints";
 
 export const queryKeys = {
   blobGet: (hash: string) => ["blob_get", hash] as const,
@@ -27,6 +28,8 @@ export const queryKeys = {
   journalHead: () => ["journal_head"] as const,
   journalTail: (params?: JournalTailQuery) =>
     ["journal_tail", params ?? {}] as const,
+  debugTrace: (params: DebugTraceQuery) =>
+    ["debug_trace", params.event_hash, params.window_limit ?? null] as const,
   manifest: (params?: ManifestQuery) => ["manifest", params ?? {}] as const,
   stateGet: (path: StateGetPath, query?: StateGetQuery) =>
     ["state_get", path.reducer, query ?? {}] as const,

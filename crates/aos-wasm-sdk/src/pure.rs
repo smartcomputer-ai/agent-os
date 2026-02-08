@@ -171,8 +171,8 @@ mod tests {
         let ctx = PureContext {
             logical_now_ns: 5,
             journal_height: 9,
-            manifest_hash: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-                .into(),
+            manifest_hash:
+                "sha256:2222222222222222222222222222222222222222222222222222222222222222".into(),
             module: "com.acme/TestPure@1".into(),
         };
         let ctx_bytes = serde_cbor::to_vec(&ctx).unwrap();

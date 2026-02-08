@@ -44,10 +44,10 @@ fn schema_index(schemas: &HashMap<aos_air_types::Name, DefSchema>) -> SchemaInde
 
 fn load_manifest_for_keys(dirs: &ResolvedDirs) -> Result<LoadedManifest> {
     let store = Arc::new(FsStore::open(&dirs.store_root).context("open store")?);
-    let Some(manifest_hash) =
-        crate::util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
-            anyhow::bail!("no manifest found in journal; run `aos push` first");
-        };
+    let Some(manifest_hash) = crate::util::latest_manifest_hash_from_journal(&dirs.store_root)?
+    else {
+        anyhow::bail!("no manifest found in journal; run `aos push` first");
+    };
     aos_kernel::ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
         .context("load manifest for key encoding")
 }

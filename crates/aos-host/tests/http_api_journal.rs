@@ -12,7 +12,9 @@ async fn http_journal_tail_forwards_kind_filters() {
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let state = HttpState::new(control_tx, shutdown_tx.clone());
 
-    let app = axum::Router::new().nest("/api", api::router()).with_state(state);
+    let app = axum::Router::new()
+        .nest("/api", api::router())
+        .with_state(state);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .expect("bind listener");
@@ -60,9 +62,8 @@ async fn http_journal_tail_forwards_kind_filters() {
         }
     });
 
-    let url = format!(
-        "http://{addr}/api/journal?from=0&limit=10&kinds=domain_event,effect_receipt"
-    );
+    let url =
+        format!("http://{addr}/api/journal?from=0&limit=10&kinds=domain_event,effect_receipt");
     let response = reqwest::get(url).await.expect("http get");
     assert!(response.status().is_success());
     let body: serde_json::Value = response.json().await.expect("decode json");
@@ -70,6 +71,62 @@ async fn http_journal_tail_forwards_kind_filters() {
     assert_eq!(body["to"], 2);
     assert_eq!(body["entries"][0]["kind"], "domain_event");
     assert_eq!(body["entries"][1]["kind"], "effect_receipt");
+
+    control.await.expect("control task");
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
+async fn http_debug_trace_forwards_query() {
+    let (control_tx, mut control_rx) = mpsc::channel::<ControlMsg>(8);
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
+    let state = HttpState::new(control_tx, shutdown_tx.clone());
+
+    let app = axum::Router::new()
+        .nest("/api", api::router())
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve");
+    });
+
+    let control = tokio::spawn(async move {
+        if let Some(ControlMsg::TraceGet {
+            event_hash,
+            window_limit,
+            resp,
+        }) = control_rx.recv().await
+        {
+            assert_eq!(
+                event_hash,
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            );
+            assert_eq!(window_limit, Some(32));
+            let _ = resp.send(Ok(json!({
+                "query": {"event_hash": event_hash, "window_limit": 32},
+                "root_event": {"seq": 1, "record": {"event_hash": "x"}},
+                "journal_window": {"from_seq": 1, "to_seq": 1, "entries": []},
+                "live_wait": {},
+                "terminal_state": "completed"
+            })));
+        } else {
+            panic!("expected trace get control message");
+        }
+    });
+
+    let url = format!(
+        "http://{addr}/api/debug/trace?event_hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&window_limit=32"
+    );
+    let response = reqwest::get(url).await.expect("http get");
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.expect("decode json");
+    assert_eq!(body["terminal_state"], "completed");
+    assert_eq!(body["query"]["window_limit"], 32);
 
     control.await.expect("control task");
     server.abort();

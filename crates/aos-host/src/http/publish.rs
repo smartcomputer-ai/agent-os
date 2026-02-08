@@ -104,8 +104,8 @@ pub fn match_publish_rule<'a>(
     let mut best: Option<PublishMatch<'a>> = None;
     let mut best_len = 0usize;
     for (id, rule) in rules {
-        let prefix = normalize_route_prefix(&rule.route_prefix)
-            .map_err(|error| MatchError::RulePrefix {
+        let prefix =
+            normalize_route_prefix(&rule.route_prefix).map_err(|error| MatchError::RulePrefix {
                 id: id.clone(),
                 error,
             })?;
@@ -140,10 +140,7 @@ pub fn join_workspace_path(base: Option<&str>, suffix: &str) -> String {
     format!("{base}/{suffix}")
 }
 
-pub async fn handler(
-    State(state): State<HttpState>,
-    req: axum::http::Request<Body>,
-) -> Response {
+pub async fn handler(State(state): State<HttpState>, req: axum::http::Request<Body>) -> Response {
     match handle_publish(state, req).await {
         Ok(resp) => resp,
         Err(err) => err.into_response(),
@@ -204,13 +201,7 @@ async fn handle_publish(
         .root_hash
         .ok_or_else(|| PublishError::invalid("workspace resolve missing root_hash"))?;
 
-    let (entry, entry_path) = match resolve_entry(
-        &state,
-        &root_hash,
-        &target_path,
-    )
-    .await?
-    {
+    let (entry, entry_path) = match resolve_entry(&state, &root_hash, &target_path).await? {
         Some(entry) => entry,
         None => {
             if accepts_html(&request_headers) {
@@ -242,9 +233,7 @@ async fn handle_publish(
         }
         if let Some(default_doc) = rule.default_doc.as_deref() {
             let doc_path = join_workspace_path(Some(&entry_path), default_doc);
-            if let Some(doc_entry) =
-                workspace_read_ref(&state, &root_hash, &doc_path).await?
-            {
+            if let Some(doc_entry) = workspace_read_ref(&state, &root_hash, &doc_path).await? {
                 if doc_entry.kind == "file" {
                     return serve_file(
                         &state,
@@ -260,14 +249,12 @@ async fn handle_publish(
             }
         }
         if rule.allow_dir_listing {
-            let listing =
-                workspace_list(&state, &root_hash, Some(&entry_path)).await?;
+            let listing = workspace_list(&state, &root_hash, Some(&entry_path)).await?;
             return Ok((
                 StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
-                serde_json::to_vec(&listing).map_err(|e| {
-                    PublishError::invalid(format!("encode listing: {e}"))
-                })?,
+                serde_json::to_vec(&listing)
+                    .map_err(|e| PublishError::invalid(format!("encode listing: {e}")))?,
             )
                 .into_response());
         }
@@ -300,9 +287,8 @@ async fn serve_file(
     );
     headers.insert(
         HeaderName::from_static("content-length"),
-        HeaderValue::from_str(&bytes.len().to_string()).unwrap_or_else(|_| {
-            HeaderValue::from_static("0")
-        }),
+        HeaderValue::from_str(&bytes.len().to_string())
+            .unwrap_or_else(|_| HeaderValue::from_static("0")),
     );
     if !headers.contains_key(HeaderName::from_static("content-type")) {
         headers.insert(
@@ -315,10 +301,7 @@ async fn serve_file(
         HeaderValue::from_str(root_hash)
             .map_err(|_| PublishError::invalid("invalid x-aos-root-hash header"))?,
     );
-    headers.insert(
-        header::ACCEPT_RANGES,
-        HeaderValue::from_static("bytes"),
-    );
+    headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
     let status = if let Some((start, end)) = range {
         let end_inclusive = end.saturating_sub(1);
         let value = format!("bytes {start}-{end_inclusive}/{}", entry.size);
@@ -361,9 +344,7 @@ fn redirect_with_slash(request: &NormalizedPath) -> Response {
         .into_response()
 }
 
-async fn load_registry(
-    state: &HttpState,
-) -> Result<Option<HttpPublishRegistry>, PublishError> {
+async fn load_registry(state: &HttpState) -> Result<Option<HttpPublishRegistry>, PublishError> {
     let result = control_call(
         state,
         "state-get",
@@ -421,7 +402,11 @@ async fn resolve_headers(
         "http.cache-control",
     ]);
     let mut paths = Vec::new();
-    let mut cursor = if path.is_empty() { None } else { Some(path.to_string()) };
+    let mut cursor = if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    };
     loop {
         paths.push(cursor.clone());
         match cursor {
@@ -571,10 +556,7 @@ fn accepts_html(headers: &HeaderMap) -> bool {
     text.contains("text/html") || text.contains("*/*")
 }
 
-fn parse_range_header(
-    headers: &HeaderMap,
-    size: u64,
-) -> Result<Option<(u64, u64)>, RangeError> {
+fn parse_range_header(headers: &HeaderMap, size: u64) -> Result<Option<(u64, u64)>, RangeError> {
     let value = match headers.get(header::RANGE) {
         Some(value) => value,
         None => return Ok(None),
@@ -587,9 +569,7 @@ fn parse_range_header(
     if range_spec.contains(',') {
         return Err(RangeError::Invalid);
     }
-    let (start_str, end_str) = range_spec
-        .split_once('-')
-        .ok_or(RangeError::Invalid)?;
+    let (start_str, end_str) = range_spec.split_once('-').ok_or(RangeError::Invalid)?;
     if start_str.is_empty() {
         let suffix: u64 = end_str.parse().map_err(|_| RangeError::Invalid)?;
         if suffix == 0 {
@@ -611,9 +591,7 @@ fn parse_range_header(
     if end_inclusive < start {
         return Err(RangeError::Invalid);
     }
-    let end_exclusive = end_inclusive
-        .saturating_add(1)
-        .min(size);
+    let end_exclusive = end_inclusive.saturating_add(1).min(size);
     Ok(Some((start, end_exclusive)))
 }
 
@@ -715,8 +693,7 @@ async fn workspace_list(
     )
     .await
     .map_err(|err| PublishError::invalid(err.message))?;
-    serde_json::from_value(result)
-        .map_err(|e| PublishError::invalid(format!("decode list: {e}")))
+    serde_json::from_value(result).map_err(|e| PublishError::invalid(format!("decode list: {e}")))
 }
 
 async fn workspace_annotations_get(
@@ -1039,10 +1016,7 @@ mod tests {
             .unwrap()
             .expect("match");
         assert_eq!(matched.rule_id, "assets");
-        assert_eq!(
-            matched.suffix_segments,
-            vec!["logo.png".to_string()]
-        );
+        assert_eq!(matched.suffix_segments, vec!["logo.png".to_string()]);
         assert_eq!(matched.suffix, "logo.png");
         assert_eq!(matched.request.query, Some("x=1".to_string()));
     }
@@ -1077,8 +1051,14 @@ mod tests {
     fn join_workspace_path_handles_empty_components() {
         assert_eq!(join_workspace_path(None, "index.html"), "index.html");
         assert_eq!(join_workspace_path(Some("app"), ""), "app");
-        assert_eq!(join_workspace_path(Some("app"), "index.html"), "app/index.html");
-        assert_eq!(join_workspace_path(Some("/app/"), "assets/logo.png"), "app/assets/logo.png");
+        assert_eq!(
+            join_workspace_path(Some("app"), "index.html"),
+            "app/index.html"
+        );
+        assert_eq!(
+            join_workspace_path(Some("/app/"), "assets/logo.png"),
+            "app/assets/logo.png"
+        );
     }
 
     fn publish_rules(entries: Vec<(&str, &str)>) -> BTreeMap<String, HttpPublishRule> {

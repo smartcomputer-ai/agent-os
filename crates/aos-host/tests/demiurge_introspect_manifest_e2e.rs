@@ -10,11 +10,11 @@ use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::builtins::{LlmGenerateReceipt, TokenUsage};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use aos_host::adapters::traits::AsyncEffectAdapter;
+use aos_host::config::HostConfig;
 use aos_host::fixtures;
+use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
 use aos_host::testhost::TestHost;
-use aos_host::host::WorldHost;
-use aos_host::config::HostConfig;
 use aos_kernel::{Kernel, KernelConfig, cap_enforcer::CapCheckOutput};
 use aos_store::{FsStore, Store};
 use aos_wasm_abi::PureOutput;
@@ -47,10 +47,7 @@ struct ToolLlmAdapter<S: aos_store::Store> {
 
 impl<S: aos_store::Store> ToolLlmAdapter<S> {
     fn new(store: Arc<S>, call_count: Arc<AtomicUsize>) -> Self {
-        Self {
-            store,
-            call_count,
-        }
+        Self { store, call_count }
     }
 }
 
@@ -134,19 +131,18 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
     let tmp = tempfile::tempdir().context("tempdir")?;
     let store = Arc::new(FsStore::open(tmp.path()).context("open store")?);
 
-    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../apps/demiurge");
+    let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/demiurge");
     load_world_env(&asset_root).context("load demiurge .env")?;
     let asset_root = asset_root.as_path();
     let mut loaded = manifest_loader::load_from_assets(store.clone(), asset_root)
         .context("load demiurge assets")?
         .context("missing demiurge manifest")?;
-    let _manifest_bytes = aos_cbor::to_canonical_cbor(&loaded.manifest)
-        .context("encode manifest bytes")?;
+    let _manifest_bytes =
+        aos_cbor::to_canonical_cbor(&loaded.manifest).context("encode manifest bytes")?;
 
     let reducer_root = asset_root.join("reducer");
-    let reducer_dir = Utf8PathBuf::from_path_buf(reducer_root.to_path_buf())
-        .expect("utf8 reducer path");
+    let reducer_dir =
+        Utf8PathBuf::from_path_buf(reducer_root.to_path_buf()).expect("utf8 reducer path");
     let mut request = BuildRequest::new(reducer_dir);
     request.config.release = false;
     let artifact = Builder::compile(request).context("compile demiurge reducer")?;
@@ -208,10 +204,8 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         call_count.clone(),
     )));
 
-    let tool_bytes = std::fs::read(
-        asset_root.join("tools").join("introspect.manifest.json"),
-    )
-    .context("read tool file")?;
+    let tool_bytes = std::fs::read(asset_root.join("tools").join("introspect.manifest.json"))
+        .context("read tool file")?;
     let tool_hash = store
         .put_blob(&tool_bytes)
         .context("store tool blob")?

@@ -196,8 +196,12 @@ mod tests {
                 module: "sys/CapAllowAll@1".into(),
             },
         };
-        let cap_hash =
-            HashRef::new(Hash::of_cbor(&AirNode::Defcap(cap.clone())).unwrap().to_hex()).unwrap();
+        let cap_hash = HashRef::new(
+            Hash::of_cbor(&AirNode::Defcap(cap.clone()))
+                .unwrap()
+                .to_hex(),
+        )
+        .unwrap();
         let patch = ManifestPatch {
             manifest: Manifest {
                 caps: vec![NamedRef {

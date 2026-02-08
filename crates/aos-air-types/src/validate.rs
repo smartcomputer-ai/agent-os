@@ -1539,8 +1539,10 @@ mod tests {
         let effects = HashMap::new();
         let caps = HashMap::new();
         let policies = HashMap::new();
-        validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &caps, &policies)
-            .expect("record event family routing should validate");
+        validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .expect("record event family routing should validate");
     }
 
     #[test]
@@ -1699,8 +1701,10 @@ mod tests {
         let effects = HashMap::new();
         let caps = HashMap::new();
         let policies = HashMap::new();
-        validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &caps, &policies)
-            .expect("record event schema should validate");
+        validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .expect("record event schema should validate");
     }
 
     #[test]

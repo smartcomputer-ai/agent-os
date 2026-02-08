@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use aos_air_types::{AirNode, Manifest, CURRENT_AIR_VERSION};
+use aos_air_types::{AirNode, CURRENT_AIR_VERSION, Manifest};
 use clap::Args;
 
 use crate::opts::WorldOpts;
@@ -46,11 +46,8 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
     let store_root = resolve_opt_path(&world_root, opts.store.as_deref(), "");
     let modules_dir = world_root.join("modules");
 
-    let any_scoped = args.dirs
-        || args.manifest
-        || args.manifest_force
-        || args.sync
-        || args.sync_force;
+    let any_scoped =
+        args.dirs || args.manifest || args.manifest_force || args.sync || args.sync_force;
     let do_dirs = if any_scoped { args.dirs } else { true };
     let do_manifest = if any_scoped {
         args.manifest || args.manifest_force
@@ -83,20 +80,14 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
     let store_status = init_dir(&store_root.join(".aos"), do_dirs)?;
 
     let manifest_path = air_dir.join("manifest.air.json");
-    let manifest_status = init_file(
-        &manifest_path,
-        do_manifest,
-        args.manifest_force,
-        || write_manifest_file(&manifest_path),
-    )?;
+    let manifest_status = init_file(&manifest_path, do_manifest, args.manifest_force, || {
+        write_manifest_file(&manifest_path)
+    })?;
 
     let sync_path = world_root.join("aos.sync.json");
-    let sync_status = init_file(
-        &sync_path,
-        do_sync,
-        args.sync_force,
-        || write_sync_file(&sync_path, &world_root, &air_dir, &reducer_dir),
-    )?;
+    let sync_status = init_file(&sync_path, do_sync, args.sync_force, || {
+        write_sync_file(&sync_path, &world_root, &air_dir, &reducer_dir)
+    })?;
 
     // TODO: Support --template to scaffold different starter manifests
 

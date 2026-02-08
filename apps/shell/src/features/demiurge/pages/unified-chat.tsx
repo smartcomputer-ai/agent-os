@@ -16,7 +16,6 @@ export function UnifiedChatPage() {
 
   const [settings, setSettings] = useState<ChatSettings>(DEFAULT_CHAT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
 
   const eventsPostMutation = useEventsPost();
 
@@ -44,7 +43,6 @@ export function UnifiedChatPage() {
   };
 
   const handleNewChat = async () => {
-    setIsCreating(true);
     try {
       const chatId = generateChatId();
       const now = Date.now();
@@ -64,8 +62,6 @@ export function UnifiedChatPage() {
       navigate(`/chat?id=${chatId}`);
     } catch (error) {
       console.error("Failed to create chat:", error);
-    } finally {
-      setIsCreating(false);
     }
   };
 

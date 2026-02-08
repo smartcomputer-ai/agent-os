@@ -50,7 +50,8 @@ pub fn run(example_root: &Path) -> Result<()> {
     drive_blob_echo(&mut host, input)?;
 
     let final_state: ReducerEchoState = host.read_state()?;
-    let data_ok = final_state.retrieved_blob_hash.as_deref() == final_state.stored_blob_ref.as_deref();
+    let data_ok =
+        final_state.retrieved_blob_hash.as_deref() == final_state.stored_blob_ref.as_deref();
     println!(
         "   final state: pc={:?}, stored_ref={:?}, retrieved_ref={:?}, retrieved_hash={:?}, data_ok={}",
         final_state.pc,
@@ -66,9 +67,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
 fn drive_blob_echo(host: &mut ExampleHost, input: BlobEchoInput) -> Result<()> {
     let mut harness = BlobHarnessStore::default();
-    let start_event = BlobEchoEvent::Start(StartEvent {
-        data: input.data,
-    });
+    let start_event = BlobEchoEvent::Start(StartEvent { data: input.data });
     host.send_event(&start_event)?;
     synthesize_blob_effects(host.kernel_mut(), &mut harness)
 }

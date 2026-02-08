@@ -2,18 +2,18 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 
-use aos_air_types::{Manifest, SecretDecl, SecretEntry, SecretPolicy, CURRENT_AIR_VERSION};
 use aos_air_types::catalog::EffectCatalog;
+use aos_air_types::{CURRENT_AIR_VERSION, Manifest, SecretDecl, SecretEntry, SecretPolicy};
 use aos_cbor::Hash;
 use aos_effects::builtins::LlmGenerateParams;
 use aos_host::util::env_secret_resolver_from_manifest;
-use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_kernel::error::KernelError;
+use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::secret::{
     MapSecretResolver, SecretCatalog, enforce_secret_policy, inject_secrets_in_params,
     normalize_secret_variants,
 };
-use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_store::MemStore;
 use indexmap::IndexMap;
 
@@ -22,7 +22,10 @@ fn secret_ref_value(alias: &str, version: u64) -> serde_cbor::Value {
     use serde_cbor::Value;
     let mut inner = BTreeMap::new();
     inner.insert(Value::Text("alias".into()), Value::Text(alias.into()));
-    inner.insert(Value::Text("version".into()), Value::Integer(version as i128));
+    inner.insert(
+        Value::Text("version".into()),
+        Value::Integer(version as i128),
+    );
     let mut variant = BTreeMap::new();
     variant.insert(Value::Text("$tag".into()), Value::Text("secret".into()));
     variant.insert(Value::Text("$value".into()), Value::Map(inner));
@@ -33,7 +36,10 @@ fn secret_ref_value(alias: &str, version: u64) -> serde_cbor::Value {
 fn secret_param_cbor(alias: &str, version: u64) -> Vec<u8> {
     use serde_cbor::Value;
     let mut root = BTreeMap::new();
-    root.insert(Value::Text("api_key".into()), secret_ref_value(alias, version));
+    root.insert(
+        Value::Text("api_key".into()),
+        secret_ref_value(alias, version),
+    );
     serde_cbor::to_vec(&Value::Map(root)).unwrap()
 }
 
@@ -329,7 +335,10 @@ fn env_resolver_injects_llm_api_key() {
         Value::Text("message_refs".into()),
         Value::Array(vec![Value::Text(Hash::of_bytes(b"input").to_hex())]),
     );
-    params.insert(Value::Text("api_key".into()), secret_ref_value("llm/api", 1));
+    params.insert(
+        Value::Text("api_key".into()),
+        secret_ref_value("llm/api", 1),
+    );
     let params_cbor = serde_cbor::to_vec(&Value::Map(params)).unwrap();
 
     let injected = inject_secrets_in_params(&params_cbor, &catalog, resolver.as_ref())
@@ -345,7 +354,10 @@ fn missing_env_var_yields_secret_resolver_missing() {
 
     let loaded = loaded_manifest_with_secret("env:AOS_TEST_MISSING_KEY");
     let resolver = env_secret_resolver_from_manifest(&loaded);
-    assert!(resolver.is_none(), "resolver should be absent when env missing");
+    assert!(
+        resolver.is_none(),
+        "resolver should be absent when env missing"
+    );
 
     let store = std::sync::Arc::new(MemStore::new());
     let config = KernelConfig {

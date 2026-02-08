@@ -51,7 +51,9 @@ enum LlmToolChoice {
     #[serde(rename = "None")]
     NoneChoice,
     Required,
-    Tool { name: String },
+    Tool {
+        name: String,
+    },
 }
 
 impl PureModule for CapEnforceLlmBasic {

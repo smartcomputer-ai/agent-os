@@ -7,9 +7,9 @@ use std::collections::{BTreeMap, HashMap};
 use crate::cell_index::CellMeta;
 use crate::governance_effects::{
     GovApplyParams, GovApplyReceipt, GovApprovalDecision, GovApproveParams, GovApproveReceipt,
-    GovPatchInput, GovProposeParams, GovProposeReceipt, GovShadowParams, GovShadowReceipt,
-    GovPredictedEffect, GovPendingReceipt, GovPlanResultPreview, GovLedgerDelta, GovLedgerKind,
-    GovDeltaKind,
+    GovDeltaKind, GovLedgerDelta, GovLedgerKind, GovPatchInput, GovPendingReceipt,
+    GovPlanResultPreview, GovPredictedEffect, GovProposeParams, GovProposeReceipt, GovShadowParams,
+    GovShadowReceipt,
 };
 use crate::query::{Consistency, ReadMeta, StateReader};
 use crate::{Kernel, KernelError};
@@ -462,8 +462,9 @@ where
                 head: None,
                 root_hash: None,
             };
-            return Ok(to_canonical_cbor(&receipt)
-                .map_err(|e| KernelError::Manifest(e.to_string()))?);
+            return Ok(
+                to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?
+            );
         };
         let history: WorkspaceHistory = serde_cbor::from_slice(&state_bytes)
             .map_err(|e| KernelError::Query(format!("decode workspace history: {e}")))?;
@@ -476,8 +477,9 @@ where
                 head: None,
                 root_hash: None,
             };
-            return Ok(to_canonical_cbor(&receipt)
-                .map_err(|e| KernelError::Manifest(e.to_string()))?);
+            return Ok(
+                to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?
+            );
         };
         let receipt = WorkspaceResolveReceipt {
             exists: true,
@@ -533,12 +535,7 @@ where
                     entries.push(list_entry_from_tree(path, &entry));
                 }
             }
-            _ => {
-                return Err(KernelError::Query(format!(
-                    "invalid scope '{}'",
-                    scope
-                )))
-            }
+            _ => return Err(KernelError::Query(format!("invalid scope '{}'", scope))),
         }
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         let start = params
@@ -697,10 +694,7 @@ where
             let entry_a = resolve_entry(store.as_ref(), &root_a, &prefix_segments)?;
             let entry_b = resolve_entry(store.as_ref(), &root_b, &prefix_segments)?;
             if entry_a.is_none() && entry_b.is_none() {
-                return Err(KernelError::Query(format!(
-                    "path not found: {}",
-                    prefix
-                )));
+                return Err(KernelError::Query(format!("path not found: {}", prefix)));
             }
             let file_diff = entry_a
                 .as_ref()
@@ -736,11 +730,7 @@ where
         for (path, entry) in entries_b {
             map_b.insert(path, entry);
         }
-        let mut paths: Vec<String> = map_a
-            .keys()
-            .chain(map_b.keys())
-            .cloned()
-            .collect();
+        let mut paths: Vec<String> = map_a.keys().chain(map_b.keys()).cloned().collect();
         paths.sort();
         paths.dedup();
         let mut changes = Vec::new();
@@ -750,9 +740,7 @@ where
             if old
                 .zip(new)
                 .map(|(a, b)| {
-                    a.kind == b.kind
-                        && a.hash == b.hash
-                        && a.annotations_hash == b.annotations_hash
+                    a.kind == b.kind && a.hash == b.hash && a.annotations_hash == b.annotations_hash
                 })
                 .unwrap_or(false)
             {
@@ -842,8 +830,12 @@ where
                 params.path.as_deref().unwrap_or_default()
             )));
         }
-        let (new_root, annotations_hash) =
-            set_annotations_at_path(store.as_ref(), &root_hash, &path_segments, &params.annotations_patch)?;
+        let (new_root, annotations_hash) = set_annotations_at_path(
+            store.as_ref(),
+            &root_hash,
+            &path_segments,
+            &params.annotations_patch,
+        )?;
         let receipt = WorkspaceAnnotationsSetReceipt {
             new_root_hash: hash_ref_from_hash(&new_root)?,
             annotations_hash,
@@ -889,11 +881,9 @@ where
                 .map(|effect| {
                     let intent_hash = hash_ref_from_hex(&effect.intent_hash)?;
                     let params_json = match effect.params_json {
-                        Some(value) => Some(
-                            serde_json::to_string(&value).map_err(|err| {
-                                KernelError::Manifest(format!("encode params_json: {err}"))
-                            })?,
-                        ),
+                        Some(value) => Some(serde_json::to_string(&value).map_err(|err| {
+                            KernelError::Manifest(format!("encode params_json: {err}"))
+                        })?),
                         None => None,
                     };
                     Ok(GovPredictedEffect {
@@ -956,8 +946,12 @@ where
         let patch_hash = HashRef::new(proposal.patch_hash.clone())
             .map_err(|e| KernelError::Manifest(format!("invalid patch hash: {e}")))?;
         match params.decision {
-            GovApprovalDecision::Approve => self.approve_proposal(params.proposal_id, params.approver.clone())?,
-            GovApprovalDecision::Reject => self.reject_proposal(params.proposal_id, params.approver.clone())?,
+            GovApprovalDecision::Approve => {
+                self.approve_proposal(params.proposal_id, params.approver.clone())?
+            }
+            GovApprovalDecision::Reject => {
+                self.reject_proposal(params.proposal_id, params.approver.clone())?
+            }
         }
         let receipt = GovApproveReceipt {
             proposal_id: params.proposal_id,
@@ -1013,8 +1007,7 @@ fn parse_hash_str(value: &str) -> Result<Hash, KernelError> {
 }
 
 fn hash_from_ref(hash: &HashRef) -> Result<Hash, KernelError> {
-    Hash::from_hex_str(hash.as_str())
-        .map_err(|e| KernelError::Query(format!("invalid hash: {e}")))
+    Hash::from_hex_str(hash.as_str()).map_err(|e| KernelError::Query(format!("invalid hash: {e}")))
 }
 
 fn validate_workspace_name(name: &str) -> Result<(), KernelError> {
@@ -1080,10 +1073,7 @@ fn validate_tree(tree: &WorkspaceTree) -> Result<(), KernelError> {
     Ok(())
 }
 
-fn load_tree<S: aos_store::Store>(
-    store: &S,
-    hash: &Hash,
-) -> Result<WorkspaceTree, KernelError> {
+fn load_tree<S: aos_store::Store>(store: &S, hash: &Hash) -> Result<WorkspaceTree, KernelError> {
     let tree: WorkspaceTree = store.get_node(*hash)?;
     validate_tree(&tree)?;
     Ok(tree)
@@ -1103,7 +1093,10 @@ fn upsert_entry(entries: &mut Vec<WorkspaceEntry>, entry: WorkspaceEntry) {
     }
 }
 
-fn remove_entry(entries: &mut Vec<WorkspaceEntry>, name: &str) -> Result<WorkspaceEntry, KernelError> {
+fn remove_entry(
+    entries: &mut Vec<WorkspaceEntry>,
+    name: &str,
+) -> Result<WorkspaceEntry, KernelError> {
     match entries.binary_search_by(|e| e.name.as_str().cmp(name)) {
         Ok(idx) => Ok(entries.remove(idx)),
         Err(_) => Err(KernelError::Query("path not found".into())),
@@ -1118,9 +1111,8 @@ fn resolve_dir_hash<S: aos_store::Store>(
     let mut current = *root_hash;
     for segment in path {
         let tree = load_tree(store, &current)?;
-        let entry = find_entry(&tree, segment).ok_or_else(|| {
-            KernelError::Query(format!("missing path segment '{segment}'"))
-        })?;
+        let entry = find_entry(&tree, segment)
+            .ok_or_else(|| KernelError::Query(format!("missing path segment '{segment}'")))?;
         if entry.kind != "dir" {
             return Err(KernelError::Query("path is not a directory".into()));
         }
@@ -1226,9 +1218,11 @@ fn apply_annotations_patch<S: aos_store::Store>(
     patch: &WorkspaceAnnotationsPatch,
 ) -> Result<HashRef, KernelError> {
     let mut annotations = match current {
-        Some(hash) => annotations_from_hash(store, Some(hash))?
-            .unwrap_or_default()
-            .0,
+        Some(hash) => {
+            annotations_from_hash(store, Some(hash))?
+                .unwrap_or_default()
+                .0
+        }
         None => BTreeMap::new(),
     };
     for (key, value) in &patch.0 {
@@ -1254,7 +1248,8 @@ fn set_annotations_at_path<S: aos_store::Store>(
 ) -> Result<(Hash, HashRef), KernelError> {
     let mut tree = load_tree(store, tree_hash)?;
     if path.is_empty() {
-        let annotations_hash = apply_annotations_patch(store, tree.annotations_hash.as_ref(), patch)?;
+        let annotations_hash =
+            apply_annotations_patch(store, tree.annotations_hash.as_ref(), patch)?;
         tree.annotations_hash = Some(annotations_hash.clone());
         let new_root = store.put_node(&tree)?;
         return Ok((new_root, annotations_hash));
@@ -1383,8 +1378,8 @@ fn remove_entry_at_path<S: aos_store::Store>(
         return Ok(store.put_node(&tree)?);
     }
     let dir_name = &path[0];
-    let entry = find_entry(&tree, dir_name)
-        .ok_or_else(|| KernelError::Query("path not found".into()))?;
+    let entry =
+        find_entry(&tree, dir_name).ok_or_else(|| KernelError::Query("path not found".into()))?;
     if entry.kind != "dir" {
         return Err(KernelError::Query("path is not a directory".into()));
     }
@@ -1550,13 +1545,9 @@ mod tests {
             MODE_FILE_DEFAULT,
         )
         .expect("write file");
-        let entry = resolve_entry(
-            &store,
-            &new_root,
-            &vec!["dir".into(), "file.txt".into()],
-        )
-        .expect("resolve")
-        .expect("entry");
+        let entry = resolve_entry(&store, &new_root, &vec!["dir".into(), "file.txt".into()])
+            .expect("resolve")
+            .expect("entry");
         assert_eq!(entry.kind, "file");
         assert_eq!(entry.size, content.len() as u64);
         let err = remove_entry_at_path(&store, &new_root, &vec!["dir".into()]).unwrap_err();

@@ -8,7 +8,7 @@ fn help_mentions_new_flags_and_nouns() {
     let text = String::from_utf8_lossy(&output.stdout);
 
     // Check a couple of important flags and nouns.
-    for needle in ["--no-meta", "--pretty", "event", "blob"] {
+    for needle in ["--no-meta", "--pretty", "event", "blob", "trace", "journal"] {
         assert!(
             text.contains(needle),
             "help output should contain '{needle}'"

@@ -19,6 +19,7 @@ use commands::pull::PullArgs;
 use commands::push::PushArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
+use commands::trace::TraceArgs;
 use commands::ui::UiArgs;
 use commands::workspace::WorkspaceArgs;
 use opts::{WorldOpts, resolve_world};
@@ -64,6 +65,9 @@ enum Command {
     /// Show journal information
     #[command(subcommand)]
     Journal(JournalCommand),
+
+    /// Trace a request/event execution lineage
+    Trace(TraceArgs),
 
     /// Display active manifest
     #[command(subcommand)]
@@ -114,6 +118,9 @@ enum JournalCommand {
     /// Show journal head
     Head,
 
+    /// Show journal entries from a sequence
+    Tail(commands::journal_tail::JournalTailArgs),
+
     /// Replay journal to head (experimental)
     Replay(commands::replay::ReplayArgs),
 }
@@ -154,8 +161,12 @@ async fn main() -> Result<()> {
         },
         Command::Journal(cmd) => match cmd {
             JournalCommand::Head => commands::head::cmd_head(opts).await,
+            JournalCommand::Tail(args) => {
+                commands::journal_tail::cmd_journal_tail(opts, &args).await
+            }
             JournalCommand::Replay(args) => commands::replay::cmd_replay(opts, &args).await,
         },
+        Command::Trace(args) => commands::trace::cmd_trace(opts, &args).await,
         Command::Snapshot(cmd) => match cmd {
             SnapshotCommand::Create => commands::snapshot::cmd_snapshot(opts).await,
         },

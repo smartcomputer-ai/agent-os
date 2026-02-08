@@ -9,10 +9,10 @@ use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_host::config::HostConfig;
 use aos_host::util::is_placeholder_hash;
-use aos_kernel::{KernelConfig, LoadedManifest};
-use aos_kernel::journal::{JournalKind, JournalRecord, SnapshotRecord, ManifestRecord};
 use aos_kernel::journal::Journal;
 use aos_kernel::journal::fs::FsJournal;
+use aos_kernel::journal::{JournalKind, JournalRecord, ManifestRecord, SnapshotRecord};
+use aos_kernel::{KernelConfig, LoadedManifest};
 use aos_store::{FsStore, Store};
 use aos_wasm_build::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
@@ -275,10 +275,7 @@ fn resolve_from_modules_dir(
     let prefix = format!("{module_name}-");
     let mut matches: Vec<PathBuf> = Vec::new();
 
-    for entry in WalkDir::new(modules_dir)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
+    for entry in WalkDir::new(modules_dir).into_iter().filter_map(Result::ok) {
         if !entry.file_type().is_file() {
             continue;
         }
@@ -391,9 +388,19 @@ fn resolve_sys_module(
                     hash_ref.as_str()
                 );
             }
-            persist_module_file(&sys_cache_dir(store_root), spec.name, hash_ref.as_str(), &bytes)?;
+            persist_module_file(
+                &sys_cache_dir(store_root),
+                spec.name,
+                hash_ref.as_str(),
+                &bytes,
+            )?;
             if should_copy_sys_modules() {
-                persist_module_file(&world_root.join("modules"), spec.name, hash_ref.as_str(), &bytes)?;
+                persist_module_file(
+                    &world_root.join("modules"),
+                    spec.name,
+                    hash_ref.as_str(),
+                    &bytes,
+                )?;
             }
             return Ok(Some(hash_ref));
         }

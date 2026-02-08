@@ -157,9 +157,7 @@ pub fn import_genesis<S: Store>(store: &S, bundle: &WorldBundle) -> Result<Genes
             .context("store defsecret")?;
     }
 
-    store
-        .put_node(&bundle.manifest)
-        .context("store manifest")?;
+    store.put_node(&bundle.manifest).context("store manifest")?;
     let manifest_bytes =
         to_canonical_cbor(&bundle.manifest).context("encode manifest to canonical CBOR")?;
     let manifest_hash = Hash::of_bytes(&manifest_bytes).to_hex();
@@ -198,9 +196,7 @@ pub fn export_bundle<S: Store>(
     let manifest_bytes = manifest_node_bytes(&manifest)?;
     let computed_hash = Hash::of_bytes(&manifest_bytes).to_hex();
     if computed_hash != manifest_hash {
-        bail!(
-            "manifest hash mismatch: expected {manifest_hash}, computed {computed_hash}"
-        );
+        bail!("manifest hash mismatch: expected {manifest_hash}, computed {computed_hash}");
     }
 
     let catalog = aos_store::load_manifest_from_bytes(store, &manifest_bytes)
@@ -304,12 +300,30 @@ pub fn build_patch_document(
     }
 
     let mut add_refs = Vec::new();
-    add_refs.extend(manifest_refs_from("defschema", &filter_sys_refs(&bundle.manifest.schemas)));
-    add_refs.extend(manifest_refs_from("defmodule", &filter_sys_refs(&bundle.manifest.modules)));
-    add_refs.extend(manifest_refs_from("defplan", &filter_sys_refs(&bundle.manifest.plans)));
-    add_refs.extend(manifest_refs_from("defcap", &filter_sys_refs(&bundle.manifest.caps)));
-    add_refs.extend(manifest_refs_from("defpolicy", &filter_sys_refs(&bundle.manifest.policies)));
-    add_refs.extend(manifest_refs_from("defeffect", &filter_sys_refs(&bundle.manifest.effects)));
+    add_refs.extend(manifest_refs_from(
+        "defschema",
+        &filter_sys_refs(&bundle.manifest.schemas),
+    ));
+    add_refs.extend(manifest_refs_from(
+        "defmodule",
+        &filter_sys_refs(&bundle.manifest.modules),
+    ));
+    add_refs.extend(manifest_refs_from(
+        "defplan",
+        &filter_sys_refs(&bundle.manifest.plans),
+    ));
+    add_refs.extend(manifest_refs_from(
+        "defcap",
+        &filter_sys_refs(&bundle.manifest.caps),
+    ));
+    add_refs.extend(manifest_refs_from(
+        "defpolicy",
+        &filter_sys_refs(&bundle.manifest.policies),
+    ));
+    add_refs.extend(manifest_refs_from(
+        "defeffect",
+        &filter_sys_refs(&bundle.manifest.effects),
+    ));
     for secret in &bundle.manifest.secrets {
         if let SecretEntry::Ref(named) = secret {
             if is_sys_name(named.name.as_str()) {
@@ -432,9 +446,7 @@ pub async fn resolve_base_manifest(
         let bytes = manifest_node_bytes(&manifest)?;
         let computed = Hash::of_bytes(&bytes).to_hex();
         if computed != hash {
-            bail!(
-                "base manifest hash mismatch: expected {hash}, computed {computed}"
-            );
+            bail!("base manifest hash mismatch: expected {hash}, computed {computed}");
         }
         return Ok(BaseManifest {
             manifest,
@@ -492,11 +504,7 @@ pub fn decode_manifest_bytes(bytes: &[u8]) -> Result<Manifest> {
     bail!("unsupported manifest encoding");
 }
 
-pub fn write_air_layout(
-    bundle: &WorldBundle,
-    manifest_cbor: &[u8],
-    out_dir: &Path,
-) -> Result<()> {
+pub fn write_air_layout(bundle: &WorldBundle, manifest_cbor: &[u8], out_dir: &Path) -> Result<()> {
     write_air_layout_with_options(bundle, manifest_cbor, out_dir, WriteOptions::default())
 }
 
@@ -526,49 +534,29 @@ pub fn write_air_layout_with_options(
         &AirNode::Manifest(bundle.manifest.clone()),
     )?;
     if options.defs_bundle {
-        let defs = collect_def_nodes(
-            schemas,
-            modules,
-            plans,
-            effects,
-            caps,
-            policies,
-            secrets,
-        );
-        write_node_array_with_options(&air_dir.join("defs.air.json"), defs, options.strip_wasm_hashes)?;
+        let defs = collect_def_nodes(schemas, modules, plans, effects, caps, policies, secrets);
+        write_node_array_with_options(
+            &air_dir.join("defs.air.json"),
+            defs,
+            options.strip_wasm_hashes,
+        )?;
     } else {
         write_node_array(
             &air_dir.join("schemas.air.json"),
-            schemas
-                .iter()
-                .cloned()
-                .map(AirNode::Defschema)
-                .collect(),
+            schemas.iter().cloned().map(AirNode::Defschema).collect(),
         )?;
         write_node_array_with_options(
             &air_dir.join("module.air.json"),
-            modules
-                .iter()
-                .cloned()
-                .map(AirNode::Defmodule)
-                .collect(),
+            modules.iter().cloned().map(AirNode::Defmodule).collect(),
             options.strip_wasm_hashes,
         )?;
         write_node_array(
             &air_dir.join("plans.air.json"),
-            plans
-                .iter()
-                .cloned()
-                .map(AirNode::Defplan)
-                .collect(),
+            plans.iter().cloned().map(AirNode::Defplan).collect(),
         )?;
         write_node_array(
             &air_dir.join("effects.air.json"),
-            effects
-                .iter()
-                .cloned()
-                .map(AirNode::Defeffect)
-                .collect(),
+            effects.iter().cloned().map(AirNode::Defeffect).collect(),
         )?;
         write_node_array(
             &air_dir.join("capabilities.air.json"),
@@ -576,19 +564,11 @@ pub fn write_air_layout_with_options(
         )?;
         write_node_array(
             &air_dir.join("policies.air.json"),
-            policies
-                .iter()
-                .cloned()
-                .map(AirNode::Defpolicy)
-                .collect(),
+            policies.iter().cloned().map(AirNode::Defpolicy).collect(),
         )?;
         write_node_array(
             &air_dir.join("secrets.air.json"),
-            secrets
-                .iter()
-                .cloned()
-                .map(AirNode::Defsecret)
-                .collect(),
+            secrets.iter().cloned().map(AirNode::Defsecret).collect(),
         )?;
     }
 
@@ -725,10 +705,7 @@ fn strip_module_wasm_hash(value: &mut serde_json::Value) {
     }
 }
 
-fn split_sys_defs<T: HasName + Clone>(
-    defs: &[T],
-    include_sys: bool,
-) -> (Vec<T>, Vec<T>) {
+fn split_sys_defs<T: HasName + Clone>(defs: &[T], include_sys: bool) -> (Vec<T>, Vec<T>) {
     let mut normal = Vec::new();
     let mut sys = Vec::new();
     for def in defs {
@@ -913,15 +890,17 @@ fn manifest_from_store(store: &FsStore, hash_hex: &str) -> Result<Manifest> {
 }
 
 fn manifest_from_path(path: &Path) -> Result<Manifest> {
-    let bytes =
-        fs::read(path).with_context(|| format!("read manifest at {}", path.display()))?;
+    let bytes = fs::read(path).with_context(|| format!("read manifest at {}", path.display()))?;
     decode_manifest_bytes(&bytes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_air_types::{CURRENT_AIR_VERSION, DefSchema, EmptyObject, HashRef, NamedRef, TypeExpr, TypePrimitive, TypePrimitiveBool};
+    use aos_air_types::{
+        CURRENT_AIR_VERSION, DefSchema, EmptyObject, HashRef, NamedRef, TypeExpr, TypePrimitive,
+        TypePrimitiveBool,
+    };
     use aos_store::{MemStore, Store};
     use tempfile::tempdir;
 
@@ -981,8 +960,8 @@ mod tests {
             .expect("store manifest")
             .to_hex();
 
-        let exported = export_bundle(&store, &manifest_hash, ExportOptions::default())
-            .expect("export bundle");
+        let exported =
+            export_bundle(&store, &manifest_hash, ExportOptions::default()).expect("export bundle");
         assert_eq!(exported.manifest_hash, manifest_hash);
         assert_eq!(exported.bundle.schemas.len(), 1);
 
@@ -993,7 +972,9 @@ mod tests {
         let manifest_node_hash =
             Hash::from_hex_str(&imported.manifest_hash).expect("manifest hash parse");
         assert!(
-            store2.has_node(manifest_node_hash).expect("manifest stored"),
+            store2
+                .has_node(manifest_node_hash)
+                .expect("manifest stored"),
             "manifest node should be stored in CAS"
         );
     }
@@ -1015,17 +996,10 @@ mod tests {
             routing: None,
             triggers: Vec::new(),
         };
-        let manifest_hash = store
-            .put_node(&manifest)
-            .expect("store manifest")
-            .to_hex();
+        let manifest_hash = store.put_node(&manifest).expect("store manifest").to_hex();
 
-        let exported = export_bundle(
-            &store,
-            &manifest_hash,
-            ExportOptions { include_sys: true },
-        )
-        .expect("export bundle");
+        let exported = export_bundle(&store, &manifest_hash, ExportOptions { include_sys: true })
+            .expect("export bundle");
         let has_sys_schema = exported
             .bundle
             .schemas
@@ -1106,7 +1080,9 @@ mod tests {
         let defs_json = fs::read_to_string(&defs_path).expect("read defs bundle");
         let nodes: Vec<AirNode> = serde_json::from_str(&defs_json).expect("parse defs bundle");
         assert!(
-            nodes.iter().any(|node| matches!(node, AirNode::Defschema(def) if def.name == schema.name)),
+            nodes
+                .iter()
+                .any(|node| matches!(node, AirNode::Defschema(def) if def.name == schema.name)),
             "defs bundle should include schema"
         );
     }

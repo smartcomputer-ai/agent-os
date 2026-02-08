@@ -5,8 +5,8 @@ use aos_cbor::Hash;
 use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmToolChoice, TokenUsage};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use async_trait::async_trait;
-use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -102,11 +102,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         };
 
         if params.message_refs.is_empty() {
-            return Ok(self.error_receipt(
-                intent,
-                &provider_id,
-                "message_refs empty",
-            ));
+            return Ok(self.error_receipt(intent, &provider_id, "message_refs empty"));
         }
 
         let messages = match self.load_messages(&params.message_refs, provider.api_kind) {
@@ -150,7 +146,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                             match normalize_responses_tools(&tools) {
                                 Ok(value) => value,
                                 Err(err) => {
-                                    return Ok(self.error_receipt(intent, &provider_id, err))
+                                    return Ok(self.error_receipt(intent, &provider_id, err));
                                 }
                             }
                         } else {
@@ -163,7 +159,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                             match normalize_responses_tool_choice(tool_choice_from_blob.unwrap()) {
                                 Ok(value) => value,
                                 Err(err) => {
-                                    return Ok(self.error_receipt(intent, &provider_id, err))
+                                    return Ok(self.error_receipt(intent, &provider_id, err));
                                 }
                             }
                         } else {
@@ -220,9 +216,11 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                 let api_response: OpenAiChatResponse = match response.json().await {
                     Ok(r) => r,
                     Err(e) => {
-                        return Ok(
-                            self.error_receipt(intent, &provider_id, format!("parse error: {e}")),
-                        );
+                        return Ok(self.error_receipt(
+                            intent,
+                            &provider_id,
+                            format!("parse error: {e}"),
+                        ));
                     }
                 };
                 let content = api_response
@@ -246,9 +244,11 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
                 let api_response: serde_json::Value = match response.json().await {
                     Ok(r) => r,
                     Err(e) => {
-                        return Ok(
-                            self.error_receipt(intent, &provider_id, format!("parse error: {e}")),
-                        );
+                        return Ok(self.error_receipt(
+                            intent,
+                            &provider_id,
+                            format!("parse error: {e}"),
+                        ));
                     }
                 };
                 let usage = extract_responses_usage(&api_response);
@@ -328,8 +328,8 @@ impl<S: Store> LlmAdapter<S> {
         reference: &HashRef,
         api_kind: LlmApiKind,
     ) -> Result<Vec<serde_json::Value>, String> {
-        let hash =
-            Hash::from_hex_str(reference.as_str()).map_err(|e| format!("invalid message_ref: {e}"))?;
+        let hash = Hash::from_hex_str(reference.as_str())
+            .map_err(|e| format!("invalid message_ref: {e}"))?;
         let bytes = self
             .store
             .get_blob(hash)
@@ -341,10 +341,8 @@ impl<S: Store> LlmAdapter<S> {
                     let mut messages = Vec::with_capacity(items.len());
                     for item in items {
                         if api_kind == LlmApiKind::Responses {
-                            messages.push(normalize_responses_input_item(
-                                item,
-                                self.store.as_ref(),
-                            )?);
+                            messages
+                                .push(normalize_responses_input_item(item, self.store.as_ref())?);
                         } else {
                             messages.push(normalize_message(item, self.store.as_ref(), api_kind)?);
                         }
@@ -352,7 +350,11 @@ impl<S: Store> LlmAdapter<S> {
                     return Ok(messages);
                 }
                 serde_json::Value::Object(_) => {
-                    return Ok(vec![normalize_message(value, self.store.as_ref(), api_kind)?]);
+                    return Ok(vec![normalize_message(
+                        value,
+                        self.store.as_ref(),
+                        api_kind,
+                    )?]);
                 }
                 _ => {}
             }
@@ -411,7 +413,6 @@ impl<S: Store> LlmAdapter<S> {
 
         Ok((tools_value, merged_choice))
     }
-
 }
 
 fn normalize_message<S: Store>(
@@ -493,7 +494,10 @@ fn rewrite_message_content_types_for_responses_input(value: &mut serde_json::Val
             .and_then(|v| v.as_str())
             .is_some_and(|t| t == "output_text")
         {
-            obj.insert("type".into(), serde_json::Value::String("input_text".into()));
+            obj.insert(
+                "type".into(),
+                serde_json::Value::String("input_text".into()),
+            );
         }
     }
 }
@@ -678,7 +682,6 @@ struct OpenAiUsage {
     _total_tokens: u64,
 }
 
-
 fn extract_responses_usage(value: &serde_json::Value) -> TokenUsage {
     let prompt = value
         .get("usage")
@@ -782,7 +785,6 @@ fn normalize_responses_tool_choice(value: serde_json::Value) -> Result<serde_jso
     }
     Ok(value)
 }
-
 
 fn zero_hashref() -> HashRef {
     HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")

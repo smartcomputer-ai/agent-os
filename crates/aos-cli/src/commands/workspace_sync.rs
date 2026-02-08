@@ -196,7 +196,9 @@ pub fn sync_workspace_push(
     let mut writes: Vec<(String, LocalFileEntry)> = Vec::new();
     for (path, entry) in &local {
         let needs_write = match remote.get(path) {
-            Some(remote_entry) => remote_entry.hash != entry.hash || remote_entry.mode != entry.mode,
+            Some(remote_entry) => {
+                remote_entry.hash != entry.hash || remote_entry.mode != entry.mode
+            }
             None => true,
         };
         if needs_write {
@@ -219,13 +221,10 @@ pub fn sync_workspace_push(
 
     let mut annotation_map = annotations.clone();
     if let Some(message) = opts.message {
-        annotation_map
-            .entry(String::new())
-            .or_default()
-            .insert(
-                "sys/commit.message".to_string(),
-                JsonValue::String(message.to_string()),
-            );
+        annotation_map.entry(String::new()).or_default().insert(
+            "sys/commit.message".to_string(),
+            JsonValue::String(message.to_string()),
+        );
     }
     let annotation_targets =
         build_annotation_targets(store, &annotation_map, parsed.path.as_deref())?;
@@ -236,8 +235,8 @@ pub fn sync_workspace_push(
 
     writes.sort_by(|a, b| a.0.cmp(&b.0));
     for (path, entry) in writes {
-        let bytes = fs::read(&entry.path)
-            .with_context(|| format!("read file {}", entry.path.display()))?;
+        let bytes =
+            fs::read(&entry.path).with_context(|| format!("read file {}", entry.path.display()))?;
         let receipt = workspace_write_bytes(
             host,
             &WorkspaceWriteBytesParams {
@@ -334,8 +333,7 @@ pub fn sync_workspace_pull(
                 fs::create_dir_all(parent)
                     .with_context(|| format!("create {}", parent.display()))?;
             }
-            fs::write(&out_path, bytes)
-                .with_context(|| format!("write {}", out_path.display()))?;
+            fs::write(&out_path, bytes).with_context(|| format!("write {}", out_path.display()))?;
             set_file_mode(&out_path, *mode)?;
             stats.writes += 1;
         }
@@ -350,8 +348,7 @@ pub fn sync_workspace_pull(
         for path in local_paths {
             if !remote_paths.contains(&path) {
                 let full = dir.join(&path);
-                fs::remove_file(&full)
-                    .with_context(|| format!("remove {}", full.display()))?;
+                fs::remove_file(&full).with_context(|| format!("remove {}", full.display()))?;
                 stats.removes += 1;
             }
         }
@@ -436,12 +433,16 @@ fn collect_local_files(
             );
         }
         let rel = entry.path().strip_prefix(root).with_context(|| {
-            format!("strip prefix {} from {}", root.display(), entry.path().display())
+            format!(
+                "strip prefix {} from {}",
+                root.display(),
+                entry.path().display()
+            )
         })?;
         let rel_encoded = encode_relative_path(rel)?;
         let full_path = join_workspace_path(base_path, &rel_encoded);
-        let bytes = fs::read(entry.path())
-            .with_context(|| format!("read {}", entry.path().display()))?;
+        let bytes =
+            fs::read(entry.path()).with_context(|| format!("read {}", entry.path().display()))?;
         let hash = Hash::of_bytes(&bytes).to_hex();
         let mode = file_mode_from_metadata(&entry.metadata()?)?;
         files.insert(
@@ -481,7 +482,11 @@ fn collect_local_paths(root: &Path, matcher: &IgnoreMatcher) -> Result<Vec<PathB
             );
         }
         let rel = entry.path().strip_prefix(root).with_context(|| {
-            format!("strip prefix {} from {}", root.display(), entry.path().display())
+            format!(
+                "strip prefix {} from {}",
+                root.display(),
+                entry.path().display()
+            )
         })?;
         let rel_path = rel.to_path_buf();
         paths.push(rel_path);
@@ -559,8 +564,9 @@ fn build_annotation_targets(
             let key = normalize_annotation_key(key)?;
             let bytes = match value {
                 JsonValue::String(text) => text.as_bytes().to_vec(),
-                _ => aos_cbor::to_canonical_cbor(value)
-                    .context("encode annotation value to CBOR")?,
+                _ => {
+                    aos_cbor::to_canonical_cbor(value).context("encode annotation value to CBOR")?
+                }
             };
             let hash = store.put_blob(&bytes).context("store annotation blob")?;
             patch.insert(key, Some(hash.to_hex()));
@@ -673,13 +679,15 @@ fn decode_relative_path(path: &str) -> Result<PathBuf> {
 fn encode_segment(raw: &str) -> String {
     if !raw.is_empty()
         && !raw.starts_with('~')
-        && raw.chars().all(|c| matches!(c, 'a'..='z'
+        && raw.chars().all(|c| {
+            matches!(c, 'a'..='z'
             | 'A'..='Z'
             | '0'..='9'
             | '.'
             | '_'
             | '-'
-            | '~'))
+            | '~')
+        })
     {
         return raw.to_string();
     }
@@ -704,9 +712,7 @@ fn decode_segment(seg: &str) -> Result<String> {
 
 impl IgnoreMatcher {
     fn new(scope: &Path, patterns: &[String]) -> Result<Self> {
-        let scope = scope
-            .canonicalize()
-            .unwrap_or_else(|_| scope.to_path_buf());
+        let scope = scope.canonicalize().unwrap_or_else(|_| scope.to_path_buf());
         let root = find_git_root(&scope).unwrap_or_else(|| scope.to_path_buf());
         let prefix = scope
             .strip_prefix(&root)
@@ -727,9 +733,7 @@ impl IgnoreMatcher {
         } else {
             self.prefix.join(path)
         };
-        let config_match = self
-            .config
-            .matched_path_or_any_parents(&full_path, is_dir);
+        let config_match = self.config.matched_path_or_any_parents(&full_path, is_dir);
         if config_match.is_whitelist() {
             return false;
         }
@@ -775,21 +779,14 @@ fn build_gitignore(root: &Path) -> Result<Gitignore> {
         let entry = entry?;
         if entry.file_type().is_file() && entry.file_name() == ".gitignore" {
             if let Some(err) = builder.add(entry.path()) {
-                return Err(anyhow!(
-                    "parse {}: {err}",
-                    entry.path().display()
-                ));
+                return Err(anyhow!("parse {}: {err}", entry.path().display()));
             }
         }
     }
     builder.build().context("build gitignore matcher")
 }
 
-fn build_config_ignore(
-    root: &Path,
-    prefix: &Path,
-    patterns: &[String],
-) -> Result<Gitignore> {
+fn build_config_ignore(root: &Path, prefix: &Path, patterns: &[String]) -> Result<Gitignore> {
     let mut builder = GitignoreBuilder::new(root);
     if patterns.is_empty() {
         return builder.build().context("build ignore matcher");
@@ -878,7 +875,12 @@ fn workspace_resolve(
     host: &mut WorldHost<FsStore>,
     params: &WorkspaceResolveParams,
 ) -> Result<WorkspaceResolveReceipt> {
-    handle_internal(host, EffectKind::workspace_resolve(), params, "workspace.resolve")
+    handle_internal(
+        host,
+        EffectKind::workspace_resolve(),
+        params,
+        "workspace.resolve",
+    )
 }
 
 fn workspace_empty_root(
@@ -928,7 +930,12 @@ fn workspace_remove(
     host: &mut WorldHost<FsStore>,
     params: &WorkspaceRemoveParams,
 ) -> Result<WorkspaceRemoveReceipt> {
-    handle_internal(host, EffectKind::workspace_remove(), params, "workspace.remove")
+    handle_internal(
+        host,
+        EffectKind::workspace_remove(),
+        params,
+        "workspace.remove",
+    )
 }
 
 fn workspace_annotations_set(

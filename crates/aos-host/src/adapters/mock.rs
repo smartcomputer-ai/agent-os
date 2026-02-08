@@ -301,8 +301,8 @@ impl<S: Store + 'static> MockLlmHarness<S> {
                 { "type": "text", "text": summary_text }
             ]
         });
-        let output_bytes = serde_json::to_vec(&output_message)
-            .context("encode llm.generate output message")?;
+        let output_bytes =
+            serde_json::to_vec(&output_message).context("encode llm.generate output message")?;
         let output_hash = self
             .store
             .put_blob(&output_bytes)
@@ -360,7 +360,10 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             .iter()
             .map(|v| match v {
                 serde_cbor::Value::Text(t) => HashRef::new(t.clone()).context("parse hash ref"),
-                other => Err(anyhow!("message_refs entries must be hash text, got {:?}", other)),
+                other => Err(anyhow!(
+                    "message_refs entries must be hash text, got {:?}",
+                    other
+                )),
             })
             .collect::<Result<Vec<_>>>()?,
         Some(other) => {
@@ -380,7 +383,10 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             .iter()
             .map(|v| match v {
                 serde_cbor::Value::Text(t) => Ok(HashRef::new(t.clone())?),
-                other => Err(anyhow!("tool_refs entries must be hash text, got {:?}", other)),
+                other => Err(anyhow!(
+                    "tool_refs entries must be hash text, got {:?}",
+                    other
+                )),
             })
             .collect::<Result<Vec<_>>>()?,
         Some(serde_cbor::Value::Null) | None => Vec::new(),
@@ -399,7 +405,11 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
         temperature: text("temperature")?,
         max_tokens: nat("max_tokens")?,
         message_refs,
-        tool_refs: if tool_refs.is_empty() { None } else { Some(tool_refs) },
+        tool_refs: if tool_refs.is_empty() {
+            None
+        } else {
+            Some(tool_refs)
+        },
         tool_choice: None,
         api_key,
     })
@@ -520,9 +530,9 @@ fn message_text_from_value(value: &serde_json::Value) -> Result<String> {
         serde_json::Value::Array(parts) => {
             let mut buf = String::new();
             for part in parts {
-                let part_obj = part.as_object().ok_or_else(|| {
-                    anyhow!("content parts must be objects")
-                })?;
+                let part_obj = part
+                    .as_object()
+                    .ok_or_else(|| anyhow!("content parts must be objects"))?;
                 let part_type = part_obj
                     .get("type")
                     .and_then(|v| v.as_str())

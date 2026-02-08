@@ -3,6 +3,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChatMessage } from "./chat-message";
 import { MessageInput } from "./message-input";
+import { ChatDebugPanel } from "./chat-debug-panel";
 import type { ChatState, ChatSettings } from "../types";
 
 interface ChatMainViewProps {
@@ -103,6 +104,7 @@ export function ChatMainView({
             </div>
           ) : (
             <div className="space-y-3 max-w-4xl mx-auto mt-28 mb-24">
+              <ChatDebugPanel />
               {chatState?.messages.map((message, index) => (
                 <ChatMessage
                   key={`${message.request_id}-${message.role.$tag}-${message.message_ref ?? "inline"}-${index}`}

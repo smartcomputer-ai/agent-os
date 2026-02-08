@@ -3,7 +3,7 @@
 **Priority**: P4  
 **Effort**: Medium  
 **Risk if deferred**: High (feature work stays slow because failures are opaque)  
-**Status**: Proposed
+**Status**: In Progress
 
 ## Goal
 
@@ -149,3 +149,24 @@ Implement in this order:
 5. Add trace-based integration tests and smoke artifact output.
 
 This is the minimum path that materially increases development velocity without introducing heavy new infrastructure.
+
+## Implementation Status (2026-02-06)
+
+Completed:
+- Phase 1.1 full journal tail in control/HTTP:
+  - `journal-list` now returns all journal record kinds with optional `kinds` filtering.
+  - `GET /api/journal` forwards `kinds`.
+- Phase 1.2 generic trace query:
+  - `trace-get` control command and `GET /api/debug/trace` endpoint implemented.
+  - Includes root metadata, bounded journal window, live wait snapshots, and derived terminal state.
+- Phase 2 CLI baseline:
+  - `aos journal tail --from --limit --kinds [--out]`
+  - `aos trace --event-hash [--window-limit] [--follow] [--out]`
+- Phase 4 initial smoke artifact support:
+  - `apps/demiurge/scripts/smoke_introspect_manifest.sh` now emits debug artifacts on failure:
+    - `journal-tail.json`
+    - best-effort `trace.json` for latest Demiurge domain event
+
+Remaining:
+- Shell Debug drawer (Phase 3 thin adapter) wired to `/api/debug/trace`.
+- Replay parity test for trace classification and broader trace-driven e2e assertions.

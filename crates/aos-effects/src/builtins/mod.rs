@@ -111,5 +111,7 @@ pub enum LlmToolChoice {
     #[serde(rename = "None")]
     NoneChoice,
     Required,
-    Tool { name: String },
+    Tool {
+        name: String,
+    },
 }

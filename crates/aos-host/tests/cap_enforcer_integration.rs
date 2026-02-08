@@ -198,7 +198,9 @@ fn workspace_enforcer_module_denies_workspace() {
         name: "sys/workspace@1".into(),
         hash: fixtures::zero_hash(),
     });
-    loaded.caps.insert("sys/workspace@1".into(), workspace_defcap());
+    loaded
+        .caps
+        .insert("sys/workspace@1".into(), workspace_defcap());
 
     let mut world = TestWorld::with_store(store, loaded).expect("world");
     world
