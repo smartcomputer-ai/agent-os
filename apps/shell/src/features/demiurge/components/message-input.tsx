@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { workspaceList, workspaceReadRef } from "@/sdk/endpoints";
@@ -55,6 +55,15 @@ export function MessageInput({
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const nextRequestIdRef = useRef(lastRequestId + 1);
+
+  useEffect(() => {
+    nextRequestIdRef.current = lastRequestId + 1;
+  }, [chatId]);
+
+  useEffect(() => {
+    nextRequestIdRef.current = Math.max(nextRequestIdRef.current, lastRequestId + 1);
+  }, [lastRequestId]);
 
   const blobPutMutation = useBlobPut();
   const eventsPostMutation = useEventsPost();
@@ -72,7 +81,7 @@ export function MessageInput({
         data_b64: base64Data,
       });
 
-      const requestId = lastRequestId + 1;
+      const requestId = Math.max(nextRequestIdRef.current, lastRequestId + 1);
       const toolRefs = await loadToolRefs();
       const toolChoice = toolRefs.length > 0 ? { $tag: "Auto" as const } : null;
 
@@ -93,6 +102,8 @@ export function MessageInput({
           },
         },
       });
+
+      nextRequestIdRef.current = requestId + 1;
 
       setMessage("");
       onMessageSent?.();

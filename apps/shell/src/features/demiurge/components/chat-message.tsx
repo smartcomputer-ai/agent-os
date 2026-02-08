@@ -34,6 +34,11 @@ function extractTextFromBlob(blob: unknown): string | null {
     for (const item of blob) {
       if (!item || typeof item !== "object") continue;
       const type = (item as { type?: string }).type;
+      if (type === "function_call" || type === "tool_call") {
+        const name = (item as { name?: string }).name ?? "unknown_tool";
+        parts.push(`Tool call: ${name}`);
+        continue;
+      }
       if (type === "function_call_output") {
         const output = (item as { output?: unknown }).output;
         if (typeof output === "string" && output.length > 0) {
@@ -48,6 +53,10 @@ function extractTextFromBlob(blob: unknown): string | null {
   }
   if (typeof blob === "object") {
     const type = (blob as { type?: string }).type;
+    if (type === "function_call" || type === "tool_call") {
+      const name = (blob as { name?: string }).name ?? "unknown_tool";
+      return `Tool call: ${name}`;
+    }
     if (type === "function_call_output") {
       const output = (blob as { output?: unknown }).output;
       if (typeof output === "string" && output.length > 0) {
@@ -170,10 +179,12 @@ export function ChatMessage({ chatId, message }: ChatMessageProps) {
     return message.text;
   }, [blobData, message.text]);
 
-  const correlateBy = message.message_ref
+  const correlateBy = isUser && message.message_ref
     ? "$value.message_ref"
     : "$value.request_id";
-  const correlateValue = message.message_ref ?? message.request_id;
+  const correlateValue = isUser && message.message_ref
+    ? message.message_ref
+    : message.request_id;
   const traceQuery = useDebugTrace(
     {
       schema: "demiurge/ChatEvent@1",
