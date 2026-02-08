@@ -19,6 +19,8 @@ pub mod state;
 pub mod stop;
 pub mod sync;
 pub mod trace;
+pub mod trace_diagnose;
+pub mod trace_find;
 pub mod ui;
 pub mod workspace;
 pub mod workspace_sync;

@@ -178,3 +178,34 @@ Completed:
 
 Remaining:
 - None for P4 baseline.
+
+## Next Operator Slice (Agent-Driven Live Debugging)
+
+Goal:
+- Make external AI/human operators able to diagnose a live request without first manually finding `event_hash`.
+
+Status:
+- Implemented (CLI baseline).
+
+Scope:
+1. `trace-find`
+   - Query recent root `domain_event` records and return matching trace roots.
+   - Filters:
+     - `schema` (required),
+     - optional `correlate_by + value`,
+     - optional scan controls (`from`, `limit`, `max_results`).
+   - Output:
+     - `event_hash`, `seq`, `schema`, optional key, and decoded event value snippet.
+2. `trace diagnose`
+   - Run `trace-get` (by `event_hash` or `schema + correlate_by + value`) and return a concise diagnosis.
+   - Output:
+     - terminal state,
+     - likely cause classification (`policy_denied`, `capability_denied`, `adapter_timeout`, `adapter_error`, `plan_error`, `waiting_receipt`, `waiting_event`, `completed`, `unknown`),
+     - key correlation hashes and wait counters,
+     - one-line actionable hint.
+
+Tasks:
+- [x] Add CLI command `aos trace-find` (daemon/control backed).
+- [x] Add CLI command `aos trace-diagnose` (daemon/control backed).
+- [x] Keep raw `aos trace` for full timeline payload.
+- [x] Add CLI tests for help/flags and command surface.

@@ -20,6 +20,8 @@ use commands::push::PushArgs;
 use commands::run::RunArgs;
 use commands::state::StateArgs;
 use commands::trace::TraceArgs;
+use commands::trace_diagnose::TraceDiagnoseArgs;
+use commands::trace_find::TraceFindArgs;
 use commands::ui::UiArgs;
 use commands::workspace::WorkspaceArgs;
 use opts::{WorldOpts, resolve_world};
@@ -68,6 +70,12 @@ enum Command {
 
     /// Trace a request/event execution lineage
     Trace(TraceArgs),
+
+    /// Find trace roots by schema/correlation fields
+    TraceFind(TraceFindArgs),
+
+    /// Diagnose a trace root into likely cause + next hint
+    TraceDiagnose(TraceDiagnoseArgs),
 
     /// Display active manifest
     #[command(subcommand)]
@@ -167,6 +175,10 @@ async fn main() -> Result<()> {
             JournalCommand::Replay(args) => commands::replay::cmd_replay(opts, &args).await,
         },
         Command::Trace(args) => commands::trace::cmd_trace(opts, &args).await,
+        Command::TraceFind(args) => commands::trace_find::cmd_trace_find(opts, &args).await,
+        Command::TraceDiagnose(args) => {
+            commands::trace_diagnose::cmd_trace_diagnose(opts, &args).await
+        }
         Command::Snapshot(cmd) => match cmd {
             SnapshotCommand::Create => commands::snapshot::cmd_snapshot(opts).await,
         },
