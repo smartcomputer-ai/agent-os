@@ -416,9 +416,15 @@ export function ChatMessage({ chatId, message }: ChatMessageProps) {
                   {journalEntries.slice(-20).map((entry, idx) => {
                     if (!entry || typeof entry !== "object") return null;
                     const e = entry as Record<string, unknown>;
+                    const seq = Number(e.seq ?? 0);
+                    const rootSeq = Number(root.seq ?? 0);
+                    const rel = Number.isFinite(seq) && Number.isFinite(rootSeq)
+                      ? seq - rootSeq
+                      : idx;
                     return (
                       <div key={`${idx}-${String(e.seq)}-${String(e.kind)}`}>
-                        #{String(e.seq ?? 0)} {String(e.kind ?? "unknown")}
+                        +{rel} {String(e.kind ?? "unknown")}{" "}
+                        <span className="text-muted-foreground">#{String(e.seq ?? 0)}</span>
                       </div>
                     );
                   })}
