@@ -8,19 +8,18 @@ import type { ChatSettings } from "../types";
 import { cn } from "@/lib/utils";
 
 const TOOL_WORKSPACE = "demiurge";
-const TOOL_FOLDER = "tools";
 const MAX_TOKENS_CAP = 2048;
 
 async function loadToolRefs(): Promise<string[]> {
   try {
     const list = await workspaceList({
       workspace: TOOL_WORKSPACE,
-      path: TOOL_FOLDER,
       limit: 100,
     });
     const refs: string[] = [];
     for (const entry of list.entries) {
       if (entry.kind !== "file") continue;
+      if (!entry.path.endsWith(".json")) continue;
       const ref = await workspaceReadRef({
         workspace: TOOL_WORKSPACE,
         path: entry.path,
