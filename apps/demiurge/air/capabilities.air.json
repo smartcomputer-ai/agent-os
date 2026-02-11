@@ -1,0 +1,24 @@
+[
+  {
+    "$kind": "defcap",
+    "name": "demiurge/llm_basic@1",
+    "cap_type": "llm.basic",
+    "schema": {
+      "record": {
+        "models": { "set": { "text": {} } },
+        "max_tokens": { "nat": {} }
+      }
+    },
+    "enforcer": { "module": "sys/CapEnforceLlmBasic@1" }
+  },
+  {
+    "$kind": "defcap",
+    "name": "demiurge/blob@1",
+    "cap_type": "blob",
+    "schema": {
+      "record": {
+        "namespaces": { "option": { "set": { "text": {} } } }
+      }
+    }
+  }
+]

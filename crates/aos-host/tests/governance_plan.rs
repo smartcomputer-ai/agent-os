@@ -5,10 +5,7 @@ use aos_air_types::{
     AirNode, CapEnforcer, CapGrant, DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprOrValue,
     ExprRecord, HashRef, ManifestDefaults, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
     PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, Trigger, TypeExpr,
-    TypePrimitive, TypePrimitiveText,
-    builtins,
-    catalog::EffectCatalog,
-    plan_literals::SchemaIndex,
+    TypePrimitive, TypePrimitiveText, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::ReceiptStatus;
@@ -133,10 +130,7 @@ fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), Ker
     assert_eq!(proposal.state, ProposalState::Applied);
 
     assert!(
-        world
-            .kernel
-            .get_def("com.acme/UpgradeSchema@1")
-            .is_some(),
+        world.kernel.get_def("com.acme/UpgradeSchema@1").is_some(),
         "patched schema not found in manifest"
     );
     Ok(())
@@ -163,7 +157,10 @@ fn governance_action_requested_trigger_runs_plan() -> Result<(), KernelError> {
                                 "manifest_base".into(),
                                 fixtures::plan_input_expr("manifest_base"),
                             ),
-                            ("description".into(), fixtures::plan_input_expr("description")),
+                            (
+                                "description".into(),
+                                fixtures::plan_input_expr("description"),
+                            ),
                         ]),
                     })),
                     cap: "gov_cap".into(),
@@ -225,10 +222,7 @@ fn governance_action_requested_trigger_runs_plan() -> Result<(), KernelError> {
 
     let intents = world.drain_effects();
     assert_eq!(intents.len(), 1, "expected one governance.propose intent");
-    let intent = intents
-        .into_iter()
-        .next()
-        .expect("governance intent");
+    let intent = intents.into_iter().next().expect("governance intent");
     assert_eq!(intent.kind.as_str(), "governance.propose");
     assert!(
         world
@@ -272,11 +266,9 @@ fn build_effect_manager(
         effect_catalog.clone(),
     )?;
     let grant = capability_resolver.resolve_grant("gov_cap")?;
-    let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> =
-        Some(Arc::new(GovernanceParamPreprocessor::new(
-            store.clone(),
-            loaded.manifest.clone(),
-        )));
+    let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
+        GovernanceParamPreprocessor::new(store.clone(), loaded.manifest.clone()),
+    ));
     let manager = EffectManager::new(
         capability_resolver,
         Box::new(AllowAllPolicy),
@@ -355,8 +347,7 @@ fn patch_doc_add_schema(base_manifest_hash: String, name: &str) -> serde_json::V
             text: EmptyObject {},
         })),
     };
-    let node = serde_json::to_value(AirNode::Defschema(schema))
-        .expect("serialize defschema node");
+    let node = serde_json::to_value(AirNode::Defschema(schema)).expect("serialize defschema node");
     serde_json::json!({
         "version": "1",
         "base_manifest_hash": base_manifest_hash,
@@ -404,7 +395,10 @@ fn propose_params_cbor(patch_doc_bytes: &[u8]) -> Result<Vec<u8>, KernelError> {
         serde_cbor::Value::Text("patch".into()),
         serde_cbor::Value::Map(patch_map),
     );
-    params.insert(serde_cbor::Value::Text("summary".into()), serde_cbor::Value::Null);
+    params.insert(
+        serde_cbor::Value::Text("summary".into()),
+        serde_cbor::Value::Null,
+    );
     params.insert(
         serde_cbor::Value::Text("manifest_base".into()),
         serde_cbor::Value::Null,
@@ -429,7 +423,10 @@ fn shadow_params_cbor(proposal_id: u64) -> Result<Vec<u8>, KernelError> {
 
 fn approve_params_cbor(proposal_id: u64) -> Result<Vec<u8>, KernelError> {
     let mut decision = BTreeMap::new();
-    decision.insert(serde_cbor::Value::Text("approve".into()), serde_cbor::Value::Null);
+    decision.insert(
+        serde_cbor::Value::Text("approve".into()),
+        serde_cbor::Value::Null,
+    );
 
     let mut params = BTreeMap::new();
     params.insert(
@@ -444,7 +441,10 @@ fn approve_params_cbor(proposal_id: u64) -> Result<Vec<u8>, KernelError> {
         serde_cbor::Value::Text("approver".into()),
         serde_cbor::Value::Text("test".into()),
     );
-    params.insert(serde_cbor::Value::Text("reason".into()), serde_cbor::Value::Null);
+    params.insert(
+        serde_cbor::Value::Text("reason".into()),
+        serde_cbor::Value::Null,
+    );
     to_canonical_cbor(&serde_cbor::Value::Map(params))
         .map_err(|err| KernelError::Manifest(err.to_string()))
 }

@@ -17,26 +17,26 @@ use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
 use aos_wasm_abi::{ABI_VERSION, DomainEvent, PureInput, PureOutput, ReducerInput, ReducerOutput};
+use getrandom::getrandom;
 use serde::Serialize;
 use serde_cbor;
 use serde_cbor::Value as CborValue;
-use getrandom::getrandom;
 
 use crate::cap_enforcer::{CapEnforcerInvoker, PureCapEnforcer};
 use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::cell_index::{CellIndex, CellMeta};
 use crate::effects::{EffectManager, EffectParamPreprocessor};
-use crate::governance_effects::GovernanceParamPreprocessor;
 use crate::error::KernelError;
 use crate::event::{IngressStamp, KernelEvent, ReducerEvent};
 use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
+use crate::governance_effects::GovernanceParamPreprocessor;
 use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
     AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, DomainEventRecord, EffectIntentRecord,
     EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry, JournalKind,
-    JournalRecord, JournalSeq, OwnedJournalEntry, PlanEndStatus, PlanEndedRecord, PlanResultRecord,
-    ProposedRecord, ShadowReportRecord, SnapshotRecord, ManifestRecord,
+    JournalRecord, JournalSeq, ManifestRecord, OwnedJournalEntry, PlanEndStatus, PlanEndedRecord,
+    PlanResultRecord, ProposedRecord, ShadowReportRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
@@ -210,10 +210,18 @@ pub struct TailReceipt {
     pub record: EffectReceiptRecord,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TailEntry {
+    pub seq: JournalSeq,
+    pub kind: JournalKind,
+    pub record: JournalRecord,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct TailScan {
     pub from: JournalSeq,
     pub to: JournalSeq,
+    pub entries: Vec<TailEntry>,
     pub intents: Vec<TailIntent>,
     pub receipts: Vec<TailReceipt>,
 }
@@ -551,11 +559,9 @@ impl<S: Store + 'static> Kernel<S> {
             PureCapEnforcer::new(Arc::new(loaded.modules.clone()), pures.clone()),
         ));
 
-        let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> =
-            Some(Arc::new(GovernanceParamPreprocessor::new(
-                store.clone(),
-                loaded.manifest.clone(),
-            )));
+        let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
+            GovernanceParamPreprocessor::new(store.clone(), loaded.manifest.clone()),
+        ));
         let mut kernel = Self {
             store: store.clone(),
             manifest: loaded.manifest.clone(),
@@ -788,10 +794,12 @@ impl<S: Store + 'static> Kernel<S> {
 
             match (keyed, &binding.key_field) {
                 (true, None) => {
-                    return Err(KernelError::Manifest(format!(
-                        "route to keyed reducer '{}' is missing key_field",
-                        binding.reducer
-                    )));
+                    if event.key.is_none() {
+                        return Err(KernelError::Manifest(format!(
+                            "route to keyed reducer '{}' is missing key_field",
+                            binding.reducer
+                        )));
+                    }
                 }
                 (false, Some(_)) => {
                     return Err(KernelError::Manifest(format!(
@@ -821,32 +829,36 @@ impl<S: Store + 'static> Kernel<S> {
                 ))
             })?;
 
-            let key_bytes = if let Some(field) = &binding.key_field {
-                let key_schema_ref = module_def
-                    .key_schema
-                    .as_ref()
-                    .expect("keyed reducers have key_schema");
-                let key_schema =
-                    self.schema_index
-                        .get(key_schema_ref.as_str())
-                        .ok_or_else(|| {
-                            KernelError::Manifest(format!(
-                                "key schema '{}' not found for reducer '{}'",
-                                key_schema_ref.as_str(),
-                                binding.reducer
-                            ))
-                        })?;
-                let value_for_key = if binding.route_event_schema == event.schema {
-                    &event_value
+            let key_bytes = if keyed {
+                if let Some(field) = &binding.key_field {
+                    let key_schema_ref = module_def
+                        .key_schema
+                        .as_ref()
+                        .expect("keyed reducers have key_schema");
+                    let key_schema =
+                        self.schema_index
+                            .get(key_schema_ref.as_str())
+                            .ok_or_else(|| {
+                                KernelError::Manifest(format!(
+                                    "key schema '{}' not found for reducer '{}'",
+                                    key_schema_ref.as_str(),
+                                    binding.reducer
+                                ))
+                            })?;
+                    let value_for_key = if binding.route_event_schema == event.schema {
+                        &event_value
+                    } else {
+                        &normalized_for_reducer.value
+                    };
+                    Some(self.extract_key_bytes(
+                        field,
+                        key_schema,
+                        value_for_key,
+                        binding.route_event_schema.as_str(),
+                    )?)
                 } else {
-                    &normalized_for_reducer.value
-                };
-                Some(self.extract_key_bytes(
-                    field,
-                    key_schema,
-                    value_for_key,
-                    binding.route_event_schema.as_str(),
-                )?)
+                    event.key.clone()
+                }
             } else {
                 None
             };
@@ -987,11 +999,12 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             None
         };
-        self.effect_manager.set_cap_context(crate::effects::CapContext {
-            logical_now_ns: event.stamp.logical_now_ns,
-            journal_height: event.stamp.journal_height,
-            manifest_hash: event.stamp.manifest_hash.clone(),
-        });
+        self.effect_manager
+            .set_cap_context(crate::effects::CapContext {
+                logical_now_ns: event.stamp.logical_now_ns,
+                journal_height: event.stamp.journal_height,
+                manifest_hash: event.stamp.manifest_hash.clone(),
+            });
         let input = ReducerInput {
             version: ABI_VERSION,
             state: current_state,
@@ -1077,23 +1090,23 @@ impl<S: Store + 'static> Kernel<S> {
             } else {
                 None
             };
-            let grant = bound_grant.or_else(|| default_grant.as_ref()).ok_or_else(|| {
-                KernelError::CapabilityBindingMissing {
+            let grant = bound_grant
+                .or_else(|| default_grant.as_ref())
+                .ok_or_else(|| KernelError::CapabilityBindingMissing {
                     reducer: reducer_name.clone(),
                     slot: slot.clone(),
+                })?;
+            let intent = match self.effect_manager.enqueue_reducer_effect_with_grant(
+                &reducer_name,
+                grant,
+                effect,
+            ) {
+                Ok(intent) => intent,
+                Err(err) => {
+                    self.record_decisions()?;
+                    return Err(err);
                 }
-            })?;
-            let intent =
-                match self
-                    .effect_manager
-                    .enqueue_reducer_effect_with_grant(&reducer_name, grant, effect)
-                {
-                    Ok(intent) => intent,
-                    Err(err) => {
-                        self.record_decisions()?;
-                        return Err(err);
-                    }
-                };
+            };
             self.record_decisions()?;
             self.record_effect_intent(
                 &intent,
@@ -1107,6 +1120,7 @@ impl<S: Store + 'static> Kernel<S> {
                     reducer_name.clone(),
                     effect.kind.clone(),
                     effect.params_cbor.clone(),
+                    key.clone(),
                 ),
             );
         }
@@ -1115,6 +1129,11 @@ impl<S: Store + 'static> Kernel<S> {
 
     pub fn drain_effects(&mut self) -> Vec<aos_effects::EffectIntent> {
         self.effect_manager.drain()
+    }
+
+    /// Returns true when the effect queue is non-empty and a cycle is needed.
+    pub fn has_pending_effects(&self) -> bool {
+        self.effect_manager.has_pending()
     }
 
     pub fn restore_effect_queue(&mut self, intents: Vec<aos_effects::EffectIntent>) {
@@ -1505,7 +1524,9 @@ impl<S: Store + 'static> Kernel<S> {
                 }
                 self.pending_reducer_receipts
                     .entry(record.intent_hash)
-                    .or_insert_with(|| ReducerEffectContext::new(name, effect_kind, params_cbor));
+                    .or_insert_with(|| {
+                        ReducerEffectContext::new(name, effect_kind, params_cbor, None)
+                    });
             }
             IntentOriginRecord::Plan { name: _, plan_id } => {
                 self.reconcile_plan_replay_identity(plan_id, record.intent_hash);
@@ -1579,8 +1600,7 @@ impl<S: Store + 'static> Kernel<S> {
         schema_name: &str,
         value: &str,
     ) -> Result<Vec<u8>, KernelError> {
-        let cbor =
-            serde_cbor::to_vec(&value).map_err(|e| KernelError::Manifest(e.to_string()))?;
+        let cbor = serde_cbor::to_vec(&value).map_err(|e| KernelError::Manifest(e.to_string()))?;
         let normalized = normalize_cbor_by_name(&self.schema_index, schema_name, &cbor)
             .map_err(|err| KernelError::Manifest(err.to_string()))?;
         Ok(normalized.bytes)
@@ -1636,11 +1656,8 @@ impl<S: Store + 'static> Kernel<S> {
         });
 
         let mut entries = Vec::new();
-        let hash_def = |node: AirNode| -> String {
-            Hash::of_cbor(&node)
-                .expect("hash def")
-                .to_hex()
-        };
+        let hash_def =
+            |node: AirNode| -> String { Hash::of_cbor(&node).expect("hash def").to_hex() };
 
         fn push_if<F>(
             entries: &mut Vec<DefListing>,
@@ -1859,6 +1876,7 @@ impl<S: Store + 'static> Kernel<S> {
             return Ok(TailScan {
                 from: height,
                 to: head,
+                entries: Vec::new(),
                 intents: Vec::new(),
                 receipts: Vec::new(),
             });
@@ -1868,23 +1886,27 @@ impl<S: Store + 'static> Kernel<S> {
         let mut scan = TailScan {
             from: height,
             to: head,
+            entries: Vec::new(),
             intents: Vec::new(),
             receipts: Vec::new(),
         };
 
         for entry in entries {
-            match entry.kind {
-                JournalKind::EffectIntent => {
-                    let record: EffectIntentRecord = serde_cbor::from_slice(&entry.payload)
-                        .map_err(|err| KernelError::Journal(err.to_string()))?;
+            let record = decode_tail_record(entry.kind, &entry.payload)?;
+            scan.entries.push(TailEntry {
+                seq: entry.seq,
+                kind: entry.kind,
+                record: record.clone(),
+            });
+
+            match record {
+                JournalRecord::EffectIntent(record) => {
                     scan.intents.push(TailIntent {
                         seq: entry.seq,
                         record,
                     });
                 }
-                JournalKind::EffectReceipt => {
-                    let record: EffectReceiptRecord = serde_cbor::from_slice(&entry.payload)
-                        .map_err(|err| KernelError::Journal(err.to_string()))?;
+                JournalRecord::EffectReceipt(record) => {
                     scan.receipts.push(TailReceipt {
                         seq: entry.seq,
                         record,
@@ -1905,6 +1927,17 @@ impl<S: Store + 'static> Kernel<S> {
         self.plan_instances
             .iter()
             .map(|(id, instance)| (*id, instance.pending_receipt_hashes()))
+            .collect()
+    }
+
+    pub fn debug_plan_waiting_events(&self) -> Vec<(u64, String)> {
+        self.plan_instances
+            .iter()
+            .filter_map(|(id, instance)| {
+                instance
+                    .waiting_event_schema()
+                    .map(|schema| (*id, schema.to_string()))
+            })
             .collect()
     }
 
@@ -2208,11 +2241,9 @@ impl<S: Store + 'static> Kernel<S> {
         let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
             PureCapEnforcer::new(Arc::new(self.module_defs.clone()), self.pures.clone()),
         ));
-        let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> =
-            Some(Arc::new(GovernanceParamPreprocessor::new(
-                self.store.clone(),
-                self.manifest.clone(),
-            )));
+        let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
+            GovernanceParamPreprocessor::new(self.store.clone(), self.manifest.clone()),
+        ));
         self.effect_manager = EffectManager::new(
             capability_resolver,
             policy_gate,
@@ -2694,6 +2725,49 @@ impl<S: Store + 'static> Kernel<S> {
     }
 }
 
+fn decode_tail_record(kind: JournalKind, payload: &[u8]) -> Result<JournalRecord, KernelError> {
+    if let Ok(record) = serde_cbor::from_slice::<JournalRecord>(payload) {
+        return Ok(record);
+    }
+    // Backward-compatible fallback for older payloads that were encoded as raw records.
+    let err = |e: serde_cbor::Error| KernelError::Journal(e.to_string());
+    match kind {
+        JournalKind::DomainEvent => serde_cbor::from_slice(payload)
+            .map(JournalRecord::DomainEvent)
+            .map_err(err),
+        JournalKind::EffectIntent => serde_cbor::from_slice(payload)
+            .map(JournalRecord::EffectIntent)
+            .map_err(err),
+        JournalKind::EffectReceipt => serde_cbor::from_slice(payload)
+            .map(JournalRecord::EffectReceipt)
+            .map_err(err),
+        JournalKind::CapDecision => serde_cbor::from_slice(payload)
+            .map(JournalRecord::CapDecision)
+            .map_err(err),
+        JournalKind::PolicyDecision => serde_cbor::from_slice(payload)
+            .map(JournalRecord::PolicyDecision)
+            .map_err(err),
+        JournalKind::Manifest => serde_cbor::from_slice(payload)
+            .map(JournalRecord::Manifest)
+            .map_err(err),
+        JournalKind::Snapshot => serde_cbor::from_slice(payload)
+            .map(JournalRecord::Snapshot)
+            .map_err(err),
+        JournalKind::Governance => serde_cbor::from_slice(payload)
+            .map(JournalRecord::Governance)
+            .map_err(err),
+        JournalKind::PlanResult => serde_cbor::from_slice(payload)
+            .map(JournalRecord::PlanResult)
+            .map_err(err),
+        JournalKind::PlanEnded => serde_cbor::from_slice(payload)
+            .map(JournalRecord::PlanEnded)
+            .map_err(err),
+        JournalKind::Custom => serde_cbor::from_slice(payload)
+            .map(JournalRecord::Custom)
+            .map_err(err),
+    }
+}
+
 fn select_secret_resolver(
     has_secrets: bool,
     config: &KernelConfig,
@@ -2830,33 +2904,39 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
     for node in &patch.nodes {
         match node {
             AirNode::Defschema(schema) => {
-                let hash = Hash::of_cbor(&AirNode::Defschema(schema.clone()))
-                    .map_err(|err| KernelError::Manifest(format!("hash schema '{}': {err}", schema.name)))?;
+                let hash = Hash::of_cbor(&AirNode::Defschema(schema.clone())).map_err(|err| {
+                    KernelError::Manifest(format!("hash schema '{}': {err}", schema.name))
+                })?;
                 schema_hashes.insert(schema.name.clone(), hash);
             }
             AirNode::Defmodule(module) => {
-                let hash = Hash::of_cbor(&AirNode::Defmodule(module.clone()))
-                    .map_err(|err| KernelError::Manifest(format!("hash module '{}': {err}", module.name)))?;
+                let hash = Hash::of_cbor(&AirNode::Defmodule(module.clone())).map_err(|err| {
+                    KernelError::Manifest(format!("hash module '{}': {err}", module.name))
+                })?;
                 module_hashes.insert(module.name.clone(), hash);
             }
             AirNode::Defplan(plan) => {
-                let hash = Hash::of_cbor(&AirNode::Defplan(plan.clone()))
-                    .map_err(|err| KernelError::Manifest(format!("hash plan '{}': {err}", plan.name)))?;
+                let hash = Hash::of_cbor(&AirNode::Defplan(plan.clone())).map_err(|err| {
+                    KernelError::Manifest(format!("hash plan '{}': {err}", plan.name))
+                })?;
                 plan_hashes.insert(plan.name.clone(), hash);
             }
             AirNode::Defeffect(effect) => {
-                let hash = Hash::of_cbor(&AirNode::Defeffect(effect.clone()))
-                    .map_err(|err| KernelError::Manifest(format!("hash effect '{}': {err}", effect.name)))?;
+                let hash = Hash::of_cbor(&AirNode::Defeffect(effect.clone())).map_err(|err| {
+                    KernelError::Manifest(format!("hash effect '{}': {err}", effect.name))
+                })?;
                 effect_hashes.insert(effect.name.clone(), hash);
             }
             AirNode::Defcap(cap) => {
-                let hash = Hash::of_cbor(&AirNode::Defcap(cap.clone()))
-                    .map_err(|err| KernelError::Manifest(format!("hash cap '{}': {err}", cap.name)))?;
+                let hash = Hash::of_cbor(&AirNode::Defcap(cap.clone())).map_err(|err| {
+                    KernelError::Manifest(format!("hash cap '{}': {err}", cap.name))
+                })?;
                 cap_hashes.insert(cap.name.clone(), hash);
             }
             AirNode::Defpolicy(policy) => {
-                let hash = Hash::of_cbor(&AirNode::Defpolicy(policy.clone()))
-                    .map_err(|err| KernelError::Manifest(format!("hash policy '{}': {err}", policy.name)))?;
+                let hash = Hash::of_cbor(&AirNode::Defpolicy(policy.clone())).map_err(|err| {
+                    KernelError::Manifest(format!("hash policy '{}': {err}", policy.name))
+                })?;
                 policy_hashes.insert(policy.name.clone(), hash);
             }
             _ => {}
@@ -2867,8 +2947,9 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
         if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
             reference.hash = builtin.hash_ref.clone();
         } else if let Some(hash) = schema_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("schema hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("schema hash '{}': {err}", reference.name))
+            })?;
         }
     }
 
@@ -2876,15 +2957,17 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
         if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
             reference.hash = builtin.hash_ref.clone();
         } else if let Some(hash) = module_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("module hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("module hash '{}': {err}", reference.name))
+            })?;
         }
     }
 
     for reference in patch.manifest.plans.iter_mut() {
         if let Some(hash) = plan_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("plan hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("plan hash '{}': {err}", reference.name))
+            })?;
         }
     }
 
@@ -2892,8 +2975,9 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
         if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
             reference.hash = builtin.hash_ref.clone();
         } else if let Some(hash) = effect_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("effect hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("effect hash '{}': {err}", reference.name))
+            })?;
         }
     }
 
@@ -2901,15 +2985,17 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
         if let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str()) {
             reference.hash = builtin.hash_ref.clone();
         } else if let Some(hash) = cap_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("cap hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("cap hash '{}': {err}", reference.name))
+            })?;
         }
     }
 
     for reference in patch.manifest.policies.iter_mut() {
         if let Some(hash) = policy_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("policy hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("policy hash '{}': {err}", reference.name))
+            })?;
         }
     }
 
@@ -3135,7 +3221,9 @@ mod tests {
         )])))
         .unwrap();
         let event = DomainEvent::new("com.acme/Event@1", payload);
-        let err = kernel.route_event(&event, &dummy_stamp(&kernel)).unwrap_err();
+        let err = kernel
+            .route_event(&event, &dummy_stamp(&kernel))
+            .unwrap_err();
         assert!(format!("{err:?}").contains("missing key_field"), "{err}");
     }
 
@@ -3148,7 +3236,9 @@ mod tests {
         )])))
         .unwrap();
         let event = DomainEvent::new("com.acme/Event@1", payload);
-        let err = kernel.route_event(&event, &dummy_stamp(&kernel)).unwrap_err();
+        let err = kernel
+            .route_event(&event, &dummy_stamp(&kernel))
+            .unwrap_err();
         assert!(format!("{err:?}").contains("provided key_field"), "{err}");
     }
 
@@ -3161,7 +3251,9 @@ mod tests {
         )])))
         .unwrap();
         let event = DomainEvent::new("com.acme/Event@1", payload);
-        let routed = kernel.route_event(&event, &dummy_stamp(&kernel)).expect("route");
+        let routed = kernel
+            .route_event(&event, &dummy_stamp(&kernel))
+            .expect("route");
         assert_eq!(routed.len(), 1);
         let expected_key = aos_cbor::to_canonical_cbor(&CborValue::Text("abc".into())).unwrap();
         assert_eq!(routed[0].event.key.as_ref().unwrap(), &expected_key);
@@ -4002,8 +4094,19 @@ mod tests {
             .unwrap();
 
         let scan = kernel.tail_scan_after(0).expect("tail scan");
+        assert!(scan.entries.len() >= 2);
         assert_eq!(scan.intents.len(), 1);
         assert_eq!(scan.receipts.len(), 1);
+        assert!(
+            scan.entries
+                .iter()
+                .any(|entry| entry.kind == JournalKind::EffectIntent)
+        );
+        assert!(
+            scan.entries
+                .iter()
+                .any(|entry| entry.kind == JournalKind::EffectReceipt)
+        );
         assert_eq!(scan.intents[0].seq, 1);
         assert_eq!(scan.receipts[0].seq, 2);
         assert_eq!(scan.intents[0].record.intent_hash, [1u8; 32]);
@@ -4081,6 +4184,12 @@ fn build_router(
     reducer_schemas: &HashMap<Name, ReducerSchema>,
 ) -> Result<HashMap<String, Vec<RouteBinding>>, KernelError> {
     let mut router = HashMap::new();
+    let receipt_schema_allows_missing_key_field = |event_schema: &str| {
+        matches!(
+            event_schema,
+            "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
+        )
+    };
     let Some(routing) = manifest.routing.as_ref() else {
         return Ok(router);
     };
@@ -4120,6 +4229,13 @@ fn build_router(
                 TypeExpr::Variant(variant) => {
                     for (tag, ty) in &variant.variant {
                         if let TypeExpr::Ref(reference) = ty {
+                            if route.key_field.is_some()
+                                && receipt_schema_allows_missing_key_field(
+                                    reference.reference.as_str(),
+                                )
+                            {
+                                continue;
+                            }
                             push_route_binding(
                                 &mut router,
                                 reference.reference.as_str(),
@@ -4302,8 +4418,9 @@ fn persist_loaded_manifest<S: Store>(
             continue;
         }
         if let Some(hash) = schema_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("schema hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("schema hash '{}': {err}", reference.name))
+            })?;
             continue;
         }
         return Err(KernelError::Manifest(format!(
@@ -4314,8 +4431,9 @@ fn persist_loaded_manifest<S: Store>(
 
     for reference in loaded.manifest.modules.iter_mut() {
         if let Some(hash) = module_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("module hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("module hash '{}': {err}", reference.name))
+            })?;
             continue;
         }
         if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
@@ -4330,8 +4448,9 @@ fn persist_loaded_manifest<S: Store>(
 
     for reference in loaded.manifest.plans.iter_mut() {
         if let Some(hash) = plan_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("plan hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("plan hash '{}': {err}", reference.name))
+            })?;
         } else {
             return Err(KernelError::Manifest(format!(
                 "manifest references unknown plan '{}'",
@@ -4346,8 +4465,9 @@ fn persist_loaded_manifest<S: Store>(
             continue;
         }
         if let Some(hash) = effect_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("effect hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("effect hash '{}': {err}", reference.name))
+            })?;
             continue;
         }
         return Err(KernelError::Manifest(format!(
@@ -4362,8 +4482,9 @@ fn persist_loaded_manifest<S: Store>(
             continue;
         }
         if let Some(hash) = cap_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("cap hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("cap hash '{}': {err}", reference.name))
+            })?;
             continue;
         }
         return Err(KernelError::Manifest(format!(
@@ -4374,8 +4495,9 @@ fn persist_loaded_manifest<S: Store>(
 
     for reference in loaded.manifest.policies.iter_mut() {
         if let Some(hash) = policy_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex())
-                .map_err(|err| KernelError::Manifest(format!("policy hash '{}': {err}", reference.name)))?;
+            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
+                KernelError::Manifest(format!("policy hash '{}': {err}", reference.name))
+            })?;
         } else {
             return Err(KernelError::Manifest(format!(
                 "manifest references unknown policy '{}'",

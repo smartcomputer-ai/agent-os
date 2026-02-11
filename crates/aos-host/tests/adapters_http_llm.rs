@@ -9,7 +9,7 @@ use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_host::adapters::http::HttpAdapter;
 use aos_host::adapters::llm::LlmAdapter;
 use aos_host::adapters::traits::AsyncEffectAdapter;
-use aos_host::config::{HttpAdapterConfig, LlmAdapterConfig, ProviderConfig};
+use aos_host::config::{HttpAdapterConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_store::{MemStore, Store};
 use serde_cbor;
 use serde_json::json;
@@ -140,6 +140,7 @@ async fn llm_errors_missing_api_key() {
         ProviderConfig {
             base_url: "http://127.0.0.1:0".into(),
             timeout: Duration::from_secs(5),
+            api_kind: LlmApiKind::ChatCompletions,
         },
     );
     let cfg = LlmAdapterConfig {
@@ -151,11 +152,12 @@ async fn llm_errors_missing_api_key() {
     // Missing api_key
     let params = LlmGenerateParams {
         provider: "openai".into(),
-        model: "gpt-4o-mini".into(),
+        model: "gpt-5.2".into(),
         temperature: "0".into(),
-        max_tokens: 16,
-        input_ref: HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap(),
-        tools: None,
+        max_tokens: 1024 * 16,
+        message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
+        tool_refs: None,
+        tool_choice: None,
         api_key: None,
     };
     let intent = build_intent(
@@ -180,8 +182,9 @@ async fn llm_unknown_provider_errors() {
         model: "gpt".into(),
         temperature: "0".into(),
         max_tokens: 16,
-        input_ref: HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap(),
-        tools: None,
+        message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
+        tool_refs: None,
+        tool_choice: None,
         api_key: Some("key".into()),
     };
     let intent = build_intent(
@@ -193,7 +196,7 @@ async fn llm_unknown_provider_errors() {
 }
 
 #[tokio::test]
-async fn llm_input_ref_missing_errors() {
+async fn llm_message_ref_missing_errors() {
     let store = Arc::new(MemStore::new());
     let mut providers = HashMap::new();
     providers.insert(
@@ -201,6 +204,7 @@ async fn llm_input_ref_missing_errors() {
         ProviderConfig {
             base_url: "http://127.0.0.1:0".into(),
             timeout: Duration::from_secs(5),
+            api_kind: LlmApiKind::ChatCompletions,
         },
     );
     let cfg = LlmAdapterConfig {
@@ -218,8 +222,9 @@ async fn llm_input_ref_missing_errors() {
         model: "gpt".into(),
         temperature: "0".into(),
         max_tokens: 16,
-        input_ref: missing_ref,
-        tools: None,
+        message_refs: vec![missing_ref],
+        tool_refs: None,
+        tool_choice: None,
         api_key: Some("key".into()),
     };
     let intent = build_intent(
@@ -238,10 +243,10 @@ async fn llm_happy_path_ok_receipt() {
     }
 
     let store = Arc::new(MemStore::new());
-    // Prepare prompt messages blob
-    let messages = serde_json::to_vec(&json!([{"role":"user","content":"hi"}])).unwrap();
-    let input_hash = store.put_blob(&messages).unwrap();
-    let input_ref = HashRef::new(input_hash.to_hex()).unwrap();
+    // Prepare prompt message blob
+    let message = serde_json::to_vec(&json!({"role":"user","content":"hi"})).unwrap();
+    let input_hash = store.put_blob(&message).unwrap();
+    let message_ref = HashRef::new(input_hash.to_hex()).unwrap();
 
     // Start local fake LLM server
     let body = br#"{
@@ -256,6 +261,7 @@ async fn llm_happy_path_ok_receipt() {
         ProviderConfig {
             base_url: format!("http://{}", addr),
             timeout: Duration::from_secs(2),
+            api_kind: LlmApiKind::ChatCompletions,
         },
     );
     let cfg = LlmAdapterConfig {
@@ -269,8 +275,9 @@ async fn llm_happy_path_ok_receipt() {
         model: "gpt-mock".into(),
         temperature: "0".into(),
         max_tokens: 8,
-        input_ref,
-        tools: None,
+        message_refs: vec![message_ref],
+        tool_refs: None,
+        tool_choice: None,
         api_key: Some("key".into()),
     };
     let intent = build_intent(

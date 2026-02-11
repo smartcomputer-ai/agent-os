@@ -87,9 +87,7 @@ impl<S: Store> CapEnforcerInvoker for PureCapEnforcer<S> {
             .is_some();
         let ctx_bytes = if wants_context {
             let ctx = ctx.ok_or_else(|| {
-                KernelError::Manifest(format!(
-                    "module '{module}' requires call context"
-                ))
+                KernelError::Manifest(format!("module '{module}' requires call context"))
             })?;
             Some(
                 to_canonical_cbor(&ctx)

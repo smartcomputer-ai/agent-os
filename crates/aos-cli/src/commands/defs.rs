@@ -146,10 +146,10 @@ fn load_def_local(
     use std::sync::Arc;
     let mut warnings = vec![];
     let store = Arc::new(aos_store::FsStore::open(&dirs.store_root)?);
-    let Some(manifest_hash) =
-        crate::util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
-            anyhow::bail!("no manifest found in journal; run `aos push` first");
-        };
+    let Some(manifest_hash) = crate::util::latest_manifest_hash_from_journal(&dirs.store_root)?
+    else {
+        anyhow::bail!("no manifest found in journal; run `aos push` first");
+    };
     let loaded = aos_kernel::ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
         .context("load manifest from CAS")?;
     let name_val: aos_air_types::Name = name.to_string();
@@ -179,10 +179,10 @@ fn list_defs_local(
 ) -> Result<(serde_json::Value, Vec<String>)> {
     use std::sync::Arc;
     let store = Arc::new(aos_store::FsStore::open(&dirs.store_root)?);
-    let Some(manifest_hash) =
-        crate::util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
-            anyhow::bail!("no manifest found in journal; run `aos push` first");
-        };
+    let Some(manifest_hash) = crate::util::latest_manifest_hash_from_journal(&dirs.store_root)?
+    else {
+        anyhow::bail!("no manifest found in journal; run `aos push` first");
+    };
     let loaded = aos_kernel::ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)
         .context("load manifest from CAS")?;
 

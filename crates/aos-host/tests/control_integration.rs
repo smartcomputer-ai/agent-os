@@ -4,6 +4,7 @@ use aos_air_types::ReducerAbi;
 use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
 use aos_host::{WorldHost, config::HostConfig};
 use aos_kernel::Kernel;
+use aos_kernel::journal::JournalRecord;
 use aos_kernel::journal::mem::MemJournal;
 use aos_wasm_abi::ReducerOutput;
 use base64::prelude::*;
@@ -122,6 +123,140 @@ async fn control_channel_round_trip() {
     let resp = client.request(&evt).await.unwrap();
     assert!(resp.ok, "event-send failed: {:?}", resp.error);
 
+    let journal_all = RequestEnvelope {
+        v: 1,
+        id: "journal-all".into(),
+        cmd: "journal-list".into(),
+        payload: json!({ "from": 0, "limit": 100 }),
+    };
+    let resp = client.request(&journal_all).await.unwrap();
+    assert!(resp.ok, "journal-list failed: {:?}", resp.error);
+    let entries = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("entries"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        entries.iter().any(|entry| {
+            entry
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .map(|k| k == "domain_event")
+                .unwrap_or(false)
+        }),
+        "journal-list should include domain_event entries"
+    );
+
+    let journal_filtered = RequestEnvelope {
+        v: 1,
+        id: "journal-filtered".into(),
+        cmd: "journal-list".into(),
+        payload: json!({ "from": 0, "limit": 100, "kinds": ["domain_event"] }),
+    };
+    let resp = client.request(&journal_filtered).await.unwrap();
+    assert!(resp.ok, "journal-list filtered failed: {:?}", resp.error);
+    let filtered_entries = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("entries"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(!filtered_entries.is_empty(), "expected filtered entries");
+    assert!(
+        filtered_entries.iter().all(|entry| {
+            entry
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .map(|k| k == "domain_event")
+                .unwrap_or(false)
+        }),
+        "filtered journal-list should only include domain_event entries"
+    );
+
+    // trace-get by event hash
+    let head = RequestEnvelope {
+        v: 1,
+        id: "head".into(),
+        cmd: "journal-head".into(),
+        payload: json!({}),
+    };
+    let resp = client.request(&head).await.unwrap();
+    assert!(resp.ok, "journal-head failed: {:?}", resp.error);
+    let to = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("meta"))
+        .and_then(|v| v.get("journal_height"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let journal_scan = RequestEnvelope {
+        v: 1,
+        id: "scan".into(),
+        cmd: "journal-list".into(),
+        payload: json!({ "from": 0, "limit": to }),
+    };
+    let resp = client.request(&journal_scan).await.unwrap();
+    assert!(resp.ok, "journal scan failed: {:?}", resp.error);
+    let entries = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("entries"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let event_hash = entries
+        .iter()
+        .find(|entry| entry.get("kind").and_then(|v| v.as_str()) == Some("domain_event"))
+        .and_then(|entry| entry.get("record"))
+        .and_then(|record| {
+            serde_json::from_value::<JournalRecord>(record.clone())
+                .ok()
+                .and_then(|record| match record {
+                    JournalRecord::DomainEvent(rec) => Some(rec.event_hash),
+                    _ => None,
+                })
+        })
+        .expect("domain event hash");
+
+    let trace = RequestEnvelope {
+        v: 1,
+        id: "trace".into(),
+        cmd: "trace-get".into(),
+        payload: json!({ "event_hash": event_hash, "window_limit": 64 }),
+    };
+    let resp = client.request(&trace).await.unwrap();
+    assert!(resp.ok, "trace-get failed: {:?}", resp.error);
+    let trace = resp.result.expect("trace result");
+    assert!(trace.get("root_event").is_some());
+    assert!(trace.get("root").is_some());
+    assert!(trace.get("journal_window").is_some());
+    assert!(trace.get("live_wait").is_some());
+    assert!(trace.get("terminal_state").is_some());
+
+    // trace-get by correlation (schema + field + value)
+    let trace = RequestEnvelope {
+        v: 1,
+        id: "trace-correlation".into(),
+        cmd: "trace-get".into(),
+        payload: json!({
+            "schema": START_SCHEMA,
+            "correlate_by": "id",
+            "value": "x",
+            "window_limit": 64
+        }),
+    };
+    let resp = client.request(&trace).await.unwrap();
+    assert!(resp.ok, "trace-get correlation failed: {:?}", resp.error);
+    let trace = resp.result.expect("trace correlation result");
+    assert_eq!(trace["query"]["schema"], START_SCHEMA);
+    assert_eq!(trace["query"]["correlate_by"], "id");
+    assert_eq!(trace["query"]["value"], "x");
+    assert_eq!(trace["root"]["event_hash"], event_hash);
+
+    // journal-list should include domain_event entries
     // state-get
     let query = RequestEnvelope {
         v: 1,

@@ -179,6 +179,12 @@ pub struct ReducerReceiptSnapshot {
     pub intent_hash: [u8; 32],
     pub reducer: String,
     pub effect_kind: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub key: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
 }
@@ -189,12 +195,13 @@ impl ReducerReceiptSnapshot {
             intent_hash,
             reducer: ctx.reducer.clone(),
             effect_kind: ctx.effect_kind.clone(),
+            key: ctx.key.clone(),
             params_cbor: ctx.params_cbor.clone(),
         }
     }
 
     pub fn into_context(self) -> ReducerEffectContext {
-        ReducerEffectContext::new(self.reducer, self.effect_kind, self.params_cbor)
+        ReducerEffectContext::new(self.reducer, self.effect_kind, self.params_cbor, self.key)
     }
 }
 

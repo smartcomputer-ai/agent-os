@@ -18,14 +18,21 @@ pub struct ReducerEffectContext {
     pub reducer: String,
     pub effect_kind: String,
     pub params_cbor: Vec<u8>,
+    pub key: Option<Vec<u8>>,
 }
 
 impl ReducerEffectContext {
-    pub fn new(reducer: String, effect_kind: String, params_cbor: Vec<u8>) -> Self {
+    pub fn new(
+        reducer: String,
+        effect_kind: String,
+        params_cbor: Vec<u8>,
+        key: Option<Vec<u8>>,
+    ) -> Self {
         Self {
             reducer,
             effect_kind,
             params_cbor,
+            key,
         }
     }
 }
@@ -64,12 +71,14 @@ pub fn build_reducer_receipt_event(
     ctx: &ReducerEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<DomainEvent, KernelError> {
-    match ctx.effect_kind.as_str() {
+    let mut event = match ctx.effect_kind.as_str() {
         aos_effects::EffectKind::TIMER_SET => build_timer_event(ctx, receipt),
         aos_effects::EffectKind::BLOB_PUT => build_blob_put_event(ctx, receipt),
         aos_effects::EffectKind::BLOB_GET => build_blob_get_event(ctx, receipt),
         other => Err(KernelError::UnsupportedReducerReceipt(other.to_string())),
-    }
+    }?;
+    event.key = ctx.key.clone();
+    Ok(event)
 }
 
 fn build_timer_event(
@@ -177,7 +186,7 @@ mod tests {
     /// Rejects reducer receipts whose effect kind is not part of the built-in micro-effect set.
     #[test]
     fn rejects_unknown_effect_kind() {
-        let ctx = ReducerEffectContext::new("reducer".into(), "unknown".into(), vec![]);
+        let ctx = ReducerEffectContext::new("reducer".into(), "unknown".into(), vec![], None);
         let receipt = base_receipt();
         let err = build_reducer_receipt_event(&ctx, &receipt).unwrap_err();
         assert!(matches!(err, KernelError::UnsupportedReducerReceipt(_)));
@@ -194,6 +203,7 @@ mod tests {
             "com.acme/Reducer@1".into(),
             aos_effects::EffectKind::TIMER_SET.into(),
             serde_cbor::to_vec(&params).unwrap(),
+            None,
         );
         let timer_receipt = TimerSetReceipt {
             delivered_at_ns: 123,
@@ -239,11 +249,13 @@ mod tests {
     fn blob_put_receipt_event_is_structured() {
         let params = BlobPutParams {
             blob_ref: fake_hash(0x10),
+            bytes: Vec::new(),
         };
         let ctx = ReducerEffectContext::new(
             "com.acme/Reducer@1".into(),
             aos_effects::EffectKind::BLOB_PUT.into(),
             serde_cbor::to_vec(&params).unwrap(),
+            None,
         );
         let receipt_body = BlobPutReceipt {
             blob_ref: fake_hash(0x11),
@@ -269,17 +281,18 @@ mod tests {
     #[test]
     fn blob_get_receipt_event_is_structured() {
         let params = BlobGetParams {
-            namespace: "ns".into(),
-            key: "doc".into(),
+            blob_ref: fake_hash(0x10),
         };
         let ctx = ReducerEffectContext::new(
             "com.acme/Reducer@1".into(),
             aos_effects::EffectKind::BLOB_GET.into(),
             serde_cbor::to_vec(&params).unwrap(),
+            None,
         );
         let receipt_body = BlobGetReceipt {
             blob_ref: fake_hash(0x12),
             size: 99,
+            bytes: vec![0; 99],
         };
         let mut receipt = base_receipt();
         receipt.payload_cbor = serde_cbor::to_vec(&receipt_body).unwrap();
@@ -294,7 +307,7 @@ mod tests {
         }
 
         let decoded: Payload = serde_cbor::from_slice(&event.value).unwrap();
-        assert_eq!(decoded.requested.key, "doc");
+        assert_eq!(decoded.requested.blob_ref, params.blob_ref);
         assert_eq!(decoded.receipt.blob_ref, receipt_body.blob_ref);
     }
 }

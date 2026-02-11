@@ -271,20 +271,41 @@ Built-in kinds in v1:
 - receipt: `{ status:int, headers: map{text→text}, body_ref?:hash, timings:{start_ns:nat,end_ns:nat}, adapter_id:text }`
 
 **blob.put**
-- params: `{ blob_ref:hash }`
+- params: `{ blob_ref:hash, bytes:bytes }`
 - receipt: `{ blob_ref:hash, size:nat }`
 
 **blob.get**
-- params: `{ namespace:text, key:text }`
-- receipt: `{ blob_ref:hash, size:nat }`
+- params: `{ blob_ref:hash }`
+- receipt: `{ blob_ref:hash, size:nat, bytes:bytes }`
 
 **timer.set**
 - params: `{ deliver_at_ns:nat, key?:text }` (`deliver_at_ns` uses logical time)
 - receipt: `{ delivered_at_ns:nat, key?:text }`
 
 **llm.generate**
-- params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, input_ref:hash, tools?:list<text>, api_key?:TextOrSecretRef }`
+- params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, message_refs:list<hash>, tool_refs?:list<hash>, tool_choice?:sys/LlmToolChoice@1, api_key?:TextOrSecretRef }`
 - receipt: `{ output_ref:hash, token_usage:{prompt:nat,completion:nat}, cost_cents:nat, provider_id:text }`
+
+LLM secrets use `defsecret` + `SecretRef` so plans never carry plaintext. v0.9 resolvers read
+`env:VAR_NAME` bindings from process env (and `.env` when loaded).
+
+Example `defsecret` for an LLM API key:
+```json
+{
+  "$kind": "defsecret",
+  "name": "llm/api@1",
+  "binding_id": "env:LLM_API_KEY",
+  "allowed_caps": ["cap_llm"],
+  "allowed_plans": ["demiurge/chat_plan@1"]
+}
+```
+
+Example secret ref in `llm.generate` params:
+```json
+{
+  "api_key": { "secret": { "alias": "llm/api", "version": 1 } }
+}
+```
 
 **vault.put**
 - params: `{ alias:text, binding_id:text, value_ref:hash, expected_digest:hash }`
@@ -858,7 +879,7 @@ Effects occur only at the boundary; receipts bind non‑determinism. Replay reus
     { "id":"set_url", "op":"assign", "expr": { "text":"https://news.google.com/rss" }, "bind": { "as":"rss_url" } },
     { "id":"fetch", "op":"emit_effect", "kind":"http.request", "params": { "record": { "method": {"text":"GET"}, "url": { "ref":"@var:rss_url" }, "headers": { "map": [] } } }, "cap":"http_out_google", "bind": { "effect_id_as":"fetch_id" } },
     { "id":"wait_fetch", "op":"await_receipt", "for": { "ref":"@var:fetch_id" }, "bind": { "as":"fetch_rcpt" } },
-    { "id":"summarize", "op":"emit_effect", "kind":"llm.generate", "params": { "record": { "provider": {"text":"openai"}, "model": {"text":"gpt-4o"}, "temperature": {"dec128":"0.2"}, "max_tokens": {"nat": 400 }, "input_ref": { "ref": "@var:fetch_rcpt.body_ref" } } }, "cap":"llm_basic", "bind": { "effect_id_as":"sum_id" } },
+    { "id":"summarize", "op":"emit_effect", "kind":"llm.generate", "params": { "record": { "provider": {"text":"openai-responses"}, "model": {"text":"gpt-4o"}, "temperature": {"dec128":"0.2"}, "max_tokens": {"nat": 400 }, "message_refs": { "list": [ { "ref": "@var:fetch_rcpt.body_ref" } ] } } }, "cap":"llm_basic", "bind": { "effect_id_as":"sum_id" } },
     { "id":"wait_sum", "op":"await_receipt", "for": { "ref":"@var:sum_id" }, "bind": { "as":"sum_rcpt" } },
     { "id":"send", "op":"emit_effect", "kind":"http.request", "params": { "record": { "method": {"text":"POST"}, "url": {"text":"https://api.mail/send"}, "headers": { "map": [] }, "body_ref": { "ref":"@var:sum_rcpt.output_ref" } } }, "cap":"mailer", "bind": { "effect_id_as":"send_id" } },
     { "id":"wait_send", "op":"await_receipt", "for": { "ref":"@var:send_id" }, "bind": { "as":"send_rcpt" } },

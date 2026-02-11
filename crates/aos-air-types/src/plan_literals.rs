@@ -881,11 +881,12 @@ mod tests {
                     kind: EffectKind::llm_generate(),
                     params: ExprOrValue::Json(json!({
                         "provider": "openai",
-                        "model": "gpt-4",
+                        "model": "gpt-5.2",
                         "temperature": "0.5",
                         "max_tokens": 128,
-                        "input_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                        "tools": ["function.call"],
+                        "message_refs": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+                        "tool_refs": null,
+                        "tool_choice": null,
                         "api_key": null
                     })),
                     cap: "cap_llm".into(),

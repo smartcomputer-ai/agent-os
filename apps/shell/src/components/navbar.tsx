@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Compass,
   FolderTree,
+  MessageSquare,
   Search,
   ShieldCheck,
   X,
@@ -30,6 +31,7 @@ const FEATURES: FeatureInfo[] = [
   { path: "/manifest", label: "Manifest", icon: Compass },
   { path: "/workspaces", label: "Workspaces", icon: FolderTree },
   { path: "/governance", label: "Governance", icon: ShieldCheck },
+  { path: "/chat", label: "Demiurge", icon: MessageSquare },
 ];
 
 function getActiveFeature(pathname: string): FeatureInfo | null {

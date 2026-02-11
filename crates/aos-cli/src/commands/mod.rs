@@ -8,18 +8,22 @@ pub mod gov;
 pub mod head;
 pub mod info;
 pub mod init;
+pub mod journal_tail;
 pub mod manifest;
 pub mod pull;
 pub mod push;
-pub mod sync;
-pub mod workspace_sync;
 pub mod replay;
 pub mod run;
 pub mod snapshot;
 pub mod state;
 pub mod stop;
+pub mod sync;
+pub mod trace;
+pub mod trace_diagnose;
+pub mod trace_find;
 pub mod ui;
 pub mod workspace;
+pub mod workspace_sync;
 
 use std::sync::Arc;
 
@@ -69,9 +73,7 @@ pub fn prepare_world(
     let store = Arc::new(FsStore::open(&dirs.store_root).context("open store")?);
 
     let Some(manifest_hash) = util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
-        anyhow::bail!(
-            "no manifest found in journal; run `aos push` to seed the world"
-        );
+        anyhow::bail!("no manifest found in journal; run `aos push` to seed the world");
     };
 
     let loaded = aos_kernel::ManifestLoader::load_from_hash(store.as_ref(), manifest_hash)

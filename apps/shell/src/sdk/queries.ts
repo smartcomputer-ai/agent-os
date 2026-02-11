@@ -2,6 +2,8 @@ import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import type { ApiError } from "./http";
 import { queryKeys } from "./queryKeys";
 import * as endpoints from "./endpoints";
+import type { DebugTraceQuery, DebugTraceResponse } from "./endpoints";
+import { encodeCborTextToBase64 } from "./cbor";
 import type {
   DefsGetPath,
   DefsGetResponse,
@@ -38,7 +40,6 @@ type QueryOptions<TData, TQueryKey extends readonly unknown[]> = Omit<
   UseQueryOptions<TData, ApiError, TData, TQueryKey>,
   "queryKey" | "queryFn"
 >;
-
 
 export function useBlobGet(
   hash: string,
@@ -140,6 +141,20 @@ export function useJournalTail(
   return useQuery({
     queryKey: queryKeys.journalTail(params),
     queryFn: () => endpoints.journalTail(params),
+    ...options,
+  });
+}
+
+export function useDebugTrace(
+  params: DebugTraceQuery,
+  options?: QueryOptions<
+    DebugTraceResponse,
+    ReturnType<typeof queryKeys.debugTrace>
+  >,
+) {
+  return useQuery({
+    queryKey: queryKeys.debugTrace(params),
+    queryFn: () => endpoints.debugTrace(params),
     ...options,
   });
 }
@@ -247,6 +262,33 @@ export function useWorkspaceResolve(
   return useQuery({
     queryKey: queryKeys.workspaceResolve(params),
     queryFn: () => endpoints.workspaceResolve(params),
+    ...options,
+  });
+}
+
+export function useChatState(
+  chatId: string,
+  options?: QueryOptions<StateGetResponse, ReturnType<typeof queryKeys.chatState>>,
+) {
+  return useQuery({
+    queryKey: queryKeys.chatState(chatId),
+    queryFn: () =>
+      endpoints.stateGet(
+        { reducer: "demiurge/Demiurge@1" },
+        { key_b64: encodeCborTextToBase64(chatId) },
+      ),
+    refetchInterval: 3000,
+    ...options,
+  });
+}
+
+export function useChatList(
+  options?: QueryOptions<StateCellsResponse, ReturnType<typeof queryKeys.chatList>>,
+) {
+  return useQuery({
+    queryKey: queryKeys.chatList(),
+    queryFn: () => endpoints.stateCells({ reducer: "demiurge/Demiurge@1" }),
+    refetchInterval: 5000,
     ...options,
   });
 }

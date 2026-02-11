@@ -6,9 +6,9 @@ use aos_air_types::{
 use aos_effects::builtins::TimerSetReceipt;
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
+use aos_kernel::journal::JournalKind;
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
-use aos_kernel::journal::JournalKind;
 use aos_store::FsStore;
 use aos_wasm_abi::ReducerOutput;
 use helpers::fixtures::{self, START_SCHEMA, TestWorld};
@@ -233,7 +233,9 @@ fn cap_decisions_survive_snapshot_replay() {
     world.kernel.create_snapshot().unwrap();
     let entries = world.kernel.dump_journal().unwrap();
     assert!(
-        entries.iter().any(|entry| entry.kind == JournalKind::CapDecision),
+        entries
+            .iter()
+            .any(|entry| entry.kind == JournalKind::CapDecision),
         "expected cap decision entry"
     );
 

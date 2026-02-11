@@ -579,6 +579,12 @@ pub fn validate_manifest(
             _ => false,
         }
     };
+    let receipt_schema_allows_missing_key_field = |event_schema: &str| {
+        matches!(
+            event_schema,
+            "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
+        )
+    };
     let key_field_type = |event_schema: &TypeExpr, key_field: &str| {
         let segments: Vec<&str> = key_field.split('.').filter(|s| !s.is_empty()).collect();
         if segments.is_empty() {
@@ -593,6 +599,11 @@ pub fn validate_manifest(
                 }
                 let mut found: Option<TypeExpr> = None;
                 for ty in variant.variant.values() {
+                    if let TypeExpr::Ref(reference) = ty {
+                        if receipt_schema_allows_missing_key_field(reference.reference.as_str()) {
+                            continue;
+                        }
+                    }
                     let resolved_arm = resolve_type(ty)?;
                     let mut current = resolved_arm;
                     for seg in remaining {
@@ -681,9 +692,11 @@ pub fn validate_manifest(
             let keyed = module.key_schema.is_some();
             match (keyed, key_field.is_some()) {
                 (true, false) => {
-                    return Err(ValidationError::RoutingMissingKeyField {
-                        reducer: reducer.clone(),
-                    });
+                    if !receipt_schema_allows_missing_key_field(event.as_str()) {
+                        return Err(ValidationError::RoutingMissingKeyField {
+                            reducer: reducer.clone(),
+                        });
+                    }
                 }
                 (false, true) => {
                     return Err(ValidationError::RoutingUnexpectedKeyField {
@@ -1526,8 +1539,10 @@ mod tests {
         let effects = HashMap::new();
         let caps = HashMap::new();
         let policies = HashMap::new();
-        validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &caps, &policies)
-            .expect("record event family routing should validate");
+        validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .expect("record event family routing should validate");
     }
 
     #[test]
@@ -1686,8 +1701,10 @@ mod tests {
         let effects = HashMap::new();
         let caps = HashMap::new();
         let policies = HashMap::new();
-        validate_manifest(&manifest, &modules, &schemas, &plans, &effects, &caps, &policies)
-            .expect("record event schema should validate");
+        validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .expect("record event schema should validate");
     }
 
     #[test]

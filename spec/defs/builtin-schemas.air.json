@@ -71,7 +71,8 @@
     "name": "sys/BlobPutParams@1",
     "type": {
       "record": {
-        "blob_ref": { "hash": {} }
+        "blob_ref": { "hash": {} },
+        "bytes": { "bytes": {} }
       }
     }
   },
@@ -90,8 +91,7 @@
     "name": "sys/BlobGetParams@1",
     "type": {
       "record": {
-        "namespace": { "text": {} },
-        "key": { "text": {} }
+        "blob_ref": { "hash": {} }
       }
     }
   },
@@ -101,7 +101,8 @@
     "type": {
       "record": {
         "blob_ref": { "hash": {} },
-        "size": { "nat": {} }
+        "size": { "nat": {} },
+        "bytes": { "bytes": {} }
       }
     }
   },
@@ -183,6 +184,22 @@
 
   {
     "$kind": "defschema",
+    "name": "sys/LlmToolChoice@1",
+    "type": {
+      "variant": {
+        "Auto": { "unit": {} },
+        "None": { "unit": {} },
+        "Required": { "unit": {} },
+        "Tool": {
+          "record": {
+            "name": { "text": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/LlmGenerateParams@1",
     "type": {
       "record": {
@@ -190,8 +207,9 @@
         "model": { "text": {} },
         "temperature": { "dec128": {} },
         "max_tokens": { "nat": {} },
-        "input_ref": { "hash": {} },
-        "tools": { "option": { "list": { "text": {} } } },
+        "message_refs": { "list": { "hash": {} } },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
         "api_key": { "option": { "ref": "sys/TextOrSecretRef@1" } }
       }
     }

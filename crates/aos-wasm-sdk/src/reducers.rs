@@ -313,13 +313,14 @@ pub struct TimerSetParams {
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct BlobPutParams {
     pub blob_ref: HashRef,
+    #[serde(with = "serde_bytes")]
+    pub bytes: Vec<u8>,
 }
 
 /// Blob.get parameters.
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct BlobGetParams {
-    pub namespace: String,
-    pub key: String,
+    pub blob_ref: HashRef,
 }
 
 /// Content-addressed blob reference.
@@ -581,8 +582,8 @@ mod tests {
             entropy: vec![0x11; 64],
             event_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
                 .into(),
-            manifest_hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-                .into(),
+            manifest_hash:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
             reducer: reducer.into(),
             key: None,
             cell_mode: false,

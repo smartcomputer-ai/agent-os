@@ -367,6 +367,7 @@ pub enum ExprOpCode {
     Not,
     Concat,
     Hash,
+    HashBytes,
     Add,
     Sub,
     Mul,

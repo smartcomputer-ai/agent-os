@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
-import { Compass, FolderTree, ShieldCheck } from "lucide-react";
+import { Compass, FolderTree, ShieldCheck, MessageSquare } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +30,12 @@ const FEATURES: FeatureTile[] = [
     description: "Proposals, approvals",
     icon: ShieldCheck,
   },
+  {
+    to: "/chat",
+    label: "Demiurge Chat",
+    description: "AI chat, LLM capabilities",
+    icon: MessageSquare,
+  },
 ];
 
 export function HomePage() {
@@ -48,7 +54,7 @@ export function HomePage() {
           </p>
         </header>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {FEATURES.map((feature) => (
             <FeatureCard key={feature.to} {...feature} />
           ))}

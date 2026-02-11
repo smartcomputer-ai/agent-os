@@ -254,6 +254,24 @@ fn apply_op(op: ExprOpCode, args: &[Value]) -> EvalResult {
             })?;
             Ok(Value::Hash(hash_ref))
         }
+        HashBytes => {
+            require_args_exact(op, args, 1)?;
+            let bytes = match &args[0] {
+                Value::Bytes(bytes) => bytes,
+                other => {
+                    return Err(EvalError::OpError {
+                        op,
+                        message: format!("expected bytes, got {}", other.kind()),
+                    });
+                }
+            };
+            let hash = CborHash::of_bytes(bytes);
+            let hash_ref = HashRef::new(hash.to_hex()).map_err(|err| EvalError::OpError {
+                op,
+                message: err.to_string(),
+            })?;
+            Ok(Value::Hash(hash_ref))
+        }
         StartsWith | EndsWith | Contains => {
             require_args_exact(op, args, 2)?;
             string_op(op, &args[0], &args[1])
@@ -779,6 +797,22 @@ mod tests {
         let expected = CborHash::of_cbor(&Value::Text("alpha".into()))
             .unwrap()
             .to_hex();
+        match value {
+            Value::Hash(hash) => assert_eq!(hash.as_str(), expected),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hash_bytes_op_produces_hash_value() {
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::HashBytes,
+            args: vec![Expr::Const(ExprConst::Bytes {
+                bytes_b64: BASE64.encode([0x01_u8, 0x02, 0x03]),
+            })],
+        });
+        let value = eval_expr(&expr, &sample_env()).unwrap();
+        let expected = CborHash::of_bytes(&[0x01_u8, 0x02, 0x03]).to_hex();
         match value {
             Value::Hash(hash) => assert_eq!(hash.as_str(), expected),
             other => panic!("unexpected {other:?}"),

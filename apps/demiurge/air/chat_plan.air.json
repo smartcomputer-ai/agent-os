@@ -1,0 +1,97 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demiurge/chat_plan@1",
+    "input": "demiurge/ChatRequest@1",
+    "steps": [
+      {
+        "id": "emit_llm",
+        "op": "emit_effect",
+        "kind": "llm.generate",
+        "params": {
+          "record": {
+            "provider": { "ref": "@plan.input.provider" },
+            "model": { "ref": "@plan.input.model" },
+            "temperature": { "text": "0.2" },
+            "max_tokens": { "ref": "@plan.input.max_tokens" },
+            "message_refs": { "ref": "@plan.input.message_refs" },
+            "tool_refs": { "ref": "@plan.input.tool_refs" },
+            "tool_choice": { "ref": "@plan.input.tool_choice" },
+            "api_key": {
+              "variant": {
+                "tag": "secret",
+                "value": {
+                  "record": {
+                    "alias": { "text": "llm/api" },
+                    "version": { "nat": 1 }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "cap": "cap_llm",
+        "bind": { "effect_id_as": "llm_req" }
+      },
+      {
+        "id": "await_llm",
+        "op": "await_receipt",
+        "for": { "ref": "@var:llm_req" },
+        "bind": { "as": "llm_receipt" }
+      },
+      {
+        "id": "assign_output_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:llm_receipt" },
+            { "text": "output_ref" }
+          ]
+        },
+        "bind": { "as": "output_ref" }
+      },
+      {
+        "id": "assign_token_usage",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:llm_receipt" },
+            { "text": "token_usage" }
+          ]
+        },
+        "bind": { "as": "token_usage" }
+      },
+      {
+        "id": "raise_result",
+        "op": "raise_event",
+        "event": "demiurge/ChatEvent@1",
+        "value": {
+          "variant": {
+            "tag": "ChatResult",
+            "value": {
+              "record": {
+                "request_id": { "ref": "@plan.input.request_id" },
+                "chat_id": { "ref": "@plan.input.chat_id" },
+                "output_ref": { "ref": "@var:output_ref" },
+                "token_usage": { "ref": "@var:token_usage" },
+                "tool_calls": { "null": {} }
+              }
+            }
+          }
+        }
+      },
+      { "id": "finish", "op": "end" }
+    ],
+    "edges": [
+      { "from": "emit_llm", "to": "await_llm" },
+      { "from": "await_llm", "to": "assign_output_ref" },
+      { "from": "assign_output_ref", "to": "assign_token_usage" },
+      { "from": "assign_token_usage", "to": "raise_result" },
+      { "from": "raise_result", "to": "finish" }
+    ],
+    "required_caps": ["cap_llm"],
+    "allowed_effects": ["llm.generate"]
+  }
+]

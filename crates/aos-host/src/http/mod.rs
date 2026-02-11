@@ -22,10 +22,7 @@ pub struct HttpState {
 }
 
 impl HttpState {
-    pub fn new(
-        control_tx: mpsc::Sender<ControlMsg>,
-        shutdown_tx: broadcast::Sender<()>,
-    ) -> Self {
+    pub fn new(control_tx: mpsc::Sender<ControlMsg>, shutdown_tx: broadcast::Sender<()>) -> Self {
         Self {
             control_tx,
             shutdown_tx,

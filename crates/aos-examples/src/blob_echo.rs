@@ -16,7 +16,6 @@ use aos_store::FsStore;
 use aos_wasm_sdk::{aos_event_union, aos_variant};
 use serde::{Deserialize, Serialize};
 use serde_cbor;
-use sha2::{Digest, Sha256};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
@@ -26,15 +25,12 @@ const ADAPTER_ID: &str = "adapter.blob.fake";
 
 #[derive(Debug, Clone)]
 struct BlobEchoInput {
-    namespace: String,
-    key: String,
     data: Vec<u8>,
 }
 
 #[derive(Default)]
 struct BlobHarnessStore {
     pending_blobs: HashMap<String, Vec<u8>>,
-    key_to_blob: HashMap<(String, String), String>,
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
@@ -47,8 +43,6 @@ pub fn run(example_root: &Path) -> Result<()> {
     })?;
 
     let input = BlobEchoInput {
-        namespace: "demo".into(),
-        key: "echo".into(),
         data: b"Blob Echo Example".to_vec(),
     };
 
@@ -56,9 +50,15 @@ pub fn run(example_root: &Path) -> Result<()> {
     drive_blob_echo(&mut host, input)?;
 
     let final_state: ReducerEchoState = host.read_state()?;
+    let data_ok =
+        final_state.retrieved_blob_hash.as_deref() == final_state.stored_blob_ref.as_deref();
     println!(
-        "   final state: pc={:?}, stored_ref={:?}, retrieved_ref={:?}",
-        final_state.pc, final_state.stored_blob_ref, final_state.retrieved_blob_ref
+        "   final state: pc={:?}, stored_ref={:?}, retrieved_ref={:?}, retrieved_hash={:?}, data_ok={}",
+        final_state.pc,
+        final_state.stored_blob_ref,
+        final_state.retrieved_blob_ref,
+        final_state.retrieved_blob_hash,
+        data_ok
     );
 
     host.finish()?.verify_replay()?;
@@ -67,19 +67,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
 fn drive_blob_echo(host: &mut ExampleHost, input: BlobEchoInput) -> Result<()> {
     let mut harness = BlobHarnessStore::default();
-    let blob_ref = hash_bytes(&input.data);
-    harness
-        .pending_blobs
-        .insert(blob_ref.clone(), input.data.clone());
-    harness
-        .key_to_blob
-        .insert((input.namespace.clone(), input.key.clone()), blob_ref);
-
-    let start_event = BlobEchoEvent::Start(StartEvent {
-        namespace: input.namespace,
-        key: input.key,
-        data: input.data,
-    });
+    let start_event = BlobEchoEvent::Start(StartEvent { data: input.data });
     host.send_event(&start_event)?;
     synthesize_blob_effects(host.kernel_mut(), &mut harness)
 }
@@ -111,10 +99,8 @@ fn handle_blob_put(
 ) -> Result<()> {
     let params: BlobPutParams = serde_cbor::from_slice(&intent.params_cbor)?;
     let blob_ref = params.blob_ref.as_str().to_string();
-    let data = harness
-        .pending_blobs
-        .get(&blob_ref)
-        .ok_or_else(|| anyhow!("missing blob data for {blob_ref}"))?;
+    let data = params.bytes.clone();
+    harness.pending_blobs.insert(blob_ref.clone(), data.clone());
     println!(
         "     blob.put -> blob_ref={} size={} bytes",
         blob_ref,
@@ -144,28 +130,21 @@ fn handle_blob_get(
     intent: EffectIntent,
 ) -> Result<()> {
     let params: BlobGetParams = serde_cbor::from_slice(&intent.params_cbor)?;
-    let key = (params.namespace.clone(), params.key.clone());
-    let blob_ref = harness.key_to_blob.get(&key).ok_or_else(|| {
-        anyhow!(
-            "no blob stored for namespace={} key={}",
-            params.namespace,
-            params.key
-        )
-    })?;
+    let blob_ref = params.blob_ref.as_str().to_string();
     let data = harness
         .pending_blobs
-        .get(blob_ref)
+        .get(&blob_ref)
         .ok_or_else(|| anyhow!("missing blob bytes for {blob_ref}"))?;
     println!(
-        "     blob.get -> namespace={} key={} size={} bytes",
-        params.namespace,
-        params.key,
+        "     blob.get -> blob_ref={} size={} bytes",
+        blob_ref,
         data.len()
     );
 
     let receipt_payload = BlobGetReceipt {
         blob_ref: HashRef::new(blob_ref.clone()).map_err(|err| anyhow!("invalid hash: {err}"))?,
         size: data.len() as u64,
+        bytes: data.clone(),
     };
     let receipt = EffectReceipt {
         intent_hash: intent.intent_hash,
@@ -183,8 +162,10 @@ fn handle_blob_get(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ReducerEchoState {
     pc: ReducerPc,
+    pending_blob_ref: Option<String>,
     stored_blob_ref: Option<String>,
     retrieved_blob_ref: Option<String>,
+    retrieved_blob_hash: Option<String>,
 }
 
 aos_variant! {
@@ -199,8 +180,6 @@ aos_variant! {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartEvent {
-    namespace: String,
-    key: String,
     #[serde(with = "serde_bytes")]
     data: Vec<u8>,
 }
@@ -210,11 +189,4 @@ aos_event_union! {
     enum BlobEchoEvent {
         Start(StartEvent),
     }
-}
-
-fn hash_bytes(data: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let digest = hasher.finalize();
-    format!("sha256:{}", hex::encode(digest))
 }

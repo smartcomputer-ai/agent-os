@@ -278,10 +278,12 @@ fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreRe
 
 fn insert_builtin_caps(nodes: &mut HashMap<String, CatalogEntry>) {
     for builtin in builtins::builtin_caps() {
-        nodes.entry(builtin.cap.name.clone()).or_insert_with(|| CatalogEntry {
-            hash: builtin.hash,
-            node: AirNode::Defcap(builtin.cap.clone()),
-        });
+        nodes
+            .entry(builtin.cap.name.clone())
+            .or_insert_with(|| CatalogEntry {
+                hash: builtin.hash,
+                node: AirNode::Defcap(builtin.cap.clone()),
+            });
     }
 }
 

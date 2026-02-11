@@ -274,15 +274,17 @@ fn resolve_schema<'a>(
 fn decode_variant(value: &CborValue) -> Result<(String, Option<&CborValue>), KernelError> {
     match value {
         CborValue::Map(map) => {
-            if map.len() == 1 {
-                if let Some((CborValue::Text(tag), inner)) = map.iter().next() {
-                    return Ok((tag.clone(), Some(inner)));
-                }
-            }
             let tag = match map.get(&CborValue::Text("$tag".into())) {
                 Some(CborValue::Text(tag)) => tag.clone(),
                 Some(_) => return Err(KernelError::Manifest("variant $tag must be text".into())),
-                None => return Err(KernelError::Manifest("variant missing $tag field".into())),
+                None => {
+                    if map.len() == 1 {
+                        if let Some((CborValue::Text(tag), inner)) = map.iter().next() {
+                            return Ok((tag.clone(), Some(inner)));
+                        }
+                    }
+                    return Err(KernelError::Manifest("variant missing $tag field".into()));
+                }
             };
             let inner = map.get(&CborValue::Text("$value".into()));
             Ok((tag, inner))

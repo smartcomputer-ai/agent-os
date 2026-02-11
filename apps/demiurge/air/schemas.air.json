@@ -1,0 +1,296 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatRole@1",
+    "type": {
+      "variant": {
+        "User": { "unit": {} },
+        "Assistant": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatId@1",
+    "type": { "text": {} }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/TokenUsage@1",
+    "type": {
+      "record": {
+        "prompt": { "nat": {} },
+        "completion": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatMessage@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "role": { "ref": "demiurge/ChatRole@1" },
+        "text": { "option": { "text": {} } },
+        "message_ref": { "option": { "hash": {} } },
+        "token_usage": { "option": { "ref": "demiurge/TokenUsage@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/PendingOutput@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "output_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/PendingToolOutput@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "tool_call_id": { "text": {} },
+        "output_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/PendingToolMessage@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "tool_call_id": { "text": {} },
+        "expected_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/PendingChatRequest@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "message_refs": { "list": { "hash": {} } },
+        "model": { "text": {} },
+        "provider": { "text": {} },
+        "max_tokens": { "nat": {} },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatState@1",
+    "type": {
+      "record": {
+        "messages": { "list": { "ref": "demiurge/ChatMessage@1" } },
+        "last_request_id": { "nat": {} },
+        "title": { "option": { "text": {} } },
+        "created_at_ms": { "option": { "nat": {} } },
+        "model": { "option": { "text": {} } },
+        "provider": { "option": { "text": {} } },
+        "max_tokens": { "option": { "nat": {} } },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_registry_version": { "option": { "nat": {} } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "pending_chat_requests": {
+          "option": { "list": { "ref": "demiurge/PendingChatRequest@1" } }
+        },
+        "pending_outputs": {
+          "option": { "list": { "ref": "demiurge/PendingOutput@1" } }
+        },
+        "pending_tool_outputs": {
+          "option": { "list": { "ref": "demiurge/PendingToolOutput@1" } }
+        },
+        "pending_tool_messages": {
+          "option": { "list": { "ref": "demiurge/PendingToolMessage@1" } }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatCreated@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "title": { "text": {} },
+        "created_at_ms": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/UserMessage@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "text": { "text": {} },
+        "message_ref": { "hash": {} },
+        "model": { "text": {} },
+        "provider": { "text": {} },
+        "max_tokens": { "nat": {} },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatRequest@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "message_refs": { "list": { "hash": {} } },
+        "model": { "text": {} },
+        "provider": { "text": {} },
+        "max_tokens": { "nat": {} },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolCall@1",
+    "type": {
+      "record": {
+        "id": { "text": {} },
+        "name": { "text": {} },
+        "arguments_json": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolRegistryScanRequested@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "known_version": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolRegistrySnapshot@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "version": { "option": { "nat": {} } },
+        "entries": { "list": { "ref": "sys/WorkspaceListEntry@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolRegistryUnchanged@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "version": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolError@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "tool_call_id": { "option": { "text": {} } },
+        "stage": { "text": {} },
+        "detail": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolCallParams@1",
+    "type": {
+      "variant": {
+        "IntrospectManifest": {
+          "record": {
+            "consistency": { "text": {} }
+          }
+        },
+        "WorkspaceReadBytes": {
+          "record": {
+            "workspace": { "text": {} },
+            "version": { "option": { "nat": {} } },
+            "path": { "text": {} }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatResult@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "output_ref": { "hash": {} },
+        "token_usage": { "ref": "demiurge/TokenUsage@1" },
+        "tool_calls": { "option": { "list": { "ref": "demiurge/ToolCall@1" } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolCallRequested@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "tool_call_id": { "text": {} },
+        "params": { "ref": "demiurge/ToolCallParams@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ToolResult@1",
+    "type": {
+      "record": {
+        "chat_id": { "ref": "demiurge/ChatId@1" },
+        "request_id": { "nat": {} },
+        "tool_call_id": { "text": {} },
+        "result_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/ChatEvent@1",
+    "type": {
+      "variant": {
+        "ChatCreated": { "ref": "demiurge/ChatCreated@1" },
+        "UserMessage": { "ref": "demiurge/UserMessage@1" },
+        "ChatResult": { "ref": "demiurge/ChatResult@1" },
+        "ToolResult": { "ref": "demiurge/ToolResult@1" },
+        "ToolRegistrySnapshot": { "ref": "demiurge/ToolRegistrySnapshot@1" },
+        "ToolRegistryUnchanged": { "ref": "demiurge/ToolRegistryUnchanged@1" },
+        "ToolError": { "ref": "demiurge/ToolError@1" },
+        "BlobGetResult": { "ref": "sys/BlobGetResult@1" },
+        "BlobPutResult": { "ref": "sys/BlobPutResult@1" }
+      }
+    }
+  }
+]

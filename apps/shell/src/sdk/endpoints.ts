@@ -51,6 +51,16 @@ import type {
   WorkspaceWriteBytesResponse,
 } from "./apiTypes";
 
+export interface DebugTraceQuery {
+  event_hash?: string;
+  schema?: string;
+  correlate_by?: string;
+  value?: string;
+  window_limit?: number;
+}
+
+export type DebugTraceResponse = Record<string, unknown>;
+
 export function blobPut(body: BlobPutBody): Promise<BlobPutResponse> {
   return apiRequestJson("post", "/api/blob", { body });
 }
@@ -117,6 +127,14 @@ export function journalTail(
 
 export function journalHead(): Promise<JournalHeadResponse> {
   return apiRequestJson("get", "/api/journal/head");
+}
+
+export function debugTrace(
+  query: DebugTraceQuery,
+): Promise<DebugTraceResponse> {
+  return apiRequestJson("get", "/api/debug/trace" as never, {
+    query,
+  } as never) as Promise<DebugTraceResponse>;
 }
 
 export function manifest(query?: ManifestQuery): Promise<ManifestResponse> {

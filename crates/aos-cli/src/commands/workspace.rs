@@ -357,7 +357,6 @@ struct WorkspaceAnnotationsSetReceipt {
     annotations_hash: String,
 }
 
-
 pub async fn cmd_ws(opts: &WorldOpts, args: &WorkspaceArgs) -> Result<()> {
     match &args.cmd {
         WorkspaceCommand::Resolve(a) => ws_resolve(opts, a).await,
@@ -401,7 +400,12 @@ async fn ws_resolve(opts: &WorldOpts, args: &WorkspaceResolveArgs) -> Result<()>
     let (store, loaded) = prepare_world(&dirs, opts)?;
     let mut host = create_host(store.clone(), loaded, &dirs, opts)?;
     let receipt = batch_workspace_resolve(&mut host, &params)?;
-    print_success(opts, serde_json::to_value(receipt)?, None, fallback_warning(opts))
+    print_success(
+        opts,
+        serde_json::to_value(receipt)?,
+        None,
+        fallback_warning(opts),
+    )
 }
 
 async fn ws_ls(opts: &WorldOpts, args: &WorkspaceLsArgs) -> Result<()> {
@@ -461,7 +465,12 @@ async fn ws_ls(opts: &WorldOpts, args: &WorkspaceLsArgs) -> Result<()> {
         limit,
     };
     let receipt = batch_workspace_list(&mut host, &params)?;
-    print_success(opts, serde_json::to_value(receipt)?, None, fallback_warning(opts))
+    print_success(
+        opts,
+        serde_json::to_value(receipt)?,
+        None,
+        fallback_warning(opts),
+    )
 }
 
 async fn ws_ls_workspaces(opts: &WorldOpts, dirs: &crate::opts::ResolvedDirs) -> Result<()> {
@@ -608,9 +617,14 @@ async fn ws_stat(opts: &WorldOpts, args: &WorkspaceStatArgs) -> Result<()> {
         root_hash,
         path: path.to_string(),
     };
-    let entry = batch_workspace_read_ref(&mut host, &params)?
-        .ok_or_else(|| anyhow!("path not found"))?;
-    print_success(opts, serde_json::to_value(entry)?, None, fallback_warning(opts))
+    let entry =
+        batch_workspace_read_ref(&mut host, &params)?.ok_or_else(|| anyhow!("path not found"))?;
+    print_success(
+        opts,
+        serde_json::to_value(entry)?,
+        None,
+        fallback_warning(opts),
+    )
 }
 
 async fn ws_write(opts: &WorldOpts, args: &WorkspaceWriteArgs) -> Result<()> {
@@ -623,12 +637,8 @@ async fn ws_write(opts: &WorldOpts, args: &WorkspaceWriteArgs) -> Result<()> {
 
     if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
-            let (base_root, expected_head) = resolve_or_init_workspace_control(
-                &mut client,
-                &reference,
-                &owner,
-            )
-            .await?;
+            let (base_root, expected_head) =
+                resolve_or_init_workspace_control(&mut client, &reference, &owner).await?;
             let params = WorkspaceWriteBytesParams {
                 root_hash: base_root,
                 path: path.to_string(),
@@ -673,7 +683,12 @@ async fn ws_write(opts: &WorldOpts, args: &WorkspaceWriteArgs) -> Result<()> {
         &receipt.new_root_hash,
         &owner,
     )?;
-    print_success(opts, serde_json::to_value(receipt)?, None, fallback_warning(opts))
+    print_success(
+        opts,
+        serde_json::to_value(receipt)?,
+        None,
+        fallback_warning(opts),
+    )
 }
 
 async fn ws_rm(opts: &WorldOpts, args: &WorkspaceRmArgs) -> Result<()> {
@@ -684,12 +699,8 @@ async fn ws_rm(opts: &WorldOpts, args: &WorkspaceRmArgs) -> Result<()> {
 
     if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
-            let (base_root, expected_head) = resolve_or_init_workspace_control(
-                &mut client,
-                &reference,
-                &owner,
-            )
-            .await?;
+            let (base_root, expected_head) =
+                resolve_or_init_workspace_control(&mut client, &reference, &owner).await?;
             let params = WorkspaceRemoveParams {
                 root_hash: base_root,
                 path: path.to_string(),
@@ -730,7 +741,12 @@ async fn ws_rm(opts: &WorldOpts, args: &WorkspaceRmArgs) -> Result<()> {
         &receipt.new_root_hash,
         &owner,
     )?;
-    print_success(opts, serde_json::to_value(receipt)?, None, fallback_warning(opts))
+    print_success(
+        opts,
+        serde_json::to_value(receipt)?,
+        None,
+        fallback_warning(opts),
+    )
 }
 
 async fn ws_diff(opts: &WorldOpts, args: &WorkspaceDiffArgs) -> Result<()> {
@@ -795,7 +811,12 @@ async fn ws_diff(opts: &WorldOpts, args: &WorkspaceDiffArgs) -> Result<()> {
         prefix,
     };
     let receipt = batch_workspace_diff(&mut host, &params)?;
-    print_success(opts, serde_json::to_value(receipt)?, None, fallback_warning(opts))
+    print_success(
+        opts,
+        serde_json::to_value(receipt)?,
+        None,
+        fallback_warning(opts),
+    )
 }
 
 async fn ws_log(opts: &WorldOpts, args: &WorkspaceLogArgs) -> Result<()> {
@@ -806,12 +827,7 @@ async fn ws_log(opts: &WorldOpts, args: &WorkspaceLogArgs) -> Result<()> {
     let history = if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
             let (_meta, state_opt) = client
-                .query_state_decoded(
-                    "cli-ws-log",
-                    WORKSPACE_REDUCER,
-                    Some(&key_bytes),
-                    None,
-                )
+                .query_state_decoded("cli-ws-log", WORKSPACE_REDUCER, Some(&key_bytes), None)
                 .await?;
             match state_opt {
                 Some(bytes) => serde_cbor::from_slice::<WorkspaceHistory>(&bytes)
@@ -918,12 +934,8 @@ async fn ws_ann_set(opts: &WorldOpts, args: &WorkspaceAnnSetArgs) -> Result<()> 
             let patch =
                 build_annotation_patch_control(&mut client, &args.entries, values_are_hashes)
                     .await?;
-            let (base_root, expected_head) = resolve_or_init_workspace_control(
-                &mut client,
-                &reference,
-                &owner,
-            )
-            .await?;
+            let (base_root, expected_head) =
+                resolve_or_init_workspace_control(&mut client, &reference, &owner).await?;
             let params = WorkspaceAnnotationsSetParams {
                 root_hash: base_root,
                 path: reference.path.clone(),
@@ -967,7 +979,12 @@ async fn ws_ann_set(opts: &WorldOpts, args: &WorkspaceAnnSetArgs) -> Result<()> 
         &receipt.new_root_hash,
         &owner,
     )?;
-    print_success(opts, serde_json::to_value(receipt)?, None, fallback_warning(opts))
+    print_success(
+        opts,
+        serde_json::to_value(receipt)?,
+        None,
+        fallback_warning(opts),
+    )
 }
 
 async fn ws_ann_del(opts: &WorldOpts, args: &WorkspaceAnnDelArgs) -> Result<()> {
@@ -978,12 +995,8 @@ async fn ws_ann_del(opts: &WorldOpts, args: &WorkspaceAnnDelArgs) -> Result<()> 
 
     if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
-            let (base_root, expected_head) = resolve_or_init_workspace_control(
-                &mut client,
-                &reference,
-                &owner,
-            )
-            .await?;
+            let (base_root, expected_head) =
+                resolve_or_init_workspace_control(&mut client, &reference, &owner).await?;
             let params = WorkspaceAnnotationsSetParams {
                 root_hash: base_root,
                 path: reference.path.clone(),
@@ -1026,7 +1039,12 @@ async fn ws_ann_del(opts: &WorldOpts, args: &WorkspaceAnnDelArgs) -> Result<()> 
         &receipt.new_root_hash,
         &owner,
     )?;
-    print_success(opts, serde_json::to_value(receipt)?, None, fallback_warning(opts))
+    print_success(
+        opts,
+        serde_json::to_value(receipt)?,
+        None,
+        fallback_warning(opts),
+    )
 }
 
 async fn control_workspace_resolve(
@@ -1144,13 +1162,15 @@ fn batch_workspace_resolve(
     host: &mut WorldHost<FsStore>,
     params: &WorkspaceResolveParams,
 ) -> Result<WorkspaceResolveReceipt> {
-    handle_internal(host, EffectKind::workspace_resolve(), params, "workspace.resolve")
+    handle_internal(
+        host,
+        EffectKind::workspace_resolve(),
+        params,
+        "workspace.resolve",
+    )
 }
 
-fn batch_workspace_empty_root(
-    host: &mut WorldHost<FsStore>,
-    workspace: &str,
-) -> Result<String> {
+fn batch_workspace_empty_root(host: &mut WorldHost<FsStore>, workspace: &str) -> Result<String> {
     let params = WorkspaceEmptyRootParams {
         workspace: workspace.to_string(),
     };
@@ -1174,28 +1194,48 @@ fn batch_workspace_read_ref(
     host: &mut WorldHost<FsStore>,
     params: &WorkspaceReadRefParams,
 ) -> Result<Option<WorkspaceRefEntry>> {
-    handle_internal(host, EffectKind::workspace_read_ref(), params, "workspace.read_ref")
+    handle_internal(
+        host,
+        EffectKind::workspace_read_ref(),
+        params,
+        "workspace.read_ref",
+    )
 }
 
 fn batch_workspace_read_bytes(
     host: &mut WorldHost<FsStore>,
     params: &WorkspaceReadBytesParams,
 ) -> Result<Vec<u8>> {
-    handle_internal(host, EffectKind::workspace_read_bytes(), params, "workspace.read_bytes")
+    handle_internal(
+        host,
+        EffectKind::workspace_read_bytes(),
+        params,
+        "workspace.read_bytes",
+    )
 }
 
 fn batch_workspace_write_bytes(
     host: &mut WorldHost<FsStore>,
     params: &WorkspaceWriteBytesParams,
 ) -> Result<WorkspaceWriteBytesReceipt> {
-    handle_internal(host, EffectKind::workspace_write_bytes(), params, "workspace.write_bytes")
+    handle_internal(
+        host,
+        EffectKind::workspace_write_bytes(),
+        params,
+        "workspace.write_bytes",
+    )
 }
 
 fn batch_workspace_remove(
     host: &mut WorldHost<FsStore>,
     params: &WorkspaceRemoveParams,
 ) -> Result<WorkspaceRemoveReceipt> {
-    handle_internal(host, EffectKind::workspace_remove(), params, "workspace.remove")
+    handle_internal(
+        host,
+        EffectKind::workspace_remove(),
+        params,
+        "workspace.remove",
+    )
 }
 
 fn batch_workspace_diff(
@@ -1268,10 +1308,7 @@ async fn control_call<T: serde::de::DeserializeOwned, P: Serialize>(
         })
         .await?;
     if !resp.ok {
-        anyhow::bail!(
-            "{cmd} failed: {:?}",
-            resp.error.map(|e| e.message)
-        );
+        anyhow::bail!("{cmd} failed: {:?}", resp.error.map(|e| e.message));
     }
     let result = resp.result.unwrap_or(serde_json::Value::Null);
     serde_json::from_value(result).context("decode control response")
@@ -1340,7 +1377,9 @@ fn parse_range(input: Option<&str>) -> Result<Option<WorkspaceReadBytesRange>> {
     let start = start
         .parse::<u64>()
         .map_err(|_| anyhow!("invalid range start"))?;
-    let end = end.parse::<u64>().map_err(|_| anyhow!("invalid range end"))?;
+    let end = end
+        .parse::<u64>()
+        .map_err(|_| anyhow!("invalid range end"))?;
     Ok(Some(WorkspaceReadBytesRange { start, end }))
 }
 
@@ -1461,9 +1500,7 @@ fn resolve_diff_prefix(
             anyhow::bail!("diff refs must share the same path");
         }
     }
-    let explicit = explicit
-        .map(normalize_path_arg)
-        .transpose()?;
+    let explicit = explicit.map(normalize_path_arg).transpose()?;
     Ok(explicit
         .or_else(|| path_a.map(|s| s.to_string()))
         .or_else(|| path_b.map(|s| s.to_string())))
@@ -1655,10 +1692,7 @@ async fn build_annotation_patch_control(
 async fn put_text_blob_control(client: &mut ControlClient, bytes: &[u8]) -> Result<String> {
     let resp = client.put_blob("cli-ws-ann-put", bytes).await?;
     if !resp.ok {
-        anyhow::bail!(
-            "blob put failed: {:?}",
-            resp.error.map(|e| e.message)
-        );
+        anyhow::bail!("blob put failed: {:?}", resp.error.map(|e| e.message));
     }
     let hash = match resp.result {
         Some(value) => value
@@ -1790,7 +1824,11 @@ fn read_workspace_history(
     key_bytes: &[u8],
 ) -> Result<WorkspaceHistory> {
     let read = host
-        .query_state(WORKSPACE_REDUCER, Some(key_bytes), aos_kernel::Consistency::Head)
+        .query_state(
+            WORKSPACE_REDUCER,
+            Some(key_bytes),
+            aos_kernel::Consistency::Head,
+        )
         .ok_or_else(|| anyhow!("workspace '{}' not found", workspace))?;
     let bytes = read
         .value

@@ -5,6 +5,7 @@ import { AppErrorBoundary } from "./error-boundary";
 import { manifestRoutes } from "../features/manifest/routes";
 import { workspacesRoutes } from "../features/workspaces/routes";
 import { governanceRoutes } from "../features/governance/routes";
+import { demiurgeRoutes } from "../features/demiurge/routes";
 
 export const router = createBrowserRouter([
   {
@@ -16,6 +17,7 @@ export const router = createBrowserRouter([
       ...manifestRoutes,
       ...workspacesRoutes,
       ...governanceRoutes,
+      ...demiurgeRoutes,
     ],
   },
 ]);

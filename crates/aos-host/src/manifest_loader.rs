@@ -343,7 +343,9 @@ fn normalize_authoring_hashes(value: &mut Value) {
 }
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
-    for key in ["schemas", "modules", "plans", "caps", "policies", "effects"] {
+    for key in [
+        "schemas", "modules", "plans", "caps", "policies", "effects", "secrets",
+    ] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
                 if let Value::Object(obj) = entry {
@@ -563,8 +565,8 @@ fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
 mod tests {
     use super::*;
     use aos_air_types::{
-        HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef, TypeExpr, TypePrimitive,
-        TypePrimitiveNat, TypeRef, TypeVariant,
+        HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef, SecretEntry, TypeExpr,
+        TypePrimitive, TypePrimitiveNat, TypeRef, TypeVariant,
     };
     use aos_cbor::Hash;
     use indexmap::IndexMap;
@@ -579,6 +581,9 @@ mod tests {
                 { "name": "demo/State@1", "hash": "" },
                 { "name": "demo/Event@1" },
                 { "name": "demo/Zero@1", "hash": "sha256" }
+            ],
+            "secrets": [
+                { "name": "llm/api@1" }
             ],
             "modules": [],
             "plans": [],
@@ -598,6 +603,14 @@ mod tests {
 
         for reference in manifest.schemas {
             assert_eq!(reference.hash.as_str(), ZERO_HASH_SENTINEL);
+        }
+        for reference in manifest.secrets {
+            match reference {
+                SecretEntry::Ref(named) => {
+                    assert_eq!(named.hash.as_str(), ZERO_HASH_SENTINEL);
+                }
+                SecretEntry::Decl(_) => panic!("expected manifest secret ref"),
+            }
         }
     }
 

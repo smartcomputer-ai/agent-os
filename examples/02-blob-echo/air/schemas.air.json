@@ -17,10 +17,10 @@
     "type": {
       "record": {
         "pc": { "ref": "demo/BlobEchoPc@1" },
-        "namespace": { "option": { "text": {} } },
-        "key": { "option": { "text": {} } },
+        "pending_blob_ref": { "option": { "text": {} } },
         "stored_blob_ref": { "option": { "text": {} } },
-        "retrieved_blob_ref": { "option": { "text": {} } }
+        "retrieved_blob_ref": { "option": { "text": {} } },
+        "retrieved_blob_hash": { "option": { "text": {} } }
       }
     }
   },
@@ -29,8 +29,6 @@
     "name": "demo/BlobEchoStart@1",
     "type": {
       "record": {
-        "namespace": { "text": {} },
-        "key": { "text": {} },
         "data": { "bytes": {} }
       }
     }

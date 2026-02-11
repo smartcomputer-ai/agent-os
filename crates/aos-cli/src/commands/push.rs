@@ -16,13 +16,15 @@ use aos_kernel::patch_doc::compile_patch_document;
 use aos_store::{FsStore, Store};
 
 use crate::opts::WorldOpts;
-use crate::output::print_success;
 use crate::opts::resolve_dirs;
-use crate::util::{compile_reducer, latest_manifest_hash_from_journal, resolve_placeholder_modules};
+use crate::output::print_success;
+use crate::util::{
+    compile_reducer, latest_manifest_hash_from_journal, resolve_placeholder_modules,
+};
 
+use super::create_host;
 use super::sync::load_sync_config;
 use super::workspace_sync::{SyncPushOptions, SyncStats, sync_workspace_push};
-use super::{create_host};
 
 #[derive(Args, Debug)]
 pub struct PushArgs {
@@ -116,17 +118,15 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
     if let Some(base_hash) = latest_manifest_hash_from_journal(&dirs.store_root)? {
         let bundle = WorldBundle::from_loaded_assets(loaded, secrets);
         let base_hex = base_hash.to_hex();
-        let base_loaded =
-            ManifestLoader::load_from_hash(store.as_ref(), base_hash)
-                .context("load base manifest")?;
+        let base_loaded = ManifestLoader::load_from_hash(store.as_ref(), base_hash)
+            .context("load base manifest")?;
         let doc = build_patch_document(&bundle, &base_loaded.manifest, &base_hex)?;
         let doc_json = serde_json::to_value(&doc).context("serialize patch doc")?;
         if args.dry_run {
             return print_success(opts, doc_json, None, warnings);
         }
 
-        let compiled = compile_patch_document(store.as_ref(), doc)
-            .context("compile patch doc")?;
+        let compiled = compile_patch_document(store.as_ref(), doc).context("compile patch doc")?;
         let mut host = create_host(store.clone(), base_loaded, &dirs, opts)?;
         let manifest_hash = host
             .kernel_mut()
@@ -142,7 +142,9 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
             },
             &mut warnings,
         )?;
-        host.kernel_mut().create_snapshot().context("create snapshot")?;
+        host.kernel_mut()
+            .create_snapshot()
+            .context("create snapshot")?;
 
         return print_success(
             opts,
@@ -173,7 +175,9 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
         },
         &mut warnings,
     )?;
-    host.kernel_mut().create_snapshot().context("create snapshot")?;
+    host.kernel_mut()
+        .create_snapshot()
+        .context("create snapshot")?;
 
     print_success(
         opts,

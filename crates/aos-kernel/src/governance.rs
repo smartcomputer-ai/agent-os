@@ -4,7 +4,7 @@ use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
-    SecretDecl, SecretEntry, SecretPolicy, catalog::EffectCatalog, builtins,
+    SecretDecl, SecretEntry, SecretPolicy, builtins, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_store::Store;
@@ -191,7 +191,11 @@ impl ManifestPatch {
 
         // Ensure built-ins referenced by the manifest are present in catalogs.
         for builtin in builtins::builtin_schemas() {
-            if manifest.schemas.iter().any(|nr| nr.name == builtin.schema.name) {
+            if manifest
+                .schemas
+                .iter()
+                .any(|nr| nr.name == builtin.schema.name)
+            {
                 schemas
                     .entry(builtin.schema.name.clone())
                     .or_insert(builtin.schema.clone());
@@ -226,24 +230,36 @@ impl ManifestPatch {
             }
         }
 
-        load_defs_from_manifest(store, &manifest.schemas, &mut schemas, "defschema", |node| {
-            if let AirNode::Defschema(schema) = node {
-                Ok(schema)
-            } else {
-                Err(KernelError::Manifest(
-                    "manifest schema ref did not point to defschema".into(),
-                ))
-            }
-        })?;
-        load_defs_from_manifest(store, &manifest.modules, &mut modules, "defmodule", |node| {
-            if let AirNode::Defmodule(module) = node {
-                Ok(module)
-            } else {
-                Err(KernelError::Manifest(
-                    "manifest module ref did not point to defmodule".into(),
-                ))
-            }
-        })?;
+        load_defs_from_manifest(
+            store,
+            &manifest.schemas,
+            &mut schemas,
+            "defschema",
+            |node| {
+                if let AirNode::Defschema(schema) = node {
+                    Ok(schema)
+                } else {
+                    Err(KernelError::Manifest(
+                        "manifest schema ref did not point to defschema".into(),
+                    ))
+                }
+            },
+        )?;
+        load_defs_from_manifest(
+            store,
+            &manifest.modules,
+            &mut modules,
+            "defmodule",
+            |node| {
+                if let AirNode::Defmodule(module) = node {
+                    Ok(module)
+                } else {
+                    Err(KernelError::Manifest(
+                        "manifest module ref did not point to defmodule".into(),
+                    ))
+                }
+            },
+        )?;
         load_defs_from_manifest(store, &manifest.plans, &mut plans, "defplan", |node| {
             if let AirNode::Defplan(plan) = node {
                 Ok(plan)
@@ -253,15 +269,21 @@ impl ManifestPatch {
                 ))
             }
         })?;
-        load_defs_from_manifest(store, &manifest.effects, &mut effects, "defeffect", |node| {
-            if let AirNode::Defeffect(effect) = node {
-                Ok(effect)
-            } else {
-                Err(KernelError::Manifest(
-                    "manifest effect ref did not point to defeffect".into(),
-                ))
-            }
-        })?;
+        load_defs_from_manifest(
+            store,
+            &manifest.effects,
+            &mut effects,
+            "defeffect",
+            |node| {
+                if let AirNode::Defeffect(effect) = node {
+                    Ok(effect)
+                } else {
+                    Err(KernelError::Manifest(
+                        "manifest effect ref did not point to defeffect".into(),
+                    ))
+                }
+            },
+        )?;
         load_defs_from_manifest(store, &manifest.caps, &mut caps, "defcap", |node| {
             if let AirNode::Defcap(cap) = node {
                 Ok(cap)
@@ -271,15 +293,21 @@ impl ManifestPatch {
                 ))
             }
         })?;
-        load_defs_from_manifest(store, &manifest.policies, &mut policies, "defpolicy", |node| {
-            if let AirNode::Defpolicy(policy) = node {
-                Ok(policy)
-            } else {
-                Err(KernelError::Manifest(
-                    "manifest policy ref did not point to defpolicy".into(),
-                ))
-            }
-        })?;
+        load_defs_from_manifest(
+            store,
+            &manifest.policies,
+            &mut policies,
+            "defpolicy",
+            |node| {
+                if let AirNode::Defpolicy(policy) = node {
+                    Ok(policy)
+                } else {
+                    Err(KernelError::Manifest(
+                        "manifest policy ref did not point to defpolicy".into(),
+                    ))
+                }
+            },
+        )?;
 
         for entry in &manifest.secrets {
             match entry {

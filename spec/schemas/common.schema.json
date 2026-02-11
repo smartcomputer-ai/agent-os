@@ -218,7 +218,7 @@
       "properties": {
         "op": {
           "type": "string",
-          "enum": ["len","get","has","eq","ne","lt","le","gt","ge","and","or","not","concat","hash","add","sub","mul","div","mod","starts_with","ends_with","contains"]
+          "enum": ["len","get","has","eq","ne","lt","le","gt","ge","and","or","not","concat","hash","hash_bytes","add","sub","mul","div","mod","starts_with","ends_with","contains"]
         },
         "args": { "type": "array", "items": { "$ref": "#/$defs/Expr" }, "minItems": 1 }
       },

@@ -169,7 +169,10 @@ pub fn resolve_dirs(opts: &WorldOpts) -> Result<ResolvedDirs> {
 fn find_world_root(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start.to_path_buf());
     while let Some(dir) = current {
-        if dir.join("aos.sync.json").exists() || dir.join("air").exists() || dir.join(".aos").exists() {
+        if dir.join("aos.sync.json").exists()
+            || dir.join("air").exists()
+            || dir.join(".aos").exists()
+        {
             return Some(dir);
         }
         current = dir.parent().map(|p| p.to_path_buf());

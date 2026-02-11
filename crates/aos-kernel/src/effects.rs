@@ -38,6 +38,10 @@ impl EffectQueue {
         std::mem::take(&mut self.intents)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.intents.is_empty()
+    }
+
     pub fn as_slice(&self) -> &[EffectIntent] {
         &self.intents
     }
@@ -324,9 +328,9 @@ impl EffectManager {
                 grant.name.as_str(),
             )?;
         }
-        let policy_detail = self
-            .policy_gate
-            .decide(&intent, &grant, &source, &resolved.cap_type)?;
+        let policy_detail =
+            self.policy_gate
+                .decide(&intent, &grant, &source, &resolved.cap_type)?;
         let policy_decision = policy_detail.decision;
         self.record_policy_decision(intent.intent_hash, &policy_detail);
         match policy_decision {
@@ -368,6 +372,10 @@ impl EffectManager {
             }
         }
         intents
+    }
+
+    pub fn has_pending(&self) -> bool {
+        !self.queue.is_empty()
     }
 
     pub fn restore_queue(&mut self, intents: Vec<EffectIntent>) {
@@ -453,11 +461,7 @@ impl EffectManager {
         });
     }
 
-    fn record_policy_decision(
-        &mut self,
-        intent_hash: [u8; 32],
-        detail: &PolicyDecisionDetail,
-    ) {
+    fn record_policy_decision(&mut self, intent_hash: [u8; 32], detail: &PolicyDecisionDetail) {
         let outcome = match detail.decision {
             aos_effects::traits::PolicyDecision::Allow => PolicyDecisionOutcome::Allow,
             aos_effects::traits::PolicyDecision::Deny => PolicyDecisionOutcome::Deny,
@@ -513,7 +517,19 @@ struct LlmGenerateParamsView {
     model: String,
     max_tokens: u64,
     #[serde(default)]
-    tools: Option<Vec<String>>,
+    tool_choice: Option<LlmToolChoiceView>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "$tag", content = "$value")]
+enum LlmToolChoiceView {
+    Auto,
+    #[serde(rename = "None")]
+    NoneChoice,
+    Required,
+    Tool {
+        name: String,
+    },
 }
 
 fn cap_constraints_only(
@@ -733,12 +749,17 @@ fn builtin_llm_enforcer(
         }
     }
     if let Some(allowed) = &cap_params.tools_allow {
-        let tools = effect_params.tools.as_deref().unwrap_or(&[]);
-        if !allowed.is_empty() && !tools.iter().all(|tool| allowed.iter().any(|t| t == tool)) {
-            return Err(CapDenyReason {
-                code: "tool_not_allowed".into(),
-                message: "tool not allowed".into(),
-            });
+        if !allowed.is_empty() {
+            if let Some(choice) = &effect_params.tool_choice {
+                if let LlmToolChoiceView::Tool { name } = choice {
+                    if !allowed.iter().any(|t| t == name) {
+                        return Err(CapDenyReason {
+                            code: "tool_not_allowed".into(),
+                            message: "tool not allowed".into(),
+                        });
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -862,14 +883,17 @@ mod tests {
 
         let params = LlmGenerateParams {
             provider: "openai".into(),
-            model: "gpt-4".into(),
+            model: "gpt-5.2".into(),
             temperature: "0.5".into(),
             max_tokens: 50,
-            input_ref: aos_air_types::HashRef::new(
-                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            )
-            .expect("hash ref"),
-            tools: None,
+            message_refs: vec![
+                aos_air_types::HashRef::new(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                )
+                .expect("hash ref"),
+            ],
+            tool_refs: None,
+            tool_choice: None,
             api_key: None,
         };
         let params_cbor = serde_cbor::to_vec(&params).expect("encode params");
@@ -884,14 +908,17 @@ mod tests {
 
         let over_limit = LlmGenerateParams {
             provider: "openai".into(),
-            model: "gpt-4".into(),
+            model: "gpt-5.2".into(),
             temperature: "0.5".into(),
             max_tokens: 55,
-            input_ref: aos_air_types::HashRef::new(
-                "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-            )
-            .expect("hash ref"),
-            tools: None,
+            message_refs: vec![
+                aos_air_types::HashRef::new(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                )
+                .expect("hash ref"),
+            ],
+            tool_refs: None,
+            tool_choice: None,
             api_key: None,
         };
         let over_cbor = serde_cbor::to_vec(&over_limit).expect("encode params");

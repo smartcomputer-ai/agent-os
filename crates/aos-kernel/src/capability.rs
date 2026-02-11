@@ -126,7 +126,10 @@ impl CapabilityResolver {
         effect_kind: &str,
     ) -> Result<Option<CapGrantResolution>, KernelError> {
         let expected = expected_cap_type(&self.effect_catalog, effect_kind)?;
-        let mut matches = self.grants.values().filter(|grant| grant.cap_type == expected);
+        let mut matches = self
+            .grants
+            .values()
+            .filter(|grant| grant.cap_type == expected);
         let first = matches.next();
         if first.is_none() || matches.next().is_some() {
             return Ok(None);
@@ -212,9 +215,8 @@ fn compute_grant_hash(
         params_cbor: &grant.params_cbor,
         expiry_ns: grant.expiry_ns,
     };
-    let hash = Hash::of_cbor(&input).map_err(|err| {
-        KernelError::EffectManager(format!("grant hash encoding failed: {err}"))
-    })?;
+    let hash = Hash::of_cbor(&input)
+        .map_err(|err| KernelError::EffectManager(format!("grant hash encoding failed: {err}")))?;
     Ok(*hash.as_bytes())
 }
 

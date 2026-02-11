@@ -1,0 +1,84 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demiurge/llm_policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "llm.generate",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/chat_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "blob.get",
+          "origin_kind": "reducer",
+          "origin_name": "demiurge/Demiurge@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "blob.put",
+          "origin_kind": "reducer",
+          "origin_name": "demiurge/Demiurge@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "blob.put",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "introspect.manifest",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.resolve",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.resolve",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_registry_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.list",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_registry_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_bytes",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {},
+        "decision": "deny"
+      }
+    ]
+  }
+]

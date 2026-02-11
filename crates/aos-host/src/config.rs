@@ -85,11 +85,19 @@ impl Default for HttpAdapterConfig {
     }
 }
 
+/// Provider API kind for the LLM adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LlmApiKind {
+    ChatCompletions,
+    Responses,
+}
+
 /// Per-provider configuration for LLM adapter.
 #[derive(Debug, Clone)]
 pub struct ProviderConfig {
     pub base_url: String,
     pub timeout: Duration,
+    pub api_kind: LlmApiKind,
 }
 
 /// Configuration for the LLM adapter.
@@ -106,17 +114,25 @@ impl LlmAdapterConfig {
             std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into());
 
         let mut providers = HashMap::new();
-        providers.insert(
-            "openai".into(),
-            ProviderConfig {
-                base_url,
-                timeout: Duration::from_secs(120),
-            },
-        );
+        let openai_chat = ProviderConfig {
+            base_url: base_url.clone(),
+            timeout: Duration::from_secs(120),
+            api_kind: LlmApiKind::ChatCompletions,
+        };
+        let openai_responses = ProviderConfig {
+            base_url,
+            timeout: Duration::from_secs(120),
+            api_kind: LlmApiKind::Responses,
+        };
+
+        providers.insert("openai-chat".into(), openai_chat.clone());
+        providers.insert("openai-responses".into(), openai_responses);
+        // Back-compat alias for existing configs.
+        providers.insert("openai".into(), openai_chat);
 
         Ok(Self {
             providers,
-            default_provider: "openai".into(),
+            default_provider: "openai-responses".into(),
         })
     }
 }

@@ -55,12 +55,13 @@ pub async fn cmd_manifest(opts: &WorldOpts, args: &ManifestArgs) -> Result<()> {
 
     // Load manifest from store/journal
     let store = Arc::new(FsStore::open(&dirs.store_root).context("open store")?);
-    let Some(manifest_hash) =
-        crate::util::latest_manifest_hash_from_journal(&dirs.store_root)? else {
-            anyhow::bail!("no manifest found in journal; run `aos push` first");
-        };
-    let manifest: aos_air_types::Manifest =
-        store.get_node(manifest_hash).context("load manifest from CAS")?;
+    let Some(manifest_hash) = crate::util::latest_manifest_hash_from_journal(&dirs.store_root)?
+    else {
+        anyhow::bail!("no manifest found in journal; run `aos push` first");
+    };
+    let manifest: aos_air_types::Manifest = store
+        .get_node(manifest_hash)
+        .context("load manifest from CAS")?;
 
     // Serialize and print
     let manifest_json = if args.raw {

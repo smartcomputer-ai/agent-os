@@ -186,10 +186,7 @@ fn collect_path_deps(table: &toml::value::Table, paths: &mut BTreeSet<String>) {
     for section in SECTIONS {
         if let Some(Value::Table(deps)) = table.get(section) {
             for dep in deps.values() {
-                if let Some(path) = dep
-                    .get("path")
-                    .and_then(|value| value.as_str())
-                {
+                if let Some(path) = dep.get("path").and_then(|value| value.as_str()) {
                     paths.insert(path.to_string());
                 }
             }

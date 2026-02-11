@@ -13,13 +13,13 @@ use aos_kernel::{
 };
 use aos_store::{FsStore, Store};
 
+use crate::adapters::blob_get::BlobGetAdapter;
+use crate::adapters::blob_put::BlobPutAdapter;
 use crate::adapters::registry::AdapterRegistry;
 use crate::adapters::registry::AdapterRegistryConfig;
 #[cfg(not(feature = "adapter-http"))]
 use crate::adapters::stub::StubHttpAdapter;
-use crate::adapters::stub::{
-    StubBlobAdapter, StubBlobGetAdapter, StubLlmAdapter, StubTimerAdapter,
-};
+use crate::adapters::stub::{StubLlmAdapter, StubTimerAdapter};
 use crate::adapters::timer::TimerScheduler;
 use crate::config::HostConfig;
 use crate::error::HostError;
@@ -78,6 +78,13 @@ impl<S: Store + 'static> WorldHost<S> {
         kernel_config: KernelConfig,
     ) -> Result<Self, HostError> {
         let root = manifest_path.parent().unwrap_or(Path::new("."));
+        let loaded = ManifestLoader::load_from_path(store.as_ref(), manifest_path)?;
+        let mut kernel_config = kernel_config;
+        if kernel_config.secret_resolver.is_none() {
+            if let Some(resolver) = crate::util::env_secret_resolver_from_manifest(&loaded) {
+                kernel_config.secret_resolver = Some(resolver);
+            }
+        }
         let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(root)?;
 
         if let Some(dir) = host_config
@@ -93,7 +100,7 @@ impl<S: Store + 'static> WorldHost<S> {
         }
         builder = builder.allow_placeholder_secrets(host_config.allow_placeholder_secrets);
 
-        let mut kernel = builder.from_manifest_path(manifest_path)?;
+        let mut kernel = builder.from_loaded_manifest(loaded)?;
 
         // Rehydrate dispatch queue: queued_effects snapshot + tail intents lacking receipts.
         let heights = kernel.heights();
@@ -185,6 +192,12 @@ impl WorldHost<FsStore> {
         host_config: HostConfig,
         kernel_config: KernelConfig,
     ) -> Result<Self, HostError> {
+        let mut kernel_config = kernel_config;
+        if kernel_config.secret_resolver.is_none() {
+            if let Some(resolver) = crate::util::env_secret_resolver_from_manifest(&loaded) {
+                kernel_config.secret_resolver = Some(resolver);
+            }
+        }
         let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(world_root)?;
 
         if let Some(dir) = host_config
@@ -407,6 +420,11 @@ impl<S: Store + 'static> WorldHost<S> {
         })
     }
 
+    /// Returns true if the kernel has pending effects that need processing.
+    pub fn has_pending_effects(&self) -> bool {
+        self.kernel.has_pending_effects()
+    }
+
     pub fn heights(&self) -> KernelHeights {
         self.kernel.heights()
     }
@@ -489,8 +507,8 @@ fn default_registry<S: Store + 'static>(store: Arc<S>, config: &HostConfig) -> A
         effect_timeout: config.effect_timeout,
     });
     registry.register(Box::new(StubTimerAdapter));
-    registry.register(Box::new(StubBlobAdapter));
-    registry.register(Box::new(StubBlobGetAdapter));
+    registry.register(Box::new(BlobPutAdapter::new(store.clone())));
+    registry.register(Box::new(BlobGetAdapter::new(store.clone())));
 
     #[cfg(feature = "adapter-http")]
     {

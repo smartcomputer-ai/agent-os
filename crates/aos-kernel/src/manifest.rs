@@ -33,10 +33,7 @@ impl ManifestLoader {
         Self::from_catalog(catalog)
     }
 
-    pub fn load_from_hash<S: Store>(
-        store: &S,
-        hash: Hash,
-    ) -> Result<LoadedManifest, KernelError> {
+    pub fn load_from_hash<S: Store>(store: &S, hash: Hash) -> Result<LoadedManifest, KernelError> {
         let manifest: Manifest = store.get_node(hash)?;
         let bytes = to_canonical_cbor(&manifest)
             .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;

@@ -19,8 +19,8 @@ use crate::opts::{WorldOpts, resolve_dirs};
 use crate::output::print_success;
 use crate::util::{load_world_env, resolve_sys_module_wasm_hash};
 
-use super::{create_host, prepare_world};
 use super::workspace_sync::{SyncPushOptions, sync_workspace_push};
+use super::{create_host, prepare_world};
 
 const PUBLISH_EVENT: &str = "sys/HttpPublishSet@1";
 const PUBLISH_REDUCER: &str = "sys/HttpPublish@1";
@@ -115,7 +115,9 @@ async fn ui_install(opts: &WorldOpts, args: &UiInstallArgs) -> Result<()> {
     )?;
 
     apply_publish_rule(&mut host, workspace, &route, args.force)?;
-    host.kernel_mut().create_snapshot().context("create snapshot")?;
+    host.kernel_mut()
+        .create_snapshot()
+        .context("create snapshot")?;
 
     print_success(
         opts,
@@ -242,11 +244,7 @@ fn cache_control_for_path(path: &Path) -> &'static str {
         .and_then(|s| s.to_str())
         .map(|ext| ext.eq_ignore_ascii_case("html"))
         .unwrap_or(false);
-    if is_html {
-        CACHE_HTML
-    } else {
-        CACHE_ASSET
-    }
+    if is_html { CACHE_HTML } else { CACHE_ASSET }
 }
 
 fn encode_workspace_path(path: &Path) -> Result<String> {
@@ -277,13 +275,15 @@ fn encode_workspace_path(path: &Path) -> Result<String> {
 fn encode_segment(raw: &str) -> String {
     if !raw.is_empty()
         && !raw.starts_with('~')
-        && raw.chars().all(|c| matches!(c, 'a'..='z'
+        && raw.chars().all(|c| {
+            matches!(c, 'a'..='z'
             | 'A'..='Z'
             | '0'..='9'
             | '.'
             | '_'
             | '-'
-            | '~'))
+            | '~')
+        })
     {
         return raw.to_string();
     }
@@ -347,9 +347,7 @@ fn apply_publish_rule(
     )
 }
 
-fn load_publish_registry(
-    host: &aos_host::host::WorldHost<FsStore>,
-) -> Result<HttpPublishRegistry> {
+fn load_publish_registry(host: &aos_host::host::WorldHost<FsStore>) -> Result<HttpPublishRegistry> {
     let Some(bytes) = host.state(PUBLISH_REDUCER, None) else {
         return Ok(HttpPublishRegistry::default());
     };
@@ -374,7 +372,9 @@ fn ensure_sys_support(
     dirs: &crate::opts::ResolvedDirs,
 ) -> Result<()> {
     let base_hash = host.kernel().manifest_hash();
-    let mut manifest: Manifest = store.get_node(base_hash).context("load manifest from store")?;
+    let mut manifest: Manifest = store
+        .get_node(base_hash)
+        .context("load manifest from store")?;
     let mut changed = false;
     let mut nodes: Vec<AirNode> = Vec::new();
 
@@ -412,10 +412,12 @@ fn ensure_sys_support(
         }
     }
 
-    let routing = manifest.routing.get_or_insert_with(|| aos_air_types::Routing {
-        events: Vec::new(),
-        inboxes: Vec::new(),
-    });
+    let routing = manifest
+        .routing
+        .get_or_insert_with(|| aos_air_types::Routing {
+            events: Vec::new(),
+            inboxes: Vec::new(),
+        });
 
     let mut next_events = Vec::new();
     let mut saw_publish = false;
@@ -477,8 +479,7 @@ fn build_sys_module_node(
 ) -> Result<(HashRef, AirNode)> {
     let builtin = builtins::find_builtin_module(name)
         .ok_or_else(|| anyhow!("missing builtin module '{name}'"))?;
-    let wasm_hash =
-        resolve_sys_module_wasm_hash(store, &dirs.store_root, &dirs.world, name)?;
+    let wasm_hash = resolve_sys_module_wasm_hash(store, &dirs.store_root, &dirs.world, name)?;
     let mut module: DefModule = builtin.module.clone();
     module.wasm_hash = wasm_hash;
     let node = AirNode::Defmodule(module);

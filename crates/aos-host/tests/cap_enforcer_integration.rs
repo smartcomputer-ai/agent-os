@@ -87,7 +87,7 @@ fn http_enforcer_module_denies_host() {
 fn llm_enforcer_module_denies_model() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/LlmPlan@1".to_string();
-    let plan = llm_plan(&plan_name, "cap_llm", "openai", "gpt-4", 10);
+    let plan = llm_plan(&plan_name, "cap_llm", "openai", "gpt-5.2", 10);
 
     let enforcer = fixtures::pure_module_from_target(
         &store,
@@ -198,7 +198,9 @@ fn workspace_enforcer_module_denies_workspace() {
         name: "sys/workspace@1".into(),
         hash: fixtures::zero_hash(),
     });
-    loaded.caps.insert("sys/workspace@1".into(), workspace_defcap());
+    loaded
+        .caps
+        .insert("sys/workspace@1".into(), workspace_defcap());
 
     let mut world = TestWorld::with_store(store, loaded).expect("world");
     world
@@ -561,13 +563,21 @@ fn llm_params_literal(provider: &str, model: &str, max_tokens: u64) -> ExprOrVal
                 ValueLiteral::Nat(aos_air_types::ValueNat { nat: max_tokens }),
             ),
             (
-                "input_ref".into(),
-                ValueLiteral::Hash(aos_air_types::ValueHash {
-                    hash: fixtures::fake_hash(0x11),
+                "message_refs".into(),
+                ValueLiteral::List(aos_air_types::ValueList {
+                    list: vec![ValueLiteral::Hash(aos_air_types::ValueHash {
+                        hash: fixtures::fake_hash(0x11),
+                    })],
                 }),
             ),
             (
-                "tools".into(),
+                "tool_refs".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+            (
+                "tool_choice".into(),
                 ValueLiteral::Null(ValueNull {
                     null: EmptyObject::default(),
                 }),
