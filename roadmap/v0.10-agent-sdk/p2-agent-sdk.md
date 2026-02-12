@@ -1,71 +1,337 @@
-# P2: Agent SDK on AOS Primitives
+# P2: Agent SDK on AOS Primitives (Contract-Complete)
 
 **Priority**: P2  
 **Effort**: High  
-**Risk if deferred**: High (agents remain app-specific and hard to scale)  
-**Status**: Proposed
+**Risk if deferred**: High (agents remain app-specific and fragile under real workloads)  
+**Status**: Proposed (revised)
 
 ## Goal
 
-Define and implement an Agent SDK that sits above core AOS and makes agent construction reusable:
-- coding agent,
-- Demiurge-native world operator,
-- planner/worker/judge patterns for factory flows.
+Define and implement an Agent SDK above core AOS that makes agent behavior reusable and operationally safe across:
+- coding agents,
+- Demiurge-native world operators,
+- planner/worker/judge and factory patterns.
 
-The SDK should be headless-first, policy-aware, and fully auditable through normal AOS event/plan/receipt rails.
+The SDK must stay inside AOS boundaries:
+- reducers own state and business/loop decisions,
+- plans execute privileged effects,
+- adapters isolate non-determinism behind receipts.
 
-**Very Important**: WE CAN MAKE BREAKING CHANGES. DO NOT, I REPEAT, DO NOT WORRY ABOUT BACKWARD COMPATIBILITY. Only focus on what the best new setup and contracts and schemas would be and agressively refactor towards that goal.
+This revision resolves the concerns in `p2-agent-sdk-concerns.md` with concrete contracts.
 
-## Core Positioning
+**Very Important**: v0.10 allows breaking changes. Optimize for the best long-term contracts, not compatibility.
 
-AOS itself remains agent-agnostic.  
-Agent semantics are introduced in SDK-level schemas, reducers, plans, and helper libraries.
+## What Demiurge Already Proves (and Where It Stops)
 
-This preserves existing system boundaries:
-- reducers: state + business/agent loop logic,
-- plans: external orchestration and effect execution,
-- adapters: provider/tool execution.
+Current Demiurge in `apps/demiurge/` already validates important patterns:
 
-## Non-Goals (P2)
+1. CAS-first IO works:
+   - reducer and plans exchange `message_ref`, `output_ref`, `result_ref` hashes.
+2. Reducer/plan split is correct:
+   - reducer interprets tool calls and emits intents (`ToolCallRequested`),
+   - plans execute `llm.generate`, `workspace.*`, `introspect.*`.
+3. Tool registry refresh is version-aware:
+   - `tool_registry_plan` avoids rescanning when version is unchanged.
+4. Normalized LLM output already exists in host:
+   - `aos-host` LLM adapter stores normalized output in `output_ref` and provider-native raw output in `raw_output_ref`.
 
-- No kernel-level “agent” primitive.
-- No implicit hidden orchestration loops outside events/plans.
-- No final multi-world universe protocol design in this phase.
+But it is still chat-app specific and under-specified for SDK reuse:
 
-## Decision Summary
+- no explicit host control/session lifecycle contract,
+- no canonical terminal states on reducer state,
+- no SDK-level event schema guarantees for automation,
+- no shared failure/retry ownership contract,
+- output truncation exists but is app-local (`MAX_TOOL_OUTPUT_BYTES = 64 * 1024` in reducer) instead of SDK policy.
 
-1. Create `crates/aos-agent-sdk` (plus app-level AIR templates/examples).
-2. Standardize agent run primitives as schemas/events rather than ad hoc app types.
-3. Keep tool execution cap/policy gated through normal plan effects.
-4. Support parallel tool execution via plan DAG fan-out/fan-in and/or multi-plan choreography.
-5. Accept breaking schema changes during v0.10 to converge on a stable core model.
-6. Treat subagents as additional keyed sessions (events + routing), not kernel primitives.
+## P2 Thesis
 
-## Namespace Convention
+P2 must standardize runtime behavior, not only naming:
 
-- SDK-owned schemas, plans, and modules use `aos.agent/*`.
-- Do not use `sys/*` for SDK-level agent abstractions.
-- App-specific layers (like Demiurge UI events) may map onto `aos.agent/*` but should not redefine core loop semantics.
+1. Session control contract.
+2. Provider profile contract.
+3. Context/output bounding contract.
+4. Loop safety and stop semantics contract.
+5. Event API contract (journal + telemetry).
+6. Failure/recovery taxonomy contract.
+7. LLM effect contract evolution.
+8. Determinism boundary contract.
+9. Conformance-based Definition of Done.
 
-## Demiurge Learnings to Preserve
+Without these, each app rebuilds the same loop differently.
 
-These are required constraints for SDK design because they reflect hard-won behavior from the current Demiurge wiring:
+## SDK Namespace and Core Defs
 
-1. CAS-first IO:
-   - message/tool/result payloads are hash refs, not large inline state blobs.
-2. Reducer interprets, plans execute:
-   - reducer parses tool calls and emits typed tool intents,
-   - plans perform `llm.generate` and tool effects.
-3. Plan-only privileged effects:
-   - `llm.generate`, `workspace.*`, `introspect.*` stay in plans under policy/cap gates.
-4. Tool call normalization before execution:
-   - reducer maps tool call payloads into typed params/variants before `ToolCallRequested`.
-5. Tool registry caching pattern:
-   - refresh/scan is version-aware and should avoid unnecessary re-resolution each turn.
+- Namespace: `aos.agent/*`.
+- Keyed reducer baseline:
+  - module: `aos.agent/SessionReducer@1`
+  - key schema: `aos.agent/SessionId@1`
+  - event schema: `aos.agent/SessionEvent@1`
+  - state schema: `aos.agent/SessionState@1`
+- Plans:
+  - `aos.agent/llm_step_plan@1`
+  - `aos.agent/tool_call_plan@1`
+  - `aos.agent/toolset_refresh_plan@1`
+- Optional (P2 if time, else P3): `aos.agent/session_control_plan@1` for host commands that require plan effects.
 
-## Reference Wiring to Carry Forward
+## Concern Resolutions
 
-SDK should explicitly preserve this shape (renamed into `aos.agent/*`):
+## 1) Host-Control Contract (resolved)
+
+### Contract
+
+Add explicit lifecycle and host command events:
+
+- `aos.agent/SessionLifecycle@1` (variant):
+  - `Idle`, `Running`, `WaitingInput`, `Paused`, `Cancelling`, `Completed`, `Failed`, `Cancelled`.
+- `aos.agent/HostCommand@1` (variant):
+  - `Steer { text }`
+  - `FollowUp { text }`
+  - `Reconfigure { patch }`
+  - `Pause`
+  - `Resume`
+  - `Cancel { reason? }`
+
+### Observation semantics
+
+- `Steer`: observed at next step boundary before the next `llm.generate`.
+- `FollowUp`: queued and consumed after current input/run reaches `Idle` or `WaitingInput`.
+- `Reconfigure`: takes effect on next `LlmStepRequested`.
+- `Cancel`: immediate state transition to `Cancelling`; no new intents emitted. Late receipts/results are ignored via epoch fence.
+
+### Implementation shape
+
+- Add `session_epoch` and `step_epoch` to state and emitted intents.
+- Plans echo epochs in result events.
+- Reducer ignores stale completions (`epoch mismatch`).
+
+This avoids kernel plan-cancel primitives while remaining deterministic and compatible with AIR v1.
+
+## 2) Provider Strategy (resolved)
+
+### Contract
+
+Introduce first-class provider profiles:
+
+- `aos.agent/ProviderProfile@1`:
+  - `profile_id`
+  - `provider`
+  - `model_default`
+  - capability flags:
+    - `supports_parallel_tool_calls`
+    - `supports_reasoning_effort`
+    - `supports_streaming`
+    - `supports_tool_choice_named`
+  - hints:
+    - `context_window_hint`
+  - `provider_options_default` (escape hatch)
+
+### Rules
+
+- Reducer and plans are profile-driven; app logic never branches on raw provider names.
+- Preserve provider-native tool/request semantics in adapter/profile layer.
+- Normalize outputs into common CAS envelopes for reducer consumption.
+
+### Current-code alignment
+
+- `aos-llm` already supports provider-specific options and normalized stream/event models.
+- `aos-host` currently drops `provider_options`; P2 must thread profile options through `llm.generate`.
+
+## 3) Context Bounding and Output Discipline (resolved)
+
+### Contract
+
+Define SDK-wide tool output policy and channels:
+
+- `operator_output_ref`: full-fidelity tool output in CAS.
+- `model_output_ref`: bounded text passed to LLM context.
+- `truncation_meta`: `{ original_bytes, bounded_bytes, truncated, policy_id }`.
+
+### Deterministic bounding policy (default)
+
+1. Apply byte cap per tool family.
+2. Decode into UTF-8 (lossy if needed).
+3. If over limit, head/tail compaction with deterministic marker:
+   - `...[truncated <N> bytes; sha256:<digest>]`
+4. Store both refs.
+
+### Pressure signals
+
+Reducer emits `aos.agent/ContextPressure@1` when thresholds are crossed (for example 70/85/95% estimated window usage).
+Compaction strategy remains host/app-specific, but pressure signals are standardized now.
+
+## 4) Loop Safety and Termination (resolved)
+
+### Contract
+
+Canonical stop reasons:
+
+- `Completed`
+- `Cancelled`
+- `Failed { code, retryable, stage }`
+- `LimitsExceeded { kind }` where kind in:
+  - `max_turns`
+  - `max_tool_rounds`
+  - `max_steps`
+  - `max_tool_calls_per_step`
+
+Loop detection contract:
+
+- signature: hash of `(tool_name, normalized_args, tool_choice, last_assistant_ref?)`
+- configurable window and repeat threshold
+- policy:
+  - `InjectSteeringThenContinue` (default once),
+  - `FailImmediately`,
+  - `CompleteWithWarning`
+
+### Cancellation ordering
+
+Ordered journal events:
+
+1. `HostCommandAccepted(Cancel)`
+2. `LifecycleChanged(Cancelling)`
+3. optional late receipts/results (ignored by reducer via epoch fence)
+4. `LifecycleChanged(Cancelled)`
+
+## 5) Event Contract as API (resolved)
+
+### Contract
+
+Create canonical SDK event schema:
+
+- `aos.agent/AgentEvent@1` (variant) with required correlation fields:
+  - `session_id`
+  - `run_id`
+  - `turn_id`
+  - `step_id`
+  - `event_seq`
+  - `correlation_id`
+  - `causation` (event hash or intent hash)
+
+Event families:
+
+- lifecycle: started/paused/resumed/completed/failed/cancelled
+- llm step: requested/completed/failed
+- tool call: requested/completed/failed/bounded
+- host control: accepted/rejected/applied
+- diagnostics: loop detected/context pressure
+
+### Ordering guarantees
+
+- Durable ordering is journal order (DomainEvent/receipt order from kernel).
+- Telemetry stream ordering is best-effort and must carry journal cursor when derived from journal.
+
+### Channels
+
+- `model channel`: bounded payload refs only.
+- `operator channel`: full refs and diagnostics.
+
+## 6) Failure Model and Recovery Taxonomy (resolved)
+
+### Contract
+
+Standard error kinds:
+
+- `policy_denied`
+- `cap_denied`
+- `validation_error`
+- `adapter_error`
+- `adapter_timeout`
+- `provider_error_retryable`
+- `provider_error_terminal`
+- `tool_not_found`
+- `tool_args_invalid`
+- `internal_invariant_violation`
+
+### Retry ownership
+
+- Adapter-owned retries: transient network/provider transport (`aos-llm` retry policy).
+- Plan-owned retries: effect-level retry envelope only when deterministic and explicit.
+- Reducer-owned retries: business retries/backoff decisions and escalation.
+
+Terminal reducer states are always one of:
+- `Completed`
+- `Failed`
+- `Cancelled`
+
+No silent terminal ambiguity.
+
+## 7) LLM Effect Contract Pressure (resolved)
+
+### Contract change
+
+Add `sys/LlmGenerateParams@2` and `sys/LlmGenerateReceipt@2` for SDK needs:
+
+- params additions (optional):
+  - `reasoning_effort`
+  - `stop_sequences`
+  - `metadata`
+  - `provider_options`
+  - `response_format`
+- receipt additions:
+  - `finish_reason`
+  - `usage_details` (reasoning/cache tokens when available)
+  - `warnings_ref` (optional CAS ref)
+
+Keep:
+- `output_ref` = normalized reducer-facing payload,
+- `raw_output_ref` = provider-native payload for audit/debug.
+
+This matches current host behavior and closes the schema gap for runtime controls.
+
+## 8) Determinism Boundary for Agent Workloads (resolved)
+
+### Contract
+
+Replay-relevant:
+- DomainEvents,
+- EffectIntents/EffectReceipts,
+- PlanResult,
+- canonical SDK envelopes and bounded refs used for decisions.
+
+Telemetry-only (never reducer-decision input):
+- live stream deltas,
+- UI progress ticks,
+- non-journal host diagnostics.
+
+### Rule
+
+Any value that can affect reducer transitions must be journaled and schema-normalized once at ingress.
+
+### Tests
+
+Add replay-or-die e2e tests for agent flows:
+- run flow,
+- snapshot state/journal,
+- replay from genesis,
+- assert byte-identical state and terminal classification.
+
+## 9) Definition of Done for Cross-App Reuse (resolved)
+
+P2 closes only when behavior is conformant, not just APIs compiling.
+
+Required conformance matrix:
+
+- provider profiles: `openai-responses`, `anthropic-messages`, `openai-compatible`.
+- scenarios:
+  - no-tool completion,
+  - single tool call,
+  - multi-tool roundtrip,
+  - bounded output with truncation markers,
+  - host cancellation,
+  - loop detection trigger,
+  - policy deny,
+  - cap deny,
+  - adapter timeout/error,
+  - parent/child session orchestration.
+
+Minimum artifacts before closure:
+
+1. `crates/aos-agent-sdk` with contracts/helpers/tests.
+2. One headless sample world using `aos.agent/*`.
+3. One parent/child session sample (`spawn/send_input/wait/close` event choreography).
+4. Demiurge migrated to SDK core contracts (legacy adapters allowed short-term).
+
+## Concrete AIR Mapping (Demiurge -> SDK)
 
 - `demiurge/UserMessage@1` -> `aos.agent/UserInput@1`
 - `demiurge/ChatRequest@1` -> `aos.agent/LlmStepRequested@1`
@@ -74,141 +340,70 @@ SDK should explicitly preserve this shape (renamed into `aos.agent/*`):
 - `demiurge/ToolResult@1` -> `aos.agent/ToolResult@1`
 - `demiurge/ToolRegistryScanRequested@1` -> `aos.agent/ToolsetRefreshRequested@1`
 
-Plan equivalents:
+and plans:
+
 - `demiurge/chat_plan@1` -> `aos.agent/llm_step_plan@1`
 - `demiurge/tool_plan@1` -> `aos.agent/tool_call_plan@1`
 - `demiurge/tool_registry_plan@1` -> `aos.agent/toolset_refresh_plan@1`
 
-## Concrete AIR Skeleton (v1 Baseline)
+## Implementation Slices
 
-### Keyed reducer
-- module: `aos.agent/SessionReducer@1`
-- key schema: `aos.agent/SessionId@1`
-- event schema: `aos.agent/SessionEvent@1`
-- state schema: `aos.agent/SessionState@1`
+### Phase 2.1: Contracts and schemas
+- Define `SessionState`, `SessionEvent`, `HostCommand`, `ProviderProfile`, `FailureEnvelope`, `ContextPressure`.
+- Define event ordering/correlation rules.
 
-### Routing and triggers
-- Route `aos.agent/SessionEvent@1` to reducer with `key_field` bound to `session_id` (or `$value.session_id` for variants).
-- Trigger `aos.agent/LlmStepRequested@1` -> `aos.agent/llm_step_plan@1`.
-- Trigger `aos.agent/ToolCallRequested@1` -> `aos.agent/tool_call_plan@1`.
-- Trigger `aos.agent/ToolsetRefreshRequested@1` -> `aos.agent/toolset_refresh_plan@1`.
+### Phase 2.2: Reducer helpers
+- session lifecycle state machine helpers,
+- epoch fence helpers,
+- loop detection and limit evaluators.
 
-### Loop shape
-1. Reducer handles `UserInput` / `ToolResult` / lifecycle events.
-2. Reducer emits `LlmStepRequested`.
-3. Plan executes `llm.generate`, raises `LlmStepCompleted`.
-4. Reducer parses normalized output and emits 0..N `ToolCallRequested`.
-5. Tool plans raise `ToolResult`.
-6. Reducer transitions to next step or `Completed`/`Failed`.
+### Phase 2.3: Plan templates
+- llm step plan template,
+- tool call plan template (including bounded output refs),
+- toolset refresh template.
 
-## Proposed SDK Primitives (v0)
+### Phase 2.4: LLM effect v2
+- add `sys/LlmGenerateParams@2`/`Receipt@2`,
+- host adapter wiring for `provider_options`, `reasoning_effort`, `finish_reason`.
 
-### State model
-- `AgentRun`: identity, objective, policy profile, budget, status.
-- `AgentTurn`: input refs, model config, parent/child relation.
-- `AgentAction`: requested tool call(s), delegation, plan request.
-- `AgentObservation`: tool results/receipts/outcomes.
-- `AgentDecision`: continue, retry, delegate, finish, fail.
+### Phase 2.5: Event API and telemetry
+- finalize `aos.agent/AgentEvent@1`,
+- align HTTP/SSE surfaces with cursor/correlation semantics.
 
-### Event model
-- `RunRequested`, `RunStarted`, `TurnRequested`, `TurnCompleted`
-- `ActionRequested`, `ActionCompleted`, `ActionFailed`
-- `DelegationRequested`, `DelegationResult`
-- `RunCompleted`, `RunFailed`, `RunCancelled`
+### Phase 2.6: Conformance harness
+- profile x scenario matrix tests,
+- replay parity for every terminal class.
 
-Concrete naming baseline:
-- `aos.agent/UserInput@1`
-- `aos.agent/LlmStepRequested@1`
-- `aos.agent/LlmStepCompleted@1`
-- `aos.agent/ToolCallRequested@1`
-- `aos.agent/ToolResult@1`
-- `aos.agent/Completed@1`
-- `aos.agent/SpawnRequested@1`
-- `aos.agent/SpawnAccepted@1`
-- `aos.agent/SpawnCompleted@1`
+### Phase 2.7: Demiurge migration path
+- keep namespace adapters temporarily,
+- move reducer state/lifecycle to SDK contracts,
+- remove legacy-only paths by end of v0.10.
 
-### Tooling model
-- typed tool registry entries (schema + constraints + caps),
-- deterministic tool result envelope,
-- explicit error category taxonomy (policy/cap/adapter/timeout/validation).
+## Specs Alignment
 
-### Observability model
-- Every step includes `step_id`.
-- Every tool call includes stable `tool_call_id`.
-- Every cross-step flow includes `correlation_id`.
-- Session reducer emits lightweight annotations/events so `trace-get` and journal views remain operator-friendly.
+This proposal intentionally aligns with:
 
-## Architecture Shape
+- `spec/03-air.md`:
+  - plans as `emit_effect`/`await_receipt`/`raise_event` orchestration,
+  - policy/cap gating at effect boundary,
+  - determinism and replay constraints.
+- `spec/04-reducers.md`:
+  - reducer-owned business logic and typestate,
+  - micro-effect limits for reducers,
+  - intent-driven pattern for risky effects.
+- `spec/02-architecture.md`:
+  - receipts as non-determinism boundary,
+  - journaled control-plane/runtime evidence.
 
-### Crate/API
+## Out of Scope for P2
 
-`crates/aos-agent-sdk` should provide:
-- reusable event/state types,
-- reducer helpers (turn loop, correlation, idempotency fences),
-- plan helper patterns (tool execution, wait handling, retries),
-- test harness helpers for deterministic replay-based assertions.
+- kernel-level agent primitive,
+- new plan opcodes,
+- universe/cross-world protocol,
+- automatic compaction policy selection (only pressure signaling is standardized in P2).
 
-### AIR assets
+## Open Questions (remaining)
 
-Provide reusable templates under app folders (or examples):
-- minimal headless agent world,
-- tool-enabled single-agent world,
-- delegation/subagent pattern world.
-
-Baseline module/plan names:
-- keyed reducer: `aos.agent/SessionReducer@1`
-- plans: `aos.agent/llm_step_plan@1`, `aos.agent/tool_call_plan@1`, `aos.agent/toolset_refresh_plan@1`
-
-Subagent semantics:
-- `spawn_agent`/`send_input`/`wait`/`close_agent` are modeled as `aos.agent/*` events across parent/child session ids.
-- No kernel-side spawn/wait API is introduced.
-
-## Phase Plan
-
-### Phase 2.1: SDK schema and contracts
-- Define base schemas for run/turn/action/observation/decision.
-- Define keyed routing schema (`session_id`) and enforce `key_field` conventions.
-- Define compatibility rules and versioning policy.
-- Add initial docs and examples.
-
-### Phase 2.2: Reducer/plan helpers
-- Add reducer utility patterns for agent loops.
-- Add plan utility patterns for tool fan-out/fan-in.
-- Provide standard error/result envelopes.
-- Encode current Demiurge loop shape as first-class helpers, not as optional examples.
-- Add helper patterns for parent/child session orchestration (spawn/wait/close via events).
-
-### Phase 2.3: Tool runtime contracts
-- Define SDK-level tool descriptor conventions.
-- Standardize tool call normalization and result events.
-- Add harness tests across mock tools.
-- Include a policy template that mirrors current Demiurge allow/deny pattern by origin plan/module.
-- Integrate with P4 effect contracts for coding/build/exec tool families.
-
-### Phase 2.4: Headless operations
-- Add operational helpers for long-running headless runs:
-  - checkpoint markers,
-  - cancellation,
-  - bounded retries/backoff policies.
-- Integrate with debug trace surfaces from v0.9.
-
-## Testing Strategy
-
-- Unit tests for schema transforms and loop helpers.
-- Integration tests that run full reducer+plan flows using `aos-host` test fixtures.
-- Replay-or-die tests asserting byte-identical snapshots across agent runs.
-- Targeted conformance tests for tool-call roundtrips and parallel action handling.
-
-## Definition of Done
-
-- `aos-agent-sdk` exists with reusable primitives and helper APIs.
-- At least one non-trivial agent flow runs end-to-end using SDK primitives.
-- Parallel tool-use and error handling paths are covered by deterministic integration tests.
-- Docs are sufficient for building a new agent app without copying Demiurge internals.
-- The default SDK flow can be wired into current Demiurge plans/events with only namespace/event-shape adapters.
-
-## Open Questions
-
-- Which primitives should be mandatory vs optional extension points?
-- Do we standardize delegation now for same-world only, or reserve cross-world semantics for universe work?
-- Where do budget/economics constraints live first: SDK schemas only, or immediately cap-policy integrated?
+1. Should `pause/resume` be mandatory in P2 core or optional extension?
+2. Should `provider_options` be typed per profile in SDK schemas now, or remain partially opaque until v0.11?
+3. How strict should initial loop-detection defaults be for coding-agent vs world-operator profiles?
