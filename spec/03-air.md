@@ -284,7 +284,7 @@ Built-in kinds in v1:
 
 **llm.generate**
 - params: `{ provider:text, model:text, temperature:dec128, max_tokens:nat, message_refs:list<hash>, tool_refs?:list<hash>, tool_choice?:sys/LlmToolChoice@1, api_key?:TextOrSecretRef }`
-- receipt: `{ output_ref:hash, token_usage:{prompt:nat,completion:nat}, cost_cents:nat, provider_id:text }`
+- receipt: `{ output_ref:hash, raw_output_ref?:hash, token_usage:{prompt:nat,completion:nat}, cost_cents:nat, provider_id:text }`
 
 LLM secrets use `defsecret` + `SecretRef` so plans never carry plaintext. v0.9 resolvers read
 `env:VAR_NAME` bindings from process env (and `.env` when loaded).

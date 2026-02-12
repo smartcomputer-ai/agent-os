@@ -156,7 +156,7 @@ Four adapters ship in v1:
 - **HTTP**: `http.request(method, url, headers, body_ref) → receipt(status, headers, body_ref, timings)`
 - **Blob**: `blob.{put,get} → receipt(blob_ref, size)`
 - **Timer**: `timer.set(deliver_at_ns) → receipt(delivered_at_ns)` (logical time)
-- **LLM**: `llm.generate(model, params, message_refs) → receipt(output_ref, token_usage, cost, provider_id)`
+- **LLM**: `llm.generate(model, params, message_refs) → receipt(output_ref, raw_output_ref?, token_usage, cost, provider_id)`
 
 Each adapter signs receipts (ed25519/HMAC) including intent_hash, inputs/outputs hashes, timings, and cost.
 

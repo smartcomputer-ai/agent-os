@@ -875,7 +875,7 @@ mod tests {
         let grant = CapabilityGrant::builder(
             "cap_llm",
             "sys/llm.basic@1",
-            &serde_json::json!({ "models": ["gpt-4"], "max_tokens": 50 }),
+            &serde_json::json!({ "models": ["gpt-5.2"], "max_tokens": 50 }),
         )
         .build()
         .expect("grant");

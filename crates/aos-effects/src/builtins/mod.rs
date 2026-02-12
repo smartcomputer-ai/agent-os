@@ -92,6 +92,8 @@ pub struct LlmGenerateParams {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmGenerateReceipt {
     pub output_ref: HashRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_output_ref: Option<HashRef>,
     pub token_usage: TokenUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_cents: Option<u64>,

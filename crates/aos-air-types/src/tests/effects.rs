@@ -115,6 +115,7 @@ fn llm_generate_receipt_literal_matches_builtin_schema() {
             "output_ref",
             hash("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
         ),
+        ("raw_output_ref", null()),
         (
             "token_usage",
             record(vec![("prompt", nat(128)), ("completion", nat(64))]),
@@ -133,6 +134,7 @@ fn llm_generate_receipt_requires_token_usage_fields() {
             "output_ref",
             hash("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
         ),
+        ("raw_output_ref", null()),
         ("token_usage", record(vec![("prompt", nat(1))])),
         ("cost_cents", nat(0)),
         ("provider_id", text("openai")),

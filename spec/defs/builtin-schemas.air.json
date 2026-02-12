@@ -220,6 +220,7 @@
     "type": {
       "record": {
         "output_ref": { "hash": {} },
+        "raw_output_ref": { "option": { "hash": {} } },
         "token_usage": {
           "record": {
             "prompt": { "nat": {} },

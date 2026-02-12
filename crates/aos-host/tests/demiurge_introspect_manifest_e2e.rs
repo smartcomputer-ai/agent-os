@@ -90,6 +90,7 @@ impl<S: aos_store::Store + Send + Sync + 'static> AsyncEffectAdapter for ToolLlm
 
         let receipt = LlmGenerateReceipt {
             output_ref,
+            raw_output_ref: None,
             token_usage: TokenUsage {
                 prompt: 5,
                 completion: 5,
@@ -160,8 +161,7 @@ fn user_message_event_hash(
         let Ok(value) = serde_cbor::from_slice::<serde_json::Value>(&domain.value) else {
             continue;
         };
-        let is_user_message =
-            value.get("$tag").and_then(|v| v.as_str()) == Some("UserMessage");
+        let is_user_message = value.get("$tag").and_then(|v| v.as_str()) == Some("UserMessage");
         let same_chat = value
             .get("$value")
             .and_then(|v| v.get("chat_id"))
@@ -183,7 +183,10 @@ fn user_message_event_hash(
     );
 }
 
-fn analyze_trace(kernel: &aos_kernel::Kernel<FsStore>, event_hash: &str) -> Result<TraceAssertions> {
+fn analyze_trace(
+    kernel: &aos_kernel::Kernel<FsStore>,
+    event_hash: &str,
+) -> Result<TraceAssertions> {
     let entries = kernel.dump_journal().context("dump journal")?;
     let root_seq = entries
         .iter()
@@ -193,7 +196,9 @@ fn analyze_trace(kernel: &aos_kernel::Kernel<FsStore>, event_hash: &str) -> Resu
             }
             let record: JournalRecord = serde_cbor::from_slice(&entry.payload).ok()?;
             match record {
-                JournalRecord::DomainEvent(domain) if domain.event_hash == event_hash => Some(entry.seq),
+                JournalRecord::DomainEvent(domain) if domain.event_hash == event_hash => {
+                    Some(entry.seq)
+                }
                 _ => None,
             }
         })
@@ -219,10 +224,7 @@ fn analyze_trace(kernel: &aos_kernel::Kernel<FsStore>, event_hash: &str) -> Resu
                 }
             }
             JournalRecord::CapDecision(cap) => {
-                if matches!(
-                    cap.decision,
-                    aos_kernel::journal::CapDecisionOutcome::Deny
-                ) {
+                if matches!(cap.decision, aos_kernel::journal::CapDecisionOutcome::Deny) {
                     cap_denied = true;
                 }
             }
@@ -458,8 +460,16 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         "trace should not have pending event waits at end: {:?}",
         trace
     );
-    assert!(!trace.policy_denied, "unexpected policy deny in trace: {:?}", trace);
-    assert!(!trace.cap_denied, "unexpected capability deny in trace: {:?}", trace);
+    assert!(
+        !trace.policy_denied,
+        "unexpected policy deny in trace: {:?}",
+        trace
+    );
+    assert!(
+        !trace.cap_denied,
+        "unexpected capability deny in trace: {:?}",
+        trace
+    );
     assert!(
         !trace.has_receipt_error,
         "unexpected error receipt in trace: {:?}",
@@ -470,7 +480,11 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         "unexpected timeout receipt in trace: {:?}",
         trace
     );
-    assert!(!trace.has_plan_error, "unexpected plan error in trace: {:?}", trace);
+    assert!(
+        !trace.has_plan_error,
+        "unexpected plan error in trace: {:?}",
+        trace
+    );
 
     Ok(())
 }

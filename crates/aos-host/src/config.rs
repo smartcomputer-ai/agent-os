@@ -90,6 +90,7 @@ impl Default for HttpAdapterConfig {
 pub enum LlmApiKind {
     ChatCompletions,
     Responses,
+    AnthropicMessages,
 }
 
 /// Per-provider configuration for LLM adapter.
@@ -110,23 +111,31 @@ pub struct LlmAdapterConfig {
 impl LlmAdapterConfig {
     /// Build provider map from environment; returns error only on malformed input.
     pub fn from_env() -> Result<Self, std::env::VarError> {
-        let base_url =
+        let openai_base_url =
             std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".into());
+        let anthropic_base_url = std::env::var("ANTHROPIC_BASE_URL")
+            .unwrap_or_else(|_| "https://api.anthropic.com/v1".into());
 
         let mut providers = HashMap::new();
         let openai_chat = ProviderConfig {
-            base_url: base_url.clone(),
+            base_url: openai_base_url.clone(),
             timeout: Duration::from_secs(120),
             api_kind: LlmApiKind::ChatCompletions,
         };
         let openai_responses = ProviderConfig {
-            base_url,
+            base_url: openai_base_url,
             timeout: Duration::from_secs(120),
             api_kind: LlmApiKind::Responses,
+        };
+        let anthropic_messages = ProviderConfig {
+            base_url: anthropic_base_url,
+            timeout: Duration::from_secs(120),
+            api_kind: LlmApiKind::AnthropicMessages,
         };
 
         providers.insert("openai-chat".into(), openai_chat.clone());
         providers.insert("openai-responses".into(), openai_responses);
+        providers.insert("anthropic".into(), anthropic_messages);
         // Back-compat alias for existing configs.
         providers.insert("openai".into(), openai_chat);
 

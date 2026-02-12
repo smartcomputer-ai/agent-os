@@ -85,7 +85,7 @@ Notes:
 
 `llm.generate` should evolve to support normalized parsing contracts:
 - provider-native raw output ref (`raw_output_ref`),
-- normalized output ref (`norm_output_ref`) for reducer/tool-runtime consumption.
+- normalized output ref in `output_ref` for reducer/tool-runtime consumption.
 
 This keeps reducer logic provider-agnostic while preserving debuggability.
 
