@@ -3,7 +3,7 @@
 **Priority**: P2  
 **Effort**: Medium  
 **Risk if deferred**: Medium (blocks first-agent UX)  
-**Status**: Mostly Done
+**Status**: Complete
 
 ## Goal
 

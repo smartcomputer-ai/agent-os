@@ -1,4 +1,4 @@
-# Cells (Keyed Reducers) — AIR v1.1
+# Cells (Keyed Reducers)
 
 Status: **implemented** (kernel/storage/control). Cells make many instances of the same reducer FSM first-class while preserving the unified reducer ABI.
 
@@ -51,14 +51,3 @@ If we add an explicit key override (e.g., envelope key or a future plan field), 
 - CLI/inspect supports listing cells, showing a cell's state, tailing events, and exporting a single cell snapshot.
 - Why-graph can render per-cell timelines and correlate receipts via intent_hash and correlate_by keys.
 
-## Migration (v1 → v1.1)
-1) Ensure events include a stable key field; reducer code already treats state as `map<key,substate>`.
-2) Add `key_field` to routing entries (and optionally `key_schema` to the module).
-3) Enable `cell_mode` in kernel for that reducer.
-4) Run one-time migration that spills the monolithic map into per-cell blobs and rebuilds the index root.
-Reducer binary can stay unchanged if the SDK wrapper was used.
-
-## Non-goals (v1.1)
-- Multiple keys per reducer (exactly one key_field).
-- Cross-world cell routing.
-- Query engine over cell state (index/list only; richer queries via exported snapshots).
