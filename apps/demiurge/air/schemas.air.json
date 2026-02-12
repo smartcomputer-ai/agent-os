@@ -155,6 +155,7 @@
         "message_refs": { "list": { "hash": {} } },
         "model": { "text": {} },
         "provider": { "text": {} },
+        "api_key_alias": { "text": {} },
         "max_tokens": { "nat": {} },
         "tool_refs": { "option": { "list": { "hash": {} } } },
         "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }

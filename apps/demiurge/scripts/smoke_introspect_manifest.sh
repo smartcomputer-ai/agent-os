@@ -16,8 +16,8 @@ if [ -f "${WORLD_DIR}/.env" ]; then
   set +a
 fi
 
-if [ -z "${LLM_API_KEY:-}" ]; then
-  echo "LLM_API_KEY is required (set in ${WORLD_DIR}/.env or env)." >&2
+if [ -z "${OPENAI_API_KEY:-}" ]; then
+  echo "OPENAI_API_KEY is required (set in ${WORLD_DIR}/.env or env)." >&2
   exit 1
 fi
 

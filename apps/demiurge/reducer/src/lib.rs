@@ -13,6 +13,8 @@ use serde_json::Value as JsonValue;
 use sha2::{Digest, Sha256};
 
 const REQUEST_SCHEMA: &str = "demiurge/ChatRequest@1";
+const OPENAI_API_ALIAS: &str = "llm/openai_api";
+const ANTHROPIC_API_ALIAS: &str = "llm/anthropic_api";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 struct ChatState {
@@ -146,6 +148,7 @@ struct ChatRequest {
     message_refs: Vec<String>,
     model: String,
     provider: String,
+    api_key_alias: String,
     max_tokens: u64,
     tool_refs: Option<Vec<String>>,
     tool_choice: Option<LlmToolChoice>,
@@ -503,12 +506,14 @@ fn emit_chat_request_with_refs(
     tool_refs: Option<Vec<String>>,
 ) {
     ctx.state.tool_refs = tool_refs.clone();
+    let api_key_alias = api_key_alias_for_provider(&pending.provider).to_string();
     let intent_value = ChatRequest {
         chat_id: pending.chat_id,
         request_id: pending.request_id,
         message_refs: pending.message_refs,
         model: pending.model,
         provider: pending.provider,
+        api_key_alias,
         max_tokens: pending.max_tokens,
         tool_refs,
         tool_choice: pending.tool_choice,
@@ -518,6 +523,15 @@ fn emit_chat_request_with_refs(
         .key_bytes(&key)
         .payload(&intent_value)
         .send();
+}
+
+fn api_key_alias_for_provider(provider: &str) -> &'static str {
+    let normalized = provider.trim().to_ascii_lowercase();
+    if normalized.starts_with("anthropic") {
+        ANTHROPIC_API_ALIAS
+    } else {
+        OPENAI_API_ALIAS
+    }
 }
 
 fn handle_tool_result(ctx: &mut ReducerCtx<ChatState, ()>, result: ToolResult) {
@@ -1220,6 +1234,7 @@ mod tests {
             serde_cbor::from_slice(&output.domain_events[0].value).expect("request decode");
         assert_eq!(request.chat_id, "chat-1");
         assert_eq!(request.request_id, 1);
+        assert_eq!(request.api_key_alias, OPENAI_API_ALIAS);
         assert_eq!(request.tool_refs, Some(vec![String::from(TEST_HASH)]));
         assert_eq!(request.tool_choice, None);
         assert!(state.pending_chat_requests.is_empty());
@@ -1264,6 +1279,44 @@ mod tests {
             "demiurge/ToolRegistryScanRequested@1"
         );
         assert_eq!(state.pending_chat_requests.len(), 1);
+    }
+
+    #[test]
+    fn user_message_with_anthropic_provider_uses_anthropic_secret_alias() {
+        let state = ChatState {
+            messages: vec![],
+            last_request_id: 0,
+            title: Some("First chat".into()),
+            created_at_ms: Some(1234),
+            model: None,
+            provider: None,
+            max_tokens: None,
+            tool_refs: Some(vec![TEST_HASH.into()]),
+            tool_registry_version: Some(3),
+            tool_choice: None,
+            pending_chat_requests: vec![],
+            pending_outputs: vec![],
+            pending_tool_outputs: vec![],
+            pending_tool_messages: vec![],
+        };
+        let event = ChatEvent::UserMessage(UserMessage {
+            chat_id: "chat-1".into(),
+            request_id: 1,
+            text: "hello".into(),
+            message_ref: TEST_HASH.into(),
+            model: "claude-sonnet-4-5".into(),
+            provider: "anthropic".into(),
+            max_tokens: 128,
+            tool_refs: None,
+            tool_choice: None,
+        });
+        let output = run_with_state(Some(state), event);
+
+        assert_eq!(output.domain_events.len(), 1);
+        assert_eq!(output.domain_events[0].schema, REQUEST_SCHEMA);
+        let request: ChatRequest =
+            serde_cbor::from_slice(&output.domain_events[0].value).expect("request decode");
+        assert_eq!(request.api_key_alias, ANTHROPIC_API_ALIAS);
     }
 
     #[test]
@@ -1422,6 +1475,7 @@ mod tests {
         assert_eq!(request.message_refs, vec![String::from(TEST_HASH)]);
         assert_eq!(request.model, "gpt-mock");
         assert_eq!(request.provider, "mock");
+        assert_eq!(request.api_key_alias, OPENAI_API_ALIAS);
         assert_eq!(request.max_tokens, 128);
         assert_eq!(request.tool_refs, Some(vec![String::from(TEST_HASH)]));
     }

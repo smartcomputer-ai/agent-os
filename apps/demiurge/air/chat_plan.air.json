@@ -22,7 +22,7 @@
                 "tag": "secret",
                 "value": {
                   "record": {
-                    "alias": { "text": "llm/api" },
+                    "alias": { "ref": "@plan.input.api_key_alias" },
                     "version": { "nat": 1 }
                   }
                 }

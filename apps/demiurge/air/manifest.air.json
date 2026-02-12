@@ -189,7 +189,10 @@
   ],
   "secrets": [
     {
-      "name": "llm/api@1"
+      "name": "llm/openai_api@1"
+    },
+    {
+      "name": "llm/anthropic_api@1"
     }
   ],
   "defaults": {
