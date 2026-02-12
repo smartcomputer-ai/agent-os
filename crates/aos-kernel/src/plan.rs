@@ -62,6 +62,7 @@ pub enum StepState {
     WaitingReceipt,
     WaitingEvent,
     Completed,
+    Skipped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -776,21 +777,34 @@ impl PlanInstance {
     }
 
     fn ready_steps(&mut self) -> Result<Vec<String>, KernelError> {
-        let mut ready = Vec::new();
-        let mut skip = Vec::new();
-        for id in &self.step_order {
-            if matches!(self.step_states[id], StepState::Pending) {
-                match self.step_readiness(id)? {
-                    StepReadiness::Ready => ready.push(id.clone()),
-                    StepReadiness::Skip => skip.push(id.clone()),
-                    StepReadiness::Blocked => {}
+        loop {
+            let mut ready = Vec::new();
+            let mut skip = Vec::new();
+            for id in &self.step_order {
+                if matches!(self.step_states[id], StepState::Pending) {
+                    match self.step_readiness(id)? {
+                        StepReadiness::Ready => ready.push(id.clone()),
+                        StepReadiness::Skip => skip.push(id.clone()),
+                        StepReadiness::Blocked => {}
+                    }
                 }
             }
+
+            if !ready.is_empty() {
+                return Ok(ready);
+            }
+
+            if skip.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            for id in skip {
+                self.mark_skipped(&id);
+            }
+
+            // Continue to allow skip propagation through descendants before the caller
+            // decides whether the plan is waiting or completed.
         }
-        for id in skip {
-            self.mark_completed(&id);
-        }
-        Ok(ready)
     }
 
     fn step_readiness(&self, step_id: &str) -> Result<StepReadiness, KernelError> {
@@ -801,19 +815,24 @@ impl PlanInstance {
         let mut active_dep = false;
         let mut pending_dep = false;
         for dep in deps {
-            if !matches!(self.step_states.get(&dep.pred), Some(StepState::Completed)) {
-                pending_dep = true;
-                continue;
-            }
-            let guard_true = if let Some(expr) = &dep.guard {
-                let value = eval_expr(expr, &self.env)
-                    .map_err(|err| KernelError::Manifest(format!("guard eval error: {err}")))?;
-                value_to_bool(value)?
-            } else {
-                true
-            };
-            if guard_true {
-                active_dep = true;
+            match self.step_states.get(&dep.pred) {
+                Some(StepState::Completed) => {
+                    let guard_true = if let Some(expr) = &dep.guard {
+                        let value = eval_expr(expr, &self.env).map_err(|err| {
+                            KernelError::Manifest(format!("guard eval error: {err}"))
+                        })?;
+                        value_to_bool(value)?
+                    } else {
+                        true
+                    };
+                    if guard_true {
+                        active_dep = true;
+                    }
+                }
+                Some(StepState::Skipped) => {}
+                _ => {
+                    pending_dep = true;
+                }
             }
         }
 
@@ -829,11 +848,17 @@ impl PlanInstance {
     fn mark_completed(&mut self, step_id: &str) {
         self.step_states
             .insert(step_id.to_string(), StepState::Completed);
-        if self
-            .step_states
-            .values()
-            .all(|s| matches!(s, StepState::Completed))
-        {
+        self.refresh_completed_flag();
+    }
+
+    fn mark_skipped(&mut self, step_id: &str) {
+        self.step_states
+            .insert(step_id.to_string(), StepState::Skipped);
+        self.refresh_completed_flag();
+    }
+
+    fn refresh_completed_flag(&mut self) {
+        if self.all_steps_completed() {
             self.completed = true;
         }
     }
@@ -841,7 +866,7 @@ impl PlanInstance {
     fn all_steps_completed(&self) -> bool {
         self.step_states
             .values()
-            .all(|state| matches!(state, StepState::Completed))
+            .all(|state| matches!(state, StepState::Completed | StepState::Skipped))
     }
 }
 
@@ -1706,6 +1731,64 @@ mod tests {
         let mut effects = test_effect_manager();
         let outcome = instance.tick(&mut effects).unwrap();
         assert!(!outcome.completed);
+    }
+
+    #[test]
+    fn skipped_step_does_not_activate_descendants() {
+        let steps = vec![
+            PlanStep {
+                id: "gate".into(),
+                kind: PlanStepKind::Assign(PlanStepAssign {
+                    expr: Expr::Const(ExprConst::Bool { bool: true }).into(),
+                    bind: PlanBind {
+                        var: "gate".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "branch".into(),
+                kind: PlanStepKind::Assign(PlanStepAssign {
+                    expr: Expr::Const(ExprConst::Text { text: "ok".into() }).into(),
+                    bind: PlanBind { var: "branch".into() },
+                }),
+            },
+            PlanStep {
+                id: "descendant".into(),
+                kind: PlanStepKind::Assign(PlanStepAssign {
+                    expr: Expr::Ref(ExprRef {
+                        reference: "@var:branch".into(),
+                    })
+                    .into(),
+                    bind: PlanBind {
+                        var: "descendant".into(),
+                    },
+                }),
+            },
+        ];
+
+        let mut plan = base_plan(steps);
+        plan.edges.push(PlanEdge {
+            from: "gate".into(),
+            to: "branch".into(),
+            when: Some(Expr::Const(ExprConst::Bool { bool: false })),
+        });
+        plan.edges.push(PlanEdge {
+            from: "branch".into(),
+            to: "descendant".into(),
+            when: None,
+        });
+
+        let mut instance = new_plan_instance(plan);
+        let mut effects = test_effect_manager();
+        let outcome = instance.tick(&mut effects).unwrap();
+
+        assert!(outcome.completed);
+        assert_eq!(instance.step_states.get("branch"), Some(&StepState::Skipped));
+        assert_eq!(
+            instance.step_states.get("descendant"),
+            Some(&StepState::Skipped)
+        );
+        assert!(!instance.env.vars.contains_key("descendant"));
     }
 
     /// Raising an event should surface a DomainEvent with the serialized payload.
