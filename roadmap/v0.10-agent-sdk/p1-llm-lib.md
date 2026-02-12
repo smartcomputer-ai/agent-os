@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: Medium/High  
 **Risk if deferred**: High (blocks agent SDK velocity and provider quality)  
-**Status**: Proposed
+**Status**: Complete (verified in-repo on February 12, 2026)
 
 ## Goal
 
