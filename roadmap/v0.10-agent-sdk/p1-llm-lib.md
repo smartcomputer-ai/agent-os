@@ -43,7 +43,7 @@ It does not fit AOS 1:1 yet and must be reshaped for:
 
 1. Introduce a new crate: `crates/aos-llm`.
 2. Use `tmp-llm-lib-code` as source material, not a direct copy.
-3. Keep AOS effects contracts stable in v0.10; adapt library to current effect model first.
+3. Adapt AOS effect contracts as needed.
 4. Keep provider/network complexity in `aos-llm`; keep `aos-host` adapter thin.
 5. Streaming is supported as runtime telemetry/output events, not reducer-state mutation.
 
@@ -64,6 +64,7 @@ Responsibilities:
 - stream event normalization,
 - retries/backoff (explicit and configurable),
 - provider-specific escape hatches via controlled options.
+- tests also migrated and passing.
 
 ### `crates/aos-host` integration
 
