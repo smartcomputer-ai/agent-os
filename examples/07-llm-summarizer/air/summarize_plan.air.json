@@ -52,7 +52,7 @@
                 { "ref": "@var:body_ref" }
               ]
             },
-            "tools": { "list": [] },
+            "tool_refs": { "null": {} },
             "api_key": {
               "variant": {
                 "tag": "secret",
