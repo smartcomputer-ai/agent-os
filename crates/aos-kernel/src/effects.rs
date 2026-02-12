@@ -515,7 +515,8 @@ struct LlmCapParams {
 struct LlmGenerateParamsView {
     provider: String,
     model: String,
-    max_tokens: u64,
+    #[serde(default)]
+    max_tokens: Option<u64>,
     #[serde(default)]
     tool_choice: Option<LlmToolChoiceView>,
 }
@@ -737,14 +738,11 @@ fn builtin_llm_enforcer(
             message: format!("model '{}' not allowed", effect_params.model),
         });
     }
-    if let Some(limit) = cap_params.max_tokens {
-        if effect_params.max_tokens > limit {
+    if let (Some(limit), Some(requested)) = (cap_params.max_tokens, effect_params.max_tokens) {
+        if requested > limit {
             return Err(CapDenyReason {
                 code: "max_tokens_exceeded".into(),
-                message: format!(
-                    "max_tokens {} exceeds cap {limit}",
-                    effect_params.max_tokens
-                ),
+                message: format!("max_tokens {requested} exceeds cap {limit}"),
             });
         }
     }
@@ -885,7 +883,7 @@ mod tests {
             provider: "openai".into(),
             model: "gpt-5.2".into(),
             temperature: "0.5".into(),
-            max_tokens: 50,
+            max_tokens: Some(50),
             message_refs: vec![
                 aos_air_types::HashRef::new(
                     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -910,7 +908,7 @@ mod tests {
             provider: "openai".into(),
             model: "gpt-5.2".into(),
             temperature: "0.5".into(),
-            max_tokens: 55,
+            max_tokens: Some(55),
             message_refs: vec![
                 aos_air_types::HashRef::new(
                     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",

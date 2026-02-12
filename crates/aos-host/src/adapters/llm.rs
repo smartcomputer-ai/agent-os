@@ -256,7 +256,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             response_format: None,
             temperature: params.temperature.parse::<f64>().ok(),
             top_p: None,
-            max_tokens: Some(params.max_tokens),
+            max_tokens: params.max_tokens,
             stop_sequences: None,
             reasoning_effort: None,
             metadata: None,

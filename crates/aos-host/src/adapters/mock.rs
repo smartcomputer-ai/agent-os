@@ -348,11 +348,11 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             None => Err(anyhow!("field '{field}' missing from llm.generate params")),
         }
     };
-    let nat = |field: &str| -> Result<u64> {
+    let opt_nat = |field: &str| -> Result<Option<u64>> {
         match map.get(&serde_cbor::Value::Text(field.into())) {
-            Some(serde_cbor::Value::Integer(n)) if *n >= 0 => Ok(*n as u64),
+            Some(serde_cbor::Value::Integer(n)) if *n >= 0 => Ok(Some(*n as u64)),
+            Some(serde_cbor::Value::Null) | None => Ok(None),
             Some(other) => Err(anyhow!("field '{field}' must be nat, got {:?}", other)),
-            None => Err(anyhow!("field '{field}' missing from llm.generate params")),
         }
     };
     let message_refs = match map.get(&serde_cbor::Value::Text("message_refs".into())) {
@@ -403,7 +403,7 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
         provider: text("provider")?,
         model: text("model")?,
         temperature: text("temperature")?,
-        max_tokens: nat("max_tokens")?,
+        max_tokens: opt_nat("max_tokens")?,
         message_refs,
         tool_refs: if tool_refs.is_empty() {
             None

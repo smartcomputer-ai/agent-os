@@ -102,7 +102,7 @@ struct PendingChatRequest {
     message_refs: Vec<String>,
     model: String,
     provider: String,
-    max_tokens: u64,
+    max_tokens: Option<u64>,
     tool_choice: Option<LlmToolChoice>,
 }
 
@@ -136,7 +136,7 @@ struct UserMessage {
     message_ref: String,
     model: String,
     provider: String,
-    max_tokens: u64,
+    max_tokens: Option<u64>,
     tool_refs: Option<Vec<String>>,
     tool_choice: Option<LlmToolChoice>,
 }
@@ -149,7 +149,7 @@ struct ChatRequest {
     model: String,
     provider: String,
     api_key_alias: String,
-    max_tokens: u64,
+    max_tokens: Option<u64>,
     tool_refs: Option<Vec<String>>,
     tool_choice: Option<LlmToolChoice>,
 }
@@ -342,7 +342,7 @@ fn handle_user_message(ctx: &mut ReducerCtx<ChatState, ()>, message: UserMessage
     ctx.state.last_request_id = request_id;
     ctx.state.model = Some(model.clone());
     ctx.state.provider = Some(provider.clone());
-    ctx.state.max_tokens = Some(max_tokens);
+    ctx.state.max_tokens = max_tokens;
     ctx.state.tool_choice = tool_choice.clone();
     ctx.state.messages.push(ChatMessage {
         request_id,
@@ -479,10 +479,9 @@ fn emit_chat_request(
         message_refs = message_refs.split_off(start);
     }
 
-    let (Some(model), Some(provider), Some(max_tokens)) = (
+    let (Some(model), Some(provider)) = (
         ctx.state.model.clone(),
         ctx.state.provider.clone(),
-        ctx.state.max_tokens,
     ) else {
         return;
     };
@@ -494,7 +493,7 @@ fn emit_chat_request(
         message_refs,
         model,
         provider,
-        max_tokens,
+        max_tokens: ctx.state.max_tokens,
         tool_choice,
     };
     emit_chat_request_with_refs(ctx, pending, ctx.state.tool_refs.clone());
@@ -1158,7 +1157,7 @@ mod tests {
             message_ref: TEST_HASH.into(),
             model: "gpt-mock".into(),
             provider: "mock".into(),
-            max_tokens: 128,
+            max_tokens: Some(128),
             tool_refs: None,
             tool_choice: None,
         });
@@ -1191,7 +1190,7 @@ mod tests {
         assert_eq!(pending.message_refs, vec![String::from(TEST_HASH)]);
         assert_eq!(pending.model, "gpt-mock");
         assert_eq!(pending.provider, "mock");
-        assert_eq!(pending.max_tokens, 128);
+        assert_eq!(pending.max_tokens, Some(128));
         assert_eq!(pending.tool_choice, None);
     }
 
@@ -1220,7 +1219,7 @@ mod tests {
             message_ref: TEST_HASH.into(),
             model: "gpt-mock".into(),
             provider: "mock".into(),
-            max_tokens: 128,
+            max_tokens: Some(128),
             tool_refs: None,
             tool_choice: None,
         });
@@ -1238,6 +1237,44 @@ mod tests {
         assert_eq!(request.tool_refs, Some(vec![String::from(TEST_HASH)]));
         assert_eq!(request.tool_choice, None);
         assert!(state.pending_chat_requests.is_empty());
+    }
+
+    #[test]
+    fn user_message_without_max_tokens_emits_chat_request() {
+        let state = ChatState {
+            messages: vec![],
+            last_request_id: 0,
+            title: Some("First chat".into()),
+            created_at_ms: Some(1234),
+            model: None,
+            provider: None,
+            max_tokens: None,
+            tool_refs: Some(vec![TEST_HASH.into()]),
+            tool_registry_version: Some(3),
+            tool_choice: None,
+            pending_chat_requests: vec![],
+            pending_outputs: vec![],
+            pending_tool_outputs: vec![],
+            pending_tool_messages: vec![],
+        };
+        let event = ChatEvent::UserMessage(UserMessage {
+            chat_id: "chat-1".into(),
+            request_id: 1,
+            text: "hello".into(),
+            message_ref: TEST_HASH.into(),
+            model: "gpt-mock".into(),
+            provider: "mock".into(),
+            max_tokens: None,
+            tool_refs: None,
+            tool_choice: None,
+        });
+        let output = run_with_state(Some(state), event);
+
+        assert_eq!(output.domain_events.len(), 1);
+        assert_eq!(output.domain_events[0].schema, REQUEST_SCHEMA);
+        let request: ChatRequest =
+            serde_cbor::from_slice(&output.domain_events[0].value).expect("request decode");
+        assert_eq!(request.max_tokens, None);
     }
 
     #[test]
@@ -1265,7 +1302,7 @@ mod tests {
             message_ref: TEST_HASH.into(),
             model: "gpt-mock".into(),
             provider: "mock".into(),
-            max_tokens: 128,
+            max_tokens: Some(128),
             tool_refs: Some(vec![]),
             tool_choice: None,
         });
@@ -1306,7 +1343,7 @@ mod tests {
             message_ref: TEST_HASH.into(),
             model: "claude-sonnet-4-5".into(),
             provider: "anthropic".into(),
-            max_tokens: 128,
+            max_tokens: Some(128),
             tool_refs: None,
             tool_choice: None,
         });
@@ -1350,7 +1387,7 @@ mod tests {
             message_ref: TEST_HASH.into(),
             model: "gpt-mock".into(),
             provider: "mock".into(),
-            max_tokens: 64,
+            max_tokens: Some(64),
             tool_refs: None,
             tool_choice: None,
         });
@@ -1439,7 +1476,7 @@ mod tests {
                 message_refs: vec![TEST_HASH.into()],
                 model: "gpt-mock".into(),
                 provider: "mock".into(),
-                max_tokens: 128,
+                max_tokens: Some(128),
                 tool_choice: None,
             }],
             pending_outputs: vec![],
@@ -1476,7 +1513,7 @@ mod tests {
         assert_eq!(request.model, "gpt-mock");
         assert_eq!(request.provider, "mock");
         assert_eq!(request.api_key_alias, OPENAI_API_ALIAS);
-        assert_eq!(request.max_tokens, 128);
+        assert_eq!(request.max_tokens, Some(128));
         assert_eq!(request.tool_refs, Some(vec![String::from(TEST_HASH)]));
     }
 }

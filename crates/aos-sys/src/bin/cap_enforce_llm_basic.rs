@@ -39,7 +39,8 @@ struct LlmCapParams {
 struct LlmGenerateParams {
     provider: String,
     model: String,
-    max_tokens: u64,
+    #[serde(default)]
+    max_tokens: Option<u64>,
     #[serde(default)]
     tool_choice: Option<LlmToolChoice>,
 }
@@ -101,14 +102,11 @@ impl PureModule for CapEnforceLlmBasic {
                 format!("model '{}' not allowed", effect_params.model),
             ));
         }
-        if let Some(limit) = cap_params.max_tokens {
-            if effect_params.max_tokens > limit {
+        if let (Some(limit), Some(requested)) = (cap_params.max_tokens, effect_params.max_tokens) {
+            if requested > limit {
                 return Ok(deny(
                     "max_tokens_exceeded",
-                    format!(
-                        "max_tokens {} exceeds cap {limit}",
-                        effect_params.max_tokens
-                    ),
+                    format!("max_tokens {requested} exceeds cap {limit}"),
                 ));
             }
         }

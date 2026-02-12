@@ -79,7 +79,8 @@ pub struct LlmGenerateParams {
     pub provider: String,
     pub model: String,
     pub temperature: String,
-    pub max_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
     pub message_refs: Vec<HashRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_refs: Option<Vec<HashRef>>,

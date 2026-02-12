@@ -206,7 +206,7 @@
         "provider": { "text": {} },
         "model": { "text": {} },
         "temperature": { "dec128": {} },
-        "max_tokens": { "nat": {} },
+        "max_tokens": { "option": { "nat": {} } },
         "message_refs": { "list": { "hash": {} } },
         "tool_refs": { "option": { "list": { "hash": {} } } },
         "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },

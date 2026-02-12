@@ -82,7 +82,7 @@
         "message_refs": { "list": { "hash": {} } },
         "model": { "text": {} },
         "provider": { "text": {} },
-        "max_tokens": { "nat": {} },
+        "max_tokens": { "option": { "nat": {} } },
         "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }
       }
     }
@@ -139,7 +139,7 @@
         "message_ref": { "hash": {} },
         "model": { "text": {} },
         "provider": { "text": {} },
-        "max_tokens": { "nat": {} },
+        "max_tokens": { "option": { "nat": {} } },
         "tool_refs": { "option": { "list": { "hash": {} } } },
         "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }
       }
@@ -156,7 +156,7 @@
         "model": { "text": {} },
         "provider": { "text": {} },
         "api_key_alias": { "text": {} },
-        "max_tokens": { "nat": {} },
+        "max_tokens": { "option": { "nat": {} } },
         "tool_refs": { "option": { "list": { "hash": {} } } },
         "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } }
       }

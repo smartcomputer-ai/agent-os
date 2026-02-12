@@ -6,7 +6,7 @@
     "schema": {
       "record": {
         "models": { "set": { "text": {} } },
-        "max_tokens": { "nat": {} }
+        "max_tokens": { "option": { "nat": {} } }
       }
     },
     "enforcer": { "module": "sys/CapEnforceLlmBasic@1" }
