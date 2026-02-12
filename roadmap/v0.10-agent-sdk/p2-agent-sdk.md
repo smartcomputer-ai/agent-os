@@ -39,6 +39,7 @@ This preserves existing system boundaries:
 3. Keep tool execution cap/policy gated through normal plan effects.
 4. Support parallel tool execution via plan DAG fan-out/fan-in and/or multi-plan choreography.
 5. Accept breaking schema changes during v0.10 to converge on a stable core model.
+6. Treat subagents as additional keyed sessions (events + routing), not kernel primitives.
 
 ## Namespace Convention
 
@@ -78,6 +79,28 @@ Plan equivalents:
 - `demiurge/tool_plan@1` -> `aos.agent/tool_call_plan@1`
 - `demiurge/tool_registry_plan@1` -> `aos.agent/toolset_refresh_plan@1`
 
+## Concrete AIR Skeleton (v1 Baseline)
+
+### Keyed reducer
+- module: `aos.agent/SessionReducer@1`
+- key schema: `aos.agent/SessionId@1`
+- event schema: `aos.agent/SessionEvent@1`
+- state schema: `aos.agent/SessionState@1`
+
+### Routing and triggers
+- Route `aos.agent/SessionEvent@1` to reducer with `key_field` bound to `session_id` (or `$value.session_id` for variants).
+- Trigger `aos.agent/LlmStepRequested@1` -> `aos.agent/llm_step_plan@1`.
+- Trigger `aos.agent/ToolCallRequested@1` -> `aos.agent/tool_call_plan@1`.
+- Trigger `aos.agent/ToolsetRefreshRequested@1` -> `aos.agent/toolset_refresh_plan@1`.
+
+### Loop shape
+1. Reducer handles `UserInput` / `ToolResult` / lifecycle events.
+2. Reducer emits `LlmStepRequested`.
+3. Plan executes `llm.generate`, raises `LlmStepCompleted`.
+4. Reducer parses normalized output and emits 0..N `ToolCallRequested`.
+5. Tool plans raise `ToolResult`.
+6. Reducer transitions to next step or `Completed`/`Failed`.
+
 ## Proposed SDK Primitives (v0)
 
 ### State model
@@ -100,11 +123,20 @@ Concrete naming baseline:
 - `aos.agent/ToolCallRequested@1`
 - `aos.agent/ToolResult@1`
 - `aos.agent/Completed@1`
+- `aos.agent/SpawnRequested@1`
+- `aos.agent/SpawnAccepted@1`
+- `aos.agent/SpawnCompleted@1`
 
 ### Tooling model
 - typed tool registry entries (schema + constraints + caps),
 - deterministic tool result envelope,
 - explicit error category taxonomy (policy/cap/adapter/timeout/validation).
+
+### Observability model
+- Every step includes `step_id`.
+- Every tool call includes stable `tool_call_id`.
+- Every cross-step flow includes `correlation_id`.
+- Session reducer emits lightweight annotations/events so `trace-get` and journal views remain operator-friendly.
 
 ## Architecture Shape
 
@@ -127,6 +159,10 @@ Baseline module/plan names:
 - keyed reducer: `aos.agent/SessionReducer@1`
 - plans: `aos.agent/llm_step_plan@1`, `aos.agent/tool_call_plan@1`, `aos.agent/toolset_refresh_plan@1`
 
+Subagent semantics:
+- `spawn_agent`/`send_input`/`wait`/`close_agent` are modeled as `aos.agent/*` events across parent/child session ids.
+- No kernel-side spawn/wait API is introduced.
+
 ## Phase Plan
 
 ### Phase 2.1: SDK schema and contracts
@@ -140,12 +176,14 @@ Baseline module/plan names:
 - Add plan utility patterns for tool fan-out/fan-in.
 - Provide standard error/result envelopes.
 - Encode current Demiurge loop shape as first-class helpers, not as optional examples.
+- Add helper patterns for parent/child session orchestration (spawn/wait/close via events).
 
 ### Phase 2.3: Tool runtime contracts
 - Define SDK-level tool descriptor conventions.
 - Standardize tool call normalization and result events.
 - Add harness tests across mock tools.
 - Include a policy template that mirrors current Demiurge allow/deny pattern by origin plan/module.
+- Integrate with P4 effect contracts for coding/build/exec tool families.
 
 ### Phase 2.4: Headless operations
 - Add operational helpers for long-running headless runs:

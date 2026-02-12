@@ -63,6 +63,7 @@ Expected first mappings:
   - `tool_registry_plan` shape -> `aos.agent/toolset_refresh_plan@1`
 - Keep current introspect/workspace tools functional.
 - Add at least one additional tool path that validates SDK extensibility.
+- Adopt new effect/tool families from P4 incrementally (starting with low-risk workspace-native operations).
 
 ### Slice 3.4: Operational hardening
 - Align debug surfaces with SDK terminology (run/turn/action lineage).
@@ -70,6 +71,14 @@ Expected first mappings:
   - tool errors,
   - cap/policy denials,
   - multi-step tool continuation.
+  - parent/child session orchestration events.
+
+### Slice 3.5: Advanced toolset enablement
+- Add coding-agent-grade tools as Demiurge capabilities once P4 contracts land:
+  - patch-style workspace edits,
+  - shell execution,
+  - compiler/build flows.
+- Keep each capability behind explicit caps/policy and validate traceability end-to-end.
 
 ## Backward Compatibility Strategy
 
