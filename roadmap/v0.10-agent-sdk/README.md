@@ -17,3 +17,4 @@ This phase moves AOS from a toy chat app toward a reusable agent runtime stack:
 - Breaking changes are acceptable in v0.10.
 - Keep AOS kernel/spec boundaries intact: reducers own state/business logic, plans orchestrate effects.
 - Agent semantics live above core AOS, not inside the kernel.
+- SDK schema/plan/module naming uses the `aos.agent/*` namespace.

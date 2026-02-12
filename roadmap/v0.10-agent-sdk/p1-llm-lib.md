@@ -46,6 +46,7 @@ It does not fit AOS 1:1 yet and must be reshaped for:
 3. Adapt AOS effect contracts as needed.
 4. Keep provider/network complexity in `aos-llm`; keep `aos-host` adapter thin.
 5. Streaming is supported as runtime telemetry/output events, not reducer-state mutation.
+6. Preserve the working Demiurge wiring: CAS message refs in, CAS output ref out, reducer-driven tool loop.
 
 ## Non-Goals (P1)
 
@@ -83,6 +84,8 @@ Responsibilities:
 4. Ensure streaming APIs can emit normalized events usable by shell/SSE surfaces.
 5. Harden error mapping to AOS receipt status (`ok/error/timeout`) and deterministic test harnesses.
 6. Keep secrets handling compatible with current resolver path (`api_key` resolved upstream).
+7. Add a normalized LLM output envelope in CAS so reducers do not parse provider-specific JSON directly.
+8. Keep provider-native output available in CAS for debugging/audit (`raw_output_ref`).
 
 ## Phase Plan
 
@@ -98,8 +101,8 @@ Responsibilities:
 
 ### Phase 1.3: Host bridge
 - Refactor `aos-host` LLM adapter to consume `aos-llm`.
-- Keep `llm.generate` effect contract unchanged for now.
-- Verify tool refs + tool choice mapping parity.
+- Evolve `llm.generate` request/receipt contracts as needed for normalized output refs.
+- Verify tool refs + tool choice mapping parity with current Demiurge behavior.
 
 ### Phase 1.4: Streaming + conformance
 - Normalize stream events across providers.
@@ -117,8 +120,9 @@ Responsibilities:
 
 - `aos-llm` crate exists and is used by `aos-host` LLM adapter.
 - OpenAI + Anthropic supported with unified request/tool/stream semantics.
-- Existing Demiurge/tool flows keep working on top of the refactored adapter.
+- Existing Demiurge/tool flows keep working on top of the refactored adapter semantics.
 - Test suite demonstrates deterministic adapter contracts and provider conformance.
+- Reducer-facing parsing can rely on normalized output shape instead of provider-native response formats.
 
 ## Open Questions
 

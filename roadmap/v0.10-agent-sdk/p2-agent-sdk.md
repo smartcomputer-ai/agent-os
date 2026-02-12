@@ -40,6 +40,44 @@ This preserves existing system boundaries:
 4. Support parallel tool execution via plan DAG fan-out/fan-in and/or multi-plan choreography.
 5. Accept breaking schema changes during v0.10 to converge on a stable core model.
 
+## Namespace Convention
+
+- SDK-owned schemas, plans, and modules use `aos.agent/*`.
+- Do not use `sys/*` for SDK-level agent abstractions.
+- App-specific layers (like Demiurge UI events) may map onto `aos.agent/*` but should not redefine core loop semantics.
+
+## Demiurge Learnings to Preserve
+
+These are required constraints for SDK design because they reflect hard-won behavior from the current Demiurge wiring:
+
+1. CAS-first IO:
+   - message/tool/result payloads are hash refs, not large inline state blobs.
+2. Reducer interprets, plans execute:
+   - reducer parses tool calls and emits typed tool intents,
+   - plans perform `llm.generate` and tool effects.
+3. Plan-only privileged effects:
+   - `llm.generate`, `workspace.*`, `introspect.*` stay in plans under policy/cap gates.
+4. Tool call normalization before execution:
+   - reducer maps tool call payloads into typed params/variants before `ToolCallRequested`.
+5. Tool registry caching pattern:
+   - refresh/scan is version-aware and should avoid unnecessary re-resolution each turn.
+
+## Reference Wiring to Carry Forward
+
+SDK should explicitly preserve this shape (renamed into `aos.agent/*`):
+
+- `demiurge/UserMessage@1` -> `aos.agent/UserInput@1`
+- `demiurge/ChatRequest@1` -> `aos.agent/LlmStepRequested@1`
+- `demiurge/ChatResult@1` -> `aos.agent/LlmStepCompleted@1`
+- `demiurge/ToolCallRequested@1` -> `aos.agent/ToolCallRequested@1`
+- `demiurge/ToolResult@1` -> `aos.agent/ToolResult@1`
+- `demiurge/ToolRegistryScanRequested@1` -> `aos.agent/ToolsetRefreshRequested@1`
+
+Plan equivalents:
+- `demiurge/chat_plan@1` -> `aos.agent/llm_step_plan@1`
+- `demiurge/tool_plan@1` -> `aos.agent/tool_call_plan@1`
+- `demiurge/tool_registry_plan@1` -> `aos.agent/toolset_refresh_plan@1`
+
 ## Proposed SDK Primitives (v0)
 
 ### State model
@@ -54,6 +92,14 @@ This preserves existing system boundaries:
 - `ActionRequested`, `ActionCompleted`, `ActionFailed`
 - `DelegationRequested`, `DelegationResult`
 - `RunCompleted`, `RunFailed`, `RunCancelled`
+
+Concrete naming baseline:
+- `aos.agent/UserInput@1`
+- `aos.agent/LlmStepRequested@1`
+- `aos.agent/LlmStepCompleted@1`
+- `aos.agent/ToolCallRequested@1`
+- `aos.agent/ToolResult@1`
+- `aos.agent/Completed@1`
 
 ### Tooling model
 - typed tool registry entries (schema + constraints + caps),
@@ -77,10 +123,15 @@ Provide reusable templates under app folders (or examples):
 - tool-enabled single-agent world,
 - delegation/subagent pattern world.
 
+Baseline module/plan names:
+- keyed reducer: `aos.agent/SessionReducer@1`
+- plans: `aos.agent/llm_step_plan@1`, `aos.agent/tool_call_plan@1`, `aos.agent/toolset_refresh_plan@1`
+
 ## Phase Plan
 
 ### Phase 2.1: SDK schema and contracts
 - Define base schemas for run/turn/action/observation/decision.
+- Define keyed routing schema (`session_id`) and enforce `key_field` conventions.
 - Define compatibility rules and versioning policy.
 - Add initial docs and examples.
 
@@ -88,11 +139,13 @@ Provide reusable templates under app folders (or examples):
 - Add reducer utility patterns for agent loops.
 - Add plan utility patterns for tool fan-out/fan-in.
 - Provide standard error/result envelopes.
+- Encode current Demiurge loop shape as first-class helpers, not as optional examples.
 
 ### Phase 2.3: Tool runtime contracts
 - Define SDK-level tool descriptor conventions.
 - Standardize tool call normalization and result events.
 - Add harness tests across mock tools.
+- Include a policy template that mirrors current Demiurge allow/deny pattern by origin plan/module.
 
 ### Phase 2.4: Headless operations
 - Add operational helpers for long-running headless runs:
@@ -114,6 +167,7 @@ Provide reusable templates under app folders (or examples):
 - At least one non-trivial agent flow runs end-to-end using SDK primitives.
 - Parallel tool-use and error handling paths are covered by deterministic integration tests.
 - Docs are sufficient for building a new agent app without copying Demiurge internals.
+- The default SDK flow can be wired into current Demiurge plans/events with only namespace/event-shape adapters.
 
 ## Open Questions
 

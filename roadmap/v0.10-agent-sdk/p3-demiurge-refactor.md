@@ -29,6 +29,7 @@ But it is still app-specific and embeds patterns the SDK should own.
 1. Keep shipping Demiurge while incrementally swapping internals to SDK primitives.
 2. Prefer compatibility shims first, then cleanup/breaking schema changes once SDK stabilizes.
 3. Treat Demiurge as the first major integration test for the new SDK.
+4. Adopt `aos.agent/*` as the core namespace and map existing `demiurge/*` flows onto it.
 
 ## Non-Goals (P3)
 
@@ -39,9 +40,16 @@ But it is still app-specific and embeds patterns the SDK should own.
 ## Proposed Migration Slices
 
 ### Slice 3.1: Event/schema alignment
-- Map existing Demiurge chat/tool events to SDK run/turn/action concepts.
+- Map existing Demiurge chat/tool events to `aos.agent/*` run/turn/action concepts.
 - Add adapter layer to translate old events to new internals where needed.
 - Keep existing UI flows operational.
+
+Expected first mappings:
+- `demiurge/UserMessage@1` -> `aos.agent/UserInput@1`
+- `demiurge/ChatRequest@1` -> `aos.agent/LlmStepRequested@1`
+- `demiurge/ChatResult@1` -> `aos.agent/LlmStepCompleted@1`
+- `demiurge/ToolCallRequested@1` -> `aos.agent/ToolCallRequested@1`
+- `demiurge/ToolResult@1` -> `aos.agent/ToolResult@1`
 
 ### Slice 3.2: Reducer refactor
 - Replace bespoke loop fields/state transitions with SDK reducer helpers.
@@ -49,7 +57,10 @@ But it is still app-specific and embeds patterns the SDK should own.
 - Preserve deterministic behavior and request correlation guarantees.
 
 ### Slice 3.3: Plan/tool refactor
-- Replace custom tool orchestration patterns with SDK plan templates/helpers.
+- Replace custom tool orchestration patterns with SDK plan templates/helpers:
+  - `chat_plan` shape -> `aos.agent/llm_step_plan@1`
+  - `tool_plan` shape -> `aos.agent/tool_call_plan@1`
+  - `tool_registry_plan` shape -> `aos.agent/toolset_refresh_plan@1`
 - Keep current introspect/workspace tools functional.
 - Add at least one additional tool path that validates SDK extensibility.
 
@@ -66,6 +77,16 @@ But it is still app-specific and embeds patterns the SDK should own.
 - Mid-term: introduce versioned schemas for new contracts.
 - End of v0.10: deprecate legacy-only paths once shell/API clients are migrated.
 
+## Wiring Invariants from Current Demiurge
+
+These invariants must be preserved during refactor to avoid regressions:
+
+1. Tool execution stays plan-only under caps/policy.
+2. Reducer remains the tool-call interpreter and state owner.
+3. CAS refs remain the interface between LLM output, tool results, and state.
+4. Tool registry refresh remains explicit and version-aware.
+5. Reducer micro-effects remain limited to blob bridging behavior, not tool orchestration.
+
 ## Testing
 
 - Preserve existing Demiurge e2e coverage as baseline.
@@ -78,6 +99,7 @@ But it is still app-specific and embeds patterns the SDK should own.
 - Existing core features (chat + tools + debug trace) remain functional.
 - At least one new agent behavior can be added in Demiurge with SDK extension points and minimal bespoke code.
 - Legacy pathways are either removed or clearly marked deprecated with migration notes.
+- Runtime behavior matches current working tool path semantics while moving naming/contracts to `aos.agent/*`.
 
 ## Open Questions
 
