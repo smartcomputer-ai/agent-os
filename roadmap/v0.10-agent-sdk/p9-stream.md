@@ -5,6 +5,8 @@
 **Risk if deferred**: Low (UI polish only)  
 **Status**: Draft
 
+TODO: was copied from the demiurge package, needs to be reworked to fit the agent sdk structure.
+
 ## Goal
 
 Expose a simple SSE endpoint for ephemeral progress updates that do not affect
