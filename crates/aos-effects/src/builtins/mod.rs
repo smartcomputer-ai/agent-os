@@ -34,14 +34,24 @@ pub struct RequestTimings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlobPutParams {
-    pub blob_ref: HashRef,
     #[serde(with = "serde_bytes")]
     pub bytes: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blob_ref: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refs: Option<Vec<HashRef>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlobEdge {
+    pub blob_ref: HashRef,
+    pub refs: Vec<HashRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlobPutReceipt {
     pub blob_ref: HashRef,
+    pub edge_ref: HashRef,
     pub size: u64,
 }
 

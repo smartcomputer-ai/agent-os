@@ -198,6 +198,7 @@ mod tests {
         assert!(names.contains(&"sys/TimerSetReceipt@1"));
         assert!(names.contains(&"sys/TimerFired@1"));
         assert!(names.contains(&"sys/BlobPutParams@1"));
+        assert!(names.contains(&"sys/BlobEdge@1"));
         assert!(names.contains(&"sys/BlobPutReceipt@1"));
         assert!(names.contains(&"sys/BlobPutResult@1"));
         assert!(names.contains(&"sys/BlobGetParams@1"));

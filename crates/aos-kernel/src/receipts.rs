@@ -248,8 +248,9 @@ mod tests {
     #[test]
     fn blob_put_receipt_event_is_structured() {
         let params = BlobPutParams {
-            blob_ref: fake_hash(0x10),
             bytes: Vec::new(),
+            blob_ref: Some(fake_hash(0x10)),
+            refs: Some(vec![]),
         };
         let ctx = ReducerEffectContext::new(
             "com.acme/Reducer@1".into(),
@@ -259,6 +260,7 @@ mod tests {
         );
         let receipt_body = BlobPutReceipt {
             blob_ref: fake_hash(0x11),
+            edge_ref: fake_hash(0x12),
             size: 42,
         };
         let mut receipt = base_receipt();
@@ -275,7 +277,9 @@ mod tests {
 
         let decoded: Payload = serde_cbor::from_slice(&event.value).unwrap();
         assert_eq!(decoded.requested.blob_ref, params.blob_ref);
+        assert_eq!(decoded.requested.refs, params.refs);
         assert_eq!(decoded.receipt.size, 42);
+        assert_eq!(decoded.receipt.edge_ref, receipt_body.edge_ref);
     }
 
     #[test]

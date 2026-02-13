@@ -740,8 +740,9 @@ fn blob_put_receipt_routes_event_to_handler() {
             effects: vec![ReducerEffect::new(
                 aos_effects::EffectKind::BLOB_PUT,
                 serde_cbor::to_vec(&BlobPutParams {
-                    blob_ref: fake_hash(0x20),
                     bytes: Vec::new(),
+                    blob_ref: None,
+                    refs: None,
                 })
                 .unwrap(),
             )],
@@ -843,6 +844,7 @@ fn blob_put_receipt_routes_event_to_handler() {
         status: ReceiptStatus::Ok,
         payload_cbor: serde_cbor::to_vec(&BlobPutReceipt {
             blob_ref: fake_hash(0x21),
+            edge_ref: fake_hash(0x22),
             size: 64,
         })
         .unwrap(),

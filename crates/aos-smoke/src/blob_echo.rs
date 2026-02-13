@@ -9,7 +9,10 @@ use std::path::Path;
 
 use anyhow::{Result, anyhow};
 use aos_air_types::HashRef;
-use aos_effects::builtins::{BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt};
+use aos_cbor::{Hash, to_canonical_cbor};
+use aos_effects::builtins::{
+    BlobEdge, BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt,
+};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::FsStore;
@@ -98,7 +101,12 @@ fn handle_blob_put(
     intent: EffectIntent,
 ) -> Result<()> {
     let params: BlobPutParams = serde_cbor::from_slice(&intent.params_cbor)?;
-    let blob_ref = params.blob_ref.as_str().to_string();
+    let blob_ref = params
+        .blob_ref
+        .as_ref()
+        .ok_or_else(|| anyhow!("blob.put params missing blob_ref"))?
+        .as_str()
+        .to_string();
     let data = params.bytes.clone();
     harness.pending_blobs.insert(blob_ref.clone(), data.clone());
     println!(
@@ -107,8 +115,15 @@ fn handle_blob_put(
         data.len()
     );
 
+    let edge_bytes = to_canonical_cbor(&BlobEdge {
+        blob_ref: HashRef::new(blob_ref.clone()).map_err(|err| anyhow!("invalid hash: {err}"))?,
+        refs: params.refs.unwrap_or_default(),
+    })?;
+    let edge_ref = HashRef::new(Hash::of_bytes(&edge_bytes).to_hex())
+        .map_err(|err| anyhow!("invalid hash: {err}"))?;
     let receipt_payload = BlobPutReceipt {
-        blob_ref: params.blob_ref.clone(),
+        blob_ref: HashRef::new(blob_ref).map_err(|err| anyhow!("invalid hash: {err}"))?,
+        edge_ref,
         size: data.len() as u64,
     };
     let receipt = EffectReceipt {

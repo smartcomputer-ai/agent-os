@@ -71,8 +71,19 @@
     "name": "sys/BlobPutParams@1",
     "type": {
       "record": {
+        "bytes": { "bytes": {} },
+        "blob_ref": { "option": { "hash": {} } },
+        "refs": { "option": { "list": { "hash": {} } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobEdge@1",
+    "type": {
+      "record": {
         "blob_ref": { "hash": {} },
-        "bytes": { "bytes": {} }
+        "refs": { "list": { "hash": {} } }
       }
     }
   },
@@ -82,6 +93,7 @@
     "type": {
       "record": {
         "blob_ref": { "hash": {} },
+        "edge_ref": { "hash": {} },
         "size": { "nat": {} }
       }
     }

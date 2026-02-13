@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams};
+use aos_cbor::{Hash, to_canonical_cbor};
+use aos_effects::builtins::{BlobPutParams, HttpRequestParams, LlmGenerateParams};
 use aos_effects::{
     CapabilityGrant, EffectIntent, EffectKind, EffectSource, normalize_effect_params,
 };
@@ -235,6 +236,11 @@ impl EffectManager {
 
         let params_cbor = if let Some(preprocessor) = &self.param_preprocessor {
             preprocessor.preprocess(&source, &runtime_kind, params_cbor)?
+        } else {
+            params_cbor
+        };
+        let params_cbor = if runtime_kind.as_str() == aos_effects::EffectKind::BLOB_PUT {
+            normalize_blob_put_params(params_cbor)?
         } else {
             params_cbor
         };
@@ -473,6 +479,27 @@ impl EffectManager {
             decision: outcome,
         });
     }
+}
+
+fn normalize_blob_put_params(params_cbor: Vec<u8>) -> Result<Vec<u8>, KernelError> {
+    let mut params: BlobPutParams = serde_cbor::from_slice(&params_cbor)
+        .map_err(|err| KernelError::EffectManager(format!("decode blob.put params: {err}")))?;
+    let computed = Hash::of_bytes(&params.bytes);
+    let computed_ref = aos_air_types::HashRef::new(computed.to_hex())
+        .map_err(|err| KernelError::EffectManager(format!("invalid computed blob hash: {err}")))?;
+    if let Some(provided_ref) = params.blob_ref.as_ref() {
+        if provided_ref != &computed_ref {
+            return Err(KernelError::EffectManager(
+                "blob.put blob_ref does not match sha256(bytes)".into(),
+            ));
+        }
+    }
+    if params.refs.is_none() {
+        params.refs = Some(Vec::new());
+    }
+    params.blob_ref = Some(computed_ref);
+    to_canonical_cbor(&params)
+        .map_err(|err| KernelError::EffectManager(format!("encode blob.put params: {err}")))
 }
 
 fn format_effect_origin(source: &EffectSource) -> String {
@@ -792,7 +819,7 @@ fn allowlist_contains(
 mod tests {
     use super::*;
     use aos_air_types::{CapType, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex};
-    use aos_effects::builtins::{HeaderMap, HttpRequestParams, LlmGenerateParams};
+    use aos_effects::builtins::{BlobPutParams, HeaderMap, HttpRequestParams, LlmGenerateParams};
     use aos_effects::{CapabilityGrant, EffectKind};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -958,5 +985,64 @@ mod tests {
             )
             .expect_err("expected expiry denial");
         assert!(matches!(err, KernelError::CapabilityDenied { .. }));
+    }
+
+    #[test]
+    fn blob_put_mismatched_ref_is_rejected_deterministically() {
+        let grant = CapabilityGrant::builder("cap_blob", "sys/blob@1", &serde_json::json!({}))
+            .build()
+            .expect("grant");
+        let mut mgr = effect_manager_with_grants(vec![(grant, CapType::blob())]);
+
+        let params = BlobPutParams {
+            bytes: b"hello".to_vec(),
+            blob_ref: Some(
+                aos_air_types::HashRef::new(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                )
+                .expect("hash"),
+            ),
+            refs: None,
+        };
+        let params_cbor = serde_cbor::to_vec(&params).expect("encode params");
+        let err = mgr
+            .enqueue_plan_effect(
+                "plan",
+                &EffectKind::blob_put(),
+                "cap_blob",
+                params_cbor,
+                [0u8; 32],
+            )
+            .expect_err("expected mismatch error");
+        assert!(matches!(err, KernelError::EffectManager(_)));
+        assert!(format!("{err}").contains("blob_ref does not match"));
+    }
+
+    #[test]
+    fn blob_put_omitted_fields_are_normalized_before_hashing() {
+        let grant = CapabilityGrant::builder("cap_blob", "sys/blob@1", &serde_json::json!({}))
+            .build()
+            .expect("grant");
+        let mut mgr = effect_manager_with_grants(vec![(grant, CapType::blob())]);
+        let bytes = b"hello".to_vec();
+        let expected_ref = aos_air_types::HashRef::new(Hash::of_bytes(&bytes).to_hex()).unwrap();
+
+        let params = BlobPutParams {
+            bytes: bytes.clone(),
+            blob_ref: None,
+            refs: None,
+        };
+        let intent = mgr
+            .enqueue_plan_effect(
+                "plan",
+                &EffectKind::blob_put(),
+                "cap_blob",
+                serde_cbor::to_vec(&params).expect("encode params"),
+                [0u8; 32],
+            )
+            .expect("enqueue blob.put");
+        let normalized: BlobPutParams = serde_cbor::from_slice(&intent.params_cbor).unwrap();
+        assert_eq!(normalized.blob_ref, Some(expected_ref));
+        assert_eq!(normalized.refs, Some(vec![]));
     }
 }
