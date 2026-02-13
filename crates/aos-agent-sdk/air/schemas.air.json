@@ -172,6 +172,204 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/ProviderProfile@1",
+    "type": {
+      "record": {
+        "profile_id": { "ref": "aos.agent/ProviderProfileId@1" },
+        "provider": { "text": {} },
+        "default_model": { "text": {} },
+        "catalog_model_id": { "option": { "text": {} } },
+        "allowed_models": { "option": { "set": { "text": {} } } },
+        "max_tokens_cap": { "option": { "nat": {} } },
+        "default_reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
+        "provider_options_default_ref": { "option": { "hash": {} } },
+        "response_format_default_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ProfileLookupRequested@1",
+    "type": {
+      "record": {
+        "provider_profile_id": { "ref": "aos.agent/ProviderProfileId@1" },
+        "run_id": { "ref": "aos.agent/RunId@1" },
+        "session_epoch": { "nat": {} },
+        "step_epoch": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ProfileLookupResolved@1",
+    "type": {
+      "record": {
+        "provider_profile_id": { "ref": "aos.agent/ProviderProfileId@1" },
+        "run_id": { "ref": "aos.agent/RunId@1" },
+        "session_epoch": { "nat": {} },
+        "step_epoch": { "nat": {} },
+        "provider": { "text": {} },
+        "model": { "text": {} },
+        "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
+        "max_tokens": { "option": { "nat": {} } },
+        "diagnostics_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ProfileLookupFailure@1",
+    "type": {
+      "variant": {
+        "UnknownProfile": { "unit": {} },
+        "ModelNotAllowed": { "record": { "model": { "text": {} } } },
+        "MissingRequiredResolvedValues": { "unit": {} },
+        "ValidationError": { "record": { "code": { "text": {} } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ProfileLookupFailed@1",
+    "type": {
+      "record": {
+        "provider_profile_id": { "ref": "aos.agent/ProviderProfileId@1" },
+        "run_id": { "ref": "aos.agent/RunId@1" },
+        "session_epoch": { "nat": {} },
+        "step_epoch": { "nat": {} },
+        "failure": { "ref": "aos.agent/ProfileLookupFailure@1" },
+        "detail": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ProfileCatalogState@1",
+    "type": {
+      "record": {
+        "profiles": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "ref": "aos.agent/ProviderProfile@1" }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ProfileCatalogEvent@1",
+    "type": {
+      "variant": {
+        "UpsertProfile": { "record": { "profile": { "ref": "aos.agent/ProviderProfile@1" } } },
+        "DeleteProfile": { "record": { "profile_id": { "ref": "aos.agent/ProviderProfileId@1" } } },
+        "LookupRequested": { "ref": "aos.agent/ProfileLookupRequested@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmRuntimeArgs@1",
+    "type": {
+      "record": {
+        "temperature": { "option": { "dec128": {} } },
+        "max_tokens": { "option": { "nat": {} } },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
+        "stop_sequences": { "option": { "list": { "text": {} } } },
+        "metadata": {
+          "option": {
+            "map": {
+              "key": { "text": {} },
+              "value": { "text": {} }
+            }
+          }
+        },
+        "provider_options_ref": { "option": { "hash": {} } },
+        "response_format_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmGenerateParams@1",
+    "type": {
+      "record": {
+        "provider_profile_id": { "ref": "aos.agent/ProviderProfileId@1" },
+        "provider": { "text": {} },
+        "model": { "text": {} },
+        "message_refs": { "list": { "hash": {} } },
+        "runtime": { "ref": "sys/LlmRuntimeArgs@1" },
+        "api_key": { "option": { "ref": "sys/TextOrSecretRef@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmGenerateReceipt@1",
+    "type": {
+      "record": {
+        "output_ref": { "hash": {} },
+        "raw_output_ref": { "option": { "hash": {} } },
+        "provider_response_id": { "option": { "text": {} } },
+        "finish_reason": {
+          "record": {
+            "reason": { "text": {} },
+            "raw": { "option": { "text": {} } }
+          }
+        },
+        "token_usage": {
+          "record": {
+            "prompt": { "nat": {} },
+            "completion": { "nat": {} }
+          }
+        },
+        "usage_details": {
+          "option": {
+            "record": {
+              "reasoning_tokens": { "option": { "nat": {} } },
+              "cache_read_tokens": { "option": { "nat": {} } },
+              "cache_write_tokens": { "option": { "nat": {} } }
+            }
+          }
+        },
+        "warnings_ref": { "option": { "hash": {} } },
+        "cost_cents": { "option": { "nat": {} } },
+        "provider_id": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmToolCall@1",
+    "type": {
+      "record": {
+        "call_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "arguments_ref": { "hash": {} },
+        "provider_call_id": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmToolCallList@1",
+    "type": { "list": { "ref": "aos.agent/LlmToolCall@1" } }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmOutputEnvelope@1",
+    "type": {
+      "record": {
+        "assistant_text": { "option": { "text": {} } },
+        "tool_calls_ref": { "option": { "hash": {} } },
+        "reasoning_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/SessionEventKind@1",
     "type": {
       "variant": {
@@ -187,8 +385,10 @@
         "LifecycleChanged": { "ref": "aos.agent/SessionLifecycle@1" },
         "RunCompleted": { "unit": {} },
         "RunFailed": { "record": { "code": { "text": {} }, "detail": { "text": {} } } },
-        "RunCancelled": { "record": { "reason": { "option": { "text": {} } } }
-        }
+        "RunCancelled": { "record": { "reason": { "option": { "text": {} } } } },
+        "ProfileLookupRequested": { "ref": "aos.agent/ProfileLookupRequested@1" },
+        "ProfileLookupResolved": { "ref": "aos.agent/ProfileLookupResolved@1" },
+        "ProfileLookupFailed": { "ref": "aos.agent/ProfileLookupFailed@1" }
       }
     }
   },

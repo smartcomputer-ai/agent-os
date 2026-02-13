@@ -15,6 +15,10 @@ path = "src/bin/session_reducer.rs"
 name = "session_event_echo"
 path = "src/bin/session_event_echo.rs"
 
+[[bin]]
+name = "profile_catalog_reducer"
+path = "src/bin/profile_catalog_reducer.rs"
+
 [dependencies]
 aos-wasm-sdk = { path = "../aos-wasm-sdk" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }

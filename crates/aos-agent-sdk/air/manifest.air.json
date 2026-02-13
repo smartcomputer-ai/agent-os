@@ -15,12 +15,26 @@
     { "name": "aos.agent/RunConfig@1" },
     { "name": "aos.agent/SessionLifecycle@1" },
     { "name": "aos.agent/HostCommand@1" },
+    { "name": "aos.agent/ProviderProfile@1" },
+    { "name": "aos.agent/ProfileLookupRequested@1" },
+    { "name": "aos.agent/ProfileLookupResolved@1" },
+    { "name": "aos.agent/ProfileLookupFailure@1" },
+    { "name": "aos.agent/ProfileLookupFailed@1" },
+    { "name": "aos.agent/ProfileCatalogState@1" },
+    { "name": "aos.agent/ProfileCatalogEvent@1" },
+    { "name": "aos.agent/LlmToolCall@1" },
+    { "name": "aos.agent/LlmToolCallList@1" },
+    { "name": "aos.agent/LlmOutputEnvelope@1" },
     { "name": "aos.agent/SessionEventKind@1" },
     { "name": "aos.agent/SessionState@1" },
-    { "name": "aos.agent/SessionEvent@1" }
+    { "name": "aos.agent/SessionEvent@1" },
+    { "name": "sys/LlmRuntimeArgs@1" },
+    { "name": "sys/LlmGenerateParams@1" },
+    { "name": "sys/LlmGenerateReceipt@1" }
   ],
   "modules": [
     { "name": "aos.agent/SessionReducer@1" },
+    { "name": "aos.agent/ProfileCatalogReducer@1" },
     { "name": "aos.agent/SessionEventEcho@1" }
   ],
   "plans": [],
@@ -33,6 +47,10 @@
       {
         "event": "aos.agent/SessionEvent@1",
         "reducer": "aos.agent/SessionReducer@1"
+      },
+      {
+        "event": "aos.agent/ProfileCatalogEvent@1",
+        "reducer": "aos.agent/ProfileCatalogReducer@1"
       }
     ],
     "inboxes": []
