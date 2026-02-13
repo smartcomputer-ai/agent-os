@@ -186,8 +186,37 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn swap_manifest(&mut self, patch: &ManifestPatch) -> Result<(), KernelError> {
+        self.ensure_manifest_apply_quiescent()?;
         let loaded = patch.to_loaded_manifest(self.store.as_ref())?;
         self.apply_loaded_manifest(loaded, true)
+    }
+
+    fn ensure_manifest_apply_quiescent(&self) -> Result<(), KernelError> {
+        let plan_instances = self.plan_instances.len();
+        let waiting_events = self.waiting_events.values().map(std::vec::Vec::len).sum();
+        let pending_plan_receipts = self.pending_receipts.len();
+        let pending_reducer_receipts = self.pending_reducer_receipts.len();
+        let queued_effects = self.effect_manager.queued().len();
+        let scheduler_pending = !self.scheduler.is_empty();
+
+        if plan_instances == 0
+            && waiting_events == 0
+            && pending_plan_receipts == 0
+            && pending_reducer_receipts == 0
+            && queued_effects == 0
+            && !scheduler_pending
+        {
+            return Ok(());
+        }
+
+        Err(KernelError::ManifestApplyBlockedInFlight {
+            plan_instances,
+            waiting_events,
+            pending_plan_receipts,
+            pending_reducer_receipts,
+            queued_effects,
+            scheduler_pending,
+        })
     }
 
     pub(super) fn apply_loaded_manifest(
@@ -314,8 +343,12 @@ impl<S: Store + 'static> Kernel<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::receipts::ReducerEffectContext;
     use crate::world::test_support::{empty_manifest, hash, named_ref};
+    use aos_effects::{EffectIntent, EffectKind};
     use aos_store::MemStore;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[test]
     fn ledger_deltas_capture_added_changed_and_removed() {
@@ -364,5 +397,87 @@ mod tests {
             name: "policy/new@1".to_string(),
             change: DeltaKind::Added,
         }));
+    }
+
+    fn empty_kernel() -> Kernel<MemStore> {
+        let loaded = LoadedManifest {
+            manifest: empty_manifest(),
+            secrets: vec![],
+            modules: HashMap::new(),
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::new(),
+            effect_catalog: aos_air_types::catalog::EffectCatalog::new(),
+        };
+        Kernel::from_loaded_manifest(
+            Arc::new(MemStore::new()),
+            loaded,
+            Box::new(crate::journal::mem::MemJournal::new()),
+        )
+        .expect("kernel")
+    }
+
+    #[test]
+    fn apply_patch_direct_blocks_when_runtime_not_quiescent() {
+        let mut kernel = empty_kernel();
+        kernel.pending_receipts.insert(
+            [1u8; 32],
+            PendingPlanReceiptInfo {
+                plan_id: 7,
+                effect_kind: "sys/http.request@1".into(),
+            },
+        );
+        kernel.pending_reducer_receipts.insert(
+            [2u8; 32],
+            ReducerEffectContext::new("com.acme/Reducer@1".into(), "timer.set".into(), vec![], None),
+        );
+        kernel.waiting_events.insert("com.acme/Evt@1".into(), vec![9]);
+        kernel.scheduler.push_plan(9);
+        kernel.effect_manager.restore_queue(vec![EffectIntent {
+            kind: EffectKind::new("introspect.manifest"),
+            cap_name: "sys/query@1".into(),
+            params_cbor: vec![],
+            idempotency_key: [0u8; 32],
+            intent_hash: [3u8; 32],
+        }]);
+
+        let patch = ManifestPatch {
+            manifest: empty_manifest(),
+            nodes: vec![],
+        };
+        let err = kernel
+            .apply_patch_direct(patch)
+            .expect_err("manifest apply should block while in-flight state exists");
+        match err {
+            KernelError::ManifestApplyBlockedInFlight {
+                plan_instances,
+                waiting_events,
+                pending_plan_receipts,
+                pending_reducer_receipts,
+                queued_effects,
+                scheduler_pending,
+            } => {
+                assert_eq!(plan_instances, 0);
+                assert_eq!(waiting_events, 1);
+                assert_eq!(pending_plan_receipts, 1);
+                assert_eq!(pending_reducer_receipts, 1);
+                assert_eq!(queued_effects, 1);
+                assert!(scheduler_pending);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn apply_patch_direct_succeeds_when_runtime_quiescent() {
+        let mut kernel = empty_kernel();
+        let patch = ManifestPatch {
+            manifest: empty_manifest(),
+            nodes: vec![],
+        };
+        let result = kernel.apply_patch_direct(patch);
+        assert!(result.is_ok(), "expected quiescent apply to succeed: {result:?}");
     }
 }

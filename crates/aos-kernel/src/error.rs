@@ -88,6 +88,17 @@ pub enum KernelError {
     },
     #[error("proposal {0} already applied")]
     ProposalAlreadyApplied(u64),
+    #[error(
+        "manifest apply blocked: in-flight runtime state exists (plans={plan_instances}, waiting_events={waiting_events}, pending_plan_receipts={pending_plan_receipts}, pending_reducer_receipts={pending_reducer_receipts}, queued_effects={queued_effects}, scheduler_pending={scheduler_pending})"
+    )]
+    ManifestApplyBlockedInFlight {
+        plan_instances: usize,
+        waiting_events: usize,
+        pending_plan_receipts: usize,
+        pending_reducer_receipts: usize,
+        queued_effects: usize,
+        scheduler_pending: bool,
+    },
     #[error("shadow patch hash mismatch: expected {expected}, got {actual}")]
     ShadowPatchMismatch { expected: String, actual: String },
     #[error("secret resolver missing for manifest containing secrets")]
@@ -143,6 +154,7 @@ impl KernelError {
             KernelError::ProposalNotFound(_) => "governance.proposal_missing",
             KernelError::ProposalStateInvalid { .. } => "governance.proposal_state",
             KernelError::ProposalAlreadyApplied(_) => "governance.proposal_applied",
+            KernelError::ManifestApplyBlockedInFlight { .. } => "governance.apply_inflight",
             KernelError::ShadowPatchMismatch { .. } => "governance.shadow_mismatch",
             KernelError::SecretResolverMissing => "secret.resolver_missing",
             KernelError::SecretResolver(_) => "secret.resolver_error",
