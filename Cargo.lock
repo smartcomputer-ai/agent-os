@@ -191,40 +191,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aos-examples"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aos-air-exec",
- "aos-air-types",
- "aos-cbor",
- "aos-effects",
- "aos-host",
- "aos-kernel",
- "aos-store",
- "aos-wasm-abi",
- "aos-wasm-build",
- "aos-wasm-sdk",
- "assert_cmd",
- "camino",
- "clap",
- "env_logger",
- "hex",
- "indexmap",
- "log",
- "once_cell",
- "predicates",
- "serde",
- "serde_bytes",
- "serde_cbor",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "walkdir",
-]
-
-[[package]]
 name = "aos-host"
 version = "0.1.0"
 dependencies = [
@@ -312,6 +278,40 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+]
+
+[[package]]
+name = "aos-smoke"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aos-air-exec",
+ "aos-air-types",
+ "aos-cbor",
+ "aos-effects",
+ "aos-host",
+ "aos-kernel",
+ "aos-store",
+ "aos-wasm-abi",
+ "aos-wasm-build",
+ "aos-wasm-sdk",
+ "assert_cmd",
+ "camino",
+ "clap",
+ "env_logger",
+ "hex",
+ "indexmap",
+ "log",
+ "once_cell",
+ "predicates",
+ "serde",
+ "serde_bytes",
+ "serde_cbor",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "walkdir",
 ]
 
 [[package]]

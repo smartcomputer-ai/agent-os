@@ -9,7 +9,7 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/WorkspaceDemo@1";
 const EVENT_SCHEMA: &str = "demo/WorkspaceEvent@1";
-const MODULE_PATH: &str = "examples/09-workspaces/reducer";
+const MODULE_PATH: &str = "crates/aos-smoke/fixtures/09-workspaces/reducer";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]

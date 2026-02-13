@@ -23,8 +23,8 @@ flowchart TD
 ```
 
 Run:
-- `cargo run -p aos-examples -- workspaces`
-- `AOS_WORLD=examples/09-workspaces aos ws ls`
+- `cargo run -p aos-smoke -- workspaces`
+- `AOS_WORLD=crates/aos-smoke/fixtures/09-workspaces aos ws ls`
 
 Note:
 - The plan writes a per-workspace marker file under `seed/` before other writes so effect intents

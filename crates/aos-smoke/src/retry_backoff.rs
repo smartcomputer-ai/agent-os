@@ -14,7 +14,7 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/RetrySM@1";
 const EVENT_SCHEMA: &str = "demo/RetryEvent@1";
-const MODULE_CRATE: &str = "examples/08-retry-backoff/reducer";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/08-retry-backoff/reducer";
 const ADAPTER_ID: &str = "adapter.timer.fake";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

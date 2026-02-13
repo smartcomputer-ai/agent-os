@@ -41,12 +41,12 @@ For implementation guidance, project structure, and coding conventions, see **[A
 
 ## Running the Examples
 
-All ladder demos live under `examples/` and share the `aos-examples` CLI.
+All ladder demos live under `crates/aos-smoke/fixtures/` and share the `aos-smoke` CLI.
 
-- List demos: `cargo run -p aos-examples --`
-- Run a single demo (e.g., counter): `cargo run -p aos-examples -- counter`
-- Run them sequentially: `cargo run -p aos-examples -- all`
-- Force a rebuild of reducer WASM/artifacts: add `--force-build`, e.g. `cargo run -p aos-examples -- --force-build counter`
+- List demos: `cargo run -p aos-smoke --`
+- Run a single demo (e.g., counter): `cargo run -p aos-smoke -- counter`
+- Run them sequentially: `cargo run -p aos-smoke -- all`
+- Force a rebuild of reducer WASM/artifacts: add `--force-build`, e.g. `cargo run -p aos-smoke -- --force-build counter`
 - Increase logging by exporting `RUST_LOG=debug` before invoking the CLI if you need cache/build insight
 
 ## Workspaces and Sync

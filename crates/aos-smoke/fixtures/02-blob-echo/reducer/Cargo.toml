@@ -9,9 +9,9 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-aos-air-types = { path = "../../../crates/aos-air-types" }
-aos-effects = { path = "../../../crates/aos-effects" }
-aos-wasm-sdk = { path = "../../../crates/aos-wasm-sdk" }
+aos-air-types = { path = "../../../../aos-air-types" }
+aos-effects = { path = "../../../../aos-effects" }
+aos-wasm-sdk = { path = "../../../../aos-wasm-sdk" }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 serde_cbor = "0.11"

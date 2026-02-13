@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn builds_counter_reducer() {
         let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source = root.join("../../examples/01-hello-timer/reducer");
+        let source = root.join("../aos-smoke/fixtures/01-hello-timer/reducer");
         let mut request = BuildRequest::new(source);
         request.config.release = false;
         let artifact = Builder::compile(request.clone()).expect("compile hello timer reducer");

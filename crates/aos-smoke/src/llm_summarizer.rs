@@ -9,7 +9,7 @@ use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse, MockLlmHarness
 
 const REDUCER_NAME: &str = "demo/LlmSummarizer@1";
 const EVENT_SCHEMA: &str = "demo/LlmSummarizerEvent@1";
-const MODULE_PATH: &str = "examples/07-llm-summarizer/reducer";
+const MODULE_PATH: &str = "crates/aos-smoke/fixtures/07-llm-summarizer/reducer";
 const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
 
 aos_variant! {

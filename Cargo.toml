@@ -13,7 +13,7 @@ members = [
   "crates/aos-wasm-sdk",
   "crates/aos-cli",
   "crates/aos-wasm-build",
-  "crates/aos-sys"
+  "crates/aos-sys",
   "crates/aos-smoke",
 ]
 resolver = "2"

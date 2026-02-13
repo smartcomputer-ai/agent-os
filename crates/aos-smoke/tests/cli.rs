@@ -74,7 +74,7 @@ fn run_cli_smoke(subcommand: &str) {
 }
 
 fn run_cli_example(subcommand: &str, expected_snippet: &str) {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("aos-examples"));
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("aos-smoke"));
     cmd.arg(subcommand).env("RUST_LOG", "error");
     cmd.assert()
         .success()

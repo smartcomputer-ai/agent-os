@@ -11,7 +11,7 @@ fn aggregator_manifest_loads_from_assets() {
     let store = Arc::new(FsStore::open(tmp.path()).expect("store"));
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join("examples/04-aggregator");
+        .join("crates/aos-smoke/fixtures/04-aggregator");
     let loaded = load_from_assets(store, &root)
         .expect("load assets")
         .expect("manifest");

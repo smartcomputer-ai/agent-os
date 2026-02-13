@@ -8,7 +8,7 @@ fn blob_echo_returns_data_to_reducer() {
         eprintln!("skipping blob-echo data test (missing wasm target)");
         return;
     }
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("aos-examples"));
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("aos-smoke"));
     cmd.arg("blob-echo").env("RUST_LOG", "error");
     cmd.assert()
         .success()

@@ -9,7 +9,7 @@ use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
 const REDUCER_NAME: &str = "demo/FetchNotify@1";
 const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
-const MODULE_PATH: &str = "examples/03-fetch-notify/reducer";
+const MODULE_PATH: &str = "crates/aos-smoke/fixtures/03-fetch-notify/reducer";
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     enum FetchEventEnvelope {

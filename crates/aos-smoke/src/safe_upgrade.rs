@@ -13,7 +13,7 @@ use aos_host::manifest_loader;
 
 const REDUCER_NAME: &str = "demo/SafeUpgrade@1";
 const EVENT_SCHEMA: &str = "demo/SafeUpgradeEvent@1";
-const MODULE_PATH: &str = "examples/06-safe-upgrade/reducer";
+const MODULE_PATH: &str = "crates/aos-smoke/fixtures/06-safe-upgrade/reducer";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,7 +9,7 @@ use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
 const REDUCER_NAME: &str = "demo/Aggregator@1";
 const EVENT_SCHEMA: &str = "demo/AggregatorEvent@1";
-const MODULE_PATH: &str = "examples/04-aggregator/reducer";
+const MODULE_PATH: &str = "crates/aos-smoke/fixtures/04-aggregator/reducer";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]

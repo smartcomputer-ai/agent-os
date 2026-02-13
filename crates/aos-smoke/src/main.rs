@@ -19,7 +19,7 @@ use std::process;
 use std::sync::Once;
 
 #[derive(Parser, Debug)]
-#[command(name = "aos-examples", version, about = "Run AgentOS ladder demos")]
+#[command(name = "aos-smoke", version, about = "Run AgentOS ladder demos")]
 struct Cli {
     #[arg(
         long,
@@ -73,7 +73,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "counter",
         title: "CounterSM",
         summary: "Reducer typestate without effects",
-        dir: "examples/00-counter",
+        dir: "crates/aos-smoke/fixtures/00-counter",
         runner: counter::run,
     },
     ExampleMeta {
@@ -81,7 +81,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "hello-timer",
         title: "Hello Timer",
         summary: "Reducer micro-effect timer demo",
-        dir: "examples/01-hello-timer",
+        dir: "crates/aos-smoke/fixtures/01-hello-timer",
         runner: hello_timer::run,
     },
     ExampleMeta {
@@ -89,7 +89,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "blob-echo",
         title: "Blob Echo",
         summary: "Reducer blob.put/get demo",
-        dir: "examples/02-blob-echo",
+        dir: "crates/aos-smoke/fixtures/02-blob-echo",
         runner: blob_echo::run,
     },
     ExampleMeta {
@@ -97,7 +97,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "fetch-notify",
         title: "Fetch & Notify",
         summary: "Plan-triggered HTTP orchestration",
-        dir: "examples/03-fetch-notify",
+        dir: "crates/aos-smoke/fixtures/03-fetch-notify",
         runner: fetch_notify::run,
     },
     ExampleMeta {
@@ -105,7 +105,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "aggregator",
         title: "Aggregator",
         summary: "Fan-out plan with http receipts",
-        dir: "examples/04-aggregator",
+        dir: "crates/aos-smoke/fixtures/04-aggregator",
         runner: aggregator::run,
     },
     ExampleMeta {
@@ -113,7 +113,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "chain-comp",
         title: "Chain + Compensation",
         summary: "Multi-plan saga w/ refund path",
-        dir: "examples/05-chain-comp",
+        dir: "crates/aos-smoke/fixtures/05-chain-comp",
         runner: chain_comp::run,
     },
     ExampleMeta {
@@ -121,7 +121,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "safe-upgrade",
         title: "Safe Upgrade",
         summary: "Governance shadow/apply demo",
-        dir: "examples/06-safe-upgrade",
+        dir: "crates/aos-smoke/fixtures/06-safe-upgrade",
         runner: safe_upgrade::run,
     },
     ExampleMeta {
@@ -129,7 +129,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "llm-summarizer",
         title: "LLM Summarizer",
         summary: "HTTP + LLM with mocked receipt",
-        dir: "examples/07-llm-summarizer",
+        dir: "crates/aos-smoke/fixtures/07-llm-summarizer",
         runner: llm_summarizer::run,
     },
     ExampleMeta {
@@ -137,7 +137,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "retry-backoff",
         title: "Retry Backoff",
         summary: "Reducer-driven retries w/ timer.set",
-        dir: "examples/08-retry-backoff",
+        dir: "crates/aos-smoke/fixtures/08-retry-backoff",
         runner: retry_backoff::run,
     },
     ExampleMeta {
@@ -145,7 +145,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "workspaces",
         title: "Workspaces",
         summary: "Workspace plan + caps demo",
-        dir: "examples/09-workspaces",
+        dir: "crates/aos-smoke/fixtures/09-workspaces",
         runner: workspaces::run,
     },
 ];

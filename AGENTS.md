@@ -81,7 +81,7 @@ Crates keep deterministic core small and effectful code at the edges:
 - `aos-wasm-sdk` — Reducer helper library for `wasm32-unknown-unknown`.
 - `aos-wasm-build` — Deterministic reducer compiler + cache.
 - `aos-host` — WorldHost runtime + TestHost test harness + fixtures (with `test-fixtures` feature).
-- `aos-examples` — CLI runners for numbered demos in `examples/`.
+- `aos-smoke` — CLI runners for numbered demos in `crates/aos-smoke/fixtures/`.
 
 Planned adapters: `aos-adapter-http`, `aos-adapter-llm`, `aos-adapter-fs`, `aos-adapter-timer`.
 
@@ -101,7 +101,7 @@ Planned adapters: `aos-adapter-http`, `aos-adapter-llm`, `aos-adapter-fs`, `aos-
 - `aos-host` note: integration tests expect fixtures; run with `--features test-fixtures` when invoking `cargo test -p aos-host`.
 
 ## Examples Ladder (index)
-- See `examples/README.md` for the numbered demos.
+- See `crates/aos-smoke/fixtures/README.md` for the numbered demos.
 ## Keeping Documentation Updated
 
 **IMPORTANT**: When modifying specs or architecture:

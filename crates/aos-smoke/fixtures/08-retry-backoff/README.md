@@ -10,7 +10,7 @@ A runnable blueprint for reducer-driven retries: reducer owns attempt counting a
 
 ## Layout
 ```
-examples/08-retry-backoff/
+crates/aos-smoke/fixtures/08-retry-backoff/
   air/
     schemas.air.json      # StartWork, WorkRequested, WorkOk, WorkErr, RetryEvent, RetryState
     module.air.json       # defmodule demo/RetrySM@1 (reducer)
