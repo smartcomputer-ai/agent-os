@@ -29,6 +29,8 @@ pub struct KernelSnapshot {
         with = "serde_bytes_opt"
     )]
     manifest_hash: Option<Vec<u8>>, // CBOR-encoded hash bytes (sha256)
+    #[serde(default)]
+    root_completeness: SnapshotRootCompleteness,
 }
 
 impl KernelSnapshot {
@@ -61,6 +63,7 @@ impl KernelSnapshot {
             height,
             logical_now_ns,
             manifest_hash: manifest_hash.map(|h| h.to_vec()),
+            root_completeness: SnapshotRootCompleteness::default(),
         }
     }
 
@@ -119,6 +122,32 @@ impl KernelSnapshot {
     pub fn manifest_hash(&self) -> Option<&[u8]> {
         self.manifest_hash.as_deref()
     }
+
+    pub fn set_root_completeness(&mut self, roots: SnapshotRootCompleteness) {
+        self.root_completeness = roots;
+    }
+
+    pub fn root_completeness(&self) -> &SnapshotRootCompleteness {
+        &self.root_completeness
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SnapshotRootCompleteness {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub manifest_hash: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reducer_state_roots: Vec<[u8; 32]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cell_index_roots: Vec<[u8; 32]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_roots: Vec<[u8; 32]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pinned_roots: Vec<[u8; 32]>,
 }
 
 pub fn receipts_to_vecdeque(

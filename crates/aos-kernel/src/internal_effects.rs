@@ -301,6 +301,10 @@ struct MetaSer {
     snapshot_hash: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
     manifest_hash: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_baseline_height: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_baseline_receipt_horizon_height: Option<u64>,
 }
 
 /// Map textual consistency param to enum.
@@ -1402,6 +1406,8 @@ fn to_meta(meta: &ReadMeta) -> MetaSer {
         journal_height: meta.journal_height,
         snapshot_hash: meta.snapshot_hash.as_ref().map(|h| h.as_bytes().to_vec()),
         manifest_hash: meta.manifest_hash.as_bytes().to_vec(),
+        active_baseline_height: meta.active_baseline_height,
+        active_baseline_receipt_horizon_height: meta.active_baseline_receipt_horizon_height,
     }
 }
 
@@ -1460,7 +1466,8 @@ mod tests {
         assert_eq!(receipt.status, ReceiptStatus::Ok);
         let decoded: ManifestReceipt = receipt.payload().unwrap();
         assert!(decoded.manifest.len() > 0);
-        assert_eq!(decoded.meta.journal_height, 1);
+        // New worlds now include an initial baseline snapshot plus manifest record.
+        assert_eq!(decoded.meta.journal_height, 2);
     }
 
     #[test]

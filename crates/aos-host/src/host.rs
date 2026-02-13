@@ -112,9 +112,14 @@ impl<S: Store + 'static> WorldHost<S> {
             .into_iter()
             .map(|snap| snap.into_intent())
             .collect();
+        let mut seen_intents: HashSet<[u8; 32]> =
+            to_dispatch.iter().map(|i| i.intent_hash).collect();
 
         for TailIntent { record, .. } in tail.intents.iter() {
             if receipts_seen.contains(&record.intent_hash) {
+                continue;
+            }
+            if seen_intents.contains(&record.intent_hash) {
                 continue;
             }
             let intent = EffectIntent::from_raw_params(
@@ -125,6 +130,7 @@ impl<S: Store + 'static> WorldHost<S> {
             )
             .ok();
             if let Some(intent) = intent {
+                seen_intents.insert(intent.intent_hash);
                 to_dispatch.push(intent);
             }
         }
@@ -225,9 +231,14 @@ impl WorldHost<FsStore> {
             .into_iter()
             .map(|snap| snap.into_intent())
             .collect();
+        let mut seen_intents: HashSet<[u8; 32]> =
+            to_dispatch.iter().map(|i| i.intent_hash).collect();
 
         for TailIntent { record, .. } in tail.intents.iter() {
             if receipts_seen.contains(&record.intent_hash) {
+                continue;
+            }
+            if seen_intents.contains(&record.intent_hash) {
                 continue;
             }
             let intent = EffectIntent::from_raw_params(
@@ -238,6 +249,7 @@ impl WorldHost<FsStore> {
             )
             .ok();
             if let Some(intent) = intent {
+                seen_intents.insert(intent.intent_hash);
                 to_dispatch.push(intent);
             }
         }

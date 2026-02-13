@@ -53,7 +53,7 @@ The kernel handles several categories of events. The first four are **design-tim
 - **EffectQueued** {intent_hash, kind, params_ref, cap_ref}
 - **ReceiptAppended** {intent_hash, receipt_ref, status}
 - **PolicyDecisionRecorded** {subject, decision, rationale_ref}
-- **SnapshotCreated** {height, snapshot_ref}
+- **SnapshotCreated** {height, snapshot_ref, logical_time_ns, receipt_horizon_height?, manifest_hash?}
 
 ### Ordering and Fences
 
@@ -69,7 +69,7 @@ Manifest updates are also recorded as `Manifest` journal entries. These are appe
 
 ### Snapshots
 
-Snapshots persist control‑plane AIR state (manifest hash + content), reducer state bytes (canonical CBOR by declared schema), and pinned blob roots. They are created periodically or on demand. Restore operations replay from the last snapshot to head, using the journal as the authoritative source; any later `Manifest` entries swap manifests during replay.
+Snapshots persist control‑plane AIR state (manifest hash + content), reducer state bytes (canonical CBOR by declared schema), keyed reducer `cell_index_root` values, optional workspace roots, and optional pinned roots. Worlds maintain an **active baseline** snapshot record; restore loads that baseline and replays journal tail entries with `height >= baseline.height`. Baseline promotion is gated by receipt-horizon preconditions (`receipt_horizon_height`), and snapshots missing required root-completeness metadata are rejected.
 
 ### Content‑Addressed Store (CAS)
 

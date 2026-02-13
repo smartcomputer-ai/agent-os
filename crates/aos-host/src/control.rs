@@ -1223,6 +1223,8 @@ fn meta_to_json(meta: &ReadMeta) -> serde_json::Value {
         "journal_height": meta.journal_height,
         "snapshot_hash": meta.snapshot_hash.map(|h| h.to_hex()),
         "manifest_hash": meta.manifest_hash.to_hex(),
+        "active_baseline_height": meta.active_baseline_height,
+        "active_baseline_receipt_horizon_height": meta.active_baseline_receipt_horizon_height,
     })
 }
 
@@ -1705,10 +1707,16 @@ fn parse_meta(val: &serde_json::Value) -> std::io::Result<ReadMeta> {
         .and_then(|s| {
             Hash::from_hex_str(s).map_err(|e| io_err(format!("manifest_hash decode: {e}")))
         })?;
+    let active_baseline_height = val.get("active_baseline_height").and_then(|v| v.as_u64());
+    let active_baseline_receipt_horizon_height = val
+        .get("active_baseline_receipt_horizon_height")
+        .and_then(|v| v.as_u64());
     Ok(ReadMeta {
         journal_height,
         snapshot_hash,
         manifest_hash,
+        active_baseline_height,
+        active_baseline_receipt_horizon_height,
     })
 }
 

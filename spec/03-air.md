@@ -271,8 +271,8 @@ Built-in kinds in v1:
 - receipt: `{ status:int, headers: map{text→text}, body_ref?:hash, timings:{start_ns:nat,end_ns:nat}, adapter_id:text }`
 
 **blob.put**
-- params: `{ blob_ref:hash, bytes:bytes }`
-- receipt: `{ blob_ref:hash, size:nat }`
+- params: `{ bytes:bytes, blob_ref?:hash, refs?:list<hash> }`
+- receipt: `{ blob_ref:hash, edge_ref:hash, size:nat }`
 
 **blob.get**
 - params: `{ blob_ref:hash }`
@@ -814,7 +814,7 @@ Runtime journal entries are canonical CBOR enums; the important ones for AIR pla
 - **cap_decision** `{ intent_hash, effect_kind, cap_name, cap_type, grant_hash, enforcer_module, decision, deny?, expiry_ns?, logical_now_ns }` – capability checks recorded at enqueue time for audit/replay explainability.
 - **policy_decision** `{ intent_hash, policy_name, rule_index?, decision }` – policy allow/deny decision recorded at enqueue time.
 - **PlanResult** `{ plan_name, plan_id, output_schema, value_cbor }` – appended when an `end` step returns a value; shadow/governance tooling can surface outputs directly from the journal without re-running expressions.
-- **Snapshot** `{ snapshot_ref, height }` – pointer to CAS snapshot blob; enables fast replay.
+- **Snapshot** `{ snapshot_ref, height, logical_time_ns, receipt_horizon_height?, manifest_hash? }` – baseline snapshot record used as a restore root; replay loads the active baseline and replays tail entries with `height >= baseline.height`.
 - **Governance** – proposal/shadow/approve/apply records (design-time control plane).
 
 Ingress-stamped fields (`now_ns`, `logical_now_ns`, `journal_height`, `entropy`, `manifest_hash`, and `event_hash` for DomainEvent) are sampled by the kernel at ingress and replayed verbatim. `event_hash` is the sha256 of the canonical DomainEvent envelope (`schema`, `value`, `key`).

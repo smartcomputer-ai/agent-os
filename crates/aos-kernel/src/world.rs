@@ -8,7 +8,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, HashRef, Manifest, Name,
-    NamedRef, PlanStepKind, SecretDecl, SecretEntry, TypeExpr, builtins,
+    NamedRef, PlanStepKind, SecretDecl, SecretEntry, TypeExpr, TypePrimitive, builtins,
     catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
@@ -53,7 +53,7 @@ use crate::shadow::{
 };
 use crate::snapshot::{
     EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanResultSnapshot,
-    ReducerReceiptSnapshot, ReducerStateEntry, receipts_to_vecdeque,
+    ReducerReceiptSnapshot, ReducerStateEntry, SnapshotRootCompleteness, receipts_to_vecdeque,
 };
 use std::sync::Mutex;
 
@@ -160,6 +160,8 @@ pub struct Kernel<S: Store> {
     active_baseline: Option<SnapshotRecord>,
     last_snapshot_height: Option<JournalSeq>,
     last_snapshot_hash: Option<Hash>,
+    pinned_roots: Vec<Hash>,
+    workspace_roots: Vec<Hash>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -617,6 +619,8 @@ impl<S: Store + 'static> Kernel<S> {
             active_baseline: None,
             last_snapshot_height: None,
             last_snapshot_hash: None,
+            pinned_roots: Vec::new(),
+            workspace_roots: Vec::new(),
         };
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
@@ -1209,6 +1213,31 @@ impl<S: Store + 'static> Kernel<S> {
             Some(*self.manifest_hash.as_bytes()),
         );
         snapshot.set_reducer_index_roots(reducer_index_roots);
+        let root_completeness = SnapshotRootCompleteness {
+            manifest_hash: Some(self.manifest_hash.as_bytes().to_vec()),
+            reducer_state_roots: snapshot
+                .reducer_state_entries()
+                .iter()
+                .map(|entry| entry.state_hash)
+                .collect(),
+            cell_index_roots: snapshot
+                .reducer_index_roots()
+                .iter()
+                .map(|(_, root)| *root)
+                .collect(),
+            workspace_roots: self
+                .workspace_roots
+                .iter()
+                .map(|hash| *hash.as_bytes())
+                .collect(),
+            pinned_roots: self
+                .pinned_roots
+                .iter()
+                .map(|hash| *hash.as_bytes())
+                .collect(),
+        };
+        snapshot.set_root_completeness(root_completeness);
+        self.validate_snapshot_root_completeness(&snapshot)?;
         let bytes = serde_cbor::to_vec(&snapshot)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
         let hash = self.store.put_blob(&bytes)?;
@@ -1222,7 +1251,9 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(JournalRecord::Snapshot(baseline.clone()))?;
         self.snapshot_index
             .insert(height, (hash, Some(self.manifest_hash)));
-        self.active_baseline = Some(baseline);
+        if self.validate_baseline_promotion(&baseline).is_ok() {
+            self.active_baseline = Some(baseline);
+        }
         self.last_snapshot_hash = Some(hash);
         self.last_snapshot_height = Some(height);
         Ok(())
@@ -1234,7 +1265,7 @@ impl<S: Store + 'static> Kernel<S> {
             return Ok(());
         }
         let mut resume_seq: Option<JournalSeq> = None;
-        let mut latest_snapshot: Option<SnapshotRecord> = None;
+        let mut latest_promotable_baseline: Option<SnapshotRecord> = None;
         for entry in &entries {
             if matches!(entry.kind, JournalKind::Snapshot) {
                 let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
@@ -1248,11 +1279,13 @@ impl<S: Store + 'static> Kernel<S> {
                         self.snapshot_index
                             .insert(snapshot.height, (hash, manifest_hash));
                     }
-                    latest_snapshot = Some(snapshot);
+                    if self.validate_baseline_promotion(&snapshot).is_ok() {
+                        latest_promotable_baseline = Some(snapshot.clone());
+                    }
                 }
             }
         }
-        if let Some(snapshot) = latest_snapshot {
+        if let Some(snapshot) = latest_promotable_baseline {
             resume_seq = Some(snapshot.height);
             self.active_baseline = Some(snapshot.clone());
             self.last_snapshot_height = Some(snapshot.height);
@@ -1355,11 +1388,18 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn load_snapshot(&mut self, record: &SnapshotRecord) -> Result<(), KernelError> {
+        self.validate_baseline_promotion(record)?;
+        if record.manifest_hash.is_none() {
+            return Err(KernelError::SnapshotUnavailable(
+                "snapshot record missing manifest_hash".into(),
+            ));
+        }
         let hash = Hash::from_hex_str(&record.snapshot_ref)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
         let bytes = self.store.get_blob(hash)?;
         let snapshot: KernelSnapshot = serde_cbor::from_slice(&bytes)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
+        self.validate_snapshot_root_completeness(&snapshot)?;
         self.last_snapshot_height = Some(record.height);
         self.last_snapshot_hash = Some(hash);
         self.active_baseline = Some(record.clone());
@@ -1388,7 +1428,13 @@ impl<S: Store + 'static> Kernel<S> {
         if self.active_baseline.is_some() {
             return Ok(());
         }
-        self.create_snapshot()
+        self.create_snapshot()?;
+        if self.active_baseline.is_none() {
+            return Err(KernelError::SnapshotUnavailable(
+                "failed to establish active baseline due to receipt-horizon precondition".into(),
+            ));
+        }
+        Ok(())
     }
 
     fn receipt_horizon_height_for_baseline(&self, height: JournalSeq) -> Option<JournalSeq> {
@@ -1397,6 +1443,62 @@ impl<S: Store + 'static> Kernel<S> {
         } else {
             None
         }
+    }
+
+    fn validate_baseline_promotion(&self, record: &SnapshotRecord) -> Result<(), KernelError> {
+        let Some(horizon) = record.receipt_horizon_height else {
+            return Err(KernelError::SnapshotUnavailable(
+                "baseline promotion requires receipt_horizon_height".into(),
+            ));
+        };
+        if horizon != record.height {
+            return Err(KernelError::SnapshotUnavailable(format!(
+                "baseline receipt_horizon_height ({horizon}) must equal baseline height ({})",
+                record.height
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_snapshot_root_completeness(
+        &self,
+        snapshot: &KernelSnapshot,
+    ) -> Result<(), KernelError> {
+        let roots = snapshot.root_completeness();
+        let Some(snapshot_manifest_hash) = snapshot.manifest_hash() else {
+            return Err(KernelError::SnapshotUnavailable(
+                "snapshot root completeness missing manifest_hash".into(),
+            ));
+        };
+        let Some(roots_manifest_hash) = roots.manifest_hash.as_ref() else {
+            return Err(KernelError::SnapshotUnavailable(
+                "root completeness missing manifest_hash".into(),
+            ));
+        };
+        if roots_manifest_hash.as_slice() != snapshot_manifest_hash {
+            return Err(KernelError::SnapshotUnavailable(
+                "root completeness manifest_hash mismatch".into(),
+            ));
+        }
+
+        let state_roots: HashSet<[u8; 32]> = roots.reducer_state_roots.iter().cloned().collect();
+        for entry in snapshot.reducer_state_entries() {
+            if !state_roots.contains(&entry.state_hash) {
+                return Err(KernelError::SnapshotUnavailable(
+                    "root completeness missing reducer state root".into(),
+                ));
+            }
+        }
+
+        let index_roots: HashSet<[u8; 32]> = roots.cell_index_roots.iter().cloned().collect();
+        for (_, root) in snapshot.reducer_index_roots() {
+            if !index_roots.contains(root) {
+                return Err(KernelError::SnapshotUnavailable(
+                    "root completeness missing reducer cell_index_root".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn apply_snapshot(&mut self, snapshot: KernelSnapshot) -> Result<(), KernelError> {
@@ -1619,6 +1721,42 @@ impl<S: Store + 'static> Kernel<S> {
         }
     }
 
+    /// Returns typed hash references reachable from reducer state by traversing the reducer's
+    /// declared state schema. Hash-like text/bytes in opaque fields are ignored.
+    pub fn reducer_state_typed_hash_refs(
+        &self,
+        reducer: &str,
+        key: Option<&[u8]>,
+    ) -> Result<Vec<Hash>, KernelError> {
+        let Some(state_bytes) = self.reducer_state_bytes(reducer, key)? else {
+            return Ok(Vec::new());
+        };
+        let module = self
+            .module_defs
+            .get(reducer)
+            .ok_or_else(|| KernelError::ReducerNotFound(reducer.to_string()))?;
+        let reducer_abi =
+            module.abi.reducer.as_ref().ok_or_else(|| {
+                KernelError::Manifest(format!("module '{reducer}' is not a reducer"))
+            })?;
+        let schema = self
+            .schema_index
+            .get(reducer_abi.state.as_str())
+            .ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "state schema '{}' not found for reducer '{reducer}'",
+                    reducer_abi.state
+                ))
+            })?;
+        let value: CborValue = serde_cbor::from_slice(&state_bytes)
+            .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
+        let mut refs = Vec::new();
+        collect_typed_hash_refs(&value, schema, &self.schema_index, &mut refs)?;
+        refs.sort();
+        refs.dedup();
+        Ok(refs)
+    }
+
     pub(crate) fn canonical_key_bytes(
         &self,
         schema_name: &str,
@@ -1631,10 +1769,17 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     pub(crate) fn read_meta(&self) -> ReadMeta {
+        let (active_baseline_height, active_baseline_receipt_horizon_height) = self
+            .active_baseline
+            .as_ref()
+            .map(|b| (Some(b.height), b.receipt_horizon_height))
+            .unwrap_or((None, None));
         ReadMeta {
             journal_height: self.journal.next_seq(),
             snapshot_hash: self.last_snapshot_hash,
             manifest_hash: self.manifest_hash,
+            active_baseline_height,
+            active_baseline_receipt_horizon_height,
         }
     }
 
@@ -2792,6 +2937,117 @@ fn decode_tail_record(kind: JournalKind, payload: &[u8]) -> Result<JournalRecord
     }
 }
 
+fn collect_typed_hash_refs(
+    value: &CborValue,
+    schema: &TypeExpr,
+    schemas: &SchemaIndex,
+    out: &mut Vec<Hash>,
+) -> Result<(), KernelError> {
+    match schema {
+        TypeExpr::Primitive(TypePrimitive::Hash(_)) => {
+            if let CborValue::Text(text) = value {
+                let hash = Hash::from_hex_str(text)
+                    .map_err(|err| KernelError::Manifest(format!("invalid hash ref: {err}")))?;
+                out.push(hash);
+            }
+        }
+        TypeExpr::Primitive(_) => {}
+        TypeExpr::Record(record) => {
+            let CborValue::Map(map) = value else {
+                return Err(KernelError::Manifest("expected record map".into()));
+            };
+            for (field, ty) in &record.record {
+                let resolved = resolve_type_ref(ty, schemas)?;
+                let field_value = map
+                    .get(&CborValue::Text(field.clone()))
+                    .unwrap_or(&CborValue::Null);
+                collect_typed_hash_refs(field_value, resolved, schemas, out)?;
+            }
+        }
+        TypeExpr::Variant(variant) => {
+            let CborValue::Map(map) = value else {
+                return Err(KernelError::Manifest("expected variant map".into()));
+            };
+            let tag = map
+                .get(&CborValue::Text("$tag".into()))
+                .and_then(|v| match v {
+                    CborValue::Text(text) => Some(text),
+                    _ => None,
+                })
+                .ok_or_else(|| KernelError::Manifest("variant missing $tag".into()))?;
+            let Some(ty) = variant.variant.get(tag) else {
+                return Err(KernelError::Manifest(format!(
+                    "unknown variant tag '{tag}'"
+                )));
+            };
+            let resolved = resolve_type_ref(ty, schemas)?;
+            if let Some(inner) = map.get(&CborValue::Text("$value".into())) {
+                collect_typed_hash_refs(inner, resolved, schemas, out)?;
+            }
+        }
+        TypeExpr::List(list) => {
+            let CborValue::Array(items) = value else {
+                return Err(KernelError::Manifest("expected array".into()));
+            };
+            let resolved = resolve_type_ref(&list.list, schemas)?;
+            for item in items {
+                collect_typed_hash_refs(item, resolved, schemas, out)?;
+            }
+        }
+        TypeExpr::Set(set) => {
+            let CborValue::Array(items) = value else {
+                return Err(KernelError::Manifest("expected array".into()));
+            };
+            let resolved = resolve_type_ref(&set.set, schemas)?;
+            for item in items {
+                collect_typed_hash_refs(item, resolved, schemas, out)?;
+            }
+        }
+        TypeExpr::Map(map_ty) => {
+            let CborValue::Map(map) = value else {
+                return Err(KernelError::Manifest("expected map".into()));
+            };
+            for (k, v) in map {
+                if matches!(map_ty.map.key, aos_air_types::TypeMapKey::Hash(_)) {
+                    if let CborValue::Text(text) = k {
+                        let hash = Hash::from_hex_str(text).map_err(|err| {
+                            KernelError::Manifest(format!("invalid hash map key: {err}"))
+                        })?;
+                        out.push(hash);
+                    }
+                }
+                let resolved = resolve_type_ref(&map_ty.map.value, schemas)?;
+                collect_typed_hash_refs(v, resolved, schemas, out)?;
+            }
+        }
+        TypeExpr::Option(opt) => {
+            if !matches!(value, CborValue::Null) {
+                let resolved = resolve_type_ref(&opt.option, schemas)?;
+                collect_typed_hash_refs(value, resolved, schemas, out)?;
+            }
+        }
+        TypeExpr::Ref(reference) => {
+            let resolved = schemas.get(reference.reference.as_str()).ok_or_else(|| {
+                KernelError::Manifest(format!("schema '{}' not found", reference.reference))
+            })?;
+            collect_typed_hash_refs(value, resolved, schemas, out)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_type_ref<'a>(
+    schema: &'a TypeExpr,
+    schemas: &'a SchemaIndex,
+) -> Result<&'a TypeExpr, KernelError> {
+    match schema {
+        TypeExpr::Ref(reference) => schemas.get(reference.reference.as_str()).ok_or_else(|| {
+            KernelError::Manifest(format!("schema '{}' not found", reference.reference))
+        }),
+        other => Ok(other),
+    }
+}
+
 fn select_secret_resolver(
     has_secrets: bool,
     config: &KernelConfig,
@@ -3106,8 +3362,8 @@ mod tests {
     use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
     use aos_air_types::{
         CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, ReducerAbi, Routing,
-        RoutingEvent, SchemaRef, SecretDecl, TypeExpr, TypePrimitive, TypePrimitiveText,
-        TypeRecord,
+        RoutingEvent, SchemaRef, SecretDecl, TypeExpr, TypePrimitive, TypePrimitiveHash,
+        TypePrimitiveText, TypeRecord,
     };
     use aos_cbor::to_canonical_cbor;
     use aos_store::MemStore;
@@ -3191,7 +3447,7 @@ mod tests {
 
         // Pretend a snapshot exists at the requested height.
         // Create and store an empty snapshot blob at the requested height.
-        let snapshot = KernelSnapshot::new(
+        let mut snapshot = KernelSnapshot::new(
             height,
             vec![],
             vec![],
@@ -3205,6 +3461,10 @@ mod tests {
             0,
             Some(*manifest_hash.as_bytes()),
         );
+        snapshot.set_root_completeness(SnapshotRootCompleteness {
+            manifest_hash: Some(manifest_hash.as_bytes().to_vec()),
+            ..SnapshotRootCompleteness::default()
+        });
         let snap_bytes = serde_cbor::to_vec(&snapshot).unwrap();
         let snap_hash = kernel.store.put_blob(&snap_bytes).unwrap();
 
@@ -3233,7 +3493,11 @@ mod tests {
         let err = kernel
             .get_reducer_state("missing", None, Consistency::Exact(7))
             .unwrap_err();
-        assert!(matches!(err, KernelError::SnapshotUnavailable(_)));
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("root completeness") || rendered.contains("snapshot"),
+            "unexpected error: {rendered}"
+        );
     }
 
     #[test]
@@ -3353,7 +3617,7 @@ mod tests {
         );
 
         let snapshot_height = 2;
-        let snapshot = KernelSnapshot::new(
+        let mut snapshot = KernelSnapshot::new(
             snapshot_height,
             vec![],
             vec![],
@@ -3367,6 +3631,10 @@ mod tests {
             0,
             Some(*hash_a.as_bytes()),
         );
+        snapshot.set_root_completeness(SnapshotRootCompleteness {
+            manifest_hash: Some(hash_a.as_bytes().to_vec()),
+            ..SnapshotRootCompleteness::default()
+        });
         let snap_bytes = serde_cbor::to_vec(&snapshot).expect("encode snapshot");
         let snap_hash = store.put_blob(&snap_bytes).expect("store snapshot");
         append_record(
@@ -3416,14 +3684,311 @@ mod tests {
         let entries = kernel.dump_journal().expect("journal");
         let baseline = entries
             .iter()
-            .find_map(|entry| match serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok() {
-                Some(JournalRecord::Snapshot(record)) => Some(record),
-                _ => None,
-            })
+            .find_map(
+                |entry| match serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok() {
+                    Some(JournalRecord::Snapshot(record)) => Some(record),
+                    _ => None,
+                },
+            )
             .expect("baseline snapshot record");
         assert!(
             baseline.receipt_horizon_height.is_some(),
             "initial baseline should carry a receipt horizon when no pending receipts exist"
+        );
+    }
+
+    #[test]
+    fn unsafe_baseline_promotion_fails_receipt_horizon_precondition() {
+        let mut kernel = minimal_kernel_non_keyed();
+        let initial_baseline_height = kernel
+            .active_baseline
+            .as_ref()
+            .expect("initial baseline")
+            .height;
+
+        kernel.pending_receipts.insert(
+            [9u8; 32],
+            PendingPlanReceiptInfo {
+                plan_id: 42,
+                effect_kind: "http.request".into(),
+            },
+        );
+        kernel.create_snapshot().expect("snapshot still written");
+
+        let active_height = kernel
+            .active_baseline
+            .as_ref()
+            .expect("active baseline retained")
+            .height;
+        assert_eq!(
+            active_height, initial_baseline_height,
+            "unsafe snapshot must not promote active baseline"
+        );
+    }
+
+    #[test]
+    fn snapshot_root_completeness_missing_required_root_fails_closed() {
+        let store = Arc::new(MemStore::default());
+        let (loaded, manifest_hash) =
+            loaded_manifest_with_schema(store.as_ref(), "com.acme/Event@1");
+
+        let snapshot = KernelSnapshot::new(
+            1,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            0,
+            vec![],
+            vec![],
+            vec![],
+            0,
+            None, // missing manifest root on purpose
+        );
+        let snap_bytes = serde_cbor::to_vec(&snapshot).unwrap();
+        let snap_hash = store.put_blob(&snap_bytes).unwrap();
+
+        let mut bad_journal = MemJournal::default();
+        append_record(
+            &mut bad_journal,
+            JournalRecord::Manifest(ManifestRecord {
+                manifest_hash: manifest_hash.to_hex(),
+            }),
+        );
+        append_record(
+            &mut bad_journal,
+            JournalRecord::Snapshot(SnapshotRecord {
+                snapshot_ref: snap_hash.to_hex(),
+                height: 1,
+                logical_time_ns: 0,
+                receipt_horizon_height: Some(1),
+                manifest_hash: Some(manifest_hash.to_hex()),
+            }),
+        );
+
+        let err = match Kernel::from_loaded_manifest(store, loaded, Box::new(bad_journal)) {
+            Ok(_) => panic!("incomplete roots should fail"),
+            Err(err) => err,
+        };
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("root completeness") || rendered.contains("snapshot"),
+            "unexpected error: {rendered}"
+        );
+    }
+
+    #[test]
+    fn reducer_state_traversal_collects_only_typed_hash_refs() {
+        let store = aos_store::MemStore::default();
+        let module = DefModule {
+            name: "com.acme/Reducer@1".into(),
+            module_kind: ModuleKind::Reducer,
+            wasm_hash: HashRef::new(hash(1)).unwrap(),
+            key_schema: None,
+            abi: ModuleAbi {
+                reducer: Some(ReducerAbi {
+                    state: SchemaRef::new("com.acme/StateRefs@1").unwrap(),
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                    annotations: None,
+                    effects_emitted: vec![],
+                    cap_slots: Default::default(),
+                }),
+                pure: None,
+            },
+        };
+        let mut modules = HashMap::new();
+        modules.insert(module.name.clone(), module);
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/StateRefs@1".into(),
+            DefSchema {
+                name: "com.acme/StateRefs@1".into(),
+                ty: TypeExpr::Record(aos_air_types::TypeRecord {
+                    record: IndexMap::from([
+                        (
+                            "direct".into(),
+                            TypeExpr::Primitive(TypePrimitive::Hash(TypePrimitiveHash {
+                                hash: Default::default(),
+                            })),
+                        ),
+                        (
+                            "nested".into(),
+                            TypeExpr::List(aos_air_types::TypeList {
+                                list: Box::new(TypeExpr::Primitive(TypePrimitive::Hash(
+                                    TypePrimitiveHash {
+                                        hash: Default::default(),
+                                    },
+                                ))),
+                            }),
+                        ),
+                        (
+                            "opaque_text".into(),
+                            TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                                text: Default::default(),
+                            })),
+                        ),
+                    ]),
+                }),
+            },
+        );
+        schemas.insert(
+            "com.acme/Event@1".into(),
+            schema_event_record("com.acme/Event@1"),
+        );
+        let manifest = Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![NamedRef {
+                name: "com.acme/Reducer@1".into(),
+                hash: HashRef::new(hash(1)).unwrap(),
+            }],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: Default::default(),
+            routing: Some(Routing {
+                events: vec![RoutingEvent {
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    reducer: "com.acme/Reducer@1".to_string(),
+                    key_field: None,
+                }],
+                inboxes: vec![],
+            }),
+            triggers: vec![],
+        };
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules,
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas,
+            effect_catalog: EffectCatalog::from_defs(Vec::new()),
+        };
+        let mut kernel = Kernel::from_loaded_manifest(
+            Arc::new(store),
+            loaded,
+            Box::new(crate::journal::mem::MemJournal::default()),
+        )
+        .unwrap();
+
+        let direct = hash(10);
+        let nested = hash(11);
+        let opaque = hash(12);
+        let state = CborValue::Map(BTreeMap::from([
+            (
+                CborValue::Text("direct".into()),
+                CborValue::Text(direct.clone()),
+            ),
+            (
+                CborValue::Text("nested".into()),
+                CborValue::Array(vec![CborValue::Text(nested.clone())]),
+            ),
+            (
+                CborValue::Text("opaque_text".into()),
+                CborValue::Text(opaque.clone()),
+            ),
+        ]));
+        kernel
+            .handle_reducer_output(
+                "com.acme/Reducer@1".into(),
+                None,
+                false,
+                ReducerOutput {
+                    state: Some(serde_cbor::to_vec(&state).unwrap()),
+                    domain_events: vec![],
+                    effects: vec![],
+                    ann: None,
+                },
+            )
+            .unwrap();
+
+        let refs = kernel
+            .reducer_state_typed_hash_refs("com.acme/Reducer@1", None)
+            .unwrap();
+        assert!(refs.contains(&Hash::from_hex_str(&direct).unwrap()));
+        assert!(refs.contains(&Hash::from_hex_str(&nested).unwrap()));
+        assert!(
+            !refs.contains(&Hash::from_hex_str(&opaque).unwrap()),
+            "opaque text hashes must not be auto-traversed"
+        );
+    }
+
+    #[test]
+    fn baseline_plus_tail_replay_matches_full_replay_state() {
+        let store_full = Arc::new(MemStore::default());
+        let (loaded_full, _) =
+            loaded_manifest_with_schema(store_full.as_ref(), "com.acme/EventA@1");
+        let mut kernel_full = Kernel::from_loaded_manifest(
+            store_full.clone(),
+            loaded_full,
+            Box::new(MemJournal::default()),
+        )
+        .unwrap();
+        kernel_full
+            .submit_domain_event_result(
+                "com.acme/EventA@1",
+                serde_cbor::to_vec(&json!({ "id": "1" })).unwrap(),
+            )
+            .unwrap();
+        kernel_full
+            .submit_domain_event_result(
+                "com.acme/EventA@1",
+                serde_cbor::to_vec(&json!({ "id": "2" })).unwrap(),
+            )
+            .unwrap();
+        kernel_full
+            .submit_domain_event_result(
+                "com.acme/EventA@1",
+                serde_cbor::to_vec(&json!({ "id": "3" })).unwrap(),
+            )
+            .unwrap();
+        kernel_full.create_snapshot().unwrap();
+
+        let store_baseline = Arc::new(MemStore::default());
+        let (loaded_baseline, _) =
+            loaded_manifest_with_schema(store_baseline.as_ref(), "com.acme/EventA@1");
+        let mut kernel_baseline = Kernel::from_loaded_manifest(
+            store_baseline.clone(),
+            loaded_baseline,
+            Box::new(MemJournal::default()),
+        )
+        .unwrap();
+        kernel_baseline
+            .submit_domain_event_result(
+                "com.acme/EventA@1",
+                serde_cbor::to_vec(&json!({ "id": "1" })).unwrap(),
+            )
+            .unwrap();
+        kernel_baseline.create_snapshot().unwrap();
+        kernel_baseline
+            .submit_domain_event_result(
+                "com.acme/EventA@1",
+                serde_cbor::to_vec(&json!({ "id": "2" })).unwrap(),
+            )
+            .unwrap();
+        kernel_baseline
+            .submit_domain_event_result(
+                "com.acme/EventA@1",
+                serde_cbor::to_vec(&json!({ "id": "3" })).unwrap(),
+            )
+            .unwrap();
+        kernel_baseline.create_snapshot().unwrap();
+
+        assert_eq!(
+            kernel_full.manifest_hash, kernel_baseline.manifest_hash,
+            "manifest hash must be identical after baseline+tail and full replay"
+        );
+        assert_eq!(
+            kernel_full.reducer_index_roots, kernel_baseline.reducer_index_roots,
+            "cell index roots must be identical after baseline+tail and full replay"
         );
     }
 
@@ -4155,8 +4720,9 @@ mod tests {
                 .iter()
                 .any(|entry| entry.kind == JournalKind::EffectReceipt)
         );
-        assert_eq!(scan.intents[0].seq, 1);
-        assert_eq!(scan.receipts[0].seq, 2);
+        // New worlds start with baseline+manifest journal records.
+        assert_eq!(scan.intents[0].seq, 2);
+        assert_eq!(scan.receipts[0].seq, 3);
         assert_eq!(scan.intents[0].record.intent_hash, [1u8; 32]);
         assert_eq!(scan.receipts[0].record.intent_hash, [1u8; 32]);
     }
@@ -4599,6 +5165,11 @@ impl<S: Store + 'static> StateReader for Kernel<S> {
                         journal_height: h,
                         snapshot_hash: Some(snap_hash),
                         manifest_hash: snap_manifest.unwrap_or(self.manifest_hash),
+                        active_baseline_height: self.active_baseline.as_ref().map(|b| b.height),
+                        active_baseline_receipt_horizon_height: self
+                            .active_baseline
+                            .as_ref()
+                            .and_then(|b| b.receipt_horizon_height),
                     };
                     return Ok(StateRead { meta, value });
                 }
@@ -4650,6 +5221,11 @@ impl<S: Store + 'static> StateReader for Kernel<S> {
                         journal_height: h,
                         snapshot_hash: Some(snap_hash),
                         manifest_hash,
+                        active_baseline_height: self.active_baseline.as_ref().map(|b| b.height),
+                        active_baseline_receipt_horizon_height: self
+                            .active_baseline
+                            .as_ref()
+                            .and_then(|b| b.receipt_horizon_height),
                     };
                     return Ok(StateRead {
                         meta,

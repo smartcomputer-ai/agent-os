@@ -3,7 +3,23 @@
 **Priority**: P1  
 **Effort**: Medium/High  
 **Risk if deferred**: High (future infra and storage work will harden wrong semantics)  
-**Status**: Proposed
+**Status**: Implemented (core), February 13, 2026
+
+## Completion Snapshot
+
+- Completed:
+  - `BlobEdge` schema + `blob.put@1` schema/receipt updates
+  - `blob.put@1` runtime normalization + deterministic `edge_ref`
+  - baseline snapshot record semantics (`logical_time_ns`, `receipt_horizon_height`)
+  - active-baseline enforcement on world init (unseeded worlds)
+  - baseline-aware restore behavior
+  - receipt-horizon baseline promotion precondition checks
+  - snapshot root-completeness metadata + fail-closed validation on write/load
+  - reducer-state typed-hash traversal helper (schema-known traversal only)
+  - correctness tests listed below (except seeded/fork-specific create semantics)
+  - spec alignment updates in `spec/02-architecture.md`, `spec/03-air.md`, `spec/07-gc.md`
+- Remaining/N-A in current codebase:
+  - seeded/fork world-create baseline pointer semantics are not implemented as a dedicated creation surface in this repository yet (no separate seed/fork world creation API path exists to wire).
 
 ## Goal
 
