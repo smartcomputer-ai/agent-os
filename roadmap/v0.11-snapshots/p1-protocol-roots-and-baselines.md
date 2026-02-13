@@ -24,6 +24,7 @@ future distributed stores.
 3) Opaque blobs are leaves unless accompanied by explicit refs.
 4) Baseline safety is fenced by receipt horizon semantics.
 5) `blob.put` schemas are updated in place (`@1`) with no version bump.
+6) make sure to keep `spec/07-gc.md` in sync.
 
 ## Protocol/Schema Changes
 
