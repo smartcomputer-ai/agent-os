@@ -2,12 +2,16 @@ use std::sync::Arc;
 
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmToolChoice, TokenUsage};
+use aos_effects::builtins::{
+    LlmFinishReason, LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCall,
+    LlmToolCallList, LlmToolChoice, LlmUsageDetails, TokenUsage,
+};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use aos_llm::{
     AdapterTimeout, AnthropicAdapter, AnthropicAdapterConfig, ContentPart, Message, OpenAIAdapter,
     OpenAIAdapterConfig, OpenAICompatibleAdapter, OpenAICompatibleAdapterConfig, ProviderAdapter,
-    Request, Role, SDKError, ToolCallData, ToolChoice, ToolDefinition, ToolResultData,
+    Request, ResponseFormat, Role, SDKError, ToolCallData, ToolChoice, ToolDefinition,
+    ToolResultData,
 };
 use aos_store::Store;
 use async_trait::async_trait;
@@ -40,19 +44,25 @@ impl<S: Store> LlmAdapter<S> {
     ) -> EffectReceipt {
         let msg = message.into();
         let output_ref = self
-            .store
-            .put_blob(msg.as_bytes())
-            .ok()
-            .and_then(|h| HashRef::new(h.to_hex()).ok())
-            .unwrap_or_else(zero_hashref);
+            .store_text_blob(&msg)
+            .unwrap_or_else(|_| zero_hashref());
 
         let receipt = LlmGenerateReceipt {
-            output_ref: output_ref.clone(),
+            output_ref,
             raw_output_ref: None,
+            provider_response_id: None,
+            finish_reason: LlmFinishReason {
+                reason: "error".to_string(),
+                raw: None,
+            },
             token_usage: TokenUsage {
                 prompt: 0,
                 completion: 0,
+                total: Some(0),
             },
+            usage_details: None,
+            warnings_ref: None,
+            rate_limit_ref: None,
             cost_cents: None,
             provider_id: provider_id.to_string(),
         };
@@ -169,6 +179,39 @@ impl<S: Store> LlmAdapter<S> {
 
         Ok((tools, tool_choice))
     }
+
+    fn load_json_blob(&self, reference: &HashRef, field: &str) -> Result<Value, String> {
+        let hash =
+            Hash::from_hex_str(reference.as_str()).map_err(|e| format!("invalid {field}: {e}"))?;
+        let bytes = self
+            .store
+            .get_blob(hash)
+            .map_err(|e| format!("{field} not found: {e}"))?;
+        serde_json::from_slice::<Value>(&bytes).map_err(|e| format!("{field} invalid JSON: {e}"))
+    }
+
+    fn load_response_format(&self, reference: &HashRef) -> Result<ResponseFormat, String> {
+        let value = self.load_json_blob(reference, "response_format_ref")?;
+        serde_json::from_value::<ResponseFormat>(value)
+            .map_err(|e| format!("response_format_ref invalid shape: {e}"))
+    }
+
+    fn store_json_blob(&self, value: &Value) -> Result<HashRef, String> {
+        let bytes = serde_json::to_vec(value).map_err(|e| format!("encode JSON failed: {e}"))?;
+        self.store_bytes_blob(&bytes)
+    }
+
+    fn store_text_blob(&self, value: &str) -> Result<HashRef, String> {
+        self.store_bytes_blob(value.as_bytes())
+    }
+
+    fn store_bytes_blob(&self, bytes: &[u8]) -> Result<HashRef, String> {
+        let hash = self
+            .store
+            .put_blob(bytes)
+            .map_err(|e| format!("store blob failed: {e}"))?;
+        HashRef::new(hash.to_hex()).map_err(|e| format!("invalid blob hash: {e}"))
+    }
 }
 
 #[async_trait]
@@ -227,7 +270,7 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        let (tools, tool_choice_from_blob) = if let Some(tool_refs) = params.tool_refs.as_ref() {
+        let (tools, tool_choice_from_blob) = if let Some(tool_refs) = params.runtime.tool_refs.as_ref() {
             match self.load_tools_blobs(tool_refs) {
                 Ok((tools, choice)) => (Some(tools), choice),
                 Err(err) => {
@@ -243,24 +286,66 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             (None, None)
         };
 
+        let response_format = if let Some(reference) = params.runtime.response_format_ref.as_ref() {
+            match self.load_response_format(reference) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        err,
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        let provider_options =
+            if let Some(reference) = params.runtime.provider_options_ref.as_ref() {
+                match self.load_json_blob(reference, "provider_options_ref") {
+                    Ok(value) => Some(value),
+                    Err(err) => {
+                        return Ok(self.failure_receipt(
+                            intent,
+                            &provider_id,
+                            ReceiptStatus::Error,
+                            err,
+                        ));
+                    }
+                }
+            } else {
+                None
+            };
+
         let request = Request {
             model: params.model.clone(),
             messages,
             provider: Some(provider_id.clone()),
             tools,
             tool_choice: params
+                .runtime
                 .tool_choice
                 .as_ref()
                 .map(tool_choice_from_params)
                 .or(tool_choice_from_blob),
-            response_format: None,
-            temperature: params.temperature.parse::<f64>().ok(),
-            top_p: None,
-            max_tokens: params.max_tokens,
-            stop_sequences: None,
-            reasoning_effort: None,
-            metadata: None,
-            provider_options: None,
+            response_format,
+            temperature: params
+                .runtime
+                .temperature
+                .as_ref()
+                .and_then(|v| v.parse::<f64>().ok()),
+            top_p: params
+                .runtime
+                .top_p
+                .as_ref()
+                .and_then(|v| v.parse::<f64>().ok()),
+            max_tokens: params.runtime.max_tokens,
+            stop_sequences: params.runtime.stop_sequences.clone(),
+            reasoning_effort: params.runtime.reasoning_effort.clone(),
+            metadata: params.runtime.metadata.clone().map(|m| m.into_iter().collect()),
+            provider_options,
         };
 
         let response = match self
@@ -279,31 +364,83 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        let normalized_output = normalized_output(provider.api_kind, &response);
-        let output_bytes = match serde_json::to_vec(&normalized_output) {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                return Ok(self.failure_receipt(
-                    intent,
-                    &provider_id,
-                    ReceiptStatus::Error,
-                    format!("encode normalized output failed: {err}"),
-                ));
-            }
-        };
-
-        let output_ref = match self.store.put_blob(&output_bytes) {
-            Ok(hash) => match HashRef::new(hash.to_hex()) {
-                Ok(hash_ref) => hash_ref,
+        let mut normalized_calls: LlmToolCallList = Vec::new();
+        for call in response.tool_calls() {
+            let arguments_ref = match self.store_json_blob(&call.arguments) {
+                Ok(reference) => reference,
                 Err(err) => {
                     return Ok(self.failure_receipt(
                         intent,
                         &provider_id,
                         ReceiptStatus::Error,
-                        format!("invalid normalized output hash: {err}"),
+                        format!("store tool call arguments failed: {err}"),
                     ));
                 }
+            };
+            normalized_calls.push(LlmToolCall {
+                call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                arguments_ref,
+                provider_call_id: call.raw_arguments.as_ref().map(|_| call.id.clone()),
+            });
+        }
+
+        let tool_calls_ref = if normalized_calls.is_empty() {
+            None
+        } else {
+            let value = match serde_json::to_value(&normalized_calls) {
+                Ok(value) => value,
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        format!("encode tool_calls failed: {err}"),
+                    ));
+                }
+            };
+            match self.store_json_blob(&value) {
+                Ok(reference) => Some(reference),
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        format!("store tool_calls failed: {err}"),
+                    ));
+                }
+            }
+        };
+
+        let reasoning_ref = if let Some(reasoning) = response.reasoning() {
+            match self.store_text_blob(&reasoning) {
+                Ok(reference) => Some(reference),
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        format!("store reasoning failed: {err}"),
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        let envelope = LlmOutputEnvelope {
+            assistant_text: {
+                let text = response.text();
+                if text.is_empty() { None } else { Some(text) }
             },
+            tool_calls_ref,
+            reasoning_ref,
+        };
+        let output_ref = match serde_json::to_value(&envelope)
+            .map_err(|e| e.to_string())
+            .and_then(|v| self.store_json_blob(&v))
+        {
+            Ok(reference) => reference,
             Err(err) => {
                 return Ok(self.failure_receipt(
                     intent,
@@ -317,17 +454,42 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         let raw_output_ref = response
             .raw
             .as_ref()
-            .and_then(|raw| serde_json::to_vec(raw).ok())
-            .and_then(|bytes| self.store.put_blob(&bytes).ok())
-            .and_then(|hash| HashRef::new(hash.to_hex()).ok());
+            .and_then(|raw| self.store_json_blob(raw).ok());
+
+        let warnings_ref = if response.warnings.is_empty() {
+            None
+        } else {
+            serde_json::to_value(&response.warnings)
+                .ok()
+                .and_then(|value| self.store_json_blob(&value).ok())
+        };
+
+        let rate_limit_ref = response
+            .rate_limit
+            .as_ref()
+            .and_then(|rate_limit| serde_json::to_value(rate_limit).ok())
+            .and_then(|value| self.store_json_blob(&value).ok());
 
         let receipt = LlmGenerateReceipt {
-            output_ref: output_ref.clone(),
+            output_ref,
             raw_output_ref,
+            provider_response_id: Some(response.id.clone()),
+            finish_reason: LlmFinishReason {
+                reason: response.finish_reason.reason.clone(),
+                raw: response.finish_reason.raw.clone(),
+            },
             token_usage: TokenUsage {
                 prompt: response.usage.input_tokens,
                 completion: response.usage.output_tokens,
+                total: Some(response.usage.total_tokens),
             },
+            usage_details: Some(LlmUsageDetails {
+                reasoning_tokens: response.usage.reasoning_tokens,
+                cache_read_tokens: response.usage.cache_read_tokens,
+                cache_write_tokens: response.usage.cache_write_tokens,
+            }),
+            warnings_ref,
+            rate_limit_ref,
             cost_cents: None,
             provider_id: provider_id.clone(),
         };
@@ -706,71 +868,6 @@ fn parse_role(role: &str) -> Role {
         "developer" => Role::Developer,
         _ => Role::User,
     }
-}
-
-fn normalized_output(api_kind: LlmApiKind, response: &aos_llm::Response) -> Value {
-    if matches!(api_kind, LlmApiKind::Responses) {
-        if let Some(raw_output) = response
-            .raw
-            .as_ref()
-            .and_then(|raw| raw.get("output"))
-            .cloned()
-        {
-            return raw_output;
-        }
-    }
-
-    let mut message = serde_json::Map::new();
-    message.insert(
-        "role".into(),
-        Value::String(role_to_string(&response.message.role)),
-    );
-
-    let mut content_parts: Vec<Value> = Vec::new();
-    let mut tool_calls: Vec<Value> = Vec::new();
-    for part in &response.message.content {
-        if let Some(text) = part.text.as_ref() {
-            content_parts.push(serde_json::json!({
-                "type": "text",
-                "text": text,
-            }));
-        }
-        if let Some(call) = part.tool_call.as_ref() {
-            let args_text = call
-                .arguments
-                .as_str()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| {
-                    serde_json::to_string(&call.arguments).unwrap_or_else(|_| "{}".to_string())
-                });
-            tool_calls.push(serde_json::json!({
-                "id": call.id,
-                "type": "function",
-                "function": {
-                    "name": call.name,
-                    "arguments": args_text,
-                }
-            }));
-        }
-    }
-
-    message.insert("content".into(), Value::Array(content_parts));
-    if !tool_calls.is_empty() {
-        message.insert("tool_calls".into(), Value::Array(tool_calls));
-    }
-
-    Value::Object(message)
-}
-
-fn role_to_string(role: &Role) -> String {
-    match role {
-        Role::System => "system",
-        Role::User => "user",
-        Role::Assistant => "assistant",
-        Role::Tool => "tool",
-        Role::Developer => "developer",
-    }
-    .to_string()
 }
 
 fn empty_object() -> Value {

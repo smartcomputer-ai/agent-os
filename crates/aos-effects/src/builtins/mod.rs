@@ -85,19 +85,75 @@ pub struct TimerSetReceipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct LlmGenerateParams {
-    pub provider: String,
-    pub model: String,
-    pub temperature: String,
+pub struct LlmRuntimeArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u64>,
-    pub message_refs: Vec<HashRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_refs: Option<Vec<HashRef>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<LlmToolChoice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_sequences: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<IndexMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_options_ref: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_format_ref: Option<HashRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LlmGenerateParams {
+    pub provider: String,
+    pub model: String,
+    pub message_refs: Vec<HashRef>,
+    pub runtime: LlmRuntimeArgs,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmFinishReason {
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmToolCall {
+    pub call_id: String,
+    pub tool_name: String,
+    pub arguments_ref: HashRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_call_id: Option<String>,
+}
+
+pub type LlmToolCallList = Vec<LlmToolCall>;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LlmOutputEnvelope {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls_ref: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_ref: Option<HashRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LlmUsageDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -105,7 +161,16 @@ pub struct LlmGenerateReceipt {
     pub output_ref: HashRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_output_ref: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_response_id: Option<String>,
+    pub finish_reason: LlmFinishReason,
     pub token_usage: TokenUsage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_details: Option<LlmUsageDetails>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warnings_ref: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_ref: Option<HashRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_cents: Option<u64>,
     pub provider_id: String,
@@ -115,6 +180,8 @@ pub struct LlmGenerateReceipt {
 pub struct TokenUsage {
     pub prompt: u64,
     pub completion: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

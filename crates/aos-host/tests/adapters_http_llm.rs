@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aos_air_types::HashRef;
-use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams};
+use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs};
 use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_host::adapters::http::HttpAdapter;
 use aos_host::adapters::llm::LlmAdapter;
@@ -153,11 +153,19 @@ async fn llm_errors_missing_api_key() {
     let params = LlmGenerateParams {
         provider: "openai".into(),
         model: "gpt-5.2".into(),
-        temperature: "0".into(),
-        max_tokens: Some(1024 * 16),
         message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
-        tool_refs: None,
-        tool_choice: None,
+        runtime: LlmRuntimeArgs {
+            temperature: Some("0".into()),
+            top_p: None,
+            max_tokens: Some(1024 * 16),
+            tool_refs: None,
+            tool_choice: None,
+            reasoning_effort: None,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
+        },
         api_key: None,
     };
     let intent = build_intent(
@@ -180,11 +188,19 @@ async fn llm_unknown_provider_errors() {
     let params = LlmGenerateParams {
         provider: "missing".into(),
         model: "gpt".into(),
-        temperature: "0".into(),
-        max_tokens: Some(16),
         message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
-        tool_refs: None,
-        tool_choice: None,
+        runtime: LlmRuntimeArgs {
+            temperature: Some("0".into()),
+            top_p: None,
+            max_tokens: Some(16),
+            tool_refs: None,
+            tool_choice: None,
+            reasoning_effort: None,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
+        },
         api_key: Some("key".into()),
     };
     let intent = build_intent(
@@ -220,11 +236,19 @@ async fn llm_message_ref_missing_errors() {
     let params = LlmGenerateParams {
         provider: "openai".into(),
         model: "gpt".into(),
-        temperature: "0".into(),
-        max_tokens: Some(16),
         message_refs: vec![missing_ref],
-        tool_refs: None,
-        tool_choice: None,
+        runtime: LlmRuntimeArgs {
+            temperature: Some("0".into()),
+            top_p: None,
+            max_tokens: Some(16),
+            tool_refs: None,
+            tool_choice: None,
+            reasoning_effort: None,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
+        },
         api_key: Some("key".into()),
     };
     let intent = build_intent(
@@ -273,11 +297,19 @@ async fn llm_happy_path_ok_receipt() {
     let params = LlmGenerateParams {
         provider: "mock".into(),
         model: "gpt-mock".into(),
-        temperature: "0".into(),
-        max_tokens: Some(8),
         message_refs: vec![message_ref],
-        tool_refs: None,
-        tool_choice: None,
+        runtime: LlmRuntimeArgs {
+            temperature: Some("0".into()),
+            top_p: None,
+            max_tokens: Some(8),
+            tool_refs: None,
+            tool_choice: None,
+            reasoning_effort: None,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
+        },
         api_key: Some("key".into()),
     };
     let intent = build_intent(

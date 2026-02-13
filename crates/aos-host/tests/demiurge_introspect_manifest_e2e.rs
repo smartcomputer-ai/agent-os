@@ -91,10 +91,19 @@ impl<S: aos_store::Store + Send + Sync + 'static> AsyncEffectAdapter for ToolLlm
         let receipt = LlmGenerateReceipt {
             output_ref,
             raw_output_ref: None,
+            provider_response_id: None,
+            finish_reason: aos_effects::builtins::LlmFinishReason {
+                reason: "stop".into(),
+                raw: None,
+            },
             token_usage: TokenUsage {
                 prompt: 5,
                 completion: 5,
+                total: Some(10),
             },
+            usage_details: None,
+            warnings_ref: None,
+            rate_limit_ref: None,
             cost_cents: None,
             provider_id: "mock".into(),
         };

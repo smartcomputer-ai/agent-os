@@ -542,6 +542,11 @@ struct LlmCapParams {
 struct LlmGenerateParamsView {
     provider: String,
     model: String,
+    runtime: LlmRuntimeArgsView,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct LlmRuntimeArgsView {
     #[serde(default)]
     max_tokens: Option<u64>,
     #[serde(default)]
@@ -765,7 +770,8 @@ fn builtin_llm_enforcer(
             message: format!("model '{}' not allowed", effect_params.model),
         });
     }
-    if let (Some(limit), Some(requested)) = (cap_params.max_tokens, effect_params.max_tokens) {
+    if let (Some(limit), Some(requested)) = (cap_params.max_tokens, effect_params.runtime.max_tokens)
+    {
         if requested > limit {
             return Err(CapDenyReason {
                 code: "max_tokens_exceeded".into(),
@@ -775,7 +781,7 @@ fn builtin_llm_enforcer(
     }
     if let Some(allowed) = &cap_params.tools_allow {
         if !allowed.is_empty() {
-            if let Some(choice) = &effect_params.tool_choice {
+            if let Some(choice) = &effect_params.runtime.tool_choice {
                 if let LlmToolChoiceView::Tool { name } = choice {
                     if !allowed.iter().any(|t| t == name) {
                         return Err(CapDenyReason {
@@ -819,7 +825,9 @@ fn allowlist_contains(
 mod tests {
     use super::*;
     use aos_air_types::{CapType, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex};
-    use aos_effects::builtins::{BlobPutParams, HeaderMap, HttpRequestParams, LlmGenerateParams};
+    use aos_effects::builtins::{
+        BlobPutParams, HeaderMap, HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs,
+    };
     use aos_effects::{CapabilityGrant, EffectKind};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -909,16 +917,24 @@ mod tests {
         let params = LlmGenerateParams {
             provider: "openai".into(),
             model: "gpt-5.2".into(),
-            temperature: "0.5".into(),
-            max_tokens: Some(50),
             message_refs: vec![
                 aos_air_types::HashRef::new(
                     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 )
                 .expect("hash ref"),
             ],
-            tool_refs: None,
-            tool_choice: None,
+            runtime: LlmRuntimeArgs {
+                temperature: Some("0.5".into()),
+                top_p: None,
+                max_tokens: Some(50),
+                tool_refs: None,
+                tool_choice: None,
+                reasoning_effort: None,
+                stop_sequences: None,
+                metadata: None,
+                provider_options_ref: None,
+                response_format_ref: None,
+            },
             api_key: None,
         };
         let params_cbor = serde_cbor::to_vec(&params).expect("encode params");
@@ -934,16 +950,24 @@ mod tests {
         let over_limit = LlmGenerateParams {
             provider: "openai".into(),
             model: "gpt-5.2".into(),
-            temperature: "0.5".into(),
-            max_tokens: Some(55),
             message_refs: vec![
                 aos_air_types::HashRef::new(
                     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                 )
                 .expect("hash ref"),
             ],
-            tool_refs: None,
-            tool_choice: None,
+            runtime: LlmRuntimeArgs {
+                temperature: Some("0.5".into()),
+                top_p: None,
+                max_tokens: Some(55),
+                tool_refs: None,
+                tool_choice: None,
+                reasoning_effort: None,
+                stop_sequences: None,
+                metadata: None,
+                provider_options_ref: None,
+                response_format_ref: None,
+            },
             api_key: None,
         };
         let over_cbor = serde_cbor::to_vec(&over_limit).expect("encode params");

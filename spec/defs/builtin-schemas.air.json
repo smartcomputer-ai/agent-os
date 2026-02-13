@@ -212,16 +212,86 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/LlmRuntimeArgs@1",
+    "type": {
+      "record": {
+        "temperature": { "option": { "dec128": {} } },
+        "top_p": { "option": { "dec128": {} } },
+        "max_tokens": { "option": { "nat": {} } },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "reasoning_effort": { "option": { "text": {} } },
+        "stop_sequences": { "option": { "list": { "text": {} } } },
+        "metadata": {
+          "option": {
+            "map": {
+              "key": { "text": {} },
+              "value": { "text": {} }
+            }
+          }
+        },
+        "provider_options_ref": { "option": { "hash": {} } },
+        "response_format_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmToolCall@1",
+    "type": {
+      "record": {
+        "call_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "arguments_ref": { "hash": {} },
+        "provider_call_id": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmToolCallList@1",
+    "type": { "list": { "ref": "sys/LlmToolCall@1" } }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmOutputEnvelope@1",
+    "type": {
+      "record": {
+        "assistant_text": { "option": { "text": {} } },
+        "tool_calls_ref": { "option": { "hash": {} } },
+        "reasoning_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/LlmGenerateParams@1",
     "type": {
       "record": {
         "provider": { "text": {} },
         "model": { "text": {} },
-        "temperature": { "dec128": {} },
-        "max_tokens": { "option": { "nat": {} } },
         "message_refs": { "list": { "hash": {} } },
-        "tool_refs": { "option": { "list": { "hash": {} } } },
-        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "runtime": {
+          "record": {
+            "temperature": { "option": { "dec128": {} } },
+            "top_p": { "option": { "dec128": {} } },
+            "max_tokens": { "option": { "nat": {} } },
+            "tool_refs": { "option": { "list": { "hash": {} } } },
+            "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+            "reasoning_effort": { "option": { "text": {} } },
+            "stop_sequences": { "option": { "list": { "text": {} } } },
+            "metadata": {
+              "option": {
+                "map": {
+                  "key": { "text": {} },
+                  "value": { "text": {} }
+                }
+              }
+            },
+            "provider_options_ref": { "option": { "hash": {} } },
+            "response_format_ref": { "option": { "hash": {} } }
+          }
+        },
         "api_key": { "option": { "ref": "sys/TextOrSecretRef@1" } }
       }
     }
@@ -233,13 +303,32 @@
       "record": {
         "output_ref": { "hash": {} },
         "raw_output_ref": { "option": { "hash": {} } },
+        "provider_response_id": { "option": { "text": {} } },
+        "finish_reason": {
+          "record": {
+            "reason": { "text": {} },
+            "raw": { "option": { "text": {} } }
+          }
+        },
         "token_usage": {
           "record": {
             "prompt": { "nat": {} },
-            "completion": { "nat": {} }
+            "completion": { "nat": {} },
+            "total": { "option": { "nat": {} } }
           }
         },
-        "cost_cents": { "nat": {} },
+        "usage_details": {
+          "option": {
+            "record": {
+              "reasoning_tokens": { "option": { "nat": {} } },
+              "cache_read_tokens": { "option": { "nat": {} } },
+              "cache_write_tokens": { "option": { "nat": {} } }
+            }
+          }
+        },
+        "warnings_ref": { "option": { "hash": {} } },
+        "rate_limit_ref": { "option": { "hash": {} } },
+        "cost_cents": { "option": { "nat": {} } },
         "provider_id": { "text": {} }
       }
     }

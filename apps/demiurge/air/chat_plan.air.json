@@ -12,11 +12,21 @@
           "record": {
             "provider": { "ref": "@plan.input.provider" },
             "model": { "ref": "@plan.input.model" },
-            "temperature": { "text": "0.2" },
-            "max_tokens": { "ref": "@plan.input.max_tokens" },
             "message_refs": { "ref": "@plan.input.message_refs" },
-            "tool_refs": { "ref": "@plan.input.tool_refs" },
-            "tool_choice": { "ref": "@plan.input.tool_choice" },
+            "runtime": {
+              "record": {
+                "temperature": { "text": "0.2" },
+                "top_p": { "null": {} },
+                "max_tokens": { "ref": "@plan.input.max_tokens" },
+                "tool_refs": { "ref": "@plan.input.tool_refs" },
+                "tool_choice": { "ref": "@plan.input.tool_choice" },
+                "reasoning_effort": { "null": {} },
+                "stop_sequences": { "null": {} },
+                "metadata": { "null": {} },
+                "provider_options_ref": { "null": {} },
+                "response_format_ref": { "null": {} }
+              }
+            },
             "api_key": {
               "variant": {
                 "tag": "secret",

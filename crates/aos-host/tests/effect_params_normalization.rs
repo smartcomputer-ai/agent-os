@@ -403,6 +403,7 @@ fn timer_params_cbor(deliver_at: u64, key: Option<String>) -> Vec<u8> {
 
 fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
     let mut map = BTreeMap::new();
+    let mut runtime = BTreeMap::new();
     map.insert(
         CborValue::Text("provider".into()),
         CborValue::Text("openai".into()),
@@ -411,19 +412,20 @@ fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
         CborValue::Text("model".into()),
         CborValue::Text("gpt-5.2".into()),
     );
-    map.insert(CborValue::Text("temperature".into()), temp_value);
-    map.insert(
+    runtime.insert(CborValue::Text("temperature".into()), temp_value);
+    runtime.insert(
         CborValue::Text("max_tokens".into()),
         CborValue::Integer(16.into()),
     );
+    runtime.insert(CborValue::Text("tool_refs".into()), CborValue::Null);
+    runtime.insert(CborValue::Text("tool_choice".into()), CborValue::Null);
+    map.insert(CborValue::Text("runtime".into()), CborValue::Map(runtime));
     map.insert(
         CborValue::Text("message_refs".into()),
         CborValue::Array(vec![CborValue::Text(
             "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
         )]),
     );
-    map.insert(CborValue::Text("tool_refs".into()), CborValue::Null);
-    map.insert(CborValue::Text("tool_choice".into()), CborValue::Null);
     map.insert(CborValue::Text("api_key".into()), CborValue::Null);
     serde_cbor::to_vec(&CborValue::Map(map)).expect("encode params")
 }
@@ -432,20 +434,22 @@ fn llm_params_cbor(temp_value: CborValue) -> Vec<u8> {
 // must sort the map.
 fn llm_params_cbor_reordered(temp_value: CborValue) -> Vec<u8> {
     let mut map = BTreeMap::new();
+    let mut runtime = BTreeMap::new();
     map.insert(CborValue::Text("api_key".into()), CborValue::Null);
-    map.insert(CborValue::Text("tool_choice".into()), CborValue::Null);
-    map.insert(CborValue::Text("tool_refs".into()), CborValue::Null);
+    runtime.insert(CborValue::Text("tool_choice".into()), CborValue::Null);
+    runtime.insert(CborValue::Text("tool_refs".into()), CborValue::Null);
+    runtime.insert(
+        CborValue::Text("max_tokens".into()),
+        CborValue::Integer(16.into()),
+    );
+    runtime.insert(CborValue::Text("temperature".into()), temp_value);
     map.insert(
         CborValue::Text("message_refs".into()),
         CborValue::Array(vec![CborValue::Text(
             "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
         )]),
     );
-    map.insert(
-        CborValue::Text("max_tokens".into()),
-        CborValue::Integer(16.into()),
-    );
-    map.insert(CborValue::Text("temperature".into()), temp_value);
+    map.insert(CborValue::Text("runtime".into()), CborValue::Map(runtime));
     map.insert(
         CborValue::Text("model".into()),
         CborValue::Text("gpt-5.2".into()),

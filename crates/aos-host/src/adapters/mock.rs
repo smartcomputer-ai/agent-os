@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effects::builtins::{HeaderMap, HttpRequestParams, LlmGenerateParams};
+use aos_effects::builtins::{HeaderMap, HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::Store;
@@ -348,13 +348,6 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             None => Err(anyhow!("field '{field}' missing from llm.generate params")),
         }
     };
-    let opt_nat = |field: &str| -> Result<Option<u64>> {
-        match map.get(&serde_cbor::Value::Text(field.into())) {
-            Some(serde_cbor::Value::Integer(n)) if *n >= 0 => Ok(Some(*n as u64)),
-            Some(serde_cbor::Value::Null) | None => Ok(None),
-            Some(other) => Err(anyhow!("field '{field}' must be nat, got {:?}", other)),
-        }
-    };
     let message_refs = match map.get(&serde_cbor::Value::Text("message_refs".into())) {
         Some(serde_cbor::Value::Array(items)) => items
             .iter()
@@ -378,7 +371,36 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             ));
         }
     };
-    let tool_refs = match map.get(&serde_cbor::Value::Text("tool_refs".into())) {
+    let runtime_map = match map.get(&serde_cbor::Value::Text("runtime".into())) {
+        Some(serde_cbor::Value::Map(m)) => m,
+        Some(other) => {
+            return Err(anyhow!("field 'runtime' must be record/map, got {:?}", other));
+        }
+        None => {
+            return Err(anyhow!("field 'runtime' missing from llm.generate params"));
+        }
+    };
+    let runtime_opt_nat = |field: &str| -> Result<Option<u64>> {
+        match runtime_map.get(&serde_cbor::Value::Text(field.into())) {
+            Some(serde_cbor::Value::Integer(n)) if *n >= 0 => Ok(Some(*n as u64)),
+            Some(serde_cbor::Value::Null) | None => Ok(None),
+            Some(other) => Err(anyhow!(
+                "runtime field '{field}' must be nat or null, got {:?}",
+                other
+            )),
+        }
+    };
+    let runtime_opt_text = |field: &str| -> Result<Option<String>> {
+        match runtime_map.get(&serde_cbor::Value::Text(field.into())) {
+            Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
+            Some(serde_cbor::Value::Null) | None => Ok(None),
+            Some(other) => Err(anyhow!(
+                "runtime field '{field}' must be text or null, got {:?}",
+                other
+            )),
+        }
+    };
+    let tool_refs = match runtime_map.get(&serde_cbor::Value::Text("tool_refs".into())) {
         Some(serde_cbor::Value::Array(items)) => items
             .iter()
             .map(|v| match v {
@@ -402,15 +424,23 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
     Ok(LlmGenerateParams {
         provider: text("provider")?,
         model: text("model")?,
-        temperature: text("temperature")?,
-        max_tokens: opt_nat("max_tokens")?,
         message_refs,
-        tool_refs: if tool_refs.is_empty() {
-            None
-        } else {
-            Some(tool_refs)
+        runtime: LlmRuntimeArgs {
+            temperature: runtime_opt_text("temperature")?,
+            top_p: runtime_opt_text("top_p")?,
+            max_tokens: runtime_opt_nat("max_tokens")?,
+            tool_refs: if tool_refs.is_empty() {
+                None
+            } else {
+                Some(tool_refs)
+            },
+            tool_choice: None,
+            reasoning_effort: runtime_opt_text("reasoning_effort")?,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
         },
-        tool_choice: None,
         api_key,
     })
 }
@@ -472,17 +502,29 @@ fn build_receipt_value(output_ref: &HashRef, summary: &str) -> ExprValue {
     let mut token_usage = indexmap::IndexMap::new();
     token_usage.insert("prompt".into(), ExprValue::Nat(120));
     token_usage.insert("completion".into(), ExprValue::Nat(42));
+    token_usage.insert("total".into(), ExprValue::Nat(162));
+
+    let mut finish_reason = indexmap::IndexMap::new();
+    finish_reason.insert("reason".into(), ExprValue::Text("stop".into()));
+    finish_reason.insert("raw".into(), ExprValue::Null);
 
     let mut record = indexmap::IndexMap::new();
     record.insert(
         "output_ref".into(),
         ExprValue::Text(output_ref.as_str().to_string()),
     );
+    record.insert("raw_output_ref".into(), ExprValue::Null);
+    record.insert("provider_response_id".into(), ExprValue::Null);
+    record.insert("finish_reason".into(), ExprValue::Record(finish_reason));
+    record.insert("token_usage".into(), ExprValue::Record(token_usage.clone()));
+    record.insert("usage_details".into(), ExprValue::Null);
+    record.insert("warnings_ref".into(), ExprValue::Null);
+    record.insert("rate_limit_ref".into(), ExprValue::Null);
+    record.insert("cost_cents".into(), ExprValue::Nat(0));
     record.insert(
         "summary_preview".into(),
         ExprValue::Text(summary.to_string()),
     );
-    record.insert("token_usage".into(), ExprValue::Record(token_usage.clone()));
     record.insert("tokens_prompt".into(), ExprValue::Nat(120));
     record.insert("tokens_completion".into(), ExprValue::Nat(42));
     record.insert("cost_millis".into(), ExprValue::Nat(250));

@@ -882,11 +882,13 @@ mod tests {
                     params: ExprOrValue::Json(json!({
                         "provider": "openai",
                         "model": "gpt-5.2",
-                        "temperature": "0.5",
-                        "max_tokens": 128,
                         "message_refs": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
-                        "tool_refs": null,
-                        "tool_choice": null,
+                        "runtime": {
+                            "temperature": "0.5",
+                            "max_tokens": 128,
+                            "tool_refs": null,
+                            "tool_choice": null
+                        },
                         "api_key": null
                     })),
                     cap: "cap_llm".into(),

@@ -45,14 +45,25 @@
           "record": {
             "provider": { "text": "mock" },
             "model": { "text": "mock-summarizer" },
-            "temperature": { "text": "0" },
-            "max_tokens": { "nat": 512 },
             "message_refs": {
               "list": [
                 { "ref": "@var:body_ref" }
               ]
             },
-            "tool_refs": { "null": {} },
+            "runtime": {
+              "record": {
+                "temperature": { "text": "0" },
+                "top_p": { "null": {} },
+                "max_tokens": { "nat": 512 },
+                "tool_refs": { "null": {} },
+                "tool_choice": { "null": {} },
+                "reasoning_effort": { "null": {} },
+                "stop_sequences": { "null": {} },
+                "metadata": { "null": {} },
+                "provider_options_ref": { "null": {} },
+                "response_format_ref": { "null": {} }
+              }
+            },
             "api_key": {
               "variant": {
                 "tag": "secret",

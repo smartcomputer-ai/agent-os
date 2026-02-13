@@ -39,6 +39,11 @@ struct LlmCapParams {
 struct LlmGenerateParams {
     provider: String,
     model: String,
+    runtime: LlmRuntimeArgs,
+}
+
+#[derive(Deserialize, Default)]
+struct LlmRuntimeArgs {
     #[serde(default)]
     max_tokens: Option<u64>,
     #[serde(default)]
@@ -102,7 +107,9 @@ impl PureModule for CapEnforceLlmBasic {
                 format!("model '{}' not allowed", effect_params.model),
             ));
         }
-        if let (Some(limit), Some(requested)) = (cap_params.max_tokens, effect_params.max_tokens) {
+        if let (Some(limit), Some(requested)) =
+            (cap_params.max_tokens, effect_params.runtime.max_tokens)
+        {
             if requested > limit {
                 return Ok(deny(
                     "max_tokens_exceeded",
@@ -112,7 +119,7 @@ impl PureModule for CapEnforceLlmBasic {
         }
         if let Some(allowed) = &cap_params.tools_allow {
             if !allowed.is_empty() {
-                if let Some(choice) = &effect_params.tool_choice {
+                if let Some(choice) = &effect_params.runtime.tool_choice {
                     if let LlmToolChoice::Tool { name } = choice {
                         if !allowed.iter().any(|t| t == name) {
                             return Ok(deny("tool_not_allowed", "tool not allowed"));

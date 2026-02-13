@@ -538,6 +538,68 @@ fn workspace_resolve_params_literal(workspace: &str) -> ExprOrValue {
 }
 
 fn llm_params_literal(provider: &str, model: &str, max_tokens: u64) -> ExprOrValue {
+    let runtime = ValueLiteral::Record(ValueRecord {
+        record: IndexMap::from([
+            (
+                "temperature".into(),
+                ValueLiteral::Dec128(aos_air_types::ValueDec128 {
+                    dec128: "0.4".into(),
+                }),
+            ),
+            (
+                "top_p".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+            (
+                "max_tokens".into(),
+                ValueLiteral::Nat(aos_air_types::ValueNat { nat: max_tokens }),
+            ),
+            (
+                "tool_refs".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+            (
+                "tool_choice".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+            (
+                "reasoning_effort".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+            (
+                "stop_sequences".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+            (
+                "metadata".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+            (
+                "provider_options_ref".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+            (
+                "response_format_ref".into(),
+                ValueLiteral::Null(ValueNull {
+                    null: EmptyObject::default(),
+                }),
+            ),
+        ]),
+    });
     ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
         record: IndexMap::from([
             (
@@ -553,16 +615,6 @@ fn llm_params_literal(provider: &str, model: &str, max_tokens: u64) -> ExprOrVal
                 }),
             ),
             (
-                "temperature".into(),
-                ValueLiteral::Dec128(aos_air_types::ValueDec128 {
-                    dec128: "0.4".into(),
-                }),
-            ),
-            (
-                "max_tokens".into(),
-                ValueLiteral::Nat(aos_air_types::ValueNat { nat: max_tokens }),
-            ),
-            (
                 "message_refs".into(),
                 ValueLiteral::List(aos_air_types::ValueList {
                     list: vec![ValueLiteral::Hash(aos_air_types::ValueHash {
@@ -570,18 +622,7 @@ fn llm_params_literal(provider: &str, model: &str, max_tokens: u64) -> ExprOrVal
                     })],
                 }),
             ),
-            (
-                "tool_refs".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-            (
-                "tool_choice".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
+            ("runtime".into(), runtime),
             (
                 "api_key".into(),
                 ValueLiteral::Null(ValueNull {
