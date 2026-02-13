@@ -4,7 +4,9 @@
 //! `target/wasm32-unknown-unknown/debug/workspace.wasm`. Build it first with:
 //! `cargo build -p aos-sys --target wasm32-unknown-unknown`.
 
-#[path = "helpers.rs"]
+#![cfg(feature = "e2e-tests")]
+
+#[path = "../tests/helpers.rs"]
 mod helpers;
 
 use std::collections::BTreeMap;
