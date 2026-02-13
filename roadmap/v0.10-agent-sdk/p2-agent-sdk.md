@@ -15,6 +15,17 @@ Define and implement a reusable Agent SDK above core AOS that is:
 
 This document is the umbrella index. Implementation is split into staged docs (`p2.1` ... `p2.6`) with hard exit gates.
 
+## Repository Placement and Test Runner Decisions
+
+1. SDK contracts and reusable runtime helpers live in `crates/aos-agent-sdk`.
+2. For v0.10, SDK reducer/pure WASM modules stay in `crates/aos-agent-sdk` (`src/bin/*`) rather than a separate module crate.
+3. Canonical reusable AIR assets for the SDK live under `crates/aos-agent-sdk/air/` (schemas, module defs, plan templates, capability/policy templates).
+4. `apps/demiurge` is a consumer and migration target for SDK contracts, not the source of truth for them.
+5. `crates/aos-smoke` is the single end-to-end runner for SDK flows; do not introduce a parallel e2e harness in `aos-agent-sdk`.
+6. E2E execution has two lanes:
+   - deterministic lane (default/CI, mock or stub adapters, replay parity required),
+   - live lane (opt-in with real credentials/providers, validates wiring/interop, not replay-parity gating).
+
 ## Why Staged
 
 The SDK has coupled contracts (session lifecycle, provider profiles, loop safety, event API, failure semantics).  

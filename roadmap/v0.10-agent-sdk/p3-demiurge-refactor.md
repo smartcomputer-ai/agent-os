@@ -101,6 +101,7 @@ These invariants must be preserved during refactor to avoid regressions:
 - Preserve existing Demiurge e2e coverage as baseline.
 - Add replay parity tests for migrated flows.
 - Add SDK conformance tests that run against Demiurge as a fixture app.
+- Keep `crates/aos-smoke` as the single e2e runner for SDK-level scenarios; avoid adding a Demiurge-specific parallel runner.
 
 ## Definition of Done
 
