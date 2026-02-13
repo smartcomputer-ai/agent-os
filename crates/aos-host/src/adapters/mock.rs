@@ -374,7 +374,10 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
     let runtime_map = match map.get(&serde_cbor::Value::Text("runtime".into())) {
         Some(serde_cbor::Value::Map(m)) => m,
         Some(other) => {
-            return Err(anyhow!("field 'runtime' must be record/map, got {:?}", other));
+            return Err(anyhow!(
+                "field 'runtime' must be record/map, got {:?}",
+                other
+            ));
         }
         None => {
             return Err(anyhow!("field 'runtime' missing from llm.generate params"));

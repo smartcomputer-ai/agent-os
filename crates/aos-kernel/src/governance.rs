@@ -399,7 +399,9 @@ fn load_defs_from_manifest<T>(
 fn parse_secret_name(name: &str) -> Result<(String, u64), KernelError> {
     let mut parts = name.rsplitn(2, '@');
     let version_raw = parts.next().ok_or_else(|| {
-        KernelError::Manifest(format!("invalid defsecret name '{name}': missing version segment"))
+        KernelError::Manifest(format!(
+            "invalid defsecret name '{name}': missing version segment"
+        ))
     })?;
     let version_part = version_raw.parse::<u64>().map_err(|_| {
         KernelError::Manifest(format!(

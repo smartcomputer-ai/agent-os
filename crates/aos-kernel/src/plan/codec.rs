@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
 
-use aos_air_exec::{Env as ExprEnv, Value as ExprValue, ValueKey, ValueMap as ExecValueMap, ValueSet as ExecValueSet, eval_expr};
+use aos_air_exec::{
+    Env as ExprEnv, Value as ExprValue, ValueKey, ValueMap as ExecValueMap,
+    ValueSet as ExecValueSet, eval_expr,
+};
 use aos_air_types::{
     EmptyObject, ExprOrValue, HashRef, ValueBool, ValueBytes, ValueDec128, ValueDurationNs,
     ValueHash, ValueInt, ValueList, ValueLiteral, ValueMap, ValueMapEntry, ValueNat, ValueNull,

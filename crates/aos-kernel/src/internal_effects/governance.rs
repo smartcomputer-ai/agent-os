@@ -34,7 +34,8 @@ where
                 ));
             }
         };
-        let patch = crate::governance_effects::load_patch_by_hash(self.store().as_ref(), &patch_hash)?;
+        let patch =
+            crate::governance_effects::load_patch_by_hash(self.store().as_ref(), &patch_hash)?;
         let proposal_id = self.submit_proposal(patch, params.description.clone())?;
         let receipt = GovProposeReceipt {
             proposal_id,

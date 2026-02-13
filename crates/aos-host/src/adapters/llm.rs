@@ -270,21 +270,22 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             }
         };
 
-        let (tools, tool_choice_from_blob) = if let Some(tool_refs) = params.runtime.tool_refs.as_ref() {
-            match self.load_tools_blobs(tool_refs) {
-                Ok((tools, choice)) => (Some(tools), choice),
-                Err(err) => {
-                    return Ok(self.failure_receipt(
-                        intent,
-                        &provider_id,
-                        ReceiptStatus::Error,
-                        err,
-                    ));
+        let (tools, tool_choice_from_blob) =
+            if let Some(tool_refs) = params.runtime.tool_refs.as_ref() {
+                match self.load_tools_blobs(tool_refs) {
+                    Ok((tools, choice)) => (Some(tools), choice),
+                    Err(err) => {
+                        return Ok(self.failure_receipt(
+                            intent,
+                            &provider_id,
+                            ReceiptStatus::Error,
+                            err,
+                        ));
+                    }
                 }
-            }
-        } else {
-            (None, None)
-        };
+            } else {
+                (None, None)
+            };
 
         let response_format = if let Some(reference) = params.runtime.response_format_ref.as_ref() {
             match self.load_response_format(reference) {
@@ -302,22 +303,22 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             None
         };
 
-        let provider_options =
-            if let Some(reference) = params.runtime.provider_options_ref.as_ref() {
-                match self.load_json_blob(reference, "provider_options_ref") {
-                    Ok(value) => Some(value),
-                    Err(err) => {
-                        return Ok(self.failure_receipt(
-                            intent,
-                            &provider_id,
-                            ReceiptStatus::Error,
-                            err,
-                        ));
-                    }
+        let provider_options = if let Some(reference) = params.runtime.provider_options_ref.as_ref()
+        {
+            match self.load_json_blob(reference, "provider_options_ref") {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        err,
+                    ));
                 }
-            } else {
-                None
-            };
+            }
+        } else {
+            None
+        };
 
         let request = Request {
             model: params.model.clone(),
@@ -344,7 +345,11 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
             max_tokens: params.runtime.max_tokens,
             stop_sequences: params.runtime.stop_sequences.clone(),
             reasoning_effort: params.runtime.reasoning_effort.clone(),
-            metadata: params.runtime.metadata.clone().map(|m| m.into_iter().collect()),
+            metadata: params
+                .runtime
+                .metadata
+                .clone()
+                .map(|m| m.into_iter().collect()),
             provider_options,
         };
 

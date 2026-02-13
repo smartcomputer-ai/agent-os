@@ -219,8 +219,8 @@ fn hash_ref_from_hash(hash: &Hash) -> Result<HashRef, KernelError> {
 }
 
 fn parse_hash_str(value: &str) -> Result<Hash, KernelError> {
-    let hash_ref =
-        HashRef::new(value.to_string()).map_err(|e| KernelError::Query(format!("invalid hash: {e}")))?;
+    let hash_ref = HashRef::new(value.to_string())
+        .map_err(|e| KernelError::Query(format!("invalid hash: {e}")))?;
     Hash::from_hex_str(hash_ref.as_str())
         .map_err(|e| KernelError::Query(format!("invalid hash: {e}")))
 }
@@ -312,7 +312,10 @@ fn upsert_entry(entries: &mut Vec<WorkspaceEntry>, entry: WorkspaceEntry) {
     }
 }
 
-fn remove_entry(entries: &mut Vec<WorkspaceEntry>, name: &str) -> Result<WorkspaceEntry, KernelError> {
+fn remove_entry(
+    entries: &mut Vec<WorkspaceEntry>,
+    name: &str,
+) -> Result<WorkspaceEntry, KernelError> {
     match entries.binary_search_by(|e| e.name.as_str().cmp(name)) {
         Ok(idx) => Ok(entries.remove(idx)),
         Err(_) => Err(KernelError::Query("path not found".into())),
@@ -398,7 +401,10 @@ fn collect_subtree_entries<S: aos_store::Store>(
     Ok(())
 }
 
-fn resolve_file_mode(existing: Option<&WorkspaceEntry>, requested: Option<u64>) -> Result<u64, KernelError> {
+fn resolve_file_mode(
+    existing: Option<&WorkspaceEntry>,
+    requested: Option<u64>,
+) -> Result<u64, KernelError> {
     if let Some(mode) = requested {
         if mode != MODE_FILE_DEFAULT && mode != MODE_FILE_EXEC {
             return Err(KernelError::Query("invalid file mode".into()));
@@ -431,7 +437,11 @@ fn apply_annotations_patch<S: aos_store::Store>(
     patch: &WorkspaceAnnotationsPatch,
 ) -> Result<HashRef, KernelError> {
     let mut annotations = match current {
-        Some(hash) => annotations_from_hash(store, Some(hash))?.unwrap_or_default().0,
+        Some(hash) => {
+            annotations_from_hash(store, Some(hash))?
+                .unwrap_or_default()
+                .0
+        }
         None => BTreeMap::new(),
     };
     for (key, value) in &patch.0 {
@@ -457,7 +467,8 @@ fn set_annotations_at_path<S: aos_store::Store>(
 ) -> Result<(Hash, HashRef), KernelError> {
     let mut tree = load_tree(store, tree_hash)?;
     if path.is_empty() {
-        let annotations_hash = apply_annotations_patch(store, tree.annotations_hash.as_ref(), patch)?;
+        let annotations_hash =
+            apply_annotations_patch(store, tree.annotations_hash.as_ref(), patch)?;
         tree.annotations_hash = Some(annotations_hash.clone());
         let new_root = store.put_node(&tree)?;
         return Ok((new_root, annotations_hash));
@@ -468,7 +479,8 @@ fn set_annotations_at_path<S: aos_store::Store>(
             .cloned()
             .ok_or_else(|| KernelError::Query("path not found".into()))?;
         if entry.kind == "file" {
-            let annotations_hash = apply_annotations_patch(store, entry.annotations_hash.as_ref(), patch)?;
+            let annotations_hash =
+                apply_annotations_patch(store, entry.annotations_hash.as_ref(), patch)?;
             let updated = WorkspaceEntry {
                 annotations_hash: Some(annotations_hash.clone()),
                 ..entry
@@ -479,7 +491,8 @@ fn set_annotations_at_path<S: aos_store::Store>(
         }
         if entry.kind == "dir" {
             let child_hash = hash_from_ref(&entry.hash)?;
-            let (new_child, annotations_hash) = set_annotations_at_path(store, &child_hash, &[], patch)?;
+            let (new_child, annotations_hash) =
+                set_annotations_at_path(store, &child_hash, &[], patch)?;
             let updated = WorkspaceEntry {
                 hash: hash_ref_from_hash(&new_child)?,
                 annotations_hash: entry.annotations_hash.clone(),
@@ -499,7 +512,8 @@ fn set_annotations_at_path<S: aos_store::Store>(
         return Err(KernelError::Query("path is not a directory".into()));
     }
     let child_hash = hash_from_ref(&entry.hash)?;
-    let (new_child, annotations_hash) = set_annotations_at_path(store, &child_hash, &path[1..], patch)?;
+    let (new_child, annotations_hash) =
+        set_annotations_at_path(store, &child_hash, &path[1..], patch)?;
     let updated = WorkspaceEntry {
         hash: hash_ref_from_hash(&new_child)?,
         annotations_hash: entry.annotations_hash.clone(),
@@ -624,7 +638,9 @@ where
                 head: None,
                 root_hash: None,
             };
-            return Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?);
+            return Ok(
+                to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?
+            );
         };
         let history: WorkspaceHistory = serde_cbor::from_slice(&state_bytes)
             .map_err(|e| KernelError::Query(format!("decode workspace history: {e}")))?;
@@ -637,7 +653,9 @@ where
                 head: None,
                 root_hash: None,
             };
-            return Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?);
+            return Ok(
+                to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?
+            );
         };
         let receipt = WorkspaceResolveReceipt {
             exists: true,
@@ -667,7 +685,10 @@ where
         Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
     }
 
-    pub(super) fn handle_workspace_list(&self, intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
+    pub(super) fn handle_workspace_list(
+        &self,
+        intent: &EffectIntent,
+    ) -> Result<Vec<u8>, KernelError> {
         let params: WorkspaceListParams = intent
             .params()
             .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
@@ -720,7 +741,11 @@ where
         } else {
             None
         };
-        let sliced = if start < end { entries[start..end].to_vec() } else { Vec::new() };
+        let sliced = if start < end {
+            entries[start..end].to_vec()
+        } else {
+            Vec::new()
+        };
         let receipt = WorkspaceListReceipt {
             entries: sliced,
             next_cursor,
@@ -759,10 +784,16 @@ where
         let path_segments = validate_path(&params.path)?;
         let store = self.store();
         let Some(entry) = resolve_entry(store.as_ref(), &root_hash, &path_segments)? else {
-            return Err(KernelError::Query(format!("path not found: {}", params.path)));
+            return Err(KernelError::Query(format!(
+                "path not found: {}",
+                params.path
+            )));
         };
         if entry.kind != "file" {
-            return Err(KernelError::Query(format!("path is not a file: {}", params.path)));
+            return Err(KernelError::Query(format!(
+                "path is not a file: {}",
+                params.path
+            )));
         }
         let blob_hash = hash_from_ref(&entry.hash)?;
         let mut bytes = store.get_blob(blob_hash)?;
@@ -813,7 +844,10 @@ where
         Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
     }
 
-    pub(super) fn handle_workspace_remove(&self, intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
+    pub(super) fn handle_workspace_remove(
+        &self,
+        intent: &EffectIntent,
+    ) -> Result<Vec<u8>, KernelError> {
         let params: WorkspaceRemoveParams = intent
             .params()
             .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
@@ -821,7 +855,10 @@ where
         let path_segments = validate_path(&params.path)?;
         let store = self.store();
         if resolve_entry(store.as_ref(), &root_hash, &path_segments)?.is_none() {
-            return Err(KernelError::Query(format!("path not found: {}", params.path)));
+            return Err(KernelError::Query(format!(
+                "path not found: {}",
+                params.path
+            )));
         }
         let new_root = remove_entry_at_path(store.as_ref(), &root_hash, &path_segments)?;
         let receipt = WorkspaceRemoveReceipt {
@@ -830,7 +867,10 @@ where
         Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
     }
 
-    pub(super) fn handle_workspace_diff(&self, intent: &EffectIntent) -> Result<Vec<u8>, KernelError> {
+    pub(super) fn handle_workspace_diff(
+        &self,
+        intent: &EffectIntent,
+    ) -> Result<Vec<u8>, KernelError> {
         let params: WorkspaceDiffParams = intent
             .params()
             .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
@@ -853,8 +893,14 @@ where
             if entry_a.is_none() && entry_b.is_none() {
                 return Err(KernelError::Query(format!("path not found: {}", prefix)));
             }
-            let file_diff = entry_a.as_ref().map(|entry| entry.kind == "file").unwrap_or(false)
-                || entry_b.as_ref().map(|entry| entry.kind == "file").unwrap_or(false);
+            let file_diff = entry_a
+                .as_ref()
+                .map(|entry| entry.kind == "file")
+                .unwrap_or(false)
+                || entry_b
+                    .as_ref()
+                    .map(|entry| entry.kind == "file")
+                    .unwrap_or(false);
             if file_diff {
                 if let Some(entry) = entry_a {
                     entries_a.push((prefix.clone(), entry));
@@ -890,7 +936,9 @@ where
             let new = map_b.get(&path);
             if old
                 .zip(new)
-                .map(|(a, b)| a.kind == b.kind && a.hash == b.hash && a.annotations_hash == b.annotations_hash)
+                .map(|(a, b)| {
+                    a.kind == b.kind && a.hash == b.hash && a.annotations_hash == b.annotations_hash
+                })
                 .unwrap_or(false)
             {
                 continue;
@@ -923,7 +971,9 @@ where
             None => Vec::new(),
         };
         let store = self.store();
-        if !path_segments.is_empty() && resolve_entry(store.as_ref(), &root_hash, &path_segments)?.is_none() {
+        if !path_segments.is_empty()
+            && resolve_entry(store.as_ref(), &root_hash, &path_segments)?.is_none()
+        {
             return Err(KernelError::Query(format!(
                 "path not found: {}",
                 params.path.as_deref().unwrap_or_default()
@@ -968,14 +1018,20 @@ where
             None => Vec::new(),
         };
         let store = self.store();
-        if !path_segments.is_empty() && resolve_entry(store.as_ref(), &root_hash, &path_segments)?.is_none() {
+        if !path_segments.is_empty()
+            && resolve_entry(store.as_ref(), &root_hash, &path_segments)?.is_none()
+        {
             return Err(KernelError::Query(format!(
                 "path not found: {}",
                 params.path.as_deref().unwrap_or_default()
             )));
         }
-        let (new_root, annotations_hash) =
-            set_annotations_at_path(store.as_ref(), &root_hash, &path_segments, &params.annotations_patch)?;
+        let (new_root, annotations_hash) = set_annotations_at_path(
+            store.as_ref(),
+            &root_hash,
+            &path_segments,
+            &params.annotations_patch,
+        )?;
         let receipt = WorkspaceAnnotationsSetReceipt {
             new_root_hash: hash_ref_from_hash(&new_root)?,
             annotations_hash,
@@ -1031,9 +1087,12 @@ mod tests {
         let root_no_file =
             remove_entry_at_path(&store, &new_root, &vec!["dir".into(), "file.txt".into()])
                 .expect("remove file");
-        let missing =
-            resolve_entry(&store, &root_no_file, &vec!["dir".into(), "file.txt".into()])
-                .expect("resolve");
+        let missing = resolve_entry(
+            &store,
+            &root_no_file,
+            &vec!["dir".into(), "file.txt".into()],
+        )
+        .expect("resolve");
         assert!(missing.is_none());
         let root_no_dir =
             remove_entry_at_path(&store, &root_no_file, &vec!["dir".into()]).expect("remove dir");

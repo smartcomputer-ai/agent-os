@@ -147,10 +147,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::KernelBuilder;
     use crate::internal_effects::introspect::{
         ListCellsParams, ListCellsReceipt, ManifestParams, ManifestReceipt,
     };
-    use crate::KernelBuilder;
     use aos_effects::IntentBuilder;
     use aos_store::MemStore;
     use serde_json::json;

@@ -480,7 +480,10 @@ fn simple_state_manifest(store: &Arc<fixtures::TestStore>) -> aos_kernel::manife
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let routing = vec![fixtures::routing_event(fixtures::START_SCHEMA, &reducer.name)];
+    let routing = vec![fixtures::routing_event(
+        fixtures::START_SCHEMA,
+        &reducer.name,
+    )];
     let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
     fixtures::insert_test_schemas(
         &mut loaded,

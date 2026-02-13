@@ -330,10 +330,7 @@ fn env_resolver_injects_llm_api_key() {
     params.insert(Value::Text("provider".into()), Value::Text("openai".into()));
     params.insert(Value::Text("model".into()), Value::Text("gpt-5.2".into()));
     let mut runtime = BTreeMap::new();
-    runtime.insert(
-        Value::Text("temperature".into()),
-        Value::Text("0.7".into()),
-    );
+    runtime.insert(Value::Text("temperature".into()), Value::Text("0.7".into()));
     runtime.insert(Value::Text("max_tokens".into()), Value::Integer(16));
     params.insert(Value::Text("runtime".into()), Value::Map(runtime));
     params.insert(

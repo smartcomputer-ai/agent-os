@@ -73,3 +73,8 @@ path = "tests_e2e/cap_enforcer_e2e.rs"
 [[test]]
 name = "workspace_e2e"
 path = "tests_e2e/workspace_e2e.rs"
+
+[[test]]
+name = "adapters_llm_live"
+path = "tests_live/adapters_llm_live.rs"
+required-features = ["adapter-llm"]

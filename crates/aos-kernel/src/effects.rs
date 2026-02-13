@@ -770,7 +770,8 @@ fn builtin_llm_enforcer(
             message: format!("model '{}' not allowed", effect_params.model),
         });
     }
-    if let (Some(limit), Some(requested)) = (cap_params.max_tokens, effect_params.runtime.max_tokens)
+    if let (Some(limit), Some(requested)) =
+        (cap_params.max_tokens, effect_params.runtime.max_tokens)
     {
         if requested > limit {
             return Err(CapDenyReason {

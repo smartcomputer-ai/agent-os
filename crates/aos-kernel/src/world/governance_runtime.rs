@@ -431,9 +431,16 @@ mod tests {
         );
         kernel.pending_reducer_receipts.insert(
             [2u8; 32],
-            ReducerEffectContext::new("com.acme/Reducer@1".into(), "timer.set".into(), vec![], None),
+            ReducerEffectContext::new(
+                "com.acme/Reducer@1".into(),
+                "timer.set".into(),
+                vec![],
+                None,
+            ),
         );
-        kernel.waiting_events.insert("com.acme/Evt@1".into(), vec![9]);
+        kernel
+            .waiting_events
+            .insert("com.acme/Evt@1".into(), vec![9]);
         kernel.scheduler.push_plan(9);
         kernel.effect_manager.restore_queue(vec![EffectIntent {
             kind: EffectKind::new("introspect.manifest"),
@@ -478,6 +485,9 @@ mod tests {
             nodes: vec![],
         };
         let result = kernel.apply_patch_direct(patch);
-        assert!(result.is_ok(), "expected quiescent apply to succeed: {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected quiescent apply to succeed: {result:?}"
+        );
     }
 }

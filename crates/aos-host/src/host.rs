@@ -300,7 +300,8 @@ impl<S: Store + 'static> WorldHost<S> {
         match evt {
             ExternalEvent::DomainEvent { schema, value, key } => {
                 if let Some(key) = key {
-                    self.kernel.submit_domain_event_with_key(schema, value, key)?;
+                    self.kernel
+                        .submit_domain_event_with_key(schema, value, key)?;
                 } else {
                     self.kernel.submit_domain_event(schema, value)?;
                 }

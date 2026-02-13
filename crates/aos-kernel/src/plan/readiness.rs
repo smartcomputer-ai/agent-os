@@ -2,8 +2,8 @@ use aos_air_exec::eval_expr;
 
 use crate::error::KernelError;
 
-use super::{PlanInstance, StepState};
 use super::codec::value_to_bool;
+use super::{PlanInstance, StepState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StepReadiness {
@@ -55,8 +55,9 @@ impl PlanInstance {
             match self.step_states.get(&dep.pred) {
                 Some(StepState::Completed) => {
                     let guard_true = if let Some(expr) = &dep.guard {
-                        let value = eval_expr(expr, &self.env)
-                            .map_err(|err| KernelError::Manifest(format!("guard eval error: {err}")))?;
+                        let value = eval_expr(expr, &self.env).map_err(|err| {
+                            KernelError::Manifest(format!("guard eval error: {err}"))
+                        })?;
                         value_to_bool(value)?
                     } else {
                         true

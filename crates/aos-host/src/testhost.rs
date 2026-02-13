@@ -192,7 +192,10 @@ impl<S: Store + 'static> TestHost<S> {
 
     /// Drain pending effects from the kernel.
     pub fn drain_effects(&mut self) -> Result<Vec<EffectIntent>, HostError> {
-        self.host.kernel_mut().drain_effects().map_err(HostError::from)
+        self.host
+            .kernel_mut()
+            .drain_effects()
+            .map_err(HostError::from)
     }
 
     /// Apply a receipt directly (bypassing adapter execution).

@@ -55,10 +55,15 @@ impl PlanInstance {
                 let normalized =
                     normalize_cbor_by_name(&self.schema_index, wait.schema.as_str(), &event.value)
                         .map_err(|err| {
-                            KernelError::Manifest(format!("await_event payload decode error: {err}"))
+                            KernelError::Manifest(format!(
+                                "await_event payload decode error: {err}"
+                            ))
                         })?;
                 let schema = self.schema_index.get(wait.schema.as_str()).ok_or_else(|| {
-                    KernelError::Manifest(format!("schema '{}' not found for await_event", wait.schema))
+                    KernelError::Manifest(format!(
+                        "schema '{}' not found for await_event",
+                        wait.schema
+                    ))
                 })?;
                 let value = cbor_to_expr_value(&normalized.value, schema, &self.schema_index)?;
                 if let Some(predicate) = &wait.where_clause {

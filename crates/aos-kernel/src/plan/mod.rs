@@ -1,13 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use aos_air_exec::{
-    Env as ExprEnv, Value as ExprValue, eval_expr,
-};
+use aos_air_exec::{Env as ExprEnv, Value as ExprValue, eval_expr};
 use aos_air_types::plan_literals::SchemaIndex;
-use aos_air_types::{
-    DefPlan, Expr, PlanEdge, PlanStep, PlanStepKind, TypeExpr,
-};
+use aos_air_types::{DefPlan, Expr, PlanEdge, PlanStep, PlanStepKind, TypeExpr};
 use aos_cbor::to_canonical_cbor;
 use aos_effects::EffectIntent;
 use aos_wasm_abi::DomainEvent;
@@ -258,8 +254,17 @@ impl PlanInstance {
             }
 
             for step_id in ready_steps {
-                let step = self.step_map.get(&step_id).expect("step must exist").clone();
-                match self.process_ready_step(step, &step_id, &mut outcome, &mut waiting_registered)? {
+                let step = self
+                    .step_map
+                    .get(&step_id)
+                    .expect("step must exist")
+                    .clone();
+                match self.process_ready_step(
+                    step,
+                    &step_id,
+                    &mut outcome,
+                    &mut waiting_registered,
+                )? {
                     StepTickControl::Return => return Ok(outcome),
                     StepTickControl::RestartTick => {
                         progressed = true;
@@ -387,5 +392,4 @@ impl PlanInstance {
         }
         Ok(None)
     }
-
 }

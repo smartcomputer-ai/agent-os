@@ -1,6 +1,9 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::plan_literals::{canonicalize_literal, validate_literal};
-use aos_air_types::{PlanStep, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepAssign, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent};
+use aos_air_types::{
+    PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect,
+    PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+};
 use aos_wasm_abi::DomainEvent;
 use indexmap::IndexMap;
 
@@ -8,8 +11,8 @@ use crate::effects::EffectManager;
 use crate::error::KernelError;
 
 use super::codec::{
-    eval_expr_or_value, expr_value_to_cbor_value, expr_value_to_literal, idempotency_key_from_value,
-    literal_to_value,
+    eval_expr_or_value, expr_value_to_cbor_value, expr_value_to_literal,
+    idempotency_key_from_value, literal_to_value,
 };
 use super::{EventWait, PlanInstance, PlanTickOutcome, StepState};
 
@@ -28,10 +31,14 @@ impl PlanInstance {
     ) -> Result<StepTickControl, KernelError> {
         let mut progressed = false;
         for step_id in emit_ready {
-            if let Some(emit) = self.step_map.get(step_id).and_then(|step| match &step.kind {
-                PlanStepKind::EmitEffect(emit) => Some(emit.clone()),
-                _ => None,
-            }) {
+            if let Some(emit) = self
+                .step_map
+                .get(step_id)
+                .and_then(|step| match &step.kind {
+                    PlanStepKind::EmitEffect(emit) => Some(emit.clone()),
+                    _ => None,
+                })
+            {
                 if self.handle_emit_effect_step(step_id, &emit, effects, outcome)? {
                     return Ok(StepTickControl::Return);
                 }
@@ -62,7 +69,9 @@ impl PlanInstance {
             PlanStepKind::AwaitEvent(await_event) => {
                 self.handle_await_event_step(step_id, await_event, outcome)
             }
-            PlanStepKind::RaiseEvent(raise) => self.handle_raise_event_step(step_id, raise, outcome),
+            PlanStepKind::RaiseEvent(raise) => {
+                self.handle_raise_event_step(step_id, raise, outcome)
+            }
             PlanStepKind::End(end) => self.handle_end_step(step_id, end, outcome),
         }
     }
@@ -109,10 +118,13 @@ impl PlanInstance {
         } else {
             [0u8; 32]
         };
-        let grant = self.cap_handles.get(step_id).ok_or_else(|| KernelError::PlanCapabilityMissing {
-            plan: self.name.clone(),
-            cap: emit.cap.clone(),
-        })?;
+        let grant =
+            self.cap_handles
+                .get(step_id)
+                .ok_or_else(|| KernelError::PlanCapabilityMissing {
+                    plan: self.name.clone(),
+                    cap: emit.cap.clone(),
+                })?;
         let intent = effects.enqueue_plan_effect_with_grant(
             &self.name,
             &emit.kind,
@@ -122,16 +134,23 @@ impl PlanInstance {
         )?;
         outcome.intents_enqueued.push(intent.clone());
         let handle = emit.bind.effect_id_as.clone();
-        self.effect_handles.insert(handle.clone(), intent.intent_hash);
+        self.effect_handles
+            .insert(handle.clone(), intent.intent_hash);
         let handle_value = ExprValue::Text(handle.clone());
         self.env.vars.insert(handle.clone(), handle_value.clone());
         let mut record = IndexMap::new();
         record.insert("handle".into(), handle_value);
-        record.insert("intent_hash".into(), ExprValue::Bytes(intent.intent_hash.to_vec()));
+        record.insert(
+            "intent_hash".into(),
+            ExprValue::Bytes(intent.intent_hash.to_vec()),
+        );
         record.insert("params".into(), params_value);
         self.record_step_value(step_id, ExprValue::Record(record));
 
-        Ok(matches!(self.finish_step(step_id, outcome)?, StepTickControl::Return))
+        Ok(matches!(
+            self.finish_step(step_id, outcome)?,
+            StepTickControl::Return
+        ))
     }
 
     fn handle_await_receipt_step(
@@ -142,7 +161,9 @@ impl PlanInstance {
         waiting_registered: &mut bool,
     ) -> Result<StepTickControl, KernelError> {
         if let Some(value) = self.receipt_values.remove(step_id) {
-            self.env.vars.insert(await_step.bind.var.clone(), value.clone());
+            self.env
+                .vars
+                .insert(await_step.bind.var.clone(), value.clone());
             self.record_step_value(step_id, value);
             return self.finish_step(step_id, outcome);
         }
@@ -166,7 +187,9 @@ impl PlanInstance {
             ));
         }
         if let Some(value) = self.event_value.take() {
-            self.env.vars.insert(await_event.bind.var.clone(), value.clone());
+            self.env
+                .vars
+                .insert(await_event.bind.var.clone(), value.clone());
             self.record_step_value(step_id, value);
             self.event_wait = None;
             return self.finish_step(step_id, outcome);
@@ -191,22 +214,28 @@ impl PlanInstance {
     ) -> Result<StepTickControl, KernelError> {
         let schema_name = raise.event.as_str();
         let schema = self.schema_index.get(schema_name).ok_or_else(|| {
-            KernelError::Manifest(format!("event schema '{}' not found for raise_event", schema_name))
+            KernelError::Manifest(format!(
+                "event schema '{}' not found for raise_event",
+                schema_name
+            ))
         })?;
         let value = eval_expr_or_value(&raise.value, &self.env, "plan raise_event eval error")?;
-        let mut event_literal = expr_value_to_literal(&value)
-            .map_err(|err| KernelError::Manifest(format!("plan raise_event literal error: {err}")))?;
+        let mut event_literal = expr_value_to_literal(&value).map_err(|err| {
+            KernelError::Manifest(format!("plan raise_event literal error: {err}"))
+        })?;
         canonicalize_literal(&mut event_literal, schema, &self.schema_index).map_err(|err| {
             KernelError::Manifest(format!("plan raise_event canonicalization error: {err}"))
         })?;
-        validate_literal(&event_literal, schema, schema_name, &self.schema_index).map_err(|err| {
-            KernelError::Manifest(format!("plan raise_event validation error: {err}"))
+        validate_literal(&event_literal, schema, schema_name, &self.schema_index).map_err(
+            |err| KernelError::Manifest(format!("plan raise_event validation error: {err}")),
+        )?;
+        let canonical_value = literal_to_value(&event_literal).map_err(|err| {
+            KernelError::Manifest(format!("plan raise_event value encode error: {err}"))
         })?;
-        let canonical_value = literal_to_value(&event_literal)
-            .map_err(|err| KernelError::Manifest(format!("plan raise_event value encode error: {err}")))?;
         let payload_cbor = expr_value_to_cbor_value(&canonical_value);
-        let payload_bytes = serde_cbor::to_vec(&payload_cbor)
-            .map_err(|err| KernelError::Manifest(format!("plan raise_event encode error: {err}")))?;
+        let payload_bytes = serde_cbor::to_vec(&payload_cbor).map_err(|err| {
+            KernelError::Manifest(format!("plan raise_event encode error: {err}"))
+        })?;
 
         let event = DomainEvent::new(schema_name.to_string(), payload_bytes);
         outcome.raised_events.push(event);
@@ -239,7 +268,8 @@ impl PlanInstance {
         }
 
         if let Some(result_expr) = &end.result {
-            let mut value = eval_expr_or_value(result_expr, &self.env, "plan end result eval error")?;
+            let mut value =
+                eval_expr_or_value(result_expr, &self.env, "plan end result eval error")?;
 
             if let Some(schema_ref) = &self.plan.output {
                 let schema_name = schema_ref.as_str();
@@ -249,16 +279,18 @@ impl PlanInstance {
                         self.plan.name
                     ))
                 })?;
-                let mut literal = expr_value_to_literal(&value)
-                    .map_err(|err| KernelError::Manifest(format!("plan end result literal error: {err}")))?;
+                let mut literal = expr_value_to_literal(&value).map_err(|err| {
+                    KernelError::Manifest(format!("plan end result literal error: {err}"))
+                })?;
                 canonicalize_literal(&mut literal, schema, &self.schema_index).map_err(|err| {
                     KernelError::Manifest(format!("plan end result canonicalization error: {err}"))
                 })?;
-                validate_literal(&literal, schema, schema_name, &self.schema_index).map_err(|err| {
-                    KernelError::Manifest(format!("plan end result validation error: {err}"))
+                validate_literal(&literal, schema, schema_name, &self.schema_index).map_err(
+                    |err| KernelError::Manifest(format!("plan end result validation error: {err}")),
+                )?;
+                value = literal_to_value(&literal).map_err(|err| {
+                    KernelError::Manifest(format!("plan end result decode error: {err}"))
                 })?;
-                value = literal_to_value(&literal)
-                    .map_err(|err| KernelError::Manifest(format!("plan end result decode error: {err}")))?;
                 let payload_bytes = serde_cbor::to_vec(&value).map_err(|err| {
                     KernelError::Manifest(format!("plan end result encode error: {err}"))
                 })?;
@@ -292,11 +324,10 @@ mod tests {
     use aos_air_types::{
         CapType, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprOrValue,
         ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
-        PlanStepAwaitEvent,
-        PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
-        SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText, TypeRecord,
-        ValueInt, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
-        catalog::EffectCatalog,
+        PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
+        PlanStepRaiseEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveInt,
+        TypePrimitiveText, TypeRecord, ValueInt, ValueLiteral, ValueMap, ValueNull, ValueRecord,
+        ValueText, catalog::EffectCatalog,
     };
     use aos_effects::CapabilityGrant;
     use serde_cbor::Value as CborValue;
