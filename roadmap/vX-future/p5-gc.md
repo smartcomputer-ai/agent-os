@@ -21,7 +21,7 @@ nodes. Opaque blobs are leaves. Log compaction + mark/sweep keeps worlds bounded
 ---
 
 ## Terms
-- Baseline snapshot: a snapshot declared as the world's new genesis.
+- Baseline snapshot: the active restore anchor for a world.
 - Journal tail: events at heights >= baseline height.
 - CAS node: canonical CBOR with a schema (typed); safe to traverse for refs.
 - CAS blob: raw bytes (opaque); not traversed by GC.
@@ -61,12 +61,12 @@ sys/BlobEdge@1 = {
 `refs` is the transitive list of CAS objects the blob depends on (e.g. image
 bytes used by a message, tool call payloads, embedded attachments).
 
-### Blob Put (v2)
-Extend `blob.put` so writers can provide refs at write time:
+### Blob Put (`@1` in-place update)
+Update `blob.put@1` so writers can provide refs at write time:
 
 ```
-sys/BlobPutParams@2 = { blob_ref: hash, refs?: list<hash> }
-sys/BlobPutReceipt@2 = { blob_ref: hash, edge_ref: hash, size: nat }
+sys/BlobPutParams@1 = { bytes: bytes, blob_ref?: hash, refs?: list<hash> }
+sys/BlobPutReceipt@1 = { blob_ref: hash, edge_ref: hash, size: nat }
 ```
 
 Behavior:
@@ -77,7 +77,7 @@ Behavior:
 ### Rule: No Opaque Refs
 Any new feature that needs to reference other CAS objects must:
 - Use typed nodes with `hash` fields, or
-- Use `blob.put@2` with `refs`.
+- Use `blob.put` with `refs`.
 Opaque blobs without `refs` are treated as leaf objects.
 This is the core constraint that makes GC tractable.
 
@@ -172,10 +172,10 @@ This is a precondition for safe log truncation and CAS GC.
 ### Backwards Compatibility
 - `blob.put@1` remains valid; blobs written without `refs` are treated as leaves.
 - GC correctness requires that any new refs are visible via typed nodes or
-  `blob.put@2`.
+  `blob.put refs`.
 
 ### World Upgrade Plan
-1) Add `sys/BlobEdge@1` + `blob.put@2` schemas.
+1) Add `sys/BlobEdge@1` + updated `blob.put@1` schemas.
 2) Update reducers/plans/adapters to persist `edge_ref` in state/events.
 3) Migrate data that embedded refs inside opaque JSON blobs:
    - Re-encode as typed nodes, or

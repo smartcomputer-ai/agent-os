@@ -5,7 +5,7 @@
 From the spec, the runtime wants:
 
 * **Journal is authoritative** (append-only, canonical CBOR).  
-* **Snapshots are optimization only** (fast restore; replay from snapshot → journal head). 
+* **Baselines are semantic restore roots** (restore = baseline snapshot + journal tail). 
 * **CAS is immutable `{hash → bytes}`** and **GC roots come only from snapshot-pinned roots** (no mutable “named refs”). 
 * **Worlds should be movable** between workloads (a worker process can run multiple worlds; orchestrator assigns). 
 
@@ -68,6 +68,13 @@ So define a **Universe** as a namespace + isolation boundary:
 * `world_id`: UUID (or UUIDv7 if you want roughly time-ordered creation)
 
 World address = `(universe_id, world_id)`.
+
+### 3.2 World Creation Baseline Requirement
+
+Every world must have an `active_baseline` at creation time.
+
+* unseeded create: write an initial baseline snapshot for empty/default runtime state
+* seeded/forked create: set `active_baseline` to the selected seed/fork snapshot
 
 ---
 
@@ -201,7 +208,7 @@ In hosted mode:
 
 ## 6) Snapshot persistence: what to store, how to index, how to restore
 
-Architecture doc: snapshots persist control-plane AIR state + reducer state bytes + pinned blob roots, and restore = snapshot + replay. 
+Architecture doc: snapshots persist control-plane AIR state + reducer state bytes + pinned blob roots. Restore is always baseline snapshot + replay tail.
 
 Cells doc adds: snapshots persist `cell_index_root` per keyed reducer. 
 
@@ -247,20 +254,21 @@ Key point: include enough data to restart without scanning the whole journal:
 In FDB:
 
 * `world/<u>/<w>/snapshots/<height> -> snapshot_hash`
-* `world/<u>/<w>/latest_snapshot -> {height, snapshot_hash}`
+* `world/<u>/<w>/active_baseline -> {height, snapshot_hash, receipt_horizon_height?}`
 
-And you also append the standard journal entry:
+And you also append journal entries:
 
-* `Snapshot { snapshot_ref, height }` as in the spec.  
+* `Snapshot { snapshot_ref, height }` when snapshotting  
+* `BaselineSnapshot { snapshot_ref, height, logical_time_ns, receipt_horizon_height? }` when promoting a baseline
 
 ### 6.3 Restore algorithm
 
 When a worker acquires a world lease:
 
-1. read `latest_snapshot`
+1. read `active_baseline`
 2. `cas_get(snapshot_hash)`
 3. hydrate world runtime state
-4. replay journal entries `(snapshot_height+1 .. journal_head)` in order
+4. replay journal entries with `height >= baseline.height` in order
 5. resume normal stepping
 
 This matches the intended semantics. 
@@ -537,7 +545,7 @@ Yes — but **not inside FDB as “rewrite the ordered keys”** (that’s basic
 
 * `journal/<height> -> entry_bytes` for the last N entries or last T days
 * `journal_head -> height`
-* `latest_snapshot -> (height, snapshot_hash)` 
+* `active_baseline -> (height, snapshot_hash, receipt_horizon_height?)` 
 
 **In object store (cold):**
 
@@ -546,12 +554,12 @@ Yes — but **not inside FDB as “rewrite the ordered keys”** (that’s basic
 
 **Compactor job (per world, or sharded):**
 
-1. Pick a compaction window `[h0..h1]` where `h1 <= latest_snapshot_height - safety_margin`.
+1. Pick a compaction window `[h0..h1]` where `h1 < active_baseline_height` and receipt-horizon safety checks pass.
 2. Stream those FDB entries in order, write a segment file to object store.
 3. Atomically write a `segments_index` record (FDB) that says “this range is materialized in object store”.
 4. Then delete the individual `journal/<height>` keys for that range from FDB.
 
-This gives you **bounded FDB growth** while keeping deterministic replay: restore uses `latest_snapshot` then replays **object-store segments + FDB tail** to head. Snapshots already exist as the optimization boundary. 
+This gives you **bounded FDB growth** while keeping deterministic replay: restore uses `active_baseline` then replays **object-store segments + FDB tail** to head.
 
 ### Why not “in-place compaction” in FDB?
 
@@ -568,9 +576,9 @@ The segment export approach converts “compaction” into **append-only object 
 
 Given AgentOS semantics:
 
-* **Snapshots are sufficient to restart** + replay forward. 
-  So you can compact everything **below** your retained snapshot window.
-* If you keep, say, **K snapshots per world**, you can keep journal segments back to the oldest retained snapshot height, and delete older segments entirely (unless you want infinite audit).
+* **Active baseline + retained tail are sufficient to restart** + replay forward. 
+  So you can compact everything **below** the active baseline height.
+* If you keep, say, **K baselines per world**, you can keep journal segments back to the oldest retained baseline height, and delete older segments entirely (unless you want infinite audit).
 
 If you want *infinite audit*, keep all segments forever in object store (cheap) and only bound FDB.
 
@@ -614,7 +622,7 @@ So branching = **create a new world whose starting point is an existing snapshot
 Implementation (all in one FDB transaction):
 
 1. Create `new_world_id`
-2. Set `new_world.latest_snapshot = (src_height, snapshot_hash)`
+2. Set `new_world.active_baseline = (src_height, snapshot_hash, receipt_horizon_height?)`
 3. Set `new_world.journal_head = src_height`
 4. Create a **new empty journal tail** (no entries above head)
 5. Copy/point the manifest (or let it diverge later)
@@ -622,7 +630,7 @@ Implementation (all in one FDB transaction):
 
 No CAS copy. No reducer copy. You’re just pointing the new world at the same snapshot root.
 
-**Restore behavior for the new world:** load snapshot, replay from `(src_height+1 .. head)` — which is empty — so it boots exactly into the branched state.
+**Restore behavior for the new world:** load baseline snapshot, replay entries with `height >= baseline.height` — which is empty beyond the fork point — so it boots exactly into the branched state.
 
 **Complication:** you must ensure the snapshot is “complete enough” to restart without scanning earlier history (it should be, by design).
 

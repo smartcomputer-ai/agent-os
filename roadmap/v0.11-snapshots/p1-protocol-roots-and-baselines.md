@@ -32,6 +32,10 @@ This P1 replaces broader snapshot-track decomposition. It is the only in-scope r
    - keyed reducer `cell_index_root`
    - workspace roots (directly or via reducer state)
    - additional `pinned_roots[]`
+5. Define world-creation baseline requirement:
+   - every world must have an `active_baseline`
+   - unseeded create writes an initial empty/default baseline snapshot
+   - seeded/forked create points `active_baseline` at the seed/fork snapshot
 
 ### 2) Immediate kernel/runtime behavior
 
@@ -51,6 +55,7 @@ This P1 replaces broader snapshot-track decomposition. It is the only in-scope r
    - reducer state roots are required snapshot roots
    - schema-known reducer state is traversable for typed `hash` refs
    - hashes hidden in opaque bytes/text are not auto-discovered and require explicit refs
+6. Implement world creation/init behavior that always sets `active_baseline`.
 
 ### 3) Spec/documentation alignment
 
@@ -69,6 +74,7 @@ Update and align:
 4. Unsafe baseline promotion fails on receipt-horizon precondition.
 5. Snapshot root completeness checks fail closed when required roots are missing.
 6. Typed refs in reducer state are reachable in traversal tests; opaque embedded hashes are not treated as refs.
+7. World creation tests verify an `active_baseline` exists immediately (empty/default for unseeded, seed/fork snapshot for seeded worlds).
 
 ## Invariants
 
@@ -77,6 +83,7 @@ Update and align:
 - Opaque blobs are leaves unless explicit refs are provided.
 - Reducer state is traversed only when schema-known; opaque embedded hashes are out of contract unless explicitly attached.
 - Baseline validity is fenced by receipt horizon semantics.
+- Every world has an active baseline; restore never depends on a separate no-baseline mode.
 - Replay-or-die is strict: baseline+tail output must match full replay exactly.
 
 ## DoD
@@ -86,7 +93,8 @@ Update and align:
 3. Baseline restore path works and is replay-identical.
 4. Receipt-horizon baseline safety checks are enforced.
 5. Snapshot root completeness is documented and enforced by code paths that create/accept restore roots.
-6. Deterministic tests cover the cases listed above.
+6. World create/init code paths always persist `active_baseline`.
+7. Deterministic tests cover the cases listed above.
 
 ## Explicitly Out of Scope
 
