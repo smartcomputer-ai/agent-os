@@ -21,6 +21,7 @@ use serde_json::{Value, json};
 const RUN_LIVE_ENV: &str = "RUN_LIVE_LLM_ADAPTER_TESTS";
 const OPENAI_KEY_ENV: &str = "OPENAI_API_KEY";
 const OPENAI_MODEL_ENV: &str = "OPENAI_LIVE_MODEL";
+const OPENAI_CODEX_MODEL_ENV: &str = "OPENAI_CODEX_LIVE_MODEL";
 const OPENAI_BASE_URL_ENV: &str = "OPENAI_BASE_URL";
 const ANTHROPIC_KEY_ENV: &str = "ANTHROPIC_API_KEY";
 const ANTHROPIC_MODEL_ENV: &str = "ANTHROPIC_LIVE_MODEL";
@@ -56,6 +57,16 @@ fn provider_cases() -> Vec<ProviderCase> {
             api_key_env: OPENAI_KEY_ENV,
             model_env: OPENAI_MODEL_ENV,
             default_model: "gpt-5-mini",
+            base_url_env: OPENAI_BASE_URL_ENV,
+            default_base_url: "https://api.openai.com/v1",
+            supports_response_format: true,
+        },
+        ProviderCase {
+            provider_id: "openai-responses",
+            api_kind: LlmApiKind::Responses,
+            api_key_env: OPENAI_KEY_ENV,
+            model_env: OPENAI_CODEX_MODEL_ENV,
+            default_model: "gpt-5.2-codex",
             base_url_env: OPENAI_BASE_URL_ENV,
             default_base_url: "https://api.openai.com/v1",
             supports_response_format: true,
