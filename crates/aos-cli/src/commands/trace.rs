@@ -68,7 +68,9 @@ pub async fn cmd_trace(opts: &WorldOpts, args: &TraceArgs) -> Result<()> {
         (true, false, false, false) => {}
         (false, true, true, true) => {}
         (false, false, false, false) => {
-            anyhow::bail!("trace requires either --event-hash or --schema + --correlate-by + --value");
+            anyhow::bail!(
+                "trace requires either --event-hash or --schema + --correlate-by + --value"
+            );
         }
         _ => {
             anyhow::bail!(

@@ -486,12 +486,13 @@ impl<S: Store + 'static> WorldDaemon<S> {
                             if entry.kind != aos_kernel::journal::JournalKind::DomainEvent {
                                 continue;
                             }
-                            let Ok(record) = serde_cbor::from_slice::<aos_kernel::journal::JournalRecord>(
-                                &entry.payload,
-                            ) else {
+                            let Ok(record) = serde_cbor::from_slice::<
+                                aos_kernel::journal::JournalRecord,
+                            >(&entry.payload) else {
                                 continue;
                             };
-                            let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record else {
+                            let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record
+                            else {
                                 continue;
                             };
                             if domain.event_hash == hash {
@@ -500,19 +501,22 @@ impl<S: Store + 'static> WorldDaemon<S> {
                                 break;
                             }
                         }
-                    } else if let (Some(schema), Some(correlate_by), Some(correlate_value)) =
-                        (schema.clone(), correlate_by.clone(), correlate_value.clone())
-                    {
+                    } else if let (Some(schema), Some(correlate_by), Some(correlate_value)) = (
+                        schema.clone(),
+                        correlate_by.clone(),
+                        correlate_value.clone(),
+                    ) {
                         for entry in entries.iter().rev() {
                             if entry.kind != aos_kernel::journal::JournalKind::DomainEvent {
                                 continue;
                             }
-                            let Ok(record) = serde_cbor::from_slice::<aos_kernel::journal::JournalRecord>(
-                                &entry.payload,
-                            ) else {
+                            let Ok(record) = serde_cbor::from_slice::<
+                                aos_kernel::journal::JournalRecord,
+                            >(&entry.payload) else {
                                 continue;
                             };
-                            let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record else {
+                            let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record
+                            else {
                                 continue;
                             };
                             if domain.schema != schema {
@@ -536,14 +540,18 @@ impl<S: Store + 'static> WorldDaemon<S> {
 
                     let root_domain = root_domain.ok_or_else(|| {
                         if let Some(hash) = event_hash.clone() {
-                            HostError::External(format!("trace root event_hash '{}' not found", hash))
+                            HostError::External(format!(
+                                "trace root event_hash '{}' not found",
+                                hash
+                            ))
                         } else {
-                            HostError::External("trace root event not found for correlation query".into())
+                            HostError::External(
+                                "trace root event not found for correlation query".into(),
+                            )
                         }
                     })?;
-                    let root_seq = root_seq.ok_or_else(|| {
-                        HostError::External("trace root sequence missing".into())
-                    })?;
+                    let root_seq = root_seq
+                        .ok_or_else(|| HostError::External("trace root sequence missing".into()))?;
                     let root_record_json = serde_json::to_value(&root_domain).map_err(|e| {
                         HostError::External(format!("encode root event record: {e}"))
                     })?;
@@ -909,14 +917,8 @@ mod tests {
             "$tag": "UserMessage",
             "$value": { "request_id": 2 }
         });
-        assert_eq!(
-            json_path_get(&value, "$value.request_id"),
-            Some(&json!(2))
-        );
-        assert_eq!(
-            json_path_get(&value, "$.value.request_id"),
-            None
-        );
+        assert_eq!(json_path_get(&value, "$value.request_id"), Some(&json!(2)));
+        assert_eq!(json_path_get(&value, "$.value.request_id"), None);
     }
 }
 

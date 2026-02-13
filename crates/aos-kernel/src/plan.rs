@@ -1740,16 +1740,16 @@ mod tests {
                 id: "gate".into(),
                 kind: PlanStepKind::Assign(PlanStepAssign {
                     expr: Expr::Const(ExprConst::Bool { bool: true }).into(),
-                    bind: PlanBind {
-                        var: "gate".into(),
-                    },
+                    bind: PlanBind { var: "gate".into() },
                 }),
             },
             PlanStep {
                 id: "branch".into(),
                 kind: PlanStepKind::Assign(PlanStepAssign {
                     expr: Expr::Const(ExprConst::Text { text: "ok".into() }).into(),
-                    bind: PlanBind { var: "branch".into() },
+                    bind: PlanBind {
+                        var: "branch".into(),
+                    },
                 }),
             },
             PlanStep {
@@ -1783,7 +1783,10 @@ mod tests {
         let outcome = instance.tick(&mut effects).unwrap();
 
         assert!(outcome.completed);
-        assert_eq!(instance.step_states.get("branch"), Some(&StepState::Skipped));
+        assert_eq!(
+            instance.step_states.get("branch"),
+            Some(&StepState::Skipped)
+        );
         assert_eq!(
             instance.step_states.get("descendant"),
             Some(&StepState::Skipped)

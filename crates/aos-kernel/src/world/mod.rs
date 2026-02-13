@@ -57,6 +57,16 @@ use crate::snapshot::{
 };
 use std::sync::Mutex;
 
+mod bootstrap;
+mod event_flow;
+pub(crate) mod governance_runtime;
+mod manifest_runtime;
+mod plan_runtime;
+mod query_api;
+mod snapshot_replay;
+
+pub use crate::governance_utils::canonicalize_patch;
+
 const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
 const CELL_CACHE_SIZE: usize = 128;
@@ -473,177 +483,6 @@ impl<S: Store + 'static> Kernel<S> {
             .map_err(|err| KernelError::SnapshotUnavailable(err.to_string()))?;
         self.reducer_index_roots.insert(reducer.clone(), root);
         Ok(root)
-    }
-
-    pub fn from_loaded_manifest(
-        store: Arc<S>,
-        loaded: LoadedManifest,
-        journal: Box<dyn Journal>,
-    ) -> Result<Self, KernelError> {
-        Self::from_loaded_manifest_with_config(store, loaded, journal, KernelConfig::default())
-    }
-
-    pub fn from_loaded_manifest_with_config(
-        store: Arc<S>,
-        loaded: LoadedManifest,
-        journal: Box<dyn Journal>,
-        config: KernelConfig,
-    ) -> Result<Self, KernelError> {
-        let mut loaded = loaded;
-        let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
-        let schema_index = Arc::new(build_schema_index_from_loaded(store.as_ref(), &loaded)?);
-        let reducer_schemas = Arc::new(build_reducer_schemas(
-            &loaded.modules,
-            schema_index.as_ref(),
-        )?);
-        let router = build_router(&loaded.manifest, reducer_schemas.as_ref())?;
-        let mut plan_registry = PlanRegistry::default();
-        for plan in loaded.plans.values() {
-            plan_registry.register(plan.clone());
-        }
-        let mut plan_triggers = HashMap::new();
-        for trigger in &loaded.manifest.triggers {
-            plan_triggers
-                .entry(trigger.event.as_str().to_string())
-                .or_insert_with(Vec::new)
-                .push(PlanTriggerBinding {
-                    plan: trigger.plan.clone(),
-                    correlate_by: trigger.correlate_by.clone(),
-                });
-        }
-        for bindings in plan_triggers.values_mut() {
-            bindings.sort_by(|a, b| a.plan.cmp(&b.plan));
-        }
-        let effect_catalog = Arc::new(loaded.effect_catalog.clone());
-        let capability_resolver = CapabilityResolver::from_manifest(
-            &loaded.manifest,
-            &loaded.caps,
-            schema_index.as_ref(),
-            effect_catalog.clone(),
-        )?;
-        let plan_cap_handles = resolve_plan_cap_handles(&loaded.plans, &capability_resolver)?;
-        let module_cap_bindings =
-            resolve_module_cap_bindings(&loaded.manifest, &capability_resolver)?;
-        let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
-            .manifest
-            .defaults
-            .as_ref()
-            .and_then(|defaults| defaults.policy.clone())
-        {
-            Some(policy_name) => {
-                let def = loaded.policies.get(&policy_name).ok_or_else(|| {
-                    KernelError::Manifest(format!(
-                        "policy '{policy_name}' referenced by manifest defaults was not found"
-                    ))
-                })?;
-                Box::new(RulePolicy::from_def(def))
-            }
-            None => Box::new(AllowAllPolicy),
-        };
-        let plan_defs = loaded.plans.clone();
-        let cap_defs = loaded.caps.clone();
-        let effect_defs = loaded.effects.clone();
-        let policy_defs = loaded.policies.clone();
-        let schema_defs = loaded.schemas.clone();
-
-        // Persist the loaded manifest + defs into the store so governance/patch doc
-        // compilation can resolve the base manifest hash from CAS.
-        persist_loaded_manifest(store.as_ref(), &mut loaded)?;
-
-        let manifest_bytes = to_canonical_cbor(&loaded.manifest)
-            .map_err(|err| KernelError::Manifest(format!("encode manifest: {err}")))?;
-        let manifest_hash = Hash::of_bytes(&manifest_bytes);
-
-        let pures = Arc::new(Mutex::new(PureRegistry::new(
-            store.clone(),
-            config.module_cache_dir.clone(),
-        )?));
-        let enforcer_invoker: Option<Arc<dyn CapEnforcerInvoker>> = Some(Arc::new(
-            PureCapEnforcer::new(Arc::new(loaded.modules.clone()), pures.clone()),
-        ));
-
-        let param_preprocessor: Option<Arc<dyn EffectParamPreprocessor>> = Some(Arc::new(
-            GovernanceParamPreprocessor::new(store.clone(), loaded.manifest.clone()),
-        ));
-        let mut kernel = Self {
-            store: store.clone(),
-            manifest: loaded.manifest.clone(),
-            manifest_hash,
-            module_defs: loaded.modules,
-            plan_defs,
-            cap_defs,
-            effect_defs,
-            policy_defs,
-            schema_defs,
-            schema_index: schema_index.clone(),
-            reducer_schemas: reducer_schemas.clone(),
-            plan_cap_handles,
-            module_cap_bindings,
-            reducers: ReducerRegistry::new(store.clone(), config.module_cache_dir.clone())?,
-            pures,
-            router,
-            plan_registry,
-            plan_instances: HashMap::new(),
-            plan_triggers,
-            waiting_events: HashMap::new(),
-            pending_receipts: HashMap::new(),
-            pending_reducer_receipts: HashMap::new(),
-            recent_receipts: VecDeque::new(),
-            recent_receipt_index: HashSet::new(),
-            plan_results: VecDeque::new(),
-            scheduler: Scheduler::default(),
-            effect_manager: EffectManager::new(
-                capability_resolver,
-                policy_gate,
-                effect_catalog.clone(),
-                schema_index.clone(),
-                param_preprocessor,
-                enforcer_invoker,
-                if loaded.secrets.is_empty() {
-                    None
-                } else {
-                    Some(crate::secret::SecretCatalog::new(&loaded.secrets))
-                },
-                secret_resolver.clone(),
-            ),
-            clock: KernelClock::new(),
-            reducer_state: HashMap::new(),
-            reducer_index_roots: HashMap::new(),
-            snapshot_index: HashMap::new(),
-            journal,
-            suppress_journal: false,
-            governance: GovernanceManager::new(),
-            secret_resolver: secret_resolver.clone(),
-            allow_placeholder_secrets: config.allow_placeholder_secrets,
-            secrets: loaded.secrets,
-            active_baseline: None,
-            last_snapshot_height: None,
-            last_snapshot_hash: None,
-            pinned_roots: Vec::new(),
-            workspace_roots: Vec::new(),
-        };
-        if config.eager_module_load {
-            for (name, module_def) in kernel.module_defs.iter() {
-                match module_def.module_kind {
-                    aos_air_types::ModuleKind::Reducer => {
-                        kernel.reducers.ensure_loaded(name, module_def)?;
-                    }
-                    aos_air_types::ModuleKind::Pure => {
-                        let mut pures = kernel.pures.lock().map_err(|_| {
-                            KernelError::Manifest("pure registry lock poisoned".into())
-                        })?;
-                        pures.ensure_loaded(name, module_def)?;
-                    }
-                }
-            }
-        }
-        let journal_empty = kernel.journal.next_seq() == 0;
-        kernel.replay_existing_entries()?;
-        if journal_empty {
-            kernel.record_manifest()?;
-        }
-        kernel.ensure_active_baseline()?;
-        Ok(kernel)
     }
 
     pub fn submit_domain_event(&mut self, schema: impl Into<String>, value: Vec<u8>) {
@@ -2322,37 +2161,7 @@ impl<S: Store + 'static> Kernel<S> {
         loaded: LoadedManifest,
         record_manifest: bool,
     ) -> Result<(), KernelError> {
-        let schema_index = Arc::new(build_schema_index_from_loaded(
-            self.store.as_ref(),
-            &loaded,
-        )?);
-        let reducer_schemas = Arc::new(build_reducer_schemas(&loaded.modules, &schema_index)?);
-        let effect_catalog = Arc::new(loaded.effect_catalog.clone());
-        let capability_resolver = CapabilityResolver::from_manifest(
-            &loaded.manifest,
-            &loaded.caps,
-            schema_index.as_ref(),
-            effect_catalog.clone(),
-        )?;
-        let plan_cap_handles = resolve_plan_cap_handles(&loaded.plans, &capability_resolver)?;
-        let module_cap_bindings =
-            resolve_module_cap_bindings(&loaded.manifest, &capability_resolver)?;
-        let policy_gate: Box<dyn crate::policy::PolicyGate> = match loaded
-            .manifest
-            .defaults
-            .as_ref()
-            .and_then(|defaults| defaults.policy.clone())
-        {
-            Some(policy_name) => {
-                let def = loaded.policies.get(&policy_name).ok_or_else(|| {
-                    KernelError::Manifest(format!(
-                        "policy '{policy_name}' referenced by manifest defaults was not found"
-                    ))
-                })?;
-                Box::new(RulePolicy::from_def(def))
-            }
-            None => Box::new(AllowAllPolicy),
-        };
+        let runtime = manifest_runtime::assemble_runtime(self.store.as_ref(), &loaded)?;
 
         self.manifest = loaded.manifest;
         let manifest_bytes = to_canonical_cbor(&self.manifest)
@@ -2365,27 +2174,9 @@ impl<S: Store + 'static> Kernel<S> {
         self.effect_defs = loaded.effects;
         self.policy_defs = loaded.policies;
         self.schema_defs = loaded.schemas;
-        self.plan_registry = PlanRegistry::default();
-        for plan in self.plan_defs.values() {
-            self.plan_registry.register(plan.clone());
-        }
-
-        self.router = build_router(&self.manifest, reducer_schemas.as_ref())?;
-
-        let mut plan_triggers = HashMap::new();
-        for trigger in &self.manifest.triggers {
-            plan_triggers
-                .entry(trigger.event.as_str().to_string())
-                .or_insert_with(Vec::new)
-                .push(PlanTriggerBinding {
-                    plan: trigger.plan.clone(),
-                    correlate_by: trigger.correlate_by.clone(),
-                });
-        }
-        for bindings in plan_triggers.values_mut() {
-            bindings.sort_by(|a, b| a.plan.cmp(&b.plan));
-        }
-        self.plan_triggers = plan_triggers;
+        self.plan_registry = runtime.plan_registry;
+        self.router = runtime.router;
+        self.plan_triggers = runtime.plan_triggers;
 
         self.plan_instances.clear();
         self.waiting_events.clear();
@@ -2395,8 +2186,8 @@ impl<S: Store + 'static> Kernel<S> {
         self.recent_receipt_index.clear();
         self.plan_results.clear();
 
-        self.schema_index = schema_index.clone();
-        self.reducer_schemas = reducer_schemas;
+        self.schema_index = runtime.schema_index.clone();
+        self.reducer_schemas = runtime.reducer_schemas;
         self.secret_resolver = ensure_secret_resolver(
             !self.secrets.is_empty(),
             self.secret_resolver.clone(),
@@ -2414,17 +2205,17 @@ impl<S: Store + 'static> Kernel<S> {
             GovernanceParamPreprocessor::new(self.store.clone(), self.manifest.clone()),
         ));
         self.effect_manager = EffectManager::new(
-            capability_resolver,
-            policy_gate,
-            effect_catalog,
-            schema_index.clone(),
+            runtime.capability_resolver,
+            runtime.policy_gate,
+            runtime.effect_catalog,
+            runtime.schema_index.clone(),
             param_preprocessor,
             enforcer_invoker,
             secret_catalog,
             self.secret_resolver.clone(),
         );
-        self.plan_cap_handles = plan_cap_handles;
-        self.module_cap_bindings = module_cap_bindings;
+        self.plan_cap_handles = runtime.plan_cap_handles;
+        self.module_cap_bindings = runtime.module_cap_bindings;
         if record_manifest {
             self.record_manifest()?;
         }
@@ -2433,16 +2224,32 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn compute_ledger_deltas(current: &Manifest, candidate: &Manifest) -> Vec<LedgerDelta> {
         let mut deltas = Vec::new();
-        deltas.extend(diff_named_refs(
-            &current.caps,
-            &candidate.caps,
-            LedgerKind::Capability,
-        ));
-        deltas.extend(diff_named_refs(
-            &current.policies,
-            &candidate.policies,
-            LedgerKind::Policy,
-        ));
+        deltas.extend(
+            crate::governance_utils::diff_named_refs(&current.caps, &candidate.caps)
+                .into_iter()
+                .map(|delta| LedgerDelta {
+                    ledger: LedgerKind::Capability,
+                    name: delta.name,
+                    change: match delta.change {
+                        crate::governance_utils::NamedRefDiffKind::Added => DeltaKind::Added,
+                        crate::governance_utils::NamedRefDiffKind::Removed => DeltaKind::Removed,
+                        crate::governance_utils::NamedRefDiffKind::Changed => DeltaKind::Changed,
+                    },
+                }),
+        );
+        deltas.extend(
+            crate::governance_utils::diff_named_refs(&current.policies, &candidate.policies)
+                .into_iter()
+                .map(|delta| LedgerDelta {
+                    ledger: LedgerKind::Policy,
+                    name: delta.name,
+                    change: match delta.change {
+                        crate::governance_utils::NamedRefDiffKind::Added => DeltaKind::Added,
+                        crate::governance_utils::NamedRefDiffKind::Removed => DeltaKind::Removed,
+                        crate::governance_utils::NamedRefDiffKind::Changed => DeltaKind::Changed,
+                    },
+                }),
+        );
 
         deltas.sort_by(|a, b| {
             let ledger_a = match a.ledger {
@@ -3126,234 +2933,6 @@ fn encode_correlation_bytes(value: &ExprValue) -> Vec<u8> {
         ExprValue::Int(i) => i.to_be_bytes().to_vec(),
         other => serde_cbor::to_vec(other).unwrap_or_default(),
     }
-}
-
-pub fn canonicalize_patch<S: Store>(
-    store: &S,
-    patch: ManifestPatch,
-) -> Result<ManifestPatch, KernelError> {
-    let mut canonical = patch.clone();
-
-    let mut schema_map = HashMap::new();
-    for builtin in builtins::builtin_schemas() {
-        schema_map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
-    }
-    let mut effect_defs = Vec::new();
-
-    for node in &canonical.nodes {
-        match node {
-            AirNode::Defschema(schema) => {
-                schema_map.insert(schema.name.clone(), schema.ty.clone());
-            }
-            AirNode::Defeffect(effect) => {
-                effect_defs.push(effect.clone());
-            }
-            _ => {}
-        }
-    }
-
-    extend_schema_map_from_store(store, &canonical.manifest.schemas, &mut schema_map)?;
-    let schema_index = SchemaIndex::new(schema_map);
-    if effect_defs.is_empty() {
-        effect_defs.extend(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
-    }
-    let effect_catalog = EffectCatalog::from_defs(effect_defs);
-    for node in canonical.nodes.iter_mut() {
-        if let AirNode::Defplan(plan) = node {
-            normalize_plan_literals(plan, &schema_index, &effect_catalog).map_err(|err| {
-                KernelError::Manifest(format!(
-                    "plan '{}' literal normalization failed: {err}",
-                    plan.name
-                ))
-            })?;
-        }
-    }
-    normalize_patch_manifest_refs(&mut canonical)?;
-
-    Ok(canonical)
-}
-
-fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), KernelError> {
-    let mut schema_hashes = HashMap::new();
-    let mut module_hashes = HashMap::new();
-    let mut plan_hashes = HashMap::new();
-    let mut effect_hashes = HashMap::new();
-    let mut cap_hashes = HashMap::new();
-    let mut policy_hashes = HashMap::new();
-
-    for node in &patch.nodes {
-        match node {
-            AirNode::Defschema(schema) => {
-                let hash = Hash::of_cbor(&AirNode::Defschema(schema.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash schema '{}': {err}", schema.name))
-                })?;
-                schema_hashes.insert(schema.name.clone(), hash);
-            }
-            AirNode::Defmodule(module) => {
-                let hash = Hash::of_cbor(&AirNode::Defmodule(module.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash module '{}': {err}", module.name))
-                })?;
-                module_hashes.insert(module.name.clone(), hash);
-            }
-            AirNode::Defplan(plan) => {
-                let hash = Hash::of_cbor(&AirNode::Defplan(plan.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash plan '{}': {err}", plan.name))
-                })?;
-                plan_hashes.insert(plan.name.clone(), hash);
-            }
-            AirNode::Defeffect(effect) => {
-                let hash = Hash::of_cbor(&AirNode::Defeffect(effect.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash effect '{}': {err}", effect.name))
-                })?;
-                effect_hashes.insert(effect.name.clone(), hash);
-            }
-            AirNode::Defcap(cap) => {
-                let hash = Hash::of_cbor(&AirNode::Defcap(cap.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash cap '{}': {err}", cap.name))
-                })?;
-                cap_hashes.insert(cap.name.clone(), hash);
-            }
-            AirNode::Defpolicy(policy) => {
-                let hash = Hash::of_cbor(&AirNode::Defpolicy(policy.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash policy '{}': {err}", policy.name))
-                })?;
-                policy_hashes.insert(policy.name.clone(), hash);
-            }
-            _ => {}
-        }
-    }
-
-    for reference in patch.manifest.schemas.iter_mut() {
-        if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-        } else if let Some(hash) = schema_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("schema hash '{}': {err}", reference.name))
-            })?;
-        }
-    }
-
-    for reference in patch.manifest.modules.iter_mut() {
-        if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-        } else if let Some(hash) = module_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("module hash '{}': {err}", reference.name))
-            })?;
-        }
-    }
-
-    for reference in patch.manifest.plans.iter_mut() {
-        if let Some(hash) = plan_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("plan hash '{}': {err}", reference.name))
-            })?;
-        }
-    }
-
-    for reference in patch.manifest.effects.iter_mut() {
-        if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-        } else if let Some(hash) = effect_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("effect hash '{}': {err}", reference.name))
-            })?;
-        }
-    }
-
-    for reference in patch.manifest.caps.iter_mut() {
-        if let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-        } else if let Some(hash) = cap_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("cap hash '{}': {err}", reference.name))
-            })?;
-        }
-    }
-
-    for reference in patch.manifest.policies.iter_mut() {
-        if let Some(hash) = policy_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("policy hash '{}': {err}", reference.name))
-            })?;
-        }
-    }
-
-    Ok(())
-}
-
-fn extend_schema_map_from_store<S: Store>(
-    store: &S,
-    refs: &[NamedRef],
-    schemas: &mut HashMap<String, TypeExpr>,
-) -> Result<(), KernelError> {
-    for reference in refs {
-        if schemas.contains_key(reference.name.as_str()) {
-            continue;
-        }
-        if let Some(hash) = parse_nonzero_hash(reference.hash.as_str())? {
-            let node: AirNode = store.get_node(hash)?;
-            if let AirNode::Defschema(schema) = node {
-                schemas.insert(schema.name.clone(), schema.ty.clone());
-            }
-        }
-    }
-    Ok(())
-}
-
-fn parse_nonzero_hash(value: &str) -> Result<Option<Hash>, KernelError> {
-    let hash = Hash::from_hex_str(value)
-        .map_err(|err| KernelError::Manifest(format!("invalid hash '{value}': {err}")))?;
-    if hash.as_bytes().iter().all(|b| *b == 0) {
-        Ok(None)
-    } else {
-        Ok(Some(hash))
-    }
-}
-
-fn diff_named_refs(
-    current: &[NamedRef],
-    candidate: &[NamedRef],
-    ledger: LedgerKind,
-) -> Vec<LedgerDelta> {
-    let mut deltas = Vec::new();
-    let current_map: HashMap<&str, &NamedRef> = current
-        .iter()
-        .map(|reference| (reference.name.as_str(), reference))
-        .collect();
-    let next_map: HashMap<&str, &NamedRef> = candidate
-        .iter()
-        .map(|reference| (reference.name.as_str(), reference))
-        .collect();
-
-    for (name, reference) in next_map.iter() {
-        match current_map.get(name) {
-            None => deltas.push(LedgerDelta {
-                ledger,
-                name: reference.name.as_str().to_string(),
-                change: DeltaKind::Added,
-            }),
-            Some(current_ref) if current_ref.hash.as_str() != reference.hash.as_str() => deltas
-                .push(LedgerDelta {
-                    ledger,
-                    name: reference.name.as_str().to_string(),
-                    change: DeltaKind::Changed,
-                }),
-            _ => {}
-        }
-    }
-
-    for (name, reference) in current_map.iter() {
-        if !next_map.contains_key(name) {
-            deltas.push(LedgerDelta {
-                ledger,
-                name: reference.name.as_str().to_string(),
-                change: DeltaKind::Removed,
-            })
-        }
-    }
-
-    deltas
 }
 
 #[cfg(test)]
@@ -4088,7 +3667,7 @@ mod tests {
             effect_catalog: EffectCatalog::from_defs(Vec::new()),
         };
         let mut loaded = loaded;
-        persist_loaded_manifest(store, &mut loaded).expect("persist manifest");
+        manifest_runtime::persist_loaded_manifest(store, &mut loaded).expect("persist manifest");
         let manifest_hash = store.put_node(&loaded.manifest).expect("store manifest");
         (loaded, manifest_hash)
     }
@@ -4732,557 +4311,4 @@ fn format_intent_hash(hash: &[u8; 32]) -> String {
     DigestHash::from_bytes(hash)
         .map(|h| h.to_hex())
         .unwrap_or_else(|_| format!("{:?}", hash))
-}
-
-fn build_schema_index_from_loaded<S: Store>(
-    store: &S,
-    loaded: &LoadedManifest,
-) -> Result<SchemaIndex, KernelError> {
-    let mut schema_map = HashMap::new();
-    for builtin in builtins::builtin_schemas() {
-        schema_map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
-    }
-    for (name, schema) in &loaded.schemas {
-        schema_map.insert(name.clone(), schema.ty.clone());
-    }
-    extend_schema_map_from_store(store, &loaded.manifest.schemas, &mut schema_map)?;
-    Ok(SchemaIndex::new(schema_map))
-}
-
-fn build_reducer_schemas(
-    modules: &HashMap<Name, aos_air_types::DefModule>,
-    schema_index: &SchemaIndex,
-) -> Result<HashMap<Name, ReducerSchema>, KernelError> {
-    let mut map = HashMap::new();
-    for (name, module) in modules {
-        if let Some(reducer) = module.abi.reducer.as_ref() {
-            let schema_name = reducer.event.as_str();
-            let event_schema = schema_index
-                .get(schema_name)
-                .ok_or_else(|| {
-                    KernelError::Manifest(format!(
-                        "schema '{schema_name}' not found for reducer '{name}'"
-                    ))
-                })?
-                .clone();
-            let key_schema = if let Some(key_ref) = &module.key_schema {
-                let schema_name = key_ref.as_str();
-                Some(
-                    schema_index
-                        .get(schema_name)
-                        .ok_or_else(|| {
-                            KernelError::Manifest(format!(
-                                "schema '{schema_name}' not found for reducer '{name}' key"
-                            ))
-                        })?
-                        .clone(),
-                )
-            } else {
-                None
-            };
-            map.insert(
-                name.clone(),
-                ReducerSchema {
-                    event_schema_name: schema_name.to_string(),
-                    event_schema,
-                    key_schema,
-                },
-            );
-        }
-    }
-    Ok(map)
-}
-
-fn build_router(
-    manifest: &Manifest,
-    reducer_schemas: &HashMap<Name, ReducerSchema>,
-) -> Result<HashMap<String, Vec<RouteBinding>>, KernelError> {
-    let mut router = HashMap::new();
-    let receipt_schema_allows_missing_key_field = |event_schema: &str| {
-        matches!(
-            event_schema,
-            "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
-        )
-    };
-    let Some(routing) = manifest.routing.as_ref() else {
-        return Ok(router);
-    };
-
-    for route in &routing.events {
-        let reducer_schema = reducer_schemas.get(&route.reducer).ok_or_else(|| {
-            KernelError::Manifest(format!(
-                "schema for reducer '{}' not found while building router",
-                route.reducer
-            ))
-        })?;
-        let route_event = route.event.as_str();
-        let reducer_event_schema = reducer_schema.event_schema_name.as_str();
-        if route_event == reducer_event_schema {
-            push_route_binding(
-                &mut router,
-                route_event,
-                route_event,
-                reducer_schema,
-                route.key_field.clone(),
-                EventWrap::Identity,
-                &route.reducer,
-            );
-            match &reducer_schema.event_schema {
-                TypeExpr::Ref(reference) => {
-                    let member = reference.reference.as_str();
-                    push_route_binding(
-                        &mut router,
-                        member,
-                        route_event,
-                        reducer_schema,
-                        route.key_field.clone(),
-                        EventWrap::Identity,
-                        &route.reducer,
-                    );
-                }
-                TypeExpr::Variant(variant) => {
-                    for (tag, ty) in &variant.variant {
-                        if let TypeExpr::Ref(reference) = ty {
-                            if route.key_field.is_some()
-                                && receipt_schema_allows_missing_key_field(
-                                    reference.reference.as_str(),
-                                )
-                            {
-                                continue;
-                            }
-                            push_route_binding(
-                                &mut router,
-                                reference.reference.as_str(),
-                                route_event,
-                                reducer_schema,
-                                route.key_field.clone(),
-                                EventWrap::Variant { tag: tag.clone() },
-                                &route.reducer,
-                            );
-                        }
-                    }
-                }
-                _ => {}
-            }
-        } else {
-            let wrap = wrap_for_event_schema(route_event, reducer_schema)?;
-            push_route_binding(
-                &mut router,
-                route_event,
-                route_event,
-                reducer_schema,
-                route.key_field.clone(),
-                wrap,
-                &route.reducer,
-            );
-        }
-    }
-
-    Ok(router)
-}
-
-fn push_route_binding(
-    router: &mut HashMap<String, Vec<RouteBinding>>,
-    event_key: &str,
-    route_event_schema: &str,
-    reducer_schema: &ReducerSchema,
-    key_field: Option<String>,
-    wrap: EventWrap,
-    reducer: &str,
-) {
-    router
-        .entry(event_key.to_string())
-        .or_insert_with(Vec::new)
-        .push(RouteBinding {
-            reducer: reducer.to_string(),
-            key_field,
-            route_event_schema: route_event_schema.to_string(),
-            reducer_event_schema: reducer_schema.event_schema_name.clone(),
-            wrap,
-        });
-}
-
-fn wrap_for_event_schema(
-    event_schema: &str,
-    reducer_schema: &ReducerSchema,
-) -> Result<EventWrap, KernelError> {
-    if event_schema == reducer_schema.event_schema_name {
-        return Ok(EventWrap::Identity);
-    }
-    match &reducer_schema.event_schema {
-        TypeExpr::Ref(reference) if reference.reference.as_str() == event_schema => {
-            Ok(EventWrap::Identity)
-        }
-        TypeExpr::Variant(variant) => {
-            let mut found = None;
-            for (tag, ty) in &variant.variant {
-                if let TypeExpr::Ref(reference) = ty {
-                    if reference.reference.as_str() == event_schema {
-                        if found.is_some() {
-                            return Err(KernelError::Manifest(format!(
-                                "event '{event_schema}' appears in multiple variant arms for reducer schema '{}'",
-                                reducer_schema.event_schema_name
-                            )));
-                        }
-                        found = Some(tag.clone());
-                    }
-                }
-            }
-            found.map(|tag| EventWrap::Variant { tag }).ok_or_else(|| {
-                KernelError::Manifest(format!(
-                    "event '{event_schema}' is not in reducer schema '{}' family",
-                    reducer_schema.event_schema_name
-                ))
-            })
-        }
-        _ => Err(KernelError::Manifest(format!(
-            "event '{event_schema}' is not in reducer schema '{}' family",
-            reducer_schema.event_schema_name
-        ))),
-    }
-}
-
-fn resolve_plan_cap_handles(
-    plans: &HashMap<Name, DefPlan>,
-    resolver: &CapabilityResolver,
-) -> Result<HashMap<Name, Arc<HashMap<String, CapGrantResolution>>>, KernelError> {
-    let mut plan_caps = HashMap::new();
-    for plan in plans.values() {
-        for cap in &plan.required_caps {
-            if !resolver.has_grant(cap) {
-                return Err(KernelError::PlanCapabilityMissing {
-                    plan: plan.name.clone(),
-                    cap: cap.clone(),
-                });
-            }
-        }
-        let mut step_caps = HashMap::new();
-        for step in &plan.steps {
-            if let PlanStepKind::EmitEffect(emit) = &step.kind {
-                let resolved = resolver.resolve(emit.cap.as_str(), emit.kind.as_str())?;
-                step_caps.insert(step.id.clone(), resolved);
-            }
-        }
-        plan_caps.insert(plan.name.clone(), Arc::new(step_caps));
-    }
-    Ok(plan_caps)
-}
-
-fn resolve_module_cap_bindings(
-    manifest: &Manifest,
-    resolver: &CapabilityResolver,
-) -> Result<HashMap<Name, HashMap<String, CapGrantResolution>>, KernelError> {
-    let mut bindings = HashMap::new();
-    for (module, binding) in &manifest.module_bindings {
-        let mut slot_map = HashMap::new();
-        for (slot, cap) in &binding.slots {
-            if !resolver.has_grant(cap) {
-                return Err(KernelError::ModuleCapabilityMissing {
-                    module: module.clone(),
-                    cap: cap.clone(),
-                });
-            }
-            let resolved = resolver.resolve_grant(cap)?;
-            slot_map.insert(slot.clone(), resolved);
-        }
-        bindings.insert(module.clone(), slot_map);
-    }
-    Ok(bindings)
-}
-
-fn persist_loaded_manifest<S: Store>(
-    store: &S,
-    loaded: &mut LoadedManifest,
-) -> Result<(), KernelError> {
-    let mut schema_hashes = HashMap::new();
-    let mut module_hashes = HashMap::new();
-    let mut plan_hashes = HashMap::new();
-    let mut effect_hashes = HashMap::new();
-    let mut cap_hashes = HashMap::new();
-    let mut policy_hashes = HashMap::new();
-
-    for schema in loaded.schemas.values() {
-        let hash = store.put_node(&AirNode::Defschema(schema.clone()))?;
-        schema_hashes.insert(schema.name.clone(), hash);
-    }
-    for module in loaded.modules.values() {
-        let hash = store.put_node(&AirNode::Defmodule(module.clone()))?;
-        module_hashes.insert(module.name.clone(), hash);
-    }
-    for plan in loaded.plans.values() {
-        let hash = store.put_node(&AirNode::Defplan(plan.clone()))?;
-        plan_hashes.insert(plan.name.clone(), hash);
-    }
-    for cap in loaded.caps.values() {
-        let hash = store.put_node(&AirNode::Defcap(cap.clone()))?;
-        cap_hashes.insert(cap.name.clone(), hash);
-    }
-    for policy in loaded.policies.values() {
-        let hash = store.put_node(&AirNode::Defpolicy(policy.clone()))?;
-        policy_hashes.insert(policy.name.clone(), hash);
-    }
-    for effect in loaded.effects.values() {
-        let hash = store.put_node(&AirNode::Defeffect(effect.clone()))?;
-        effect_hashes.insert(effect.name.clone(), hash);
-    }
-
-    for reference in loaded.manifest.schemas.iter_mut() {
-        if let Some(builtin) = builtins::find_builtin_schema(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-            continue;
-        }
-        if let Some(hash) = schema_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("schema hash '{}': {err}", reference.name))
-            })?;
-            continue;
-        }
-        return Err(KernelError::Manifest(format!(
-            "manifest references unknown schema '{}'",
-            reference.name
-        )));
-    }
-
-    for reference in loaded.manifest.modules.iter_mut() {
-        if let Some(hash) = module_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("module hash '{}': {err}", reference.name))
-            })?;
-            continue;
-        }
-        if let Some(builtin) = builtins::find_builtin_module(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-            continue;
-        }
-        return Err(KernelError::Manifest(format!(
-            "manifest references unknown module '{}'",
-            reference.name
-        )));
-    }
-
-    for reference in loaded.manifest.plans.iter_mut() {
-        if let Some(hash) = plan_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("plan hash '{}': {err}", reference.name))
-            })?;
-        } else {
-            return Err(KernelError::Manifest(format!(
-                "manifest references unknown plan '{}'",
-                reference.name
-            )));
-        }
-    }
-
-    for reference in loaded.manifest.effects.iter_mut() {
-        if let Some(builtin) = builtins::find_builtin_effect(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-            continue;
-        }
-        if let Some(hash) = effect_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("effect hash '{}': {err}", reference.name))
-            })?;
-            continue;
-        }
-        return Err(KernelError::Manifest(format!(
-            "manifest references unknown effect '{}'",
-            reference.name
-        )));
-    }
-
-    for reference in loaded.manifest.caps.iter_mut() {
-        if let Some(builtin) = builtins::find_builtin_cap(reference.name.as_str()) {
-            reference.hash = builtin.hash_ref.clone();
-            continue;
-        }
-        if let Some(hash) = cap_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("cap hash '{}': {err}", reference.name))
-            })?;
-            continue;
-        }
-        return Err(KernelError::Manifest(format!(
-            "manifest references unknown cap '{}'",
-            reference.name
-        )));
-    }
-
-    for reference in loaded.manifest.policies.iter_mut() {
-        if let Some(hash) = policy_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("policy hash '{}': {err}", reference.name))
-            })?;
-        } else {
-            return Err(KernelError::Manifest(format!(
-                "manifest references unknown policy '{}'",
-                reference.name
-            )));
-        }
-    }
-
-    store.put_node(&loaded.manifest)?;
-    store.put_node(&AirNode::Manifest(loaded.manifest.clone()))?;
-    Ok(())
-}
-
-impl<S: Store + 'static> StateReader for Kernel<S> {
-    fn get_reducer_state(
-        &self,
-        module: &str,
-        key: Option<&[u8]>,
-        consistency: Consistency,
-    ) -> Result<StateRead<Option<Vec<u8>>>, KernelError> {
-        let head = self.journal.next_seq();
-        match consistency {
-            Consistency::Head => {
-                return Ok(StateRead {
-                    meta: self.read_meta(),
-                    value: self.reducer_state_bytes(module, key)?,
-                });
-            }
-            Consistency::AtLeast(h) => {
-                if head < h {
-                    return Err(KernelError::SnapshotUnavailable(format!(
-                        "requested at least height {h}, but head is {head}"
-                    )));
-                }
-                return Ok(StateRead {
-                    meta: self.read_meta(),
-                    value: self.reducer_state_bytes(module, key)?,
-                });
-            }
-            Consistency::Exact(h) => {
-                if h == head {
-                    return Ok(StateRead {
-                        meta: self.read_meta(),
-                        value: self.reducer_state_bytes(module, key)?,
-                    });
-                }
-                if let Some((snap_hash, snap_manifest)) = self.snapshot_at_height(h) {
-                    let snapshot = self.load_snapshot_blob(snap_hash)?;
-                    let value = self.read_reducer_state_from_snapshot(&snapshot, module, key)?;
-                    let meta = ReadMeta {
-                        journal_height: h,
-                        snapshot_hash: Some(snap_hash),
-                        manifest_hash: snap_manifest.unwrap_or(self.manifest_hash),
-                        active_baseline_height: self.active_baseline.as_ref().map(|b| b.height),
-                        active_baseline_receipt_horizon_height: self
-                            .active_baseline
-                            .as_ref()
-                            .and_then(|b| b.receipt_horizon_height),
-                    };
-                    return Ok(StateRead { meta, value });
-                }
-                Err(KernelError::SnapshotUnavailable(format!(
-                    "exact height {h} not available; no snapshot and head is {head}"
-                )))
-            }
-        }
-    }
-
-    fn get_manifest(&self, consistency: Consistency) -> Result<StateRead<Manifest>, KernelError> {
-        let head = self.journal.next_seq();
-        match consistency {
-            Consistency::Head => {
-                return Ok(StateRead {
-                    meta: self.read_meta(),
-                    value: self.manifest.clone(),
-                });
-            }
-            Consistency::AtLeast(h) => {
-                if head < h {
-                    return Err(KernelError::SnapshotUnavailable(format!(
-                        "requested at least height {h}, but head is {head}"
-                    )));
-                }
-                return Ok(StateRead {
-                    meta: self.read_meta(),
-                    value: self.manifest.clone(),
-                });
-            }
-            Consistency::Exact(h) => {
-                if h == head {
-                    return Ok(StateRead {
-                        meta: self.read_meta(),
-                        value: self.manifest.clone(),
-                    });
-                }
-                if let Some((snap_hash, snap_manifest)) = self.snapshot_at_height(h) {
-                    let manifest_hash = snap_manifest.ok_or_else(|| {
-                        KernelError::SnapshotUnavailable(
-                            "snapshot missing manifest_hash; cannot serve manifest".into(),
-                        )
-                    })?;
-                    let manifest: Manifest = self
-                        .store
-                        .get_node(manifest_hash)
-                        .map_err(|e| KernelError::SnapshotDecode(e.to_string()))?;
-                    let meta = ReadMeta {
-                        journal_height: h,
-                        snapshot_hash: Some(snap_hash),
-                        manifest_hash,
-                        active_baseline_height: self.active_baseline.as_ref().map(|b| b.height),
-                        active_baseline_receipt_horizon_height: self
-                            .active_baseline
-                            .as_ref()
-                            .and_then(|b| b.receipt_horizon_height),
-                    };
-                    return Ok(StateRead {
-                        meta,
-                        value: manifest,
-                    });
-                }
-                Err(KernelError::SnapshotUnavailable(format!(
-                    "exact height {h} not available; no snapshot and head is {head}"
-                )))
-            }
-        }
-    }
-
-    fn get_journal_head(&self) -> ReadMeta {
-        self.read_meta()
-    }
-}
-
-impl<S: Store + 'static> Kernel<S> {
-    fn load_snapshot_blob(&self, hash: Hash) -> Result<KernelSnapshot, KernelError> {
-        let bytes = self.store.get_blob(hash)?;
-        let snapshot: KernelSnapshot = serde_cbor::from_slice(&bytes)
-            .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
-        Ok(snapshot)
-    }
-
-    fn read_reducer_state_from_snapshot(
-        &self,
-        snapshot: &KernelSnapshot,
-        reducer: &str,
-        key: Option<&[u8]>,
-    ) -> Result<Option<Vec<u8>>, KernelError> {
-        let key_bytes = key.unwrap_or(MONO_KEY);
-        // Preferred path: use index root recorded in snapshot to find cell state in CAS.
-        if let Some(root) = snapshot
-            .reducer_index_roots()
-            .iter()
-            .find(|(name, _)| name == reducer)
-            .and_then(|(_, bytes)| Hash::from_bytes(bytes).ok())
-        {
-            let index = CellIndex::new(self.store.as_ref());
-            let meta = index.get(root, Hash::of_bytes(key_bytes).as_bytes())?;
-            if let Some(meta) = meta {
-                let state_hash = Hash::from_bytes(&meta.state_hash)
-                    .unwrap_or_else(|_| Hash::of_bytes(&meta.state_hash));
-                let state = self.store.get_blob(state_hash)?;
-                return Ok(Some(state));
-            }
-        }
-
-        // Legacy snapshots: fall back to inline entries (monolithic or keyed).
-        for entry in snapshot.reducer_state_entries() {
-            let entry_key = entry.key.as_deref().unwrap_or(MONO_KEY);
-            if entry.reducer == reducer && entry_key == key_bytes {
-                return Ok(Some(entry.state.clone()));
-            }
-        }
-        Ok(None)
-    }
 }

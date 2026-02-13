@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::KernelError;
 use crate::governance::ManifestPatch;
-use crate::world::canonicalize_patch;
+use crate::governance_utils::canonicalize_patch;
 
 /// Patch document as described in spec/03-air.md §15 and patch.schema.json.
 #[derive(Debug, Serialize, Deserialize)]

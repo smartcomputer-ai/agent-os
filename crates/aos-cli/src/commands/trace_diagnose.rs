@@ -288,9 +288,25 @@ fn first_intent_hash(value: &Value) -> Option<String> {
         None
     };
 
-    read(value.get("pending_plan_receipts").and_then(|v| v.as_array()))
-        .or_else(|| read(value.get("pending_reducer_receipts").and_then(|v| v.as_array())))
-        .or_else(|| read(value.get("plan_waiting_receipts").and_then(|v| v.as_array())))
+    read(
+        value
+            .get("pending_plan_receipts")
+            .and_then(|v| v.as_array()),
+    )
+    .or_else(|| {
+        read(
+            value
+                .get("pending_reducer_receipts")
+                .and_then(|v| v.as_array()),
+        )
+    })
+    .or_else(|| {
+        read(
+            value
+                .get("plan_waiting_receipts")
+                .and_then(|v| v.as_array()),
+        )
+    })
 }
 
 fn find_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {

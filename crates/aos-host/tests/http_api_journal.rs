@@ -107,7 +107,10 @@ async fn http_debug_trace_forwards_query() {
         {
             assert_eq!(
                 event_hash,
-                Some("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string())
+                Some(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string()
+                )
             );
             assert_eq!(schema, None);
             assert_eq!(correlate_by, None);
