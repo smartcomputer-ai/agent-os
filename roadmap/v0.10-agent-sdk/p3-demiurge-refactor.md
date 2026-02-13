@@ -100,6 +100,7 @@ These invariants must be preserved during refactor to avoid regressions:
 4. Tool registry refresh remains explicit and version-aware.
 5. Reducer micro-effects remain limited to blob bridging behavior, not tool orchestration.
 6. Provider profile selection is id-based in session state; concrete provider/model is loaded through the dedicated profile-catalog reducer and frozen per run.
+7. Demiurge consumes core-owned `sys/*` LLM contracts and must not introduce app- or SDK-local `sys/*` schema forks.
 
 ## Testing
 

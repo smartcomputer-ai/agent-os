@@ -19,12 +19,17 @@ This document is the umbrella index. Implementation is split into staged docs (`
 
 1. SDK contracts and reusable runtime helpers live in `crates/aos-agent-sdk`.
 2. For v0.10, SDK reducer/pure WASM modules stay in `crates/aos-agent-sdk` (`src/bin/*`) rather than a separate module crate.
-3. Canonical reusable AIR assets for the SDK live under `crates/aos-agent-sdk/air/` (schemas, module defs, plan templates, capability/policy templates).
+3. Canonical reusable AIR assets for the SDK live under `crates/aos-agent-sdk/air/` (schemas, module defs, plan templates, capability/policy templates), but only for `aos.agent/*` ownership.
 4. `apps/demiurge` is a consumer and migration target for SDK contracts, not the source of truth for them.
 5. `crates/aos-smoke` is the single end-to-end runner for SDK flows; do not introduce a parallel e2e harness in `aos-agent-sdk`.
 6. E2E execution has two lanes:
    - deterministic lane (default/CI, mock or stub adapters, replay parity required),
    - live lane (opt-in with real credentials/providers, validates wiring/interop, not replay-parity gating).
+7. Built-in `sys/*` ownership stays in core:
+   - schemas/effects/caps in `spec/defs`,
+   - Rust effect/receipt types in `aos-effects`,
+   - adapter execution in `aos-host`,
+   - cap enforcers in `aos-sys`.
 
 ## Why Staged
 
@@ -49,7 +54,9 @@ Staging prevents partial rollout drift and gives each phase a testable boundary.
 ## Sequencing Rationale
 
 1. Contracts first (`p2.1`), so all later work targets stable schemas/events.
-2. Provider + LLM contract second (`p2.2`), because loop behavior depends on request/receipt semantics.
+2. Provider + LLM contract second (`p2.2`), split into:
+   - core `sys/Llm*` evolution in core crates,
+   - SDK profile/lookup/mapper flow on top of that core contract.
 3. Loop safety + bounding third (`p2.3`), once request/response surfaces are fixed.
 4. Event API fourth (`p2.4`), once core runtime flow is stable.
 5. Failure/retry/cancel fifth (`p2.5`), to harden operational behavior.

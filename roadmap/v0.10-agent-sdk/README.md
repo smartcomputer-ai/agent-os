@@ -13,6 +13,7 @@ This phase moves AOS from a toy chat app toward a reusable agent runtime stack:
 - `roadmap/v0.10-agent-sdk/p2-agent-sdk.md`
 - `roadmap/v0.10-agent-sdk/p2.1-session-contracts.md`
 - `roadmap/v0.10-agent-sdk/p2.2-provider-profiles-llm-contract.md`
+- `roadmap/v0.10-agent-sdk/p2.2-llm-boundary-issue.md`
 - `roadmap/v0.10-agent-sdk/p2.3-tool-loop-safety-context-bounds.md`
 - `roadmap/v0.10-agent-sdk/p2.4-events-observability-contract.md`
 - `roadmap/v0.10-agent-sdk/p2.5-failure-retry-cancel.md`
@@ -26,6 +27,7 @@ This phase moves AOS from a toy chat app toward a reusable agent runtime stack:
 - Breaking changes are acceptable in v0.10.
 - Keep AOS kernel/spec boundaries intact: reducers own state/business logic, plans orchestrate effects.
 - Agent semantics live above core AOS, not inside the kernel.
+- Built-in `sys/*` contracts are core-owned (`spec/defs`, `aos-effects`, `aos-host`, `aos-sys`) and must not be defined in SDK AIR assets.
 - SDK schema/plan/module naming uses the `aos.agent/*` namespace.
 - Canonical SDK implementation lives in `crates/aos-agent-sdk` (shared Rust types/helpers, SDK WASM modules, reusable AIR assets).
 - `crates/aos-sys` remains reserved for built-in `sys/*` runtime primitives and enforcers.
