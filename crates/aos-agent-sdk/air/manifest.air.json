@@ -27,10 +27,7 @@
     { "name": "aos.agent/LlmOutputEnvelope@1" },
     { "name": "aos.agent/SessionEventKind@1" },
     { "name": "aos.agent/SessionState@1" },
-    { "name": "aos.agent/SessionEvent@1" },
-    { "name": "sys/LlmRuntimeArgs@1" },
-    { "name": "sys/LlmGenerateParams@1" },
-    { "name": "sys/LlmGenerateReceipt@1" }
+    { "name": "aos.agent/SessionEvent@1" }
   ],
   "modules": [
     { "name": "aos.agent/SessionReducer@1" },
