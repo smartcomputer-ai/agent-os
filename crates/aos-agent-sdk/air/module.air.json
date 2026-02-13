@@ -1,0 +1,30 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "aos.agent/SessionReducer@1",
+    "module_kind": "reducer",
+    "key_schema": "aos.agent/SessionId@1",
+    "abi": {
+      "reducer": {
+        "state": "aos.agent/SessionState@1",
+        "event": "aos.agent/SessionEvent@1",
+        "effects_emitted": ["blob.get", "blob.put", "timer.set"],
+        "cap_slots": {
+          "blob": "blob",
+          "timer": "timer"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defmodule",
+    "name": "aos.agent/SessionEventEcho@1",
+    "module_kind": "pure",
+    "abi": {
+      "pure": {
+        "input": "aos.agent/SessionEvent@1",
+        "output": "aos.agent/SessionEvent@1"
+      }
+    }
+  }
+]

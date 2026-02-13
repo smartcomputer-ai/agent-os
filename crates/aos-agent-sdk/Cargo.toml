@@ -1,0 +1,22 @@
+[package]
+name = "aos-agent-sdk"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "session_reducer"
+path = "src/bin/session_reducer.rs"
+
+[[bin]]
+name = "session_event_echo"
+path = "src/bin/session_event_echo.rs"
+
+[dependencies]
+aos-wasm-sdk = { path = "../aos-wasm-sdk" }
+aos-wasm-abi = { path = "../aos-wasm-abi" }
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"

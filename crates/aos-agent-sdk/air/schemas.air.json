@@ -1,0 +1,239 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionId@1",
+    "type": { "uuid": {} }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ProviderProfileId@1",
+    "type": { "text": {} }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunId@1",
+    "type": {
+      "record": {
+        "session_id": { "ref": "aos.agent/SessionId@1" },
+        "run_seq": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnId@1",
+    "type": {
+      "record": {
+        "run_id": { "ref": "aos.agent/RunId@1" },
+        "turn_seq": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/StepId@1",
+    "type": {
+      "record": {
+        "turn_id": { "ref": "aos.agent/TurnId@1" },
+        "step_seq": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolBatchId@1",
+    "type": {
+      "record": {
+        "step_id": { "ref": "aos.agent/StepId@1" },
+        "batch_seq": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallStatus@1",
+    "type": {
+      "variant": {
+        "Pending": { "unit": {} },
+        "Succeeded": { "unit": {} },
+        "Failed": { "record": { "code": { "text": {} }, "detail": { "text": {} } } },
+        "IgnoredStale": { "unit": {} },
+        "Cancelled": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ActiveToolBatch@1",
+    "type": {
+      "record": {
+        "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+        "issued_at_step_epoch": { "nat": {} },
+        "expected_call_ids": { "set": { "text": {} } },
+        "call_status": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "ref": "aos.agent/ToolCallStatus@1" }
+          }
+        },
+        "results_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunLease@1",
+    "type": {
+      "record": {
+        "lease_id": { "uuid": {} },
+        "issued_at": { "time": {} },
+        "expires_at": { "time": {} },
+        "heartbeat_timeout_secs": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ReasoningEffort@1",
+    "type": {
+      "variant": {
+        "Low": { "unit": {} },
+        "Medium": { "unit": {} },
+        "High": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionConfig@1",
+    "type": {
+      "record": {
+        "provider_profile_id": { "ref": "aos.agent/ProviderProfileId@1" },
+        "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
+        "max_tokens": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunConfig@1",
+    "type": {
+      "record": {
+        "provider_profile_id": { "ref": "aos.agent/ProviderProfileId@1" },
+        "provider": { "text": {} },
+        "model": { "text": {} },
+        "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
+        "max_tokens": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionLifecycle@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Running": { "unit": {} },
+        "WaitingInput": { "unit": {} },
+        "Paused": { "unit": {} },
+        "Cancelling": { "unit": {} },
+        "Completed": { "unit": {} },
+        "Failed": { "unit": {} },
+        "Cancelled": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostCommand@1",
+    "type": {
+      "record": {
+        "command_id": { "uuid": {} },
+        "target_run_id": { "option": { "ref": "aos.agent/RunId@1" } },
+        "expected_session_epoch": { "option": { "nat": {} } },
+        "issued_at": { "time": {} },
+        "command": {
+          "variant": {
+            "Steer": { "record": { "text": { "text": {} } } },
+            "FollowUp": { "record": { "text": { "text": {} } } },
+            "Pause": { "unit": {} },
+            "Resume": { "unit": {} },
+            "Cancel": { "record": { "reason": { "option": { "text": {} } } } },
+            "LeaseHeartbeat": {
+              "record": {
+                "lease_id": { "uuid": {} },
+                "heartbeat_at": { "time": {} }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionEventKind@1",
+    "type": {
+      "variant": {
+        "RunRequested": {
+          "record": {
+            "input_ref": { "hash": {} },
+            "run_overrides": { "option": { "ref": "aos.agent/SessionConfig@1" } }
+          }
+        },
+        "RunStarted": { "unit": {} },
+        "HostCommandReceived": { "ref": "aos.agent/HostCommand@1" },
+        "HostCommandApplied": { "record": { "command_id": { "uuid": {} } } },
+        "LifecycleChanged": { "ref": "aos.agent/SessionLifecycle@1" },
+        "RunCompleted": { "unit": {} },
+        "RunFailed": { "record": { "code": { "text": {} }, "detail": { "text": {} } } },
+        "RunCancelled": { "record": { "reason": { "option": { "text": {} } } }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionState@1",
+    "type": {
+      "record": {
+        "session_id": { "ref": "aos.agent/SessionId@1" },
+        "lifecycle": { "ref": "aos.agent/SessionLifecycle@1" },
+        "session_epoch": { "nat": {} },
+        "step_epoch": { "nat": {} },
+        "next_run_seq": { "nat": {} },
+        "next_turn_seq": { "nat": {} },
+        "next_step_seq": { "nat": {} },
+        "session_config": { "ref": "aos.agent/SessionConfig@1" },
+        "active_run_id": { "option": { "ref": "aos.agent/RunId@1" } },
+        "active_run_config": { "option": { "ref": "aos.agent/RunConfig@1" } },
+        "active_turn_id": { "option": { "ref": "aos.agent/TurnId@1" } },
+        "active_step_id": { "option": { "ref": "aos.agent/StepId@1" } },
+        "active_tool_batch": { "option": { "ref": "aos.agent/ActiveToolBatch@1" } },
+        "in_flight_effects": { "nat": {} },
+        "max_in_flight_effects": { "nat": {} },
+        "active_run_lease": { "option": { "ref": "aos.agent/RunLease@1" } },
+        "last_heartbeat_at": { "option": { "time": {} } },
+        "pending_steer": { "list": { "text": {} } },
+        "pending_follow_up": { "list": { "text": {} } },
+        "created_at": { "time": {} },
+        "updated_at": { "time": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionEvent@1",
+    "type": {
+      "record": {
+        "session_id": { "ref": "aos.agent/SessionId@1" },
+        "run_id": { "option": { "ref": "aos.agent/RunId@1" } },
+        "turn_id": { "option": { "ref": "aos.agent/TurnId@1" } },
+        "step_id": { "option": { "ref": "aos.agent/StepId@1" } },
+        "session_epoch": { "nat": {} },
+        "step_epoch": { "nat": {} },
+        "event": { "ref": "aos.agent/SessionEventKind@1" }
+      }
+    }
+  }
+]
