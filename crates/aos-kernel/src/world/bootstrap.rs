@@ -124,3 +124,47 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(kernel)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::journal::mem::MemJournal;
+    use crate::world::test_support::empty_manifest;
+    use aos_air_types::{SecretDecl, SecretEntry};
+    use aos_store::MemStore;
+    use std::collections::HashMap;
+
+    #[test]
+    fn kernel_requires_secret_resolver_for_secretful_manifest() {
+        let store = Arc::new(MemStore::new());
+        let mut manifest = empty_manifest();
+        manifest.secrets.push(SecretEntry::Decl(SecretDecl {
+            alias: "payments/stripe".into(),
+            version: 1,
+            binding_id: "stripe:prod".into(),
+            expected_digest: None,
+            policy: None,
+        }));
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![SecretDecl {
+                alias: "payments/stripe".into(),
+                version: 1,
+                binding_id: "stripe:prod".into(),
+                expected_digest: None,
+                policy: None,
+            }],
+            modules: HashMap::new(),
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::new(),
+            effect_catalog: EffectCatalog::new(),
+        };
+
+        let result = Kernel::from_loaded_manifest(store, loaded, Box::new(MemJournal::new()));
+
+        assert!(matches!(result, Err(KernelError::SecretResolverMissing)));
+    }
+}

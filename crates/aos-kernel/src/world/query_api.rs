@@ -165,8 +165,8 @@ impl<S: Store + 'static> Kernel<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::journal::mem::MemJournal;
     use crate::journal::Journal;
+    use crate::journal::mem::MemJournal;
     use aos_air_types::{AirNode, CURRENT_AIR_VERSION};
     use aos_store::MemStore;
     use indexmap::IndexMap;
