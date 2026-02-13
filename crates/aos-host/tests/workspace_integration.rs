@@ -1,5 +1,3 @@
-#![cfg(feature = "test-fixtures")]
-
 //! Integration tests for the Workspace reducer and internal workspace effects.
 //!
 //! These tests load the actual reducer WASM built in `crates/aos-sys` from

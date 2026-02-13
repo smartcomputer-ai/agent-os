@@ -15,7 +15,7 @@ use aos_air_types::{
 };
 use aos_effects::builtins::TimerSetParams;
 use aos_kernel::cap_enforcer::CapCheckOutput;
-#[path = "../src/fixtures/mod.rs"]
+#[path = "fixtures.rs"]
 pub mod fixtures;
 
 /// Compatibility wrapper for decoding ReadMeta via serde_json/serde_cbor in tests.

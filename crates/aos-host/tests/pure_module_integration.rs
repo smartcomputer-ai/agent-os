@@ -1,5 +1,3 @@
-#![cfg(feature = "test-fixtures")]
-
 #[path = "helpers.rs"]
 mod helpers;
 

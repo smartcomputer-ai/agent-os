@@ -13,7 +13,7 @@ aos-air-exec = { path = "../aos-air-exec" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }
 aos-wasm-sdk = { path = "../aos-wasm-sdk" }
 aos-effects = { path = "../aos-effects" }
-aos-host = { path = "../aos-host", features = ["test-fixtures"] }
+aos-host = { path = "../aos-host", features = ["e2e-tests"] }
 aos-wasm-build = { path = "../aos-wasm-build" }
 clap = { version = "4", features = ["derive"] }
 indexmap = "2"

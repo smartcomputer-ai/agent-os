@@ -18,7 +18,7 @@
 - [x] Execution step 7 (replay-or-die style verification pass) completed:
   - `cargo test -p aos-kernel world::snapshot_replay:: -- --nocapture`
   - `cargo test -p aos-kernel world::query_api:: -- --nocapture`
-  - `cargo test -p aos-host --features test-fixtures --test snapshot_integration -- --nocapture`
+  - `cargo test -p aos-host --features e2e-tests --test snapshot_integration -- --nocapture`
   - `cargo test -p aos-kernel --lib`
 - [x] Suggestion item 3 completed: `EffectManager::drain` now returns `Result` and secret injection failures are surfaced instead of dropped.
 - [x] Suggestion item 4 completed: defsecret name parsing in governance manifest loading now returns typed `KernelError::Manifest` instead of panicking.

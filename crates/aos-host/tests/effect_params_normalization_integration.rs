@@ -1,5 +1,5 @@
-#[path = "helpers.rs"]
-mod helpers;
+#[path = "fixtures.rs"]
+mod fixtures;
 
 use aos_effects::CapabilityGrant;
 use aos_kernel::capability::CapabilityResolver;
@@ -7,7 +7,6 @@ use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
 use aos_wasm_abi::ReducerEffect;
-use helpers::fixtures;
 use indexmap::IndexMap;
 use serde_cbor::Value as CborValue;
 use serde_json;

@@ -1,4 +1,4 @@
-#![cfg(feature = "test-fixtures")]
+#![cfg(feature = "e2e-tests")]
 
 use std::path::Path;
 use std::sync::Arc;
@@ -11,7 +11,6 @@ use aos_effects::builtins::{LlmGenerateReceipt, TokenUsage};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
 use aos_host::adapters::traits::AsyncEffectAdapter;
 use aos_host::config::HostConfig;
-use aos_host::fixtures;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
 use aos_host::testhost::TestHost;
@@ -23,6 +22,9 @@ use aos_wasm_build::builder::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use serde::Deserialize;
 use serde_json::json;
+
+#[path = "../tests/fixtures.rs"]
+mod fixtures;
 
 fn load_world_env(world_root: &Path) -> Result<()> {
     let env_path = world_root.join(".env");

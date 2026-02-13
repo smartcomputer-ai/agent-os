@@ -12,9 +12,6 @@ pub mod world_io;
 
 pub mod testhost;
 
-#[cfg(any(feature = "test-fixtures", test))]
-pub mod fixtures;
-
 pub use adapters::timer::TimerScheduler;
 pub use control::{ControlClient, ControlServer, RequestEnvelope, ResponseEnvelope};
 pub use host::{ExternalEvent, RunMode, WorldHost, now_wallclock_ns};

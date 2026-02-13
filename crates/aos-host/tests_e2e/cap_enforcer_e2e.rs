@@ -1,12 +1,12 @@
-#![cfg(feature = "test-fixtures")]
-
 //! Integration tests for cap enforcer pure modules.
 //!
 //! These tests load the actual enforcer WASM built in `crates/aos-sys` from
 //! `target/wasm32-unknown-unknown/debug`. Build it first with:
 //! `cargo build -p aos-sys --target wasm32-unknown-unknown`.
 
-#[path = "helpers.rs"]
+#![cfg(feature = "e2e-tests")]
+
+#[path = "../tests/helpers.rs"]
 mod helpers;
 
 use aos_air_types::{

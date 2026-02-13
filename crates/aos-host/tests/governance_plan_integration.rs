@@ -4,8 +4,9 @@ use std::sync::Arc;
 use aos_air_types::{
     AirNode, CapEnforcer, CapGrant, DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprOrValue,
     ExprRecord, HashRef, ManifestDefaults, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, Trigger, TypeExpr,
-    TypePrimitive, TypePrimitiveText, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex,
+    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, ReducerAbi, Trigger,
+    TypeExpr, TypePrimitive, TypePrimitiveText, builtins, catalog::EffectCatalog,
+    plan_literals::SchemaIndex,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::ReceiptStatus;
@@ -18,12 +19,13 @@ use aos_kernel::governance::ProposalState;
 use aos_kernel::governance_effects::GovernanceParamPreprocessor;
 use aos_kernel::policy::AllowAllPolicy;
 use aos_store::Store;
+use aos_wasm_abi::ReducerOutput;
 use indexmap::IndexMap;
 use serde::Deserialize;
 
-#[path = "helpers.rs"]
-mod helpers;
-use helpers::fixtures::{self, TestWorld};
+#[path = "fixtures.rs"]
+mod fixtures;
+use fixtures::TestWorld;
 
 #[derive(Debug, Deserialize)]
 struct GovProposeReceipt {
@@ -33,7 +35,7 @@ struct GovProposeReceipt {
 #[test]
 fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), KernelError> {
     let store = fixtures::new_mem_store();
-    let mut loaded = helpers::simple_state_manifest(&store);
+    let mut loaded = simple_state_manifest(&store);
     hydrate_schema_hashes(&store, &mut loaded)?;
     attach_governance_cap_allow_all(&mut loaded);
 
@@ -457,4 +459,41 @@ fn apply_params_cbor(proposal_id: u64) -> Result<Vec<u8>, KernelError> {
     );
     to_canonical_cbor(&serde_cbor::Value::Map(params))
         .map_err(|err| KernelError::Manifest(err.to_string()))
+}
+
+fn simple_state_manifest(store: &Arc<fixtures::TestStore>) -> aos_kernel::manifest::LoadedManifest {
+    let mut reducer = fixtures::stub_reducer_module(
+        store,
+        "com.acme/Simple@1",
+        &ReducerOutput {
+            state: Some(vec![0xAA]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/SimpleState@1"),
+        event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    let routing = vec![fixtures::routing_event(fixtures::START_SCHEMA, &reducer.name)];
+    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            fixtures::def_text_record_schema(
+                fixtures::START_SCHEMA,
+                vec![("id", fixtures::text_type())],
+            ),
+            DefSchema {
+                name: "com.acme/SimpleState@1".into(),
+                ty: fixtures::text_type(),
+            },
+        ],
+    );
+    loaded
 }

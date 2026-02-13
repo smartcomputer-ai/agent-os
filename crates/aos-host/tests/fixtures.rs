@@ -1,7 +1,7 @@
 //! Test fixtures for building manifests, stub reducers, and test data.
 //!
 //! This module provides utilities for programmatically constructing manifests,
-//! stub WASM reducers, and other test fixtures. Enable with the `test-fixtures` feature.
+//! stub WASM reducers, and other test fixtures. Enable with the `e2e-tests` feature.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
