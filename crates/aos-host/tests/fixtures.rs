@@ -3,6 +3,8 @@
 //! This module provides utilities for programmatically constructing manifests,
 //! stub WASM reducers, and other test fixtures. Enable with the `e2e-tests` feature.
 
+#![allow(dead_code)]
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
