@@ -11,10 +11,3 @@ pub struct LlmToolCall {
 }
 
 pub type LlmToolCallList = Vec<LlmToolCall>;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct LlmOutputEnvelope {
-    pub assistant_text: Option<String>,
-    pub tool_calls_ref: Option<String>,
-    pub reasoning_ref: Option<String>,
-}

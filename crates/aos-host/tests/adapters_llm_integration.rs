@@ -70,6 +70,7 @@ async fn llm_errors_missing_api_key() {
 
     // Missing api_key
     let params = LlmGenerateParams {
+        correlation_id: None,
         provider: "openai".into(),
         model: "gpt-5.2".into(),
         message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
@@ -105,6 +106,7 @@ async fn llm_unknown_provider_errors() {
     let adapter = LlmAdapter::new(store.clone(), cfg);
 
     let params = LlmGenerateParams {
+        correlation_id: None,
         provider: "missing".into(),
         model: "gpt".into(),
         message_refs: vec![HashRef::new(store.put_blob(b"[]").unwrap().to_hex()).unwrap()],
@@ -153,6 +155,7 @@ async fn llm_message_ref_missing_errors() {
         HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
             .unwrap();
     let params = LlmGenerateParams {
+        correlation_id: None,
         provider: "openai".into(),
         model: "gpt".into(),
         message_refs: vec![missing_ref],
@@ -214,6 +217,7 @@ async fn llm_happy_path_ok_receipt() {
     let adapter = LlmAdapter::new(store.clone(), cfg);
 
     let params = LlmGenerateParams {
+        correlation_id: None,
         provider: "mock".into(),
         model: "gpt-mock".into(),
         message_refs: vec![message_ref],

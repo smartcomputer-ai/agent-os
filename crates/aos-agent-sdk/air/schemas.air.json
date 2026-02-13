@@ -286,17 +286,6 @@
   },
   {
     "$kind": "defschema",
-    "name": "aos.agent/LlmOutputEnvelope@1",
-    "type": {
-      "record": {
-        "assistant_text": { "option": { "text": {} } },
-        "tool_calls_ref": { "option": { "hash": {} } },
-        "reasoning_ref": { "option": { "hash": {} } }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "aos.agent/SessionEventKind@1",
     "type": {
       "variant": {

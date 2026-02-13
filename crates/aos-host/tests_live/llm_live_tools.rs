@@ -46,6 +46,7 @@ pub(crate) async fn run_required_tool_call(
     runtime.tool_refs = Some(vec![tool_ref]);
     runtime.tool_choice = Some(LlmToolChoice::Required);
     let params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![message_ref],
@@ -154,6 +155,7 @@ async fn run_multi_tool_call(case: &ProviderRuntime) -> (Arc<MemStore>, LlmToolC
         }
 
         let params = LlmGenerateParams {
+            correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
             message_refs: vec![message_ref],
@@ -232,6 +234,7 @@ pub(crate) async fn run_tool_result_roundtrip(case: &ProviderRuntime) {
     );
 
     let params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![roundtrip_messages_ref.clone()],
@@ -264,6 +267,7 @@ pub(crate) async fn run_tool_result_roundtrip(case: &ProviderRuntime) {
     let turn3_ref = store_json(&store, &Value::Array(history.clone()));
 
     let turn3_params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![turn3_ref],
@@ -324,6 +328,7 @@ pub(crate) async fn run_multi_tool_roundtrip(case: &ProviderRuntime) {
     for round in 0..4 {
         let roundtrip_ref = store_json(&store, &Value::Array(history.clone()));
         let roundtrip_params = LlmGenerateParams {
+            correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
             message_refs: vec![roundtrip_ref],
@@ -396,6 +401,7 @@ pub(crate) async fn run_multi_tool_roundtrip(case: &ProviderRuntime) {
     }));
     let followup_ref = store_json(&store, &Value::Array(history));
     let followup_params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![followup_ref],

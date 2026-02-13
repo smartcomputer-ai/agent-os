@@ -20,6 +20,7 @@ pub(crate) async fn run_plain_completion(case: &ProviderRuntime) {
         &json!({"role":"user","content":"Reply with exactly: live_adapter_ok"}),
     );
     let params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![message_ref],
@@ -59,6 +60,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
         })]),
     );
     let turn1_params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![turn1_ref],
@@ -82,6 +84,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
             })]),
         );
         let retry_params = LlmGenerateParams {
+            correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
             message_refs: vec![retry_ref],
@@ -115,6 +118,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
     ];
     let turn2_ref = store_json(&store, &Value::Array(history.clone()));
     let turn2_params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![turn2_ref],
@@ -142,6 +146,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
         }));
         let retry_ref = store_json(&store, &Value::Array(history.clone()));
         let retry_params = LlmGenerateParams {
+            correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
             message_refs: vec![retry_ref],
@@ -172,6 +177,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
     history.push(json!({"role":"user","content":"Summarize our exchange in 8 words or fewer."}));
     let turn3_ref = store_json(&store, &Value::Array(history.clone()));
     let turn3_params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![turn3_ref],
@@ -194,6 +200,7 @@ pub(crate) async fn run_multi_turn_conversation(case: &ProviderRuntime) {
         }));
         let retry_ref = store_json(&store, &Value::Array(retry_history));
         let retry_params = LlmGenerateParams {
+            correlation_id: None,
             provider: case.provider_id.clone(),
             model: case.model.clone(),
             message_refs: vec![retry_ref],
@@ -266,6 +273,7 @@ pub(crate) async fn run_runtime_refs_smoke(case: &ProviderRuntime) {
     runtime.provider_options_ref = provider_options_ref;
     runtime.response_format_ref = response_format_ref;
     let params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![message_ref],
@@ -310,6 +318,7 @@ pub(crate) async fn run_invalid_api_key(case: &ProviderRuntime) {
 
     let message_ref = store_json(&store, &json!({"role":"user","content":"hello"}));
     let params = LlmGenerateParams {
+        correlation_id: None,
         provider: case.provider_id.clone(),
         model: case.model.clone(),
         message_refs: vec![message_ref],

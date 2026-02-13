@@ -916,6 +916,7 @@ mod tests {
         let mut mgr = effect_manager_with_grants(vec![(grant, CapType::llm_basic())]);
 
         let params = LlmGenerateParams {
+            correlation_id: None,
             provider: "openai".into(),
             model: "gpt-5.2".into(),
             message_refs: vec![
@@ -949,6 +950,7 @@ mod tests {
         assert!(res.is_ok(), "enqueue failed: {:?}", res.err());
 
         let over_limit = LlmGenerateParams {
+            correlation_id: None,
             provider: "openai".into(),
             model: "gpt-5.2".into(),
             message_refs: vec![

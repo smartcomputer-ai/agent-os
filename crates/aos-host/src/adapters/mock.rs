@@ -348,6 +348,13 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             None => Err(anyhow!("field '{field}' missing from llm.generate params")),
         }
     };
+    let opt_text = |field: &str| -> Result<Option<String>> {
+        match map.get(&serde_cbor::Value::Text(field.into())) {
+            Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
+            Some(serde_cbor::Value::Null) | None => Ok(None),
+            Some(other) => Err(anyhow!("field '{field}' must be text or null, got {:?}", other)),
+        }
+    };
     let message_refs = match map.get(&serde_cbor::Value::Text("message_refs".into())) {
         Some(serde_cbor::Value::Array(items)) => items
             .iter()
@@ -425,6 +432,7 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
     let api_key = decode_api_key(map.get(&serde_cbor::Value::Text("api_key".into())))?;
 
     Ok(LlmGenerateParams {
+        correlation_id: opt_text("correlation_id")?,
         provider: text("provider")?,
         model: text("model")?,
         message_refs,

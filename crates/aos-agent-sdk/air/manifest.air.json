@@ -24,7 +24,6 @@
     { "name": "aos.agent/ProfileCatalogEvent@1" },
     { "name": "aos.agent/LlmToolCall@1" },
     { "name": "aos.agent/LlmToolCallList@1" },
-    { "name": "aos.agent/LlmOutputEnvelope@1" },
     { "name": "aos.agent/SessionEventKind@1" },
     { "name": "aos.agent/SessionState@1" },
     { "name": "aos.agent/SessionEvent@1" }

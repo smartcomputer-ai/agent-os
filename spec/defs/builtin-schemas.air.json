@@ -268,6 +268,7 @@
     "name": "sys/LlmGenerateParams@1",
     "type": {
       "record": {
+        "correlation_id": { "option": { "text": {} } },
         "provider": { "text": {} },
         "model": { "text": {} },
         "message_refs": { "list": { "hash": {} } },

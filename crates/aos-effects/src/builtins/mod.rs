@@ -110,6 +110,8 @@ pub struct LlmRuntimeArgs {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmGenerateParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
     pub provider: String,
     pub model: String,
     pub message_refs: Vec<HashRef>,
