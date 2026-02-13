@@ -61,6 +61,10 @@ Expected first mappings:
   - `chat_plan` shape -> `aos.agent/llm_step_plan@1`
   - `tool_plan` shape -> `aos.agent/tool_call_plan@1`
   - `tool_registry_plan` shape -> `aos.agent/toolset_refresh_plan@1`
+- Adopt SDK provider-profile lookup choreography:
+  - `RunRequested` path emits `ProfileLookupRequested`,
+  - dedicated profile-catalog reducer returns `ProfileLookupResolved|Failed`,
+  - run start occurs only after resolved config snapshot.
 - Keep current introspect/workspace tools functional.
 - Add at least one additional tool path that validates SDK extensibility.
 - Adopt new effect/tool families from P4 incrementally (starting with low-risk workspace-native operations).
@@ -95,6 +99,7 @@ These invariants must be preserved during refactor to avoid regressions:
 3. CAS refs remain the interface between LLM output, tool results, and state.
 4. Tool registry refresh remains explicit and version-aware.
 5. Reducer micro-effects remain limited to blob bridging behavior, not tool orchestration.
+6. Provider profile selection is id-based in session state; concrete provider/model is loaded through the dedicated profile-catalog reducer and frozen per run.
 
 ## Testing
 

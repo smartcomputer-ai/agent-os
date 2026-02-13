@@ -36,7 +36,7 @@ Staging prevents partial rollout drift and gives each phase a testable boundary.
 1. `roadmap/v0.10-agent-sdk/p2.1-session-contracts.md`  
    Foundation schemas and lifecycle/control contracts.
 2. `roadmap/v0.10-agent-sdk/p2.2-provider-profiles-llm-contract.md`  
-   Provider profile model and LLM effect contract evolution.
+   Provider profile model, dedicated profile-catalog reducer flow, and LLM effect contract evolution.
 3. `roadmap/v0.10-agent-sdk/p2.3-tool-loop-safety-context-bounds.md`  
    Loop safety, limits, bounded tool output, context pressure signals.
 4. `roadmap/v0.10-agent-sdk/p2.4-events-observability-contract.md`  
