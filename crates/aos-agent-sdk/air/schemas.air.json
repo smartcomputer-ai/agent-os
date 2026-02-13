@@ -197,6 +197,30 @@
         "HostCommandReceived": { "ref": "aos.agent/HostCommand@1" },
         "HostCommandApplied": { "record": { "command_id": { "uuid": {} } } },
         "LifecycleChanged": { "ref": "aos.agent/SessionLifecycle@1" },
+        "StepBoundary": { "unit": {} },
+        "ToolBatchStarted": {
+          "record": {
+            "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+            "expected_call_ids": { "list": { "text": {} } }
+          }
+        },
+        "ToolCallSettled": {
+          "record": {
+            "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+            "call_id": { "text": {} },
+            "status": { "ref": "aos.agent/ToolCallStatus@1" },
+            "receipt_session_epoch": { "nat": {} },
+            "receipt_step_epoch": { "nat": {} }
+          }
+        },
+        "ToolBatchSettled": {
+          "record": {
+            "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+            "results_ref": { "option": { "hash": {} } }
+          }
+        },
+        "LeaseIssued": { "record": { "lease": { "ref": "aos.agent/RunLease@1" } } },
+        "LeaseExpiryCheck": { "record": { "observed_time_ns": { "time": {} } } },
         "RunCompleted": { "unit": {} },
         "RunFailed": { "record": { "code": { "text": {} }, "detail": { "text": {} } } },
         "RunCancelled": { "record": { "reason": { "option": { "text": {} } } } }

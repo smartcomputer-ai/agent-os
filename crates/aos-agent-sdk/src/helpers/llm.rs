@@ -183,6 +183,22 @@ mod tests {
         assert_eq!(decoded.model, "gpt-5.2");
         assert_eq!(decoded.runtime.max_tokens, Some(512));
         assert_eq!(decoded.runtime.reasoning_effort.as_deref(), Some("medium"));
+        assert_eq!(
+            decoded
+                .runtime
+                .provider_options_ref
+                .as_ref()
+                .map(|h| h.as_str()),
+            Some("sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+        );
+        assert_eq!(
+            decoded
+                .runtime
+                .response_format_ref
+                .as_ref()
+                .map(|h| h.as_str()),
+            Some("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+        );
     }
 
     #[test]
@@ -227,5 +243,29 @@ mod tests {
         let message_err = materialize_llm_generate_params(&run, &LlmStepContext::default())
             .expect_err("messages");
         assert_eq!(message_err, LlmMappingError::EmptyMessageRefs);
+    }
+
+    #[test]
+    fn leaves_optional_runtime_controls_unset_when_not_provided() {
+        let run = RunConfig {
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            reasoning_effort: None,
+            max_tokens: None,
+        };
+        let step = LlmStepContext {
+            message_refs: vec![hash('f')],
+            ..LlmStepContext::default()
+        };
+
+        let mapped = materialize_llm_generate_params(&run, &step).expect("map");
+        let encoded = serde_cbor::to_vec(&mapped).expect("encode");
+        let decoded: aos_effects::builtins::LlmGenerateParams =
+            serde_cbor::from_slice(&encoded).expect("decode");
+
+        assert_eq!(decoded.runtime.max_tokens, None);
+        assert_eq!(decoded.runtime.reasoning_effort, None);
+        assert_eq!(decoded.runtime.provider_options_ref, None);
+        assert_eq!(decoded.runtime.response_format_ref, None);
     }
 }

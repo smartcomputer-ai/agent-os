@@ -1,11 +1,13 @@
 use super::{
     allocate_run_id, allocate_step_id, allocate_turn_id, apply_cancel_fence,
-    can_apply_host_command, enqueue_host_text, transition_lifecycle,
+    can_apply_host_command, enqueue_host_text, pop_follow_up_if_ready, pop_pending_steer,
+    transition_lifecycle,
 };
 use crate::contracts::{
-    HostCommandKind, RunConfig, SessionConfig, SessionEvent, SessionEventKind, SessionLifecycle,
-    SessionState,
+    ActiveToolBatch, HostCommandKind, RunConfig, SessionConfig, SessionEvent, SessionEventKind,
+    SessionLifecycle, SessionState, ToolCallStatus,
 };
+use alloc::collections::{BTreeMap, BTreeSet};
 
 /// Extension hooks for SDK-based session reducers.
 pub trait SessionReducerHooks {
@@ -39,8 +41,15 @@ impl SessionReducerHooks for NoopSessionHooks {
 pub enum SessionReduceError {
     InvalidLifecycleTransition,
     HostCommandRejected,
+    StepBoundaryRejected,
+    ToolBatchAlreadyActive,
+    ToolBatchNotActive,
+    ToolBatchIdMismatch,
+    ToolCallUnknown,
+    ToolBatchNotSettled,
     MissingRunConfig,
     MissingActiveRun,
+    MissingActiveTurn,
     MissingProvider,
     MissingModel,
     RunAlreadyActive,
@@ -51,8 +60,15 @@ impl SessionReduceError {
         match self {
             Self::InvalidLifecycleTransition => "invalid lifecycle transition",
             Self::HostCommandRejected => "host command rejected",
+            Self::StepBoundaryRejected => "step boundary rejected",
+            Self::ToolBatchAlreadyActive => "tool batch already active",
+            Self::ToolBatchNotActive => "tool batch not active",
+            Self::ToolBatchIdMismatch => "tool batch id mismatch",
+            Self::ToolCallUnknown => "tool call id not expected in active batch",
+            Self::ToolBatchNotSettled => "tool batch not settled",
             Self::MissingRunConfig => "run config missing",
             Self::MissingActiveRun => "active run missing",
+            Self::MissingActiveTurn => "active turn missing",
             Self::MissingProvider => "run config provider missing",
             Self::MissingModel => "run config model missing",
             Self::RunAlreadyActive => "run already active",
@@ -84,12 +100,51 @@ pub fn apply_session_event(
         SessionEventKind::RunStarted => {
             on_run_started(state)?;
         }
+        SessionEventKind::StepBoundary => {
+            on_step_boundary(state)?;
+        }
         SessionEventKind::HostCommandReceived(command) => {
             on_host_command(state, command)?;
+        }
+        SessionEventKind::ToolBatchStarted {
+            tool_batch_id,
+            expected_call_ids,
+        } => {
+            on_tool_batch_started(state, tool_batch_id, expected_call_ids)?;
+        }
+        SessionEventKind::ToolCallSettled {
+            tool_batch_id,
+            call_id,
+            status,
+            receipt_session_epoch,
+            receipt_step_epoch,
+        } => {
+            on_tool_call_settled(
+                state,
+                tool_batch_id,
+                call_id,
+                status,
+                *receipt_session_epoch,
+                *receipt_step_epoch,
+            )?;
+        }
+        SessionEventKind::ToolBatchSettled {
+            tool_batch_id,
+            results_ref,
+        } => {
+            on_tool_batch_settled(state, tool_batch_id, results_ref.clone())?;
+        }
+        SessionEventKind::LeaseIssued { lease } => {
+            state.active_run_lease = Some(lease.clone());
+            state.last_heartbeat_at = Some(lease.issued_at);
+        }
+        SessionEventKind::LeaseExpiryCheck { observed_time_ns } => {
+            on_lease_expiry_check(state, *observed_time_ns)?;
         }
         SessionEventKind::LifecycleChanged(next) => {
             transition_lifecycle(state, *next)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+            let _ = pop_follow_up_if_ready(state);
         }
         SessionEventKind::RunCompleted => {
             transition_lifecycle(state, SessionLifecycle::Completed)
@@ -151,6 +206,7 @@ fn on_run_started(state: &mut SessionState) -> Result<(), SessionReduceError> {
 
     transition_lifecycle(state, SessionLifecycle::Running)
         .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+    state.step_epoch = state.step_epoch.saturating_add(1);
 
     if state.active_turn_id.is_none() {
         let turn_id = allocate_turn_id(state, &run_id);
@@ -197,6 +253,8 @@ fn on_host_command(
             transition_lifecycle(state, SessionLifecycle::Cancelling)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
             apply_cancel_fence(state);
+            maybe_finalize_cancelled(state)
+                .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
         }
         HostCommandKind::LeaseHeartbeat {
             lease_id,
@@ -226,6 +284,182 @@ fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfi
     }
 }
 
+fn on_step_boundary(state: &mut SessionState) -> Result<(), SessionReduceError> {
+    match state.lifecycle {
+        SessionLifecycle::Running => {}
+        SessionLifecycle::Idle | SessionLifecycle::WaitingInput => {
+            let _ = pop_follow_up_if_ready(state);
+            return Ok(());
+        }
+        _ => return Err(SessionReduceError::StepBoundaryRejected),
+    }
+
+    if state
+        .active_tool_batch
+        .as_ref()
+        .is_some_and(|batch| !batch.is_settled())
+    {
+        return Err(SessionReduceError::ToolBatchNotSettled);
+    }
+
+    if state
+        .active_tool_batch
+        .as_ref()
+        .is_some_and(ActiveToolBatch::is_settled)
+    {
+        state.active_tool_batch = None;
+    }
+
+    let _ = pop_pending_steer(state);
+    state.step_epoch = state.step_epoch.saturating_add(1);
+
+    let run_id = state
+        .active_run_id
+        .clone()
+        .ok_or(SessionReduceError::MissingActiveRun)?;
+    let turn_id = match state.active_turn_id.clone() {
+        Some(turn) => turn,
+        None => {
+            let new_turn = allocate_turn_id(state, &run_id);
+            state.active_turn_id = Some(new_turn.clone());
+            new_turn
+        }
+    };
+    let next_step = allocate_step_id(state, &turn_id);
+    state.active_step_id = Some(next_step);
+    Ok(())
+}
+
+fn on_tool_batch_started(
+    state: &mut SessionState,
+    tool_batch_id: &crate::contracts::ToolBatchId,
+    expected_call_ids: &[alloc::string::String],
+) -> Result<(), SessionReduceError> {
+    if state
+        .active_tool_batch
+        .as_ref()
+        .is_some_and(|batch| !batch.is_settled())
+    {
+        return Err(SessionReduceError::ToolBatchAlreadyActive);
+    }
+
+    let expected_set: BTreeSet<alloc::string::String> = expected_call_ids.iter().cloned().collect();
+    let mut call_status = BTreeMap::new();
+    for call_id in &expected_set {
+        call_status.insert(call_id.clone(), ToolCallStatus::Pending);
+    }
+
+    state.in_flight_effects = expected_set.len() as u64;
+    state.active_tool_batch = Some(ActiveToolBatch {
+        tool_batch_id: tool_batch_id.clone(),
+        issued_at_step_epoch: state.step_epoch,
+        expected_call_ids: expected_set,
+        call_status,
+        results_ref: None,
+    });
+    Ok(())
+}
+
+fn on_tool_call_settled(
+    state: &mut SessionState,
+    tool_batch_id: &crate::contracts::ToolBatchId,
+    call_id: &str,
+    status: &ToolCallStatus,
+    receipt_session_epoch: u64,
+    receipt_step_epoch: u64,
+) -> Result<(), SessionReduceError> {
+    let batch = state
+        .active_tool_batch
+        .as_mut()
+        .ok_or(SessionReduceError::ToolBatchNotActive)?;
+    if batch.tool_batch_id != *tool_batch_id {
+        return Err(SessionReduceError::ToolBatchIdMismatch);
+    }
+    if !batch.expected_call_ids.contains(call_id) {
+        return Err(SessionReduceError::ToolCallUnknown);
+    }
+
+    let stale = receipt_session_epoch != state.session_epoch
+        || receipt_step_epoch != batch.issued_at_step_epoch;
+    let effective = if stale {
+        ToolCallStatus::IgnoredStale
+    } else {
+        status.clone()
+    };
+
+    let was_terminal = batch
+        .call_status
+        .get(call_id)
+        .is_some_and(ToolCallStatus::is_terminal);
+    let is_terminal = effective.is_terminal();
+    batch.call_status.insert(call_id.into(), effective);
+
+    if !was_terminal && is_terminal {
+        state.in_flight_effects = state.in_flight_effects.saturating_sub(1);
+    }
+
+    maybe_finalize_cancelled(state).map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+    Ok(())
+}
+
+fn on_tool_batch_settled(
+    state: &mut SessionState,
+    tool_batch_id: &crate::contracts::ToolBatchId,
+    results_ref: Option<alloc::string::String>,
+) -> Result<(), SessionReduceError> {
+    let batch = state
+        .active_tool_batch
+        .as_mut()
+        .ok_or(SessionReduceError::ToolBatchNotActive)?;
+    if batch.tool_batch_id != *tool_batch_id {
+        return Err(SessionReduceError::ToolBatchIdMismatch);
+    }
+    if !batch.is_settled() {
+        return Err(SessionReduceError::ToolBatchNotSettled);
+    }
+    batch.results_ref = results_ref;
+    maybe_finalize_cancelled(state).map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+    Ok(())
+}
+
+fn on_lease_expiry_check(
+    state: &mut SessionState,
+    observed_time_ns: u64,
+) -> Result<(), SessionReduceError> {
+    let Some(lease) = state.active_run_lease.clone() else {
+        return Ok(());
+    };
+    let heartbeat_base = state.last_heartbeat_at.unwrap_or(lease.issued_at);
+    let timeout_ns = lease.heartbeat_timeout_secs.saturating_mul(1_000_000_000);
+    let heartbeat_deadline = heartbeat_base.saturating_add(timeout_ns);
+    let expired = lease.is_expired_at(observed_time_ns) || observed_time_ns >= heartbeat_deadline;
+    if expired {
+        transition_lifecycle(state, SessionLifecycle::Cancelling)
+            .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+        apply_cancel_fence(state);
+        maybe_finalize_cancelled(state)
+            .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+    }
+    Ok(())
+}
+
+fn maybe_finalize_cancelled(
+    state: &mut SessionState,
+) -> Result<(), crate::helpers::LifecycleError> {
+    if state.lifecycle != SessionLifecycle::Cancelling {
+        return Ok(());
+    }
+    let batch_settled = state
+        .active_tool_batch
+        .as_ref()
+        .is_none_or(ActiveToolBatch::is_settled);
+    if batch_settled && state.in_flight_effects == 0 {
+        transition_lifecycle(state, SessionLifecycle::Cancelled)?;
+        clear_active_run(state);
+    }
+    Ok(())
+}
+
 fn validate_run_config(config: &RunConfig) -> Result<(), SessionReduceError> {
     if config.provider.trim().is_empty() {
         return Err(SessionReduceError::MissingProvider);
@@ -250,7 +484,10 @@ fn clear_active_run(state: &mut SessionState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::{RunId, SessionId};
+    use crate::contracts::{
+        HostCommand, RunId, SessionId, StepId, ToolBatchId, ToolCallStatus, TurnId,
+    };
+    use alloc::{string::String, vec, vec::Vec};
 
     fn valid_config() -> SessionConfig {
         SessionConfig {
@@ -270,32 +507,52 @@ mod tests {
         }
     }
 
-    fn run_requested(overrides: Option<SessionConfig>) -> SessionEvent {
+    fn event(step_epoch: u64, event: SessionEventKind) -> SessionEvent {
         SessionEvent {
             session_id: SessionId("11111111-1111-1111-1111-111111111111".into()),
             session_epoch: 0,
-            step_epoch: 1,
+            step_epoch,
             run_id: None,
             turn_id: None,
             step_id: None,
-            event: SessionEventKind::RunRequested {
+            event,
+        }
+    }
+
+    fn run_requested(overrides: Option<SessionConfig>) -> SessionEvent {
+        event(
+            1,
+            SessionEventKind::RunRequested {
                 input_ref:
                     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 run_overrides: overrides,
             },
-        }
+        )
     }
 
     fn run_started(step_epoch: u64) -> SessionEvent {
-        SessionEvent {
-            session_id: SessionId("11111111-1111-1111-1111-111111111111".into()),
-            run_id: None,
-            turn_id: None,
-            step_id: None,
-            session_epoch: 0,
-            step_epoch,
-            event: SessionEventKind::RunStarted,
-        }
+        event(step_epoch, SessionEventKind::RunStarted)
+    }
+
+    fn running_state() -> SessionState {
+        let mut state = base_state();
+        apply_session_event(&mut state, &run_requested(None)).expect("run requested");
+        apply_session_event(&mut state, &run_started(2)).expect("run started");
+        state
+    }
+
+    fn active_tool_batch_id(state: &SessionState, batch_seq: u64) -> ToolBatchId {
+        let step_id = state.active_step_id.clone().unwrap_or(StepId {
+            turn_id: TurnId {
+                run_id: RunId {
+                    session_id: state.session_id.clone(),
+                    run_seq: 1,
+                },
+                turn_seq: 1,
+            },
+            step_seq: 1,
+        });
+        ToolBatchId { step_id, batch_seq }
     }
 
     #[test]
@@ -366,5 +623,268 @@ mod tests {
 
         let err = apply_session_event(&mut state, &run_requested(None)).expect_err("active run");
         assert_eq!(err, SessionReduceError::RunAlreadyActive);
+    }
+
+    #[test]
+    fn step_boundary_consumes_pending_steer_and_advances_step() {
+        let mut state = running_state();
+        let previous_step_seq = state
+            .active_step_id
+            .as_ref()
+            .map(|id| id.step_seq)
+            .unwrap_or(0);
+
+        apply_session_event(
+            &mut state,
+            &event(
+                3,
+                SessionEventKind::HostCommandReceived(HostCommand {
+                    command_id: "cmd-steer".into(),
+                    target_run_id: None,
+                    expected_session_epoch: None,
+                    issued_at: 3,
+                    command: HostCommandKind::Steer {
+                        text: "use structured output".into(),
+                    },
+                }),
+            ),
+        )
+        .expect("steer command");
+        assert_eq!(state.pending_steer.len(), 1);
+
+        apply_session_event(&mut state, &event(4, SessionEventKind::StepBoundary))
+            .expect("step boundary");
+        assert!(state.pending_steer.is_empty());
+        assert_eq!(state.step_epoch, 2);
+        assert_eq!(
+            state.active_step_id.as_ref().map(|id| id.step_seq),
+            Some(previous_step_seq + 1)
+        );
+    }
+
+    #[test]
+    fn follow_up_is_consumed_only_after_waiting_input_or_idle() {
+        let mut state = running_state();
+        apply_session_event(
+            &mut state,
+            &event(
+                3,
+                SessionEventKind::HostCommandReceived(HostCommand {
+                    command_id: "cmd-followup".into(),
+                    target_run_id: None,
+                    expected_session_epoch: None,
+                    issued_at: 3,
+                    command: HostCommandKind::FollowUp {
+                        text: "also summarize cost".into(),
+                    },
+                }),
+            ),
+        )
+        .expect("follow up");
+        assert_eq!(state.pending_follow_up.len(), 1);
+
+        apply_session_event(&mut state, &event(4, SessionEventKind::StepBoundary))
+            .expect("boundary while running");
+        assert_eq!(state.pending_follow_up.len(), 1);
+
+        apply_session_event(
+            &mut state,
+            &event(
+                5,
+                SessionEventKind::LifecycleChanged(SessionLifecycle::WaitingInput),
+            ),
+        )
+        .expect("to waiting input");
+        assert!(state.pending_follow_up.is_empty());
+    }
+
+    #[test]
+    fn tool_batch_blocks_step_until_settled_and_orders_call_status_keys() {
+        let mut state = running_state();
+        let batch_id = active_tool_batch_id(&state, 1);
+        apply_session_event(
+            &mut state,
+            &event(
+                3,
+                SessionEventKind::ToolBatchStarted {
+                    tool_batch_id: batch_id.clone(),
+                    expected_call_ids: vec!["call_b".into(), "call_a".into()],
+                },
+            ),
+        )
+        .expect("batch started");
+        assert_eq!(state.in_flight_effects, 2);
+
+        let blocked =
+            apply_session_event(&mut state, &event(4, SessionEventKind::StepBoundary)).unwrap_err();
+        assert_eq!(blocked, SessionReduceError::ToolBatchNotSettled);
+
+        apply_session_event(
+            &mut state,
+            &event(
+                5,
+                SessionEventKind::ToolCallSettled {
+                    tool_batch_id: batch_id.clone(),
+                    call_id: "call_b".into(),
+                    status: ToolCallStatus::Succeeded,
+                    receipt_session_epoch: 0,
+                    receipt_step_epoch: 1,
+                },
+            ),
+        )
+        .expect("settle b");
+        apply_session_event(
+            &mut state,
+            &event(
+                6,
+                SessionEventKind::ToolCallSettled {
+                    tool_batch_id: batch_id.clone(),
+                    call_id: "call_a".into(),
+                    status: ToolCallStatus::Failed {
+                        code: "tool_err".into(),
+                        detail: "boom".into(),
+                    },
+                    receipt_session_epoch: 0,
+                    receipt_step_epoch: 1,
+                },
+            ),
+        )
+        .expect("settle a");
+        let keys: Vec<String> = state
+            .active_tool_batch
+            .as_ref()
+            .expect("active batch")
+            .call_status
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(keys, vec![String::from("call_a"), String::from("call_b")]);
+
+        apply_session_event(
+            &mut state,
+            &event(
+                7,
+                SessionEventKind::ToolBatchSettled {
+                    tool_batch_id: batch_id,
+                    results_ref: Some(
+                        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .into(),
+                    ),
+                },
+            ),
+        )
+        .expect("batch settled");
+        apply_session_event(&mut state, &event(8, SessionEventKind::StepBoundary))
+            .expect("boundary after settled");
+        assert!(state.active_tool_batch.is_none());
+        assert_eq!(state.in_flight_effects, 0);
+    }
+
+    #[test]
+    fn stale_receipts_are_marked_ignored_and_cancel_finalizes() {
+        let mut state = running_state();
+        let batch_id = active_tool_batch_id(&state, 1);
+        apply_session_event(
+            &mut state,
+            &event(
+                3,
+                SessionEventKind::ToolBatchStarted {
+                    tool_batch_id: batch_id.clone(),
+                    expected_call_ids: vec!["call_a".into(), "call_b".into()],
+                },
+            ),
+        )
+        .expect("batch started");
+
+        apply_session_event(
+            &mut state,
+            &event(
+                4,
+                SessionEventKind::HostCommandReceived(HostCommand {
+                    command_id: "cmd-cancel".into(),
+                    target_run_id: None,
+                    expected_session_epoch: None,
+                    issued_at: 4,
+                    command: HostCommandKind::Cancel { reason: None },
+                }),
+            ),
+        )
+        .expect("cancel");
+        assert_eq!(state.lifecycle, SessionLifecycle::Cancelling);
+        assert_eq!(state.session_epoch, 1);
+
+        apply_session_event(
+            &mut state,
+            &event(
+                5,
+                SessionEventKind::ToolCallSettled {
+                    tool_batch_id: batch_id.clone(),
+                    call_id: "call_a".into(),
+                    status: ToolCallStatus::Succeeded,
+                    receipt_session_epoch: 0,
+                    receipt_step_epoch: 1,
+                },
+            ),
+        )
+        .expect("stale receipt");
+        let status_a = state
+            .active_tool_batch
+            .as_ref()
+            .and_then(|batch| batch.call_status.get("call_a"))
+            .cloned();
+        assert_eq!(status_a, Some(ToolCallStatus::IgnoredStale));
+        assert_eq!(state.lifecycle, SessionLifecycle::Cancelling);
+
+        apply_session_event(
+            &mut state,
+            &event(
+                6,
+                SessionEventKind::ToolCallSettled {
+                    tool_batch_id: batch_id,
+                    call_id: "call_b".into(),
+                    status: ToolCallStatus::Succeeded,
+                    receipt_session_epoch: 0,
+                    receipt_step_epoch: 1,
+                },
+            ),
+        )
+        .expect("stale receipt b");
+        assert_eq!(state.lifecycle, SessionLifecycle::Cancelled);
+        assert!(state.active_run_id.is_none());
+        assert!(state.active_tool_batch.is_none());
+    }
+
+    #[test]
+    fn lease_expiry_check_cancels_deterministically() {
+        let mut state = running_state();
+        apply_session_event(
+            &mut state,
+            &event(
+                3,
+                SessionEventKind::LeaseIssued {
+                    lease: crate::contracts::RunLease {
+                        lease_id: "lease-1".into(),
+                        issued_at: 1_000,
+                        expires_at: 10_000,
+                        heartbeat_timeout_secs: 1,
+                    },
+                },
+            ),
+        )
+        .expect("lease issued");
+        assert_eq!(state.last_heartbeat_at, Some(1_000));
+
+        apply_session_event(
+            &mut state,
+            &event(
+                4,
+                SessionEventKind::LeaseExpiryCheck {
+                    observed_time_ns: 2_000_000_000,
+                },
+            ),
+        )
+        .expect("lease check");
+        assert_eq!(state.lifecycle, SessionLifecycle::Cancelled);
+        assert!(state.active_run_id.is_none());
     }
 }

@@ -1,5 +1,9 @@
-use super::{HostCommand, RunId, SessionConfig, SessionId, SessionLifecycle, StepId, TurnId};
+use super::{
+    HostCommand, RunId, RunLease, SessionConfig, SessionId, SessionLifecycle, StepId, ToolBatchId,
+    ToolCallStatus, TurnId,
+};
 use alloc::string::String;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -15,6 +19,28 @@ pub enum SessionEventKind {
         command_id: String,
     },
     LifecycleChanged(SessionLifecycle),
+    StepBoundary,
+    ToolBatchStarted {
+        tool_batch_id: ToolBatchId,
+        expected_call_ids: Vec<String>,
+    },
+    ToolCallSettled {
+        tool_batch_id: ToolBatchId,
+        call_id: String,
+        status: ToolCallStatus,
+        receipt_session_epoch: u64,
+        receipt_step_epoch: u64,
+    },
+    ToolBatchSettled {
+        tool_batch_id: ToolBatchId,
+        results_ref: Option<String>,
+    },
+    LeaseIssued {
+        lease: RunLease,
+    },
+    LeaseExpiryCheck {
+        observed_time_ns: u64,
+    },
     RunCompleted,
     RunFailed {
         code: String,
