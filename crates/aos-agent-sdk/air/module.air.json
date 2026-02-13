@@ -18,20 +18,6 @@
   },
   {
     "$kind": "defmodule",
-    "name": "aos.agent/ProfileCatalogReducer@1",
-    "module_kind": "reducer",
-    "key_schema": "aos.agent/ProviderProfileId@1",
-    "abi": {
-      "reducer": {
-        "state": "aos.agent/ProfileCatalogState@1",
-        "event": "aos.agent/ProfileCatalogEvent@1",
-        "effects_emitted": [],
-        "cap_slots": {}
-      }
-    }
-  },
-  {
-    "$kind": "defmodule",
     "name": "aos.agent/SessionEventEcho@1",
     "module_kind": "pure",
     "abi": {

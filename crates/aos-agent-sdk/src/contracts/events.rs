@@ -1,7 +1,4 @@
-use super::{
-    HostCommand, ProfileLookupFailed, ProfileLookupRequested, ProfileLookupResolved, RunId,
-    SessionConfig, SessionId, SessionLifecycle, StepId, TurnId,
-};
+use super::{HostCommand, RunId, SessionConfig, SessionId, SessionLifecycle, StepId, TurnId};
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
@@ -25,9 +22,6 @@ pub enum SessionEventKind {
     RunCancelled {
         reason: Option<String>,
     },
-    ProfileLookupRequested(ProfileLookupRequested),
-    ProfileLookupResolved(ProfileLookupResolved),
-    ProfileLookupFailed(ProfileLookupFailed),
     #[default]
     Noop,
 }

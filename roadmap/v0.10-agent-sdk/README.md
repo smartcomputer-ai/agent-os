@@ -12,7 +12,7 @@ This phase moves AOS from a toy chat app toward a reusable agent runtime stack:
 - `roadmap/v0.10-agent-sdk/p1-llm-lib.md`
 - `roadmap/v0.10-agent-sdk/p2-agent-sdk.md`
 - `roadmap/v0.10-agent-sdk/p2.1-session-contracts.md`
-- `roadmap/v0.10-agent-sdk/p2.2-provider-profiles-llm-contract.md`
+- `roadmap/v0.10-agent-sdk/p2.2-llm-contract-direct-provider-model.md`
 - `roadmap/v0.10-agent-sdk/p2.2-llm-boundary-issue.md`
 - `roadmap/v0.10-agent-sdk/p2.3-tool-loop-safety-context-bounds.md`
 - `roadmap/v0.10-agent-sdk/p2.4-events-observability-contract.md`
@@ -33,3 +33,4 @@ This phase moves AOS from a toy chat app toward a reusable agent runtime stack:
 - `crates/aos-sys` remains reserved for built-in `sys/*` runtime primitives and enforcers.
 - End-to-end SDK scenarios run through `crates/aos-smoke` fixtures; do not create a separate e2e runner in `aos-agent-sdk`.
 - Real-provider LLM smoke checks are opt-in and separate from deterministic replay-parity gates.
+- Session/run config is provider/model-first; no provider-profile registry is required in v0.10.

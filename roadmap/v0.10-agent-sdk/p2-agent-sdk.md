@@ -33,30 +33,30 @@ This document is the umbrella index. Implementation is split into staged docs (`
 
 ## Why Staged
 
-The SDK has coupled contracts (session lifecycle, provider profiles, loop safety, event API, failure semantics).  
+The SDK has coupled contracts (session lifecycle, LLM contract shape, loop safety, event API, failure semantics).
 Staging prevents partial rollout drift and gives each phase a testable boundary.
 
 ## Stage Plan
 
-1. `roadmap/v0.10-agent-sdk/p2.1-session-contracts.md`  
+1. `roadmap/v0.10-agent-sdk/p2.1-session-contracts.md`
    Foundation schemas and lifecycle/control contracts.
-2. `roadmap/v0.10-agent-sdk/p2.2-provider-profiles-llm-contract.md`  
-   Provider profile model, dedicated profile-catalog reducer flow, and LLM effect contract evolution.
-3. `roadmap/v0.10-agent-sdk/p2.3-tool-loop-safety-context-bounds.md`  
+2. `roadmap/v0.10-agent-sdk/p2.2-llm-contract-direct-provider-model.md`
+   Direct provider/model run config with LLM effect contract evolution (no profile registry).
+3. `roadmap/v0.10-agent-sdk/p2.3-tool-loop-safety-context-bounds.md`
    Loop safety, limits, bounded tool output, context pressure signals.
-4. `roadmap/v0.10-agent-sdk/p2.4-events-observability-contract.md`  
+4. `roadmap/v0.10-agent-sdk/p2.4-events-observability-contract.md`
    Canonical event API, ordering/correlation guarantees, stream contract.
-5. `roadmap/v0.10-agent-sdk/p2.5-failure-retry-cancel.md`  
+5. `roadmap/v0.10-agent-sdk/p2.5-failure-retry-cancel.md`
    Failure taxonomy, retry ownership, cancellation semantics.
-6. `roadmap/v0.10-agent-sdk/p2.6-conformance-and-demiurge-migration.md`  
+6. `roadmap/v0.10-agent-sdk/p2.6-conformance-and-demiurge-migration.md`
    Conformance matrix and Demiurge migration onto `aos.agent/*`.
 
 ## Sequencing Rationale
 
-1. Contracts first (`p2.1`), so all later work targets stable schemas/events.
-2. Provider + LLM contract second (`p2.2`), split into:
+1. Contracts first (`p2.1`), so later work targets stable schemas/events.
+2. LLM contract second (`p2.2`), split into:
    - core `sys/Llm*` evolution in core crates,
-   - SDK profile/lookup/mapper flow on top of that core contract.
+   - SDK mapper flow on top of that core contract.
 3. Loop safety + bounding third (`p2.3`), once request/response surfaces are fixed.
 4. Event API fourth (`p2.4`), once core runtime flow is stable.
 5. Failure/retry/cancel fifth (`p2.5`), to harden operational behavior.
