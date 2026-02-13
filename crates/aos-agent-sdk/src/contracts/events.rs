@@ -3,6 +3,7 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "$tag", content = "$value")]
 pub enum SessionEventKind {
     RunRequested {
         input_ref: String,

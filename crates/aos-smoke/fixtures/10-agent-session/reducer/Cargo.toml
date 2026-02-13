@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "agent_session_reducer"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+aos-agent-sdk = { path = "../../../../aos-agent-sdk" }
+aos-wasm-sdk = { path = "../../../../aos-wasm-sdk" }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_cbor = { version = "0.11", default-features = false, features = ["alloc"] }

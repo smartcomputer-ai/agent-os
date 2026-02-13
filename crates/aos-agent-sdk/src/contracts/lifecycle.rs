@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "$tag", content = "$value")]
 pub enum SessionLifecycle {
     #[default]
     Idle,

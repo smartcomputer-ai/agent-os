@@ -1,25 +1,15 @@
-//! Session reducer scaffold (`aos.agent/SessionReducer@1`).
-
 #![allow(improper_ctypes_definitions)]
 #![no_std]
 
-extern crate alloc;
-
-use aos_agent_sdk::{SessionEvent, SessionReduceError, SessionState, apply_session_event};
+use aos_agent_sdk::{SessionEvent, SessionState, SessionReduceError, apply_session_event};
 use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_reducer};
 
-#[cfg(target_arch = "wasm32")]
-fn main() {}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn main() {}
-
-aos_reducer!(SessionReducer);
+aos_reducer!(AgentSessionReducer);
 
 #[derive(Default)]
-struct SessionReducer;
+struct AgentSessionReducer;
 
-impl Reducer for SessionReducer {
+impl Reducer for AgentSessionReducer {
     type State = SessionState;
     type Event = SessionEvent;
     type Ann = Value;

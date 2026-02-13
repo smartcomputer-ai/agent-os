@@ -4,6 +4,7 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
 pub enum ToolCallStatus {
     Pending,
     Succeeded,

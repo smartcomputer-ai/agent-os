@@ -2,6 +2,7 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
 pub enum ReasoningEffort {
     Low,
     Medium,

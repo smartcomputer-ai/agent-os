@@ -106,6 +106,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 name = "aos-agent-sdk"
 version = "0.1.0"
 dependencies = [
+ "aos-effects",
  "aos-wasm-abi",
  "aos-wasm-sdk",
  "serde",
@@ -295,6 +296,7 @@ name = "aos-smoke"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aos-agent-sdk",
  "aos-air-exec",
  "aos-air-types",
  "aos-cbor",

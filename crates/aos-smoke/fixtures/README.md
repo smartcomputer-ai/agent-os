@@ -14,6 +14,7 @@ These fixtures are the numbered smoke demos executed by `aos-smoke`.
 | 07  | llm-summarizer | HTTP + LLM summarization     |
 | 08  | retry-backoff  | Reducer retry with timer     |
 | 09  | workspaces     | Workspace plans + caps demo  |
+| 10  | agent-session  | SDK session lifecycle replay |
 
 Run with:
 - `cargo run -p aos-smoke --`

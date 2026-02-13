@@ -1,3 +1,4 @@
+mod agent_session;
 mod aggregator;
 mod blob_echo;
 mod chain_comp;
@@ -53,6 +54,8 @@ enum Commands {
     RetryBackoff,
     /// Run the workspace plan + caps example
     Workspaces,
+    /// Run the agent session lifecycle example
+    AgentSession,
     /// Run every available example sequentially
     All,
 }
@@ -148,6 +151,14 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "crates/aos-smoke/fixtures/09-workspaces",
         runner: workspaces::run,
     },
+    ExampleMeta {
+        number: "10",
+        slug: "agent-session",
+        title: "Agent Session",
+        summary: "SDK session run-start + replay parity",
+        dir: "crates/aos-smoke/fixtures/10-agent-session",
+        runner: agent_session::run,
+    },
 ];
 
 fn main() {
@@ -184,6 +195,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::LlmSummarizer) => run_single("llm-summarizer"),
         Some(Commands::RetryBackoff) => run_single("retry-backoff"),
         Some(Commands::Workspaces) => run_single("workspaces"),
+        Some(Commands::AgentSession) => run_single("agent-session"),
         Some(Commands::All) => run_all(),
         None => {
             list_examples();
