@@ -8,7 +8,8 @@
 ## Progress Update (2026-02-13)
 
 - [x] Scope item 1 (`world.rs` split by runtime concern) is complete.
-- [x] Scope item 5 (`internal_effects.rs` decomposition) is complete via `crates/aos-kernel/src/internal/{mod,introspect,workspace,governance}.rs` plus a compatibility shim.
+- [x] Scope item 5 (`internal_effects.rs` decomposition) is complete via `crates/aos-kernel/src/internal_effects/{mod,introspect,workspace,governance}.rs`.
+- [x] Scope item 6 (`plan.rs` execution decomposition) is complete via `crates/aos-kernel/src/plan/{mod,step_handlers,codec,readiness,waits}.rs`.
 - Decision: keep scenario-heavy `world` tests co-located in their relevant modules for now; moving them to `crates/aos-kernel/tests/` is not required for P1.
 
 ## Goal

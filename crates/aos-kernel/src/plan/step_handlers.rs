@@ -7,10 +7,11 @@ use indexmap::IndexMap;
 use crate::effects::EffectManager;
 use crate::error::KernelError;
 
-use super::{
-    EventWait, PlanInstance, PlanTickOutcome, StepState, eval_expr_or_value, expr_value_to_cbor_value,
-    expr_value_to_literal, idempotency_key_from_value, literal_to_value,
+use super::codec::{
+    eval_expr_or_value, expr_value_to_cbor_value, expr_value_to_literal, idempotency_key_from_value,
+    literal_to_value,
 };
+use super::{EventWait, PlanInstance, PlanTickOutcome, StepState};
 
 pub(super) enum StepTickControl {
     Continue,
@@ -289,11 +290,13 @@ mod tests {
     use crate::policy::AllowAllPolicy;
     use aos_air_types::plan_literals::SchemaIndex;
     use aos_air_types::{
-        CapType, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprRecord, ExprRef,
-        PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
+        CapType, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprOrValue,
+        ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
+        PlanStepAwaitEvent,
         PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
         SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText, TypeRecord,
-        ValueInt, ValueLiteral, ValueRecord, ValueText,
+        ValueInt, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
+        catalog::EffectCatalog,
     };
     use aos_effects::CapabilityGrant;
     use serde_cbor::Value as CborValue;
