@@ -7,7 +7,15 @@
 
 ## Goal
 
-Ship a production-grade hosted persistence plane for universes/worlds that preserves existing AgentOS invariants while enabling movable worlds:
+Ship a production-grade hosted persistence plane for universes/worlds that preserves existing AgentOS invariants while enabling movable worlds.
+
+Design stance for P2:
+
+- FoundationDB is the primary and only production metadata/ordering store target in this milestone.
+- We do not introduce a "portable multi-DB" abstraction layer.
+- We do keep a narrow operation boundary between host runtime and storage implementation so kernel/runtime logic is not coupled to raw FDB client APIs.
+
+Core outcomes:
 
 1. Shared universe-scoped immutable CAS.
 2. Shared world journal with deterministic append ordering.
@@ -33,15 +41,16 @@ This milestone is the persistence substrate only. It does not include scheduling
 - Timer worker and global effect worker pools (P3).
 - Mark-and-sweep deletion execution and retention policy UI.
 - Multi-region replication strategy.
+- A backend-portable storage layer across unrelated databases.
 
 ## Scope (Now)
 
-### 1) Hosted persistence interfaces (freeze contracts first)
+### 1) FDB-first storage boundary (freeze protocol first)
 
-Add a backend-agnostic persistence contract crate with deterministic semantics:
+Add a concrete FDB-focused persistence implementation crate with deterministic semantics and a narrow operation surface for host/runtime integration:
 
-- Suggested crate: `crates/aos-persistence` (name can vary, contract cannot).
-- Provide traits and canonical types for:
+- Suggested crate: `crates/aos-db` (name can vary, FDB-first stance cannot).
+- Provide canonical types and operations for:
   - CAS
   - World journal
   - World inbox
@@ -53,20 +62,18 @@ Suggested core types:
 - `UniverseId = Uuid`
 - `WorldId = Uuid`
 - `JournalHeight = u64`
-- `InboxSeq = [u8; 10]` (FDB versionstamp bytes or equivalent sortable token)
+- `InboxSeq = [u8; 10]` (FDB versionstamp bytes; this is intentionally FDB-shaped)
 - `SegmentId = { start: u64, end: u64 }`
 
-Suggested trait surface (illustrative):
+Suggested operation surface (illustrative):
 
 ```rust
-pub trait CasStore {
-    fn put_verified(&self, universe: UniverseId, bytes: &[u8]) -> Result<Hash, PersistError>;
-    fn get(&self, universe: UniverseId, hash: Hash) -> Result<Vec<u8>, PersistError>;
-    fn has(&self, universe: UniverseId, hash: Hash) -> Result<bool, PersistError>;
-}
+pub trait HostedPersistence {
+    fn cas_put_verified(&self, universe: UniverseId, bytes: &[u8]) -> Result<Hash, PersistError>;
+    fn cas_get(&self, universe: UniverseId, hash: Hash) -> Result<Vec<u8>, PersistError>;
+    fn cas_has(&self, universe: UniverseId, hash: Hash) -> Result<bool, PersistError>;
 
-pub trait WorldJournalStore {
-    fn append_batch(
+    fn journal_append_batch(
         &self,
         universe: UniverseId,
         world: WorldId,
@@ -74,7 +81,7 @@ pub trait WorldJournalStore {
         entries: &[Vec<u8>],
     ) -> Result<u64, PersistError>; // returns first height
 
-    fn read_range(
+    fn journal_read_range(
         &self,
         universe: UniverseId,
         world: WorldId,
@@ -82,18 +89,16 @@ pub trait WorldJournalStore {
         limit: u32,
     ) -> Result<Vec<(u64, Vec<u8>)>, PersistError>;
 
-    fn head(&self, universe: UniverseId, world: WorldId) -> Result<u64, PersistError>;
-}
+    fn journal_head(&self, universe: UniverseId, world: WorldId) -> Result<u64, PersistError>;
 
-pub trait WorldInboxStore {
-    fn enqueue(
+    fn inbox_enqueue(
         &self,
         universe: UniverseId,
         world: WorldId,
         item: InboxItem,
     ) -> Result<InboxSeq, PersistError>;
 
-    fn read_after(
+    fn inbox_read_after(
         &self,
         universe: UniverseId,
         world: WorldId,
@@ -101,30 +106,28 @@ pub trait WorldInboxStore {
         limit: u32,
     ) -> Result<Vec<(InboxSeq, InboxItem)>, PersistError>;
 
-    fn commit_cursor(
+    fn inbox_commit_cursor(
         &self,
         universe: UniverseId,
         world: WorldId,
         old_cursor: Option<InboxSeq>,
         new_cursor: InboxSeq,
     ) -> Result<(), PersistError>;
-}
 
-pub trait WorldSnapshotStore {
-    fn index_snapshot(
+    fn snapshot_index(
         &self,
         universe: UniverseId,
         world: WorldId,
         record: SnapshotRecord,
     ) -> Result<(), PersistError>;
 
-    fn active_baseline(
+    fn snapshot_active_baseline(
         &self,
         universe: UniverseId,
         world: WorldId,
     ) -> Result<SnapshotRecord, PersistError>;
 
-    fn promote_baseline(
+    fn snapshot_promote_baseline(
         &self,
         universe: UniverseId,
         world: WorldId,
@@ -133,11 +136,18 @@ pub trait WorldSnapshotStore {
 }
 ```
 
-Contract requirements:
+Boundary requirements:
 
 - All writes are idempotent where logically expected (`cas.put` by hash, snapshot index at height).
 - All read/write paths return typed errors (`conflict`, `not_found`, `validation`, `backend`).
 - Contract is deterministic with respect to ordering and normalization boundaries.
+
+FDB semantic leakage is accepted and explicit:
+
+- optimistic conflict and retry loops are first-class (`expected_head` mismatch, cursor CAS failure),
+- queue ordering is versionstamp-driven,
+- transaction chunking limits shape large batch behavior,
+- monotonic cursor/baseline constraints are enforced with compare-and-swap semantics.
 
 ### 2) FDB keyspace layout (authoritative metadata + ordering + queues)
 
@@ -245,7 +255,7 @@ Enqueue transaction:
 3. Increment `notify/counter`.
 4. Commit and return `seq`.
 
-Drain protocol (P2 persistence contract; runtime loop in P3):
+Drain protocol (P2 storage protocol; runtime loop in P3):
 
 1. Read `cursor`.
 2. Read next `N` items strictly after cursor.
@@ -319,14 +329,14 @@ Restore with segments:
 2. Replay required segments in order (if baseline points below segment horizon).
 3. Replay remaining hot journal tail from FDB.
 
-### 8) Storage conformance harness
+### 8) Storage protocol conformance harness
 
-Add a reusable backend conformance test suite:
+Add a reusable protocol conformance test suite:
 
-- package: `crates/aos-persistence/tests/conformance.rs`
+- package: `crates/aos-db/tests/conformance.rs`
 - runs against:
-  - in-memory reference backend (required in CI)
-  - FDB backend (CI optional, required in nightly/integration pipeline)
+  - FDB implementation (required in integration/nightly)
+  - in-memory behavioral reference implementation used for CI/unit tests (not a portability target)
 
 Conformance cases:
 
@@ -341,10 +351,9 @@ Conformance cases:
 
 Expected implementation touch points:
 
-- New: `crates/aos-persistence/` (traits/types/conformance harness)
-- New: `crates/aos-persistence-fdb/` (FDB implementation)
-- New: `crates/aos-persistence-objstore/` (S3/GCS/R2 abstraction if separated)
-- Update: `crates/aos-host/` to consume persistence traits in hosted mode
+- New: `crates/aos-db/` (FDB-first persistence implementation + protocol types + conformance harness)
+- Optional New: `crates/aos-db-objstore/` (object-store helper if split for operational concerns)
+- Update: `crates/aos-host/` to consume `aos-db` operations in hosted mode
 - Update: `crates/aos-kernel/` only via narrow boundary (no FDB/object-store coupling)
 - Update: docs/spec alignment in `spec/02-architecture.md` and infra notes
 
@@ -452,13 +461,13 @@ Guarantees:
 
 ## Deliverables / DoD
 
-1. Persistence contracts crate merged with in-memory backend and conformance tests.
-2. FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
+1. `aos-db` protocol/types merged with conformance tests and in-memory behavioral reference backend.
+2. `aos-db` FDB/object-store-backed implementation supports CAS/journal/inbox/snapshot/segment index.
 3. Hosted-mode restore uses active baseline + segments + hot tail deterministically.
 4. Inbox drain protocol with cursor commit is implemented and crash-safe.
 5. Segment export compaction is available behind config flag and tested.
 6. Kernel remains backend-agnostic; hosted persistence coupling is outside `aos-kernel`.
-7. Spec/docs updates merged for hosted persistence contracts.
+7. Spec/docs updates merged for the FDB-first hosted persistence protocol.
 
 ## Explicitly Out of Scope
 
@@ -467,4 +476,3 @@ Guarantees:
 - Fabric adapter and cross-world semantics (P3).
 - Automated mark-and-sweep deletion execution.
 - Quota/billing enforcement.
-
