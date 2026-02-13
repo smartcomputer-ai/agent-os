@@ -47,6 +47,10 @@ This P1 replaces broader snapshot-track decomposition. It is the only in-scope r
    - replay journal tail where `height >= baseline.height`
 3. Add receipt-horizon safety checks on baseline promotion/acceptance paths.
 4. Validate snapshot root completeness on write/load paths that create restore roots.
+5. Implement reducer-state reachability semantics:
+   - reducer state roots are required snapshot roots
+   - schema-known reducer state is traversable for typed `hash` refs
+   - hashes hidden in opaque bytes/text are not auto-discovered and require explicit refs
 
 ### 3) Spec/documentation alignment
 
@@ -64,12 +68,14 @@ Update and align:
 3. Baseline + tail replay is byte-identical to full replay (`replay-or-die`).
 4. Unsafe baseline promotion fails on receipt-horizon precondition.
 5. Snapshot root completeness checks fail closed when required roots are missing.
+6. Typed refs in reducer state are reachable in traversal tests; opaque embedded hashes are not treated as refs.
 
 ## Invariants
 
 - GC traversal never parses arbitrary blob bytes.
 - CAS references must be explicit in typed nodes or blob-edge nodes.
 - Opaque blobs are leaves unless explicit refs are provided.
+- Reducer state is traversed only when schema-known; opaque embedded hashes are out of contract unless explicitly attached.
 - Baseline validity is fenced by receipt horizon semantics.
 - Replay-or-die is strict: baseline+tail output must match full replay exactly.
 
@@ -87,5 +93,6 @@ Update and align:
 - Mark/sweep deletion execution.
 - Time-based retention planner/run surfaces.
 - Journal hot/cold compaction and segment architecture.
+- Automatic ref extraction/materialized adjacency index on every node write (`hash -> refs[]`).
 - Storage trait refactor and alternate local KV backends.
 - Distributed scheduler/lease/universe execution work.
