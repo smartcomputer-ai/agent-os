@@ -241,6 +241,12 @@ pub struct SnapshotRecord {
     pub snapshot_ref: String,
     /// Logical height the snapshot represents (number of events applied).
     pub height: JournalSeq,
+    /// Logical runtime time captured in this baseline snapshot.
+    #[serde(default)]
+    pub logical_time_ns: u64,
+    /// Optional safety fence for receipts included in baseline state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_horizon_height: Option<JournalSeq>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_hash: Option<String>,
 }

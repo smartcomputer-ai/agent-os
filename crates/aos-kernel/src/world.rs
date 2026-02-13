@@ -157,6 +157,7 @@ pub struct Kernel<S: Store> {
     governance: GovernanceManager,
     secret_resolver: Option<SharedSecretResolver>,
     allow_placeholder_secrets: bool,
+    active_baseline: Option<SnapshotRecord>,
     last_snapshot_height: Option<JournalSeq>,
     last_snapshot_hash: Option<Hash>,
 }
@@ -613,6 +614,7 @@ impl<S: Store + 'static> Kernel<S> {
             secret_resolver: secret_resolver.clone(),
             allow_placeholder_secrets: config.allow_placeholder_secrets,
             secrets: loaded.secrets,
+            active_baseline: None,
             last_snapshot_height: None,
             last_snapshot_hash: None,
         };
@@ -636,6 +638,7 @@ impl<S: Store + 'static> Kernel<S> {
         if journal_empty {
             kernel.record_manifest()?;
         }
+        kernel.ensure_active_baseline()?;
         Ok(kernel)
     }
 
@@ -1209,13 +1212,17 @@ impl<S: Store + 'static> Kernel<S> {
         let bytes = serde_cbor::to_vec(&snapshot)
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
         let hash = self.store.put_blob(&bytes)?;
-        self.append_record(JournalRecord::Snapshot(SnapshotRecord {
+        let baseline = SnapshotRecord {
             snapshot_ref: hash.to_hex(),
             height,
+            logical_time_ns: logical_now_ns,
+            receipt_horizon_height: self.receipt_horizon_height_for_baseline(height),
             manifest_hash: Some(self.manifest_hash.to_hex()),
-        }))?;
+        };
+        self.append_record(JournalRecord::Snapshot(baseline.clone()))?;
         self.snapshot_index
             .insert(height, (hash, Some(self.manifest_hash)));
+        self.active_baseline = Some(baseline);
         self.last_snapshot_hash = Some(hash);
         self.last_snapshot_height = Some(height);
         Ok(())
@@ -1247,12 +1254,13 @@ impl<S: Store + 'static> Kernel<S> {
         }
         if let Some(snapshot) = latest_snapshot {
             resume_seq = Some(snapshot.height);
+            self.active_baseline = Some(snapshot.clone());
             self.last_snapshot_height = Some(snapshot.height);
             self.load_snapshot(&snapshot)?;
         }
         self.suppress_journal = true;
         for entry in entries {
-            if resume_seq.map_or(false, |seq| entry.seq <= seq) {
+            if resume_seq.map_or(false, |seq| entry.seq < seq) {
                 continue;
             }
             let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
@@ -1354,6 +1362,7 @@ impl<S: Store + 'static> Kernel<S> {
             .map_err(|err| KernelError::SnapshotDecode(err.to_string()))?;
         self.last_snapshot_height = Some(record.height);
         self.last_snapshot_hash = Some(hash);
+        self.active_baseline = Some(record.clone());
         if let Some(manifest_hex) = record.manifest_hash.as_ref() {
             if let Ok(h) = Hash::from_hex_str(manifest_hex) {
                 if h != self.manifest_hash {
@@ -1373,6 +1382,21 @@ impl<S: Store + 'static> Kernel<S> {
             ),
         );
         self.apply_snapshot(snapshot)
+    }
+
+    fn ensure_active_baseline(&mut self) -> Result<(), KernelError> {
+        if self.active_baseline.is_some() {
+            return Ok(());
+        }
+        self.create_snapshot()
+    }
+
+    fn receipt_horizon_height_for_baseline(&self, height: JournalSeq) -> Option<JournalSeq> {
+        if self.pending_receipts.is_empty() && self.pending_reducer_receipts.is_empty() {
+            Some(height)
+        } else {
+            None
+        }
     }
 
     fn apply_snapshot(&mut self, snapshot: KernelSnapshot) -> Result<(), KernelError> {
@@ -3350,6 +3374,8 @@ mod tests {
             JournalRecord::Snapshot(SnapshotRecord {
                 snapshot_ref: snap_hash.to_hex(),
                 height: snapshot_height,
+                logical_time_ns: 0,
+                receipt_horizon_height: Some(snapshot_height),
                 manifest_hash: Some(hash_a.to_hex()),
             }),
         );
@@ -3377,6 +3403,28 @@ mod tests {
         )
         .expect("replay");
         assert_eq!(kernel.manifest_hash().to_hex(), hash_b.to_hex());
+    }
+
+    #[test]
+    fn world_initialization_persists_active_baseline() {
+        let kernel = minimal_kernel_non_keyed();
+        let heights = kernel.heights();
+        assert!(
+            heights.snapshot.is_some(),
+            "new worlds should always have an active baseline"
+        );
+        let entries = kernel.dump_journal().expect("journal");
+        let baseline = entries
+            .iter()
+            .find_map(|entry| match serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok() {
+                Some(JournalRecord::Snapshot(record)) => Some(record),
+                _ => None,
+            })
+            .expect("baseline snapshot record");
+        assert!(
+            baseline.receipt_horizon_height.is_some(),
+            "initial baseline should carry a receipt horizon when no pending receipts exist"
+        );
     }
 
     #[test]
