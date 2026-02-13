@@ -10,9 +10,13 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
-    pub fn submit_domain_event(&mut self, schema: impl Into<String>, value: Vec<u8>) {
+    pub fn submit_domain_event(
+        &mut self,
+        schema: impl Into<String>,
+        value: Vec<u8>,
+    ) -> Result<(), KernelError> {
         let event = DomainEvent::new(schema.into(), value);
-        let _ = self.process_domain_event(event);
+        self.process_domain_event(event)
     }
 
     pub fn submit_domain_event_with_key(
@@ -20,9 +24,9 @@ impl<S: Store + 'static> Kernel<S> {
         schema: impl Into<String>,
         value: Vec<u8>,
         key: Vec<u8>,
-    ) {
+    ) -> Result<(), KernelError> {
         let event = DomainEvent::with_key(schema.into(), value, key);
-        let _ = self.process_domain_event(event);
+        self.process_domain_event(event)
     }
 
     /// Submit a domain event and surface routing/validation errors (tests/fixtures helper).
@@ -31,8 +35,7 @@ impl<S: Store + 'static> Kernel<S> {
         schema: impl Into<String>,
         value: Vec<u8>,
     ) -> Result<(), KernelError> {
-        let event = DomainEvent::new(schema.into(), value);
-        self.process_domain_event(event)
+        self.submit_domain_event(schema, value)
     }
 
     pub(super) fn process_domain_event(&mut self, event: DomainEvent) -> Result<(), KernelError> {

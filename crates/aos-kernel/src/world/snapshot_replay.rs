@@ -490,11 +490,7 @@ impl<S: Store + 'static> Kernel<S> {
 
     pub fn tail_scan_after(&self, height: JournalSeq) -> Result<TailScan, KernelError> {
         let head = self.journal.next_seq();
-        let from_seq = if self.last_snapshot_height.is_none() && height == 0 {
-            0
-        } else {
-            height.saturating_add(1)
-        };
+        let from_seq = self.tail_scan_start_seq(height);
         if from_seq >= head {
             return Ok(TailScan {
                 from: height,
@@ -540,6 +536,14 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         Ok(scan)
+    }
+
+    fn tail_scan_start_seq(&self, cursor_height: JournalSeq) -> JournalSeq {
+        if self.last_snapshot_height.is_none() && cursor_height == 0 {
+            // Fresh worlds can start at sequence 0 before the first baseline exists.
+            return 0;
+        }
+        cursor_height.saturating_add(1)
     }
 }
 

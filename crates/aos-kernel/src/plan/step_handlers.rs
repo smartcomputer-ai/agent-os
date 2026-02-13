@@ -520,7 +520,7 @@ mod tests {
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert!(outcome.completed);
-        assert_eq!(effects.drain().len(), 1);
+        assert_eq!(effects.drain().expect("drain effects").len(), 1);
         assert!(plan.effect_handles.contains_key("req"));
     }
 
@@ -566,7 +566,7 @@ mod tests {
         let mut effects = test_effect_manager();
         let outcome = plan.tick(&mut effects).unwrap();
         assert!(outcome.completed);
-        assert_eq!(effects.drain().len(), 1);
+        assert_eq!(effects.drain().expect("drain effects").len(), 1);
     }
 
     /// Plans must block on `await_receipt` until the referenced effect handle is fulfilled.
@@ -720,7 +720,7 @@ mod tests {
         let mut hashes = first.waiting_receipts.clone();
         hashes.sort();
         assert_eq!(hashes.len(), 3);
-        assert_eq!(effects.drain().len(), 3);
+        assert_eq!(effects.drain().expect("drain effects").len(), 3);
 
         assert!(plan.deliver_receipt(hashes[1], b"\x02").unwrap());
         let mut effects = test_effect_manager();

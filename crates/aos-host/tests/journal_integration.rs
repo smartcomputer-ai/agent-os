@@ -28,7 +28,7 @@ fn journal_replay_restores_state() {
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
-    let mut effects = world.drain_effects();
+    let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let effect = effects.remove(0);
     let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
@@ -86,7 +86,11 @@ fn reducer_timer_receipt_replays_from_journal() {
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
-    let effect = world.drain_effects().pop().expect("timer effect");
+    let effect = world
+        .drain_effects()
+        .expect("drain effects")
+        .pop()
+        .expect("timer effect");
     let receipt = EffectReceipt {
         intent_hash: effect.intent_hash,
         adapter_id: "adapter.timer".into(),
@@ -135,6 +139,7 @@ fn plan_journal_replay_resumes_waiting_receipt() {
 
     let effect = world
         .drain_effects()
+        .expect("drain effects")
         .pop()
         .expect("expected pending effect before shutdown");
 
@@ -324,7 +329,7 @@ fn fs_journal_persists_across_restarts() {
             .expect("submit start event");
         world.tick_n(2).unwrap();
 
-        let mut effects = world.drain_effects();
+        let mut effects = world.drain_effects().expect("drain effects");
         assert_eq!(effects.len(), 1);
         let effect = effects.remove(0);
         let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();

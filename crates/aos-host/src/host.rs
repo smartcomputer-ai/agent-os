@@ -300,9 +300,9 @@ impl<S: Store + 'static> WorldHost<S> {
         match evt {
             ExternalEvent::DomainEvent { schema, value, key } => {
                 if let Some(key) = key {
-                    self.kernel.submit_domain_event_with_key(schema, value, key);
+                    self.kernel.submit_domain_event_with_key(schema, value, key)?;
                 } else {
-                    self.kernel.submit_domain_event(schema, value);
+                    self.kernel.submit_domain_event(schema, value)?;
                 }
             }
             ExternalEvent::Receipt(receipt) => {
@@ -363,7 +363,7 @@ impl<S: Store + 'static> WorldHost<S> {
 
     pub async fn run_cycle(&mut self, mode: RunMode<'_>) -> Result<CycleOutcome, HostError> {
         let initial = self.drain()?;
-        let intents = self.kernel.drain_effects();
+        let intents = self.kernel.drain_effects()?;
         let effects_dispatched = intents.len();
 
         enum Slot {
@@ -602,7 +602,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enqueue_domain_event_and_run() {
+    async fn enqueue_domain_event_surfaces_validation_error() {
         let tmp = TempDir::new().unwrap();
         let manifest_path = tmp.path().join("manifest.cbor");
         write_minimal_manifest(&manifest_path);
@@ -612,13 +612,15 @@ mod tests {
         let kernel_config = KernelConfig::default();
         let mut host = WorldHost::open(store, &manifest_path, host_config, kernel_config).unwrap();
 
-        // Inject a domain event (no reducers, so it should just record and idle)
-        host.enqueue_external(ExternalEvent::DomainEvent {
-            schema: "demo/Event@1".into(),
-            value: to_vec(&json!({"x": 1})).unwrap(),
-            key: None,
-        })
-        .unwrap();
+        // Event schema is not declared in this manifest; enqueue should return an error.
+        let err = host
+            .enqueue_external(ExternalEvent::DomainEvent {
+                schema: "demo/Event@1".into(),
+                value: to_vec(&json!({"x": 1})).unwrap(),
+                key: None,
+            })
+            .expect_err("missing event schema should fail");
+        assert!(matches!(err, HostError::Kernel(_)));
 
         let cycle = host.run_cycle(RunMode::Batch).await.unwrap();
         assert_eq!(cycle.effects_dispatched, 0);

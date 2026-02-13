@@ -31,10 +31,9 @@ async fn reopen_and_replay_smoke() {
 
     let store = Arc::new(MemStore::new());
 
-    // First open: send an event, run cycle, snapshot.
+    // First open: run cycle and snapshot.
     {
         let mut host = TestHost::open(store.clone(), &manifest_path).unwrap();
-        host.send_event("demo/Event@1", json!({"n": 1})).unwrap();
         host.run_cycle_batch().await.unwrap();
         host.snapshot().unwrap();
     }

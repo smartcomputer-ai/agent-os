@@ -276,7 +276,7 @@ fn reducer_params_round_trip_journal_replay() {
         .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "1" }))
         .expect("submit start event");
     world.tick_n(1).unwrap();
-    let mut effects = world.drain_effects();
+    let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let intent = effects.pop().unwrap();
     let journal = world.kernel.dump_journal().unwrap();
@@ -350,6 +350,7 @@ fn reducer_params_round_trip_journal_replay() {
     let replay_intent = replay_world
         .kernel
         .drain_effects()
+        .expect("drain effects")
         .into_iter()
         .next()
         .expect("effect in replay");

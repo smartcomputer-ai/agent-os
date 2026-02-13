@@ -181,7 +181,7 @@ fn plan_effect_allowed_by_policy() {
         .submit_event_result(fixtures::START_SCHEMA, &input)
         .expect("submit start event");
     world.tick_n(2).unwrap();
-    assert_eq!(world.drain_effects().len(), 1);
+    assert_eq!(world.drain_effects().expect("drain effects").len(), 1);
 }
 
 #[test]
@@ -282,7 +282,7 @@ fn plan_effect_expr_params_are_evaluated_and_allowed() {
         .submit_event_result(fixtures::START_SCHEMA, &input)
         .expect("submit start event");
     world.tick_n(2).unwrap();
-    let effects = world.drain_effects();
+    let effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let intent = &effects[0];
     assert_eq!(intent.kind.as_str(), aos_effects::EffectKind::HTTP_REQUEST);

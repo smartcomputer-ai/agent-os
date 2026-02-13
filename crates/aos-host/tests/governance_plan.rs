@@ -220,7 +220,7 @@ fn governance_action_requested_trigger_runs_plan() -> Result<(), KernelError> {
     world.submit_event_result("sys/GovActionRequested@1", &event_payload)?;
     world.tick_n(1)?;
 
-    let intents = world.drain_effects();
+    let intents = world.drain_effects().expect("drain effects");
     assert_eq!(intents.len(), 1, "expected one governance.propose intent");
     let intent = intents.into_iter().next().expect("governance intent");
     assert_eq!(intent.kind.as_str(), "governance.propose");

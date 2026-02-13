@@ -199,7 +199,8 @@ fn keyed_head_and_exact_reads_state() {
     let payload = serde_cbor::to_vec(&serde_json::json!({ key_field: key_val })).unwrap();
     world
         .kernel
-        .submit_domain_event("com.acme/Event@1".to_string(), payload);
+        .submit_domain_event("com.acme/Event@1".to_string(), payload)
+        .expect("submit domain event");
     world.kernel.tick_until_idle().unwrap();
 
     let cells = world.kernel.list_cells("com.acme/Keyed@1").unwrap();

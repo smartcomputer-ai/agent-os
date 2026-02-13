@@ -18,7 +18,7 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(())
     }
 
-    pub fn drain_effects(&mut self) -> Vec<aos_effects::EffectIntent> {
+    pub fn drain_effects(&mut self) -> Result<Vec<aos_effects::EffectIntent>, KernelError> {
         self.effect_manager.drain()
     }
 

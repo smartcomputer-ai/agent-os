@@ -966,7 +966,7 @@ impl TestWorld {
     }
 
     /// Convenience passthrough to drain the kernel's effect outbox.
-    pub fn drain_effects(&mut self) -> Vec<EffectIntent> {
+    pub fn drain_effects(&mut self) -> Result<Vec<EffectIntent>, KernelError> {
         self.kernel.drain_effects()
     }
 }

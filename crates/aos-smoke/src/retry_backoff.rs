@@ -105,7 +105,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 fn synthesize_timer_receipts(kernel: &mut Kernel<FsStore>) -> Result<()> {
     let mut safety = 0;
     loop {
-        let intents = kernel.drain_effects();
+        let intents = kernel.drain_effects()?;
         if intents.is_empty() {
             break;
         }

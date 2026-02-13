@@ -292,7 +292,7 @@ async fn testhost_drain_effects_empty_for_counter() {
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
     // Counter reducer doesn't emit effects
-    let effects = host.drain_effects();
+    let effects = host.drain_effects().expect("drain effects");
     assert!(effects.is_empty());
 }
 
@@ -525,7 +525,7 @@ async fn testhost_timer_effect_flow() {
     host.kernel_mut().tick_until_idle().unwrap();
 
     // Drain the timer effect
-    let effects = host.drain_effects();
+    let effects = host.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let timer_intent = &effects[0];
     assert_eq!(timer_intent.kind.as_str(), "timer.set");

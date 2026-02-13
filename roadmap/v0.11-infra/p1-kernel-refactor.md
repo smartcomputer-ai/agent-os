@@ -3,7 +3,7 @@
 **Priority**: P1  
 **Effort**: High  
 **Risk if deferred**: High (replay/snapshot correctness and maintainability continue to degrade)  
-**Status**: In Progress
+**Status**: Complete
 
 ## Progress Update (2026-02-13)
 
@@ -20,6 +20,11 @@
   - `cargo test -p aos-kernel world::query_api:: -- --nocapture`
   - `cargo test -p aos-host --features test-fixtures --test snapshot_integration -- --nocapture`
   - `cargo test -p aos-kernel --lib`
+- [x] Suggestion item 3 completed: `EffectManager::drain` now returns `Result` and secret injection failures are surfaced instead of dropped.
+- [x] Suggestion item 4 completed: defsecret name parsing in governance manifest loading now returns typed `KernelError::Manifest` instead of panicking.
+- [x] Suggestion item 5 completed: public domain-event submit APIs now return `Result`, and host/test call paths propagate validation/routing failures.
+- [x] Suggestion item 6 completed: snapshot compatibility policy remains strict fail-closed; no legacy compatibility mode is provided.
+- [x] Suggestion item 7 completed: tail scan start-sequence semantics are explicit via a dedicated helper (`tail_scan_start_seq`) to avoid baseline bootstrap off-by-one drift.
 
 ## Goal
 
@@ -157,10 +162,10 @@ Moving these scenarios into `crates/aos-kernel/tests/` can be revisited later if
 
 ## Suggestions To Look Into (From Current Review)
 
-1. Investigate and fix current `aos-kernel` red tests before or during refactor, especially replay/snapshot/tail failures.
-2. Decide whether manifest apply should be blocked when there are in-flight plans/pending receipts/effect queue entries, or support safe migration semantics explicitly.
-3. Avoid swallowing secret injection errors in `EffectManager::drain`; prefer explicit error surfaces for unresolved secret paths.
-4. Replace panic paths in manifest/governance parsing (e.g., secret name parsing) with typed `KernelError` returns.
-5. Revisit public submit APIs that currently discard routing/validation errors; consider returning `Result` consistently.
-6. Review snapshot compatibility policy: strict fail-closed validation vs transitional compatibility for older snapshots.
-7. Clarify journal height/tail scan semantics around baseline bootstrap to prevent off-by-one and bootstrap-edge regressions.
+1. [x] Investigate and fix current `aos-kernel` red tests before or during refactor, especially replay/snapshot/tail failures.
+2. [x] Decide whether manifest apply should be blocked when there are in-flight plans/pending receipts/effect queue entries, or support safe migration semantics explicitly.
+3. [x] Avoid swallowing secret injection errors in `EffectManager::drain`; prefer explicit error surfaces for unresolved secret paths.
+4. [x] Replace panic paths in manifest/governance parsing (e.g., secret name parsing) with typed `KernelError` returns.
+5. [x] Revisit public submit APIs that currently discard routing/validation errors; return `Result` consistently.
+6. [x] Snapshot compatibility policy remains strict fail-closed in v1; no transitional compatibility mode.
+7. [x] Clarify journal height/tail scan semantics around baseline bootstrap to prevent off-by-one and bootstrap-edge regressions.

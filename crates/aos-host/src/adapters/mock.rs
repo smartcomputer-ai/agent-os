@@ -84,7 +84,7 @@ impl MockHttpHarness {
     ) -> Result<Vec<HttpRequestContext>> {
         let mut out = Vec::new();
         loop {
-            let intents = kernel.drain_effects();
+            let intents = kernel.drain_effects()?;
             if intents.is_empty() {
                 break;
             }
@@ -234,7 +234,7 @@ impl<S: Store + 'static> MockLlmHarness<S> {
     pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequestContext>> {
         let mut out = Vec::new();
         loop {
-            let intents = kernel.drain_effects();
+            let intents = kernel.drain_effects()?;
             if intents.is_empty() {
                 break;
             }

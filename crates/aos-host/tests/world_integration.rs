@@ -252,7 +252,7 @@ fn sugar_literal_plan_executes_http_flow() {
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
-    let mut effects = world.drain_effects();
+    let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let effect = effects.remove(0);
 
@@ -395,7 +395,7 @@ fn single_plan_orchestration_completes_after_receipt() {
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
-    let mut effects = world.drain_effects();
+    let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let effect = effects.remove(0);
 
@@ -506,7 +506,7 @@ fn reducer_and_plan_effects_are_enqueued() {
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
-    let effects = world.drain_effects();
+    let effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 2);
     let kinds: Vec<_> = effects.iter().map(|e| e.kind.as_str()).collect();
     assert!(kinds.contains(&aos_effects::EffectKind::TIMER_SET));
@@ -530,7 +530,7 @@ fn reducer_timer_receipt_routes_event_to_handler() {
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
-    let mut effects = world.drain_effects();
+    let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let effect = effects.remove(0);
 
@@ -568,7 +568,7 @@ fn reducer_timer_receipt_routes_event_to_handler() {
     };
     world.kernel.handle_receipt(duplicate).unwrap();
     world.tick_n(1).unwrap();
-    assert!(world.drain_effects().is_empty());
+    assert!(world.drain_effects().expect("drain effects").is_empty());
 
     let unknown = EffectReceipt {
         intent_hash: [9u8; 32],
@@ -676,7 +676,7 @@ fn guarded_plan_branches_control_effects() {
         .submit_event_result(START_SCHEMA, &true_input)
         .expect("submit start event");
     world.tick_n(2).unwrap();
-    assert_eq!(world.drain_effects().len(), 1);
+    assert_eq!(world.drain_effects().expect("drain effects").len(), 1);
 
     let mut loaded_false = build_loaded_manifest_with_http_enforcer(
         &store,
@@ -724,7 +724,7 @@ fn guarded_plan_branches_control_effects() {
         .submit_event_result(START_SCHEMA, &false_input)
         .expect("submit start event");
     world_false.tick_n(2).unwrap();
-    assert_eq!(world_false.drain_effects().len(), 0);
+    assert_eq!(world_false.drain_effects().expect("drain effects").len(), 0);
 }
 /// Blob.put receipts should map into `sys/BlobPutResult@1`, route through the bus, and wrap at dispatch.
 #[test]
@@ -833,7 +833,7 @@ fn blob_put_receipt_routes_event_to_handler() {
         .expect("submit start event");
     world.tick_n(1).unwrap();
 
-    let mut effects = world.drain_effects();
+    let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let intent = effects.remove(0);
     assert_eq!(intent.kind.as_str(), aos_effects::EffectKind::BLOB_PUT);
@@ -965,7 +965,7 @@ fn blob_get_receipt_routes_event_to_handler() {
         .expect("submit start event");
     world.tick_n(1).unwrap();
 
-    let mut effects = world.drain_effects();
+    let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let intent = effects.remove(0);
     assert_eq!(intent.kind.as_str(), aos_effects::EffectKind::BLOB_GET);
@@ -1153,7 +1153,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
         .expect("submit start event");
     world.tick_n(2).unwrap();
 
-    let mut effects = world.drain_effects();
+    let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     let first_intent = effects.remove(0);
 
@@ -1168,7 +1168,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
     world.kernel.handle_receipt(receipt).unwrap();
     world.tick_n(2).unwrap();
 
-    let mut after_receipt_effects = world.drain_effects();
+    let mut after_receipt_effects = world.drain_effects().expect("drain effects");
     assert_eq!(after_receipt_effects.len(), 1);
     let second_intent = after_receipt_effects.remove(0);
     assert!(
@@ -1182,7 +1182,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
         .expect("submit pulse event");
     world.kernel.tick_until_idle().unwrap();
 
-    let mut after_event_effects = world.drain_effects();
+    let mut after_event_effects = world.drain_effects().expect("drain effects");
     assert_eq!(after_event_effects.len(), 1);
     assert!(
         effect_params_text(&after_event_effects.remove(0)).ends_with("after-event"),
@@ -1374,13 +1374,13 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         .submit_event_result(START_SCHEMA, &fixtures::start_event("ready-other"))
         .expect("submit start event");
     world.tick_n(2).unwrap();
-    assert!(world.drain_effects().is_empty());
+    assert!(world.drain_effects().expect("drain effects").is_empty());
 
     world
         .submit_event_result("com.acme/TriggerReady@1", &serde_json::json!({}))
         .expect("submit ready trigger");
     world.kernel.tick_until_idle().unwrap();
-    let mut effects = world.drain_effects();
+    let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     assert!(effect_params_text(&effects.remove(0)).ends_with("ready"));
 
@@ -1388,7 +1388,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
         .submit_event_result("com.acme/TriggerOther@1", &serde_json::json!({}))
         .expect("submit other trigger");
     world.kernel.tick_until_idle().unwrap();
-    let mut more_effects = world.drain_effects();
+    let mut more_effects = world.drain_effects().expect("drain effects");
     assert_eq!(more_effects.len(), 1);
     assert!(effect_params_text(&more_effects.remove(0)).ends_with("other"));
 }

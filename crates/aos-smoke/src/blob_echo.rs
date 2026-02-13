@@ -80,7 +80,7 @@ fn synthesize_blob_effects(
     harness: &mut BlobHarnessStore,
 ) -> Result<()> {
     loop {
-        let intents = kernel.drain_effects();
+        let intents = kernel.drain_effects()?;
         if intents.is_empty() {
             break;
         }

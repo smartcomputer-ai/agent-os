@@ -172,7 +172,7 @@ impl ManifestPatch {
                     schemas.insert(s.name.clone(), s.clone());
                 }
                 AirNode::Defsecret(s) => {
-                    let (alias, version) = parse_secret_name(&s.name);
+                    let (alias, version) = parse_secret_name(&s.name)?;
                     secrets.push(SecretDecl {
                         alias,
                         version,
@@ -319,7 +319,7 @@ impl ManifestPatch {
                         .map_err(|err| KernelError::Manifest(format!("load secret: {err}")))?;
                     match node {
                         AirNode::Defsecret(secret) => {
-                            let (alias, version) = parse_secret_name(&secret.name);
+                            let (alias, version) = parse_secret_name(&secret.name)?;
                             secrets.push(SecretDecl {
                                 alias,
                                 version,
@@ -396,16 +396,29 @@ fn load_defs_from_manifest<T>(
     Ok(())
 }
 
-fn parse_secret_name(name: &str) -> (String, u64) {
+fn parse_secret_name(name: &str) -> Result<(String, u64), KernelError> {
     let mut parts = name.rsplitn(2, '@');
-    let version_part = parts
-        .next()
-        .and_then(|p| p.parse::<u64>().ok())
-        .filter(|v| *v >= 1)
-        .expect("defsecret name must end with @<version>=1");
+    let version_raw = parts.next().ok_or_else(|| {
+        KernelError::Manifest(format!("invalid defsecret name '{name}': missing version segment"))
+    })?;
+    let version_part = version_raw.parse::<u64>().map_err(|_| {
+        KernelError::Manifest(format!(
+            "invalid defsecret name '{name}': version must be a positive integer"
+        ))
+    })?;
+    if version_part == 0 {
+        return Err(KernelError::Manifest(format!(
+            "invalid defsecret name '{name}': version must be >= 1"
+        )));
+    }
     let alias = parts
         .next()
+        .filter(|alias| !alias.is_empty())
         .map(str::to_string)
-        .expect("defsecret name must include alias");
-    (alias, version_part)
+        .ok_or_else(|| {
+            KernelError::Manifest(format!(
+                "invalid defsecret name '{name}': missing alias prefix"
+            ))
+        })?;
+    Ok((alias, version_part))
 }

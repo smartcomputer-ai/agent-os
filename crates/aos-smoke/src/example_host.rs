@@ -135,8 +135,8 @@ impl ExampleHost {
         Ok(())
     }
 
-    pub fn drain_effects(&mut self) -> Vec<aos_effects::EffectIntent> {
-        self.host.drain_effects()
+    pub fn drain_effects(&mut self) -> Result<Vec<aos_effects::EffectIntent>> {
+        self.host.drain_effects().context("drain effects")
     }
 
     pub fn apply_receipt(&mut self, receipt: aos_effects::EffectReceipt) -> Result<()> {

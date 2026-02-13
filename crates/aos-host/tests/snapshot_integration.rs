@@ -51,6 +51,7 @@ fn plan_snapshot_resumes_after_receipt() {
 
     let effect = world
         .drain_effects()
+        .expect("drain effects")
         .pop()
         .expect("expected effect before snapshot");
 
@@ -107,7 +108,7 @@ fn plan_snapshot_preserves_effect_queue() {
     )
     .unwrap();
 
-    let mut intents = replay_world.drain_effects();
+    let mut intents = replay_world.drain_effects().expect("drain effects");
     assert_eq!(
         intents.len(),
         1,
@@ -184,6 +185,7 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
 
     let effect = world
         .drain_effects()
+        .expect("drain effects")
         .pop()
         .expect("expected timer effect before snapshot");
 
@@ -246,7 +248,7 @@ fn cap_decisions_survive_snapshot_replay() {
     )
     .unwrap();
 
-    let intents = replay_world.drain_effects();
+    let intents = replay_world.drain_effects().expect("drain effects");
     assert_eq!(intents.len(), 1, "effect queue should survive replay");
 }
 
@@ -292,7 +294,9 @@ fn fs_store_and_journal_restore_snapshot() {
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(journal)).unwrap();
 
     let event_bytes = serde_cbor::to_vec(&serde_json::json!({ "id": "fs" })).unwrap();
-    kernel.submit_domain_event(START_SCHEMA.to_string(), event_bytes);
+    kernel
+        .submit_domain_event(START_SCHEMA.to_string(), event_bytes)
+        .expect("submit domain event");
     kernel.tick_until_idle().unwrap();
     kernel.create_snapshot().unwrap();
 
@@ -397,7 +401,7 @@ fn manifest_records_override_supplied_policy() {
     )
     .unwrap();
 
-    let mut intents = replay_world.drain_effects();
+    let mut intents = replay_world.drain_effects().expect("drain effects");
     assert_eq!(
         intents.len(),
         1,

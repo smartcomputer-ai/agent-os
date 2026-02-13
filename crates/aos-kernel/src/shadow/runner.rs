@@ -45,7 +45,7 @@ impl ShadowExecutor {
 
         if let Some(harness) = &config.harness {
             for (schema, bytes) in &harness.seed_events {
-                kernel.submit_domain_event(schema.clone(), bytes.clone());
+                kernel.submit_domain_event(schema.clone(), bytes.clone())?;
             }
         }
 
@@ -54,7 +54,7 @@ impl ShadowExecutor {
 
         loop {
             kernel.tick_until_idle()?;
-            let intents = kernel.drain_effects();
+            let intents = kernel.drain_effects()?;
             if intents.is_empty() {
                 break;
             }

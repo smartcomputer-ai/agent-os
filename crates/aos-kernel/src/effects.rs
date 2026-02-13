@@ -362,22 +362,22 @@ impl EffectManager {
         }
     }
 
-    pub fn drain(&mut self) -> Vec<EffectIntent> {
+    pub fn drain(&mut self) -> Result<Vec<EffectIntent>, KernelError> {
         let mut intents = self.queue.drain();
         if let (Some(catalog), Some(resolver)) =
             (self.secret_catalog.as_ref(), self.secret_resolver.as_ref())
         {
             for intent in intents.iter_mut() {
-                if let Ok(injected) = crate::secret::inject_secrets_in_params(
+                let injected = crate::secret::inject_secrets_in_params(
                     &intent.params_cbor,
                     catalog,
                     resolver.as_ref(),
-                ) {
-                    intent.params_cbor = injected;
-                }
+                )
+                .map_err(|err| KernelError::SecretResolution(err.to_string()))?;
+                intent.params_cbor = injected;
             }
         }
-        intents
+        Ok(intents)
     }
 
     pub fn has_pending(&self) -> bool {

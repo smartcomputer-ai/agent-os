@@ -140,7 +140,7 @@ impl<S: Store + 'static> TestHost<S> {
     ///
     /// Useful for tests that want to observe intents before dispatching.
     pub async fn drain_and_dispatch(&mut self) -> Result<CycleOutcome, HostError> {
-        let intents = self.host.kernel_mut().drain_effects();
+        let intents = self.host.kernel_mut().drain_effects()?;
         let effects_dispatched = intents.len();
         let receipts = self
             .host
@@ -191,8 +191,8 @@ impl<S: Store + 'static> TestHost<S> {
     }
 
     /// Drain pending effects from the kernel.
-    pub fn drain_effects(&mut self) -> Vec<EffectIntent> {
-        self.host.kernel_mut().drain_effects()
+    pub fn drain_effects(&mut self) -> Result<Vec<EffectIntent>, HostError> {
+        self.host.kernel_mut().drain_effects().map_err(HostError::from)
     }
 
     /// Apply a receipt directly (bypassing adapter execution).
