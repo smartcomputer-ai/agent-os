@@ -161,3 +161,112 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::journal::mem::MemJournal;
+    use crate::journal::Journal;
+    use aos_air_types::{AirNode, CURRENT_AIR_VERSION};
+    use aos_store::MemStore;
+    use indexmap::IndexMap;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn minimal_manifest() -> Manifest {
+        Manifest {
+            air_version: CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            caps: vec![],
+            effects: vec![],
+            policies: vec![],
+            secrets: vec![],
+            triggers: vec![],
+            module_bindings: IndexMap::new(),
+            routing: None,
+            defaults: None,
+        }
+    }
+
+    fn kernel_with_snapshot(height: JournalSeq) -> Kernel<MemStore> {
+        let store = Arc::new(MemStore::default());
+        let manifest = minimal_manifest();
+        let manifest_hash = store
+            .put_node(&AirNode::Manifest(manifest.clone()))
+            .expect("persist manifest");
+        let loaded = LoadedManifest {
+            manifest,
+            secrets: vec![],
+            modules: HashMap::new(),
+            plans: HashMap::new(),
+            effects: HashMap::new(),
+            caps: HashMap::new(),
+            policies: HashMap::new(),
+            schemas: HashMap::new(),
+            effect_catalog: aos_air_types::catalog::EffectCatalog::default(),
+        };
+        let journal: Box<dyn Journal> = Box::new(MemJournal::new());
+        let mut kernel = Kernel::from_loaded_manifest_with_config(
+            store,
+            loaded,
+            journal,
+            KernelConfig::default(),
+        )
+        .expect("kernel");
+        kernel.manifest_hash = manifest_hash;
+
+        let mut snapshot = KernelSnapshot::new(
+            height,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            0,
+            vec![],
+            vec![],
+            vec![],
+            0,
+            Some(*manifest_hash.as_bytes()),
+        );
+        snapshot.set_root_completeness(SnapshotRootCompleteness {
+            manifest_hash: Some(manifest_hash.as_bytes().to_vec()),
+            ..SnapshotRootCompleteness::default()
+        });
+        let snap_bytes = serde_cbor::to_vec(&snapshot).expect("encode snapshot");
+        let snap_hash = kernel.store.put_blob(&snap_bytes).expect("store snapshot");
+
+        kernel.last_snapshot_height = Some(height);
+        kernel.last_snapshot_hash = Some(snap_hash);
+        kernel
+            .snapshot_index
+            .insert(height, (snap_hash, Some(manifest_hash)));
+        kernel
+    }
+
+    #[test]
+    fn manifest_exact_from_snapshot() {
+        let kernel = kernel_with_snapshot(5);
+        let expected_snap = kernel.last_snapshot_hash;
+        let read = kernel
+            .get_manifest(Consistency::Exact(5))
+            .expect("manifest read");
+        assert_eq!(read.meta.journal_height, 5);
+        assert_eq!(read.meta.snapshot_hash, expected_snap);
+    }
+
+    #[test]
+    fn reducer_state_exact_missing_snapshot_errors() {
+        let kernel = kernel_with_snapshot(3);
+        let err = kernel
+            .get_reducer_state("missing", None, Consistency::Exact(7))
+            .expect_err("missing exact snapshot should fail");
+        let rendered = err.to_string();
+        assert!(
+            rendered.contains("root completeness") || rendered.contains("snapshot"),
+            "unexpected error: {rendered}"
+        );
+    }
+}
