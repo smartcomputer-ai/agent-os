@@ -8,9 +8,17 @@
 ## Progress Update (2026-02-13)
 
 - [x] Scope item 1 (`world.rs` split by runtime concern) is complete.
+- [x] Scope item 2 (single runtime assembly path) is complete via `world/manifest_runtime.rs` wired from startup + manifest swap.
+- [x] Scope item 3 (snapshot/replay boundary + invariants) is complete via `world/snapshot_replay.rs` and targeted tests.
+- [x] Scope item 4 (governance/patch helpers extracted from `world`) is complete via `governance_utils.rs`.
 - [x] Scope item 5 (`internal_effects.rs` decomposition) is complete via `crates/aos-kernel/src/internal_effects/{mod,introspect,workspace,governance}.rs`.
 - [x] Scope item 6 (`plan.rs` execution decomposition) is complete via `crates/aos-kernel/src/plan/{mod,step_handlers,codec,readiness,waits}.rs`.
 - Decision: keep scenario-heavy `world` tests co-located in their relevant modules for now; moving them to `crates/aos-kernel/tests/` is not required for P1.
+- [x] Execution step 7 (replay-or-die style verification pass) completed:
+  - `cargo test -p aos-kernel world::snapshot_replay:: -- --nocapture`
+  - `cargo test -p aos-kernel world::query_api:: -- --nocapture`
+  - `cargo test -p aos-host --features test-fixtures --test snapshot_integration -- --nocapture`
+  - `cargo test -p aos-kernel --lib`
 
 ## Goal
 
