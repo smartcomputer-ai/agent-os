@@ -3,7 +3,13 @@
 **Priority**: P1  
 **Effort**: High  
 **Risk if deferred**: High (replay/snapshot correctness and maintainability continue to degrade)  
-**Status**: Proposed
+**Status**: In Progress
+
+## Progress Update (2026-02-13)
+
+- [x] Scope item 1 (`world.rs` split by runtime concern) is complete.
+- [x] Scope item 5 (`internal_effects.rs` decomposition) is complete via `crates/aos-kernel/src/internal/{mod,introspect,workspace,governance}.rs` plus a compatibility shim.
+- Decision: keep scenario-heavy `world` tests co-located in their relevant modules for now; moving them to `crates/aos-kernel/tests/` is not required for P1.
 
 ## Goal
 
@@ -113,18 +119,13 @@ Suggested split:
 
 This should reduce local complexity and make invariant violations easier to diagnose.
 
-### 7) Move large `world` tests to crate integration tests
+### 7) Test placement for `world` runtime
 
-`world.rs` currently embeds a very large test block.
+`world.rs` previously embedded a very large test block. After decomposition into `world/*`,
+tests may remain co-located with the runtime concerns they validate.
 
-Move scenario-heavy tests into `crates/aos-kernel/tests/`:
-
-- `snapshot_replay.rs`
-- `routing.rs`
-- `governance_runtime.rs`
-- `tail_scan.rs`
-
-Keep small unit tests close to code where useful.
+For P1, co-located tests in `world/*.rs` are acceptable and preferred.
+Moving these scenarios into `crates/aos-kernel/tests/` can be revisited later if needed.
 
 ## Execution Plan
 
@@ -133,7 +134,7 @@ Keep small unit tests close to code where useful.
 3. Extract governance patch utilities and update imports.
 4. Split internal effects dispatcher.
 5. Split plan execution helpers.
-6. Migrate heavy tests to integration tests.
+6. Keep `world` tests co-located by concern (no required migration to integration tests in P1).
 7. Run replay-or-die checks and confirm snapshot/tail invariants.
 
 ## Acceptance Criteria
@@ -142,7 +143,7 @@ Keep small unit tests close to code where useful.
 - No duplicated runtime assembly logic between startup and manifest swap.
 - Replay/snapshot/tail tests are green and deterministic.
 - Governance patch preprocessing no longer depends on `world` module internals.
-- Test organization separates large scenario tests from core runtime implementation files.
+- Test placement is explicit and consistent (co-located `world` tests are acceptable for P1).
 
 ## Suggestions To Look Into (From Current Review)
 
