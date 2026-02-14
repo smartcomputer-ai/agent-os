@@ -17,7 +17,7 @@ This phase moves AOS from a toy chat app toward a reusable agent runtime stack:
 - `roadmap/v0.10-agent-sdk/p2.3-tool-loop-safety-context-bounds.md`
 - `roadmap/v0.10-agent-sdk/p2.4-events-observability-contract.md`
 - `roadmap/v0.10-agent-sdk/p2.5-failure-retry-cancel.md`
-- `roadmap/v0.10-agent-sdk/p2.6-conformance-and-demiurge-migration.md`
+- `roadmap/v0.10-agent-sdk/p2.6-sdk-conformance-live-smoke.md`
 - `roadmap/v0.10-agent-sdk/p2-agent-sdk-concerns.md`
 - `roadmap/v0.10-agent-sdk/p3-demiurge-refactor.md`
 - `roadmap/v0.10-agent-sdk/p4-agent-effects.md`

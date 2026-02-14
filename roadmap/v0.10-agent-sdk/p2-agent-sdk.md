@@ -48,8 +48,8 @@ Staging prevents partial rollout drift and gives each phase a testable boundary.
    Canonical event API, ordering/correlation guarantees, stream contract.
 5. `roadmap/v0.10-agent-sdk/p2.5-failure-retry-cancel.md`
    Failure taxonomy, retry ownership, cancellation semantics.
-6. `roadmap/v0.10-agent-sdk/p2.6-conformance-and-demiurge-migration.md`
-   Conformance matrix and Demiurge migration onto `aos.agent/*`.
+6. `roadmap/v0.10-agent-sdk/p2.6-sdk-conformance-live-smoke.md`
+   SDK conformance matrix and opt-in live-provider smoke coverage.
 
 ## Sequencing Rationale
 
@@ -60,7 +60,7 @@ Staging prevents partial rollout drift and gives each phase a testable boundary.
 3. Loop safety + bounding third (`p2.3`), once request/response surfaces are fixed.
 4. Event API fourth (`p2.4`), once core runtime flow is stable.
 5. Failure/retry/cancel fifth (`p2.5`), to harden operational behavior.
-6. Conformance + migration last (`p2.6`), to prove reuse in real app wiring.
+6. Conformance closure last (`p2.6`), with Demiurge migration deferred to `p3`.
 
 ## Completion Rule
 
