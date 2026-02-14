@@ -14,6 +14,7 @@ use serde_cbor;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 
 fn build_intent(kind: EffectKind, params_cbor: Vec<u8>) -> EffectIntent {
     // cap name is irrelevant for adapter execution here
@@ -44,6 +45,78 @@ async fn start_test_server(
         }
     });
     addr
+}
+
+async fn start_test_server_with_capture(
+    body: &'static [u8],
+    status_line: &'static str,
+) -> (SocketAddr, oneshot::Receiver<Vec<u8>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            let mut raw = Vec::new();
+            let mut header_end = None;
+            let mut content_length = 0usize;
+
+            loop {
+                let mut chunk = vec![0u8; 2048];
+                let n = stream.read(&mut chunk).await.unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&chunk[..n]);
+                if header_end.is_none() {
+                    if let Some(idx) = find_subslice(&raw, b"\r\n\r\n") {
+                        let end = idx + 4;
+                        header_end = Some(end);
+                        content_length = parse_content_length(&raw[..end]);
+                    }
+                }
+                if let Some(end) = header_end {
+                    if raw.len() >= end + content_length {
+                        break;
+                    }
+                }
+            }
+
+            let _ = tx.send(raw);
+
+            let response = format!(
+                "HTTP/1.1 {}\r\nContent-Length: {}\r\n\r\n",
+                status_line,
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.write_all(body).await;
+        }
+    });
+    (addr, rx)
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn parse_content_length(header_bytes: &[u8]) -> usize {
+    let Ok(text) = std::str::from_utf8(header_bytes) else {
+        return 0;
+    };
+    text.lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.eq_ignore_ascii_case("content-length") {
+                return value.trim().parse::<usize>().ok();
+            }
+            None
+        })
+        .unwrap_or(0)
+}
+
+fn extract_http_body(raw_request: &[u8]) -> &[u8] {
+    let end = find_subslice(raw_request, b"\r\n\r\n").expect("request header delimiter") + 4;
+    &raw_request[end..]
 }
 
 async fn loopback_available() -> bool {
@@ -247,4 +320,97 @@ async fn llm_happy_path_ok_receipt() {
     let payload: aos_effects::builtins::LlmGenerateReceipt =
         serde_cbor::from_slice(&receipt.payload_cbor).unwrap();
     assert!(!payload.output_ref.as_str().is_empty());
+}
+
+#[tokio::test]
+async fn llm_runtime_refs_roundtrip_into_provider_request_body() {
+    if !loopback_available().await {
+        eprintln!(
+            "skipping llm_runtime_refs_roundtrip_into_provider_request_body: loopback bind not permitted"
+        );
+        return;
+    }
+
+    let store = Arc::new(MemStore::new());
+    let message = serde_json::to_vec(&json!({"role":"user","content":"Return compact JSON."})).unwrap();
+    let message_ref = HashRef::new(store.put_blob(&message).unwrap().to_hex()).unwrap();
+
+    let provider_options = serde_json::to_vec(&json!({
+        "openai": {
+            "parallel_tool_calls": false,
+            "seed": 7
+        }
+    }))
+    .unwrap();
+    let provider_options_ref = HashRef::new(store.put_blob(&provider_options).unwrap().to_hex()).unwrap();
+
+    let response_format = serde_json::to_vec(&json!({
+        "type": "json_schema",
+        "json_schema": {
+            "type": "object",
+            "properties": { "answer": { "type": "string" } },
+            "required": ["answer"]
+        },
+        "strict": true
+    }))
+    .unwrap();
+    let response_format_ref = HashRef::new(store.put_blob(&response_format).unwrap().to_hex()).unwrap();
+
+    let body = br#"{
+      "choices": [ { "message": { "content": "{\"answer\":\"ok\"}" } } ],
+      "usage": { "prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5 }
+    }"#;
+    let (addr, capture_rx) = start_test_server_with_capture(body, "200 OK").await;
+
+    let mut providers = HashMap::new();
+    providers.insert(
+        "mock".into(),
+        ProviderConfig {
+            base_url: format!("http://{}", addr),
+            timeout: Duration::from_secs(2),
+            api_kind: LlmApiKind::ChatCompletions,
+        },
+    );
+    let cfg = LlmAdapterConfig {
+        providers,
+        default_provider: "mock".into(),
+    };
+    let adapter = LlmAdapter::new(store.clone(), cfg);
+
+    let params = LlmGenerateParams {
+        correlation_id: Some("run-1".into()),
+        provider: "mock".into(),
+        model: "gpt-mock".into(),
+        message_refs: vec![message_ref],
+        runtime: LlmRuntimeArgs {
+            temperature: Some("0".into()),
+            top_p: None,
+            max_tokens: Some(24),
+            tool_refs: None,
+            tool_choice: None,
+            reasoning_effort: None,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: Some(provider_options_ref),
+            response_format_ref: Some(response_format_ref),
+        },
+        api_key: Some("key".into()),
+    };
+    let intent = build_intent(
+        EffectKind::llm_generate(),
+        serde_cbor::to_vec(&params).unwrap(),
+    );
+
+    let receipt = adapter.execute(&intent).await.unwrap();
+    assert_eq!(receipt.status, ReceiptStatus::Ok);
+
+    let raw_request = capture_rx.await.expect("captured request bytes");
+    let request_body: serde_json::Value =
+        serde_json::from_slice(extract_http_body(&raw_request)).expect("json request body");
+
+    assert_eq!(request_body["model"], json!("gpt-mock"));
+    assert_eq!(request_body["max_tokens"], json!(24));
+    assert_eq!(request_body["parallel_tool_calls"], json!(false));
+    assert_eq!(request_body["seed"], json!(7));
+    assert_eq!(request_body["response_format"]["type"], json!("json_schema"));
 }

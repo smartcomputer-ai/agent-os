@@ -52,6 +52,8 @@ pub enum SessionReduceError {
     MissingActiveTurn,
     MissingProvider,
     MissingModel,
+    UnknownProvider,
+    UnknownModel,
     RunAlreadyActive,
 }
 
@@ -71,6 +73,8 @@ impl SessionReduceError {
             Self::MissingActiveTurn => "active turn missing",
             Self::MissingProvider => "run config provider missing",
             Self::MissingModel => "run config model missing",
+            Self::UnknownProvider => "run config provider unknown",
+            Self::UnknownModel => "run config model unknown",
             Self::RunAlreadyActive => "run already active",
         }
     }
@@ -166,6 +170,67 @@ pub fn apply_session_event(
             clear_active_run(state);
         }
         SessionEventKind::HostCommandApplied { .. } | SessionEventKind::Noop => {}
+    }
+
+    Ok(())
+}
+
+/// Apply a session event with deterministic provider/model catalog preflight checks.
+///
+/// For `RunRequested`, unknown provider/model values are rejected before any
+/// active-run state is mutated.
+pub fn apply_session_event_with_catalog(
+    state: &mut SessionState,
+    event: &SessionEvent,
+    allowed_providers: &[&str],
+    allowed_models: &[&str],
+) -> Result<(), SessionReduceError> {
+    if let SessionEventKind::RunRequested { run_overrides, .. } = &event.event {
+        validate_run_request_catalog(
+            state,
+            run_overrides.as_ref(),
+            allowed_providers,
+            allowed_models,
+        )?;
+    }
+    apply_session_event(state, event)
+}
+
+/// Validate a run request against optional provider/model allowlists.
+///
+/// Empty allowlists disable validation for that dimension.
+pub fn validate_run_request_catalog(
+    state: &SessionState,
+    run_overrides: Option<&SessionConfig>,
+    allowed_providers: &[&str],
+    allowed_models: &[&str],
+) -> Result<(), SessionReduceError> {
+    let requested = select_run_config(&state.session_config, run_overrides);
+    validate_run_catalog(&requested, allowed_providers, allowed_models)
+}
+
+/// Validate a concrete run config against optional provider/model allowlists.
+pub fn validate_run_catalog(
+    config: &RunConfig,
+    allowed_providers: &[&str],
+    allowed_models: &[&str],
+) -> Result<(), SessionReduceError> {
+    validate_run_config(config)?;
+
+    if !allowed_providers.is_empty()
+        && !allowed_providers
+            .iter()
+            .any(|value| config.provider.trim() == value.trim())
+    {
+        return Err(SessionReduceError::UnknownProvider);
+    }
+
+    if !allowed_models.is_empty()
+        && !allowed_models
+            .iter()
+            .any(|value| config.model.trim() == value.trim())
+    {
+        return Err(SessionReduceError::UnknownModel);
     }
 
     Ok(())
@@ -886,5 +951,78 @@ mod tests {
         .expect("lease check");
         assert_eq!(state.lifecycle, SessionLifecycle::Cancelled);
         assert!(state.active_run_id.is_none());
+    }
+
+    #[test]
+    fn catalog_validation_rejects_unknown_provider_without_state_mutation() {
+        let state = base_state();
+        let override_cfg = SessionConfig {
+            provider: "unknown-provider".into(),
+            model: "gpt-5.2".into(),
+            reasoning_effort: None,
+            max_tokens: Some(64),
+        };
+
+        let err = validate_run_request_catalog(
+            &state,
+            Some(&override_cfg),
+            &["openai", "anthropic"],
+            &["gpt-5.2", "claude-sonnet-4-5"],
+        )
+        .expect_err("unknown provider");
+        assert_eq!(err, SessionReduceError::UnknownProvider);
+        assert!(state.active_run_id.is_none());
+        assert_eq!(state.next_run_seq, 0);
+    }
+
+    #[test]
+    fn catalog_validation_rejects_unknown_model_without_state_mutation() {
+        let state = base_state();
+        let override_cfg = SessionConfig {
+            provider: "openai".into(),
+            model: "not-a-model".into(),
+            reasoning_effort: None,
+            max_tokens: Some(64),
+        };
+
+        let err = validate_run_request_catalog(
+            &state,
+            Some(&override_cfg),
+            &["openai", "anthropic"],
+            &["gpt-5.2", "claude-sonnet-4-5"],
+        )
+        .expect_err("unknown model");
+        assert_eq!(err, SessionReduceError::UnknownModel);
+        assert!(state.active_run_id.is_none());
+        assert_eq!(state.next_run_seq, 0);
+    }
+
+    #[test]
+    fn catalog_apply_rejects_unknown_provider_without_partial_activation() {
+        let mut state = base_state();
+        let before = state.clone();
+        let request = event(
+            1,
+            SessionEventKind::RunRequested {
+                input_ref:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                run_overrides: Some(SessionConfig {
+                    provider: "unknown-provider".into(),
+                    model: "gpt-5.2".into(),
+                    reasoning_effort: None,
+                    max_tokens: Some(64),
+                }),
+            },
+        );
+
+        let err = apply_session_event_with_catalog(
+            &mut state,
+            &request,
+            &["openai", "anthropic"],
+            &["gpt-5.2", "claude-sonnet-4-5"],
+        )
+        .expect_err("catalog reject");
+        assert_eq!(err, SessionReduceError::UnknownProvider);
+        assert_eq!(state, before);
     }
 }

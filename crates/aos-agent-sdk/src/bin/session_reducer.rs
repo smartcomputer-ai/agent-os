@@ -50,6 +50,8 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         SessionReduceError::MissingActiveTurn => ReduceError::new("active turn missing"),
         SessionReduceError::MissingProvider => ReduceError::new("run config provider missing"),
         SessionReduceError::MissingModel => ReduceError::new("run config model missing"),
+        SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),
+        SessionReduceError::UnknownModel => ReduceError::new("run config model unknown"),
         SessionReduceError::RunAlreadyActive => ReduceError::new("run already active"),
     }
 }

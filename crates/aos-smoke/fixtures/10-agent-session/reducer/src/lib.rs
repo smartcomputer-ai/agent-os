@@ -1,10 +1,15 @@
 #![allow(improper_ctypes_definitions)]
 #![no_std]
 
-use aos_agent_sdk::{SessionEvent, SessionState, SessionReduceError, apply_session_event};
+use aos_agent_sdk::{
+    SessionEvent, SessionReduceError, SessionState, apply_session_event_with_catalog,
+};
 use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_reducer};
 
 aos_reducer!(AgentSessionReducer);
+
+const KNOWN_PROVIDERS: &[&str] = &["openai", "anthropic", "openai-compatible"];
+const KNOWN_MODELS: &[&str] = &["gpt-5.2", "claude-sonnet-4-5", "gpt-4o-mini"];
 
 #[derive(Default)]
 struct AgentSessionReducer;
@@ -19,7 +24,8 @@ impl Reducer for AgentSessionReducer {
         event: Self::Event,
         ctx: &mut ReducerCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
-        apply_session_event(&mut ctx.state, &event).map_err(map_reduce_error)
+        apply_session_event_with_catalog(&mut ctx.state, &event, KNOWN_PROVIDERS, KNOWN_MODELS)
+            .map_err(map_reduce_error)
     }
 }
 
@@ -40,6 +46,8 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         SessionReduceError::MissingActiveTurn => ReduceError::new("active turn missing"),
         SessionReduceError::MissingProvider => ReduceError::new("run config provider missing"),
         SessionReduceError::MissingModel => ReduceError::new("run config model missing"),
+        SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),
+        SessionReduceError::UnknownModel => ReduceError::new("run config model unknown"),
         SessionReduceError::RunAlreadyActive => ReduceError::new("run already active"),
     }
 }
