@@ -106,9 +106,78 @@ pub fn compile_wasm_bin(
 
 fn load_secret_resolver() -> Option<Arc<dyn SecretResolver>> {
     const DEMO_LLM_API_KEY: &str = "demo-llm-api-key";
-    let map: HashMap<String, Vec<u8>> = HashMap::from([(
-        "env:LLM_API_KEY".to_string(),
-        DEMO_LLM_API_KEY.as_bytes().to_vec(),
-    )]);
+    let mut map: HashMap<String, Vec<u8>> = HashMap::new();
+
+    let llm_api_key = env_or_dotenv_var("LLM_API_KEY").unwrap_or_else(|| DEMO_LLM_API_KEY.into());
+    map.insert("env:LLM_API_KEY".to_string(), llm_api_key.into_bytes());
+
+    if let Some(openai_key) = env_or_dotenv_var("OPENAI_API_KEY") {
+        map.insert("env:OPENAI_API_KEY".to_string(), openai_key.into_bytes());
+    }
+    if let Some(anthropic_key) = env_or_dotenv_var("ANTHROPIC_API_KEY") {
+        map.insert(
+            "env:ANTHROPIC_API_KEY".to_string(),
+            anthropic_key.into_bytes(),
+        );
+    }
+
     Some(Arc::new(MapSecretResolver::new(map)))
+}
+
+fn env_or_dotenv_var(key: &str) -> Option<String> {
+    if let Ok(value) = std::env::var(key) {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    for path in dotenv_candidates() {
+        let Ok(contents) = fs::read_to_string(path) else {
+            continue;
+        };
+        if let Some(value) = parse_dotenv_value(&contents, key) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn dotenv_candidates() -> Vec<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    vec![
+        workspace_root().join(".env"),
+        manifest_dir.join(".env"),
+        PathBuf::from(".env"),
+    ]
+}
+
+fn parse_dotenv_value(contents: &str, key: &str) -> Option<String> {
+    for raw_line in contents.lines() {
+        let mut line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(stripped) = line.strip_prefix("export ") {
+            line = stripped.trim();
+        }
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        if name.trim() != key {
+            continue;
+        }
+        let value = value.trim();
+        let unquoted = if (value.starts_with('"') && value.ends_with('"') && value.len() >= 2)
+            || (value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2)
+        {
+            &value[1..value.len() - 1]
+        } else {
+            value
+        };
+        if !unquoted.is_empty() {
+            return Some(unquoted.to_string());
+        }
+    }
+    None
 }

@@ -1,0 +1,76 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/RunOutput@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "output_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/RunRequested@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "provider": { "text": {} },
+        "model": { "text": {} },
+        "api_key_alias": { "text": {} },
+        "message_refs": { "list": { "hash": {} } },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "max_tokens": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/RunResult@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "output_ref": { "hash": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/LiveEvent@1",
+    "type": {
+      "variant": {
+        "RunRequested": { "ref": "demo/RunRequested@1" },
+        "RunResult": { "ref": "demo/RunResult@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/LiveState@1",
+    "type": {
+      "record": {
+        "next_request_id": { "nat": {} },
+        "pending_request_id": { "option": { "nat": {} } },
+        "last_output_ref": { "option": { "hash": {} } },
+        "outputs": { "list": { "ref": "demo/RunOutput@1" } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/LiveChatRequest@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "provider": { "text": {} },
+        "model": { "text": {} },
+        "api_key_alias": { "text": {} },
+        "message_refs": { "list": { "hash": {} } },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "max_tokens": { "option": { "nat": {} } }
+      }
+    }
+  }
+]

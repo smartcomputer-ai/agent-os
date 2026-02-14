@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
 use aos_host::config::HostConfig;
+use aos_host::host::CycleOutcome;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
 use aos_host::testhost::TestHost;
@@ -121,18 +122,20 @@ impl ExampleHost {
         self.host.run_to_idle().context("drain after event")
     }
 
-    pub fn run_cycle_batch(&mut self) -> Result<()> {
-        self.runtime
+    pub fn run_cycle_batch(&mut self) -> Result<CycleOutcome> {
+        let outcome = self
+            .runtime
             .block_on(self.host.run_cycle_batch())
             .context("run cycle batch")?;
-        Ok(())
+        Ok(outcome)
     }
 
-    pub fn run_cycle_with_timers(&mut self) -> Result<()> {
-        self.runtime
+    pub fn run_cycle_with_timers(&mut self) -> Result<CycleOutcome> {
+        let outcome = self
+            .runtime
             .block_on(self.host.run_cycle_with_timers())
             .context("run cycle with timers")?;
-        Ok(())
+        Ok(outcome)
     }
 
     pub fn drain_effects(&mut self) -> Result<Vec<aos_effects::EffectIntent>> {

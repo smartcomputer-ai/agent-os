@@ -1,3 +1,4 @@
+mod agent_live;
 mod agent_session;
 mod aggregator;
 mod blob_echo;
@@ -59,6 +60,13 @@ enum Commands {
     AgentSession,
     /// Run the trace failure-classification example
     TraceFailureClassification,
+    /// Run live Agent SDK smoke (real provider + tools + follow-up)
+    AgentLive {
+        #[arg(long, value_enum, default_value_t = agent_live::LiveProvider::Openai)]
+        provider: agent_live::LiveProvider,
+        #[arg(long, help = "Override provider model for this run")]
+        model: Option<String>,
+    },
     /// Run core fixtures (00-19) sequentially
     All,
     /// Run Agent SDK fixtures (20+) sequentially
@@ -229,6 +237,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::Workspaces) => run_single("workspaces"),
         Some(Commands::AgentSession) => run_single("agent-session"),
         Some(Commands::TraceFailureClassification) => run_single("trace-failure-classification"),
+        Some(Commands::AgentLive { provider, model }) => agent_live::run(provider, model),
         Some(Commands::All) => run_group(ExampleGroup::Core),
         Some(Commands::AllAgent) => run_group(ExampleGroup::Agent),
         None => {
@@ -246,6 +255,7 @@ fn list_examples() {
     println!("\nGroup commands:");
     println!("  all       Run core fixtures (00-19)");
     println!("  all-agent Run Agent SDK fixtures (20+)");
+    println!("  agent-live Run opt-in live provider smoke (default provider=openai)");
 }
 
 fn list_examples_for_group(group: ExampleGroup) {

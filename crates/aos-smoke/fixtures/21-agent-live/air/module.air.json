@@ -1,0 +1,13 @@
+{
+  "$kind": "defmodule",
+  "name": "demo/LiveAgent@1",
+  "module_kind": "reducer",
+  "abi": {
+    "reducer": {
+      "state": "demo/LiveState@1",
+      "event": "demo/LiveEvent@1",
+      "effects_emitted": [],
+      "cap_slots": {}
+    }
+  }
+}

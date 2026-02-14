@@ -1,0 +1,20 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/live-llm-policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "llm.generate",
+          "origin_kind": "plan",
+          "origin_name": "demo/live_chat_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {},
+        "decision": "deny"
+      }
+    ]
+  }
+]
