@@ -19,6 +19,7 @@ Grouping:
 | 08  | retry-backoff  | Reducer retry with timer     |
 | 09  | workspaces     | Workspace plans + caps demo  |
 | 10  | agent-session  | SDK session lifecycle replay |
+| 11  | agent-failure-classification | Trace-get/diagnose failure conformance |
 
 Run with:
 - `cargo run -p aos-smoke --`

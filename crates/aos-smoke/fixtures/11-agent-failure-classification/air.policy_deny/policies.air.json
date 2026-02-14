@@ -1,0 +1,12 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/http-policy@1",
+    "rules": [
+      {
+        "when": {},
+        "decision": "deny"
+      }
+    ]
+  }
+]

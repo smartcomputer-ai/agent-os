@@ -1,3 +1,4 @@
+mod agent_failure_classification;
 mod agent_session;
 mod aggregator;
 mod blob_echo;
@@ -56,6 +57,8 @@ enum Commands {
     Workspaces,
     /// Run the agent session lifecycle example
     AgentSession,
+    /// Run the agent failure-classification trace example
+    AgentFailureClassification,
     /// Run core fixtures (00-09) sequentially
     All,
     /// Run Agent SDK fixtures (10+) sequentially
@@ -179,6 +182,15 @@ const EXAMPLES: &[ExampleMeta] = &[
         dir: "crates/aos-smoke/fixtures/10-agent-session",
         runner: agent_session::run,
     },
+    ExampleMeta {
+        number: "11",
+        slug: "agent-failure-classification",
+        title: "Agent Failure Trace",
+        summary: "Trace-get/diagnose failure classification",
+        group: ExampleGroup::Agent,
+        dir: "crates/aos-smoke/fixtures/11-agent-failure-classification",
+        runner: agent_failure_classification::run,
+    },
 ];
 
 fn main() {
@@ -216,6 +228,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::RetryBackoff) => run_single("retry-backoff"),
         Some(Commands::Workspaces) => run_single("workspaces"),
         Some(Commands::AgentSession) => run_single("agent-session"),
+        Some(Commands::AgentFailureClassification) => run_single("agent-failure-classification"),
         Some(Commands::All) => run_group(ExampleGroup::Core),
         Some(Commands::AllAgent) => run_group(ExampleGroup::Agent),
         None => {
