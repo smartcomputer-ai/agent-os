@@ -12,12 +12,12 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/FetchNotify@1";
 const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/11-agent-failure-classification/reducer";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/reducer";
 
-const AIR_ALLOW: &str = "crates/aos-smoke/fixtures/11-agent-failure-classification/air.allow";
-const AIR_CAP_DENY: &str = "crates/aos-smoke/fixtures/11-agent-failure-classification/air.cap_deny";
+const AIR_ALLOW: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/air.allow";
+const AIR_CAP_DENY: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/air.cap_deny";
 const AIR_POLICY_DENY: &str =
-    "crates/aos-smoke/fixtures/11-agent-failure-classification/air.policy_deny";
+    "crates/aos-smoke/fixtures/10-trace-failure-classification/air.policy_deny";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,7 +28,7 @@ aos_variant! {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    println!("→ Agent Failure Classification demo");
+    println!("→ Trace Failure Classification demo");
 
     run_policy_denied(example_root)?;
     run_capability_denied(example_root)?;

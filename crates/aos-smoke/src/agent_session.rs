@@ -10,7 +10,7 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 
 const REDUCER_NAME: &str = "demo/AgentSessionReducer@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/10-agent-session/reducer";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/20-agent-session/reducer";
 const SESSION_ID: &str = "11111111-1111-1111-1111-111111111111";
 
 pub fn run(example_root: &Path) -> Result<()> {

@@ -1,4 +1,4 @@
-# 10-agent-session
+# 20-agent-session
 
 Session lifecycle smoke fixture for `aos-agent-sdk` conformance and replay parity:
 - deterministic tool fan-in/fan-out and cancellation fences,

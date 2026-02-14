@@ -1,6 +1,6 @@
-# 11-agent-failure-classification
+# 10-trace-failure-classification
 
-Agent SDK conformance fixture for trace-based failure diagnosis:
+Trace/observability conformance fixture for failure diagnosis:
 - `policy_denied`,
 - `capability_denied`,
 - `adapter_timeout`,

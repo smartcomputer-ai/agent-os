@@ -3,8 +3,8 @@
 These fixtures are the numbered smoke demos executed by `aos-smoke`.
 
 Grouping:
-- `00`-`09`: core/kernel/system fixtures.
-- `10+`: Agent SDK conformance fixtures.
+- `00`-`19`: core/kernel/system fixtures (including trace observability conformance).
+- `20+`: Agent SDK conformance fixtures.
 
 | No. | Slug           | Summary                      |
 | --- | -------------- | ---------------------------- |
@@ -18,11 +18,11 @@ Grouping:
 | 07  | llm-summarizer | HTTP + LLM summarization     |
 | 08  | retry-backoff  | Reducer retry with timer     |
 | 09  | workspaces     | Workspace plans + caps demo  |
-| 10  | agent-session  | SDK session lifecycle replay |
-| 11  | agent-failure-classification | Trace-get/diagnose failure conformance |
+| 10  | trace-failure-classification | Trace-get/diagnose failure conformance |
+| 20  | agent-session  | SDK session lifecycle replay |
 
 Run with:
 - `cargo run -p aos-smoke --`
 - `cargo run -p aos-smoke -- <slug>`
-- `cargo run -p aos-smoke -- all` (core fixtures `00`-`09`)
-- `cargo run -p aos-smoke -- all-agent` (Agent SDK fixtures `10+`)
+- `cargo run -p aos-smoke -- all` (core fixtures `00`-`19`)
+- `cargo run -p aos-smoke -- all-agent` (Agent SDK fixtures `20+`)

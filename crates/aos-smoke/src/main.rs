@@ -1,4 +1,3 @@
-mod agent_failure_classification;
 mod agent_session;
 mod aggregator;
 mod blob_echo;
@@ -10,6 +9,7 @@ mod hello_timer;
 mod llm_summarizer;
 mod retry_backoff;
 mod safe_upgrade;
+mod trace_failure_classification;
 mod util;
 mod workspaces;
 
@@ -57,11 +57,11 @@ enum Commands {
     Workspaces,
     /// Run the agent session lifecycle example
     AgentSession,
-    /// Run the agent failure-classification trace example
-    AgentFailureClassification,
-    /// Run core fixtures (00-09) sequentially
+    /// Run the trace failure-classification example
+    TraceFailureClassification,
+    /// Run core fixtures (00-19) sequentially
     All,
-    /// Run Agent SDK fixtures (10+) sequentially
+    /// Run Agent SDK fixtures (20+) sequentially
     AllAgent,
 }
 
@@ -175,21 +175,21 @@ const EXAMPLES: &[ExampleMeta] = &[
     },
     ExampleMeta {
         number: "10",
+        slug: "trace-failure-classification",
+        title: "Trace Failure",
+        summary: "Trace-get/diagnose failure classification",
+        group: ExampleGroup::Core,
+        dir: "crates/aos-smoke/fixtures/10-trace-failure-classification",
+        runner: trace_failure_classification::run,
+    },
+    ExampleMeta {
+        number: "20",
         slug: "agent-session",
         title: "Agent Session",
         summary: "SDK session run-start + replay parity",
         group: ExampleGroup::Agent,
-        dir: "crates/aos-smoke/fixtures/10-agent-session",
+        dir: "crates/aos-smoke/fixtures/20-agent-session",
         runner: agent_session::run,
-    },
-    ExampleMeta {
-        number: "11",
-        slug: "agent-failure-classification",
-        title: "Agent Failure Trace",
-        summary: "Trace-get/diagnose failure classification",
-        group: ExampleGroup::Agent,
-        dir: "crates/aos-smoke/fixtures/11-agent-failure-classification",
-        runner: agent_failure_classification::run,
     },
 ];
 
@@ -228,7 +228,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::RetryBackoff) => run_single("retry-backoff"),
         Some(Commands::Workspaces) => run_single("workspaces"),
         Some(Commands::AgentSession) => run_single("agent-session"),
-        Some(Commands::AgentFailureClassification) => run_single("agent-failure-classification"),
+        Some(Commands::TraceFailureClassification) => run_single("trace-failure-classification"),
         Some(Commands::All) => run_group(ExampleGroup::Core),
         Some(Commands::AllAgent) => run_group(ExampleGroup::Agent),
         None => {
@@ -239,13 +239,13 @@ fn run_cli() -> Result<()> {
 }
 
 fn list_examples() {
-    println!("Core fixtures (00-09):\n");
+    println!("Core fixtures (00-19):\n");
     list_examples_for_group(ExampleGroup::Core);
-    println!("\nAgent SDK fixtures (10+):\n");
+    println!("\nAgent SDK fixtures (20+):\n");
     list_examples_for_group(ExampleGroup::Agent);
     println!("\nGroup commands:");
-    println!("  all       Run core fixtures (00-09)");
-    println!("  all-agent Run Agent SDK fixtures (10+)");
+    println!("  all       Run core fixtures (00-19)");
+    println!("  all-agent Run Agent SDK fixtures (20+)");
 }
 
 fn list_examples_for_group(group: ExampleGroup) {
