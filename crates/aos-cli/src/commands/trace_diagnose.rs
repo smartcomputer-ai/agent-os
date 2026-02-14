@@ -169,6 +169,7 @@ fn diagnose(trace: &Value) -> Value {
     let mut adapter_error = false;
     let mut adapter_timeout = false;
     let mut plan_error = false;
+    let mut invariant_violation = false;
 
     for entry in entries {
         let kind = entry
@@ -202,7 +203,12 @@ fn diagnose(trace: &Value) -> Value {
             "plan_ended" => {
                 let status = find_str(&record, "status").unwrap_or_default();
                 if status.eq_ignore_ascii_case("error") {
-                    plan_error = true;
+                    let error_code = find_str(&record, "error_code").unwrap_or_default();
+                    if error_code.eq_ignore_ascii_case("invariant_violation") {
+                        invariant_violation = true;
+                    } else {
+                        plan_error = true;
+                    }
                 }
             }
             _ => {}
@@ -217,8 +223,10 @@ fn diagnose(trace: &Value) -> Value {
         "adapter_timeout"
     } else if adapter_error {
         "adapter_error"
+    } else if invariant_violation {
+        "invariant_violation"
     } else if plan_error {
-        "plan_error"
+        "unknown_failure"
     } else if terminal == "waiting_receipt" {
         "waiting_receipt"
     } else if terminal == "waiting_event" {
@@ -234,7 +242,8 @@ fn diagnose(trace: &Value) -> Value {
         "capability_denied" => "Inspect capability grant constraints and enforcer output.",
         "adapter_timeout" => "Check adapter timeout and upstream endpoint latency.",
         "adapter_error" => "Inspect adapter receipt payload for failure details.",
-        "plan_error" => "Inspect plan edges/guards and raised event schemas.",
+        "invariant_violation" => "Inspect plan invariants and local/step value assumptions.",
+        "unknown_failure" => "Inspect plan/runtime records to identify the failure source.",
         "waiting_receipt" => "Flow is waiting for effect receipts or queued effect execution.",
         "waiting_event" => "Flow is waiting for a follow-up domain event.",
         "completed" => "Flow completed successfully.",
@@ -364,4 +373,78 @@ fn render_human(result: &Value) {
         .unwrap_or("-");
     println!("event_hash={event_hash}");
     println!("intent_hash={intent_hash}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::diagnose;
+    use serde_json::json;
+
+    fn trace_with_entries(entries: Vec<serde_json::Value>) -> serde_json::Value {
+        json!({
+            "terminal_state": "failed",
+            "journal_window": { "entries": entries },
+            "live_wait": {}
+        })
+    }
+
+    #[test]
+    fn diagnose_policy_denied() {
+        let trace = trace_with_entries(vec![json!({
+            "kind": "policy_decision",
+            "record": { "decision": "deny" }
+        })]);
+        let diagnosis = diagnose(&trace);
+        assert_eq!(diagnosis["cause"], "policy_denied");
+    }
+
+    #[test]
+    fn diagnose_capability_denied() {
+        let trace = trace_with_entries(vec![json!({
+            "kind": "cap_decision",
+            "record": { "decision": "deny" }
+        })]);
+        let diagnosis = diagnose(&trace);
+        assert_eq!(diagnosis["cause"], "capability_denied");
+    }
+
+    #[test]
+    fn diagnose_adapter_timeout() {
+        let trace = trace_with_entries(vec![json!({
+            "kind": "effect_receipt",
+            "record": { "status": "timeout" }
+        })]);
+        let diagnosis = diagnose(&trace);
+        assert_eq!(diagnosis["cause"], "adapter_timeout");
+    }
+
+    #[test]
+    fn diagnose_adapter_error() {
+        let trace = trace_with_entries(vec![json!({
+            "kind": "effect_receipt",
+            "record": { "status": "error" }
+        })]);
+        let diagnosis = diagnose(&trace);
+        assert_eq!(diagnosis["cause"], "adapter_error");
+    }
+
+    #[test]
+    fn diagnose_invariant_violation() {
+        let trace = trace_with_entries(vec![json!({
+            "kind": "plan_ended",
+            "record": { "status": "error", "error_code": "invariant_violation" }
+        })]);
+        let diagnosis = diagnose(&trace);
+        assert_eq!(diagnosis["cause"], "invariant_violation");
+    }
+
+    #[test]
+    fn diagnose_unknown_failure_for_generic_plan_error() {
+        let trace = trace_with_entries(vec![json!({
+            "kind": "plan_ended",
+            "record": { "status": "error", "error_code": "other_error" }
+        })]);
+        let diagnosis = diagnose(&trace);
+        assert_eq!(diagnosis["cause"], "unknown_failure");
+    }
 }
