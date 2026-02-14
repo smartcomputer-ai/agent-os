@@ -14,6 +14,8 @@ const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/10-agent-session/reducer";
 const SESSION_ID: &str = "11111111-1111-1111-1111-111111111111";
 
 pub fn run(example_root: &Path) -> Result<()> {
+    assert_catalog_rejections(example_root)?;
+
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
@@ -393,10 +395,52 @@ pub fn run(example_root: &Path) -> Result<()> {
         "expected run6 step counter reset after cap trigger"
     );
 
+    // Run #7: no-tool completion; active_run_config remains immutable during the run.
+    host.send_event(&run_requested_event_with_config(54, "openai", "gpt-5.2"))?;
+    host.send_event(&session_event(0, 55, SessionEventKind::RunStarted))?;
+    let run7_started: SessionState = host.read_state()?;
+    let run7_config = run7_started
+        .active_run_config
+        .clone()
+        .ok_or_else(|| anyhow!("run7 active_run_config missing"))?;
+    ensure!(
+        run7_config.provider == "openai" && run7_config.model == "gpt-5.2",
+        "unexpected run7 config: provider={} model={}",
+        run7_config.provider,
+        run7_config.model
+    );
+    host.send_event(&session_event(0, 56, SessionEventKind::StepBoundary))?;
+    let run7_mid: SessionState = host.read_state()?;
+    ensure!(
+        run7_mid.active_run_config == Some(run7_config.clone()),
+        "run7 active_run_config drifted during run"
+    );
+    host.send_event(&session_event(0, 57, SessionEventKind::RunCompleted))?;
+
+    // Run #8: provider/model update applies to next run only.
+    host.send_event(&run_requested_event_with_config(
+        58,
+        "anthropic",
+        "claude-sonnet-4-5",
+    ))?;
+    host.send_event(&session_event(0, 59, SessionEventKind::RunStarted))?;
+    let run8_started: SessionState = host.read_state()?;
+    let run8_config = run8_started
+        .active_run_config
+        .clone()
+        .ok_or_else(|| anyhow!("run8 active_run_config missing"))?;
+    ensure!(
+        run8_config.provider == "anthropic" && run8_config.model == "claude-sonnet-4-5",
+        "unexpected run8 config: provider={} model={}",
+        run8_config.provider,
+        run8_config.model
+    );
+    host.send_event(&session_event(0, 60, SessionEventKind::RunCompleted))?;
+
     let state: SessionState = host.read_state()?;
     ensure!(
-        state.lifecycle == SessionLifecycle::Failed,
-        "expected final Failed lifecycle, got {:?}",
+        state.lifecycle == SessionLifecycle::Completed,
+        "expected final Completed lifecycle, got {:?}",
         state.lifecycle
     );
     ensure!(
@@ -404,8 +448,8 @@ pub fn run(example_root: &Path) -> Result<()> {
         "expected active run to be cleared"
     );
     ensure!(
-        state.next_run_seq == 6,
-        "expected deterministic run_seq=6, got {}",
+        state.next_run_seq == 8,
+        "expected deterministic run_seq=8, got {}",
         state.next_run_seq
     );
     ensure!(
@@ -414,8 +458,8 @@ pub fn run(example_root: &Path) -> Result<()> {
         state.session_epoch
     );
     ensure!(
-        state.updated_at == 51,
-        "expected updated_at=51, got {}",
+        state.updated_at == 60,
+        "expected updated_at=60, got {}",
         state.updated_at
     );
 
@@ -438,6 +482,57 @@ fn session_event(session_epoch: u64, step_epoch: u64, kind: SessionEventKind) ->
         step_epoch,
         event: kind,
     }
+}
+
+fn assert_catalog_rejections(example_root: &Path) -> Result<()> {
+    // Isolate reject-path checks in throwaway hosts so replay assertions for the
+    // main conformance timeline remain strict and deterministic.
+    let mut provider_host = ExampleHost::prepare(HarnessConfig {
+        example_root,
+        assets_root: None,
+        reducer_name: REDUCER_NAME,
+        event_schema: EVENT_SCHEMA,
+        module_crate: MODULE_CRATE,
+    })?;
+    provider_host.send_event(&run_requested_event_with_config(1, "openai", "gpt-5.2"))?;
+    provider_host.send_event(&session_event(0, 2, SessionEventKind::RunStarted))?;
+    provider_host.send_event(&session_event(0, 3, SessionEventKind::RunCompleted))?;
+    let provider_before: SessionState = provider_host.read_state()?;
+    let _ = provider_host
+        .send_event(&run_requested_event_with_config(
+            4,
+            "unknown-provider",
+            "gpt-5.2",
+        ))
+        .expect_err("unknown provider should reject run request");
+    let provider_after: SessionState = provider_host.read_state()?;
+    ensure!(
+        provider_after == provider_before,
+        "unknown provider request must not mutate session state"
+    );
+
+    let mut model_host = ExampleHost::prepare(HarnessConfig {
+        example_root,
+        assets_root: None,
+        reducer_name: REDUCER_NAME,
+        event_schema: EVENT_SCHEMA,
+        module_crate: MODULE_CRATE,
+    })?;
+    model_host.send_event(&run_requested_event_with_config(1, "openai", "gpt-5.2"))?;
+    model_host.send_event(&session_event(0, 2, SessionEventKind::RunStarted))?;
+    model_host.send_event(&session_event(0, 3, SessionEventKind::RunCompleted))?;
+    let model_before: SessionState = model_host.read_state()?;
+    let _ = model_host
+        .send_event(&run_requested_event_with_config(4, "openai", "not-a-model"))
+        .expect_err("unknown model should reject run request");
+    let model_after: SessionState = model_host.read_state()?;
+    ensure!(
+        model_after == model_before,
+        "unknown model request must not mutate session state"
+    );
+    println!("   catalog rejection checks: unknown provider/model rejected without state mutation");
+
+    Ok(())
 }
 
 fn run_requested_event(step_epoch: u64) -> SessionEvent {
