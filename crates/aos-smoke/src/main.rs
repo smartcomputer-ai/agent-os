@@ -1,3 +1,4 @@
+mod agent_live;
 mod agent_session;
 mod aggregator;
 mod blob_echo;
@@ -64,6 +65,17 @@ enum Commands {
     ChatLive {
         #[arg(long, value_enum, default_value_t = chat_live::LiveProvider::Openai)]
         provider: chat_live::LiveProvider,
+        #[arg(long, help = "Override provider model for this run")]
+        model: Option<String>,
+    },
+    /// Run live SDK agent smoke (real provider + multi-step tool traversal)
+    AgentLive {
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = agent_live::LiveProvider::Openai
+        )]
+        provider: agent_live::LiveProvider,
         #[arg(long, help = "Override provider model for this run")]
         model: Option<String>,
     },
@@ -238,6 +250,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::AgentSession) => run_single("agent-session"),
         Some(Commands::TraceFailureClassification) => run_single("trace-failure-classification"),
         Some(Commands::ChatLive { provider, model }) => chat_live::run(provider, model),
+        Some(Commands::AgentLive { provider, model }) => agent_live::run(provider, model),
         Some(Commands::All) => run_group(ExampleGroup::Core),
         Some(Commands::AllAgent) => run_group(ExampleGroup::Agent),
         None => {
@@ -256,6 +269,7 @@ fn list_examples() {
     println!("  all       Run core fixtures (00-19)");
     println!("  all-agent Run Agent SDK fixtures (20+)");
     println!("  chat-live Run opt-in live provider smoke (default provider=openai)");
+    println!("  agent-live Run opt-in live SDK agent smoke (default provider=openai)");
 }
 
 fn list_examples_for_group(group: ExampleGroup) {

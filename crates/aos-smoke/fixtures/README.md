@@ -21,6 +21,7 @@ Grouping:
 | 10  | trace-failure-classification | Trace-get/diagnose failure conformance |
 | 20  | agent-session  | SDK session lifecycle replay |
 | 21  | chat-live (opt-in) | Live provider tool orchestration smoke |
+| 22  | agent-live (opt-in) | SDK-driven live agent with iterative tools + follow-up |
 
 Run with:
 - `cargo run -p aos-smoke --`
@@ -30,9 +31,12 @@ Run with:
 - `cargo run -p aos-smoke -- chat-live` (opt-in live provider smoke; default `--provider openai`)
 - `cargo run -p aos-smoke -- chat-live --provider anthropic`
 - `cargo run -p aos-smoke -- chat-live --provider openai --model gpt-5-mini`
+- `cargo run -p aos-smoke -- agent-live` (opt-in live SDK agent smoke; default `--provider openai`)
+- `cargo run -p aos-smoke -- agent-live --provider anthropic`
 
 Live smoke notes:
 - Uses `fixtures/21-chat-live` AIR with secret-injected API keys (`env:OPENAI_API_KEY`, `env:ANTHROPIC_API_KEY`).
 - Reads secrets from process env or `.env` files at repo root.
 - Runs a multi-tool agent flow (`echo_payload`, `sum_pair`) plus a follow-up user turn.
 - Ends with replay verification.
+- `fixtures/22-agent-live` uses `aos.agent/*` schemas + `aos-agent-sdk` reducer helpers and runs a dynamic tool-traversal flow (`search_step`) to completion, then follow-up + replay verification.

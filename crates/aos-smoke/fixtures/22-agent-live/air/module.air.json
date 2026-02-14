@@ -1,0 +1,13 @@
+{
+  "$kind": "defmodule",
+  "name": "demo/AgentLiveSessionReducer@1",
+  "module_kind": "reducer",
+  "abi": {
+    "reducer": {
+      "state": "aos.agent/SessionState@1",
+      "event": "aos.agent/SessionEvent@1",
+      "effects_emitted": [],
+      "cap_slots": {}
+    }
+  }
+}
