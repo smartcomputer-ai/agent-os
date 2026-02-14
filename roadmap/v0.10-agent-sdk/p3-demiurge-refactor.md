@@ -7,6 +7,13 @@
 
 ## Goal
 
+My goals:
+- single shot refactor: move to sdk in one go
+- considered used of tools: expand available effects first, add tool call to effect mapping support in sdk, requires thinking about what tools to support.
+- first version of a solution how to use external schema definitions (from sdk), beyond sys/* (do not repeat schemas)
+
+---
+
 Refactor `apps/demiurge` to consume `aos-agent-sdk` primitives so Demiurge becomes:
 - a real reference implementation for AOS-native agents,
 - a proving ground for coding-agent and world-operator flows,
