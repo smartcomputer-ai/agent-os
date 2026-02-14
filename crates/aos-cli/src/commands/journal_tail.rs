@@ -15,7 +15,8 @@ use super::try_control_client;
 
 #[derive(Args, Debug)]
 pub struct JournalTailArgs {
-    /// Sequence to start from (inclusive)
+    /// Journal cursor sequence. Resume by passing the last processed seq.
+    /// For initial reads, use 0.
     #[arg(long, default_value_t = 0)]
     pub from: u64,
 

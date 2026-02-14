@@ -736,6 +736,8 @@ async fn journal_head(State(state): State<HttpState>) -> Result<impl IntoRespons
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 struct JournalQuery {
+    /// Journal cursor sequence. Resume by passing the last processed `seq`.
+    /// For initial reads, use `0`.
     from: Option<u64>,
     limit: Option<u64>,
     kinds: Option<String>,

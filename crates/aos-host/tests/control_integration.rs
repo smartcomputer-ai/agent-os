@@ -131,7 +131,7 @@ async fn control_channel_round_trip() {
     };
     let resp = client.request(&journal_all).await.unwrap();
     assert!(resp.ok, "journal-list failed: {:?}", resp.error);
-    let entries = resp
+    let all_entries = resp
         .result
         .as_ref()
         .and_then(|v| v.get("entries"))
@@ -139,7 +139,7 @@ async fn control_channel_round_trip() {
         .cloned()
         .unwrap_or_default();
     assert!(
-        entries.iter().any(|entry| {
+        all_entries.iter().any(|entry| {
             entry
                 .get("kind")
                 .and_then(|v| v.as_str())
@@ -147,6 +147,18 @@ async fn control_channel_round_trip() {
                 .unwrap_or(false)
         }),
         "journal-list should include domain_event entries"
+    );
+    let all_seqs: Vec<u64> = all_entries
+        .iter()
+        .filter_map(|entry| entry.get("seq").and_then(|v| v.as_u64()))
+        .collect();
+    assert!(
+        all_seqs.len() >= 2,
+        "expected at least two journal entries for pagination test"
+    );
+    assert!(
+        all_seqs.windows(2).all(|w| w[0] < w[1]),
+        "journal-list entries should be strictly ordered by seq"
     );
 
     let journal_filtered = RequestEnvelope {
@@ -174,6 +186,63 @@ async fn control_channel_round_trip() {
                 .unwrap_or(false)
         }),
         "filtered journal-list should only include domain_event entries"
+    );
+
+    let journal_page_1 = RequestEnvelope {
+        v: 1,
+        id: "journal-page-1".into(),
+        cmd: "journal-list".into(),
+        payload: json!({ "from": 0, "limit": 2 }),
+    };
+    let resp = client.request(&journal_page_1).await.unwrap();
+    assert!(resp.ok, "journal-list page 1 failed: {:?}", resp.error);
+    let page_1_entries = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("entries"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !page_1_entries.is_empty(),
+        "expected non-empty first page from journal-list"
+    );
+    let page_1_seqs: Vec<u64> = page_1_entries
+        .iter()
+        .filter_map(|entry| entry.get("seq").and_then(|v| v.as_u64()))
+        .collect();
+    let resume_from = *page_1_seqs.last().expect("page 1 seq cursor");
+
+    let journal_page_2 = RequestEnvelope {
+        v: 1,
+        id: "journal-page-2".into(),
+        cmd: "journal-list".into(),
+        payload: json!({ "from": resume_from, "limit": 100 }),
+    };
+    let resp = client.request(&journal_page_2).await.unwrap();
+    assert!(resp.ok, "journal-list page 2 failed: {:?}", resp.error);
+    let page_2_entries = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("entries"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let page_2_seqs: Vec<u64> = page_2_entries
+        .iter()
+        .filter_map(|entry| entry.get("seq").and_then(|v| v.as_u64()))
+        .collect();
+    assert!(
+        page_2_seqs.iter().all(|seq| !page_1_seqs.contains(seq)),
+        "resume-from-cursor should not duplicate durable entries"
+    );
+
+    let mut combined = page_1_seqs.clone();
+    combined.extend(page_2_seqs.iter().copied());
+    combined.sort_unstable();
+    assert_eq!(
+        combined, all_seqs,
+        "paginated journal-list should reconstruct full ordered entry sequence"
     );
 
     // trace-get by event hash
