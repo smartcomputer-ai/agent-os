@@ -3,7 +3,7 @@
 **Priority**: P2  
 **Effort**: High  
 **Risk if deferred**: High (agents remain app-specific and fragile under real workloads)  
-**Status**: Proposed (staged)
+**Status**: Complete (closed on 2026-02-14; see `p2-closure-report.md`)
 
 ## Goal
 
@@ -50,6 +50,8 @@ Staging prevents partial rollout drift and gives each phase a testable boundary.
    Failure taxonomy, retry ownership, cancellation semantics.
 6. `roadmap/v0.10-agent-sdk/p2.6-sdk-conformance-live-smoke.md`
    SDK conformance matrix and opt-in live-provider smoke coverage.
+7. `roadmap/v0.10-agent-sdk/p2-closure-report.md`
+   Final P2 closure report with stage and exit-gate mapping.
 
 ## Sequencing Rationale
 
@@ -64,4 +66,4 @@ Staging prevents partial rollout drift and gives each phase a testable boundary.
 
 ## Completion Rule
 
-P2 is complete only when all stage exit criteria are met and validated by deterministic integration tests and replay parity checks.
+P2 is complete when all stage exit criteria are met, or explicitly deferred by decision with documented follow-up, and validated by deterministic integration tests and replay parity checks where applicable.
