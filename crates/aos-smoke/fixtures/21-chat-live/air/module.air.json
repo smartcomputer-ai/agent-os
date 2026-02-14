@@ -1,6 +1,6 @@
 {
   "$kind": "defmodule",
-  "name": "demo/LiveAgent@1",
+  "name": "demo/LiveChat@1",
   "module_kind": "reducer",
   "abi": {
     "reducer": {

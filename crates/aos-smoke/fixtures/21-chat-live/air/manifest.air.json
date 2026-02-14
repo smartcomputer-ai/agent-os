@@ -15,7 +15,7 @@
     { "name": "sys/BytesOrSecretRef@1" }
   ],
   "modules": [
-    { "name": "demo/LiveAgent@1" },
+    { "name": "demo/LiveChat@1" },
     { "name": "sys/CapEnforceLlmBasic@1" }
   ],
   "plans": [
@@ -57,7 +57,7 @@
     "events": [
       {
         "event": "demo/LiveEvent@1",
-        "reducer": "demo/LiveAgent@1"
+        "reducer": "demo/LiveChat@1"
       }
     ],
     "inboxes": []

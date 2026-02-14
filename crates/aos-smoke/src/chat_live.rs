@@ -13,10 +13,10 @@ use serde_json::{Value, json};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const REDUCER_NAME: &str = "demo/LiveAgent@1";
+const REDUCER_NAME: &str = "demo/LiveChat@1";
 const EVENT_SCHEMA: &str = "demo/LiveEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/21-agent-live/reducer";
-const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/21-agent-live";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/21-chat-live/reducer";
+const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/21-chat-live";
 
 const OPENAI_KEY_ENV: &str = "OPENAI_API_KEY";
 const OPENAI_MODEL_ENV: &str = "OPENAI_LIVE_MODEL";
@@ -64,16 +64,13 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let tool_refs = vec![tool_ref];
 
     println!(
-        "→ Agent Live smoke (provider={} model={})",
+        "→ Chat Live smoke (provider={} model={})",
         choice.provider_id, choice.model
     );
 
     let mut request_id = 1_u64;
     let initial_user_prompt = "Use tools before answering. Call echo_payload with {\"value\":\"alpha\"} and sum_pair with {\"a\":7,\"b\":8}. Then give one short sentence.";
-    println!(
-        "   turn 1 user: {}",
-        preview(initial_user_prompt)
-    );
+    println!("   turn 1 user: {}", preview(initial_user_prompt));
     let mut history = vec![json!({
         "role": "user",
         "content": initial_user_prompt
@@ -96,7 +93,10 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             let calls = load_tool_calls(&host, tool_calls_ref.as_str())?;
             ensure!(!calls.is_empty(), "expected non-empty tool call list");
             total_tool_calls += calls.len();
-            println!("   turn 1 assistant: requested {} tool call(s)", calls.len());
+            println!(
+                "   turn 1 assistant: requested {} tool call(s)",
+                calls.len()
+            );
 
             history.push(json!({
                 "role":"assistant",

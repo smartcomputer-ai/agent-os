@@ -3,14 +3,6 @@
 version = 4
 
 [[package]]
-name = "agent_live_reducer"
-version = "0.1.0"
-dependencies = [
- "aos-wasm-sdk",
- "serde",
-]
-
-[[package]]
 name = "aos-wasm-abi"
 version = "0.1.0"
 dependencies = [
@@ -28,6 +20,14 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_cbor",
+]
+
+[[package]]
+name = "chat_live_reducer"
+version = "0.1.0"
+dependencies = [
+ "aos-wasm-sdk",
+ "serde",
 ]
 
 [[package]]
