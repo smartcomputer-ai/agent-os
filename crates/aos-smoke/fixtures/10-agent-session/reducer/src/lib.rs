@@ -2,7 +2,8 @@
 #![no_std]
 
 use aos_agent_sdk::{
-    SessionEvent, SessionReduceError, SessionState, apply_session_event_with_catalog,
+    SessionEvent, SessionReduceError, SessionRuntimeLimits, SessionState,
+    apply_session_event_with_catalog_and_limits,
 };
 use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_reducer};
 
@@ -10,6 +11,9 @@ aos_reducer!(AgentSessionReducer);
 
 const KNOWN_PROVIDERS: &[&str] = &["openai", "anthropic", "openai-compatible"];
 const KNOWN_MODELS: &[&str] = &["gpt-5.2", "claude-sonnet-4-5", "gpt-4o-mini"];
+const RUNTIME_LIMITS: SessionRuntimeLimits = SessionRuntimeLimits {
+    max_steps_per_run: Some(6),
+};
 
 #[derive(Default)]
 struct AgentSessionReducer;
@@ -24,8 +28,14 @@ impl Reducer for AgentSessionReducer {
         event: Self::Event,
         ctx: &mut ReducerCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
-        apply_session_event_with_catalog(&mut ctx.state, &event, KNOWN_PROVIDERS, KNOWN_MODELS)
-            .map_err(map_reduce_error)
+        apply_session_event_with_catalog_and_limits(
+            &mut ctx.state,
+            &event,
+            KNOWN_PROVIDERS,
+            KNOWN_MODELS,
+            RUNTIME_LIMITS,
+        )
+        .map_err(map_reduce_error)
     }
 }
 

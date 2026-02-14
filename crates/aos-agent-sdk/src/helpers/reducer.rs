@@ -88,6 +88,11 @@ impl core::fmt::Display for SessionReduceError {
 
 impl core::error::Error for SessionReduceError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SessionRuntimeLimits {
+    pub max_steps_per_run: Option<u64>,
+}
+
 pub fn apply_session_event(
     state: &mut SessionState,
     event: &SessionEvent,
@@ -175,6 +180,15 @@ pub fn apply_session_event(
     Ok(())
 }
 
+pub fn apply_session_event_with_limits(
+    state: &mut SessionState,
+    event: &SessionEvent,
+    limits: SessionRuntimeLimits,
+) -> Result<(), SessionReduceError> {
+    apply_session_event(state, event)?;
+    enforce_runtime_limits(state, event, limits)
+}
+
 /// Apply a session event with deterministic provider/model catalog preflight checks.
 ///
 /// For `RunRequested`, unknown provider/model values are rejected before any
@@ -185,6 +199,22 @@ pub fn apply_session_event_with_catalog(
     allowed_providers: &[&str],
     allowed_models: &[&str],
 ) -> Result<(), SessionReduceError> {
+    apply_session_event_with_catalog_and_limits(
+        state,
+        event,
+        allowed_providers,
+        allowed_models,
+        SessionRuntimeLimits::default(),
+    )
+}
+
+pub fn apply_session_event_with_catalog_and_limits(
+    state: &mut SessionState,
+    event: &SessionEvent,
+    allowed_providers: &[&str],
+    allowed_models: &[&str],
+    limits: SessionRuntimeLimits,
+) -> Result<(), SessionReduceError> {
     if let SessionEventKind::RunRequested { run_overrides, .. } = &event.event {
         validate_run_request_catalog(
             state,
@@ -193,7 +223,7 @@ pub fn apply_session_event_with_catalog(
             allowed_models,
         )?;
     }
-    apply_session_event(state, event)
+    apply_session_event_with_limits(state, event, limits)
 }
 
 /// Validate a run request against optional provider/model allowlists.
@@ -249,6 +279,7 @@ fn on_run_requested(
 
     state.active_run_id = Some(allocate_run_id(state));
     state.active_run_config = Some(requested);
+    state.active_run_step_count = 0;
     state.active_turn_id = None;
     state.active_step_id = None;
     state.active_tool_batch = None;
@@ -279,6 +310,7 @@ fn on_run_started(state: &mut SessionState) -> Result<(), SessionReduceError> {
         state.active_turn_id = Some(turn_id);
         state.active_step_id = Some(step_id);
     }
+    state.active_run_step_count = 1;
 
     Ok(())
 }
@@ -392,6 +424,7 @@ fn on_step_boundary(state: &mut SessionState) -> Result<(), SessionReduceError> 
     };
     let next_step = allocate_step_id(state, &turn_id);
     state.active_step_id = Some(next_step);
+    state.active_run_step_count = state.active_run_step_count.saturating_add(1);
     Ok(())
 }
 
@@ -538,12 +571,42 @@ fn validate_run_config(config: &RunConfig) -> Result<(), SessionReduceError> {
 fn clear_active_run(state: &mut SessionState) {
     state.active_run_id = None;
     state.active_run_config = None;
+    state.active_run_step_count = 0;
     state.active_turn_id = None;
     state.active_step_id = None;
     state.active_tool_batch = None;
     state.in_flight_effects = 0;
     state.active_run_lease = None;
     state.last_heartbeat_at = None;
+}
+
+fn enforce_runtime_limits(
+    state: &mut SessionState,
+    event: &SessionEvent,
+    limits: SessionRuntimeLimits,
+) -> Result<(), SessionReduceError> {
+    let Some(max_steps) = limits.max_steps_per_run else {
+        return Ok(());
+    };
+    if max_steps == 0 {
+        return Ok(());
+    }
+
+    let boundary_event = matches!(
+        event.event,
+        SessionEventKind::RunStarted | SessionEventKind::StepBoundary
+    );
+    if !boundary_event {
+        return Ok(());
+    }
+
+    if state.lifecycle == SessionLifecycle::Running && state.active_run_step_count > max_steps {
+        transition_lifecycle(state, SessionLifecycle::Failed)
+            .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
+        clear_active_run(state);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -652,6 +715,7 @@ mod tests {
         );
         assert!(state.active_turn_id.is_some());
         assert!(state.active_step_id.is_some());
+        assert_eq!(state.active_run_step_count, 1);
     }
 
     #[test]
@@ -1024,5 +1088,38 @@ mod tests {
         .expect_err("catalog reject");
         assert_eq!(err, SessionReduceError::UnknownProvider);
         assert_eq!(state, before);
+    }
+
+    #[test]
+    fn step_cap_circuit_breaker_fails_run_deterministically() {
+        let limits = SessionRuntimeLimits {
+            max_steps_per_run: Some(2),
+        };
+        let mut state = base_state();
+
+        apply_session_event_with_limits(&mut state, &run_requested(None), limits)
+            .expect("run requested");
+        apply_session_event_with_limits(&mut state, &run_started(2), limits).expect("run started");
+        assert_eq!(state.lifecycle, SessionLifecycle::Running);
+        assert_eq!(state.active_run_step_count, 1);
+
+        apply_session_event_with_limits(
+            &mut state,
+            &event(3, SessionEventKind::StepBoundary),
+            limits,
+        )
+        .expect("boundary 1");
+        assert_eq!(state.lifecycle, SessionLifecycle::Running);
+        assert_eq!(state.active_run_step_count, 2);
+
+        apply_session_event_with_limits(
+            &mut state,
+            &event(4, SessionEventKind::StepBoundary),
+            limits,
+        )
+        .expect("boundary 2 exceeds");
+        assert_eq!(state.lifecycle, SessionLifecycle::Failed);
+        assert!(state.active_run_id.is_none());
+        assert_eq!(state.active_run_step_count, 0);
     }
 }

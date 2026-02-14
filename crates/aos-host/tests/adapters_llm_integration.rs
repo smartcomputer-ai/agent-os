@@ -332,7 +332,8 @@ async fn llm_runtime_refs_roundtrip_into_provider_request_body() {
     }
 
     let store = Arc::new(MemStore::new());
-    let message = serde_json::to_vec(&json!({"role":"user","content":"Return compact JSON."})).unwrap();
+    let message =
+        serde_json::to_vec(&json!({"role":"user","content":"Return compact JSON."})).unwrap();
     let message_ref = HashRef::new(store.put_blob(&message).unwrap().to_hex()).unwrap();
 
     let provider_options = serde_json::to_vec(&json!({
@@ -342,7 +343,8 @@ async fn llm_runtime_refs_roundtrip_into_provider_request_body() {
         }
     }))
     .unwrap();
-    let provider_options_ref = HashRef::new(store.put_blob(&provider_options).unwrap().to_hex()).unwrap();
+    let provider_options_ref =
+        HashRef::new(store.put_blob(&provider_options).unwrap().to_hex()).unwrap();
 
     let response_format = serde_json::to_vec(&json!({
         "type": "json_schema",
@@ -354,7 +356,8 @@ async fn llm_runtime_refs_roundtrip_into_provider_request_body() {
         "strict": true
     }))
     .unwrap();
-    let response_format_ref = HashRef::new(store.put_blob(&response_format).unwrap().to_hex()).unwrap();
+    let response_format_ref =
+        HashRef::new(store.put_blob(&response_format).unwrap().to_hex()).unwrap();
 
     let body = br#"{
       "choices": [ { "message": { "content": "{\"answer\":\"ok\"}" } } ],
@@ -412,5 +415,8 @@ async fn llm_runtime_refs_roundtrip_into_provider_request_body() {
     assert_eq!(request_body["max_tokens"], json!(24));
     assert_eq!(request_body["parallel_tool_calls"], json!(false));
     assert_eq!(request_body["seed"], json!(7));
-    assert_eq!(request_body["response_format"]["type"], json!("json_schema"));
+    assert_eq!(
+        request_body["response_format"]["type"],
+        json!("json_schema")
+    );
 }

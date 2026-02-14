@@ -242,6 +242,7 @@
         "session_config": { "ref": "aos.agent/SessionConfig@1" },
         "active_run_id": { "option": { "ref": "aos.agent/RunId@1" } },
         "active_run_config": { "option": { "ref": "aos.agent/RunConfig@1" } },
+        "active_run_step_count": { "nat": {} },
         "active_turn_id": { "option": { "ref": "aos.agent/TurnId@1" } },
         "active_step_id": { "option": { "ref": "aos.agent/StepId@1" } },
         "active_tool_batch": { "option": { "ref": "aos.agent/ActiveToolBatch@1" } },

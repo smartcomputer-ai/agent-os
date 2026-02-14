@@ -18,6 +18,7 @@ pub struct SessionState {
     pub session_config: SessionConfig,
     pub active_run_id: Option<RunId>,
     pub active_run_config: Option<RunConfig>,
+    pub active_run_step_count: u64,
     pub active_turn_id: Option<TurnId>,
     pub active_step_id: Option<StepId>,
     pub active_tool_batch: Option<ActiveToolBatch>,

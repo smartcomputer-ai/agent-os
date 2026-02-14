@@ -223,12 +223,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         29,
         SessionEventKind::ToolBatchStarted {
             tool_batch_id: batch5a.clone(),
-            expected_call_ids: vec![
-                "hc_d".into(),
-                "hc_a".into(),
-                "hc_c".into(),
-                "hc_b".into(),
-            ],
+            expected_call_ids: vec!["hc_d".into(), "hc_a".into(), "hc_c".into(), "hc_b".into()],
         },
     ))?;
     let batch5a_started: SessionState = host.read_state()?;
@@ -374,10 +369,34 @@ pub fn run(example_root: &Path) -> Result<()> {
     host.send_event(&session_event(0, 42, SessionEventKind::StepBoundary))?;
     host.send_event(&session_event(0, 43, SessionEventKind::RunCompleted))?;
 
+    // Run #6: max_steps_per_run circuit breaker (MVP P2.3) deterministically fails runaway loop.
+    host.send_event(&run_requested_event(44))?;
+    host.send_event(&session_event(0, 45, SessionEventKind::RunStarted))?;
+    host.send_event(&session_event(0, 46, SessionEventKind::StepBoundary))?;
+    host.send_event(&session_event(0, 47, SessionEventKind::StepBoundary))?;
+    host.send_event(&session_event(0, 48, SessionEventKind::StepBoundary))?;
+    host.send_event(&session_event(0, 49, SessionEventKind::StepBoundary))?;
+    host.send_event(&session_event(0, 50, SessionEventKind::StepBoundary))?;
+    host.send_event(&session_event(0, 51, SessionEventKind::StepBoundary))?;
+    let run6_state: SessionState = host.read_state()?;
+    ensure!(
+        run6_state.lifecycle == SessionLifecycle::Failed,
+        "expected step-cap circuit breaker to set Failed, got {:?}",
+        run6_state.lifecycle
+    );
+    ensure!(
+        run6_state.active_run_id.is_none() && run6_state.active_run_config.is_none(),
+        "expected run6 active run cleared after cap trigger"
+    );
+    ensure!(
+        run6_state.active_run_step_count == 0,
+        "expected run6 step counter reset after cap trigger"
+    );
+
     let state: SessionState = host.read_state()?;
     ensure!(
-        state.lifecycle == SessionLifecycle::Completed,
-        "expected Completed lifecycle, got {:?}",
+        state.lifecycle == SessionLifecycle::Failed,
+        "expected final Failed lifecycle, got {:?}",
         state.lifecycle
     );
     ensure!(
@@ -385,12 +404,20 @@ pub fn run(example_root: &Path) -> Result<()> {
         "expected active run to be cleared"
     );
     ensure!(
-        state.next_run_seq == 5,
-        "expected deterministic run_seq=5, got {}",
+        state.next_run_seq == 6,
+        "expected deterministic run_seq=6, got {}",
         state.next_run_seq
     );
-    ensure!(state.session_epoch == 3, "expected session_epoch=3, got {}", state.session_epoch);
-    ensure!(state.updated_at == 43, "expected updated_at=43, got {}", state.updated_at);
+    ensure!(
+        state.session_epoch == 3,
+        "expected session_epoch=3, got {}",
+        state.session_epoch
+    );
+    ensure!(
+        state.updated_at == 51,
+        "expected updated_at=51, got {}",
+        state.updated_at
+    );
 
     println!(
         "   lifecycle={:?} next_run_seq={} session_epoch={} updated_at={}",
