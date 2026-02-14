@@ -56,8 +56,16 @@ enum Commands {
     Workspaces,
     /// Run the agent session lifecycle example
     AgentSession,
-    /// Run every available example sequentially
+    /// Run core fixtures (00-09) sequentially
     All,
+    /// Run Agent SDK fixtures (10+) sequentially
+    AllAgent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExampleGroup {
+    Core,
+    Agent,
 }
 
 #[derive(Debug)]
@@ -66,6 +74,7 @@ struct ExampleMeta {
     slug: &'static str,
     title: &'static str,
     summary: &'static str,
+    group: ExampleGroup,
     dir: &'static str,
     runner: fn(&Path) -> Result<()>,
 }
@@ -76,6 +85,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "counter",
         title: "CounterSM",
         summary: "Reducer typestate without effects",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/00-counter",
         runner: counter::run,
     },
@@ -84,6 +94,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "hello-timer",
         title: "Hello Timer",
         summary: "Reducer micro-effect timer demo",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/01-hello-timer",
         runner: hello_timer::run,
     },
@@ -92,6 +103,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "blob-echo",
         title: "Blob Echo",
         summary: "Reducer blob.put/get demo",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/02-blob-echo",
         runner: blob_echo::run,
     },
@@ -100,6 +112,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "fetch-notify",
         title: "Fetch & Notify",
         summary: "Plan-triggered HTTP orchestration",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/03-fetch-notify",
         runner: fetch_notify::run,
     },
@@ -108,6 +121,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "aggregator",
         title: "Aggregator",
         summary: "Fan-out plan with http receipts",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/04-aggregator",
         runner: aggregator::run,
     },
@@ -116,6 +130,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "chain-comp",
         title: "Chain + Compensation",
         summary: "Multi-plan saga w/ refund path",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/05-chain-comp",
         runner: chain_comp::run,
     },
@@ -124,6 +139,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "safe-upgrade",
         title: "Safe Upgrade",
         summary: "Governance shadow/apply demo",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/06-safe-upgrade",
         runner: safe_upgrade::run,
     },
@@ -132,6 +148,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "llm-summarizer",
         title: "LLM Summarizer",
         summary: "HTTP + LLM with mocked receipt",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/07-llm-summarizer",
         runner: llm_summarizer::run,
     },
@@ -140,6 +157,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "retry-backoff",
         title: "Retry Backoff",
         summary: "Reducer-driven retries w/ timer.set",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/08-retry-backoff",
         runner: retry_backoff::run,
     },
@@ -148,6 +166,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "workspaces",
         title: "Workspaces",
         summary: "Workspace plan + caps demo",
+        group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/09-workspaces",
         runner: workspaces::run,
     },
@@ -156,6 +175,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         slug: "agent-session",
         title: "Agent Session",
         summary: "SDK session run-start + replay parity",
+        group: ExampleGroup::Agent,
         dir: "crates/aos-smoke/fixtures/10-agent-session",
         runner: agent_session::run,
     },
@@ -196,7 +216,8 @@ fn run_cli() -> Result<()> {
         Some(Commands::RetryBackoff) => run_single("retry-backoff"),
         Some(Commands::Workspaces) => run_single("workspaces"),
         Some(Commands::AgentSession) => run_single("agent-session"),
-        Some(Commands::All) => run_all(),
+        Some(Commands::All) => run_group(ExampleGroup::Core),
+        Some(Commands::AllAgent) => run_group(ExampleGroup::Agent),
         None => {
             list_examples();
             Ok(())
@@ -205,8 +226,17 @@ fn run_cli() -> Result<()> {
 }
 
 fn list_examples() {
-    println!("Available examples:\n");
-    for ex in EXAMPLES {
+    println!("Core fixtures (00-09):\n");
+    list_examples_for_group(ExampleGroup::Core);
+    println!("\nAgent SDK fixtures (10+):\n");
+    list_examples_for_group(ExampleGroup::Agent);
+    println!("\nGroup commands:");
+    println!("  all       Run core fixtures (00-09)");
+    println!("  all-agent Run Agent SDK fixtures (10+)");
+}
+
+fn list_examples_for_group(group: ExampleGroup) {
+    for ex in EXAMPLES.iter().filter(|ex| ex.group == group) {
         println!(
             "{:<3} {:<12} {:<16} {}",
             ex.number, ex.slug, ex.title, ex.summary
@@ -230,8 +260,8 @@ fn run_single(slug: &str) -> Result<()> {
     (ex.runner)(&abs_dir)
 }
 
-fn run_all() -> Result<()> {
-    for ex in EXAMPLES {
+fn run_group(group: ExampleGroup) -> Result<()> {
+    for ex in EXAMPLES.iter().filter(|ex| ex.group == group) {
         run_single(ex.slug)?;
     }
     Ok(())

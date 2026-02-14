@@ -2,6 +2,10 @@
 
 These fixtures are the numbered smoke demos executed by `aos-smoke`.
 
+Grouping:
+- `00`-`09`: core/kernel/system fixtures.
+- `10+`: Agent SDK conformance fixtures.
+
 | No. | Slug           | Summary                      |
 | --- | -------------- | ---------------------------- |
 | 00  | counter        | Deterministic reducer SM     |
@@ -19,4 +23,5 @@ These fixtures are the numbered smoke demos executed by `aos-smoke`.
 Run with:
 - `cargo run -p aos-smoke --`
 - `cargo run -p aos-smoke -- <slug>`
-- `cargo run -p aos-smoke -- all`
+- `cargo run -p aos-smoke -- all` (core fixtures `00`-`09`)
+- `cargo run -p aos-smoke -- all-agent` (Agent SDK fixtures `10+`)

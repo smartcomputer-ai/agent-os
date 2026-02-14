@@ -352,7 +352,10 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
         match map.get(&serde_cbor::Value::Text(field.into())) {
             Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
             Some(serde_cbor::Value::Null) | None => Ok(None),
-            Some(other) => Err(anyhow!("field '{field}' must be text or null, got {:?}", other)),
+            Some(other) => Err(anyhow!(
+                "field '{field}' must be text or null, got {:?}",
+                other
+            )),
         }
     };
     let message_refs = match map.get(&serde_cbor::Value::Text("message_refs".into())) {
