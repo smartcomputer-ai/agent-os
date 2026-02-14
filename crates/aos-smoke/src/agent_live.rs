@@ -69,9 +69,14 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     );
 
     let mut request_id = 1_u64;
+    let initial_user_prompt = "Use tools before answering. Call echo_payload with {\"value\":\"alpha\"} and sum_pair with {\"a\":7,\"b\":8}. Then give one short sentence.";
+    println!(
+        "   turn 1 user: {}",
+        preview(initial_user_prompt)
+    );
     let mut history = vec![json!({
         "role": "user",
-        "content": "Use tools before answering. Call echo_payload with {\"value\":\"alpha\"} and sum_pair with {\"a\":7,\"b\":8}. Then give one short sentence."
+        "content": initial_user_prompt
     })];
 
     let mut total_tool_calls = 0_usize;
@@ -91,7 +96,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             let calls = load_tool_calls(&host, tool_calls_ref.as_str())?;
             ensure!(!calls.is_empty(), "expected non-empty tool call list");
             total_tool_calls += calls.len();
-            println!("   round {} tool calls: {}", round + 1, calls.len());
+            println!("   turn 1 assistant: requested {} tool call(s)", calls.len());
 
             history.push(json!({
                 "role":"assistant",
@@ -105,11 +110,12 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 }).collect::<Vec<_>>()
             }));
 
-            for call in &calls {
+            for (idx, call) in calls.iter().enumerate() {
                 let args = load_json_blob(host.store().as_ref(), call.arguments_ref.as_str())?;
                 let output = execute_local_tool(&call.tool_name, &args)?;
                 println!(
-                    "      - {}({}) -> {}",
+                    "      tool {}: {} args={} result={}",
+                    idx + 1,
                     call.tool_name,
                     preview(&args.to_string()),
                     preview(&output.to_string())
@@ -127,15 +133,17 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
 
         let text = envelope.assistant_text.unwrap_or_default();
         if !text.trim().is_empty() {
-            println!("   final answer: {}", preview(&text));
+            println!("   turn 1 assistant: {}", preview(&text));
             final_answer = Some(text.clone());
             history.push(json!({"role":"assistant","content":text}));
             break;
         }
 
+        let retry_prompt = "Return a plain-text answer now and do not call tools.";
+        println!("   turn 1 user (clarify): {}", preview(retry_prompt));
         history.push(json!({
             "role":"user",
-            "content":"Return a plain-text answer now and do not call tools."
+            "content":retry_prompt
         }));
         request_id = request_id.saturating_add(1);
     }
@@ -147,9 +155,11 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let _ =
         final_answer.ok_or_else(|| anyhow!("missing final assistant answer after tool flow"))?;
 
+    let followup_prompt = "Follow-up: what was the numeric sum and echoed value?";
+    println!("   turn 2 user: {}", preview(followup_prompt));
     history.push(json!({
         "role":"user",
-        "content":"Follow-up: what was the numeric sum and echoed value?"
+        "content":followup_prompt
     }));
     request_id = request_id.saturating_add(1);
     let followup = dispatch_run(
@@ -165,7 +175,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         !followup_text.trim().is_empty(),
         "expected non-empty follow-up response"
     );
-    println!("   follow-up answer: {}", preview(&followup_text));
+    println!("   turn 2 assistant: {}", preview(&followup_text));
 
     host.finish()?.verify_replay()?;
     println!("   live smoke: OK");
