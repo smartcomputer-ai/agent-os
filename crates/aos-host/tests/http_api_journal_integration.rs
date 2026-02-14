@@ -78,6 +78,126 @@ async fn http_journal_tail_forwards_kind_filters() {
 }
 
 #[tokio::test]
+async fn http_journal_tail_cursor_resume_has_no_duplicates() {
+    let (control_tx, mut control_rx) = mpsc::channel::<ControlMsg>(8);
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
+    let state = HttpState::new(control_tx, shutdown_tx.clone());
+
+    let app = axum::Router::new()
+        .nest("/api", api::router())
+        .with_state(state);
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve");
+    });
+
+    let control = tokio::spawn(async move {
+        if let Some(ControlMsg::JournalTail {
+            from,
+            limit,
+            kinds,
+            resp,
+        }) = control_rx.recv().await
+        {
+            assert_eq!(from, 0);
+            assert_eq!(limit, Some(2));
+            assert_eq!(kinds, None);
+            let _ = resp.send(Ok(JournalTail {
+                from: 0,
+                to: 4,
+                entries: vec![
+                    JournalTailEntry {
+                        kind: "domain_event".into(),
+                        seq: 0,
+                        record: json!({"schema":"demo/Event@1","event_hash":"e0"}),
+                    },
+                    JournalTailEntry {
+                        kind: "domain_event".into(),
+                        seq: 1,
+                        record: json!({"schema":"demo/Event@1","event_hash":"e1"}),
+                    },
+                ],
+            }));
+        } else {
+            panic!("expected first journal tail control message");
+        }
+
+        if let Some(ControlMsg::JournalTail {
+            from,
+            limit,
+            kinds,
+            resp,
+        }) = control_rx.recv().await
+        {
+            assert_eq!(from, 1);
+            assert_eq!(limit, Some(10));
+            assert_eq!(kinds, None);
+            let _ = resp.send(Ok(JournalTail {
+                from: 1,
+                to: 4,
+                entries: vec![
+                    JournalTailEntry {
+                        kind: "domain_event".into(),
+                        seq: 2,
+                        record: json!({"schema":"demo/Event@1","event_hash":"e2"}),
+                    },
+                    JournalTailEntry {
+                        kind: "domain_event".into(),
+                        seq: 3,
+                        record: json!({"schema":"demo/Event@1","event_hash":"e3"}),
+                    },
+                ],
+            }));
+        } else {
+            panic!("expected second journal tail control message");
+        }
+    });
+
+    let url_page_1 = format!("http://{addr}/api/journal?from=0&limit=2");
+    let response = reqwest::get(url_page_1).await.expect("http get");
+    assert!(response.status().is_success());
+    let body_1: serde_json::Value = response.json().await.expect("decode json page 1");
+    let entries_1 = body_1
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let seqs_1: Vec<u64> = entries_1
+        .iter()
+        .filter_map(|entry| entry.get("seq").and_then(|v| v.as_u64()))
+        .collect();
+    assert_eq!(seqs_1, vec![0, 1]);
+    let resume_from = *seqs_1.last().expect("first page cursor");
+
+    let url_page_2 = format!("http://{addr}/api/journal?from={resume_from}&limit=10");
+    let response = reqwest::get(url_page_2).await.expect("http get");
+    assert!(response.status().is_success());
+    let body_2: serde_json::Value = response.json().await.expect("decode json page 2");
+    let entries_2 = body_2
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let seqs_2: Vec<u64> = entries_2
+        .iter()
+        .filter_map(|entry| entry.get("seq").and_then(|v| v.as_u64()))
+        .collect();
+    assert_eq!(seqs_2, vec![2, 3]);
+    assert!(
+        seqs_2.iter().all(|seq| !seqs_1.contains(seq)),
+        "resume from last processed cursor should not duplicate durable entries"
+    );
+
+    control.await.expect("control task");
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
 async fn http_debug_trace_forwards_query() {
     let (control_tx, mut control_rx) = mpsc::channel::<ControlMsg>(8);
     let (shutdown_tx, _) = broadcast::channel::<()>(1);

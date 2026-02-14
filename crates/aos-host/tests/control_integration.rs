@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, mpsc};
 mod helpers;
 use helpers::fixtures;
 use helpers::fixtures::{START_SCHEMA, TestStore};
+const SESSION_EVENT_SCHEMA: &str = "aos.agent/SessionEvent@1";
 
 fn control_socket_allowed() -> bool {
     let dir = tempfile::tempdir();
@@ -45,7 +46,7 @@ async fn control_channel_round_trip() {
 
     let store: Arc<TestStore> = fixtures::new_mem_store();
 
-    // Build simple manifest: reducer sets fixed state when invoked.
+    // Build simple manifest: reducers set fixed state when invoked.
     let reducer_output = ReducerOutput {
         state: Some(vec![0xAA]),
         domain_events: vec![],
@@ -61,18 +62,49 @@ async fn control_channel_round_trip() {
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
+    let session_reducer_output = ReducerOutput {
+        state: Some(vec![0xAB]),
+        domain_events: vec![],
+        effects: vec![],
+        ann: None,
+    };
+    let mut session_reducer = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/SessionEventEcho@1",
+        &session_reducer_output,
+    );
+    session_reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema(SESSION_EVENT_SCHEMA),
+        event: fixtures::schema(SESSION_EVENT_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
     let mut manifest = fixtures::build_loaded_manifest(
         vec![],
         vec![],
-        vec![reducer],
-        vec![fixtures::routing_event(START_SCHEMA, "com.acme/Echo@1")],
+        vec![reducer, session_reducer],
+        vec![
+            fixtures::routing_event(START_SCHEMA, "com.acme/Echo@1"),
+            fixtures::routing_event(SESSION_EVENT_SCHEMA, "com.acme/SessionEventEcho@1"),
+        ],
     );
     helpers::insert_test_schemas(
         &mut manifest,
-        vec![helpers::def_text_record_schema(
-            START_SCHEMA,
-            vec![("id", helpers::text_type())],
-        )],
+        vec![
+            helpers::def_text_record_schema(START_SCHEMA, vec![("id", helpers::text_type())]),
+            helpers::def_text_record_schema(
+                SESSION_EVENT_SCHEMA,
+                vec![
+                    ("session_id", helpers::text_type()),
+                    ("run_id", helpers::text_type()),
+                    ("turn_id", helpers::text_type()),
+                    ("step_id", helpers::text_type()),
+                    ("event", helpers::text_type()),
+                ],
+            ),
+        ],
     );
 
     let kernel =
@@ -122,6 +154,27 @@ async fn control_channel_round_trip() {
     };
     let resp = client.request(&evt).await.unwrap();
     assert!(resp.ok, "event-send failed: {:?}", resp.error);
+
+    // session lineage event (for correlation/lineage contract coverage)
+    let session_evt = RequestEnvelope {
+        v: 1,
+        id: "1-session".into(),
+        cmd: "event-send".into(),
+        payload: json!({
+            "schema": SESSION_EVENT_SCHEMA,
+            "value_b64": BASE64_STANDARD.encode(
+                serde_cbor::to_vec(&serde_json::json!({
+                    "session_id": "sess-1",
+                    "run_id": "run-1",
+                    "turn_id": "turn-1",
+                    "step_id": "step-1",
+                    "event": "RunStarted"
+                })).unwrap()
+            )
+        }),
+    };
+    let resp = client.request(&session_evt).await.unwrap();
+    assert!(resp.ok, "session event-send failed: {:?}", resp.error);
 
     let journal_all = RequestEnvelope {
         v: 1,
@@ -324,6 +377,38 @@ async fn control_channel_round_trip() {
     assert_eq!(trace["query"]["correlate_by"], "id");
     assert_eq!(trace["query"]["value"], "x");
     assert_eq!(trace["root"]["event_hash"], event_hash);
+
+    // trace-get by session lineage correlation
+    let trace = RequestEnvelope {
+        v: 1,
+        id: "trace-session-correlation".into(),
+        cmd: "trace-get".into(),
+        payload: json!({
+            "schema": SESSION_EVENT_SCHEMA,
+            "correlate_by": "session_id",
+            "value": "sess-1",
+            "window_limit": 64
+        }),
+    };
+    let resp = client.request(&trace).await.unwrap();
+    assert!(
+        resp.ok,
+        "trace-get session correlation failed: {:?}",
+        resp.error
+    );
+    let trace = resp.result.expect("trace session correlation result");
+    assert_eq!(trace["query"]["schema"], SESSION_EVENT_SCHEMA);
+    assert_eq!(trace["query"]["correlate_by"], "session_id");
+    assert_eq!(trace["query"]["value"], "sess-1");
+    let root_value = trace
+        .get("root")
+        .and_then(|v| v.get("value"))
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(root_value["session_id"], "sess-1");
+    assert_eq!(root_value["run_id"], "run-1");
+    assert_eq!(root_value["turn_id"], "turn-1");
+    assert_eq!(root_value["step_id"], "step-1");
 
     // journal-list should include domain_event entries
     // state-get
