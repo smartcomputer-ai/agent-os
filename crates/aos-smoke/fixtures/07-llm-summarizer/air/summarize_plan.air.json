@@ -66,13 +66,8 @@
             },
             "api_key": {
               "variant": {
-                "tag": "secret",
-                "value": {
-                  "record": {
-                    "alias": { "text": "llm/api" },
-                    "version": { "nat": 1 }
-                  }
-                }
+                "tag": "literal",
+                "value": { "text": "demo-llm-api-key" }
               }
             }
           }
