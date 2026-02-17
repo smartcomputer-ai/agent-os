@@ -3,7 +3,7 @@
 //! This module provides utilities to load AIR JSON files from directories and
 //! produce a `LoadedManifest` suitable for kernel initialization.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use aos_air_types::{
     DefSecret, HashRef, Manifest, Name, NamedRef, SecretEntry, catalog::EffectCatalog,
     validate_manifest,
 };
+use aos_cbor::Hash;
 use aos_kernel::{LoadedManifest, governance::ManifestPatch};
 use aos_store::{Catalog, FsStore, Store, load_manifest_from_bytes};
 use log::warn;
@@ -43,6 +44,25 @@ pub fn load_from_assets_with_defs(
     store: Arc<FsStore>,
     asset_root: &Path,
 ) -> Result<Option<LoadedAssets>> {
+    load_from_assets_with_imports_and_defs(store, asset_root, &[])
+}
+
+pub fn load_from_assets_with_imports(
+    store: Arc<FsStore>,
+    asset_root: &Path,
+    import_roots: &[PathBuf],
+) -> Result<Option<LoadedManifest>> {
+    Ok(
+        load_from_assets_with_imports_and_defs(store, asset_root, import_roots)?
+            .map(|assets| assets.loaded),
+    )
+}
+
+pub fn load_from_assets_with_imports_and_defs(
+    store: Arc<FsStore>,
+    asset_root: &Path,
+    import_roots: &[PathBuf],
+) -> Result<Option<LoadedAssets>> {
     let mut manifest: Option<Manifest> = None;
     let mut schemas: Vec<DefSchema> = Vec::new();
     let mut modules: Vec<DefModule> = Vec::new();
@@ -52,28 +72,48 @@ pub fn load_from_assets_with_defs(
     let mut secrets: Vec<DefSecret> = Vec::new();
     let mut effects: Vec<DefEffect> = Vec::new();
 
-    for dir_path in asset_search_dirs(asset_root)? {
-        for path in collect_json_files(&dir_path)? {
-            let nodes = parse_air_nodes(&path)
-                .with_context(|| format!("parse AIR nodes from {}", path.display()))?;
-            for node in nodes {
-                match node {
-                    AirNode::Manifest(found) => {
-                        if manifest.is_some() {
-                            bail!(
-                                "multiple manifest nodes found (latest at {})",
-                                path.display()
-                            );
+    let mut roots = Vec::with_capacity(import_roots.len() + 1);
+    roots.push(AssetRoot {
+        path: asset_root.to_path_buf(),
+        allow_manifest: true,
+        include_root: false,
+    });
+    roots.extend(import_roots.iter().cloned().map(|path| AssetRoot {
+        path,
+        allow_manifest: false,
+        include_root: true,
+    }));
+
+    for root in roots {
+        for dir_path in asset_search_dirs(&root.path, root.include_root)? {
+            for path in collect_json_files(&dir_path)? {
+                let nodes = parse_air_nodes(&path)
+                    .with_context(|| format!("parse AIR nodes from {}", path.display()))?;
+                for node in nodes {
+                    match node {
+                        AirNode::Manifest(found) => {
+                            if !root.allow_manifest {
+                                bail!(
+                                    "import assets may not define manifest nodes (saw {})",
+                                    path.display()
+                                );
+                            }
+                            if manifest.is_some() {
+                                bail!(
+                                    "multiple manifest nodes found (latest at {})",
+                                    path.display()
+                                );
+                            }
+                            manifest = Some(found);
                         }
-                        manifest = Some(found);
+                        AirNode::Defschema(schema) => schemas.push(schema),
+                        AirNode::Defmodule(module) => modules.push(module),
+                        AirNode::Defplan(plan) => plans.push(plan),
+                        AirNode::Defcap(cap) => caps.push(cap),
+                        AirNode::Defpolicy(policy) => policies.push(policy),
+                        AirNode::Defsecret(secret) => secrets.push(secret),
+                        AirNode::Defeffect(effect) => effects.push(effect),
                     }
-                    AirNode::Defschema(schema) => schemas.push(schema),
-                    AirNode::Defmodule(module) => modules.push(module),
-                    AirNode::Defplan(plan) => plans.push(plan),
-                    AirNode::Defcap(cap) => caps.push(cap),
-                    AirNode::Defpolicy(policy) => policies.push(policy),
-                    AirNode::Defsecret(secret) => secrets.push(secret),
-                    AirNode::Defeffect(effect) => effects.push(effect),
                 }
             }
         }
@@ -141,14 +181,6 @@ fn write_nodes(
     secrets: Vec<DefSecret>,
     effects: Vec<DefEffect>,
 ) -> Result<StoredHashes> {
-    ensure_unique_names(&schemas, "defschema")?;
-    ensure_unique_names(&modules, "defmodule")?;
-    ensure_unique_names(&plans, "defplan")?;
-    ensure_unique_names(&caps, "defcap")?;
-    ensure_unique_names(&policies, "defpolicy")?;
-    ensure_unique_names(&secrets, "defsecret")?;
-    ensure_unique_names(&effects, "defeffect")?;
-
     let mut hashes = StoredHashes::default();
     for schema in schemas {
         let name = schema.name.clone();
@@ -156,7 +188,7 @@ fn write_nodes(
         let hash = store
             .put_node(&AirNode::Defschema(schema))
             .context("store defschema node")?;
-        hashes.schemas.insert(name, HashRef::new(hash.to_hex())?);
+        insert_or_verify_hash("defschema", &mut hashes.schemas, name, hash)?;
     }
     for module in modules {
         let name = module.name.clone();
@@ -164,7 +196,7 @@ fn write_nodes(
         let hash = store
             .put_node(&AirNode::Defmodule(module))
             .context("store defmodule node")?;
-        hashes.modules.insert(name, HashRef::new(hash.to_hex())?);
+        insert_or_verify_hash("defmodule", &mut hashes.modules, name, hash)?;
     }
     for plan in plans {
         let name = plan.name.clone();
@@ -172,7 +204,7 @@ fn write_nodes(
         let hash = store
             .put_node(&AirNode::Defplan(plan))
             .context("store defplan node")?;
-        hashes.plans.insert(name, HashRef::new(hash.to_hex())?);
+        insert_or_verify_hash("defplan", &mut hashes.plans, name, hash)?;
     }
     for cap in caps {
         let name = cap.name.clone();
@@ -180,7 +212,7 @@ fn write_nodes(
         let hash = store
             .put_node(&AirNode::Defcap(cap))
             .context("store defcap node")?;
-        hashes.caps.insert(name, HashRef::new(hash.to_hex())?);
+        insert_or_verify_hash("defcap", &mut hashes.caps, name, hash)?;
     }
     for policy in policies {
         let name = policy.name.clone();
@@ -188,7 +220,7 @@ fn write_nodes(
         let hash = store
             .put_node(&AirNode::Defpolicy(policy))
             .context("store defpolicy node")?;
-        hashes.policies.insert(name, HashRef::new(hash.to_hex())?);
+        insert_or_verify_hash("defpolicy", &mut hashes.policies, name, hash)?;
     }
     for secret in secrets {
         let name = secret.name.clone();
@@ -196,7 +228,7 @@ fn write_nodes(
         let hash = store
             .put_node(&AirNode::Defsecret(secret))
             .context("store defsecret node")?;
-        hashes.secrets.insert(name, HashRef::new(hash.to_hex())?);
+        insert_or_verify_hash("defsecret", &mut hashes.secrets, name, hash)?;
     }
     for effect in effects {
         let name = effect.name.clone();
@@ -204,22 +236,30 @@ fn write_nodes(
         let hash = store
             .put_node(&AirNode::Defeffect(effect))
             .context("store defeffect node")?;
-        hashes.effects.insert(name, HashRef::new(hash.to_hex())?);
+        insert_or_verify_hash("defeffect", &mut hashes.effects, name, hash)?;
     }
     Ok(hashes)
 }
 
-fn ensure_unique_names<T>(items: &[T], kind: &str) -> Result<()>
-where
-    T: HasName,
-{
-    let mut seen = HashSet::new();
-    for item in items {
-        let name = item.name();
-        if !seen.insert(name.clone()) {
-            bail!("duplicate {kind} '{name}' detected in assets");
+fn insert_or_verify_hash(
+    kind: &str,
+    map: &mut HashMap<Name, HashRef>,
+    name: Name,
+    hash: Hash,
+) -> Result<()> {
+    let hash_ref = HashRef::new(hash.to_hex())?;
+    if let Some(existing) = map.get(name.as_str()) {
+        if existing != &hash_ref {
+            bail!(
+                "duplicate {kind} '{}' has conflicting definitions ({}, {})",
+                name,
+                existing.as_str(),
+                hash_ref.as_str()
+            );
         }
+        return Ok(());
     }
+    map.insert(name, hash_ref);
     Ok(())
 }
 
@@ -239,6 +279,13 @@ struct StoredHashes {
     caps: HashMap<Name, HashRef>,
     policies: HashMap<Name, HashRef>,
     secrets: HashMap<Name, HashRef>,
+}
+
+#[derive(Debug, Clone)]
+struct AssetRoot {
+    path: PathBuf,
+    allow_manifest: bool,
+    include_root: bool,
 }
 
 fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result<()> {
@@ -390,52 +437,6 @@ fn ensure_hash_field(map: &mut serde_json::Map<String, Value>, key: &str) {
     }
 }
 
-trait HasName {
-    fn name(&self) -> Name;
-}
-
-impl HasName for DefSchema {
-    fn name(&self) -> Name {
-        self.name.clone()
-    }
-}
-
-impl HasName for DefModule {
-    fn name(&self) -> Name {
-        self.name.clone()
-    }
-}
-
-impl HasName for DefPlan {
-    fn name(&self) -> Name {
-        self.name.clone()
-    }
-}
-
-impl HasName for DefEffect {
-    fn name(&self) -> Name {
-        self.name.clone()
-    }
-}
-
-impl HasName for DefCap {
-    fn name(&self) -> Name {
-        self.name.clone()
-    }
-}
-
-impl HasName for DefPolicy {
-    fn name(&self) -> Name {
-        self.name.clone()
-    }
-}
-
-impl HasName for DefSecret {
-    fn name(&self) -> Name {
-        self.name.clone()
-    }
-}
-
 fn manifest_catalog(store: &FsStore, manifest: Manifest) -> Result<Catalog> {
     let bytes = serde_cbor::to_vec(&manifest).context("serialize manifest to CBOR")?;
     load_manifest_from_bytes(store, &bytes).context("load manifest catalog")
@@ -494,7 +495,11 @@ fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
     }
 }
 
-fn asset_search_dirs(asset_root: &Path) -> Result<Vec<PathBuf>> {
+fn asset_search_dirs(asset_root: &Path, include_root: bool) -> Result<Vec<PathBuf>> {
+    if include_root {
+        return Ok(vec![asset_root.to_path_buf()]);
+    }
+
     let mut dirs: Vec<PathBuf> = Vec::new();
 
     if asset_root
@@ -753,6 +758,159 @@ mod tests {
         let store = Arc::new(FsStore::open(tmp.path()).expect("store"));
         let result = load_from_assets(store, tmp.path()).expect("ok");
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn loads_manifest_with_imported_defs() {
+        let tmp = TempDir::new().expect("tmp");
+        let world_air = tmp.path().join("air");
+        let import_air = tmp.path().join("sdk-exports");
+        fs::create_dir_all(&world_air).expect("mkdir world air");
+        fs::create_dir_all(&import_air).expect("mkdir import air");
+
+        let shared_schema = DefSchema {
+            name: "aos.agent/SessionId@1".into(),
+            ty: TypeExpr::Primitive(TypePrimitive::Nat(TypePrimitiveNat {
+                nat: Default::default(),
+            })),
+        };
+        let node = AirNode::Defschema(shared_schema.clone());
+        write_node(&import_air.join("defs.air.json"), &[node.clone()]);
+
+        // Include an identical local def to exercise dedupe-by-hash merge semantics.
+        write_node(&world_air.join("schemas.air.json"), &[node]);
+
+        let manifest = Manifest {
+            air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![aos_air_types::NamedRef {
+                name: shared_schema.name.clone(),
+                hash: aos_air_types::HashRef::new(ZERO_HASH_SENTINEL).expect("zero hash"),
+            }],
+            modules: Vec::new(),
+            plans: Vec::new(),
+            effects: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            secrets: Vec::new(),
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: Vec::new(),
+        };
+        write_node(
+            &world_air.join("manifest.air.json"),
+            &[AirNode::Manifest(manifest)],
+        );
+
+        let store = Arc::new(FsStore::open(tmp.path()).expect("store"));
+        let loaded =
+            load_from_assets_with_imports(store, &world_air, &[import_air]).expect("load assets");
+        let loaded = loaded.expect("manifest present");
+        assert!(loaded.schemas.contains_key("aos.agent/SessionId@1"));
+    }
+
+    #[test]
+    fn rejects_conflicting_import_defs() {
+        let tmp = TempDir::new().expect("tmp");
+        let world_air = tmp.path().join("air");
+        let import_air = tmp.path().join("sdk-exports");
+        fs::create_dir_all(&world_air).expect("mkdir world air");
+        fs::create_dir_all(&import_air).expect("mkdir import air");
+
+        let schema_one = DefSchema {
+            name: "aos.agent/SessionId@1".into(),
+            ty: nat_type(),
+        };
+        let schema_two = DefSchema {
+            name: "aos.agent/SessionId@1".into(),
+            ty: TypeExpr::Primitive(TypePrimitive::Text(aos_air_types::TypePrimitiveText {
+                text: Default::default(),
+            })),
+        };
+        write_node(
+            &world_air.join("schemas.air.json"),
+            &[AirNode::Defschema(schema_one.clone())],
+        );
+        write_node(
+            &import_air.join("defs.air.json"),
+            &[AirNode::Defschema(schema_two.clone())],
+        );
+
+        let manifest = Manifest {
+            air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![aos_air_types::NamedRef {
+                name: schema_one.name.clone(),
+                hash: aos_air_types::HashRef::new(ZERO_HASH_SENTINEL).expect("zero hash"),
+            }],
+            modules: Vec::new(),
+            plans: Vec::new(),
+            effects: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            secrets: Vec::new(),
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: Vec::new(),
+        };
+        write_node(
+            &world_air.join("manifest.air.json"),
+            &[AirNode::Manifest(manifest)],
+        );
+
+        let store = Arc::new(FsStore::open(tmp.path()).expect("store"));
+        let err = match load_from_assets_with_imports(store, &world_air, &[import_air]) {
+            Ok(_) => panic!("expected conflicting def error"),
+            Err(err) => err,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("conflicting definitions"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_manifest_nodes_in_import_assets() {
+        let tmp = TempDir::new().expect("tmp");
+        let world_air = tmp.path().join("air");
+        let import_air = tmp.path().join("sdk-exports");
+        fs::create_dir_all(&world_air).expect("mkdir world air");
+        fs::create_dir_all(&import_air).expect("mkdir import air");
+
+        let manifest = Manifest {
+            air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
+            schemas: Vec::new(),
+            modules: Vec::new(),
+            plans: Vec::new(),
+            effects: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            secrets: Vec::new(),
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: Vec::new(),
+        };
+        write_node(
+            &world_air.join("manifest.air.json"),
+            &[AirNode::Manifest(manifest.clone())],
+        );
+        write_node(
+            &import_air.join("manifest.air.json"),
+            &[AirNode::Manifest(manifest)],
+        );
+
+        let store = Arc::new(FsStore::open(tmp.path()).expect("store"));
+        let err = match load_from_assets_with_imports(store, &world_air, &[import_air]) {
+            Ok(_) => panic!("expected import manifest rejection"),
+            Err(err) => err,
+        };
+        let msg = err.to_string();
+        assert!(
+            msg.contains("import assets may not define manifest nodes"),
+            "unexpected error: {msg}"
+        );
     }
 
     fn write_node(path: &Path, nodes: &[AirNode]) {

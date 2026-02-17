@@ -1,6 +1,15 @@
 {
   "air": {
-    "dir": "air"
+    "dir": "air",
+    "imports": [
+      {
+        "cargo": {
+          "package": "aos-agent-sdk",
+          "air_dir": "air/exports/session-contracts",
+          "manifest_path": "../../Cargo.toml"
+        }
+      }
+    ]
   },
   "build": {
     "reducer_dir": "reducer"

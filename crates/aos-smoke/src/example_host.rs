@@ -46,6 +46,10 @@ pub struct ExampleHost {
 
 impl ExampleHost {
     pub fn prepare(cfg: HarnessConfig<'_>) -> Result<Self> {
+        Self::prepare_with_imports(cfg, &[])
+    }
+
+    pub fn prepare_with_imports(cfg: HarnessConfig<'_>, import_roots: &[PathBuf]) -> Result<Self> {
         reset_journal(cfg.example_root)?;
         let wasm_bytes = util::compile_reducer(cfg.module_crate)?;
 
@@ -60,12 +64,14 @@ impl ExampleHost {
         let mut loaded_host = load_and_patch(
             store.clone(),
             &assets_root,
+            import_roots,
             cfg.reducer_name,
             &wasm_hash_ref,
         )?;
         let mut loaded_replay = load_and_patch(
             store.clone(),
             &assets_root,
+            import_roots,
             cfg.reducer_name,
             &wasm_hash_ref,
         )?;
@@ -279,12 +285,14 @@ fn patch_module_hash(
 fn load_and_patch(
     store: Arc<FsStore>,
     assets_root: &Path,
+    import_roots: &[PathBuf],
     reducer_name: &str,
     wasm_hash: &HashRef,
 ) -> Result<LoadedManifest> {
-    let mut loaded = manifest_loader::load_from_assets(store, assets_root)
-        .context("load manifest from assets")?
-        .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
+    let mut loaded =
+        manifest_loader::load_from_assets_with_imports(store, assets_root, import_roots)
+            .context("load manifest from assets")?
+            .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
     patch_module_hash(&mut loaded, reducer_name, wasm_hash)?;
     Ok(loaded)
 }

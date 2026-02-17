@@ -2,6 +2,9 @@
   "$kind": "manifest",
   "schemas": [
     {
+      "name": "aos.agent/SessionId@1"
+    },
+    {
       "name": "demiurge/ChatRole@1"
     },
     {

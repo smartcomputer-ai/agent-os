@@ -25,6 +25,7 @@ const REDUCER_NAME: &str = "demo/AgentLiveSessionReducer@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/22-agent-live/reducer";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
+const SDK_SESSION_EXPORT: &str = "crates/aos-agent-sdk/air/exports/session-contracts";
 
 const SESSION_ID: &str = "22222222-2222-2222-2222-222222222222";
 
@@ -81,14 +82,19 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let provider = resolve_provider(provider, model_override)?;
     let fixture_root = crate::workspace_root().join(FIXTURE_ROOT);
     let assets_root = fixture_root.join("air");
+    let sdk_export_root = crate::workspace_root().join(SDK_SESSION_EXPORT);
+    let import_roots = vec![sdk_export_root];
 
-    let mut host = ExampleHost::prepare(HarnessConfig {
-        example_root: &fixture_root,
-        assets_root: Some(&assets_root),
-        reducer_name: REDUCER_NAME,
-        event_schema: EVENT_SCHEMA,
-        module_crate: MODULE_CRATE,
-    })?;
+    let mut host = ExampleHost::prepare_with_imports(
+        HarnessConfig {
+            example_root: &fixture_root,
+            assets_root: Some(&assets_root),
+            reducer_name: REDUCER_NAME,
+            event_schema: EVENT_SCHEMA,
+            module_crate: MODULE_CRATE,
+        },
+        &import_roots,
+    )?;
 
     let adapter = make_adapter(host.store(), &provider);
     let runtime = Builder::new_current_thread().enable_all().build()?;

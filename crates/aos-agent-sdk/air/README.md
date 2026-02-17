@@ -8,3 +8,4 @@ This directory holds canonical reusable AIR assets for the Agent SDK.
 - `capabilities.air.json`: placeholder for SDK capability templates
 - `policies.air.json`: placeholder for SDK policy templates
 - `plans/`: reserved for reusable plan templates
+- `exports/session-contracts/defs.air.json`: defs-only export for app/world imports

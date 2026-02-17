@@ -23,7 +23,7 @@ use crate::util::{
 };
 
 use super::create_host;
-use super::sync::load_sync_config;
+use super::sync::{load_sync_config, resolve_air_sources};
 use super::workspace_sync::{SyncPushOptions, SyncStats, sync_workspace_push};
 
 #[derive(Args, Debug)]
@@ -58,13 +58,6 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
     let store = FsStore::open(&dirs.store_root).context("open store")?;
     let store = Arc::new(store);
 
-    let air_dir = config
-        .air
-        .as_ref()
-        .and_then(|air| air.dir.as_ref())
-        .map(|dir| resolve_map_path(map_root, dir))
-        .unwrap_or_else(|| dirs.air_dir.clone());
-
     let reducer_dir = config
         .build
         .as_ref()
@@ -77,9 +70,17 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
         .and_then(|build| build.module.as_deref())
         .or(opts.module.as_deref());
 
-    let assets = manifest_loader::load_from_assets_with_defs(store.clone(), &air_dir)
-        .with_context(|| format!("load AIR assets from {}", air_dir.display()))?
-        .ok_or_else(|| anyhow!("no manifest found in {}", air_dir.display()))?;
+    let air_sources =
+        resolve_air_sources(&dirs.world, map_root, &config, &dirs.air_dir, &reducer_dir)?;
+    let air_dir = air_sources.air_dir;
+
+    let assets = manifest_loader::load_from_assets_with_imports_and_defs(
+        store.clone(),
+        &air_dir,
+        &air_sources.import_dirs,
+    )
+    .with_context(|| format!("load AIR assets from {}", air_dir.display()))?
+    .ok_or_else(|| anyhow!("no manifest found in {}", air_dir.display()))?;
 
     let mut loaded = assets.loaded;
     let secrets = assets.secrets;
