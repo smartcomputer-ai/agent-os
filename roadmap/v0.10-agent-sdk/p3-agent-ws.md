@@ -3,7 +3,7 @@
 **Priority**: P3  
 **Effort**: Medium  
 **Risk if deferred**: High (agent config remains app-specific and blocks reusable SDK patterns)  
-**Status**: Proposed
+**Status**: In Progress (core SDK contract + sync/apply + validation path implemented)
 
 ## Goal
 
@@ -14,6 +14,76 @@ This replaces Demiurge-specific workspace/tool registry prototype behavior with 
 - coding agents,
 - operator/factory agents,
 - future multimodal scenarios (static context docs/images/assets).
+
+## Completed So Far (as of 2026-02-21)
+
+### Implemented
+
+1. SDK workspace contract and config surface
+- Added `WorkspaceBinding`, `WorkspaceApplyMode`, and `WorkspaceSnapshot` contract types.
+- Added workspace-aware session/run config fields:
+  - `session_config.workspace_binding`, `default_prompt_pack`, `default_tool_catalog`
+  - `run_config.workspace_binding`, `prompt_pack`, `tool_catalog`
+- Added workspace sync/apply event contracts:
+  - `WorkspaceSyncRequested`, `WorkspaceSyncUnchanged`, `WorkspaceSnapshotReady`, `WorkspaceSyncFailed`, `WorkspaceApplyRequested`.
+
+2. Reducer state and deterministic apply model
+- Added `active_workspace_snapshot`, `pending_workspace_snapshot`, `pending_workspace_apply_mode` to session state.
+- Implemented deterministic apply semantics for:
+  - `ImmediateIfIdle`
+  - `NextStepBoundary`
+  - `NextRun`
+- Fixed sync request behavior so prompt/tool defaults can also be explicitly cleared.
+
+3. Reusable SDK workspace sync plan
+- Added `aos.agent/workspace_sync_plan@1`.
+- Plan now:
+  - resolves workspace/version (`workspace.resolve`),
+  - detects unchanged version,
+  - resolves index/prompt/tool refs (`workspace.read_ref`),
+  - reads prompt/tool bytes (`workspace.read_bytes`),
+  - raises `WorkspaceSnapshotReady` with refs + bytes.
+
+4. Sync-time JSON validation before staging snapshot
+- `WorkspaceSnapshotReady` now includes:
+  - `prompt_pack_bytes: option<bytes>`
+  - `tool_catalog_bytes: option<bytes>`
+- Reducer validates prompt-pack/tool-catalog JSON deterministically before accepting a pending snapshot.
+- Snapshot is rejected if bytes are missing while corresponding refs are present.
+- Added dedicated reducer error variants and reducer mapping updates.
+
+5. Step materialization path from workspace to llm.generate
+- Added SDK helper:
+  - `materialize_workspace_step_inputs(...)` for prompt/tool ref selection.
+  - `materialize_llm_generate_params_with_workspace(...)` to map active workspace snapshot + step context into `sys/llm.generate`.
+- Wired smoke usage to consume active workspace snapshot when building LLM params.
+
+6. AIR/schema/doc propagation + tests
+- Updated SDK AIR schemas and exports to include new workspace fields/events.
+- Updated fixture schemas for smoke alignment.
+- Added reducer/helper tests for workspace apply modes and validation failures.
+- Verified with:
+  - `cargo test -p aos-agent-sdk`
+  - `cargo check -p aos-smoke`
+  - `cargo run -p aos-smoke -- agent-session`
+  - replay parity checks.
+
+### Remaining / Next
+
+1. Demiurge migration to SDK workspace flow
+- Replace Demiurge-specific workspace scan/sync path with SDK events + plan fully.
+
+2. Strict schema-level validation
+- Current validation checks JSON shape compatibility.
+- Add canonical prompt-pack/tool-catalog JSON schemas and enforce strict validation.
+
+3. Failure event wiring
+- Current invalid snapshots are rejected by reducer errors.
+- Add an explicit plan/reducer failure event path (`WorkspaceSyncFailed`) for richer UX and observability.
+
+4. Workspace index and compatibility policy finalization
+- Finalize `agent.workspace.json` index requirements.
+- Decide whether legacy `tools/*.json` fallback remains in v0.10.
 
 ## Problem
 
