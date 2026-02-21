@@ -6,7 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent_sdk::{
     LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionEvent, SessionEventKind,
-    SessionId, SessionState, ToolBatchId, ToolCallStatus, materialize_llm_generate_params,
+    SessionId, SessionState, ToolBatchId, ToolCallStatus,
+    materialize_llm_generate_params_with_workspace,
 };
 use aos_cbor::Hash;
 use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope};
@@ -181,6 +182,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 .active_run_config
                 .as_ref()
                 .ok_or_else(|| anyhow!("missing active_run_config"))?,
+            state.active_workspace_snapshot.as_ref(),
             &step_ctx,
         )?;
 
@@ -384,10 +386,15 @@ fn send_session_event(
 
 fn to_core_llm_params(
     run_config: &aos_agent_sdk::RunConfig,
+    active_workspace_snapshot: Option<&aos_agent_sdk::WorkspaceSnapshot>,
     step_ctx: &LlmStepContext,
 ) -> Result<LlmGenerateParams> {
-    let mapped = materialize_llm_generate_params(run_config, step_ctx)
-        .map_err(|err| anyhow!("map llm params via sdk helpers: {err}"))?;
+    let mapped = materialize_llm_generate_params_with_workspace(
+        run_config,
+        active_workspace_snapshot,
+        step_ctx.clone(),
+    )
+    .map_err(|err| anyhow!("map llm params via sdk helpers: {err}"))?;
     let cbor = serde_cbor::to_vec(&mapped).context("encode mapped sys llm params")?;
     let core: LlmGenerateParams =
         serde_cbor::from_slice(&cbor).context("decode mapped params into core llm params")?;

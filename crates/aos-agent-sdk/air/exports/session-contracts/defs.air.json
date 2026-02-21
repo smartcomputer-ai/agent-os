@@ -129,7 +129,9 @@
         "root_hash": { "option": { "hash": {} } },
         "index_ref": { "option": { "hash": {} } },
         "prompt_pack": { "option": { "text": {} } },
-        "tool_catalog": { "option": { "text": {} } }
+        "tool_catalog": { "option": { "text": {} } },
+        "prompt_pack_ref": { "option": { "hash": {} } },
+        "tool_catalog_ref": { "option": { "hash": {} } }
       }
     }
   },

@@ -108,6 +108,104 @@
         "bind": { "as": "index_ref" }
       },
       {
+        "id": "assign_prompt_pack_ref_null",
+        "op": "assign",
+        "expr": { "null": {} },
+        "bind": { "as": "prompt_pack_ref" }
+      },
+      {
+        "id": "emit_workspace_read_prompt_pack",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:workspace_root" },
+            "path": {
+              "op": "concat",
+              "args": [
+                { "text": "prompts/packs/" },
+                {
+                  "op": "concat",
+                  "args": [
+                    { "ref": "@plan.input.prompt_pack" },
+                    { "text": ".json" }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_read_prompt_pack" }
+      },
+      {
+        "id": "await_workspace_read_prompt_pack",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_read_prompt_pack" },
+        "bind": { "as": "workspace_read_prompt_pack_receipt" }
+      },
+      {
+        "id": "assign_prompt_pack_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_read_prompt_pack_receipt" },
+            { "text": "hash" }
+          ]
+        },
+        "bind": { "as": "prompt_pack_ref" }
+      },
+      {
+        "id": "assign_tool_catalog_ref_null",
+        "op": "assign",
+        "expr": { "null": {} },
+        "bind": { "as": "tool_catalog_ref" }
+      },
+      {
+        "id": "emit_workspace_read_tool_catalog",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:workspace_root" },
+            "path": {
+              "op": "concat",
+              "args": [
+                { "text": "tools/catalogs/" },
+                {
+                  "op": "concat",
+                  "args": [
+                    { "ref": "@plan.input.tool_catalog" },
+                    { "text": ".json" }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_read_tool_catalog" }
+      },
+      {
+        "id": "await_workspace_read_tool_catalog",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_read_tool_catalog" },
+        "bind": { "as": "workspace_read_tool_catalog_receipt" }
+      },
+      {
+        "id": "assign_tool_catalog_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_read_tool_catalog_receipt" },
+            { "text": "hash" }
+          ]
+        },
+        "bind": { "as": "tool_catalog_ref" }
+      },
+      {
         "id": "raise_snapshot_ready",
         "op": "raise_event",
         "event": "aos.agent/WorkspaceSnapshotReady@1",
@@ -126,7 +224,9 @@
                 "root_hash": { "ref": "@var:workspace_root" },
                 "index_ref": { "ref": "@var:index_ref" },
                 "prompt_pack": { "ref": "@plan.input.prompt_pack" },
-                "tool_catalog": { "ref": "@plan.input.tool_catalog" }
+                "tool_catalog": { "ref": "@plan.input.tool_catalog" },
+                "prompt_pack_ref": { "ref": "@var:prompt_pack_ref" },
+                "tool_catalog_ref": { "ref": "@var:tool_catalog_ref" }
               }
             }
           }
@@ -186,7 +286,90 @@
       },
       { "from": "emit_workspace_read_index", "to": "await_workspace_read_index" },
       { "from": "await_workspace_read_index", "to": "assign_index_ref" },
-      { "from": "assign_index_ref", "to": "raise_snapshot_ready" },
+      {
+        "from": "assign_index_ref",
+        "to": "emit_workspace_read_prompt_pack",
+        "when": {
+          "op": "ne",
+          "args": [
+            { "ref": "@plan.input.prompt_pack" },
+            { "null": {} }
+          ]
+        }
+      },
+      {
+        "from": "assign_index_ref",
+        "to": "assign_prompt_pack_ref_null",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@plan.input.prompt_pack" },
+            { "null": {} }
+          ]
+        }
+      },
+      {
+        "from": "emit_workspace_read_prompt_pack",
+        "to": "await_workspace_read_prompt_pack"
+      },
+      {
+        "from": "await_workspace_read_prompt_pack",
+        "to": "assign_prompt_pack_ref"
+      },
+      {
+        "from": "assign_prompt_pack_ref",
+        "to": "emit_workspace_read_tool_catalog",
+        "when": {
+          "op": "ne",
+          "args": [
+            { "ref": "@plan.input.tool_catalog" },
+            { "null": {} }
+          ]
+        }
+      },
+      {
+        "from": "assign_prompt_pack_ref",
+        "to": "assign_tool_catalog_ref_null",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@plan.input.tool_catalog" },
+            { "null": {} }
+          ]
+        }
+      },
+      {
+        "from": "assign_prompt_pack_ref_null",
+        "to": "emit_workspace_read_tool_catalog",
+        "when": {
+          "op": "ne",
+          "args": [
+            { "ref": "@plan.input.tool_catalog" },
+            { "null": {} }
+          ]
+        }
+      },
+      {
+        "from": "assign_prompt_pack_ref_null",
+        "to": "assign_tool_catalog_ref_null",
+        "when": {
+          "op": "eq",
+          "args": [
+            { "ref": "@plan.input.tool_catalog" },
+            { "null": {} }
+          ]
+        }
+      },
+      {
+        "from": "emit_workspace_read_tool_catalog",
+        "to": "await_workspace_read_tool_catalog"
+      },
+      {
+        "from": "await_workspace_read_tool_catalog",
+        "to": "assign_tool_catalog_ref"
+      },
+      { "from": "assign_tool_catalog_ref", "to": "raise_snapshot_ready" },
+      { "from": "assign_tool_catalog_ref_null", "to": "raise_snapshot_ready" },
       { "from": "raise_snapshot_ready", "to": "finish" },
       { "from": "raise_unchanged", "to": "finish" }
     ],

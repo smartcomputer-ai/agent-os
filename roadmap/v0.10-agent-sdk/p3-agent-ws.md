@@ -85,6 +85,8 @@ Notes:
 - `prompts/packs/*.json` compose prompt templates and static context refs.
 - `tools/descriptors/*.json` are LLM-facing function/tool schemas.
 - `tools/catalogs/*.json` name which descriptors are active per catalog.
+- Prompt pack/catalog files should be provider-agnostic JSON blobs consumable by the
+  existing host LLM adapter (`message_refs` and `tool_refs` CAS contract).
 
 ### 2) Prompt Pack
 
@@ -153,6 +155,10 @@ No refresh/apply event means no change in active agent content.
 
 5. Step materialization
 - LLM request for next step uses active prompt pack + tool catalog refs.
+- SDK helper path:
+  - `materialize_workspace_step_inputs(...)` prepends `prompt_pack_ref` and selects `tool_catalog_ref`.
+  - `materialize_llm_generate_params_with_workspace(...)` maps this into `sys/llm.generate` params.
+  - Host `LlmAdapter` dereferences and parses the JSON blobs (messages/tools/tool_choice), so reducers do not need to decode workspace files.
 
 ## Config Surface (SDK Direction)
 

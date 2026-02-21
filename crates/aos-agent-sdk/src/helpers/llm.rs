@@ -1,4 +1,5 @@
-use crate::contracts::{ReasoningEffort, RunConfig};
+use super::workspace::materialize_workspace_step_inputs;
+use crate::contracts::{ReasoningEffort, RunConfig, WorkspaceSnapshot};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -119,6 +120,35 @@ pub fn materialize_llm_generate_params(
     })
 }
 
+/// Apply active workspace snapshot refs to a step context.
+///
+/// - Prepends `prompt_pack_ref` (if present) to `message_refs`.
+/// - Uses `tool_catalog_ref` when `step.tool_refs` is not explicitly set.
+pub fn apply_workspace_snapshot_to_step_context(
+    active_snapshot: Option<&WorkspaceSnapshot>,
+    mut step: LlmStepContext,
+) -> LlmStepContext {
+    let derived = materialize_workspace_step_inputs(
+        active_snapshot,
+        core::mem::take(&mut step.message_refs),
+        step.tool_refs.take(),
+    );
+    step.message_refs = derived.message_refs;
+    step.tool_refs = derived.tool_refs;
+    step
+}
+
+/// Convenience wrapper that applies workspace snapshot refs and then maps to
+/// `sys/llm.generate` params.
+pub fn materialize_llm_generate_params_with_workspace(
+    run_config: &RunConfig,
+    active_snapshot: Option<&WorkspaceSnapshot>,
+    step: LlmStepContext,
+) -> Result<SysLlmGenerateParams, LlmMappingError> {
+    let step = apply_workspace_snapshot_to_step_context(active_snapshot, step);
+    materialize_llm_generate_params(run_config, &step)
+}
+
 fn reasoning_effort_text(value: ReasoningEffort) -> String {
     match value {
         ReasoningEffort::Low => "low".into(),
@@ -130,7 +160,7 @@ fn reasoning_effort_text(value: ReasoningEffort) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contracts::{ReasoningEffort, RunConfig};
+    use crate::contracts::{ReasoningEffort, RunConfig, WorkspaceSnapshot};
     use alloc::collections::BTreeMap;
     use alloc::vec;
 
@@ -140,6 +170,19 @@ mod tests {
             value.push(seed);
         }
         value
+    }
+
+    fn workspace_snapshot() -> WorkspaceSnapshot {
+        WorkspaceSnapshot {
+            workspace: "agent".into(),
+            version: Some(3),
+            root_hash: Some(hash('f')),
+            index_ref: Some(hash('g')),
+            prompt_pack: Some("default".into()),
+            tool_catalog: Some("default".into()),
+            prompt_pack_ref: Some(hash('p')),
+            tool_catalog_ref: Some(hash('t')),
+        }
     }
 
     #[test]
@@ -255,6 +298,42 @@ mod tests {
         let message_err = materialize_llm_generate_params(&run, &LlmStepContext::default())
             .expect_err("messages");
         assert_eq!(message_err, LlmMappingError::EmptyMessageRefs);
+    }
+
+    #[test]
+    fn applies_workspace_snapshot_refs_to_step_context() {
+        let run = RunConfig {
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            reasoning_effort: None,
+            max_tokens: None,
+            workspace_binding: None,
+            prompt_pack: None,
+            tool_catalog: None,
+        };
+        let step = LlmStepContext {
+            message_refs: vec![hash('a')],
+            ..LlmStepContext::default()
+        };
+
+        let mapped =
+            materialize_llm_generate_params_with_workspace(&run, Some(&workspace_snapshot()), step)
+                .expect("map with workspace snapshot");
+        assert_eq!(mapped.message_refs, vec![hash('p'), hash('a')]);
+        assert_eq!(mapped.runtime.tool_refs, Some(vec![hash('t')]));
+    }
+
+    #[test]
+    fn explicit_tool_refs_override_workspace_catalog() {
+        let step = LlmStepContext {
+            message_refs: vec![hash('a')],
+            tool_refs: Some(vec![hash('z')]),
+            ..LlmStepContext::default()
+        };
+
+        let applied = apply_workspace_snapshot_to_step_context(Some(&workspace_snapshot()), step);
+        assert_eq!(applied.tool_refs, Some(vec![hash('z')]));
+        assert_eq!(applied.message_refs, vec![hash('p'), hash('a')]);
     }
 
     #[test]

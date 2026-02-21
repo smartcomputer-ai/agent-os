@@ -468,12 +468,8 @@ fn on_workspace_sync_requested(
     tool_catalog: Option<&alloc::string::String>,
 ) {
     state.session_config.workspace_binding = Some(workspace_binding.clone());
-    if let Some(pack) = prompt_pack {
-        state.session_config.default_prompt_pack = Some(pack.clone());
-    }
-    if let Some(catalog) = tool_catalog {
-        state.session_config.default_tool_catalog = Some(catalog.clone());
-    }
+    state.session_config.default_prompt_pack = prompt_pack.cloned();
+    state.session_config.default_tool_catalog = tool_catalog.cloned();
 }
 
 fn on_workspace_sync_unchanged(state: &mut SessionState, workspace: &str, version: Option<u64>) {
@@ -1209,6 +1205,41 @@ mod tests {
     }
 
     #[test]
+    fn workspace_sync_requested_overwrites_defaults_including_clear() {
+        let mut state = base_state();
+        state.session_config.default_prompt_pack = Some("default".into());
+        state.session_config.default_tool_catalog = Some("default".into());
+
+        apply_session_event(
+            &mut state,
+            &event(
+                1,
+                SessionEventKind::WorkspaceSyncRequested {
+                    workspace_binding: WorkspaceBinding {
+                        workspace: "agent-ws".into(),
+                        version: Some(9),
+                    },
+                    prompt_pack: None,
+                    tool_catalog: None,
+                    known_version: None,
+                },
+            ),
+        )
+        .expect("workspace sync requested");
+
+        assert_eq!(
+            state
+                .session_config
+                .workspace_binding
+                .as_ref()
+                .map(|binding| binding.workspace.as_str()),
+            Some("agent-ws")
+        );
+        assert_eq!(state.session_config.default_prompt_pack, None);
+        assert_eq!(state.session_config.default_tool_catalog, None);
+    }
+
+    #[test]
     fn workspace_snapshot_applies_immediately_when_idle() {
         let mut state = base_state();
         let snapshot = crate::contracts::WorkspaceSnapshot {
@@ -1222,6 +1253,12 @@ mod tests {
             ),
             prompt_pack: Some("default".into()),
             tool_catalog: Some("default".into()),
+            prompt_pack_ref: Some(
+                "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into(),
+            ),
+            tool_catalog_ref: Some(
+                "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".into(),
+            ),
         };
 
         apply_session_event(
@@ -1262,6 +1299,12 @@ mod tests {
             index_ref: None,
             prompt_pack: Some("concise".into()),
             tool_catalog: Some("coding".into()),
+            prompt_pack_ref: Some(
+                "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".into(),
+            ),
+            tool_catalog_ref: Some(
+                "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".into(),
+            ),
         };
 
         apply_session_event(
@@ -1307,6 +1350,12 @@ mod tests {
             index_ref: None,
             prompt_pack: Some("default".into()),
             tool_catalog: Some("default".into()),
+            prompt_pack_ref: Some(
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
+            ),
+            tool_catalog_ref: Some(
+                "sha256:2222222222222222222222222222222222222222222222222222222222222222".into(),
+            ),
         };
 
         apply_session_event(
