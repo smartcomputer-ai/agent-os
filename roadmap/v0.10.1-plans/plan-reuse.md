@@ -1,6 +1,6 @@
-# P3.3: Plan Reuse (Umbrella Decisions)
+# Plan Reuse (Umbrella Decisions)
 
-**Priority**: P3  
+**Priority**: P1
 **Status**: Active (split into two implementation tracks)  
 **Date**: 2026-02-22
 
