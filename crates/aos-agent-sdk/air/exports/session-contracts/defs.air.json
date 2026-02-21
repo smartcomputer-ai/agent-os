@@ -162,7 +162,9 @@
     "name": "aos.agent/WorkspaceSnapshotReady@1",
     "type": {
       "record": {
-        "snapshot": { "ref": "aos.agent/WorkspaceSnapshot@1" }
+        "snapshot": { "ref": "aos.agent/WorkspaceSnapshot@1" },
+        "prompt_pack_bytes": { "option": { "bytes": {} } },
+        "tool_catalog_bytes": { "option": { "bytes": {} } }
       }
     }
   },

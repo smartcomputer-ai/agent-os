@@ -53,6 +53,8 @@ pub enum SessionEventKind {
     },
     WorkspaceSnapshotReady {
         snapshot: WorkspaceSnapshot,
+        prompt_pack_bytes: Option<Vec<u8>>,
+        tool_catalog_bytes: Option<Vec<u8>>,
     },
     WorkspaceSyncFailed {
         workspace: String,

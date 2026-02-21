@@ -111,6 +111,7 @@ dependencies = [
  "aos-wasm-sdk",
  "serde",
  "serde_cbor",
+ "serde_json",
 ]
 
 [[package]]

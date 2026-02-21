@@ -56,6 +56,10 @@ pub enum SessionReduceError {
     UnknownProvider,
     UnknownModel,
     RunAlreadyActive,
+    InvalidWorkspacePromptPackJson,
+    InvalidWorkspaceToolCatalogJson,
+    MissingWorkspacePromptPackBytes,
+    MissingWorkspaceToolCatalogBytes,
 }
 
 impl SessionReduceError {
@@ -77,6 +81,14 @@ impl SessionReduceError {
             Self::UnknownProvider => "run config provider unknown",
             Self::UnknownModel => "run config model unknown",
             Self::RunAlreadyActive => "run already active",
+            Self::InvalidWorkspacePromptPackJson => "workspace prompt pack JSON invalid",
+            Self::InvalidWorkspaceToolCatalogJson => "workspace tool catalog JSON invalid",
+            Self::MissingWorkspacePromptPackBytes => {
+                "workspace prompt pack bytes missing for validation"
+            }
+            Self::MissingWorkspaceToolCatalogBytes => {
+                "workspace tool catalog bytes missing for validation"
+            }
         }
     }
 }
@@ -167,8 +179,17 @@ pub fn apply_session_event(
         SessionEventKind::WorkspaceSyncUnchanged { workspace, version } => {
             on_workspace_sync_unchanged(state, workspace, *version);
         }
-        SessionEventKind::WorkspaceSnapshotReady { snapshot } => {
-            on_workspace_snapshot_ready(state, snapshot);
+        SessionEventKind::WorkspaceSnapshotReady {
+            snapshot,
+            prompt_pack_bytes,
+            tool_catalog_bytes,
+        } => {
+            on_workspace_snapshot_ready(
+                state,
+                snapshot,
+                prompt_pack_bytes.as_deref(),
+                tool_catalog_bytes.as_deref(),
+            )?;
         }
         SessionEventKind::WorkspaceSyncFailed { .. } => {}
         SessionEventKind::WorkspaceApplyRequested { mode } => {
@@ -485,12 +506,112 @@ fn on_workspace_sync_unchanged(state: &mut SessionState, workspace: &str, versio
     }
 }
 
-fn on_workspace_snapshot_ready(state: &mut SessionState, snapshot: &WorkspaceSnapshot) {
+fn on_workspace_snapshot_ready(
+    state: &mut SessionState,
+    snapshot: &WorkspaceSnapshot,
+    prompt_pack_bytes: Option<&[u8]>,
+    tool_catalog_bytes: Option<&[u8]>,
+) -> Result<(), SessionReduceError> {
+    validate_workspace_snapshot_json(snapshot, prompt_pack_bytes, tool_catalog_bytes)?;
     state.pending_workspace_snapshot = Some(snapshot.clone());
     if state.pending_workspace_apply_mode == Some(WorkspaceApplyMode::ImmediateIfIdle)
         && state.active_run_id.is_none()
     {
         apply_pending_workspace_snapshot(state);
+    }
+    Ok(())
+}
+
+fn validate_workspace_snapshot_json(
+    snapshot: &WorkspaceSnapshot,
+    prompt_pack_bytes: Option<&[u8]>,
+    tool_catalog_bytes: Option<&[u8]>,
+) -> Result<(), SessionReduceError> {
+    if snapshot.prompt_pack_ref.is_some() {
+        let bytes = prompt_pack_bytes.ok_or(SessionReduceError::MissingWorkspacePromptPackBytes)?;
+        validate_prompt_pack_json(bytes)?;
+    }
+    if snapshot.tool_catalog_ref.is_some() {
+        let bytes =
+            tool_catalog_bytes.ok_or(SessionReduceError::MissingWorkspaceToolCatalogBytes)?;
+        validate_tool_catalog_json(bytes)?;
+    }
+    Ok(())
+}
+
+fn validate_prompt_pack_json(bytes: &[u8]) -> Result<(), SessionReduceError> {
+    let value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|_| SessionReduceError::InvalidWorkspacePromptPackJson)?;
+
+    fn looks_like_message(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Array(items) => items.iter().all(looks_like_message),
+            serde_json::Value::Object(obj) => {
+                obj.contains_key("role")
+                    || obj.contains_key("content")
+                    || obj.contains_key("type")
+                    || obj.contains_key("tool_calls")
+                    || obj.contains_key("output")
+                    || obj.contains_key("tool_call_id")
+                    || obj.contains_key("call_id")
+            }
+            _ => false,
+        }
+    }
+
+    if looks_like_message(&value) {
+        Ok(())
+    } else {
+        Err(SessionReduceError::InvalidWorkspacePromptPackJson)
+    }
+}
+
+fn validate_tool_catalog_json(bytes: &[u8]) -> Result<(), SessionReduceError> {
+    let value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|_| SessionReduceError::InvalidWorkspaceToolCatalogJson)?;
+
+    fn looks_like_tool_def(value: &serde_json::Value) -> bool {
+        let Some(obj) = value.as_object() else {
+            return false;
+        };
+        if obj
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+        {
+            return true;
+        }
+        obj.get("function")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|function| function.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+    }
+
+    match value {
+        serde_json::Value::Array(items) => {
+            if items.iter().all(looks_like_tool_def) {
+                Ok(())
+            } else {
+                Err(SessionReduceError::InvalidWorkspaceToolCatalogJson)
+            }
+        }
+        serde_json::Value::Object(obj) => {
+            if let Some(items) = obj.get("tools").and_then(serde_json::Value::as_array) {
+                if items.iter().all(looks_like_tool_def) {
+                    return Ok(());
+                }
+                return Err(SessionReduceError::InvalidWorkspaceToolCatalogJson);
+            }
+            if obj.contains_key("tool_choice") {
+                return Ok(());
+            }
+            if looks_like_tool_def(&serde_json::Value::Object(obj)) {
+                return Ok(());
+            }
+            Err(SessionReduceError::InvalidWorkspaceToolCatalogJson)
+        }
+        _ => Err(SessionReduceError::InvalidWorkspaceToolCatalogJson),
     }
 }
 
@@ -780,6 +901,14 @@ mod tests {
             step_seq: 1,
         });
         ToolBatchId { step_id, batch_seq }
+    }
+
+    fn valid_prompt_pack_bytes() -> Vec<u8> {
+        br#"[{"role":"system","content":"You are a deterministic assistant."}]"#.to_vec()
+    }
+
+    fn valid_tool_catalog_bytes() -> Vec<u8> {
+        br#"{"tools":[{"name":"search_step","description":"Lookup state","parameters":{"type":"object","properties":{"cursor":{"type":"string"}},"required":["cursor"]}}]}"#.to_vec()
     }
 
     #[test]
@@ -1267,6 +1396,8 @@ mod tests {
                 1,
                 SessionEventKind::WorkspaceSnapshotReady {
                     snapshot: snapshot.clone(),
+                    prompt_pack_bytes: Some(valid_prompt_pack_bytes()),
+                    tool_catalog_bytes: Some(valid_tool_catalog_bytes()),
                 },
             ),
         )
@@ -1287,6 +1418,101 @@ mod tests {
         assert_eq!(state.active_workspace_snapshot, Some(snapshot));
         assert!(state.pending_workspace_snapshot.is_none());
         assert!(state.pending_workspace_apply_mode.is_none());
+    }
+
+    #[test]
+    fn workspace_snapshot_ready_rejects_invalid_prompt_pack_json() {
+        let mut state = base_state();
+        let snapshot = crate::contracts::WorkspaceSnapshot {
+            workspace: "agent-ws".into(),
+            version: Some(4),
+            root_hash: None,
+            index_ref: None,
+            prompt_pack: Some("default".into()),
+            tool_catalog: None,
+            prompt_pack_ref: Some(
+                "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into(),
+            ),
+            tool_catalog_ref: None,
+        };
+
+        let err = apply_session_event(
+            &mut state,
+            &event(
+                1,
+                SessionEventKind::WorkspaceSnapshotReady {
+                    snapshot,
+                    prompt_pack_bytes: Some(br#"{"invalid":true}"#.to_vec()),
+                    tool_catalog_bytes: None,
+                },
+            ),
+        )
+        .expect_err("invalid prompt pack json");
+        assert_eq!(err, SessionReduceError::InvalidWorkspacePromptPackJson);
+        assert!(state.pending_workspace_snapshot.is_none());
+    }
+
+    #[test]
+    fn workspace_snapshot_ready_rejects_missing_tool_catalog_bytes() {
+        let mut state = base_state();
+        let snapshot = crate::contracts::WorkspaceSnapshot {
+            workspace: "agent-ws".into(),
+            version: Some(5),
+            root_hash: None,
+            index_ref: None,
+            prompt_pack: None,
+            tool_catalog: Some("default".into()),
+            prompt_pack_ref: None,
+            tool_catalog_ref: Some(
+                "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".into(),
+            ),
+        };
+
+        let err = apply_session_event(
+            &mut state,
+            &event(
+                1,
+                SessionEventKind::WorkspaceSnapshotReady {
+                    snapshot,
+                    prompt_pack_bytes: None,
+                    tool_catalog_bytes: None,
+                },
+            ),
+        )
+        .expect_err("missing tool catalog bytes");
+        assert_eq!(err, SessionReduceError::MissingWorkspaceToolCatalogBytes);
+        assert!(state.pending_workspace_snapshot.is_none());
+    }
+
+    #[test]
+    fn workspace_snapshot_ready_accepts_tool_catalog_with_tool_choice_only() {
+        let mut state = base_state();
+        let snapshot = crate::contracts::WorkspaceSnapshot {
+            workspace: "agent-ws".into(),
+            version: Some(6),
+            root_hash: None,
+            index_ref: None,
+            prompt_pack: None,
+            tool_catalog: Some("default".into()),
+            prompt_pack_ref: None,
+            tool_catalog_ref: Some(
+                "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".into(),
+            ),
+        };
+
+        apply_session_event(
+            &mut state,
+            &event(
+                1,
+                SessionEventKind::WorkspaceSnapshotReady {
+                    snapshot: snapshot.clone(),
+                    prompt_pack_bytes: None,
+                    tool_catalog_bytes: Some(br#"{"tool_choice":"none"}"#.to_vec()),
+                },
+            ),
+        )
+        .expect("tool-choice-only catalog should validate");
+        assert_eq!(state.pending_workspace_snapshot, Some(snapshot));
     }
 
     #[test]
@@ -1313,6 +1539,8 @@ mod tests {
                 3,
                 SessionEventKind::WorkspaceSnapshotReady {
                     snapshot: snapshot.clone(),
+                    prompt_pack_bytes: Some(valid_prompt_pack_bytes()),
+                    tool_catalog_bytes: Some(valid_tool_catalog_bytes()),
                 },
             ),
         )
@@ -1364,6 +1592,8 @@ mod tests {
                 1,
                 SessionEventKind::WorkspaceSnapshotReady {
                     snapshot: snapshot.clone(),
+                    prompt_pack_bytes: Some(valid_prompt_pack_bytes()),
+                    tool_catalog_bytes: Some(valid_tool_catalog_bytes()),
                 },
             ),
         )

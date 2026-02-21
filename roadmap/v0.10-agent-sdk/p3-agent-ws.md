@@ -145,6 +145,7 @@ No refresh/apply event means no change in active agent content.
 
 3. Reducer validation/adoption staging
 - reducer validates snapshot structure deterministically,
+- reducer validates prompt-pack/tool-catalog JSON bytes before staging,
 - stores as `pending_workspace_snapshot` (not active yet).
 
 4. `WorkspaceApplyRequested`
