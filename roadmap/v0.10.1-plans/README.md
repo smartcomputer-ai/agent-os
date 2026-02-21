@@ -1,7 +1,7 @@
 # Plan Reuse (Umbrella Decisions)
 
 **Priority**: P1
-**Status**: Active (split into two implementation tracks)  
+**Status**: Active (split into three implementation tracks)  
 **Date**: 2026-02-22
 
 ## Why this exists
@@ -14,9 +14,9 @@ The root cause is not just tooling. It is the interaction of:
 2. envelope-specific event contracts,
 3. lack of in-plan composition primitives in v1.0.
 
-We are addressing this in two tracks, both staying on `air_version: "1"`.
+We are addressing this in three tracks, all staying on `air_version: "1"`.
 
-## Decision: Split Scope into Two Roadmap Files
+## Decision: Split Scope into Three Roadmap Files
 
 ### Track A: Build-Time Reuse and Distribution (now)
 
@@ -51,6 +51,22 @@ Why second:
 2. It is kernel/language work, so higher risk and larger blast radius.
 3. Clearer after export/import interfaces are in place.
 
+### Track C: Runtime Hardening and Ops Readiness (now, minimal semantics)
+
+Document: `roadmap/v0.10.1-plans/p3-plan-runtime-hardening.md`
+
+Focus:
+
+1. Lift timeout/approval/correlation patterns that work on current AIR semantics.
+2. Add replay/crash-resume/cross-talk conformance gates for factory-critical plan flows.
+3. Add lightweight journal-derived plan summaries for operator debugging.
+
+Why now:
+
+1. Factory and infra goals need reliability and diagnosability, not just composition power.
+2. These items are implementable without introducing additional plan language features.
+3. They reduce delivery risk while P2 kernel work is in flight.
+
 ## Agreed Principles
 
 1. Stay on AIR v1 for now (active development phase, breaking changes acceptable).
@@ -61,7 +77,7 @@ Why second:
 
 ## Recommendation Snapshot
 
-1. Implement both tracks now, sequenced as A then B.
+1. Implement A then B, with C started early for reliability hardening.
 2. Do not introduce template macros as a runtime AIR feature in this phase.
 3. Use import/distribution for immediate reuse; use composition primitives for long-term reuse.
 
@@ -69,5 +85,6 @@ Why second:
 
 1. `p1-plan-import-reuse.md`: detailed implementation plan for import-based plan reuse.
 2. `p2-plan-composition.md`: detailed language/runtime plan for composition and projection.
-3. At least one fixture/app migrated to imported plan-pack usage.
-4. Follow-on implementation tasks in kernel/validator/loader tracked against these docs.
+3. `p3-plan-runtime-hardening.md`: implementation plan for timeout/approval/correlation hardening and ops gates.
+4. At least one fixture/app migrated to imported plan-pack usage.
+5. Follow-on implementation tasks in kernel/validator/loader/tooling tracked against these docs.
