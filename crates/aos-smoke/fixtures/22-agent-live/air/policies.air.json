@@ -1,0 +1,36 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/agent-live-workspace-policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "workspace.resolve",
+          "origin_kind": "plan",
+          "origin_name": "demo/session_workspace_sync_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_ref",
+          "origin_kind": "plan",
+          "origin_name": "demo/session_workspace_sync_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_bytes",
+          "origin_kind": "plan",
+          "origin_name": "demo/session_workspace_sync_plan@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {},
+        "decision": "deny"
+      }
+    ]
+  }
+]

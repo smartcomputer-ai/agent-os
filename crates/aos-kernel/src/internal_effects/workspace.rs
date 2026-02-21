@@ -2,6 +2,7 @@ use aos_air_types::HashRef;
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_effects::EffectIntent;
 use serde::{Deserialize, Serialize};
+use serde_bytes::ByteBuf;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::query::{Consistency, StateReader};
@@ -809,7 +810,8 @@ where
             let end = range.end as usize;
             bytes = bytes[start..end].to_vec();
         }
-        Ok(to_canonical_cbor(&bytes).map_err(|e| KernelError::Manifest(e.to_string()))?)
+        Ok(to_canonical_cbor(&ByteBuf::from(bytes))
+            .map_err(|e| KernelError::Manifest(e.to_string()))?)
     }
 
     pub(super) fn handle_workspace_write_bytes(

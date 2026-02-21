@@ -1,0 +1,566 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demo/session_workspace_sync_plan@1",
+    "input": "aos.agent/SessionEvent@1",
+    "steps": [
+      {
+        "id": "assign_event_tag",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            {
+              "op": "get",
+              "args": [{ "ref": "@plan.input" }, { "text": "event" }]
+            },
+            { "text": "$tag" }
+          ]
+        },
+        "bind": { "as": "event_tag" }
+      },
+      {
+        "id": "assign_event_value",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            {
+              "op": "get",
+              "args": [{ "ref": "@plan.input" }, { "text": "event" }]
+            },
+            { "text": "$value" }
+          ]
+        },
+        "bind": { "as": "event_value" }
+      },
+      {
+        "id": "assign_workspace_binding",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [{ "ref": "@var:event_value" }, { "text": "workspace_binding" }]
+        },
+        "bind": { "as": "workspace_binding" }
+      },
+      {
+        "id": "assign_prompt_pack",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [{ "ref": "@var:event_value" }, { "text": "prompt_pack" }]
+        },
+        "bind": { "as": "prompt_pack" }
+      },
+      {
+        "id": "assign_tool_catalog",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [{ "ref": "@var:event_value" }, { "text": "tool_catalog" }]
+        },
+        "bind": { "as": "tool_catalog" }
+      },
+      {
+        "id": "assign_known_version",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [{ "ref": "@var:event_value" }, { "text": "known_version" }]
+        },
+        "bind": { "as": "known_version" }
+      },
+      {
+        "id": "emit_workspace_resolve",
+        "op": "emit_effect",
+        "kind": "workspace.resolve",
+        "params": {
+          "record": {
+            "workspace": {
+              "op": "get",
+              "args": [{ "ref": "@var:workspace_binding" }, { "text": "workspace" }]
+            },
+            "version": {
+              "op": "get",
+              "args": [{ "ref": "@var:workspace_binding" }, { "text": "version" }]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_resolve" }
+      },
+      {
+        "id": "await_workspace_resolve",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_resolve" },
+        "bind": { "as": "workspace_resolve_receipt" }
+      },
+      {
+        "id": "assign_workspace_root",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_resolve_receipt" },
+            { "text": "root_hash" }
+          ]
+        },
+        "bind": { "as": "workspace_root" }
+      },
+      {
+        "id": "assign_resolved_version",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_resolve_receipt" },
+            { "text": "resolved_version" }
+          ]
+        },
+        "bind": { "as": "resolved_version" }
+      },
+      {
+        "id": "raise_unchanged",
+        "op": "raise_event",
+        "event": "aos.agent/SessionEvent@1",
+        "value": {
+          "record": {
+            "session_id": { "ref": "@plan.input.session_id" },
+            "run_id": { "null": {} },
+            "turn_id": { "null": {} },
+            "step_id": { "null": {} },
+            "session_epoch": { "ref": "@plan.input.session_epoch" },
+            "step_epoch": { "ref": "@plan.input.step_epoch" },
+            "event": {
+              "variant": {
+                "tag": "WorkspaceSyncUnchanged",
+                "value": {
+                  "record": {
+                    "workspace": {
+                      "op": "get",
+                      "args": [
+                        { "ref": "@var:workspace_binding" },
+                        { "text": "workspace" }
+                      ]
+                    },
+                    "version": { "ref": "@var:resolved_version" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "emit_workspace_read_index",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:workspace_root" },
+            "path": { "text": "agent.workspace.json" }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_read_index" }
+      },
+      {
+        "id": "await_workspace_read_index",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_read_index" },
+        "bind": { "as": "workspace_read_index_receipt" }
+      },
+      {
+        "id": "assign_index_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_read_index_receipt" },
+            { "text": "hash" }
+          ]
+        },
+        "bind": { "as": "index_ref" }
+      },
+      {
+        "id": "assign_prompt_pack_ref_null",
+        "op": "assign",
+        "expr": { "null": {} },
+        "bind": { "as": "prompt_pack_ref" }
+      },
+      {
+        "id": "assign_prompt_pack_bytes_null",
+        "op": "assign",
+        "expr": { "null": {} },
+        "bind": { "as": "prompt_pack_bytes" }
+      },
+      {
+        "id": "emit_workspace_read_prompt_pack",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:workspace_root" },
+            "path": {
+              "op": "concat",
+              "args": [
+                { "text": "prompts/packs/" },
+                {
+                  "op": "concat",
+                  "args": [{ "ref": "@var:prompt_pack" }, { "text": ".json" }]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_read_prompt_pack" }
+      },
+      {
+        "id": "await_workspace_read_prompt_pack",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_read_prompt_pack" },
+        "bind": { "as": "workspace_read_prompt_pack_receipt" }
+      },
+      {
+        "id": "assign_prompt_pack_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_read_prompt_pack_receipt" },
+            { "text": "hash" }
+          ]
+        },
+        "bind": { "as": "prompt_pack_ref" }
+      },
+      {
+        "id": "emit_workspace_read_prompt_pack_bytes",
+        "op": "emit_effect",
+        "kind": "workspace.read_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:workspace_root" },
+            "path": {
+              "op": "concat",
+              "args": [
+                { "text": "prompts/packs/" },
+                {
+                  "op": "concat",
+                  "args": [{ "ref": "@var:prompt_pack" }, { "text": ".json" }]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_read_prompt_pack_bytes" }
+      },
+      {
+        "id": "await_workspace_read_prompt_pack_bytes",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_read_prompt_pack_bytes" },
+        "bind": { "as": "workspace_read_prompt_pack_bytes_receipt" }
+      },
+      {
+        "id": "assign_prompt_pack_bytes",
+        "op": "assign",
+        "expr": { "ref": "@var:workspace_read_prompt_pack_bytes_receipt" },
+        "bind": { "as": "prompt_pack_bytes" }
+      },
+      {
+        "id": "assign_tool_catalog_ref_null",
+        "op": "assign",
+        "expr": { "null": {} },
+        "bind": { "as": "tool_catalog_ref" }
+      },
+      {
+        "id": "assign_tool_catalog_bytes_null",
+        "op": "assign",
+        "expr": { "null": {} },
+        "bind": { "as": "tool_catalog_bytes" }
+      },
+      {
+        "id": "emit_workspace_read_tool_catalog",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:workspace_root" },
+            "path": {
+              "op": "concat",
+              "args": [
+                { "text": "tools/catalogs/" },
+                {
+                  "op": "concat",
+                  "args": [{ "ref": "@var:tool_catalog" }, { "text": ".json" }]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_read_tool_catalog" }
+      },
+      {
+        "id": "await_workspace_read_tool_catalog",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_read_tool_catalog" },
+        "bind": { "as": "workspace_read_tool_catalog_receipt" }
+      },
+      {
+        "id": "assign_tool_catalog_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_read_tool_catalog_receipt" },
+            { "text": "hash" }
+          ]
+        },
+        "bind": { "as": "tool_catalog_ref" }
+      },
+      {
+        "id": "emit_workspace_read_tool_catalog_bytes",
+        "op": "emit_effect",
+        "kind": "workspace.read_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:workspace_root" },
+            "path": {
+              "op": "concat",
+              "args": [
+                { "text": "tools/catalogs/" },
+                {
+                  "op": "concat",
+                  "args": [{ "ref": "@var:tool_catalog" }, { "text": ".json" }]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_read_tool_catalog_bytes" }
+      },
+      {
+        "id": "await_workspace_read_tool_catalog_bytes",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_read_tool_catalog_bytes" },
+        "bind": { "as": "workspace_read_tool_catalog_bytes_receipt" }
+      },
+      {
+        "id": "assign_tool_catalog_bytes",
+        "op": "assign",
+        "expr": { "ref": "@var:workspace_read_tool_catalog_bytes_receipt" },
+        "bind": { "as": "tool_catalog_bytes" }
+      },
+      {
+        "id": "raise_snapshot_ready",
+        "op": "raise_event",
+        "event": "aos.agent/SessionEvent@1",
+        "value": {
+          "record": {
+            "session_id": { "ref": "@plan.input.session_id" },
+            "run_id": { "null": {} },
+            "turn_id": { "null": {} },
+            "step_id": { "null": {} },
+            "session_epoch": { "ref": "@plan.input.session_epoch" },
+            "step_epoch": { "ref": "@plan.input.step_epoch" },
+            "event": {
+              "variant": {
+                "tag": "WorkspaceSnapshotReady",
+                "value": {
+                  "record": {
+                    "snapshot": {
+                      "record": {
+                        "workspace": {
+                          "op": "get",
+                          "args": [
+                            { "ref": "@var:workspace_binding" },
+                            { "text": "workspace" }
+                          ]
+                        },
+                        "version": { "ref": "@var:resolved_version" },
+                        "root_hash": { "ref": "@var:workspace_root" },
+                        "index_ref": { "ref": "@var:index_ref" },
+                        "prompt_pack": { "ref": "@var:prompt_pack" },
+                        "tool_catalog": { "ref": "@var:tool_catalog" },
+                        "prompt_pack_ref": { "ref": "@var:prompt_pack_ref" },
+                        "tool_catalog_ref": { "ref": "@var:tool_catalog_ref" }
+                      }
+                    },
+                    "prompt_pack_bytes": { "ref": "@var:prompt_pack_bytes" },
+                    "tool_catalog_bytes": { "ref": "@var:tool_catalog_bytes" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      { "id": "finish", "op": "end" }
+    ],
+    "edges": [
+      {
+        "from": "assign_event_tag",
+        "to": "assign_event_value",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@var:event_tag" }, { "text": "WorkspaceSyncRequested" }]
+        }
+      },
+      {
+        "from": "assign_event_tag",
+        "to": "finish",
+        "when": {
+          "op": "ne",
+          "args": [{ "ref": "@var:event_tag" }, { "text": "WorkspaceSyncRequested" }]
+        }
+      },
+      { "from": "assign_event_value", "to": "assign_workspace_binding" },
+      { "from": "assign_workspace_binding", "to": "assign_prompt_pack" },
+      { "from": "assign_prompt_pack", "to": "assign_tool_catalog" },
+      { "from": "assign_tool_catalog", "to": "assign_known_version" },
+      { "from": "assign_known_version", "to": "emit_workspace_resolve" },
+      { "from": "emit_workspace_resolve", "to": "await_workspace_resolve" },
+      { "from": "await_workspace_resolve", "to": "assign_workspace_root" },
+      { "from": "assign_workspace_root", "to": "assign_resolved_version" },
+      {
+        "from": "assign_resolved_version",
+        "to": "raise_unchanged",
+        "when": {
+          "op": "and",
+          "args": [
+            { "op": "ne", "args": [{ "ref": "@var:known_version" }, { "null": {} }] },
+            {
+              "op": "eq",
+              "args": [{ "ref": "@var:known_version" }, { "ref": "@var:resolved_version" }]
+            }
+          ]
+        }
+      },
+      {
+        "from": "assign_resolved_version",
+        "to": "emit_workspace_read_index",
+        "when": {
+          "op": "or",
+          "args": [
+            { "op": "eq", "args": [{ "ref": "@var:known_version" }, { "null": {} }] },
+            {
+              "op": "ne",
+              "args": [{ "ref": "@var:known_version" }, { "ref": "@var:resolved_version" }]
+            }
+          ]
+        }
+      },
+      { "from": "emit_workspace_read_index", "to": "await_workspace_read_index" },
+      { "from": "await_workspace_read_index", "to": "assign_index_ref" },
+      {
+        "from": "assign_index_ref",
+        "to": "emit_workspace_read_prompt_pack",
+        "when": {
+          "op": "ne",
+          "args": [{ "ref": "@var:prompt_pack" }, { "null": {} }]
+        }
+      },
+      {
+        "from": "assign_index_ref",
+        "to": "assign_prompt_pack_ref_null",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@var:prompt_pack" }, { "null": {} }]
+        }
+      },
+      {
+        "from": "emit_workspace_read_prompt_pack",
+        "to": "await_workspace_read_prompt_pack"
+      },
+      {
+        "from": "await_workspace_read_prompt_pack",
+        "to": "assign_prompt_pack_ref"
+      },
+      {
+        "from": "assign_prompt_pack_ref",
+        "to": "emit_workspace_read_prompt_pack_bytes"
+      },
+      {
+        "from": "emit_workspace_read_prompt_pack_bytes",
+        "to": "await_workspace_read_prompt_pack_bytes"
+      },
+      {
+        "from": "await_workspace_read_prompt_pack_bytes",
+        "to": "assign_prompt_pack_bytes"
+      },
+      {
+        "from": "assign_prompt_pack_bytes",
+        "to": "emit_workspace_read_tool_catalog",
+        "when": {
+          "op": "ne",
+          "args": [{ "ref": "@var:tool_catalog" }, { "null": {} }]
+        }
+      },
+      {
+        "from": "assign_prompt_pack_bytes",
+        "to": "assign_tool_catalog_ref_null",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@var:tool_catalog" }, { "null": {} }]
+        }
+      },
+      {
+        "from": "assign_prompt_pack_ref_null",
+        "to": "assign_prompt_pack_bytes_null"
+      },
+      {
+        "from": "assign_prompt_pack_bytes_null",
+        "to": "emit_workspace_read_tool_catalog",
+        "when": {
+          "op": "ne",
+          "args": [{ "ref": "@var:tool_catalog" }, { "null": {} }]
+        }
+      },
+      {
+        "from": "assign_prompt_pack_bytes_null",
+        "to": "assign_tool_catalog_ref_null",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@var:tool_catalog" }, { "null": {} }]
+        }
+      },
+      {
+        "from": "emit_workspace_read_tool_catalog",
+        "to": "await_workspace_read_tool_catalog"
+      },
+      {
+        "from": "await_workspace_read_tool_catalog",
+        "to": "assign_tool_catalog_ref"
+      },
+      {
+        "from": "assign_tool_catalog_ref",
+        "to": "emit_workspace_read_tool_catalog_bytes"
+      },
+      {
+        "from": "emit_workspace_read_tool_catalog_bytes",
+        "to": "await_workspace_read_tool_catalog_bytes"
+      },
+      {
+        "from": "await_workspace_read_tool_catalog_bytes",
+        "to": "assign_tool_catalog_bytes"
+      },
+      {
+        "from": "assign_tool_catalog_ref_null",
+        "to": "assign_tool_catalog_bytes_null"
+      },
+      { "from": "assign_tool_catalog_bytes", "to": "raise_snapshot_ready" },
+      { "from": "assign_tool_catalog_bytes_null", "to": "raise_snapshot_ready" },
+      { "from": "raise_snapshot_ready", "to": "finish" },
+      { "from": "raise_unchanged", "to": "finish" }
+    ],
+    "required_caps": ["cap_workspace"],
+    "allowed_effects": [
+      "workspace.resolve",
+      "workspace.read_ref",
+      "workspace.read_bytes"
+    ]
+  }
+]

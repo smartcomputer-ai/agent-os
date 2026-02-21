@@ -4,7 +4,29 @@ use super::{
 };
 use alloc::string::String;
 use alloc::vec::Vec;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+mod serde_bytes_opt {
+    use super::*;
+    use serde_bytes::{ByteBuf, Bytes};
+
+    pub fn serialize<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(bytes) => serializer.serialize_some(Bytes::new(bytes)),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<ByteBuf>::deserialize(deserializer).map(|opt| opt.map(|buf| buf.into_vec()))
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(tag = "$tag", content = "$value")]
@@ -53,7 +75,17 @@ pub enum SessionEventKind {
     },
     WorkspaceSnapshotReady {
         snapshot: WorkspaceSnapshot,
+        #[serde(
+            default,
+            with = "serde_bytes_opt",
+            skip_serializing_if = "Option::is_none"
+        )]
         prompt_pack_bytes: Option<Vec<u8>>,
+        #[serde(
+            default,
+            with = "serde_bytes_opt",
+            skip_serializing_if = "Option::is_none"
+        )]
         tool_catalog_bytes: Option<Vec<u8>>,
     },
     WorkspaceSyncFailed {

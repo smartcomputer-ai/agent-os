@@ -1,0 +1,15 @@
+[
+  {
+    "$kind": "defcap",
+    "name": "demo/agent_live_workspace_cap@1",
+    "cap_type": "workspace",
+    "schema": {
+      "record": {
+        "workspaces": { "option": { "list": { "text": {} } } },
+        "path_prefixes": { "option": { "list": { "text": {} } } },
+        "ops": { "option": { "set": { "text": {} } } }
+      }
+    },
+    "enforcer": { "module": "sys/CapEnforceWorkspace@1" }
+  }
+]

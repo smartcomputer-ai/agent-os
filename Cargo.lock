@@ -110,6 +110,7 @@ dependencies = [
  "aos-wasm-abi",
  "aos-wasm-sdk",
  "serde",
+ "serde_bytes",
  "serde_cbor",
  "serde_json",
 ]
@@ -305,6 +306,7 @@ dependencies = [
  "aos-host",
  "aos-kernel",
  "aos-store",
+ "aos-sys",
  "aos-wasm-abi",
  "aos-wasm-build",
  "aos-wasm-sdk",

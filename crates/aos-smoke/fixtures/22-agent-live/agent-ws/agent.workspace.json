@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "prompt_packs": {
+    "default": "prompts/packs/default.json"
+  },
+  "tool_catalogs": {
+    "default": "tools/catalogs/default.json"
+  },
+  "defaults": {
+    "prompt_pack": "default",
+    "tool_catalog": "default"
+  }
+}

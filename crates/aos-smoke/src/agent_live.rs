@@ -1,12 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent_sdk::{
     LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionEvent, SessionEventKind,
-    SessionId, SessionState, ToolBatchId, ToolCallStatus,
+    SessionId, SessionState, ToolBatchId, ToolCallStatus, WorkspaceApplyMode, WorkspaceBinding,
     materialize_llm_generate_params_with_workspace,
 };
 use aos_cbor::Hash;
@@ -16,9 +16,11 @@ use aos_host::adapters::llm::LlmAdapter;
 use aos_host::adapters::traits::AsyncEffectAdapter;
 use aos_host::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_store::Store;
+use aos_sys::{WorkspaceCommit, WorkspaceCommitMeta, WorkspaceEntry, WorkspaceTree};
 use clap::ValueEnum;
 use serde_json::{Value, json};
 use tokio::runtime::Builder;
+use walkdir::WalkDir;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
@@ -27,6 +29,11 @@ const EVENT_SCHEMA: &str = "aos.agent/SessionEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/22-agent-live/reducer";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
 const SDK_SESSION_EXPORT: &str = "crates/aos-agent-sdk/air/exports/session-contracts";
+const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
+const AGENT_WORKSPACE_NAME: &str = "agent-live";
+const AGENT_WORKSPACE_DIR: &str = "agent-ws";
+const DEFAULT_PROMPT_PACK: &str = "default";
+const DEFAULT_TOOL_CATALOG: &str = "default";
 
 const SESSION_ID: &str = "22222222-2222-2222-2222-222222222222";
 
@@ -101,7 +108,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let runtime = Builder::new_current_thread().enable_all().build()?;
 
     let world = SearchWorld::new();
-    let tool_ref = register_tool_blob(&host)?;
 
     println!(
         "→ Agent Live smoke (sdk) (provider={} model={})",
@@ -109,6 +115,35 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     );
 
     let mut event_clock = 0_u64;
+    seed_workspace_commit(&mut host, &fixture_root.join(AGENT_WORKSPACE_DIR))?;
+    let workspace_binding = WorkspaceBinding {
+        workspace: AGENT_WORKSPACE_NAME.into(),
+        version: None,
+    };
+    send_session_event(
+        &mut host,
+        &mut event_clock,
+        SessionEventKind::WorkspaceSyncRequested {
+            workspace_binding: workspace_binding.clone(),
+            prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
+            tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
+            known_version: None,
+        },
+    )?;
+    drain_internal_effects(&mut host)?;
+    let synced_state: SessionState = host.read_state()?;
+    ensure!(
+        synced_state.pending_workspace_snapshot.is_some(),
+        "expected pending workspace snapshot after sync"
+    );
+    send_session_event(
+        &mut host,
+        &mut event_clock,
+        SessionEventKind::WorkspaceApplyRequested {
+            mode: WorkspaceApplyMode::NextRun,
+        },
+    )?;
+
     send_session_event(
         &mut host,
         &mut event_clock,
@@ -119,12 +154,21 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 model: provider.model.clone(),
                 reasoning_effort: None,
                 max_tokens: Some(768),
-                workspace_binding: None,
-                default_prompt_pack: None,
-                default_tool_catalog: None,
+                workspace_binding: Some(workspace_binding),
+                default_prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
+                default_tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
             }),
         },
     )?;
+    let state_after_run_request: SessionState = host.read_state()?;
+    ensure!(
+        state_after_run_request
+            .active_workspace_snapshot
+            .as_ref()
+            .map(|snap| snap.workspace.as_str())
+            == Some(AGENT_WORKSPACE_NAME),
+        "expected active workspace snapshot applied on next run"
+    );
     send_session_event(&mut host, &mut event_clock, SessionEventKind::RunStarted)?;
 
     let mut history: Vec<Value> = vec![json!({
@@ -164,7 +208,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             message_refs: vec![history_ref],
             temperature: None,
             top_p: None,
-            tool_refs: Some(vec![tool_ref.clone()]),
+            tool_refs: None,
             tool_choice: Some(match phase {
                 SearchPhase::Looking => LlmToolChoice::Required,
                 SearchPhase::NeedPrimaryAnswer | SearchPhase::NeedFollowUp | SearchPhase::Done => {
@@ -504,28 +548,116 @@ fn store_history_blob(host: &ExampleHost, history: &[Value]) -> Result<String> {
     Ok(hash.to_hex())
 }
 
-fn register_tool_blob(host: &ExampleHost) -> Result<String> {
-    let tools = json!({
-        "tools": [
-            {
-                "name": "search_step",
-                "description": "Traverse one hop in the search graph using the current cursor.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "cursor": { "type": "string" }
-                    },
-                    "required": ["cursor"],
-                    "additionalProperties": false
-                }
-            }
-        ]
-    });
-    let bytes = serde_json::to_vec(&tools).context("encode search tool schema")?;
-    let hash = host
-        .store()
-        .put_blob(&bytes)
-        .context("store search tool schema")?;
+fn seed_workspace_commit(host: &mut ExampleHost, workspace_dir: &Path) -> Result<()> {
+    let root_hash = build_workspace_root_hash(host.store().as_ref(), workspace_dir)?;
+    let commit = WorkspaceCommit {
+        workspace: AGENT_WORKSPACE_NAME.into(),
+        expected_head: None,
+        meta: WorkspaceCommitMeta {
+            root_hash,
+            owner: "aos-smoke".into(),
+            created_at: now_nonce(),
+        },
+    };
+    host.send_event_as(WORKSPACE_COMMIT_SCHEMA, &commit)
+}
+
+fn drain_internal_effects(host: &mut ExampleHost) -> Result<()> {
+    let mut safety = 0usize;
+    loop {
+        if host.kernel_mut().queued_effects_snapshot().is_empty() {
+            return Ok(());
+        }
+        host.run_cycle_batch()?;
+        safety = safety.saturating_add(1);
+        ensure!(
+            safety < 32,
+            "safety trip: workspace sync effects did not drain"
+        );
+    }
+}
+
+#[derive(Default)]
+struct WorkspaceDirNode {
+    dirs: BTreeMap<String, WorkspaceDirNode>,
+    files: BTreeMap<String, Vec<u8>>,
+}
+
+fn build_workspace_root_hash(store: &aos_store::FsStore, workspace_dir: &Path) -> Result<String> {
+    let mut root = WorkspaceDirNode::default();
+    for entry in WalkDir::new(workspace_dir) {
+        let entry = entry.context("walk workspace dir entry")?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let full_path = entry.path();
+        let rel = full_path
+            .strip_prefix(workspace_dir)
+            .with_context(|| format!("strip workspace prefix for {}", full_path.display()))?;
+        let rel_text = rel
+            .to_str()
+            .ok_or_else(|| anyhow!("non-utf8 workspace path {}", rel.display()))?
+            .replace('\\', "/");
+        let bytes = fs::read(full_path)
+            .with_context(|| format!("read workspace file {}", full_path.display()))?;
+        insert_workspace_file(&mut root, &rel_text, bytes)?;
+    }
+    ensure!(
+        !root.files.is_empty() || !root.dirs.is_empty(),
+        "workspace dir is empty: {}",
+        workspace_dir.display()
+    );
+    encode_workspace_dir(store, &root)
+}
+
+fn insert_workspace_file(
+    root: &mut WorkspaceDirNode,
+    rel_path: &str,
+    bytes: Vec<u8>,
+) -> Result<()> {
+    let mut segments = rel_path.split('/').peekable();
+    let mut cursor = root;
+    while let Some(segment) = segments.next() {
+        if segment.is_empty() {
+            return Err(anyhow!("invalid workspace path segment in {rel_path}"));
+        }
+        if segments.peek().is_none() {
+            cursor.files.insert(segment.to_string(), bytes);
+            return Ok(());
+        }
+        cursor = cursor.dirs.entry(segment.to_string()).or_default();
+    }
+    Err(anyhow!("empty workspace file path"))
+}
+
+fn encode_workspace_dir(store: &aos_store::FsStore, node: &WorkspaceDirNode) -> Result<String> {
+    let mut entries: Vec<WorkspaceEntry> = Vec::new();
+    for (name, child) in &node.dirs {
+        let child_hash = encode_workspace_dir(store, child)?;
+        entries.push(WorkspaceEntry {
+            name: name.clone(),
+            kind: "dir".into(),
+            hash: child_hash,
+            size: 0,
+            mode: 0o755,
+        });
+    }
+    for (name, bytes) in &node.files {
+        let blob_hash = store
+            .put_blob(bytes)
+            .with_context(|| format!("store workspace file blob {name}"))?;
+        entries.push(WorkspaceEntry {
+            name: name.clone(),
+            kind: "file".into(),
+            hash: blob_hash.to_hex(),
+            size: bytes.len() as u64,
+            mode: 0o644,
+        });
+    }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let tree = WorkspaceTree { entries };
+    let hash = store.put_node(&tree).context("store workspace tree node")?;
     Ok(hash.to_hex())
 }
 

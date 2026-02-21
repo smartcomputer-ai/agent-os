@@ -14,5 +14,11 @@
   "build": {
     "reducer_dir": "reducer"
   },
-  "workspaces": []
+  "workspaces": [
+    {
+      "ref": "agent-live",
+      "dir": "agent-ws",
+      "ignore": [".aos/"]
+    }
+  ]
 }

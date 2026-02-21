@@ -9,6 +9,7 @@ aos-air-types = { path = "../aos-air-types" }
 aos-agent-sdk = { path = "../aos-agent-sdk" }
 aos-cbor = { path = "../aos-cbor" }
 aos-kernel = { path = "../aos-kernel" }
+aos-sys = { path = "../aos-sys" }
 aos-store = { path = "../aos-store" }
 aos-air-exec = { path = "../aos-air-exec" }
 aos-wasm-abi = { path = "../aos-wasm-abi" }

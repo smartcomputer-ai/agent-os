@@ -26,24 +26,71 @@
     { "name": "aos.agent/LlmToolCallList@1" },
     { "name": "aos.agent/SessionEventKind@1" },
     { "name": "aos.agent/SessionState@1" },
-    { "name": "aos.agent/SessionEvent@1" }
+    { "name": "aos.agent/SessionEvent@1" },
+    { "name": "sys/WorkspaceName@1" },
+    { "name": "sys/WorkspaceHistory@1" },
+    { "name": "sys/WorkspaceCommitMeta@1" },
+    { "name": "sys/WorkspaceCommit@1" },
+    { "name": "sys/WorkspaceResolveParams@1" },
+    { "name": "sys/WorkspaceResolveReceipt@1" },
+    { "name": "sys/WorkspaceReadRefParams@1" },
+    { "name": "sys/WorkspaceRefEntry@1" },
+    { "name": "sys/WorkspaceReadRefReceipt@1" },
+    { "name": "sys/WorkspaceReadBytesParams@1" },
+    { "name": "sys/WorkspaceReadBytesReceipt@1" }
   ],
   "modules": [
-    { "name": "demo/AgentLiveSessionReducer@1" }
+    { "name": "demo/AgentLiveSessionReducer@1" },
+    { "name": "sys/Workspace@1" },
+    { "name": "sys/CapEnforceWorkspace@1" }
   ],
-  "plans": [],
-  "caps": [],
-  "policies": [],
-  "effects": [],
-  "triggers": [],
+  "plans": [{ "name": "demo/session_workspace_sync_plan@1" }],
+  "caps": [{ "name": "demo/agent_live_workspace_cap@1" }],
+  "policies": [{ "name": "demo/agent-live-workspace-policy@1" }],
+  "defaults": {
+    "policy": "demo/agent-live-workspace-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_workspace",
+        "cap": "demo/agent_live_workspace_cap@1",
+        "params": {
+          "record": {
+            "workspaces": {
+              "list": [{ "text": "agent-live" }]
+            },
+            "path_prefixes": { "null": {} },
+            "ops": {
+              "set": [{ "text": "resolve" }, { "text": "read" }]
+            }
+          }
+        }
+      }
+    ]
+  },
   "routing": {
     "events": [
       {
         "event": "aos.agent/SessionEvent@1",
         "reducer": "demo/AgentLiveSessionReducer@1"
+      },
+      {
+        "event": "sys/WorkspaceCommit@1",
+        "reducer": "sys/Workspace@1",
+        "key_field": "workspace"
       }
     ],
     "inboxes": []
   },
+  "triggers": [
+    {
+      "event": "aos.agent/SessionEvent@1",
+      "plan": "demo/session_workspace_sync_plan@1"
+    }
+  ],
+  "effects": [
+    { "name": "sys/workspace.resolve@1" },
+    { "name": "sys/workspace.read_ref@1" },
+    { "name": "sys/workspace.read_bytes@1" }
+  ],
   "air_version": "1"
 }
