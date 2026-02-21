@@ -22,9 +22,6 @@ This phase moves AOS from a toy chat app toward a reusable agent runtime stack:
 - `roadmap/v0.10-agent-sdk/p2-agent-sdk-concerns.md`
 - `roadmap/v0.10-agent-sdk/p3.1-defs-sync.md`
 - `roadmap/v0.10-agent-sdk/p3.2-agent-ws.md`
-- `roadmap/v0.10-agent-sdk/p3.3-plan-reuse.md`
-- `roadmap/v0.10-agent-sdk/p3.3a-plan-import-reuse.md`
-- `roadmap/v0.10-agent-sdk/p3.3b-plan-composition.md`
 - `roadmap/v0.10-agent-sdk/p3.4-demiurge-refactor.md`
 - `roadmap/v0.10-agent-sdk/p4-agent-effects.md`
 

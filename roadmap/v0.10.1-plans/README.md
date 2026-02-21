@@ -20,7 +20,7 @@ We are addressing this in two tracks, both staying on `air_version: "1"`.
 
 ### Track A: Build-Time Reuse and Distribution (now)
 
-Document: `roadmap/v0.10-agent-sdk/p3.3a-plan-import-reuse.md`
+Document: `roadmap/v0.10.1-plans/p1-plan-import-reuse.md`
 
 Focus:
 
@@ -37,7 +37,7 @@ Why first:
 
 ### Track B: Runtime Composition and Typing Boundaries (now, after A baseline)
 
-Document: `roadmap/v0.10-agent-sdk/p3.3b-plan-composition.md`
+Document: `roadmap/v0.10.1-plans/p2-plan-composition.md`
 
 Focus:
 
@@ -67,7 +67,7 @@ Why second:
 
 ## Deliverables
 
-1. `p3.3a-plan-import-reuse.md`: detailed implementation plan for import-based plan reuse.
-2. `p3.3b-plan-composition.md`: detailed language/runtime plan for composition and projection.
+1. `p1-plan-import-reuse.md`: detailed implementation plan for import-based plan reuse.
+2. `p2-plan-composition.md`: detailed language/runtime plan for composition and projection.
 3. At least one fixture/app migrated to imported plan-pack usage.
 4. Follow-on implementation tasks in kernel/validator/loader tracked against these docs.

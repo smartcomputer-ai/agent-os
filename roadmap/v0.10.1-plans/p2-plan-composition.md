@@ -1,13 +1,13 @@
-# P3.3B: Plan Composition in AIR v1 (Projection + Subplans)
+# P2: Plan Composition in AIR v1 (Projection + Subplans)
 
-**Priority**: P3  
+**Priority**: P2  
 **Status**: Proposed (kernel/runtime work)  
-**Depends on**: P3.3A for distribution baseline  
+**Depends on**: P1 for distribution baseline  
 **Source inspiration**: `roadmap/vX-future/p3-plans-v1.1.md`
 
 ## Context
 
-After import-based reuse (P3.3A), duplication still remains whenever app contracts use different envelopes.
+After import-based reuse (P1), duplication still remains whenever app contracts use different envelopes.
 
 Example class:
 

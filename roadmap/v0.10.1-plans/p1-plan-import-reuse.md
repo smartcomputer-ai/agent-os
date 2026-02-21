@@ -1,6 +1,6 @@
-# P3.3A: Plan Import Reuse via `aos.sync.json`
+# P1: Plan Import Reuse via `aos.sync.json`
 
-**Priority**: P3  
+**Priority**: P1  
 **Status**: Proposed (implementation-ready)  
 **Depends on**: P3.1 defs sync (`air.imports`)  
 **Does not require**: kernel language changes
@@ -43,7 +43,7 @@ Import-based reuse fits these goals because:
 
 ### Out of scope
 
-1. In-plan subplan calls (`spawn_plan`, etc.) and trigger projection semantics (P3.3B).
+1. In-plan subplan calls (`spawn_plan`, etc.) and trigger projection semantics (P2).
 2. Template macro language.
 3. Runtime fetching of plans from workspaces.
 
