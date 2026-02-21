@@ -149,6 +149,9 @@ mod tests {
             model: "gpt-5.2".into(),
             reasoning_effort: Some(ReasoningEffort::Medium),
             max_tokens: Some(512),
+            workspace_binding: None,
+            prompt_pack: None,
+            tool_catalog: None,
         };
 
         let mut metadata = BTreeMap::new();
@@ -208,6 +211,9 @@ mod tests {
             model: "gpt-5.2".into(),
             reasoning_effort: None,
             max_tokens: None,
+            workspace_binding: None,
+            prompt_pack: None,
+            tool_catalog: None,
         };
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
@@ -225,6 +231,9 @@ mod tests {
             model: "".into(),
             reasoning_effort: None,
             max_tokens: None,
+            workspace_binding: None,
+            prompt_pack: None,
+            tool_catalog: None,
         };
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
@@ -239,6 +248,9 @@ mod tests {
             model: "gpt-5.2".into(),
             reasoning_effort: None,
             max_tokens: None,
+            workspace_binding: None,
+            prompt_pack: None,
+            tool_catalog: None,
         };
         let message_err = materialize_llm_generate_params(&run, &LlmStepContext::default())
             .expect_err("messages");
@@ -252,6 +264,9 @@ mod tests {
             model: "gpt-5.2".into(),
             reasoning_effort: None,
             max_tokens: None,
+            workspace_binding: None,
+            prompt_pack: None,
+            tool_catalog: None,
         };
         let step = LlmStepContext {
             message_refs: vec![hash('f')],

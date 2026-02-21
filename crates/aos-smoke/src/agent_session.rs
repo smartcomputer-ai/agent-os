@@ -551,6 +551,9 @@ fn run_requested_event_with_config(step_epoch: u64, provider: &str, model: &str)
                 model: model.into(),
                 reasoning_effort: None,
                 max_tokens: Some(512),
+                workspace_binding: None,
+                default_prompt_pack: None,
+                default_tool_catalog: None,
             }),
         },
     )

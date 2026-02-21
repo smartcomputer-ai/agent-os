@@ -1,6 +1,7 @@
 # Plan Templates
 
-This folder is reserved for reusable `aos.agent/*` plan templates.
+Reusable `aos.agent/*` plan templates live here.
 
-P2.1 scaffolding intentionally leaves plans empty while session contracts and reducer
-helpers stabilize.
+Current templates:
+- `workspace_sync_plan.air.json`: resolves a workspace snapshot and raises
+  `aos.agent/WorkspaceSyncUnchanged@1` or `aos.agent/WorkspaceSnapshotReady@1`.

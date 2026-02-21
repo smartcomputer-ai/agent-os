@@ -1,6 +1,6 @@
 use super::{
     ActiveToolBatch, RunConfig, RunId, RunLease, SessionConfig, SessionId, SessionLifecycle,
-    StepId, TurnId,
+    StepId, TurnId, WorkspaceApplyMode, WorkspaceSnapshot,
 };
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -26,6 +26,9 @@ pub struct SessionState {
     pub max_in_flight_effects: u64,
     pub active_run_lease: Option<RunLease>,
     pub last_heartbeat_at: Option<u64>,
+    pub active_workspace_snapshot: Option<WorkspaceSnapshot>,
+    pub pending_workspace_snapshot: Option<WorkspaceSnapshot>,
+    pub pending_workspace_apply_mode: Option<WorkspaceApplyMode>,
     pub pending_steer: Vec<String>,
     pub pending_follow_up: Vec<String>,
     pub created_at: u64,

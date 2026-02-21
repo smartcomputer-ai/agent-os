@@ -118,6 +118,9 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 model: provider.model.clone(),
                 reasoning_effort: None,
                 max_tokens: Some(768),
+                workspace_binding: None,
+                default_prompt_pack: None,
+                default_tool_catalog: None,
             }),
         },
     )?;

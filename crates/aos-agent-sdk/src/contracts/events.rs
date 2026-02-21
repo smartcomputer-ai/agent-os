@@ -1,6 +1,6 @@
 use super::{
     HostCommand, RunId, RunLease, SessionConfig, SessionId, SessionLifecycle, StepId, ToolBatchId,
-    ToolCallStatus, TurnId,
+    ToolCallStatus, TurnId, WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
 };
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -40,6 +40,27 @@ pub enum SessionEventKind {
     },
     LeaseExpiryCheck {
         observed_time_ns: u64,
+    },
+    WorkspaceSyncRequested {
+        workspace_binding: WorkspaceBinding,
+        prompt_pack: Option<String>,
+        tool_catalog: Option<String>,
+        known_version: Option<u64>,
+    },
+    WorkspaceSyncUnchanged {
+        workspace: String,
+        version: Option<u64>,
+    },
+    WorkspaceSnapshotReady {
+        snapshot: WorkspaceSnapshot,
+    },
+    WorkspaceSyncFailed {
+        workspace: String,
+        stage: String,
+        detail: String,
+    },
+    WorkspaceApplyRequested {
+        mode: WorkspaceApplyMode,
     },
     RunCompleted,
     RunFailed {

@@ -100,13 +100,102 @@
   },
   {
     "$kind": "defschema",
+    "name": "aos.agent/WorkspaceBinding@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} },
+        "version": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceApplyMode@1",
+    "type": {
+      "variant": {
+        "NextRun": { "unit": {} },
+        "NextStepBoundary": { "unit": {} },
+        "ImmediateIfIdle": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSnapshot@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} },
+        "version": { "option": { "nat": {} } },
+        "root_hash": { "option": { "hash": {} } },
+        "index_ref": { "option": { "hash": {} } },
+        "prompt_pack": { "option": { "text": {} } },
+        "tool_catalog": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSyncRequested@1",
+    "type": {
+      "record": {
+        "workspace_binding": { "ref": "aos.agent/WorkspaceBinding@1" },
+        "prompt_pack": { "option": { "text": {} } },
+        "tool_catalog": { "option": { "text": {} } },
+        "known_version": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSyncUnchanged@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} },
+        "version": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSnapshotReady@1",
+    "type": {
+      "record": {
+        "snapshot": { "ref": "aos.agent/WorkspaceSnapshot@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSyncFailed@1",
+    "type": {
+      "record": {
+        "workspace": { "text": {} },
+        "stage": { "text": {} },
+        "detail": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceApplyRequested@1",
+    "type": {
+      "record": {
+        "mode": { "ref": "aos.agent/WorkspaceApplyMode@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "aos.agent/SessionConfig@1",
     "type": {
       "record": {
         "provider": { "text": {} },
         "model": { "text": {} },
         "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
-        "max_tokens": { "option": { "nat": {} } }
+        "max_tokens": { "option": { "nat": {} } },
+        "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
+        "default_prompt_pack": { "option": { "text": {} } },
+        "default_tool_catalog": { "option": { "text": {} } }
       }
     }
   },
@@ -118,7 +207,10 @@
         "provider": { "text": {} },
         "model": { "text": {} },
         "reasoning_effort": { "option": { "ref": "aos.agent/ReasoningEffort@1" } },
-        "max_tokens": { "option": { "nat": {} } }
+        "max_tokens": { "option": { "nat": {} } },
+        "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
+        "prompt_pack": { "option": { "text": {} } },
+        "tool_catalog": { "option": { "text": {} } }
       }
     }
   },
@@ -221,6 +313,11 @@
         },
         "LeaseIssued": { "record": { "lease": { "ref": "aos.agent/RunLease@1" } } },
         "LeaseExpiryCheck": { "record": { "observed_time_ns": { "time": {} } } },
+        "WorkspaceSyncRequested": { "ref": "aos.agent/WorkspaceSyncRequested@1" },
+        "WorkspaceSyncUnchanged": { "ref": "aos.agent/WorkspaceSyncUnchanged@1" },
+        "WorkspaceSnapshotReady": { "ref": "aos.agent/WorkspaceSnapshotReady@1" },
+        "WorkspaceSyncFailed": { "ref": "aos.agent/WorkspaceSyncFailed@1" },
+        "WorkspaceApplyRequested": { "ref": "aos.agent/WorkspaceApplyRequested@1" },
         "RunCompleted": { "unit": {} },
         "RunFailed": { "record": { "code": { "text": {} }, "detail": { "text": {} } } },
         "RunCancelled": { "record": { "reason": { "option": { "text": {} } } } }
@@ -250,6 +347,11 @@
         "max_in_flight_effects": { "nat": {} },
         "active_run_lease": { "option": { "ref": "aos.agent/RunLease@1" } },
         "last_heartbeat_at": { "option": { "time": {} } },
+        "active_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },
+        "pending_workspace_snapshot": { "option": { "ref": "aos.agent/WorkspaceSnapshot@1" } },
+        "pending_workspace_apply_mode": {
+          "option": { "ref": "aos.agent/WorkspaceApplyMode@1" }
+        },
         "pending_steer": { "list": { "text": {} } },
         "pending_follow_up": { "list": { "text": {} } },
         "created_at": { "time": {} },

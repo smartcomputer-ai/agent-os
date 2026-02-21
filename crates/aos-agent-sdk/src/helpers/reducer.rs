@@ -5,7 +5,8 @@ use super::{
 };
 use crate::contracts::{
     ActiveToolBatch, HostCommandKind, RunConfig, SessionConfig, SessionEvent, SessionEventKind,
-    SessionLifecycle, SessionState, ToolCallStatus,
+    SessionLifecycle, SessionState, ToolCallStatus, WorkspaceApplyMode, WorkspaceBinding,
+    WorkspaceSnapshot,
 };
 use alloc::collections::{BTreeMap, BTreeSet};
 
@@ -150,6 +151,29 @@ pub fn apply_session_event(
         SessionEventKind::LeaseExpiryCheck { observed_time_ns } => {
             on_lease_expiry_check(state, *observed_time_ns)?;
         }
+        SessionEventKind::WorkspaceSyncRequested {
+            workspace_binding,
+            prompt_pack,
+            tool_catalog,
+            known_version: _,
+        } => {
+            on_workspace_sync_requested(
+                state,
+                workspace_binding,
+                prompt_pack.as_ref(),
+                tool_catalog.as_ref(),
+            );
+        }
+        SessionEventKind::WorkspaceSyncUnchanged { workspace, version } => {
+            on_workspace_sync_unchanged(state, workspace, *version);
+        }
+        SessionEventKind::WorkspaceSnapshotReady { snapshot } => {
+            on_workspace_snapshot_ready(state, snapshot);
+        }
+        SessionEventKind::WorkspaceSyncFailed { .. } => {}
+        SessionEventKind::WorkspaceApplyRequested { mode } => {
+            on_workspace_apply_requested(state, *mode);
+        }
         SessionEventKind::LifecycleChanged(next) => {
             transition_lifecycle(state, *next)
                 .map_err(|_| SessionReduceError::InvalidLifecycleTransition)?;
@@ -276,6 +300,9 @@ fn on_run_requested(
 
     let requested = select_run_config(&state.session_config, run_overrides);
     validate_run_config(&requested)?;
+    if state.pending_workspace_apply_mode == Some(WorkspaceApplyMode::NextRun) {
+        apply_pending_workspace_snapshot(state);
+    }
 
     state.active_run_id = Some(allocate_run_id(state));
     state.active_run_config = Some(requested);
@@ -378,6 +405,9 @@ fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfi
         model: source.model.clone(),
         reasoning_effort: source.reasoning_effort,
         max_tokens: source.max_tokens,
+        workspace_binding: source.workspace_binding.clone(),
+        prompt_pack: source.default_prompt_pack.clone(),
+        tool_catalog: source.default_tool_catalog.clone(),
     }
 }
 
@@ -406,6 +436,9 @@ fn on_step_boundary(state: &mut SessionState) -> Result<(), SessionReduceError> 
     {
         state.active_tool_batch = None;
     }
+    if state.pending_workspace_apply_mode == Some(WorkspaceApplyMode::NextStepBoundary) {
+        apply_pending_workspace_snapshot(state);
+    }
 
     let _ = pop_pending_steer(state);
     state.step_epoch = state.step_epoch.saturating_add(1);
@@ -426,6 +459,73 @@ fn on_step_boundary(state: &mut SessionState) -> Result<(), SessionReduceError> 
     state.active_step_id = Some(next_step);
     state.active_run_step_count = state.active_run_step_count.saturating_add(1);
     Ok(())
+}
+
+fn on_workspace_sync_requested(
+    state: &mut SessionState,
+    workspace_binding: &WorkspaceBinding,
+    prompt_pack: Option<&alloc::string::String>,
+    tool_catalog: Option<&alloc::string::String>,
+) {
+    state.session_config.workspace_binding = Some(workspace_binding.clone());
+    if let Some(pack) = prompt_pack {
+        state.session_config.default_prompt_pack = Some(pack.clone());
+    }
+    if let Some(catalog) = tool_catalog {
+        state.session_config.default_tool_catalog = Some(catalog.clone());
+    }
+}
+
+fn on_workspace_sync_unchanged(state: &mut SessionState, workspace: &str, version: Option<u64>) {
+    if let Some(active) = state.active_workspace_snapshot.as_mut() {
+        if active.workspace == workspace {
+            active.version = version;
+        }
+    }
+    if let Some(pending) = state.pending_workspace_snapshot.as_mut() {
+        if pending.workspace == workspace {
+            pending.version = version;
+        }
+    }
+}
+
+fn on_workspace_snapshot_ready(state: &mut SessionState, snapshot: &WorkspaceSnapshot) {
+    state.pending_workspace_snapshot = Some(snapshot.clone());
+    if state.pending_workspace_apply_mode == Some(WorkspaceApplyMode::ImmediateIfIdle)
+        && state.active_run_id.is_none()
+    {
+        apply_pending_workspace_snapshot(state);
+    }
+}
+
+fn on_workspace_apply_requested(state: &mut SessionState, mode: WorkspaceApplyMode) {
+    match mode {
+        WorkspaceApplyMode::ImmediateIfIdle => {
+            state.pending_workspace_apply_mode = Some(WorkspaceApplyMode::ImmediateIfIdle);
+            if state.active_run_id.is_none() {
+                apply_pending_workspace_snapshot(state);
+            }
+        }
+        WorkspaceApplyMode::NextStepBoundary => {
+            if state.active_run_id.is_none() {
+                apply_pending_workspace_snapshot(state);
+            } else {
+                state.pending_workspace_apply_mode = Some(WorkspaceApplyMode::NextStepBoundary);
+            }
+        }
+        WorkspaceApplyMode::NextRun => {
+            state.pending_workspace_apply_mode = Some(WorkspaceApplyMode::NextRun);
+        }
+    }
+}
+
+fn apply_pending_workspace_snapshot(state: &mut SessionState) -> bool {
+    let Some(snapshot) = state.pending_workspace_snapshot.take() else {
+        return false;
+    };
+    state.active_workspace_snapshot = Some(snapshot);
+    state.pending_workspace_apply_mode = None;
+    true
 }
 
 fn on_tool_batch_started(
@@ -623,6 +723,9 @@ mod tests {
             model: "gpt-5.2".into(),
             reasoning_effort: None,
             max_tokens: Some(512),
+            workspace_binding: None,
+            default_prompt_pack: None,
+            default_tool_catalog: None,
         }
     }
 
@@ -691,6 +794,9 @@ mod tests {
             model: "claude-sonnet-4-5".into(),
             reasoning_effort: state.session_config.reasoning_effort,
             max_tokens: Some(1024),
+            workspace_binding: None,
+            default_prompt_pack: None,
+            default_tool_catalog: None,
         };
 
         apply_session_event(&mut state, &run_requested(Some(overrides))).expect("run requested");
@@ -748,6 +854,9 @@ mod tests {
             model: "gpt-5.2".into(),
             reasoning_effort: None,
             max_tokens: Some(512),
+            workspace_binding: None,
+            prompt_pack: None,
+            tool_catalog: None,
         });
 
         let err = apply_session_event(&mut state, &run_requested(None)).expect_err("active run");
@@ -1025,6 +1134,9 @@ mod tests {
             model: "gpt-5.2".into(),
             reasoning_effort: None,
             max_tokens: Some(64),
+            workspace_binding: None,
+            default_prompt_pack: None,
+            default_tool_catalog: None,
         };
 
         let err = validate_run_request_catalog(
@@ -1047,6 +1159,9 @@ mod tests {
             model: "not-a-model".into(),
             reasoning_effort: None,
             max_tokens: Some(64),
+            workspace_binding: None,
+            default_prompt_pack: None,
+            default_tool_catalog: None,
         };
 
         let err = validate_run_request_catalog(
@@ -1075,6 +1190,9 @@ mod tests {
                     model: "gpt-5.2".into(),
                     reasoning_effort: None,
                     max_tokens: Some(64),
+                    workspace_binding: None,
+                    default_prompt_pack: None,
+                    default_tool_catalog: None,
                 }),
             },
         );
@@ -1088,6 +1206,133 @@ mod tests {
         .expect_err("catalog reject");
         assert_eq!(err, SessionReduceError::UnknownProvider);
         assert_eq!(state, before);
+    }
+
+    #[test]
+    fn workspace_snapshot_applies_immediately_when_idle() {
+        let mut state = base_state();
+        let snapshot = crate::contracts::WorkspaceSnapshot {
+            workspace: "agent-ws".into(),
+            version: Some(4),
+            root_hash: Some(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            ),
+            index_ref: Some(
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            ),
+            prompt_pack: Some("default".into()),
+            tool_catalog: Some("default".into()),
+        };
+
+        apply_session_event(
+            &mut state,
+            &event(
+                1,
+                SessionEventKind::WorkspaceSnapshotReady {
+                    snapshot: snapshot.clone(),
+                },
+            ),
+        )
+        .expect("snapshot ready");
+        assert!(state.active_workspace_snapshot.is_none());
+        assert!(state.pending_workspace_snapshot.is_some());
+
+        apply_session_event(
+            &mut state,
+            &event(
+                2,
+                SessionEventKind::WorkspaceApplyRequested {
+                    mode: WorkspaceApplyMode::ImmediateIfIdle,
+                },
+            ),
+        )
+        .expect("apply immediate");
+        assert_eq!(state.active_workspace_snapshot, Some(snapshot));
+        assert!(state.pending_workspace_snapshot.is_none());
+        assert!(state.pending_workspace_apply_mode.is_none());
+    }
+
+    #[test]
+    fn workspace_snapshot_applies_on_next_step_boundary_when_running() {
+        let mut state = running_state();
+        let snapshot = crate::contracts::WorkspaceSnapshot {
+            workspace: "agent-ws".into(),
+            version: Some(5),
+            root_hash: None,
+            index_ref: None,
+            prompt_pack: Some("concise".into()),
+            tool_catalog: Some("coding".into()),
+        };
+
+        apply_session_event(
+            &mut state,
+            &event(
+                3,
+                SessionEventKind::WorkspaceSnapshotReady {
+                    snapshot: snapshot.clone(),
+                },
+            ),
+        )
+        .expect("snapshot ready");
+        apply_session_event(
+            &mut state,
+            &event(
+                4,
+                SessionEventKind::WorkspaceApplyRequested {
+                    mode: WorkspaceApplyMode::NextStepBoundary,
+                },
+            ),
+        )
+        .expect("apply at boundary");
+        assert_eq!(
+            state.pending_workspace_apply_mode,
+            Some(WorkspaceApplyMode::NextStepBoundary)
+        );
+        assert!(state.active_workspace_snapshot.is_none());
+
+        apply_session_event(&mut state, &event(5, SessionEventKind::StepBoundary))
+            .expect("step boundary");
+        assert_eq!(state.active_workspace_snapshot, Some(snapshot));
+        assert!(state.pending_workspace_snapshot.is_none());
+        assert!(state.pending_workspace_apply_mode.is_none());
+    }
+
+    #[test]
+    fn workspace_snapshot_applies_on_next_run() {
+        let mut state = base_state();
+        let snapshot = crate::contracts::WorkspaceSnapshot {
+            workspace: "agent-ws".into(),
+            version: Some(7),
+            root_hash: None,
+            index_ref: None,
+            prompt_pack: Some("default".into()),
+            tool_catalog: Some("default".into()),
+        };
+
+        apply_session_event(
+            &mut state,
+            &event(
+                1,
+                SessionEventKind::WorkspaceSnapshotReady {
+                    snapshot: snapshot.clone(),
+                },
+            ),
+        )
+        .expect("snapshot ready");
+        apply_session_event(
+            &mut state,
+            &event(
+                2,
+                SessionEventKind::WorkspaceApplyRequested {
+                    mode: WorkspaceApplyMode::NextRun,
+                },
+            ),
+        )
+        .expect("apply next run");
+        assert!(state.active_workspace_snapshot.is_none());
+
+        apply_session_event(&mut state, &run_requested(None)).expect("run requested");
+        assert_eq!(state.active_workspace_snapshot, Some(snapshot));
     }
 
     #[test]
