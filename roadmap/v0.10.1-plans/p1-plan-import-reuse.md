@@ -68,7 +68,6 @@ Import-based reuse fits these goals because:
 In `crates/aos-agent-sdk`:
 
 1. `air/exports/plan-packs/<pack>/defs.air.json`
-2. optional: `air/exports/plan-packs/<pack>/README.md` (human guidance only)
 
 `defs.air.json` should contain only defs (no manifest):
 
@@ -92,7 +91,7 @@ Plan-pack contract is inferred from `defs.air.json` + naming conventions (no ext
 2. Gives explicit package boundaries for plan APIs.
 3. Allows multiple packs with independent version cadence.
 4. Avoids introducing another repository-level config file while still enabling lint/scaffold tooling.
-5. Keeps contract machine-checkable even when README is absent.
+5. Keeps contract machine-checkable from defs alone.
 
 ## Where Classification Lives (and Why)
 
@@ -166,8 +165,6 @@ Consumer contract must be derivable from defs alone:
    - turnkey-capable if pack exports one or more `entry_*` plans,
    - composable-core-capable if pack exports one or more `core_*` plans.
 5. **Turnkey trigger rule**: consumer trigger event schema should match entry plan input schema.
-
-Optional README may explain intent and migration guidance, but tooling must not require it.
 
 ### Important clarification about caps (agreed)
 
@@ -243,7 +240,7 @@ Lock payload should include:
 ### Phase A1: Contract and profile standardization
 
 1. Add role/profile naming conventions to every exported pack.
-2. Ensure exported defs are sufficient for machine-derived contract checks (no README dependency).
+2. Ensure exported defs are sufficient for machine-derived contract checks (defs-only).
 3. Keep this as tooling/documentation only; no kernel changes.
 
 ### Phase A2: Import/lint enforcement
