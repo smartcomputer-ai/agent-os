@@ -1,0 +1,114 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "aos.agent/core_tool_catalog_sync_from_workspace@1",
+    "input": "aos.agent/WorkspaceSyncRequested@1",
+    "output": "aos.agent/SessionEventKind@1",
+    "steps": [
+      {
+        "id": "assign_core_input",
+        "op": "assign",
+        "expr": {
+          "record": {
+            "workspace_binding": { "ref": "@plan.input.workspace_binding" },
+            "prompt_pack": { "null": {} },
+            "tool_catalog": { "ref": "@plan.input.tool_catalog" },
+            "known_version": { "ref": "@plan.input.known_version" }
+          }
+        },
+        "bind": { "as": "core_input" }
+      },
+      {
+        "id": "spawn_core_workspace_sync",
+        "op": "spawn_plan",
+        "plan": "aos.agent/core_workspace_sync@1",
+        "input": { "ref": "@var:core_input" },
+        "bind": { "handle_as": "core_handle" }
+      },
+      {
+        "id": "await_core_workspace_sync",
+        "op": "await_plan",
+        "for": { "ref": "@var:core_handle" },
+        "bind": { "as": "core_result" }
+      },
+      {
+        "id": "assign_core_result_tag",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [{ "ref": "@var:core_result" }, { "text": "$tag" }]
+        },
+        "bind": { "as": "core_result_tag" }
+      },
+      {
+        "id": "assign_core_event_kind",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [{ "ref": "@var:core_result" }, { "text": "$value" }]
+        },
+        "bind": { "as": "core_event_kind" }
+      },
+      {
+        "id": "finish_ok",
+        "op": "end",
+        "result": { "ref": "@var:core_event_kind" }
+      },
+      {
+        "id": "finish_workspace_sync_failed",
+        "op": "end",
+        "result": {
+          "variant": {
+            "tag": "WorkspaceSyncFailed",
+            "value": {
+              "record": {
+                "workspace": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input.workspace_binding" },
+                    { "text": "workspace" }
+                  ]
+                },
+                "stage": { "text": "workspace_sync_core_tool" },
+                "detail": {
+                  "op": "get",
+                  "args": [
+                    {
+                      "op": "get",
+                      "args": [{ "ref": "@var:core_result" }, { "text": "$value" }]
+                    },
+                    { "text": "message" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "edges": [
+      { "from": "assign_core_input", "to": "spawn_core_workspace_sync" },
+      { "from": "spawn_core_workspace_sync", "to": "await_core_workspace_sync" },
+      { "from": "await_core_workspace_sync", "to": "assign_core_result_tag" },
+      {
+        "from": "assign_core_result_tag",
+        "to": "assign_core_event_kind",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@var:core_result_tag" }, { "text": "Ok" }]
+        }
+      },
+      {
+        "from": "assign_core_result_tag",
+        "to": "finish_workspace_sync_failed",
+        "when": {
+          "op": "ne",
+          "args": [{ "ref": "@var:core_result_tag" }, { "text": "Ok" }]
+        }
+      },
+      { "from": "assign_core_event_kind", "to": "finish_ok" }
+    ],
+    "required_caps": [],
+    "allowed_effects": []
+  }
+]

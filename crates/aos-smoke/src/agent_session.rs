@@ -43,6 +43,19 @@ pub fn run(example_root: &Path) -> Result<()> {
             }),
         "expected direct prompt refs materialized into active run config"
     );
+    ensure!(
+        run1_state
+            .active_run_config
+            .as_ref()
+            .and_then(|cfg| cfg.tool_refs.as_ref())
+            .is_some_and(|refs| {
+                refs == &vec![
+                    "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                        .to_string(),
+                ]
+            }),
+        "expected direct tool refs materialized into active run config"
+    );
     host.send_event(&session_event(
         0,
         3,
@@ -572,6 +585,10 @@ fn run_requested_event_with_config(step_epoch: u64, provider: &str, model: &str)
                         .into(),
                 ]),
                 default_tool_catalog: None,
+                default_tool_refs: Some(vec![
+                    "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                        .into(),
+                ]),
             }),
         },
     )

@@ -144,16 +144,25 @@ pub fn apply_workspace_snapshot_to_step_context(
 /// Prompt precedence:
 /// - `run_config.prompt_refs` when set
 /// - else active workspace `prompt_pack_ref`
+///
+/// Tool precedence:
+/// - explicit `step.tool_refs` when set
+/// - else `run_config.tool_refs` when set
+/// - else active workspace `tool_catalog_ref`
 pub fn apply_prompt_sources_to_step_context(
     run_config: &RunConfig,
     active_snapshot: Option<&WorkspaceSnapshot>,
     mut step: LlmStepContext,
 ) -> LlmStepContext {
+    let explicit_or_run_tool_refs = step
+        .tool_refs
+        .take()
+        .or_else(|| run_config.tool_refs.clone());
     let derived = materialize_workspace_step_inputs(
         active_snapshot,
         core::mem::take(&mut step.message_refs),
         run_config.prompt_refs.clone(),
-        step.tool_refs.take(),
+        explicit_or_run_tool_refs,
     );
     step.message_refs = derived.message_refs;
     step.tool_refs = derived.tool_refs;
@@ -218,6 +227,7 @@ mod tests {
             prompt_pack: None,
             prompt_refs: None,
             tool_catalog: None,
+            tool_refs: None,
         };
 
         let mut metadata = BTreeMap::new();
@@ -281,6 +291,7 @@ mod tests {
             prompt_pack: None,
             prompt_refs: None,
             tool_catalog: None,
+            tool_refs: None,
         };
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
@@ -302,6 +313,7 @@ mod tests {
             prompt_pack: None,
             prompt_refs: None,
             tool_catalog: None,
+            tool_refs: None,
         };
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
@@ -320,6 +332,7 @@ mod tests {
             prompt_pack: None,
             prompt_refs: None,
             tool_catalog: None,
+            tool_refs: None,
         };
         let message_err = materialize_llm_generate_params(&run, &LlmStepContext::default())
             .expect_err("messages");
@@ -337,6 +350,7 @@ mod tests {
             prompt_pack: None,
             prompt_refs: None,
             tool_catalog: None,
+            tool_refs: None,
         };
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
@@ -374,6 +388,7 @@ mod tests {
             prompt_pack: Some("default".into()),
             prompt_refs: Some(vec![hash('r')]),
             tool_catalog: Some("default".into()),
+            tool_refs: None,
         };
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
@@ -398,6 +413,7 @@ mod tests {
             prompt_pack: None,
             prompt_refs: Some(vec![hash('r')]),
             tool_catalog: None,
+            tool_refs: None,
         };
         let step = LlmStepContext {
             message_refs: vec![hash('a')],
@@ -411,6 +427,78 @@ mod tests {
     }
 
     #[test]
+    fn run_tool_refs_override_workspace_catalog() {
+        let run = RunConfig {
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            reasoning_effort: None,
+            max_tokens: None,
+            workspace_binding: None,
+            prompt_pack: None,
+            prompt_refs: None,
+            tool_catalog: Some("default".into()),
+            tool_refs: Some(vec![hash('u')]),
+        };
+        let step = LlmStepContext {
+            message_refs: vec![hash('a')],
+            ..LlmStepContext::default()
+        };
+
+        let mapped =
+            materialize_llm_generate_params_with_workspace(&run, Some(&workspace_snapshot()), step)
+                .expect("map with run tool refs");
+        assert_eq!(mapped.runtime.tool_refs, Some(vec![hash('u')]));
+    }
+
+    #[test]
+    fn step_tool_refs_override_run_tool_refs() {
+        let run = RunConfig {
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            reasoning_effort: None,
+            max_tokens: None,
+            workspace_binding: None,
+            prompt_pack: None,
+            prompt_refs: None,
+            tool_catalog: Some("default".into()),
+            tool_refs: Some(vec![hash('u')]),
+        };
+        let step = LlmStepContext {
+            message_refs: vec![hash('a')],
+            tool_refs: Some(vec![hash('z')]),
+            ..LlmStepContext::default()
+        };
+
+        let mapped =
+            materialize_llm_generate_params_with_workspace(&run, Some(&workspace_snapshot()), step)
+                .expect("map with explicit step tool refs");
+        assert_eq!(mapped.runtime.tool_refs, Some(vec![hash('z')]));
+    }
+
+    #[test]
+    fn run_tool_refs_work_without_workspace_snapshot() {
+        let run = RunConfig {
+            provider: "openai".into(),
+            model: "gpt-5.2".into(),
+            reasoning_effort: None,
+            max_tokens: None,
+            workspace_binding: None,
+            prompt_pack: None,
+            prompt_refs: None,
+            tool_catalog: None,
+            tool_refs: Some(vec![hash('u')]),
+        };
+        let step = LlmStepContext {
+            message_refs: vec![hash('a')],
+            ..LlmStepContext::default()
+        };
+
+        let mapped = materialize_llm_generate_params_with_workspace(&run, None, step)
+            .expect("map without workspace snapshot");
+        assert_eq!(mapped.runtime.tool_refs, Some(vec![hash('u')]));
+    }
+
+    #[test]
     fn leaves_optional_runtime_controls_unset_when_not_provided() {
         let run = RunConfig {
             provider: "openai".into(),
@@ -421,6 +509,7 @@ mod tests {
             prompt_pack: None,
             prompt_refs: None,
             tool_catalog: None,
+            tool_refs: None,
         };
         let step = LlmStepContext {
             message_refs: vec![hash('f')],

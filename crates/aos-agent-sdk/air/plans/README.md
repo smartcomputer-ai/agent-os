@@ -8,6 +8,11 @@ Current templates:
   `WorkspaceSyncUnchanged` or `WorkspaceSnapshotReady` with prompt refs/bytes.
   Exports `aos.agent/core_prompt_sync_from_workspace@1` for composable-core
   prompt sync reuse.
+- `core_tool_catalog_sync_from_workspace.air.json`: resolves workspace
+  tool-catalog content for a selected `tool_catalog` and returns
+  `WorkspaceSyncUnchanged` or `WorkspaceSnapshotReady` with tool refs/bytes.
+  Exports `aos.agent/core_tool_catalog_sync_from_workspace@1` for
+  composable-core tool sync reuse.
 - `core_workspace_sync.air.json`: resolves a workspace snapshot and returns
   a `aos.agent/SessionEventKind@1` result with either
   `WorkspaceSyncUnchanged` or `WorkspaceSnapshotReady`.

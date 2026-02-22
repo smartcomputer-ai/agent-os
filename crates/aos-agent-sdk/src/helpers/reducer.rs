@@ -430,6 +430,7 @@ fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfi
         prompt_pack: source.default_prompt_pack.clone(),
         prompt_refs: source.default_prompt_refs.clone(),
         tool_catalog: source.default_tool_catalog.clone(),
+        tool_refs: source.default_tool_refs.clone(),
     }
 }
 
@@ -845,6 +846,7 @@ mod tests {
             default_prompt_pack: None,
             default_prompt_refs: None,
             default_tool_catalog: None,
+            default_tool_refs: None,
         }
     }
 
@@ -925,6 +927,7 @@ mod tests {
             default_prompt_pack: None,
             default_prompt_refs: None,
             default_tool_catalog: None,
+            default_tool_refs: None,
         };
 
         apply_session_event(&mut state, &run_requested(Some(overrides))).expect("run requested");
@@ -974,6 +977,27 @@ mod tests {
     }
 
     #[test]
+    fn run_request_materializes_direct_tool_refs() {
+        let mut state = base_state();
+        state.session_config.default_tool_refs = Some(vec![
+            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".into(),
+        ]);
+
+        apply_session_event(&mut state, &run_requested(None)).expect("run requested");
+        apply_session_event(&mut state, &run_started(2)).expect("run started");
+
+        assert_eq!(
+            state
+                .active_run_config
+                .as_ref()
+                .and_then(|cfg| cfg.tool_refs.as_ref()),
+            Some(&vec![
+                "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".into()
+            ])
+        );
+    }
+
+    #[test]
     fn run_request_rejects_missing_provider_without_activation() {
         let mut state = base_state();
         state.session_config.provider = " ".into();
@@ -1007,6 +1031,7 @@ mod tests {
             prompt_pack: None,
             prompt_refs: None,
             tool_catalog: None,
+            tool_refs: None,
         });
 
         let err = apply_session_event(&mut state, &run_requested(None)).expect_err("active run");
@@ -1288,6 +1313,7 @@ mod tests {
             default_prompt_pack: None,
             default_prompt_refs: None,
             default_tool_catalog: None,
+            default_tool_refs: None,
         };
 
         let err = validate_run_request_catalog(
@@ -1314,6 +1340,7 @@ mod tests {
             default_prompt_pack: None,
             default_prompt_refs: None,
             default_tool_catalog: None,
+            default_tool_refs: None,
         };
 
         let err = validate_run_request_catalog(
@@ -1346,6 +1373,7 @@ mod tests {
                     default_prompt_pack: None,
                     default_prompt_refs: None,
                     default_tool_catalog: None,
+                    default_tool_refs: None,
                 }),
             },
         );
