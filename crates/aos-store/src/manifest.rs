@@ -978,6 +978,8 @@ mod tests {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
                 plan: plan.name.clone(),
                 correlate_by: Some("id".into()),
+                when: None,
+                input_expr: None,
             }],
         };
         let manifest_bytes = serde_cbor::to_vec(&AirNode::Manifest(manifest)).unwrap();

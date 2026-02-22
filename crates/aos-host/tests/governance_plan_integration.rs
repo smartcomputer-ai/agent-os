@@ -206,6 +206,8 @@ fn governance_action_requested_trigger_runs_plan() -> Result<(), KernelError> {
         event: fixtures::schema("sys/GovActionRequested@1"),
         plan: plan_name.into(),
         correlate_by: None,
+        when: None,
+        input_expr: None,
     };
     let mut loaded = fixtures::build_loaded_manifest(vec![plan], vec![trigger], vec![], vec![]);
     attach_governance_cap_allow_all(&mut loaded);

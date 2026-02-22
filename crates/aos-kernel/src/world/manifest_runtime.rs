@@ -81,13 +81,19 @@ fn build_plan_triggers(manifest: &Manifest) -> HashMap<String, Vec<PlanTriggerBi
         plan_triggers
             .entry(trigger.event.as_str().to_string())
             .or_insert_with(Vec::new)
-            .push(PlanTriggerBinding {
-                plan: trigger.plan.clone(),
-                correlate_by: trigger.correlate_by.clone(),
-            });
+                .push(PlanTriggerBinding {
+                    plan: trigger.plan.clone(),
+                    correlate_by: trigger.correlate_by.clone(),
+                    when: trigger.when.clone(),
+                    input_expr: trigger.input_expr.clone(),
+                });
     }
     for bindings in plan_triggers.values_mut() {
-        bindings.sort_by(|a, b| a.plan.cmp(&b.plan));
+        bindings.sort_by(|a, b| {
+            a.plan
+                .cmp(&b.plan)
+                .then_with(|| a.correlate_by.cmp(&b.correlate_by))
+        });
     }
     plan_triggers
 }

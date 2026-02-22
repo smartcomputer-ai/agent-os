@@ -37,19 +37,52 @@ impl<S: Store + 'static> Kernel<S> {
         stamp: &IngressStamp,
     ) -> Result<(), KernelError> {
         if let Some(plan_bindings) = self.plan_triggers.get(&event.schema) {
-            for binding in plan_bindings {
-                if let Some(plan_def) = self.plan_registry.get(&binding.plan) {
-                    let normalized = normalize_cbor_by_name(
-                        &self.schema_index,
-                        event.schema.as_str(),
-                        &event.value,
-                    )
+            let event_schema = self.schema_index.get(event.schema.as_str()).ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "trigger event schema '{}' not found",
+                    event.schema
+                ))
+            })?;
+            let normalized_event =
+                normalize_cbor_by_name(&self.schema_index, event.schema.as_str(), &event.value)
                     .map_err(|err| {
                         KernelError::Manifest(format!(
-                            "failed to decode plan input for {}: {err}",
-                            binding.plan
+                            "failed to decode trigger event '{}' payload: {err}",
+                            event.schema
                         ))
                     })?;
+            let event_value =
+                cbor_to_expr_value(&normalized_event.value, event_schema, &self.schema_index)?;
+
+            for binding in plan_bindings {
+                if let Some(plan_def) = self.plan_registry.get(&binding.plan) {
+                    let mut trigger_env = aos_air_exec::Env::new(ExprValue::Unit);
+                    trigger_env.current_event = Some(event_value.clone());
+
+                    if let Some(predicate) = binding.when.as_ref() {
+                        let passes = aos_air_exec::eval_expr(predicate, &trigger_env).map_err(
+                            |err| {
+                                KernelError::Manifest(format!(
+                                    "trigger when eval error for event '{}' -> plan '{}': {err}",
+                                    event.schema, binding.plan
+                                ))
+                            },
+                        )?;
+                        if !crate::plan::value_to_bool(passes)? {
+                            continue;
+                        }
+                    }
+
+                    let trigger_input = if let Some(input_expr) = binding.input_expr.as_ref() {
+                        crate::plan::eval_expr_or_value(
+                            input_expr,
+                            &trigger_env,
+                            "trigger input_expr eval error",
+                        )?
+                    } else {
+                        event_value.clone()
+                    };
+
                     let input_schema =
                         self.schema_index
                             .get(plan_def.input.as_str())
@@ -59,8 +92,23 @@ impl<S: Store + 'static> Kernel<S> {
                                     plan_def.name, plan_def.input
                                 ))
                             })?;
-                    let input =
-                        cbor_to_expr_value(&normalized.value, input_schema, &self.schema_index)?;
+                    let trigger_input_cbor = crate::plan::expr_value_to_cbor_value(&trigger_input);
+                    let normalized_input = normalize_value_with_schema(
+                        trigger_input_cbor,
+                        input_schema,
+                        &self.schema_index,
+                    )
+                    .map_err(|err| {
+                        KernelError::Manifest(format!(
+                            "trigger input failed schema validation for event '{}' -> plan '{}': {err}",
+                            event.schema, binding.plan
+                        ))
+                    })?;
+                    let input = cbor_to_expr_value(
+                        &normalized_input.value,
+                        input_schema,
+                        &self.schema_index,
+                    )?;
                     let correlation =
                         determine_correlation_value(binding, &input, event.key.as_ref());
                     let instance_id = self.scheduler.alloc_plan_id();
@@ -85,6 +133,12 @@ impl<S: Store + 'static> Kernel<S> {
                     instance.set_context(crate::plan::PlanContext::from_stamp(stamp));
                     self.plan_instances.insert(instance_id, instance);
                     self.scheduler.push_plan(instance_id);
+                } else {
+                    log::warn!(
+                        "trigger event '{}' references missing plan '{}'",
+                        event.schema,
+                        binding.plan
+                    );
                 }
             }
         }

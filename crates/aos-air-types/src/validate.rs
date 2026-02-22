@@ -108,6 +108,22 @@ pub enum ValidationError {
     },
     #[error("schema '{schema}' not found")]
     SchemaNotFound { schema: String },
+    #[error(
+        "trigger event '{event}' -> plan '{plan}' when clause references unsupported symbol {reference}; only @event.* is allowed"
+    )]
+    TriggerWhenInvalidReference {
+        event: String,
+        plan: String,
+        reference: String,
+    },
+    #[error(
+        "trigger event '{event}' -> plan '{plan}' input_expr references unsupported symbol {reference}; only @event.* is allowed"
+    )]
+    TriggerInputExprInvalidReference {
+        event: String,
+        plan: String,
+        reference: String,
+    },
     #[error("effect kind '{kind}' not found in catalog or built-ins")]
     EffectNotFound { kind: String },
     #[error("capability grant '{cap}' not found")]
@@ -908,6 +924,7 @@ pub fn validate_manifest(
                 schema: trigger.event.as_str().to_string(),
             });
         }
+        validate_trigger_projection(trigger)?;
     }
 
     for policy in policies.values() {
@@ -1015,16 +1032,49 @@ fn classify_reference(reference: &str) -> ReferenceKind {
     }
 }
 
+fn validate_trigger_projection(trigger: &crate::Trigger) -> Result<(), ValidationError> {
+    if let Some(predicate) = &trigger.when {
+        let mut refs = Vec::new();
+        collect_expr_refs(predicate, &mut refs);
+        for reference in refs {
+            if !matches!(classify_reference(&reference), ReferenceKind::Event) {
+                return Err(ValidationError::TriggerWhenInvalidReference {
+                    event: trigger.event.as_str().to_string(),
+                    plan: trigger.plan.clone(),
+                    reference,
+                });
+            }
+        }
+    }
+
+    if let Some(crate::ExprOrValue::Expr(expr)) = &trigger.input_expr {
+        let mut refs = Vec::new();
+        collect_expr_refs(expr, &mut refs);
+        for reference in refs {
+            if !matches!(classify_reference(&reference), ReferenceKind::Event) {
+                return Err(ValidationError::TriggerInputExprInvalidReference {
+                    event: trigger.event.as_str().to_string(),
+                    plan: trigger.plan.clone(),
+                    reference,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         CapEnforcer, CapGrant, CapType, DefCap, DefModule, DefPlan, DefPolicy, DefSchema,
-        EffectKind, Expr, ExprConst, ExprRecord, ExprRef, HashRef, Manifest, ManifestDefaults,
+        EffectKind, Expr, ExprConst, ExprOrValue, ExprRecord, ExprRef, HashRef, Manifest,
+        ManifestDefaults,
         ModuleAbi, ModuleBinding, ModuleKind, NamedRef, PlanBind, PlanBindEffect, PlanEdge,
         PlanStep, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
         PlanStepKind, PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent,
-        SchemaRef, SecretDecl, SecretEntry, SecretPolicy, TypeExpr, TypeRecord, TypeRef,
+        SchemaRef, SecretDecl, SecretEntry, SecretPolicy, Trigger, TypeExpr, TypeRecord, TypeRef,
         TypeVariant, ValueLiteral, ValueRecord,
     };
     use indexmap::IndexMap;
@@ -1383,6 +1433,106 @@ mod tests {
             err,
             ValidationError::SchemaNotFound { schema }
             if schema == "com.acme/MissingEvent@1"
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_trigger_when_with_non_event_reference() {
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![Trigger {
+                event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                plan: "com.acme/Plan@1".into(),
+                correlate_by: None,
+                when: Some(Expr::Ref(ExprRef {
+                    reference: "@plan.input.id".into(),
+                })),
+                input_expr: None,
+            }],
+        };
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/Event@1".to_string(),
+            DefSchema {
+                name: "com.acme/Event@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        let modules = HashMap::new();
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let caps = HashMap::new();
+        let policies = HashMap::new();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::TriggerWhenInvalidReference { reference, .. }
+            if reference == "@plan.input.id"
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_trigger_input_expr_with_non_event_reference() {
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![Trigger {
+                event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                plan: "com.acme/Plan@1".into(),
+                correlate_by: None,
+                when: None,
+                input_expr: Some(ExprOrValue::Expr(Expr::Ref(ExprRef {
+                    reference: "@var:payload".into(),
+                }))),
+            }],
+        };
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/Event@1".to_string(),
+            DefSchema {
+                name: "com.acme/Event@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        let modules = HashMap::new();
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let caps = HashMap::new();
+        let policies = HashMap::new();
+        let err = validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::TriggerInputExprInvalidReference { reference, .. }
+            if reference == "@var:payload"
         ));
     }
 

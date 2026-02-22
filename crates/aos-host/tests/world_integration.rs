@@ -1,7 +1,8 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefModule, DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode,
-    ExprOrValue, ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
+    DefModule, DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprMap, ExprOp,
+    ExprOpCode, ExprOrValue, ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
+    PlanStepAssign,
     PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
     PlanStepRaiseEvent, ReducerAbi, RoutingEvent, Trigger, TypeExpr, TypePrimitive,
     TypePrimitiveBool, TypePrimitiveInt, TypePrimitiveNat, TypePrimitiveText, TypeRecord, TypeRef,
@@ -1391,6 +1392,196 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
     let mut more_effects = world.drain_effects().expect("drain effects");
     assert_eq!(more_effects.len(), 1);
     assert!(effect_params_text(&more_effects.remove(0)).ends_with("other"));
+}
+
+#[test]
+fn trigger_when_filters_plan_start() {
+    let store = fixtures::new_mem_store();
+    let plan_name = "com.acme/FilteredPlan@1";
+    let plan = DefPlan {
+        name: plan_name.into(),
+        input: fixtures::schema("com.acme/PlanIn@1"),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![
+            PlanStep {
+                id: "emit".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: EffectKind::http_request(),
+                    params: http_params_literal("run"),
+                    cap: "cap_http".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ],
+        edges: vec![PlanEdge {
+            from: "emit".into(),
+            to: "end".into(),
+            when: None,
+        }],
+        required_caps: vec!["cap_http".into()],
+        allowed_effects: vec![EffectKind::http_request()],
+        invariants: vec![],
+    };
+    let trigger = Trigger {
+        event: fixtures::schema(START_SCHEMA),
+        plan: plan_name.into(),
+        correlate_by: None,
+        when: Some(Expr::Op(ExprOp {
+            op: ExprOpCode::Eq,
+            args: vec![
+                Expr::Ref(ExprRef {
+                    reference: "@event.id".into(),
+                }),
+                Expr::Const(ExprConst::Text { text: "go".into() }),
+            ],
+        })),
+        input_expr: None,
+    };
+    let mut loaded =
+        build_loaded_manifest_with_http_enforcer(&store, vec![plan], vec![trigger], vec![], vec![]);
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+        ],
+    );
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("skip"))
+        .expect("submit filtered event");
+    world.kernel.tick_until_idle().unwrap();
+    assert!(
+        world.drain_effects().expect("drain effects").is_empty(),
+        "trigger.when=false should not spawn plan"
+    );
+
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("go"))
+        .expect("submit matching event");
+    world.kernel.tick_until_idle().unwrap();
+    let mut effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 1);
+    assert!(effect_params_text(&effects.remove(0)).ends_with("run"));
+}
+
+#[test]
+fn trigger_input_expr_projects_event_into_plan_input() {
+    let store = fixtures::new_mem_store();
+    let plan_name = "com.acme/ProjectedPlan@1";
+    let plan = DefPlan {
+        name: plan_name.into(),
+        input: fixtures::schema("com.acme/PlanIn@1"),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![
+            PlanStep {
+                id: "emit".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: EffectKind::http_request(),
+                    params: Expr::Record(ExprRecord {
+                        record: IndexMap::from([
+                            (
+                                "method".into(),
+                                Expr::Const(ExprConst::Text { text: "GET".into() }),
+                            ),
+                            (
+                                "url".into(),
+                                Expr::Ref(ExprRef {
+                                    reference: "@plan.input.id".into(),
+                                }),
+                            ),
+                            ("headers".into(), Expr::Map(ExprMap { map: vec![] })),
+                            (
+                                "body_ref".into(),
+                                Expr::Const(ExprConst::Null {
+                                    null: EmptyObject::default(),
+                                }),
+                            ),
+                        ]),
+                    })
+                    .into(),
+                    cap: "cap_http".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ],
+        edges: vec![PlanEdge {
+            from: "emit".into(),
+            to: "end".into(),
+            when: None,
+        }],
+        required_caps: vec!["cap_http".into()],
+        allowed_effects: vec![EffectKind::http_request()],
+        invariants: vec![],
+    };
+    let trigger = Trigger {
+        event: fixtures::schema("com.acme/Envelope@1"),
+        plan: plan_name.into(),
+        correlate_by: None,
+        when: None,
+        input_expr: Some(Expr::Ref(ExprRef {
+            reference: "@event.payload".into(),
+        })
+        .into()),
+    };
+    let mut loaded =
+        build_loaded_manifest_with_http_enforcer(&store, vec![plan], vec![trigger], vec![], vec![]);
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            def_text_record_schema(
+                "com.acme/EnvelopePayload@1",
+                vec![("id", text_type())],
+            ),
+            DefSchema {
+                name: "com.acme/Envelope@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::from([
+                        ("kind".into(), text_type()),
+                        (
+                            "payload".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema("com.acme/EnvelopePayload@1"),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
+        ],
+    );
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    world
+        .submit_event_result(
+            "com.acme/Envelope@1",
+            &json!({
+                "kind": "sync",
+                "payload": { "id": "projected-id" }
+            }),
+        )
+        .expect("submit envelope");
+    world.kernel.tick_until_idle().unwrap();
+    let mut effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(effect_params_text(&effects.remove(0)), "projected-id");
 }
 
 #[test]

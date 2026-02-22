@@ -845,6 +845,10 @@ pub struct Trigger {
     pub plan: Name,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlate_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_expr: Option<ExprOrValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

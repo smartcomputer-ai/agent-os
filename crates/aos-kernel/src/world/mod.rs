@@ -8,7 +8,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, HashRef, Manifest, Name,
-    NamedRef, PlanStepKind, SecretDecl, SecretEntry, TypeExpr, TypePrimitive, builtins,
+    NamedRef, PlanStepKind, SecretDecl, SecretEntry, TypeExpr, TypePrimitive, Expr, ExprOrValue,
+    builtins,
     catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
@@ -265,6 +266,8 @@ fn normalize_def_kind(input: &str) -> Option<&'static str> {
 struct PlanTriggerBinding {
     plan: String,
     correlate_by: Option<String>,
+    when: Option<Expr>,
+    input_expr: Option<ExprOrValue>,
 }
 
 #[derive(Clone, Debug)]

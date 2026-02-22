@@ -17,7 +17,7 @@ use serde_cbor::{self, Value as CborValue};
 
 use crate::error::KernelError;
 
-pub(super) fn value_to_bool(value: ExprValue) -> Result<bool, KernelError> {
+pub(crate) fn value_to_bool(value: ExprValue) -> Result<bool, KernelError> {
     match value {
         ExprValue::Bool(v) => Ok(v),
         other => Err(KernelError::Manifest(format!(
@@ -27,7 +27,7 @@ pub(super) fn value_to_bool(value: ExprValue) -> Result<bool, KernelError> {
     }
 }
 
-pub(super) fn eval_expr_or_value(
+pub(crate) fn eval_expr_or_value(
     expr_or_value: &ExprOrValue,
     env: &ExprEnv,
     context: &str,
@@ -125,7 +125,7 @@ fn literal_to_value_key(literal: &ValueLiteral) -> Result<ValueKey, String> {
     }
 }
 
-pub(super) fn expr_value_to_cbor_value(value: &ExprValue) -> CborValue {
+pub(crate) fn expr_value_to_cbor_value(value: &ExprValue) -> CborValue {
     match value {
         ExprValue::Unit | ExprValue::Null => CborValue::Null,
         ExprValue::Bool(v) => CborValue::Bool(*v),

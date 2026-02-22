@@ -109,7 +109,9 @@
         "properties": {
           "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
           "plan": { "$ref": "common.schema.json#/$defs/Name" },
-          "correlate_by": { "type": "string" }
+          "correlate_by": { "type": "string" },
+          "when": { "$ref": "common.schema.json#/$defs/Expr" },
+          "input_expr": { "$ref": "common.schema.json#/$defs/ExprOrValue" }
         },
         "required": ["event","plan"],
         "additionalProperties": false

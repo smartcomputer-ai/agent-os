@@ -1,7 +1,7 @@
 # P2: Plan Composition in AIR v1 (Projection + Subplans)
 
 **Priority**: P2  
-**Status**: Proposed (kernel/runtime work)  
+**Status**: In Progress (`B1` complete on 2026-02-22; `B2` pending)  
 **Depends on**: P1 for distribution baseline  
 **Source inspiration**: `roadmap/vX-future/p3-plans-v1.1.md`
 
@@ -153,17 +153,19 @@ No ambient authority is introduced by composition.
 
 ### Milestone B1: Trigger Projection
 
+**Status**: Complete (2026-02-22)
+
 Kernel/runtime:
 
-1. extend trigger model with `when` and `input_expr`,
-2. evaluate and type-check at plan-start boundary,
-3. add manifest/validator checks for expression refs and bool guard typing.
+1. [x] extend trigger model with `when` and `input_expr`,
+2. [x] evaluate and type-check at plan-start boundary,
+3. [x] add manifest/validator checks for expression refs and bool guard typing.
 
 Tooling/tests:
 
-1. schema updates for trigger definition,
-2. loader round-trip tests,
-3. integration test replacing an envelope-wrapper plan with projection-only trigger.
+1. [x] schema updates for trigger definition,
+2. [x] loader round-trip tests,
+3. [x] integration test replacing an envelope-wrapper plan with projection-only trigger.
 
 ### Milestone B2: Subplan Ops
 

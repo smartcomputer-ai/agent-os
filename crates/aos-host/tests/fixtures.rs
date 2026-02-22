@@ -85,6 +85,8 @@ pub fn start_trigger(plan: &str) -> Trigger {
         event: schema(START_SCHEMA),
         plan: plan.to_string(),
         correlate_by: None,
+        when: None,
+        input_expr: None,
     }
 }
 
@@ -94,6 +96,8 @@ pub fn timer_trigger(plan: &str) -> Trigger {
         event: schema(SYS_TIMER_FIRED),
         plan: plan.to_string(),
         correlate_by: None,
+        when: None,
+        input_expr: None,
     }
 }
 

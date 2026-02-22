@@ -20,7 +20,7 @@ mod readiness;
 mod step_handlers;
 mod waits;
 use self::step_handlers::StepTickControl;
-use codec::value_to_bool;
+pub(crate) use codec::{eval_expr_or_value, expr_value_to_cbor_value, value_to_bool};
 
 #[derive(Default)]
 pub struct PlanRegistry {

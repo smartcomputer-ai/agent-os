@@ -83,6 +83,31 @@ fn manifest_with_defaults_routing_and_triggers_validates() {
 }
 
 #[test]
+fn manifest_trigger_projection_round_trip() {
+    let manifest_json = json!({
+        "$kind": "manifest",
+        "air_version": "1",
+        "schemas": [{"name": "com.acme/Event@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+        "modules": [],
+        "plans": [{"name": "com.acme/Plan@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+        "effects": [],
+        "caps": [],
+        "policies": [],
+        "triggers": [{
+            "event": "com.acme/Event@1",
+            "plan": "com.acme/Plan@1",
+            "when": {"bool": true},
+            "input_expr": {"ref": "@event.payload"}
+        }]
+    });
+    assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
+    let manifest: Manifest = serde_json::from_value(manifest_json.clone()).expect("manifest");
+    assert_eq!(manifest.triggers.len(), 1);
+    let round = serde_json::to_value(manifest).expect("serialize");
+    assert_eq!(round["triggers"], manifest_json["triggers"]);
+}
+
+#[test]
 fn module_binding_requires_slots_schema() {
     let manifest_json = json!({
         "$kind": "manifest",
