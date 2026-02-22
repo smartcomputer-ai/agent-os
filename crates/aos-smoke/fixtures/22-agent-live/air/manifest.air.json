@@ -44,7 +44,10 @@
     { "name": "sys/Workspace@1" },
     { "name": "sys/CapEnforceWorkspace@1" }
   ],
-  "plans": [{ "name": "demo/session_workspace_sync_plan@1" }],
+  "plans": [
+    { "name": "aos.agent/core_workspace_sync@1" },
+    { "name": "demo/session_workspace_sync_wrapper@1" }
+  ],
   "caps": [{ "name": "demo/agent_live_workspace_cap@1" }],
   "policies": [{ "name": "demo/agent-live-workspace-policy@1" }],
   "defaults": {
@@ -84,7 +87,7 @@
   "triggers": [
     {
       "event": "aos.agent/SessionEvent@1",
-      "plan": "demo/session_workspace_sync_plan@1"
+      "plan": "demo/session_workspace_sync_wrapper@1"
     }
   ],
   "effects": [

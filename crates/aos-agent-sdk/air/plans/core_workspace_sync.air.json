@@ -3,6 +3,7 @@
     "$kind": "defplan",
     "name": "aos.agent/core_workspace_sync@1",
     "input": "aos.agent/WorkspaceSyncRequested@1",
+    "output": "aos.agent/SessionEventKind@1",
     "steps": [
       {
         "id": "emit_workspace_resolve",
@@ -60,19 +61,23 @@
         "bind": { "as": "resolved_version" }
       },
       {
-        "id": "raise_unchanged",
-        "op": "raise_event",
-        "event": "aos.agent/WorkspaceSyncUnchanged@1",
-        "value": {
-          "record": {
-            "workspace": {
-              "op": "get",
-              "args": [
-                { "ref": "@plan.input.workspace_binding" },
-                { "text": "workspace" }
-              ]
-            },
-            "version": { "ref": "@var:resolved_version" }
+        "id": "finish_unchanged",
+        "op": "end",
+        "result": {
+          "variant": {
+            "tag": "WorkspaceSyncUnchanged",
+            "value": {
+              "record": {
+                "workspace": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input.workspace_binding" },
+                    { "text": "workspace" }
+                  ]
+                },
+                "version": { "ref": "@var:resolved_version" }
+              }
+            }
           }
         }
       },
@@ -292,35 +297,38 @@
         "bind": { "as": "tool_catalog_bytes" }
       },
       {
-        "id": "raise_snapshot_ready",
-        "op": "raise_event",
-        "event": "aos.agent/WorkspaceSnapshotReady@1",
-        "value": {
-          "record": {
-            "snapshot": {
+        "id": "finish_snapshot_ready",
+        "op": "end",
+        "result": {
+          "variant": {
+            "tag": "WorkspaceSnapshotReady",
+            "value": {
               "record": {
-                "workspace": {
-                  "op": "get",
-                  "args": [
-                    { "ref": "@plan.input.workspace_binding" },
-                    { "text": "workspace" }
-                  ]
+                "snapshot": {
+                  "record": {
+                    "workspace": {
+                      "op": "get",
+                      "args": [
+                        { "ref": "@plan.input.workspace_binding" },
+                        { "text": "workspace" }
+                      ]
+                    },
+                    "version": { "ref": "@var:resolved_version" },
+                    "root_hash": { "ref": "@var:workspace_root" },
+                    "index_ref": { "ref": "@var:index_ref" },
+                    "prompt_pack": { "ref": "@plan.input.prompt_pack" },
+                    "tool_catalog": { "ref": "@plan.input.tool_catalog" },
+                    "prompt_pack_ref": { "ref": "@var:prompt_pack_ref" },
+                    "tool_catalog_ref": { "ref": "@var:tool_catalog_ref" }
+                  }
                 },
-                "version": { "ref": "@var:resolved_version" },
-                "root_hash": { "ref": "@var:workspace_root" },
-                "index_ref": { "ref": "@var:index_ref" },
-                "prompt_pack": { "ref": "@plan.input.prompt_pack" },
-                "tool_catalog": { "ref": "@plan.input.tool_catalog" },
-                "prompt_pack_ref": { "ref": "@var:prompt_pack_ref" },
-                "tool_catalog_ref": { "ref": "@var:tool_catalog_ref" }
+                "prompt_pack_bytes": { "ref": "@var:prompt_pack_bytes" },
+                "tool_catalog_bytes": { "ref": "@var:tool_catalog_bytes" }
               }
-            },
-            "prompt_pack_bytes": { "ref": "@var:prompt_pack_bytes" },
-            "tool_catalog_bytes": { "ref": "@var:tool_catalog_bytes" }
+            }
           }
         }
-      },
-      { "id": "finish", "op": "end" }
+      }
     ],
     "edges": [
       { "from": "emit_workspace_resolve", "to": "await_workspace_resolve" },
@@ -328,7 +336,7 @@
       { "from": "assign_workspace_root", "to": "assign_resolved_version" },
       {
         "from": "assign_resolved_version",
-        "to": "raise_unchanged",
+        "to": "finish_unchanged",
         "when": {
           "op": "and",
           "args": [
@@ -488,10 +496,8 @@
         "from": "assign_tool_catalog_ref_null",
         "to": "assign_tool_catalog_bytes_null"
       },
-      { "from": "assign_tool_catalog_bytes", "to": "raise_snapshot_ready" },
-      { "from": "assign_tool_catalog_bytes_null", "to": "raise_snapshot_ready" },
-      { "from": "raise_snapshot_ready", "to": "finish" },
-      { "from": "raise_unchanged", "to": "finish" }
+      { "from": "assign_tool_catalog_bytes", "to": "finish_snapshot_ready" },
+      { "from": "assign_tool_catalog_bytes_null", "to": "finish_snapshot_ready" }
     ],
     "required_caps": ["cap_workspace"],
     "allowed_effects": [

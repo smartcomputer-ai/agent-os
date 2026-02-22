@@ -14,7 +14,7 @@
           "version": "0.1.0",
           "manifest_path": "reducer/Cargo.toml",
           "air_dir": "air",
-          "defs_hash": "sha256:67ffc77c5e82d5d22e87e246647b1a93a7e982d9a31117b47ce4f632ff637e9c"
+          "defs_hash": "sha256:7b5621a881b856c6de29991e544899dc4a166dd8b1ac1965415c7444af714c70"
         }
       }
     ]
