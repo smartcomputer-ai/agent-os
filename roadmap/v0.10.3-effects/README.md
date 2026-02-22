@@ -7,6 +7,7 @@ Focused roadmap slice for effect runtime clarity and adapter pluggability.
 - `roadmap/v0.10.3-effects/p1-current-state-and-gap-analysis.md`
 - `roadmap/v0.10.3-effects/p2-manifest-effect-bindings-and-host-profiles.md`
 - `roadmap/v0.10.3-effects/p3-adapter-pluggability-architecture-and-rollout.md`
+- `roadmap/v0.10.3-effects/p4-implementation-task-breakdown.md`
 
 ## Scope
 
@@ -19,4 +20,3 @@ Focused roadmap slice for effect runtime clarity and adapter pluggability.
 1. Changes to reducer/plan responsibility boundaries.
 2. Removing cap/policy enforcement from kernel.
 3. Replacing receipt-driven replay contract.
-
