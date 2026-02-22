@@ -1,7 +1,7 @@
 # P3: Plan Runtime Hardening (Factory-Ready, No New AIR Ops)
 
 **Priority**: P3  
-**Status**: In progress (single-fixture + tooling implementation on 2026-02-22)  
+**Status**: Complete for v0.10.1 scope (2026-02-22; strict replay-parity variant deferred)  
 **Depends on**: AIR v1 current plan semantics, P1 import reuse  
 **May run alongside**: P2 composition work
 
@@ -78,12 +78,15 @@ Implemented:
 
 ### C2: Conformance Gates
 
-**Status**: Mostly complete for selected high-value gates (2026-02-22)
+**Status**: Complete for v0.10.1 selected high-value gates (2026-02-22)
 
 1. [x] Add single-fixture conformance for correlated instance isolation + crash/resume with pending subplan receipts.
 2. [x] Add concurrent-instance cross-talk test (same schema, different correlation ids).
 3. [x] Add crash/resume test where waits survive restart and complete correctly.
-4. [ ] Strict replay parity for this subplan-heavy fixture shape (deferred; currently not a release gate for this slice).
+
+Deferred follow-up (explicitly non-gating for this release slice):
+
+1. Strict replay parity for this exact subplan-heavy fixture shape.
 
 Implemented in this pass:
 
@@ -129,6 +132,6 @@ If P2 subplan composition lands in this initiative, apply the same C1-C3 gates t
 ## Definition of Done
 
 1. Three canonical patterns (timeout, approval, correlated response) are documented and fixture-backed.
-2. Replay + crash/resume + cross-talk tests pass for those fixtures.
+2. v0.10.1 selected conformance gates pass (cross-talk + crash/resume); strict replay parity variant is tracked as follow-up.
 3. Lightweight journal-derived summaries are available in CI for at least one migrated flow.
 4. No additional AIR plan ops are required beyond current spec (plus any already approved in P2).
