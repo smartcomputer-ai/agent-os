@@ -5,7 +5,7 @@
       {
         "cargo": {
           "package": "aos-agent-sdk",
-          "air_dir": "air/exports/session-contracts",
+          "air_dir": "air",
           "manifest_path": "../../Cargo.toml"
         },
         "lock": {
@@ -13,8 +13,8 @@
           "package": "aos-agent-sdk",
           "version": "0.1.0",
           "manifest_path": "../../Cargo.toml",
-          "air_dir": "air/exports/session-contracts",
-          "defs_hash": "sha256:07175a24c702859ac0c0ac85a7d4721c49bbb2ab872cfe620349054a989b91cf"
+          "air_dir": "air",
+          "defs_hash": "sha256:67ffc77c5e82d5d22e87e246647b1a93a7e982d9a31117b47ce4f632ff637e9c"
         }
       }
     ]

@@ -93,10 +93,9 @@ pub fn load_from_assets_with_imports_and_defs(
                     match node {
                         AirNode::Manifest(found) => {
                             if !root.allow_manifest {
-                                bail!(
-                                    "import assets may not define manifest nodes (saw {})",
-                                    path.display()
-                                );
+                                // Import roots may contain authoring manifests; only the primary
+                                // world asset root contributes the manifest for load.
+                                continue;
                             }
                             if manifest.is_some() {
                                 bail!(
@@ -871,7 +870,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_manifest_nodes_in_import_assets() {
+    fn ignores_manifest_nodes_in_import_assets() {
         let tmp = TempDir::new().expect("tmp");
         let world_air = tmp.path().join("air");
         let import_air = tmp.path().join("sdk-exports");
@@ -902,15 +901,8 @@ mod tests {
         );
 
         let store = Arc::new(FsStore::open(tmp.path()).expect("store"));
-        let err = match load_from_assets_with_imports(store, &world_air, &[import_air]) {
-            Ok(_) => panic!("expected import manifest rejection"),
-            Err(err) => err,
-        };
-        let msg = err.to_string();
-        assert!(
-            msg.contains("import assets may not define manifest nodes"),
-            "unexpected error: {msg}"
-        );
+        load_from_assets_with_imports(store, &world_air, &[import_air])
+            .expect("load should ignore import manifest nodes");
     }
 
     fn write_node(path: &Path, nodes: &[AirNode]) {

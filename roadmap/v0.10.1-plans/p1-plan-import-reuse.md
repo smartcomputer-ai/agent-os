@@ -37,7 +37,7 @@ Import-based reuse fits these goals because:
 ### In scope
 
 1. Reuse `defplan` from upstream import roots.
-2. Define SDK export layout for reusable plan packs.
+2. Define SDK AIR layout conventions for reusable plan packs.
 3. Define interface contract for imported plans (IO schemas, cap slot naming, emitted events).
 4. Support two consumption modes:
    - turnkey import (minimal world-local glue, no wrapper plan when contracts match),
@@ -53,7 +53,7 @@ Import-based reuse fits these goals because:
 ## Decision Summary
 
 1. Keep using `air.imports` from `aos.sync.json` as the only import mechanism.
-2. Standardize SDK plan-pack exports under `air/exports/plan-packs/<pack>/`.
+2. Reuse SDK AIR roots directly (`air_dir: "air"`); no parallel export mirrors.
 3. Treat imported plan cap slot names as stable API.
 4. Keep world-local `cap_grants` and policy rules local to consuming world.
 5. Keep hard-error policy for same-name, different-hash conflicts.
@@ -63,19 +63,15 @@ Import-based reuse fits these goals because:
    - `composable-core`: import core orchestration and compose via wrapper/adapters where needed.
 8. Treat wrapper plans as a first-class extension mechanism, not a migration smell.
 
-## Plan-Pack Export Convention
+## Plan-Pack Convention
 
 In `crates/aos-agent-sdk`:
 
-1. `air/exports/plan-packs/<pack>/defs.air.json`
+1. Plan defs live directly under `air/plans/*.air.json`.
+2. Supporting schemas live in `air/schemas.air.json`.
+3. Consumers import `air` and tooling derives contracts from merged defs.
 
-`defs.air.json` should contain only defs (no manifest):
-
-1. reusable `defplan` nodes,
-2. required supporting `defschema` nodes for plan IO/results/events,
-3. optional helper defs needed for validation completeness.
-
-Plan-pack contract is inferred from `defs.air.json` + naming conventions (no extra metadata file):
+Plan-pack contract is inferred from imported defs + naming conventions (no extra metadata file):
 
 1. profile capability inferred from exported plan roles:
    - has `entry_*` plans => turnkey-capable,
@@ -87,7 +83,7 @@ Plan-pack contract is inferred from `defs.air.json` + naming conventions (no ext
 
 ### Why this convention
 
-1. Mirrors P3.1 export style, reducing tool complexity.
+1. Keeps definition sources singular (`air/*`) with no copy folders.
 2. Gives explicit package boundaries for plan APIs.
 3. Allows multiple packs with independent version cadence.
 4. Avoids introducing another repository-level config file while still enabling lint/scaffold tooling.
@@ -95,7 +91,7 @@ Plan-pack contract is inferred from `defs.air.json` + naming conventions (no ext
 
 ## Where Classification Lives (and Why)
 
-Plan classification should live in conventions over `defs.air.json`, not inside `defplan`.
+Plan classification should live in conventions over imported defs, not inside `defplan`.
 
 Rationale:
 
@@ -187,7 +183,7 @@ This is intentional: authority remains world-local and auditable.
       {
         "cargo": {
           "package": "aos-agent-sdk",
-          "air_dir": "air/exports/plan-packs/session-core",
+          "air_dir": "air",
           "manifest_path": "../../Cargo.toml"
         }
       }
@@ -202,7 +198,7 @@ Use existing P3.1 semantics unchanged:
 
 1. same def name + same content hash -> dedupe,
 2. same def name + different content hash -> hard error,
-3. import roots cannot define manifests.
+3. import manifests are ignored; only the primary world manifest is loaded.
 
 ### Why strict conflict behavior remains best
 
@@ -212,7 +208,7 @@ Use existing P3.1 semantics unchanged:
 
 ## Locking and Reproducibility
 
-`air.imports[].lock` is currently parsed but not enforced. For plan reuse we should prioritize lock enforcement to avoid accidental drift.
+`air.imports[].lock` is enforced with warn/error modes to avoid accidental drift.
 
 Recommended rollout:
 
@@ -239,8 +235,8 @@ Lock payload should include:
 
 ### Phase A1: Contract and profile standardization
 
-1. Add role/profile naming conventions to every exported pack.
-2. Ensure exported defs are sufficient for machine-derived contract checks (defs-only).
+1. Add role/profile naming conventions to reusable plans under `air/plans/`.
+2. Ensure AIR defs under `air/` are sufficient for machine-derived contract checks.
 3. Keep this as tooling/documentation only; no kernel changes.
 
 ### Phase A2: Import/lint enforcement
@@ -286,9 +282,9 @@ Implemented in this repo:
      - composable-core profile scaffold (wrapper template + trigger skeleton),
      - generated grants/policy remain world-local templates.
 
-4. **SDK export convention**
-   - added `crates/aos-agent-sdk/air/exports/plan-packs/session-core/defs.air.json`
-   - added pack README under `air/exports/plan-packs/session-core/README.md`
+4. **SDK AIR layout convention**
+   - reusable plan defs live under `crates/aos-agent-sdk/air/plans/*.air.json`
+   - supporting schemas live under `crates/aos-agent-sdk/air/schemas.air.json`
    - plan role naming follows `core_*`.
 
 ## Validation Gates
@@ -312,8 +308,8 @@ For any world consuming imported plans:
 
 ## Definition of Done
 
-1. SDK ships at least one convention-compliant plan pack export.
-2. At least one consumer world uses imported `defplan` from SDK export.
+1. SDK ships at least one convention-compliant reusable plan in `air/plans/`.
+2. At least one consumer world uses imported `defplan` from SDK `air/`.
 3. Conflict behavior and lock strategy are documented and exercised in CI.
 4. Local duplicate plan logic is reduced in at least one existing fixture/app.
 5. SDK ships at least:

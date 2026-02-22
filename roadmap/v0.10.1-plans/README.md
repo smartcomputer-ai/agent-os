@@ -25,7 +25,7 @@ Document: `roadmap/v0.10.1-plans/p1-plan-import-reuse.md`
 Focus:
 
 1. Reuse plans from upstream crates/folders via `aos.sync.json` imports.
-2. Standardize SDK plan-pack exports.
+2. Standardize SDK `air/` layout conventions for plan-pack reuse.
 3. Define plan interface contracts for imported plans.
 4. Keep merge/conflict behavior deterministic and strict.
 

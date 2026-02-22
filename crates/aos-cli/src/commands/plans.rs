@@ -609,7 +609,7 @@ fn analyze_import_packs(imports: &[ResolvedAirImport]) -> Result<Vec<PackReport>
     let mut reports = Vec::new();
     for import in imports {
         let plans = collect_plan_nodes(&import.root, true)?;
-        let pack = infer_pack_name(&import.root);
+        let pack = infer_pack_name(import);
 
         let mut unknown_role_plans = Vec::new();
         let mut contracts = Vec::new();
@@ -764,7 +764,22 @@ fn flow_name_from_plan(plan_name: &str) -> String {
     sanitize_id(stem)
 }
 
-fn infer_pack_name(root: &Path) -> String {
+fn infer_pack_name(import: &ResolvedAirImport) -> String {
+    let root = &import.root;
+    let root_name = root
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| root.display().to_string());
+
+    if root_name == "air" {
+        if let Some(package) = import.expected_lock.package.as_ref() {
+            return package.clone();
+        }
+        if let Some(path) = import.expected_lock.path.as_ref() {
+            return sanitize_id(path);
+        }
+    }
+
     let parts = root
         .iter()
         .map(|segment| segment.to_string_lossy().to_string())
@@ -774,9 +789,7 @@ fn infer_pack_name(root: &Path) -> String {
             return parts[idx + 1].clone();
         }
     }
-    root.file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| root.display().to_string())
+    root_name
 }
 
 fn sanitize_id(value: &str) -> String {
@@ -1006,7 +1019,37 @@ mod tests {
 
     #[test]
     fn infer_pack_name_prefers_plan_packs_segment() {
-        let root = PathBuf::from("/repo/crates/aos-agent-sdk/air/exports/plan-packs/session-core");
-        assert_eq!(infer_pack_name(&root), "session-core");
+        let import = ResolvedAirImport {
+            root: PathBuf::from("/repo/crates/aos-agent-sdk/air/plan-packs/session-core"),
+            expected_lock: crate::commands::sync::ImportLockPayload {
+                source: "cargo".to_string(),
+                package: Some("aos-agent-sdk".to_string()),
+                version: Some("0.1.0".to_string()),
+                source_id: None,
+                manifest_path: Some("Cargo.toml".to_string()),
+                air_dir: Some("air/plan-packs/session-core".to_string()),
+                path: None,
+                defs_hash: "sha256:abc".to_string(),
+            },
+        };
+        assert_eq!(infer_pack_name(&import), "session-core");
+    }
+
+    #[test]
+    fn infer_pack_name_prefers_package_for_root_air() {
+        let import = ResolvedAirImport {
+            root: PathBuf::from("/repo/crates/aos-agent-sdk/air"),
+            expected_lock: crate::commands::sync::ImportLockPayload {
+                source: "cargo".to_string(),
+                package: Some("aos-agent-sdk".to_string()),
+                version: Some("0.1.0".to_string()),
+                source_id: None,
+                manifest_path: Some("Cargo.toml".to_string()),
+                air_dir: Some("air".to_string()),
+                path: None,
+                defs_hash: "sha256:def".to_string(),
+            },
+        };
+        assert_eq!(infer_pack_name(&import), "aos-agent-sdk");
     }
 }

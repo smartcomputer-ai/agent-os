@@ -9,6 +9,8 @@ This directory holds canonical reusable AIR assets for the Agent SDK.
 - `policies.air.json`: placeholder for SDK policy templates
 - `plans/`: reusable plan templates (for example workspace sync)
   including sync-time workspace JSON validation inputs.
-- `exports/session-contracts/defs.air.json`: defs-only export for app/world imports
-- `exports/plan-packs/session-core/defs.air.json`: defs-only plan-pack export
-  for reusable `core_*` orchestration flows
+
+Import policy:
+- Consumers should import this AIR root directly (`air_dir: "air"`).
+- Import loaders ignore manifest nodes in imported roots and only merge defs.
+- No parallel `air/exports/*` mirrors are maintained; definitions live once here.

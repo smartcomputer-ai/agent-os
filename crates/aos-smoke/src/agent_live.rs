@@ -28,7 +28,7 @@ const REDUCER_NAME: &str = "demo/AgentLiveSessionReducer@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/22-agent-live/reducer";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
-const SDK_SESSION_EXPORT: &str = "crates/aos-agent-sdk/air/exports/session-contracts";
+const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
 const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 const AGENT_WORKSPACE_NAME: &str = "agent-live";
 const AGENT_WORKSPACE_DIR: &str = "agent-ws";
@@ -90,8 +90,8 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let provider = resolve_provider(provider, model_override)?;
     let fixture_root = crate::workspace_root().join(FIXTURE_ROOT);
     let assets_root = fixture_root.join("air");
-    let sdk_export_root = crate::workspace_root().join(SDK_SESSION_EXPORT);
-    let import_roots = vec![sdk_export_root];
+    let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
+    let import_roots = vec![sdk_air_root];
 
     let mut host = ExampleHost::prepare_with_imports(
         HarnessConfig {

@@ -428,10 +428,9 @@ fn import_defs_hash(root: &Path) -> Result<String> {
         {
             match node {
                 AirNode::Manifest(_) => {
-                    anyhow::bail!(
-                        "import assets may not define manifest nodes (saw {})",
-                        path.display()
-                    );
+                    // Import roots may include authoring manifests; they do not participate in
+                    // imported defs identity.
+                    continue;
                 }
                 AirNode::Defschema(schema) => {
                     let name = schema.name.clone();
@@ -765,7 +764,7 @@ mod tests {
         let default_air = workspace_root.join("air");
 
         let mut config = empty_config();
-        let import_root = workspace_root.join("crates/aos-agent-sdk/air/exports/session-contracts");
+        let import_root = workspace_root.join("crates/aos-agent-sdk/air");
         let lock_hash = import_defs_hash(&import_root).expect("import hash");
         config.air = Some(AirSync {
             dir: Some(PathBuf::from("apps/demiurge/air")),
@@ -775,7 +774,7 @@ mod tests {
                     package: "aos-agent-sdk".into(),
                     version: None,
                     source: None,
-                    air_dir: Some(PathBuf::from("air/exports/session-contracts")),
+                    air_dir: Some(PathBuf::from("air")),
                     manifest_path: Some(PathBuf::from("Cargo.toml")),
                 }),
                 lock: Some(AirImportLock::DefsHash(lock_hash)),
@@ -786,10 +785,8 @@ mod tests {
             resolve_air_sources(&world_root, &map_root, &config, &default_air, &reducer_dir)
                 .expect("resolve");
         let actual = std::fs::canonicalize(&resolved.import_dirs[0]).expect("canonical actual");
-        let expected = std::fs::canonicalize(
-            workspace_root.join("crates/aos-agent-sdk/air/exports/session-contracts"),
-        )
-        .expect("canonical expected");
+        let expected = std::fs::canonicalize(workspace_root.join("crates/aos-agent-sdk/air"))
+            .expect("canonical expected");
         assert_eq!(actual, expected);
     }
 
@@ -827,6 +824,26 @@ mod tests {
         assert_eq!(resolved.import_dirs.len(), 1);
         assert_eq!(resolved.warnings.len(), 1);
         assert!(resolved.warnings[0].contains("lock missing"));
+    }
+
+    #[test]
+    fn import_defs_hash_ignores_manifest_nodes() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let import_root = temp.path().join("sdk");
+        std::fs::create_dir_all(&import_root).expect("mkdir");
+        std::fs::write(
+            import_root.join("defs.air.json"),
+            r#"[{"$kind":"defschema","name":"demo/S@1","type":{"text":{}}}]"#,
+        )
+        .expect("write defs");
+        std::fs::write(
+            import_root.join("manifest.air.json"),
+            r#"{"$kind":"manifest","air_version":"v1","schemas":[],"modules":[],"plans":[],"effects":[],"caps":[],"policies":[],"secrets":[],"module_bindings":{},"triggers":[]}"#,
+        )
+        .expect("write manifest");
+
+        let hash = import_defs_hash(&import_root).expect("hash");
+        assert!(hash.starts_with("sha256:"));
     }
 
     #[test]

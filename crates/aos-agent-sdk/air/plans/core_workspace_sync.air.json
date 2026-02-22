@@ -1,7 +1,7 @@
 [
   {
     "$kind": "defplan",
-    "name": "aos.agent/workspace_sync_plan@1",
+    "name": "aos.agent/core_workspace_sync@1",
     "input": "aos.agent/WorkspaceSyncRequested@1",
     "steps": [
       {
