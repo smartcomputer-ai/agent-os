@@ -29,6 +29,20 @@ pub fn run(example_root: &Path) -> Result<()> {
     // Run #1: boundary queues + deterministic tool-batch settle.
     host.send_event(&run_requested_event(1))?;
     host.send_event(&session_event(0, 2, SessionEventKind::RunStarted))?;
+    let run1_state: SessionState = host.read_state()?;
+    ensure!(
+        run1_state
+            .active_run_config
+            .as_ref()
+            .and_then(|cfg| cfg.prompt_refs.as_ref())
+            .is_some_and(|refs| {
+                refs == &vec![
+                    "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                        .to_string(),
+                ]
+            }),
+        "expected direct prompt refs materialized into active run config"
+    );
     host.send_event(&session_event(
         0,
         3,
@@ -553,6 +567,10 @@ fn run_requested_event_with_config(step_epoch: u64, provider: &str, model: &str)
                 max_tokens: Some(512),
                 workspace_binding: None,
                 default_prompt_pack: None,
+                default_prompt_refs: Some(vec![
+                    "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                        .into(),
+                ]),
                 default_tool_catalog: None,
             }),
         },

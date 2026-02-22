@@ -199,6 +199,7 @@
         "max_tokens": { "option": { "nat": {} } },
         "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
         "default_prompt_pack": { "option": { "text": {} } },
+        "default_prompt_refs": { "option": { "list": { "hash": {} } } },
         "default_tool_catalog": { "option": { "text": {} } }
       }
     }
@@ -214,6 +215,7 @@
         "max_tokens": { "option": { "nat": {} } },
         "workspace_binding": { "option": { "ref": "aos.agent/WorkspaceBinding@1" } },
         "prompt_pack": { "option": { "text": {} } },
+        "prompt_refs": { "option": { "list": { "hash": {} } } },
         "tool_catalog": { "option": { "text": {} } }
       }
     }

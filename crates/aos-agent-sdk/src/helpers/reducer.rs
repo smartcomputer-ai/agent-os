@@ -428,6 +428,7 @@ fn select_run_config(session: &SessionConfig, override_cfg: Option<&SessionConfi
         max_tokens: source.max_tokens,
         workspace_binding: source.workspace_binding.clone(),
         prompt_pack: source.default_prompt_pack.clone(),
+        prompt_refs: source.default_prompt_refs.clone(),
         tool_catalog: source.default_tool_catalog.clone(),
     }
 }
@@ -842,6 +843,7 @@ mod tests {
             max_tokens: Some(512),
             workspace_binding: None,
             default_prompt_pack: None,
+            default_prompt_refs: None,
             default_tool_catalog: None,
         }
     }
@@ -921,6 +923,7 @@ mod tests {
             max_tokens: Some(1024),
             workspace_binding: None,
             default_prompt_pack: None,
+            default_prompt_refs: None,
             default_tool_catalog: None,
         };
 
@@ -947,6 +950,27 @@ mod tests {
         assert!(state.active_turn_id.is_some());
         assert!(state.active_step_id.is_some());
         assert_eq!(state.active_run_step_count, 1);
+    }
+
+    #[test]
+    fn run_request_materializes_direct_prompt_refs() {
+        let mut state = base_state();
+        state.session_config.default_prompt_refs = Some(vec![
+            "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".into(),
+        ]);
+
+        apply_session_event(&mut state, &run_requested(None)).expect("run requested");
+        apply_session_event(&mut state, &run_started(2)).expect("run started");
+
+        assert_eq!(
+            state
+                .active_run_config
+                .as_ref()
+                .and_then(|cfg| cfg.prompt_refs.as_ref()),
+            Some(&vec![
+                "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".into()
+            ])
+        );
     }
 
     #[test]
@@ -981,6 +1005,7 @@ mod tests {
             max_tokens: Some(512),
             workspace_binding: None,
             prompt_pack: None,
+            prompt_refs: None,
             tool_catalog: None,
         });
 
@@ -1261,6 +1286,7 @@ mod tests {
             max_tokens: Some(64),
             workspace_binding: None,
             default_prompt_pack: None,
+            default_prompt_refs: None,
             default_tool_catalog: None,
         };
 
@@ -1286,6 +1312,7 @@ mod tests {
             max_tokens: Some(64),
             workspace_binding: None,
             default_prompt_pack: None,
+            default_prompt_refs: None,
             default_tool_catalog: None,
         };
 
@@ -1317,6 +1344,7 @@ mod tests {
                     max_tokens: Some(64),
                     workspace_binding: None,
                     default_prompt_pack: None,
+                    default_prompt_refs: None,
                     default_tool_catalog: None,
                 }),
             },

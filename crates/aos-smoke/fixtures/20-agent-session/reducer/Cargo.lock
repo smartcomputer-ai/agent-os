@@ -19,6 +19,7 @@ dependencies = [
  "aos-wasm-abi",
  "aos-wasm-sdk",
  "serde",
+ "serde_bytes",
  "serde_cbor",
  "serde_json",
 ]

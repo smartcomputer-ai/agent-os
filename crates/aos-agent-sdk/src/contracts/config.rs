@@ -1,4 +1,5 @@
 use alloc::string::String;
+use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use super::WorkspaceBinding;
@@ -19,6 +20,7 @@ pub struct SessionConfig {
     pub max_tokens: Option<u64>,
     pub workspace_binding: Option<WorkspaceBinding>,
     pub default_prompt_pack: Option<String>,
+    pub default_prompt_refs: Option<Vec<String>>,
     pub default_tool_catalog: Option<String>,
 }
 
@@ -30,5 +32,6 @@ pub struct RunConfig {
     pub max_tokens: Option<u64>,
     pub workspace_binding: Option<WorkspaceBinding>,
     pub prompt_pack: Option<String>,
+    pub prompt_refs: Option<Vec<String>>,
     pub tool_catalog: Option<String>,
 }

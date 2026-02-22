@@ -11,16 +11,21 @@ pub struct WorkspaceStepInputs {
 /// Build LLM step refs from active workspace snapshot plus per-step inputs.
 ///
 /// - `history_message_refs` should be ordered oldest -> newest.
+/// - `explicit_prompt_refs`, when provided, override workspace prompt-pack refs.
 /// - `explicit_tool_refs`, when provided, override workspace tool catalog refs.
 pub fn materialize_workspace_step_inputs(
     active_snapshot: Option<&WorkspaceSnapshot>,
     history_message_refs: Vec<alloc::string::String>,
+    explicit_prompt_refs: Option<Vec<alloc::string::String>>,
     explicit_tool_refs: Option<Vec<alloc::string::String>>,
 ) -> WorkspaceStepInputs {
-    let mut message_refs = Vec::new();
-    if let Some(reference) = active_snapshot.and_then(|snap| snap.prompt_pack_ref.clone()) {
-        message_refs.push(reference);
-    }
+    let mut message_refs = if let Some(explicit) = explicit_prompt_refs {
+        explicit
+    } else if let Some(reference) = active_snapshot.and_then(|snap| snap.prompt_pack_ref.clone()) {
+        vec![reference]
+    } else {
+        Vec::new()
+    };
     message_refs.extend(history_message_refs);
 
     let tool_refs = if explicit_tool_refs.is_some() {
@@ -65,6 +70,7 @@ mod tests {
             Some(&snapshot()),
             vec!["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into()],
             None,
+            None,
         );
         assert_eq!(inputs.message_refs.len(), 2);
         assert_eq!(
@@ -79,7 +85,7 @@ mod tests {
 
     #[test]
     fn uses_workspace_tool_catalog_ref_when_no_explicit_tool_refs() {
-        let inputs = materialize_workspace_step_inputs(Some(&snapshot()), vec![], None);
+        let inputs = materialize_workspace_step_inputs(Some(&snapshot()), vec![], None, None);
         assert_eq!(
             inputs.tool_refs,
             Some(vec![
@@ -89,10 +95,34 @@ mod tests {
     }
 
     #[test]
+    fn explicit_prompt_refs_override_workspace_prompt_pack_ref() {
+        let inputs = materialize_workspace_step_inputs(
+            Some(&snapshot()),
+            vec!["sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".into()],
+            Some(vec![
+                "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee".into(),
+            ]),
+            None,
+        );
+        assert_eq!(
+            inputs.message_refs,
+            vec![
+                alloc::string::String::from(
+                    "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                ),
+                alloc::string::String::from(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn explicit_tool_refs_override_workspace_catalog_ref() {
         let inputs = materialize_workspace_step_inputs(
             Some(&snapshot()),
             vec![],
+            None,
             Some(vec![
                 "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".into(),
             ]),

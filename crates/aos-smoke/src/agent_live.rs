@@ -156,6 +156,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 max_tokens: Some(768),
                 workspace_binding: Some(workspace_binding),
                 default_prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
+                default_prompt_refs: None,
                 default_tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
             }),
         },
