@@ -7,9 +7,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, HashRef, Manifest, Name,
-    NamedRef, PlanStepKind, SecretDecl, SecretEntry, TypeExpr, TypePrimitive, Expr, ExprOrValue,
-    builtins,
+    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Expr, ExprOrValue,
+    HashRef, Manifest, Name, NamedRef, PlanStepKind, SecretDecl, SecretEntry, TypeExpr,
+    TypePrimitive, builtins,
     catalog::EffectCatalog,
     plan_literals::{SchemaIndex, normalize_plan_literals},
     value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
@@ -37,10 +37,10 @@ use crate::journal::{
     AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, DomainEventRecord, EffectIntentRecord,
     EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry, JournalKind,
     JournalRecord, JournalSeq, ManifestRecord, OwnedJournalEntry, PlanEndStatus, PlanEndedRecord,
-    PlanResultRecord, ProposedRecord, ShadowReportRecord, SnapshotRecord,
+    PlanResultRecord, PlanStartedRecord, ProposedRecord, ShadowReportRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
-use crate::plan::{PlanInstance, PlanRegistry, ReducerSchema};
+use crate::plan::{PlanCompletionValue, PlanInstance, PlanRegistry, ReducerSchema};
 use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::pure::PureRegistry;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
@@ -53,8 +53,9 @@ use crate::shadow::{
     DeltaKind, LedgerDelta, LedgerKind, ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary,
 };
 use crate::snapshot::{
-    EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanResultSnapshot,
-    ReducerReceiptSnapshot, ReducerStateEntry, SnapshotRootCompleteness, receipts_to_vecdeque,
+    EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanCompletionSnapshot,
+    PlanResultSnapshot, ReducerReceiptSnapshot, ReducerStateEntry, SnapshotRootCompleteness,
+    receipts_to_vecdeque,
 };
 use std::sync::Mutex;
 
@@ -72,6 +73,7 @@ pub use crate::governance_utils::canonicalize_patch;
 
 const RECENT_RECEIPT_CACHE: usize = 512;
 const RECENT_PLAN_RESULT_CACHE: usize = 256;
+const RECENT_PLAN_COMPLETION_CACHE: usize = 1024;
 const CELL_CACHE_SIZE: usize = 128;
 const MONO_KEY: &[u8] = b"";
 const ENTROPY_LEN: usize = 64;
@@ -154,6 +156,9 @@ pub struct Kernel<S: Store> {
     plan_instances: HashMap<u64, PlanInstance>,
     plan_triggers: HashMap<String, Vec<PlanTriggerBinding>>,
     waiting_events: HashMap<String, Vec<u64>>,
+    plan_wait_watchers: HashMap<u64, Vec<PlanWaitWatcher>>,
+    completed_plan_outcomes: HashMap<u64, PlanCompletionOutcome>,
+    completed_plan_order: VecDeque<u64>,
     pending_receipts: HashMap<[u8; 32], PendingPlanReceiptInfo>,
     pending_reducer_receipts: HashMap<[u8; 32], ReducerEffectContext>,
     recent_receipts: VecDeque<[u8; 32]>,
@@ -189,6 +194,16 @@ pub struct PlanResultEntry {
 struct PendingPlanReceiptInfo {
     plan_id: u64,
     effect_kind: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PlanWaitWatcher {
+    parent_plan_id: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PlanCompletionOutcome {
+    await_value: PlanCompletionValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -518,6 +518,33 @@ fn plan_schema_accepts_all_step_kinds() {
                 "bind": {"as": "fired"}
             },
             {
+                "id": "spawn_child",
+                "op": "spawn_plan",
+                "plan": "com.acme/Child@1",
+                "input": {"ref": "@plan.input"},
+                "bind": {"handle_as": "child_handle"}
+            },
+            {
+                "id": "await_child",
+                "op": "await_plan",
+                "for": {"ref": "@var:child_handle"},
+                "bind": {"as": "child_result"}
+            },
+            {
+                "id": "spawn_many",
+                "op": "spawn_for_each",
+                "plan": "com.acme/Child@1",
+                "inputs": [{"ref": "@plan.input"}],
+                "max_fanout": 16,
+                "bind": {"handles_as": "children"}
+            },
+            {
+                "id": "await_children",
+                "op": "await_plans_all",
+                "handles": {"ref": "@var:children"},
+                "bind": {"results_as": "children_results"}
+            },
+            {
                 "id": "raise",
                 "op": "raise_event",
                 "event": "com.acme/Result@1",
@@ -529,7 +556,11 @@ fn plan_schema_accepts_all_step_kinds() {
             {"from": "assign", "to": "emit"},
             {"from": "emit", "to": "await_receipt"},
             {"from": "await_receipt", "to": "await_event", "when": {"ref": "@var:receipt"}},
-            {"from": "await_event", "to": "raise"},
+            {"from": "await_event", "to": "spawn_child"},
+            {"from": "spawn_child", "to": "await_child"},
+            {"from": "await_child", "to": "spawn_many"},
+            {"from": "spawn_many", "to": "await_children"},
+            {"from": "await_children", "to": "raise"},
             {"from": "raise", "to": "end"}
         ],
         "required_caps": ["cap_http"],
@@ -538,8 +569,8 @@ fn plan_schema_accepts_all_step_kinds() {
     });
     assert_json_schema(crate::schemas::DEFPLAN, &plan_json);
     let plan: DefPlan = serde_json::from_value(plan_json).expect("plan json");
-    assert_eq!(plan.steps.len(), 6);
-    assert_eq!(plan.edges.len(), 5);
+    assert_eq!(plan.steps.len(), 10);
+    assert_eq!(plan.edges.len(), 9);
 }
 
 #[test]

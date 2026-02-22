@@ -43,6 +43,7 @@ pub enum JournalKind {
     Snapshot,
     PolicyDecision,
     Governance,
+    PlanStarted,
     PlanResult,
     PlanEnded,
     Custom,
@@ -62,6 +63,7 @@ pub enum JournalRecord {
     Manifest(ManifestRecord),
     Snapshot(SnapshotRecord),
     Governance(GovernanceRecord),
+    PlanStarted(PlanStartedRecord),
     PlanResult(PlanResultRecord),
     PlanEnded(PlanEndedRecord),
     Custom(CustomRecord),
@@ -78,6 +80,7 @@ impl JournalRecord {
             JournalRecord::Manifest(_) => JournalKind::Manifest,
             JournalRecord::Snapshot(_) => JournalKind::Snapshot,
             JournalRecord::Governance(_) => JournalKind::Governance,
+            JournalRecord::PlanStarted(_) => JournalKind::PlanStarted,
             JournalRecord::PlanResult(_) => JournalKind::PlanResult,
             JournalRecord::PlanEnded(_) => JournalKind::PlanEnded,
             JournalRecord::Custom(_) => JournalKind::Custom,
@@ -99,6 +102,15 @@ pub struct PlanEndedRecord {
     pub status: PlanEndStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanStartedRecord {
+    pub plan_name: String,
+    pub plan_id: u64,
+    pub input_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_instance_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

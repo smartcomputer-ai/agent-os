@@ -55,9 +55,57 @@ pub enum StepState {
     Pending,
     WaitingReceipt,
     WaitingEvent,
+    WaitingPlan,
     Completed,
     Skipped,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanHandleValue {
+    pub instance_id: u64,
+    pub plan: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PlanSpawnRequest {
+    SpawnPlan {
+        step_id: String,
+        child_plan: String,
+        input: ExprValue,
+    },
+    SpawnForEach {
+        step_id: String,
+        child_plan: String,
+        inputs: Vec<ExprValue>,
+        max_fanout: Option<u64>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PlanWaitRequest {
+    AwaitPlan {
+        step_id: String,
+        handle: PlanHandleValue,
+    },
+    AwaitPlansAll {
+        step_id: String,
+        handles: Vec<PlanHandleValue>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingPlanWait {
+    pub handles: Vec<PlanHandleValue>,
+    pub mode: PendingPlanWaitMode,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum PendingPlanWaitMode {
+    One,
+    All,
+}
+
+pub type PlanCompletionValue = ExprValue;
 
 pub struct PlanInstance {
     pub id: u64,
@@ -69,6 +117,9 @@ pub struct PlanInstance {
     effect_handles: HashMap<String, [u8; 32]>,
     receipt_waits: BTreeMap<[u8; 32], ReceiptWait>,
     receipt_values: HashMap<String, ExprValue>,
+    spawn_values: HashMap<String, ExprValue>,
+    plan_waits: HashMap<String, PendingPlanWait>,
+    plan_wait_values: HashMap<String, ExprValue>,
     event_wait: Option<EventWait>,
     event_value: Option<ExprValue>,
     correlation_id: Option<Vec<u8>>,
@@ -116,6 +167,9 @@ pub struct PlanTickOutcome {
     pub raised_events: Vec<DomainEvent>,
     pub waiting_receipts: Vec<[u8; 32]>,
     pub waiting_event: Option<String>,
+    pub waiting_plans: bool,
+    pub spawn_requests: Vec<PlanSpawnRequest>,
+    pub wait_requests: Vec<PlanWaitRequest>,
     pub completed: bool,
     pub intents_enqueued: Vec<EffectIntent>,
     pub result: Option<ExprValue>,
@@ -139,6 +193,9 @@ pub struct PlanInstanceSnapshot {
     pub effect_handles: Vec<(String, [u8; 32])>,
     pub receipt_waits: Vec<ReceiptWait>,
     pub receipt_values: Vec<(String, ExprValue)>,
+    pub spawn_values: Vec<(String, ExprValue)>,
+    pub plan_waits: Vec<(String, PendingPlanWait)>,
+    pub plan_wait_values: Vec<(String, ExprValue)>,
     pub event_wait: Option<EventWait>,
     pub event_value: Option<ExprValue>,
     pub correlation_id: Option<Vec<u8>>,
@@ -195,6 +252,9 @@ impl PlanInstance {
             effect_handles: HashMap::new(),
             receipt_waits: BTreeMap::new(),
             receipt_values: HashMap::new(),
+            spawn_values: HashMap::new(),
+            plan_waits: HashMap::new(),
+            plan_wait_values: HashMap::new(),
             event_wait: None,
             event_value: None,
             correlation_id,
@@ -225,6 +285,14 @@ impl PlanInstance {
                 }
                 if let Some(wait) = &self.event_wait {
                     outcome.waiting_event = Some(wait.schema.clone());
+                    return Ok(outcome);
+                }
+                if self
+                    .step_states
+                    .values()
+                    .any(|state| matches!(state, StepState::WaitingPlan))
+                {
+                    outcome.waiting_plans = true;
                     return Ok(outcome);
                 }
                 if self.all_steps_completed() {
@@ -316,6 +384,21 @@ impl PlanInstance {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
+            spawn_values: self
+                .spawn_values
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            plan_waits: self
+                .plan_waits
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            plan_wait_values: self
+                .plan_wait_values
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             event_wait: self.event_wait.clone(),
             event_value: self.event_value.clone(),
             correlation_id: self.correlation_id.clone(),
@@ -351,6 +434,9 @@ impl PlanInstance {
             .map(|wait| (wait.intent_hash, wait))
             .collect();
         instance.receipt_values = snapshot.receipt_values.into_iter().collect();
+        instance.spawn_values = snapshot.spawn_values.into_iter().collect();
+        instance.plan_waits = snapshot.plan_waits.into_iter().collect();
+        instance.plan_wait_values = snapshot.plan_wait_values.into_iter().collect();
         instance.event_wait = snapshot.event_wait;
         instance.event_value = snapshot.event_value;
         instance.correlation_id = snapshot.correlation_id;
@@ -364,6 +450,41 @@ impl PlanInstance {
 
     pub fn context(&self) -> Option<&PlanContext> {
         self.context.as_ref()
+    }
+
+    pub fn deliver_spawn_value(&mut self, step_id: &str, value: ExprValue) -> bool {
+        if !self.step_map.contains_key(step_id) {
+            return false;
+        }
+        self.spawn_values.insert(step_id.to_string(), value);
+        self.step_states
+            .insert(step_id.to_string(), StepState::Pending);
+        true
+    }
+
+    pub fn pending_wait_child_ids(&self, step_id: &str) -> Vec<u64> {
+        self.plan_waits
+            .get(step_id)
+            .map(|wait| wait.handles.iter().map(|h| h.instance_id).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn resolve_plan_waits(&mut self, completed: &HashMap<u64, PlanCompletionValue>) -> bool {
+        let mut resolved = false;
+        let pending: Vec<(String, PendingPlanWait)> = self
+            .plan_waits
+            .iter()
+            .map(|(step, wait)| (step.clone(), wait.clone()))
+            .collect();
+        for (step_id, wait) in pending {
+            if let Some(value) = build_resolved_wait_value(&wait, completed) {
+                self.plan_waits.remove(&step_id);
+                self.plan_wait_values.insert(step_id.clone(), value);
+                self.step_states.insert(step_id, StepState::Pending);
+                resolved = true;
+            }
+        }
+        resolved
     }
 
     fn record_step_value(&mut self, step_id: &str, value: ExprValue) {
@@ -391,5 +512,25 @@ impl PlanInstance {
             }
         }
         Ok(None)
+    }
+}
+
+fn build_resolved_wait_value(
+    wait: &PendingPlanWait,
+    completed: &HashMap<u64, PlanCompletionValue>,
+) -> Option<ExprValue> {
+    match wait.mode {
+        PendingPlanWaitMode::One => {
+            let handle = wait.handles.first()?;
+            completed.get(&handle.instance_id).cloned()
+        }
+        PendingPlanWaitMode::All => {
+            let mut values = Vec::with_capacity(wait.handles.len());
+            for handle in &wait.handles {
+                let value = completed.get(&handle.instance_id)?.clone();
+                values.push(value);
+            }
+            Some(ExprValue::List(values))
+        }
     }
 }

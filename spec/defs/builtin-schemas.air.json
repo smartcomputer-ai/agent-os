@@ -65,6 +65,26 @@
       }
     }
   },
+  {
+    "$kind": "defschema",
+    "name": "sys/PlanHandle@1",
+    "type": {
+      "record": {
+        "instance_id": { "nat": {} },
+        "plan": { "text": {}, "$comment": "Name-formatted string" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/PlanError@1",
+    "type": {
+      "record": {
+        "code": { "text": {} },
+        "message": { "text": {} }
+      }
+    }
+  },
 
   {
     "$kind": "defschema",

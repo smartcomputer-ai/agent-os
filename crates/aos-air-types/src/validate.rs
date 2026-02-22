@@ -51,6 +51,42 @@ pub enum ValidationError {
         step_id: StepId,
         handle: String,
     },
+    #[error("plan {plan} step {step_id} spawn_plan references unknown child plan '{child_plan}'")]
+    SpawnPlanUnknownPlan {
+        plan: String,
+        step_id: StepId,
+        child_plan: String,
+    },
+    #[error(
+        "plan {plan} step {step_id} spawn_for_each references unknown child plan '{child_plan}'"
+    )]
+    SpawnForEachUnknownPlan {
+        plan: String,
+        step_id: StepId,
+        child_plan: String,
+    },
+    #[error(
+        "plan {plan} step {step_id} await_plan 'for' must be @var:<handle> or @step:<spawn>.handle"
+    )]
+    AwaitPlanInvalidReference { plan: String, step_id: StepId },
+    #[error("plan {plan} step {step_id} await_plan references unknown handle source {reference}")]
+    AwaitPlanUnknownHandle {
+        plan: String,
+        step_id: StepId,
+        reference: String,
+    },
+    #[error(
+        "plan {plan} step {step_id} await_plans_all handles must be @var:<handles> or @step:<spawn>.handles"
+    )]
+    AwaitPlansAllInvalidReference { plan: String, step_id: StepId },
+    #[error(
+        "plan {plan} step {step_id} await_plans_all references unknown handles source {reference}"
+    )]
+    AwaitPlansAllUnknownHandles {
+        plan: String,
+        step_id: StepId,
+        reference: String,
+    },
     #[error(
         "plan {plan} await_event step {step_id} where clause references unknown symbol {reference}"
     )]
@@ -267,6 +303,10 @@ pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
     let mut available_vars: HashSet<String> = plan.locals.keys().cloned().collect();
     available_vars.insert("correlation_id".into());
     let mut effect_handles: HashSet<String> = HashSet::new();
+    let mut spawned_handle_vars: HashMap<String, String> = HashMap::new();
+    let mut spawned_handles_vars: HashMap<String, String> = HashMap::new();
+    let mut spawned_handle_steps: HashMap<String, String> = HashMap::new();
+    let mut spawned_handles_steps: HashMap<String, String> = HashMap::new();
     for step in &plan.steps {
         match &step.kind {
             PlanStepKind::EmitEffect(emit) => {
@@ -290,6 +330,74 @@ pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
                     validate_where_clause(plan, &step.id, predicate, &available_vars, &step_ids)?;
                 }
                 available_vars.insert(await_step.bind.var.clone());
+            }
+            PlanStepKind::SpawnPlan(spawn) => {
+                spawned_handle_vars.insert(spawn.bind.handle_as.clone(), spawn.plan.clone());
+                spawned_handle_steps.insert(step.id.clone(), spawn.plan.clone());
+                available_vars.insert(spawn.bind.handle_as.clone());
+            }
+            PlanStepKind::AwaitPlan(await_step) => {
+                let resolved_plan =
+                    if let Some(handle_var) = extract_handle_reference(&await_step.for_expr) {
+                        spawned_handle_vars
+                            .get(&handle_var)
+                            .cloned()
+                            .ok_or_else(|| ValidationError::AwaitPlanUnknownHandle {
+                                plan: plan.name.clone(),
+                                step_id: step.id.clone(),
+                                reference: format!("@var:{handle_var}"),
+                            })?
+                    } else if let Some(step_ref) =
+                        extract_step_field_reference(&await_step.for_expr, "handle")
+                    {
+                        spawned_handle_steps
+                            .get(&step_ref)
+                            .cloned()
+                            .ok_or_else(|| ValidationError::AwaitPlanUnknownHandle {
+                                plan: plan.name.clone(),
+                                step_id: step.id.clone(),
+                                reference: format!("@step:{step_ref}.handle"),
+                            })?
+                    } else {
+                        return Err(ValidationError::AwaitPlanInvalidReference {
+                            plan: plan.name.clone(),
+                            step_id: step.id.clone(),
+                        });
+                    };
+                let _ = resolved_plan;
+                available_vars.insert(await_step.bind.var.clone());
+            }
+            PlanStepKind::SpawnForEach(spawn) => {
+                spawned_handles_vars.insert(spawn.bind.handles_as.clone(), spawn.plan.clone());
+                spawned_handles_steps.insert(step.id.clone(), spawn.plan.clone());
+                available_vars.insert(spawn.bind.handles_as.clone());
+            }
+            PlanStepKind::AwaitPlansAll(await_step) => {
+                if let Some(handles_var) = extract_handle_reference(&await_step.handles) {
+                    if !spawned_handles_vars.contains_key(&handles_var) {
+                        return Err(ValidationError::AwaitPlansAllUnknownHandles {
+                            plan: plan.name.clone(),
+                            step_id: step.id.clone(),
+                            reference: format!("@var:{handles_var}"),
+                        });
+                    }
+                } else if let Some(step_ref) =
+                    extract_step_field_reference(&await_step.handles, "handles")
+                {
+                    if !spawned_handles_steps.contains_key(&step_ref) {
+                        return Err(ValidationError::AwaitPlansAllUnknownHandles {
+                            plan: plan.name.clone(),
+                            step_id: step.id.clone(),
+                            reference: format!("@step:{step_ref}.handles"),
+                        });
+                    }
+                } else {
+                    return Err(ValidationError::AwaitPlansAllInvalidReference {
+                        plan: plan.name.clone(),
+                        step_id: step.id.clone(),
+                    });
+                }
+                available_vars.insert(await_step.bind.results_as.clone());
             }
             _ => {}
         }
@@ -434,6 +542,20 @@ fn extract_handle_reference(expr: &Expr) -> Option<String> {
         }
     }
     None
+}
+
+fn extract_step_field_reference(expr: &Expr, field: &str) -> Option<String> {
+    let Expr::Ref(reference) = expr else {
+        return None;
+    };
+    let rest = reference.reference.strip_prefix("@step:")?;
+    let mut parts = rest.split('.');
+    let step_id = parts.next()?;
+    let step_field = parts.next()?;
+    if parts.next().is_some() || step_id.is_empty() || step_field != field {
+        return None;
+    }
+    Some(step_id.to_string())
 }
 
 fn collect_expr_refs(expr: &Expr, refs: &mut Vec<String>) {
@@ -875,31 +997,52 @@ pub fn validate_manifest(
             }
         }
         for step in &plan.steps {
-            if let PlanStepKind::EmitEffect(emit) = &step.kind {
-                if !known_effect_kinds.contains(emit.kind.as_str()) {
-                    return Err(ValidationError::EffectNotFound {
-                        kind: emit.kind.as_str().to_string(),
-                    });
-                }
-                if !grant_exists(emit.cap.as_str()) {
-                    return Err(ValidationError::CapabilityNotFound {
-                        cap: emit.cap.clone(),
-                    });
-                }
-                let expected = effect_cap_types.get(emit.kind.as_str()).ok_or_else(|| {
-                    ValidationError::EffectNotFound {
-                        kind: emit.kind.as_str().to_string(),
+            match &step.kind {
+                PlanStepKind::EmitEffect(emit) => {
+                    if !known_effect_kinds.contains(emit.kind.as_str()) {
+                        return Err(ValidationError::EffectNotFound {
+                            kind: emit.kind.as_str().to_string(),
+                        });
                     }
-                })?;
-                let found = cap_type_for_grant(emit.cap.as_str())?;
-                if &found != expected {
-                    return Err(ValidationError::CapabilityTypeMismatch {
-                        cap: emit.cap.clone(),
-                        effect: emit.kind.as_str().to_string(),
-                        expected: expected.clone(),
-                        found,
-                    });
+                    if !grant_exists(emit.cap.as_str()) {
+                        return Err(ValidationError::CapabilityNotFound {
+                            cap: emit.cap.clone(),
+                        });
+                    }
+                    let expected = effect_cap_types.get(emit.kind.as_str()).ok_or_else(|| {
+                        ValidationError::EffectNotFound {
+                            kind: emit.kind.as_str().to_string(),
+                        }
+                    })?;
+                    let found = cap_type_for_grant(emit.cap.as_str())?;
+                    if &found != expected {
+                        return Err(ValidationError::CapabilityTypeMismatch {
+                            cap: emit.cap.clone(),
+                            effect: emit.kind.as_str().to_string(),
+                            expected: expected.clone(),
+                            found,
+                        });
+                    }
                 }
+                PlanStepKind::SpawnPlan(spawn) => {
+                    if !plans.contains_key(spawn.plan.as_str()) {
+                        return Err(ValidationError::SpawnPlanUnknownPlan {
+                            plan: plan.name.clone(),
+                            step_id: step.id.clone(),
+                            child_plan: spawn.plan.clone(),
+                        });
+                    }
+                }
+                PlanStepKind::SpawnForEach(spawn) => {
+                    if !plans.contains_key(spawn.plan.as_str()) {
+                        return Err(ValidationError::SpawnForEachUnknownPlan {
+                            plan: plan.name.clone(),
+                            step_id: step.id.clone(),
+                            child_plan: spawn.plan.clone(),
+                        });
+                    }
+                }
+                _ => {}
             }
         }
         for allowed in &plan.allowed_effects {
@@ -1070,12 +1213,13 @@ mod tests {
     use crate::{
         CapEnforcer, CapGrant, CapType, DefCap, DefModule, DefPlan, DefPolicy, DefSchema,
         EffectKind, Expr, ExprConst, ExprOrValue, ExprRecord, ExprRef, HashRef, Manifest,
-        ManifestDefaults,
-        ModuleAbi, ModuleBinding, ModuleKind, NamedRef, PlanBind, PlanBindEffect, PlanEdge,
-        PlanStep, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
-        PlanStepKind, PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent,
-        SchemaRef, SecretDecl, SecretEntry, SecretPolicy, Trigger, TypeExpr, TypeRecord, TypeRef,
-        TypeVariant, ValueLiteral, ValueRecord,
+        ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, NamedRef, PlanBind, PlanBindEffect,
+        PlanBindHandle, PlanBindHandles, PlanBindResults, PlanEdge, PlanStep, PlanStepAwaitEvent,
+        PlanStepAwaitPlan, PlanStepAwaitPlansAll, PlanStepAwaitReceipt, PlanStepEmitEffect,
+        PlanStepEnd, PlanStepKind, PlanStepSpawnForEach, PlanStepSpawnPlan, PolicyDecision,
+        PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent, SchemaRef, SecretDecl,
+        SecretEntry, SecretPolicy, Trigger, TypeExpr, TypeRecord, TypeRef, TypeVariant,
+        ValueLiteral, ValueRecord,
     };
     use indexmap::IndexMap;
 
@@ -1168,6 +1312,117 @@ mod tests {
                 to: "end".into(),
                 when: None,
             }],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        }
+    }
+
+    fn plan_with_spawn_and_await() -> DefPlan {
+        DefPlan {
+            name: "com.acme/spawn-parent@1".into(),
+            input: SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "spawn".into(),
+                    kind: PlanStepKind::SpawnPlan(PlanStepSpawnPlan {
+                        plan: "com.acme/child@1".into(),
+                        input: Expr::Ref(ExprRef {
+                            reference: "@plan.input".into(),
+                        })
+                        .into(),
+                        bind: PlanBindHandle {
+                            handle_as: "child".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "await".into(),
+                    kind: PlanStepKind::AwaitPlan(PlanStepAwaitPlan {
+                        for_expr: Expr::Ref(ExprRef {
+                            reference: "@var:child".into(),
+                        }),
+                        bind: PlanBind {
+                            var: "child_result".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![
+                PlanEdge {
+                    from: "spawn".into(),
+                    to: "await".into(),
+                    when: None,
+                },
+                PlanEdge {
+                    from: "await".into(),
+                    to: "end".into(),
+                    when: None,
+                },
+            ],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        }
+    }
+
+    fn plan_with_spawn_for_each_and_await_all() -> DefPlan {
+        DefPlan {
+            name: "com.acme/spawn-foreach@1".into(),
+            input: SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "spawn_many".into(),
+                    kind: PlanStepKind::SpawnForEach(PlanStepSpawnForEach {
+                        plan: "com.acme/child@1".into(),
+                        inputs: Expr::List(crate::ExprList {
+                            list: vec![Expr::Ref(ExprRef {
+                                reference: "@plan.input".into(),
+                            })],
+                        })
+                        .into(),
+                        max_fanout: Some(4),
+                        bind: PlanBindHandles {
+                            handles_as: "children".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "await_all".into(),
+                    kind: PlanStepKind::AwaitPlansAll(PlanStepAwaitPlansAll {
+                        handles: Expr::Ref(ExprRef {
+                            reference: "@var:children".into(),
+                        }),
+                        bind: PlanBindResults {
+                            results_as: "results".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![
+                PlanEdge {
+                    from: "spawn_many".into(),
+                    to: "await_all".into(),
+                    when: None,
+                },
+                PlanEdge {
+                    from: "await_all".into(),
+                    to: "end".into(),
+                    when: None,
+                },
+            ],
             required_caps: vec![],
             allowed_effects: vec![],
             invariants: vec![],
@@ -1325,6 +1580,62 @@ mod tests {
         assert!(matches!(
             err,
             ValidationError::AwaitEventUnknownReference { .. }
+        ));
+    }
+
+    #[test]
+    fn await_plan_requires_handle_reference() {
+        let mut plan = plan_with_spawn_and_await();
+        if let PlanStepKind::AwaitPlan(step) = &mut plan.steps[1].kind {
+            step.for_expr = Expr::Const(ExprConst::Bool { bool: true });
+        }
+        let err = validate_plan(&plan).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::AwaitPlanInvalidReference { .. }
+        ));
+    }
+
+    #[test]
+    fn await_plan_rejects_unknown_handle() {
+        let mut plan = plan_with_spawn_and_await();
+        if let PlanStepKind::AwaitPlan(step) = &mut plan.steps[1].kind {
+            step.for_expr = Expr::Ref(ExprRef {
+                reference: "@var:missing".into(),
+            });
+        }
+        let err = validate_plan(&plan).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::AwaitPlanUnknownHandle { .. }
+        ));
+    }
+
+    #[test]
+    fn await_plans_all_requires_handles_reference() {
+        let mut plan = plan_with_spawn_for_each_and_await_all();
+        if let PlanStepKind::AwaitPlansAll(step) = &mut plan.steps[1].kind {
+            step.handles = Expr::Const(ExprConst::Bool { bool: true });
+        }
+        let err = validate_plan(&plan).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::AwaitPlansAllInvalidReference { .. }
+        ));
+    }
+
+    #[test]
+    fn await_plans_all_rejects_unknown_handles() {
+        let mut plan = plan_with_spawn_for_each_and_await_all();
+        if let PlanStepKind::AwaitPlansAll(step) = &mut plan.steps[1].kind {
+            step.handles = Expr::Ref(ExprRef {
+                reference: "@var:not_handles".into(),
+            });
+        }
+        let err = validate_plan(&plan).unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::AwaitPlansAllUnknownHandles { .. }
         ));
     }
 
@@ -2319,6 +2630,86 @@ mod tests {
             err,
             ValidationError::CapabilityNotFound { cap }
             if cap == "cap_missing"
+        ));
+    }
+
+    #[test]
+    fn manifest_rejects_spawn_plan_with_unknown_child() {
+        let parent = DefPlan {
+            name: "com.acme/parent@1".into(),
+            input: SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "spawn".into(),
+                    kind: PlanStepKind::SpawnPlan(PlanStepSpawnPlan {
+                        plan: "com.acme/missing-child@1".into(),
+                        input: Expr::Ref(ExprRef {
+                            reference: "@plan.input".into(),
+                        })
+                        .into(),
+                        bind: PlanBindHandle {
+                            handle_as: "h".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![PlanEdge {
+                from: "spawn".into(),
+                to: "end".into(),
+                when: None,
+            }],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/Input@1".into(),
+            DefSchema {
+                name: "com.acme/Input@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        let mut plans = HashMap::new();
+        plans.insert(parent.name.clone(), parent);
+
+        let err = validate_manifest(
+            &manifest,
+            &HashMap::new(),
+            &schemas,
+            &plans,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ValidationError::SpawnPlanUnknownPlan { child_plan, .. }
+            if child_plan == "com.acme/missing-child@1"
         ));
     }
 }

@@ -1,4 +1,5 @@
 use super::*;
+use indexmap::IndexMap;
 
 impl<S: Store + 'static> Kernel<S> {
     pub fn tick(&mut self) -> Result<(), KernelError> {
@@ -36,13 +37,16 @@ impl<S: Store + 'static> Kernel<S> {
         event: &DomainEvent,
         stamp: &IngressStamp,
     ) -> Result<(), KernelError> {
-        if let Some(plan_bindings) = self.plan_triggers.get(&event.schema) {
-            let event_schema = self.schema_index.get(event.schema.as_str()).ok_or_else(|| {
-                KernelError::Manifest(format!(
-                    "trigger event schema '{}' not found",
-                    event.schema
-                ))
-            })?;
+        if let Some(plan_bindings) = self.plan_triggers.get(&event.schema).cloned() {
+            let event_schema = self
+                .schema_index
+                .get(event.schema.as_str())
+                .ok_or_else(|| {
+                    KernelError::Manifest(format!(
+                        "trigger event schema '{}' not found",
+                        event.schema
+                    ))
+                })?;
             let normalized_event =
                 normalize_cbor_by_name(&self.schema_index, event.schema.as_str(), &event.value)
                     .map_err(|err| {
@@ -54,20 +58,19 @@ impl<S: Store + 'static> Kernel<S> {
             let event_value =
                 cbor_to_expr_value(&normalized_event.value, event_schema, &self.schema_index)?;
 
-            for binding in plan_bindings {
-                if let Some(plan_def) = self.plan_registry.get(&binding.plan) {
+            for binding in &plan_bindings {
+                if let Some(plan_def) = self.plan_registry.get(&binding.plan).cloned() {
                     let mut trigger_env = aos_air_exec::Env::new(ExprValue::Unit);
                     trigger_env.current_event = Some(event_value.clone());
 
                     if let Some(predicate) = binding.when.as_ref() {
-                        let passes = aos_air_exec::eval_expr(predicate, &trigger_env).map_err(
-                            |err| {
+                        let passes =
+                            aos_air_exec::eval_expr(predicate, &trigger_env).map_err(|err| {
                                 KernelError::Manifest(format!(
                                     "trigger when eval error for event '{}' -> plan '{}': {err}",
                                     event.schema, binding.plan
                                 ))
-                            },
-                        )?;
+                            })?;
                         if !crate::plan::value_to_bool(passes)? {
                             continue;
                         }
@@ -111,27 +114,13 @@ impl<S: Store + 'static> Kernel<S> {
                     )?;
                     let correlation =
                         determine_correlation_value(binding, &input, event.key.as_ref());
-                    let instance_id = self.scheduler.alloc_plan_id();
-                    let cap_handles = self
-                        .plan_cap_handles
-                        .get(&plan_def.name)
-                        .ok_or_else(|| {
-                            KernelError::Manifest(format!(
-                                "plan '{}' missing cap bindings",
-                                plan_def.name
-                            ))
-                        })?
-                        .clone();
-                    let mut instance = PlanInstance::new(
-                        instance_id,
-                        plan_def.clone(),
+                    let instance_id = self.start_plan_instance(
+                        &plan_def.name,
                         input,
-                        self.schema_index.clone(),
+                        crate::plan::PlanContext::from_stamp(stamp),
                         correlation,
-                        cap_handles,
-                    );
-                    instance.set_context(crate::plan::PlanContext::from_stamp(stamp));
-                    self.plan_instances.insert(instance_id, instance);
+                        None,
+                    )?;
                     self.scheduler.push_plan(instance_id);
                 } else {
                     log::warn!(
@@ -155,13 +144,13 @@ impl<S: Store + 'static> Kernel<S> {
             self.remove_plan_from_waiting_events_for_schema(id, &schema);
         }
         if self.plan_instances.contains_key(&id) {
-            let (plan_name, outcome, step_states) = {
+            let (plan_name, plan_context, outcome) = {
                 let instance = self
                     .plan_instances
                     .get_mut(&id)
                     .expect("instance must exist");
                 let name = instance.name.clone();
-                let snapshot = instance.snapshot();
+                let context = instance.context().cloned();
                 if let Some(context) = instance.context().cloned() {
                     self.effect_manager
                         .set_cap_context(crate::effects::CapContext {
@@ -179,7 +168,7 @@ impl<S: Store + 'static> Kernel<S> {
                         return Err(err);
                     }
                 };
-                (name, outcome, snapshot.step_states)
+                (name, context, outcome)
             };
             self.record_decisions()?;
             for event in &outcome.raised_events {
@@ -212,10 +201,27 @@ impl<S: Store + 'static> Kernel<S> {
                     },
                 );
             }
+            let Some(plan_context) = plan_context else {
+                return Err(KernelError::Manifest(format!(
+                    "plan '{plan_name}' missing execution context"
+                )));
+            };
+            for request in &outcome.spawn_requests {
+                let delivered =
+                    self.handle_spawn_request(id, request, &plan_context, plan_name.as_str())?;
+                if delivered && self.plan_instances.contains_key(&id) {
+                    self.scheduler.push_plan(id);
+                }
+            }
+            for request in &outcome.wait_requests {
+                self.handle_plan_wait_request(id, request)?;
+            }
             if let Some(schema) = outcome.waiting_event.clone() {
                 self.waiting_events.entry(schema).or_default().push(id);
             }
             if outcome.completed {
+                let completion = self.build_plan_completion_value(&outcome);
+                self.remember_plan_completion(id, completion);
                 if !self.suppress_journal {
                     let status = if outcome.plan_error.is_some() {
                         PlanEndStatus::Error
@@ -245,7 +251,13 @@ impl<S: Store + 'static> Kernel<S> {
                     }
                 }
                 self.plan_instances.remove(&id);
-            } else if outcome.waiting_receipts.is_empty() && outcome.waiting_event.is_none() {
+                self.wake_plan_waiters(id);
+            } else if outcome.waiting_receipts.is_empty()
+                && outcome.waiting_event.is_none()
+                && !outcome.waiting_plans
+                && outcome.spawn_requests.is_empty()
+                && outcome.wait_requests.is_empty()
+            {
                 self.scheduler.push_plan(id);
             }
         }
@@ -379,7 +391,250 @@ impl<S: Store + 'static> Kernel<S> {
         self.append_record(JournalRecord::PlanResult(record))
     }
 
+    fn record_plan_started(&mut self, record: PlanStartedRecord) -> Result<(), KernelError> {
+        self.append_record(JournalRecord::PlanStarted(record))
+    }
+
     fn record_plan_ended(&mut self, record: PlanEndedRecord) -> Result<(), KernelError> {
         self.append_record(JournalRecord::PlanEnded(record))
     }
+
+    fn start_plan_instance(
+        &mut self,
+        plan_name: &str,
+        input: ExprValue,
+        context: crate::plan::PlanContext,
+        correlation: Option<(Vec<u8>, ExprValue)>,
+        parent_instance_id: Option<u64>,
+    ) -> Result<u64, KernelError> {
+        let plan_def = self
+            .plan_registry
+            .get(plan_name)
+            .ok_or_else(|| KernelError::Manifest(format!("unknown child plan '{plan_name}'")))?;
+        let cap_handles = self
+            .plan_cap_handles
+            .get(&plan_def.name)
+            .ok_or_else(|| {
+                KernelError::Manifest(format!("plan '{}' missing cap bindings", plan_def.name))
+            })?
+            .clone();
+        let input_hash = {
+            let cbor = to_canonical_cbor(&crate::plan::expr_value_to_cbor_value(&input))
+                .map_err(|err| KernelError::Manifest(err.to_string()))?;
+            aos_cbor::Hash::of_bytes(&cbor).to_hex()
+        };
+        let plan_id = self.scheduler.alloc_plan_id();
+        let mut instance = PlanInstance::new(
+            plan_id,
+            plan_def.clone(),
+            input,
+            self.schema_index.clone(),
+            correlation,
+            cap_handles,
+        );
+        instance.set_context(context);
+        self.plan_instances.insert(plan_id, instance);
+        self.record_plan_started(PlanStartedRecord {
+            plan_name: plan_name.to_string(),
+            plan_id,
+            input_hash,
+            parent_instance_id,
+        })?;
+        Ok(plan_id)
+    }
+
+    fn coerce_input_for_plan(
+        &self,
+        plan_name: &str,
+        input: ExprValue,
+    ) -> Result<ExprValue, KernelError> {
+        let plan = self
+            .plan_registry
+            .get(plan_name)
+            .ok_or_else(|| KernelError::Manifest(format!("unknown plan '{plan_name}'")))?;
+        let schema = self.schema_index.get(plan.input.as_str()).ok_or_else(|| {
+            KernelError::Manifest(format!(
+                "plan '{}' input schema '{}' not found",
+                plan.name, plan.input
+            ))
+        })?;
+        let normalized = normalize_value_with_schema(
+            crate::plan::expr_value_to_cbor_value(&input),
+            schema,
+            &self.schema_index,
+        )
+        .map_err(|err| {
+            KernelError::Manifest(format!(
+                "spawn input failed schema validation for child plan '{}': {err}",
+                plan.name
+            ))
+        })?;
+        cbor_to_expr_value(&normalized.value, schema, &self.schema_index)
+    }
+
+    fn handle_spawn_request(
+        &mut self,
+        parent_plan_id: u64,
+        request: &crate::plan::PlanSpawnRequest,
+        parent_context: &crate::plan::PlanContext,
+        _parent_plan_name: &str,
+    ) -> Result<bool, KernelError> {
+        match request {
+            crate::plan::PlanSpawnRequest::SpawnPlan {
+                step_id,
+                child_plan,
+                input,
+            } => {
+                let input = self.coerce_input_for_plan(child_plan, input.clone())?;
+                let child_id = self.start_plan_instance(
+                    child_plan,
+                    input,
+                    parent_context.clone(),
+                    None,
+                    Some(parent_plan_id),
+                )?;
+                self.scheduler.push_plan(child_id);
+                if let Some(parent) = self.plan_instances.get_mut(&parent_plan_id) {
+                    let handle_value = plan_handle_expr_value(child_id, child_plan.clone());
+                    if parent.deliver_spawn_value(step_id, handle_value) {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+            crate::plan::PlanSpawnRequest::SpawnForEach {
+                step_id,
+                child_plan,
+                inputs,
+                max_fanout,
+            } => {
+                if let Some(limit) = max_fanout
+                    && inputs.len() > *limit as usize
+                {
+                    return Err(KernelError::Manifest(format!(
+                        "spawn_for_each max_fanout exceeded: {} > {}",
+                        inputs.len(),
+                        limit
+                    )));
+                }
+                let mut handles = Vec::with_capacity(inputs.len());
+                for item in inputs {
+                    let input = self.coerce_input_for_plan(child_plan, item.clone())?;
+                    let child_id = self.start_plan_instance(
+                        child_plan,
+                        input,
+                        parent_context.clone(),
+                        None,
+                        Some(parent_plan_id),
+                    )?;
+                    self.scheduler.push_plan(child_id);
+                    handles.push(plan_handle_expr_value(child_id, child_plan.clone()));
+                }
+                if let Some(parent) = self.plan_instances.get_mut(&parent_plan_id) {
+                    if parent.deliver_spawn_value(step_id, ExprValue::List(handles)) {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
+        }
+    }
+
+    fn handle_plan_wait_request(
+        &mut self,
+        parent_plan_id: u64,
+        request: &crate::plan::PlanWaitRequest,
+    ) -> Result<(), KernelError> {
+        let completion_map: HashMap<u64, PlanCompletionValue> = self
+            .completed_plan_outcomes
+            .iter()
+            .map(|(id, outcome)| (*id, outcome.await_value.clone()))
+            .collect();
+        let step_id = match request {
+            crate::plan::PlanWaitRequest::AwaitPlan { step_id, .. } => step_id.as_str(),
+            crate::plan::PlanWaitRequest::AwaitPlansAll { step_id, .. } => step_id.as_str(),
+        };
+        if let Some(instance) = self.plan_instances.get_mut(&parent_plan_id) {
+            if instance.resolve_plan_waits(&completion_map) {
+                self.scheduler.push_plan(parent_plan_id);
+                return Ok(());
+            }
+            for child_id in instance.pending_wait_child_ids(step_id) {
+                if self.completed_plan_outcomes.contains_key(&child_id) {
+                    continue;
+                }
+                let watchers = self.plan_wait_watchers.entry(child_id).or_default();
+                if !watchers
+                    .iter()
+                    .any(|watcher| watcher.parent_plan_id == parent_plan_id)
+                {
+                    watchers.push(PlanWaitWatcher { parent_plan_id });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn wake_plan_waiters(&mut self, completed_plan_id: u64) {
+        let Some(watchers) = self.plan_wait_watchers.remove(&completed_plan_id) else {
+            return;
+        };
+        let completion_map: HashMap<u64, PlanCompletionValue> = self
+            .completed_plan_outcomes
+            .iter()
+            .map(|(id, value)| (*id, value.await_value.clone()))
+            .collect();
+        for watcher in watchers {
+            if let Some(parent) = self.plan_instances.get_mut(&watcher.parent_plan_id) {
+                if parent.resolve_plan_waits(&completion_map) {
+                    self.scheduler.push_plan(watcher.parent_plan_id);
+                }
+            }
+        }
+    }
+
+    fn remember_plan_completion(&mut self, plan_id: u64, value: PlanCompletionValue) {
+        if self.completed_plan_outcomes.contains_key(&plan_id) {
+            return;
+        }
+        if self.completed_plan_order.len() >= RECENT_PLAN_COMPLETION_CACHE {
+            if let Some(oldest) = self.completed_plan_order.pop_front() {
+                self.completed_plan_outcomes.remove(&oldest);
+            }
+        }
+        self.completed_plan_order.push_back(plan_id);
+        self.completed_plan_outcomes
+            .insert(plan_id, PlanCompletionOutcome { await_value: value });
+    }
+
+    fn build_plan_completion_value(
+        &self,
+        outcome: &crate::plan::PlanTickOutcome,
+    ) -> PlanCompletionValue {
+        if let Some(err) = outcome.plan_error.as_ref() {
+            plan_await_variant(
+                "Error",
+                ExprValue::Record(IndexMap::from([
+                    ("code".into(), ExprValue::Text(err.code.clone())),
+                    ("message".into(), ExprValue::Text(err.code.clone())),
+                ])),
+            )
+        } else {
+            plan_await_variant("Ok", outcome.result.clone().unwrap_or(ExprValue::Unit))
+        }
+    }
+}
+
+fn plan_handle_expr_value(instance_id: u64, plan: String) -> ExprValue {
+    ExprValue::Record(IndexMap::from([
+        ("instance_id".into(), ExprValue::Nat(instance_id)),
+        ("plan".into(), ExprValue::Text(plan)),
+    ]))
+}
+
+fn plan_await_variant(tag: &str, value: ExprValue) -> ExprValue {
+    ExprValue::Record(IndexMap::from([
+        ("$tag".into(), ExprValue::Text(tag.to_string())),
+        ("$value".into(), value),
+    ]))
 }

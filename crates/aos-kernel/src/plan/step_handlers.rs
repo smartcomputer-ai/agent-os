@@ -1,8 +1,9 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::plan_literals::{canonicalize_literal, validate_literal};
 use aos_air_types::{
-    PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect,
-    PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+    PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitPlan, PlanStepAwaitPlansAll,
+    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+    PlanStepSpawnForEach, PlanStepSpawnPlan,
 };
 use aos_wasm_abi::DomainEvent;
 use indexmap::IndexMap;
@@ -14,7 +15,10 @@ use super::codec::{
     eval_expr_or_value, expr_value_to_cbor_value, expr_value_to_literal,
     idempotency_key_from_value, literal_to_value,
 };
-use super::{EventWait, PlanInstance, PlanTickOutcome, StepState};
+use super::{
+    EventWait, PendingPlanWait, PendingPlanWaitMode, PlanHandleValue, PlanInstance,
+    PlanSpawnRequest, PlanTickOutcome, PlanWaitRequest, StepState,
+};
 
 pub(super) enum StepTickControl {
     Continue,
@@ -68,6 +72,16 @@ impl PlanInstance {
             }
             PlanStepKind::AwaitEvent(await_event) => {
                 self.handle_await_event_step(step_id, await_event, outcome)
+            }
+            PlanStepKind::SpawnPlan(spawn) => self.handle_spawn_plan_step(step_id, spawn, outcome),
+            PlanStepKind::AwaitPlan(await_step) => {
+                self.handle_await_plan_step(step_id, await_step, outcome)
+            }
+            PlanStepKind::SpawnForEach(spawn) => {
+                self.handle_spawn_for_each_step(step_id, spawn, outcome)
+            }
+            PlanStepKind::AwaitPlansAll(await_step) => {
+                self.handle_await_plans_all_step(step_id, await_step, outcome)
             }
             PlanStepKind::RaiseEvent(raise) => {
                 self.handle_raise_event_step(step_id, raise, outcome)
@@ -206,6 +220,167 @@ impl PlanInstance {
         Ok(StepTickControl::Return)
     }
 
+    fn handle_spawn_plan_step(
+        &mut self,
+        step_id: &str,
+        spawn: &PlanStepSpawnPlan,
+        outcome: &mut PlanTickOutcome,
+    ) -> Result<StepTickControl, KernelError> {
+        if let Some(value) = self.spawn_values.remove(step_id) {
+            self.env
+                .vars
+                .insert(spawn.bind.handle_as.clone(), value.clone());
+            self.record_step_value(step_id, value);
+            return self.finish_step(step_id, outcome);
+        }
+
+        let input = eval_expr_or_value(&spawn.input, &self.env, "spawn_plan input eval error")?;
+        self.step_states
+            .insert(step_id.to_string(), StepState::WaitingPlan);
+        outcome.spawn_requests.push(PlanSpawnRequest::SpawnPlan {
+            step_id: step_id.to_string(),
+            child_plan: spawn.plan.clone(),
+            input,
+        });
+        Ok(StepTickControl::Return)
+    }
+
+    fn handle_await_plan_step(
+        &mut self,
+        step_id: &str,
+        await_step: &PlanStepAwaitPlan,
+        outcome: &mut PlanTickOutcome,
+    ) -> Result<StepTickControl, KernelError> {
+        if let Some(value) = self.plan_wait_values.remove(step_id) {
+            self.env
+                .vars
+                .insert(await_step.bind.var.clone(), value.clone());
+            self.record_step_value(step_id, value);
+            return self.finish_step(step_id, outcome);
+        }
+
+        if self.plan_waits.contains_key(step_id) {
+            self.step_states
+                .insert(step_id.to_string(), StepState::WaitingPlan);
+            return Ok(StepTickControl::Return);
+        }
+
+        let handle_value = aos_air_exec::eval_expr(&await_step.for_expr, &self.env)
+            .map_err(|err| KernelError::Manifest(format!("await_plan eval error: {err}")))?;
+        let handle = parse_plan_handle_value(handle_value)?;
+        self.plan_waits.insert(
+            step_id.to_string(),
+            PendingPlanWait {
+                handles: vec![handle.clone()],
+                mode: PendingPlanWaitMode::One,
+            },
+        );
+        self.step_states
+            .insert(step_id.to_string(), StepState::WaitingPlan);
+        outcome.wait_requests.push(PlanWaitRequest::AwaitPlan {
+            step_id: step_id.to_string(),
+            handle,
+        });
+        Ok(StepTickControl::Return)
+    }
+
+    fn handle_spawn_for_each_step(
+        &mut self,
+        step_id: &str,
+        spawn: &PlanStepSpawnForEach,
+        outcome: &mut PlanTickOutcome,
+    ) -> Result<StepTickControl, KernelError> {
+        if let Some(value) = self.spawn_values.remove(step_id) {
+            self.env
+                .vars
+                .insert(spawn.bind.handles_as.clone(), value.clone());
+            self.record_step_value(step_id, value);
+            return self.finish_step(step_id, outcome);
+        }
+
+        let values = eval_expr_or_value(&spawn.inputs, &self.env, "spawn_for_each eval error")?;
+        let ExprValue::List(inputs) = values else {
+            return Err(KernelError::Manifest(
+                "spawn_for_each inputs must evaluate to a list".into(),
+            ));
+        };
+        if let Some(limit) = spawn.max_fanout {
+            if inputs.len() > limit as usize {
+                return Err(KernelError::Manifest(format!(
+                    "spawn_for_each max_fanout exceeded: {} > {}",
+                    inputs.len(),
+                    limit
+                )));
+            }
+        }
+        self.step_states
+            .insert(step_id.to_string(), StepState::WaitingPlan);
+        outcome.spawn_requests.push(PlanSpawnRequest::SpawnForEach {
+            step_id: step_id.to_string(),
+            child_plan: spawn.plan.clone(),
+            inputs,
+            max_fanout: spawn.max_fanout,
+        });
+        Ok(StepTickControl::Return)
+    }
+
+    fn handle_await_plans_all_step(
+        &mut self,
+        step_id: &str,
+        await_step: &PlanStepAwaitPlansAll,
+        outcome: &mut PlanTickOutcome,
+    ) -> Result<StepTickControl, KernelError> {
+        if let Some(value) = self.plan_wait_values.remove(step_id) {
+            self.env
+                .vars
+                .insert(await_step.bind.results_as.clone(), value.clone());
+            self.record_step_value(step_id, value);
+            return self.finish_step(step_id, outcome);
+        }
+
+        if self.plan_waits.contains_key(step_id) {
+            self.step_states
+                .insert(step_id.to_string(), StepState::WaitingPlan);
+            return Ok(StepTickControl::Return);
+        }
+
+        let handles_value = aos_air_exec::eval_expr(&await_step.handles, &self.env)
+            .map_err(|err| KernelError::Manifest(format!("await_plans_all eval error: {err}")))?;
+        let handles = parse_plan_handles(handles_value)?;
+        if handles.is_empty() {
+            self.env.vars.insert(
+                await_step.bind.results_as.clone(),
+                ExprValue::List(Vec::new()),
+            );
+            self.record_step_value(step_id, ExprValue::List(Vec::new()));
+            return self.finish_step(step_id, outcome);
+        }
+        let first_plan = handles
+            .first()
+            .map(|h| h.plan.as_str())
+            .expect("non-empty handles");
+        if handles.iter().any(|h| h.plan.as_str() != first_plan) {
+            return Err(KernelError::Manifest(
+                "await_plans_all requires homogeneous child plan handles".into(),
+            ));
+        }
+
+        self.plan_waits.insert(
+            step_id.to_string(),
+            PendingPlanWait {
+                handles: handles.clone(),
+                mode: PendingPlanWaitMode::All,
+            },
+        );
+        self.step_states
+            .insert(step_id.to_string(), StepState::WaitingPlan);
+        outcome.wait_requests.push(PlanWaitRequest::AwaitPlansAll {
+            step_id: step_id.to_string(),
+            handles,
+        });
+        Ok(StepTickControl::Return)
+    }
+
     fn handle_raise_event_step(
         &mut self,
         step_id: &str,
@@ -313,6 +488,43 @@ impl PlanInstance {
         }
         Ok(StepTickControl::Return)
     }
+}
+
+fn parse_plan_handles(value: ExprValue) -> Result<Vec<PlanHandleValue>, KernelError> {
+    let ExprValue::List(items) = value else {
+        return Err(KernelError::Manifest(
+            "await_plans_all expects a list of plan handles".into(),
+        ));
+    };
+    let mut handles = Vec::with_capacity(items.len());
+    for item in items {
+        handles.push(parse_plan_handle_value(item)?);
+    }
+    Ok(handles)
+}
+
+fn parse_plan_handle_value(value: ExprValue) -> Result<PlanHandleValue, KernelError> {
+    let ExprValue::Record(fields) = value else {
+        return Err(KernelError::Manifest("plan handle must be a record".into()));
+    };
+    let plan = match fields.get("plan") {
+        Some(ExprValue::Text(plan)) => plan.clone(),
+        _ => {
+            return Err(KernelError::Manifest(
+                "plan handle record missing text field 'plan'".into(),
+            ));
+        }
+    };
+    let instance_id = match fields.get("instance_id") {
+        Some(ExprValue::Nat(id)) => *id,
+        Some(ExprValue::Int(id)) if *id >= 0 => *id as u64,
+        _ => {
+            return Err(KernelError::Manifest(
+                "plan handle record missing nat field 'instance_id'".into(),
+            ));
+        }
+    };
+    Ok(PlanHandleValue { instance_id, plan })
 }
 
 #[cfg(test)]

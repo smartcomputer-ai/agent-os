@@ -52,6 +52,15 @@ pub fn normalize_plan_literals(
     schemas: &SchemaIndex,
     effects: &crate::catalog::EffectCatalog,
 ) -> Result<(), PlanLiteralError> {
+    normalize_plan_literals_with_plan_inputs(plan, schemas, effects, &HashMap::new())
+}
+
+pub fn normalize_plan_literals_with_plan_inputs(
+    plan: &mut DefPlan,
+    schemas: &SchemaIndex,
+    effects: &crate::catalog::EffectCatalog,
+    plan_input_schemas: &HashMap<String, String>,
+) -> Result<(), PlanLiteralError> {
     for step in &mut plan.steps {
         match &mut step.kind {
             crate::PlanStepKind::EmitEffect(step) => {
@@ -130,6 +139,49 @@ pub fn normalize_plan_literals(
             }
             crate::PlanStepKind::RaiseEvent(step) => {
                 normalize_raise_event_literal(step, schemas)?;
+            }
+            crate::PlanStepKind::SpawnPlan(step) => {
+                if let Some(input_schema_name) = plan_input_schemas.get(step.plan.as_str()) {
+                    let schema = schemas.get(input_schema_name.as_str()).ok_or_else(|| {
+                        PlanLiteralError::SchemaNotFound {
+                            name: input_schema_name.clone(),
+                        }
+                    })?;
+                    normalize_expr_or_value(
+                        &mut step.input,
+                        schema,
+                        input_schema_name,
+                        schemas,
+                        "spawn_plan.input",
+                    )?;
+                } else if matches!(step.input, ExprOrValue::Json(_)) {
+                    return Err(PlanLiteralError::MissingSchema {
+                        context: "spawn_plan.input",
+                    });
+                }
+            }
+            crate::PlanStepKind::SpawnForEach(step) => {
+                if let Some(input_schema_name) = plan_input_schemas.get(step.plan.as_str()) {
+                    let item_schema = schemas.get(input_schema_name.as_str()).ok_or_else(|| {
+                        PlanLiteralError::SchemaNotFound {
+                            name: input_schema_name.clone(),
+                        }
+                    })?;
+                    let list_schema = TypeExpr::List(TypeList {
+                        list: Box::new(item_schema.clone()),
+                    });
+                    normalize_expr_or_value(
+                        &mut step.inputs,
+                        &list_schema,
+                        input_schema_name,
+                        schemas,
+                        "spawn_for_each.inputs",
+                    )?;
+                } else if matches!(step.inputs, ExprOrValue::Json(_)) {
+                    return Err(PlanLiteralError::MissingSchema {
+                        context: "spawn_for_each.inputs",
+                    });
+                }
             }
             _ => {}
         }
@@ -973,6 +1025,111 @@ mod tests {
         let err =
             normalize_plan_literals(&mut plan, &schema_index(), &effect_catalog()).unwrap_err();
         assert!(matches!(err, PlanLiteralError::SchemaNotFound { .. }));
+    }
+
+    #[test]
+    fn normalizes_spawn_plan_input_literals() {
+        let mut schemas = schema_index();
+        schemas.insert(
+            "com.acme/ChildInput@1".into(),
+            TypeExpr::Record(TypeRecord {
+                record: IndexMap::from([(
+                    "id".into(),
+                    TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                        text: crate::EmptyObject::default(),
+                    })),
+                )]),
+            }),
+        );
+
+        let mut plan = DefPlan {
+            name: "com.acme/Parent@1".into(),
+            input: crate::SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![crate::PlanStep {
+                id: "spawn".into(),
+                kind: crate::PlanStepKind::SpawnPlan(crate::PlanStepSpawnPlan {
+                    plan: "com.acme/Child@1".into(),
+                    input: ExprOrValue::Json(json!({"id": "abc"})),
+                    bind: crate::PlanBindHandle {
+                        handle_as: "child".into(),
+                    },
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+        let plan_inputs = HashMap::from([(
+            "com.acme/Child@1".to_string(),
+            "com.acme/ChildInput@1".to_string(),
+        )]);
+        normalize_plan_literals_with_plan_inputs(
+            &mut plan,
+            &schemas,
+            &effect_catalog(),
+            &plan_inputs,
+        )
+        .unwrap();
+        let crate::PlanStepKind::SpawnPlan(step) = &plan.steps[0].kind else {
+            panic!("expected spawn_plan");
+        };
+        assert!(matches!(step.input, ExprOrValue::Literal(_)));
+    }
+
+    #[test]
+    fn normalizes_spawn_for_each_inputs_literals() {
+        let mut schemas = schema_index();
+        schemas.insert(
+            "com.acme/ChildInput@1".into(),
+            TypeExpr::Record(TypeRecord {
+                record: IndexMap::from([(
+                    "id".into(),
+                    TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+                        text: crate::EmptyObject::default(),
+                    })),
+                )]),
+            }),
+        );
+
+        let mut plan = DefPlan {
+            name: "com.acme/Parent@1".into(),
+            input: crate::SchemaRef::new("com.acme/Input@1").unwrap(),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![crate::PlanStep {
+                id: "spawn_many".into(),
+                kind: crate::PlanStepKind::SpawnForEach(crate::PlanStepSpawnForEach {
+                    plan: "com.acme/Child@1".into(),
+                    inputs: ExprOrValue::Json(json!([{"id": "a"}, {"id": "b"}])),
+                    max_fanout: Some(10),
+                    bind: crate::PlanBindHandles {
+                        handles_as: "children".into(),
+                    },
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+        let plan_inputs = HashMap::from([(
+            "com.acme/Child@1".to_string(),
+            "com.acme/ChildInput@1".to_string(),
+        )]);
+        normalize_plan_literals_with_plan_inputs(
+            &mut plan,
+            &schemas,
+            &effect_catalog(),
+            &plan_inputs,
+        )
+        .unwrap();
+        let crate::PlanStepKind::SpawnForEach(step) = &plan.steps[0].kind else {
+            panic!("expected spawn_for_each");
+        };
+        assert!(matches!(step.inputs, ExprOrValue::Literal(_)));
     }
 
     #[test]

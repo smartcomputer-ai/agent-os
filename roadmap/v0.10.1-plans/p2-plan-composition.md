@@ -1,7 +1,7 @@
 # P2: Plan Composition in AIR v1 (Projection + Subplans)
 
 **Priority**: P2  
-**Status**: In Progress (`B1` complete on 2026-02-22; `B2` pending)  
+**Status**: Complete (`B1` + `B2` complete on 2026-02-22)  
 **Depends on**: P1 for distribution baseline  
 **Source inspiration**: `roadmap/vX-future/p3-plans-v1.1.md`
 
@@ -169,25 +169,27 @@ Tooling/tests:
 
 ### Milestone B2: Subplan Ops
 
+**Status**: Complete (2026-02-22)
+
 Kernel/runtime:
 
-1. implement new step handlers,
-2. add plan instance parent linkage,
-3. add await readiness over child plan end records,
-4. preserve pinned manifest inheritance.
+1. [x] implement new step handlers,
+2. [x] add plan instance parent linkage,
+3. [x] add await readiness over child plan end records,
+4. [x] preserve pinned manifest inheritance.
 
 Validator/type system:
 
-1. step reference checks for handles,
-2. result variant inference checks,
-3. fan-out/fan-in homogeneity checks (initially strict).
+1. [x] step reference checks for handles,
+2. [x] result variant inference checks,
+3. [x] fan-out/fan-in homogeneity checks (initially strict).
 
 Tests:
 
-1. deterministic replay with nested plan graphs,
-2. failure propagation (`Error` variant),
-3. fan-out barrier determinism,
-4. invariant failure behavior compatibility.
+1. [x] deterministic replay with nested plan graphs,
+2. [x] failure propagation (`Error` variant),
+3. [x] fan-out barrier determinism,
+4. [x] invariant failure behavior compatibility.
 
 ## Migration Pattern
 

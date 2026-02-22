@@ -1,12 +1,13 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
     DefModule, DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprMap, ExprOp,
-    ExprOpCode, ExprOrValue, ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-    PlanStepAssign,
-    PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
-    PlanStepRaiseEvent, ReducerAbi, RoutingEvent, Trigger, TypeExpr, TypePrimitive,
-    TypePrimitiveBool, TypePrimitiveInt, TypePrimitiveNat, TypePrimitiveText, TypeRecord, TypeRef,
-    TypeVariant, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
+    ExprOpCode, ExprOrValue, ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanBindHandle,
+    PlanBindHandles, PlanBindResults, PlanEdge, PlanStep, PlanStepAssign, PlanStepAwaitEvent,
+    PlanStepAwaitPlan, PlanStepAwaitPlansAll, PlanStepAwaitReceipt, PlanStepEmitEffect,
+    PlanStepEnd, PlanStepKind, PlanStepRaiseEvent, PlanStepSpawnForEach, PlanStepSpawnPlan,
+    ReducerAbi, RoutingEvent, Trigger, TypeExpr, TypePrimitive, TypePrimitiveBool,
+    TypePrimitiveInt, TypePrimitiveNat, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant,
+    ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
     builtins::builtin_schemas,
     plan_literals::{SchemaIndex, normalize_plan_literals},
 };
@@ -1536,10 +1537,12 @@ fn trigger_input_expr_projects_event_into_plan_input() {
         plan: plan_name.into(),
         correlate_by: None,
         when: None,
-        input_expr: Some(Expr::Ref(ExprRef {
-            reference: "@event.payload".into(),
-        })
-        .into()),
+        input_expr: Some(
+            Expr::Ref(ExprRef {
+                reference: "@event.payload".into(),
+            })
+            .into(),
+        ),
     };
     let mut loaded =
         build_loaded_manifest_with_http_enforcer(&store, vec![plan], vec![trigger], vec![], vec![]);
@@ -1547,10 +1550,7 @@ fn trigger_input_expr_projects_event_into_plan_input() {
         &mut loaded,
         vec![
             def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
-            def_text_record_schema(
-                "com.acme/EnvelopePayload@1",
-                vec![("id", text_type())],
-            ),
+            def_text_record_schema("com.acme/EnvelopePayload@1", vec![("id", text_type())]),
             DefSchema {
                 name: "com.acme/Envelope@1".into(),
                 ty: TypeExpr::Record(TypeRecord {
@@ -1582,6 +1582,571 @@ fn trigger_input_expr_projects_event_into_plan_input() {
     let mut effects = world.drain_effects().expect("drain effects");
     assert_eq!(effects.len(), 1);
     assert_eq!(effect_params_text(&effects.remove(0)), "projected-id");
+}
+
+#[test]
+fn spawn_plan_await_plan_and_plan_started_parent_linkage() {
+    let store = fixtures::new_mem_store();
+    let parent_plan = "com.acme/ParentSpawn@1";
+    let child_plan = "com.acme/ChildSpawn@1";
+
+    let child = DefPlan {
+        name: child_plan.into(),
+        input: fixtures::schema("com.acme/PlanIn@1"),
+        output: Some(fixtures::schema("com.acme/ChildOut@1")),
+        locals: IndexMap::new(),
+        steps: vec![PlanStep {
+            id: "end".into(),
+            kind: PlanStepKind::End(PlanStepEnd {
+                result: Some(
+                    Expr::Record(ExprRecord {
+                        record: IndexMap::from([(
+                            "value".into(),
+                            Expr::Ref(ExprRef {
+                                reference: "@plan.input.id".into(),
+                            }),
+                        )]),
+                    })
+                    .into(),
+                ),
+            }),
+        }],
+        edges: vec![],
+        required_caps: vec![],
+        allowed_effects: vec![],
+        invariants: vec![],
+    };
+
+    let parent = DefPlan {
+        name: parent_plan.into(),
+        input: fixtures::schema("com.acme/PlanIn@1"),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![
+            PlanStep {
+                id: "spawn".into(),
+                kind: PlanStepKind::SpawnPlan(PlanStepSpawnPlan {
+                    plan: child_plan.into(),
+                    input: Expr::Ref(ExprRef {
+                        reference: "@plan.input".into(),
+                    })
+                    .into(),
+                    bind: PlanBindHandle {
+                        handle_as: "child".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "await".into(),
+                kind: PlanStepKind::AwaitPlan(PlanStepAwaitPlan {
+                    for_expr: Expr::Ref(ExprRef {
+                        reference: "@var:child".into(),
+                    }),
+                    bind: PlanBind {
+                        var: "child_result".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "emit".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: EffectKind::http_request(),
+                    params: Expr::Record(ExprRecord {
+                        record: IndexMap::from([
+                            (
+                                "method".into(),
+                                Expr::Const(ExprConst::Text { text: "GET".into() }),
+                            ),
+                            (
+                                "url".into(),
+                                Expr::Op(ExprOp {
+                                    op: ExprOpCode::Get,
+                                    args: vec![
+                                        Expr::Op(ExprOp {
+                                            op: ExprOpCode::Get,
+                                            args: vec![
+                                                Expr::Ref(ExprRef {
+                                                    reference: "@var:child_result".into(),
+                                                }),
+                                                Expr::Const(ExprConst::Text {
+                                                    text: "$value".into(),
+                                                }),
+                                            ],
+                                        }),
+                                        Expr::Const(ExprConst::Text {
+                                            text: "value".into(),
+                                        }),
+                                    ],
+                                }),
+                            ),
+                            ("headers".into(), Expr::Map(ExprMap { map: vec![] })),
+                            (
+                                "body_ref".into(),
+                                Expr::Const(ExprConst::Null {
+                                    null: EmptyObject::default(),
+                                }),
+                            ),
+                        ]),
+                    })
+                    .into(),
+                    cap: "cap_http".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ],
+        edges: vec![
+            PlanEdge {
+                from: "spawn".into(),
+                to: "await".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "await".into(),
+                to: "emit".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "emit".into(),
+                to: "end".into(),
+                when: None,
+            },
+        ],
+        required_caps: vec!["cap_http".into()],
+        allowed_effects: vec![EffectKind::http_request()],
+        invariants: vec![],
+    };
+
+    let child_replay = child.clone();
+    let parent_replay = parent.clone();
+
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
+        vec![child, parent],
+        vec![fixtures::start_trigger(parent_plan)],
+        vec![],
+        vec![],
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            def_text_record_schema("com.acme/ChildOut@1", vec![("value", text_type())]),
+        ],
+    );
+
+    let store_for_replay = store.clone();
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("child-123"))
+        .expect("submit start event");
+    world.kernel.tick_until_idle().unwrap();
+
+    let mut effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(effect_params_text(&effects.remove(0)), "child-123");
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let mut started = Vec::new();
+    for entry in journal_entries
+        .iter()
+        .filter(|entry| entry.kind == JournalKind::PlanStarted)
+    {
+        let record: JournalRecord = serde_cbor::from_slice(&entry.payload).unwrap();
+        if let JournalRecord::PlanStarted(rec) = record {
+            started.push(rec);
+        }
+    }
+    assert_eq!(started.len(), 2);
+    let parent_started = started
+        .iter()
+        .find(|rec| rec.plan_name == parent_plan)
+        .expect("parent started");
+    let child_started = started
+        .iter()
+        .find(|rec| rec.plan_name == child_plan)
+        .expect("child started");
+    assert!(parent_started.parent_instance_id.is_none());
+    assert_eq!(
+        child_started.parent_instance_id,
+        Some(parent_started.plan_id)
+    );
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let mut replay_loaded = build_loaded_manifest_with_http_enforcer(
+        &store_for_replay,
+        vec![child_replay, parent_replay],
+        vec![fixtures::start_trigger(parent_plan)],
+        vec![],
+        vec![],
+    );
+    insert_test_schemas(
+        &mut replay_loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            def_text_record_schema("com.acme/ChildOut@1", vec![("value", text_type())]),
+        ],
+    );
+    let replay_world = TestWorld::with_store_and_journal(
+        store_for_replay,
+        replay_loaded,
+        Box::new(MemJournal::from_entries(&journal_entries)),
+    )
+    .unwrap();
+    let replay_entries = replay_world.kernel.dump_journal().unwrap();
+    assert_eq!(replay_entries, journal_entries);
+}
+
+#[test]
+fn await_plan_surfaces_error_variant_from_failed_child() {
+    let store = fixtures::new_mem_store();
+    let parent_plan = "com.acme/ParentAwaitError@1";
+    let child_plan = "com.acme/ChildAwaitError@1";
+
+    let child = DefPlan {
+        name: child_plan.into(),
+        input: fixtures::schema("com.acme/PlanIn@1"),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![PlanStep {
+            id: "set".into(),
+            kind: PlanStepKind::Assign(PlanStepAssign {
+                expr: Expr::Const(ExprConst::Int { int: 1 }).into(),
+                bind: PlanBind { var: "n".into() },
+            }),
+        }],
+        edges: vec![],
+        required_caps: vec![],
+        allowed_effects: vec![],
+        invariants: vec![Expr::Op(ExprOp {
+            op: ExprOpCode::Lt,
+            args: vec![
+                Expr::Ref(ExprRef {
+                    reference: "@var:n".into(),
+                }),
+                Expr::Const(ExprConst::Int { int: 0 }),
+            ],
+        })],
+    };
+
+    let parent = DefPlan {
+        name: parent_plan.into(),
+        input: fixtures::schema("com.acme/PlanIn@1"),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![
+            PlanStep {
+                id: "spawn".into(),
+                kind: PlanStepKind::SpawnPlan(PlanStepSpawnPlan {
+                    plan: child_plan.into(),
+                    input: Expr::Ref(ExprRef {
+                        reference: "@plan.input".into(),
+                    })
+                    .into(),
+                    bind: PlanBindHandle {
+                        handle_as: "child".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "await".into(),
+                kind: PlanStepKind::AwaitPlan(PlanStepAwaitPlan {
+                    for_expr: Expr::Ref(ExprRef {
+                        reference: "@var:child".into(),
+                    }),
+                    bind: PlanBind {
+                        var: "child_result".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "emit".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: EffectKind::http_request(),
+                    params: Expr::Record(ExprRecord {
+                        record: IndexMap::from([
+                            (
+                                "method".into(),
+                                Expr::Const(ExprConst::Text { text: "GET".into() }),
+                            ),
+                            (
+                                "url".into(),
+                                Expr::Op(ExprOp {
+                                    op: ExprOpCode::Get,
+                                    args: vec![
+                                        Expr::Ref(ExprRef {
+                                            reference: "@var:child_result".into(),
+                                        }),
+                                        Expr::Const(ExprConst::Text {
+                                            text: "$tag".into(),
+                                        }),
+                                    ],
+                                }),
+                            ),
+                            ("headers".into(), Expr::Map(ExprMap { map: vec![] })),
+                            (
+                                "body_ref".into(),
+                                Expr::Const(ExprConst::Null {
+                                    null: EmptyObject::default(),
+                                }),
+                            ),
+                        ]),
+                    })
+                    .into(),
+                    cap: "cap_http".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ],
+        edges: vec![
+            PlanEdge {
+                from: "spawn".into(),
+                to: "await".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "await".into(),
+                to: "emit".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "emit".into(),
+                to: "end".into(),
+                when: None,
+            },
+        ],
+        required_caps: vec!["cap_http".into()],
+        allowed_effects: vec![EffectKind::http_request()],
+        invariants: vec![],
+    };
+
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
+        vec![child, parent],
+        vec![fixtures::start_trigger(parent_plan)],
+        vec![],
+        vec![],
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+        ],
+    );
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("child-error"))
+        .expect("submit start event");
+    world.kernel.tick_until_idle().unwrap();
+    let mut effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(effect_params_text(&effects.remove(0)), "Error");
+}
+
+#[test]
+fn spawn_for_each_await_plans_all_preserves_order() {
+    let store = fixtures::new_mem_store();
+    let parent_plan = "com.acme/ParentForEach@1";
+    let child_plan = "com.acme/ChildForEach@1";
+
+    let child = DefPlan {
+        name: child_plan.into(),
+        input: fixtures::schema("com.acme/ChildOut@1"),
+        output: Some(fixtures::schema("com.acme/ChildOut@1")),
+        locals: IndexMap::new(),
+        steps: vec![PlanStep {
+            id: "end".into(),
+            kind: PlanStepKind::End(PlanStepEnd {
+                result: Some(
+                    Expr::Ref(ExprRef {
+                        reference: "@plan.input".into(),
+                    })
+                    .into(),
+                ),
+            }),
+        }],
+        edges: vec![],
+        required_caps: vec![],
+        allowed_effects: vec![],
+        invariants: vec![],
+    };
+
+    let first_result = Expr::Op(ExprOp {
+        op: ExprOpCode::Get,
+        args: vec![
+            Expr::Ref(ExprRef {
+                reference: "@var:results".into(),
+            }),
+            Expr::Const(ExprConst::Nat { nat: 0 }),
+        ],
+    });
+    let first_result_value = Expr::Op(ExprOp {
+        op: ExprOpCode::Get,
+        args: vec![
+            first_result,
+            Expr::Const(ExprConst::Text {
+                text: "$value".into(),
+            }),
+        ],
+    });
+    let first_value_field = Expr::Op(ExprOp {
+        op: ExprOpCode::Get,
+        args: vec![
+            first_result_value,
+            Expr::Const(ExprConst::Text {
+                text: "value".into(),
+            }),
+        ],
+    });
+
+    let parent = DefPlan {
+        name: parent_plan.into(),
+        input: fixtures::schema("com.acme/PlanIn@1"),
+        output: None,
+        locals: IndexMap::new(),
+        steps: vec![
+            PlanStep {
+                id: "spawn_many".into(),
+                kind: PlanStepKind::SpawnForEach(PlanStepSpawnForEach {
+                    plan: child_plan.into(),
+                    inputs: Expr::List(aos_air_types::ExprList {
+                        list: vec![
+                            Expr::Record(ExprRecord {
+                                record: IndexMap::from([(
+                                    "value".into(),
+                                    Expr::Const(ExprConst::Text { text: "one".into() }),
+                                )]),
+                            }),
+                            Expr::Record(ExprRecord {
+                                record: IndexMap::from([(
+                                    "value".into(),
+                                    Expr::Const(ExprConst::Text { text: "two".into() }),
+                                )]),
+                            }),
+                            Expr::Record(ExprRecord {
+                                record: IndexMap::from([(
+                                    "value".into(),
+                                    Expr::Const(ExprConst::Text {
+                                        text: "three".into(),
+                                    }),
+                                )]),
+                            }),
+                        ],
+                    })
+                    .into(),
+                    max_fanout: Some(8),
+                    bind: PlanBindHandles {
+                        handles_as: "children".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "await_all".into(),
+                kind: PlanStepKind::AwaitPlansAll(PlanStepAwaitPlansAll {
+                    handles: Expr::Ref(ExprRef {
+                        reference: "@var:children".into(),
+                    }),
+                    bind: PlanBindResults {
+                        results_as: "results".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "emit".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: EffectKind::http_request(),
+                    params: Expr::Record(ExprRecord {
+                        record: IndexMap::from([
+                            (
+                                "method".into(),
+                                Expr::Const(ExprConst::Text { text: "GET".into() }),
+                            ),
+                            ("url".into(), first_value_field),
+                            ("headers".into(), Expr::Map(ExprMap { map: vec![] })),
+                            (
+                                "body_ref".into(),
+                                Expr::Const(ExprConst::Null {
+                                    null: EmptyObject::default(),
+                                }),
+                            ),
+                        ]),
+                    })
+                    .into(),
+                    cap: "cap_http".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "req".into(),
+                    },
+                }),
+            },
+            PlanStep {
+                id: "end".into(),
+                kind: PlanStepKind::End(PlanStepEnd { result: None }),
+            },
+        ],
+        edges: vec![
+            PlanEdge {
+                from: "spawn_many".into(),
+                to: "await_all".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "await_all".into(),
+                to: "emit".into(),
+                when: None,
+            },
+            PlanEdge {
+                from: "emit".into(),
+                to: "end".into(),
+                when: None,
+            },
+        ],
+        required_caps: vec!["cap_http".into()],
+        allowed_effects: vec![EffectKind::http_request()],
+        invariants: vec![],
+    };
+
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
+        vec![child, parent],
+        vec![fixtures::start_trigger(parent_plan)],
+        vec![],
+        vec![],
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+            def_text_record_schema("com.acme/ChildOut@1", vec![("value", text_type())]),
+        ],
+    );
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("x"))
+        .expect("submit start event");
+    world.kernel.tick_until_idle().unwrap();
+    let mut effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(effect_params_text(&effects.remove(0)), "one");
 }
 
 #[test]

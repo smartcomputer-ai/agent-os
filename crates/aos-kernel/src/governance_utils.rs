@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use aos_air_types::{
     AirNode, HashRef, NamedRef, TypeExpr, builtins,
     catalog::EffectCatalog,
-    plan_literals::{SchemaIndex, normalize_plan_literals},
+    plan_literals::{SchemaIndex, normalize_plan_literals_with_plan_inputs},
 };
 use aos_cbor::Hash;
 use aos_store::Store;
@@ -93,9 +93,23 @@ pub fn canonicalize_patch<S: Store>(
         effect_defs.extend(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
     }
     let effect_catalog = EffectCatalog::from_defs(effect_defs);
+    let plan_input_schemas: HashMap<String, String> = canonical
+        .nodes
+        .iter()
+        .filter_map(|node| match node {
+            AirNode::Defplan(plan) => Some((plan.name.clone(), plan.input.as_str().to_string())),
+            _ => None,
+        })
+        .collect();
     for node in &mut canonical.nodes {
         if let AirNode::Defplan(plan) = node {
-            normalize_plan_literals(plan, &schema_index, &effect_catalog).map_err(|err| {
+            normalize_plan_literals_with_plan_inputs(
+                plan,
+                &schema_index,
+                &effect_catalog,
+                &plan_input_schemas,
+            )
+            .map_err(|err| {
                 KernelError::Manifest(format!(
                     "plan '{}' literal normalization failed: {err}",
                     plan.name

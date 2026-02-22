@@ -524,6 +524,10 @@ pub enum PlanStepKind {
     EmitEffect(PlanStepEmitEffect),
     AwaitReceipt(PlanStepAwaitReceipt),
     AwaitEvent(PlanStepAwaitEvent),
+    SpawnPlan(PlanStepSpawnPlan),
+    AwaitPlan(PlanStepAwaitPlan),
+    SpawnForEach(PlanStepSpawnForEach),
+    AwaitPlansAll(PlanStepAwaitPlansAll),
     Assign(PlanStepAssign),
     End(PlanStepEnd),
 }
@@ -566,6 +570,35 @@ pub struct PlanStepAwaitEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanStepSpawnPlan {
+    pub plan: Name,
+    pub input: ExprOrValue,
+    pub bind: PlanBindHandle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanStepAwaitPlan {
+    #[serde(rename = "for")]
+    pub for_expr: Expr,
+    pub bind: PlanBind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanStepSpawnForEach {
+    pub plan: Name,
+    pub inputs: ExprOrValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_fanout: Option<u64>,
+    pub bind: PlanBindHandles,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanStepAwaitPlansAll {
+    pub handles: Expr,
+    pub bind: PlanBindResults,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStepAssign {
     pub expr: ExprOrValue,
     pub bind: PlanBind,
@@ -581,6 +614,21 @@ pub struct PlanStepEnd {
 pub struct PlanBind {
     #[serde(rename = "as")]
     pub var: VarName,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanBindHandle {
+    pub handle_as: VarName,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanBindHandles {
+    pub handles_as: VarName,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanBindResults {
+    pub results_as: VarName,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

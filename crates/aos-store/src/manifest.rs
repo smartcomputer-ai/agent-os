@@ -243,7 +243,7 @@ fn load_secret_refs<S: Store>(
 }
 
 fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreResult<()> {
-    use aos_air_types::plan_literals::normalize_plan_literals;
+    use aos_air_types::plan_literals::normalize_plan_literals_with_plan_inputs;
 
     let mut schema_map = HashMap::new();
     let mut effect_defs = Vec::new();
@@ -263,13 +263,24 @@ fn normalize_plan_literals(nodes: &mut HashMap<String, CatalogEntry>) -> StoreRe
     }
     let schema_index = SchemaIndex::new(schema_map);
     let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(effect_defs);
+    let plan_input_schemas: HashMap<String, String> = nodes
+        .values()
+        .filter_map(|entry| match &entry.node {
+            AirNode::Defplan(plan) => Some((plan.name.clone(), plan.input.as_str().to_string())),
+            _ => None,
+        })
+        .collect();
     for (name, entry) in nodes.iter_mut() {
         if let AirNode::Defplan(plan) = &mut entry.node {
-            normalize_plan_literals(plan, &schema_index, &effect_catalog).map_err(|source| {
-                StoreError::PlanNormalization {
-                    name: name.clone(),
-                    source,
-                }
+            normalize_plan_literals_with_plan_inputs(
+                plan,
+                &schema_index,
+                &effect_catalog,
+                &plan_input_schemas,
+            )
+            .map_err(|source| StoreError::PlanNormalization {
+                name: name.clone(),
+                source,
             })?;
         }
     }

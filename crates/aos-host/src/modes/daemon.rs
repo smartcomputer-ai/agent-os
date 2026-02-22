@@ -654,6 +654,7 @@ fn journal_kind_name(kind: aos_kernel::journal::JournalKind) -> &'static str {
         JournalKind::Snapshot => "snapshot",
         JournalKind::PolicyDecision => "policy_decision",
         JournalKind::Governance => "governance",
+        JournalKind::PlanStarted => "plan_started",
         JournalKind::PlanResult => "plan_result",
         JournalKind::PlanEnded => "plan_ended",
         JournalKind::Custom => "custom",

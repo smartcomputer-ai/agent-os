@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_bytes;
 
 use crate::journal::JournalSeq;
-use crate::plan::PlanInstanceSnapshot;
+use crate::plan::{PlanCompletionValue, PlanInstanceSnapshot};
 use crate::receipts::ReducerEffectContext;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +16,10 @@ pub struct KernelSnapshot {
     plan_instances: Vec<PlanInstanceSnapshot>,
     pending_plan_receipts: Vec<PendingPlanReceiptSnapshot>,
     waiting_events: Vec<(String, Vec<u64>)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    plan_wait_watchers: Vec<(u64, Vec<u64>)>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    completed_plan_outcomes: Vec<PlanCompletionSnapshot>,
     next_plan_id: u64,
     queued_effects: Vec<EffectIntentSnapshot>,
     pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
@@ -56,6 +60,8 @@ impl KernelSnapshot {
             plan_instances,
             pending_plan_receipts,
             waiting_events,
+            plan_wait_watchers: Vec::new(),
+            completed_plan_outcomes: Vec::new(),
             next_plan_id,
             queued_effects,
             pending_reducer_receipts,
@@ -97,6 +103,22 @@ impl KernelSnapshot {
 
     pub fn waiting_events(&self) -> &[(String, Vec<u64>)] {
         &self.waiting_events
+    }
+
+    pub fn plan_wait_watchers(&self) -> &[(u64, Vec<u64>)] {
+        &self.plan_wait_watchers
+    }
+
+    pub fn set_plan_wait_watchers(&mut self, watchers: Vec<(u64, Vec<u64>)>) {
+        self.plan_wait_watchers = watchers;
+    }
+
+    pub fn completed_plan_outcomes(&self) -> &[PlanCompletionSnapshot] {
+        &self.completed_plan_outcomes
+    }
+
+    pub fn set_completed_plan_outcomes(&mut self, outcomes: Vec<PlanCompletionSnapshot>) {
+        self.completed_plan_outcomes = outcomes;
     }
 
     pub fn next_plan_id(&self) -> u64 {
@@ -201,6 +223,12 @@ pub struct PendingPlanReceiptSnapshot {
     pub plan_id: u64,
     pub intent_hash: [u8; 32],
     pub effect_kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanCompletionSnapshot {
+    pub plan_id: u64,
+    pub value: PlanCompletionValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -30,6 +30,31 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(|(schema, ids)| (schema.clone(), ids.clone()))
             .collect();
+        let plan_wait_watchers = self
+            .plan_wait_watchers
+            .iter()
+            .map(|(child, watchers)| {
+                (
+                    *child,
+                    watchers
+                        .iter()
+                        .map(|w| w.parent_plan_id)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let completed_plan_outcomes = self
+            .completed_plan_order
+            .iter()
+            .filter_map(|plan_id| {
+                self.completed_plan_outcomes
+                    .get(plan_id)
+                    .map(|outcome| PlanCompletionSnapshot {
+                        plan_id: *plan_id,
+                        value: outcome.await_value.clone(),
+                    })
+            })
+            .collect::<Vec<_>>();
         let queued_effects = self
             .effect_manager
             .queued()
@@ -67,6 +92,8 @@ impl<S: Store + 'static> Kernel<S> {
             Some(*self.manifest_hash.as_bytes()),
         );
         snapshot.set_reducer_index_roots(reducer_index_roots);
+        snapshot.set_plan_wait_watchers(plan_wait_watchers);
+        snapshot.set_completed_plan_outcomes(completed_plan_outcomes);
         let root_completeness = SnapshotRootCompleteness {
             manifest_hash: Some(self.manifest_hash.as_bytes().to_vec()),
             reducer_state_roots: snapshot
@@ -454,6 +481,31 @@ impl<S: Store + 'static> Kernel<S> {
             .map(|snap| (snap.intent_hash, snap.into_context()))
             .collect();
         self.waiting_events = snapshot.waiting_events().iter().cloned().collect();
+        self.plan_wait_watchers = snapshot
+            .plan_wait_watchers()
+            .iter()
+            .map(|(child, parents)| {
+                (
+                    *child,
+                    parents
+                        .iter()
+                        .copied()
+                        .map(|parent_plan_id| PlanWaitWatcher { parent_plan_id })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        self.completed_plan_outcomes.clear();
+        self.completed_plan_order.clear();
+        for entry in snapshot.completed_plan_outcomes().iter().cloned() {
+            self.completed_plan_order.push_back(entry.plan_id);
+            self.completed_plan_outcomes.insert(
+                entry.plan_id,
+                PlanCompletionOutcome {
+                    await_value: entry.value,
+                },
+            );
+        }
 
         self.effect_manager.restore_queue(
             snapshot
@@ -577,6 +629,9 @@ fn decode_tail_record(kind: JournalKind, payload: &[u8]) -> Result<JournalRecord
             .map_err(err),
         JournalKind::Governance => serde_cbor::from_slice(payload)
             .map(JournalRecord::Governance)
+            .map_err(err),
+        JournalKind::PlanStarted => serde_cbor::from_slice(payload)
+            .map(JournalRecord::PlanStarted)
             .map_err(err),
         JournalKind::PlanResult => serde_cbor::from_slice(payload)
             .map(JournalRecord::PlanResult)
