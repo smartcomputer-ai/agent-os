@@ -45,6 +45,8 @@
     { "name": "sys/CapEnforceWorkspace@1" }
   ],
   "plans": [
+    { "name": "aos.agent/core_prompt_sync_from_workspace@1" },
+    { "name": "aos.agent/core_tool_catalog_sync_from_workspace@1" },
     { "name": "aos.agent/core_workspace_sync@1" },
     { "name": "demo/session_workspace_sync_wrapper@1" }
   ],

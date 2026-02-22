@@ -7,7 +7,7 @@
         "when": {
           "effect_kind": "workspace.resolve",
           "origin_kind": "plan",
-          "origin_name": "aos.agent/core_workspace_sync@1"
+          "origin_name": "aos.agent/core_prompt_sync_from_workspace@1"
         },
         "decision": "allow"
       },
@@ -15,7 +15,7 @@
         "when": {
           "effect_kind": "workspace.read_ref",
           "origin_kind": "plan",
-          "origin_name": "aos.agent/core_workspace_sync@1"
+          "origin_name": "aos.agent/core_prompt_sync_from_workspace@1"
         },
         "decision": "allow"
       },
@@ -23,7 +23,31 @@
         "when": {
           "effect_kind": "workspace.read_bytes",
           "origin_kind": "plan",
-          "origin_name": "aos.agent/core_workspace_sync@1"
+          "origin_name": "aos.agent/core_prompt_sync_from_workspace@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.resolve",
+          "origin_kind": "plan",
+          "origin_name": "aos.agent/core_tool_catalog_sync_from_workspace@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_ref",
+          "origin_kind": "plan",
+          "origin_name": "aos.agent/core_tool_catalog_sync_from_workspace@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_bytes",
+          "origin_kind": "plan",
+          "origin_name": "aos.agent/core_tool_catalog_sync_from_workspace@1"
         },
         "decision": "allow"
       },
