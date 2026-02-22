@@ -9,22 +9,22 @@ This phase moves AOS from a toy chat app toward a reusable agent runtime stack:
 
 ## Documents
 
-- `roadmap/v0.10-agent-sdk/p1-llm-lib.md`
-- `roadmap/v0.10-agent-sdk/p2-agent-sdk.md`
-- `roadmap/v0.10-agent-sdk/p2.1-session-contracts.md`
-- `roadmap/v0.10-agent-sdk/p2.2-llm-contract-direct-provider-model.md`
-- `roadmap/v0.10-agent-sdk/p2.2-llm-boundary-issue.md`
-- `roadmap/v0.10-agent-sdk/p2.3-tool-loop-safety-context-bounds.md`
-- `roadmap/v0.10-agent-sdk/p2.4-events-observability-contract.md`
-- `roadmap/v0.10-agent-sdk/p2.5-failure-retry-cancel.md`
-- `roadmap/v0.10-agent-sdk/p2.6-sdk-conformance-live-smoke.md`
-- `roadmap/v0.10-agent-sdk/p2-closure-report.md`
-- `roadmap/v0.10-agent-sdk/p2-agent-sdk-concerns.md`
-- `roadmap/v0.10-agent-sdk/p3.1-defs-sync.md`
-- `roadmap/v0.10-agent-sdk/p3.2-agent-ws.md`
+- `roadmap/v0.10.1-agent-sdk/p1-llm-lib.md`
+- `roadmap/v0.10.1-agent-sdk/p2-agent-sdk.md`
+- `roadmap/v0.10.1-agent-sdk/p2.1-session-contracts.md`
+- `roadmap/v0.10.1-agent-sdk/p2.2-llm-contract-direct-provider-model.md`
+- `roadmap/v0.10.1-agent-sdk/p2.2-llm-boundary-issue.md`
+- `roadmap/v0.10.1-agent-sdk/p2.3-tool-loop-safety-context-bounds.md`
+- `roadmap/v0.10.1-agent-sdk/p2.4-events-observability-contract.md`
+- `roadmap/v0.10.1-agent-sdk/p2.5-failure-retry-cancel.md`
+- `roadmap/v0.10.1-agent-sdk/p2.6-sdk-conformance-live-smoke.md`
+- `roadmap/v0.10.1-agent-sdk/p2-closure-report.md`
+- `roadmap/v0.10.1-agent-sdk/p2-agent-sdk-concerns.md`
+- `roadmap/v0.10.1-agent-sdk/p3.1-defs-sync.md`
+- `roadmap/v0.10.1-agent-sdk/p3.2-agent-prompts.md`
 - `roadmap/v0.10.1-agent-sdk/p3.3-agent-tools.md`
-- `roadmap/v0.10-agent-sdk/p3.4-demiurge-refactor.md`
-- `roadmap/v0.10-agent-sdk/p4-agent-effects.md`
+- `roadmap/v0.10.1-agent-sdk/p3.4-demiurge-refactor.md`
+- `roadmap/v0.10.1-agent-sdk/p4-agent-effects.md`
 
 ## Scope Notes
 
