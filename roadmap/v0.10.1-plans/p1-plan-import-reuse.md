@@ -1,7 +1,7 @@
 # P1: Plan Import Reuse via `aos.sync.json`
 
 **Priority**: P1  
-**Status**: Proposed (implementation-ready)  
+**Status**: Implemented  
 **Depends on**: P3.1 defs sync (`air.imports`)  
 **Does not require**: kernel language changes
 
@@ -258,6 +258,38 @@ Lock payload should include:
    - turnkey: generate minimal manifest refs/triggers/policy skeleton,
    - composable-core: generate thin wrapper template + trigger skeleton.
 2. Keep generated policy/grants world-local for authority control.
+
+## Implementation Notes (2026-02-22)
+
+Implemented in this repo:
+
+1. **Lock enforcement and pinning**
+   - `air.imports[].lock` now supports:
+     - hash string (`\"sha256:...\"`) or
+     - structured payload with source identity + `defs_hash`.
+   - import defs hash is deterministic over imported defs set.
+   - local mode warns on missing/mismatch lock.
+   - CI mode hard-fails on missing/mismatch lock.
+   - optional local hard-fail via `AOS_IMPORT_LOCK_STRICT=1`.
+
+2. **CLI checks**
+   - added `aos plans check`:
+     - validates role naming conventions,
+     - validates profile capability inference,
+     - validates imported plan required cap grants are present in consumer defaults,
+     - validates turnkey trigger contract (`trigger.event == entry_plan.input`),
+     - detects redundant local copies of imported plan bodies for turnkey consumers.
+
+3. **CLI scaffolding**
+   - added `aos plans scaffold`:
+     - turnkey profile scaffold,
+     - composable-core profile scaffold (wrapper template + trigger skeleton),
+     - generated grants/policy remain world-local templates.
+
+4. **SDK export convention**
+   - added `crates/aos-agent-sdk/air/exports/plan-packs/session-core/defs.air.json`
+   - added pack README under `air/exports/plan-packs/session-core/README.md`
+   - plan role naming follows `core_*`.
 
 ## Validation Gates
 

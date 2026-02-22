@@ -1,0 +1,1554 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionId@1",
+    "type": {
+      "uuid": {}
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunId@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "ref": "aos.agent/SessionId@1"
+        },
+        "run_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/TurnId@1",
+    "type": {
+      "record": {
+        "run_id": {
+          "ref": "aos.agent/RunId@1"
+        },
+        "turn_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/StepId@1",
+    "type": {
+      "record": {
+        "turn_id": {
+          "ref": "aos.agent/TurnId@1"
+        },
+        "step_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolBatchId@1",
+    "type": {
+      "record": {
+        "step_id": {
+          "ref": "aos.agent/StepId@1"
+        },
+        "batch_seq": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ToolCallStatus@1",
+    "type": {
+      "variant": {
+        "Pending": {
+          "unit": {}
+        },
+        "Succeeded": {
+          "unit": {}
+        },
+        "Failed": {
+          "record": {
+            "code": {
+              "text": {}
+            },
+            "detail": {
+              "text": {}
+            }
+          }
+        },
+        "IgnoredStale": {
+          "unit": {}
+        },
+        "Cancelled": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ActiveToolBatch@1",
+    "type": {
+      "record": {
+        "tool_batch_id": {
+          "ref": "aos.agent/ToolBatchId@1"
+        },
+        "issued_at_step_epoch": {
+          "nat": {}
+        },
+        "expected_call_ids": {
+          "set": {
+            "text": {}
+          }
+        },
+        "call_status": {
+          "map": {
+            "key": {
+              "text": {}
+            },
+            "value": {
+              "ref": "aos.agent/ToolCallStatus@1"
+            }
+          }
+        },
+        "results_ref": {
+          "option": {
+            "hash": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunLease@1",
+    "type": {
+      "record": {
+        "lease_id": {
+          "uuid": {}
+        },
+        "issued_at": {
+          "time": {}
+        },
+        "expires_at": {
+          "time": {}
+        },
+        "heartbeat_timeout_secs": {
+          "nat": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/ReasoningEffort@1",
+    "type": {
+      "variant": {
+        "Low": {
+          "unit": {}
+        },
+        "Medium": {
+          "unit": {}
+        },
+        "High": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceBinding@1",
+    "type": {
+      "record": {
+        "workspace": {
+          "text": {}
+        },
+        "version": {
+          "option": {
+            "nat": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceApplyMode@1",
+    "type": {
+      "variant": {
+        "NextRun": {
+          "unit": {}
+        },
+        "NextStepBoundary": {
+          "unit": {}
+        },
+        "ImmediateIfIdle": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSnapshot@1",
+    "type": {
+      "record": {
+        "workspace": {
+          "text": {}
+        },
+        "version": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "root_hash": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "index_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "prompt_pack": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tool_catalog": {
+          "option": {
+            "text": {}
+          }
+        },
+        "prompt_pack_ref": {
+          "option": {
+            "hash": {}
+          }
+        },
+        "tool_catalog_ref": {
+          "option": {
+            "hash": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSyncRequested@1",
+    "type": {
+      "record": {
+        "workspace_binding": {
+          "ref": "aos.agent/WorkspaceBinding@1"
+        },
+        "prompt_pack": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tool_catalog": {
+          "option": {
+            "text": {}
+          }
+        },
+        "known_version": {
+          "option": {
+            "nat": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSyncUnchanged@1",
+    "type": {
+      "record": {
+        "workspace": {
+          "text": {}
+        },
+        "version": {
+          "option": {
+            "nat": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSnapshotReady@1",
+    "type": {
+      "record": {
+        "snapshot": {
+          "ref": "aos.agent/WorkspaceSnapshot@1"
+        },
+        "prompt_pack_bytes": {
+          "option": {
+            "bytes": {}
+          }
+        },
+        "tool_catalog_bytes": {
+          "option": {
+            "bytes": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceSyncFailed@1",
+    "type": {
+      "record": {
+        "workspace": {
+          "text": {}
+        },
+        "stage": {
+          "text": {}
+        },
+        "detail": {
+          "text": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/WorkspaceApplyRequested@1",
+    "type": {
+      "record": {
+        "mode": {
+          "ref": "aos.agent/WorkspaceApplyMode@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionConfig@1",
+    "type": {
+      "record": {
+        "provider": {
+          "text": {}
+        },
+        "model": {
+          "text": {}
+        },
+        "reasoning_effort": {
+          "option": {
+            "ref": "aos.agent/ReasoningEffort@1"
+          }
+        },
+        "max_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "workspace_binding": {
+          "option": {
+            "ref": "aos.agent/WorkspaceBinding@1"
+          }
+        },
+        "default_prompt_pack": {
+          "option": {
+            "text": {}
+          }
+        },
+        "default_tool_catalog": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/RunConfig@1",
+    "type": {
+      "record": {
+        "provider": {
+          "text": {}
+        },
+        "model": {
+          "text": {}
+        },
+        "reasoning_effort": {
+          "option": {
+            "ref": "aos.agent/ReasoningEffort@1"
+          }
+        },
+        "max_tokens": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "workspace_binding": {
+          "option": {
+            "ref": "aos.agent/WorkspaceBinding@1"
+          }
+        },
+        "prompt_pack": {
+          "option": {
+            "text": {}
+          }
+        },
+        "tool_catalog": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionLifecycle@1",
+    "type": {
+      "variant": {
+        "Idle": {
+          "unit": {}
+        },
+        "Running": {
+          "unit": {}
+        },
+        "WaitingInput": {
+          "unit": {}
+        },
+        "Paused": {
+          "unit": {}
+        },
+        "Cancelling": {
+          "unit": {}
+        },
+        "Completed": {
+          "unit": {}
+        },
+        "Failed": {
+          "unit": {}
+        },
+        "Cancelled": {
+          "unit": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/HostCommand@1",
+    "type": {
+      "record": {
+        "command_id": {
+          "uuid": {}
+        },
+        "target_run_id": {
+          "option": {
+            "ref": "aos.agent/RunId@1"
+          }
+        },
+        "expected_session_epoch": {
+          "option": {
+            "nat": {}
+          }
+        },
+        "issued_at": {
+          "time": {}
+        },
+        "command": {
+          "variant": {
+            "Steer": {
+              "record": {
+                "text": {
+                  "text": {}
+                }
+              }
+            },
+            "FollowUp": {
+              "record": {
+                "text": {
+                  "text": {}
+                }
+              }
+            },
+            "Pause": {
+              "unit": {}
+            },
+            "Resume": {
+              "unit": {}
+            },
+            "Cancel": {
+              "record": {
+                "reason": {
+                  "option": {
+                    "text": {}
+                  }
+                }
+              }
+            },
+            "LeaseHeartbeat": {
+              "record": {
+                "lease_id": {
+                  "uuid": {}
+                },
+                "heartbeat_at": {
+                  "time": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmToolCall@1",
+    "type": {
+      "record": {
+        "call_id": {
+          "text": {}
+        },
+        "tool_name": {
+          "text": {}
+        },
+        "arguments_ref": {
+          "hash": {}
+        },
+        "provider_call_id": {
+          "option": {
+            "text": {}
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/LlmToolCallList@1",
+    "type": {
+      "list": {
+        "ref": "aos.agent/LlmToolCall@1"
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionEventKind@1",
+    "type": {
+      "variant": {
+        "RunRequested": {
+          "record": {
+            "input_ref": {
+              "hash": {}
+            },
+            "run_overrides": {
+              "option": {
+                "ref": "aos.agent/SessionConfig@1"
+              }
+            }
+          }
+        },
+        "RunStarted": {
+          "unit": {}
+        },
+        "HostCommandReceived": {
+          "ref": "aos.agent/HostCommand@1"
+        },
+        "HostCommandApplied": {
+          "record": {
+            "command_id": {
+              "uuid": {}
+            }
+          }
+        },
+        "LifecycleChanged": {
+          "ref": "aos.agent/SessionLifecycle@1"
+        },
+        "StepBoundary": {
+          "unit": {}
+        },
+        "ToolBatchStarted": {
+          "record": {
+            "tool_batch_id": {
+              "ref": "aos.agent/ToolBatchId@1"
+            },
+            "expected_call_ids": {
+              "list": {
+                "text": {}
+              }
+            }
+          }
+        },
+        "ToolCallSettled": {
+          "record": {
+            "tool_batch_id": {
+              "ref": "aos.agent/ToolBatchId@1"
+            },
+            "call_id": {
+              "text": {}
+            },
+            "status": {
+              "ref": "aos.agent/ToolCallStatus@1"
+            },
+            "receipt_session_epoch": {
+              "nat": {}
+            },
+            "receipt_step_epoch": {
+              "nat": {}
+            }
+          }
+        },
+        "ToolBatchSettled": {
+          "record": {
+            "tool_batch_id": {
+              "ref": "aos.agent/ToolBatchId@1"
+            },
+            "results_ref": {
+              "option": {
+                "hash": {}
+              }
+            }
+          }
+        },
+        "LeaseIssued": {
+          "record": {
+            "lease": {
+              "ref": "aos.agent/RunLease@1"
+            }
+          }
+        },
+        "LeaseExpiryCheck": {
+          "record": {
+            "observed_time_ns": {
+              "time": {}
+            }
+          }
+        },
+        "WorkspaceSyncRequested": {
+          "ref": "aos.agent/WorkspaceSyncRequested@1"
+        },
+        "WorkspaceSyncUnchanged": {
+          "ref": "aos.agent/WorkspaceSyncUnchanged@1"
+        },
+        "WorkspaceSnapshotReady": {
+          "ref": "aos.agent/WorkspaceSnapshotReady@1"
+        },
+        "WorkspaceSyncFailed": {
+          "ref": "aos.agent/WorkspaceSyncFailed@1"
+        },
+        "WorkspaceApplyRequested": {
+          "ref": "aos.agent/WorkspaceApplyRequested@1"
+        },
+        "RunCompleted": {
+          "unit": {}
+        },
+        "RunFailed": {
+          "record": {
+            "code": {
+              "text": {}
+            },
+            "detail": {
+              "text": {}
+            }
+          }
+        },
+        "RunCancelled": {
+          "record": {
+            "reason": {
+              "option": {
+                "text": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionState@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "ref": "aos.agent/SessionId@1"
+        },
+        "lifecycle": {
+          "ref": "aos.agent/SessionLifecycle@1"
+        },
+        "session_epoch": {
+          "nat": {}
+        },
+        "step_epoch": {
+          "nat": {}
+        },
+        "next_run_seq": {
+          "nat": {}
+        },
+        "next_turn_seq": {
+          "nat": {}
+        },
+        "next_step_seq": {
+          "nat": {}
+        },
+        "session_config": {
+          "ref": "aos.agent/SessionConfig@1"
+        },
+        "active_run_id": {
+          "option": {
+            "ref": "aos.agent/RunId@1"
+          }
+        },
+        "active_run_config": {
+          "option": {
+            "ref": "aos.agent/RunConfig@1"
+          }
+        },
+        "active_run_step_count": {
+          "nat": {}
+        },
+        "active_turn_id": {
+          "option": {
+            "ref": "aos.agent/TurnId@1"
+          }
+        },
+        "active_step_id": {
+          "option": {
+            "ref": "aos.agent/StepId@1"
+          }
+        },
+        "active_tool_batch": {
+          "option": {
+            "ref": "aos.agent/ActiveToolBatch@1"
+          }
+        },
+        "in_flight_effects": {
+          "nat": {}
+        },
+        "max_in_flight_effects": {
+          "nat": {}
+        },
+        "active_run_lease": {
+          "option": {
+            "ref": "aos.agent/RunLease@1"
+          }
+        },
+        "last_heartbeat_at": {
+          "option": {
+            "time": {}
+          }
+        },
+        "active_workspace_snapshot": {
+          "option": {
+            "ref": "aos.agent/WorkspaceSnapshot@1"
+          }
+        },
+        "pending_workspace_snapshot": {
+          "option": {
+            "ref": "aos.agent/WorkspaceSnapshot@1"
+          }
+        },
+        "pending_workspace_apply_mode": {
+          "option": {
+            "ref": "aos.agent/WorkspaceApplyMode@1"
+          }
+        },
+        "pending_steer": {
+          "list": {
+            "text": {}
+          }
+        },
+        "pending_follow_up": {
+          "list": {
+            "text": {}
+          }
+        },
+        "created_at": {
+          "time": {}
+        },
+        "updated_at": {
+          "time": {}
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionEvent@1",
+    "type": {
+      "record": {
+        "session_id": {
+          "ref": "aos.agent/SessionId@1"
+        },
+        "run_id": {
+          "option": {
+            "ref": "aos.agent/RunId@1"
+          }
+        },
+        "turn_id": {
+          "option": {
+            "ref": "aos.agent/TurnId@1"
+          }
+        },
+        "step_id": {
+          "option": {
+            "ref": "aos.agent/StepId@1"
+          }
+        },
+        "session_epoch": {
+          "nat": {}
+        },
+        "step_epoch": {
+          "nat": {}
+        },
+        "event": {
+          "ref": "aos.agent/SessionEventKind@1"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defplan",
+    "name": "aos.agent/core_workspace_sync@1",
+    "input": "aos.agent/WorkspaceSyncRequested@1",
+    "steps": [
+      {
+        "id": "emit_workspace_resolve",
+        "op": "emit_effect",
+        "kind": "workspace.resolve",
+        "params": {
+          "record": {
+            "workspace": {
+              "op": "get",
+              "args": [
+                {
+                  "ref": "@plan.input.workspace_binding"
+                },
+                {
+                  "text": "workspace"
+                }
+              ]
+            },
+            "version": {
+              "op": "get",
+              "args": [
+                {
+                  "ref": "@plan.input.workspace_binding"
+                },
+                {
+                  "text": "version"
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": {
+          "effect_id_as": "workspace_resolve"
+        }
+      },
+      {
+        "id": "await_workspace_resolve",
+        "op": "await_receipt",
+        "for": {
+          "ref": "@var:workspace_resolve"
+        },
+        "bind": {
+          "as": "workspace_resolve_receipt"
+        }
+      },
+      {
+        "id": "assign_workspace_root",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            {
+              "ref": "@var:workspace_resolve_receipt"
+            },
+            {
+              "text": "root_hash"
+            }
+          ]
+        },
+        "bind": {
+          "as": "workspace_root"
+        }
+      },
+      {
+        "id": "assign_resolved_version",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            {
+              "ref": "@var:workspace_resolve_receipt"
+            },
+            {
+              "text": "resolved_version"
+            }
+          ]
+        },
+        "bind": {
+          "as": "resolved_version"
+        }
+      },
+      {
+        "id": "raise_unchanged",
+        "op": "raise_event",
+        "event": "aos.agent/WorkspaceSyncUnchanged@1",
+        "value": {
+          "record": {
+            "workspace": {
+              "op": "get",
+              "args": [
+                {
+                  "ref": "@plan.input.workspace_binding"
+                },
+                {
+                  "text": "workspace"
+                }
+              ]
+            },
+            "version": {
+              "ref": "@var:resolved_version"
+            }
+          }
+        }
+      },
+      {
+        "id": "emit_workspace_read_index",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": {
+              "ref": "@var:workspace_root"
+            },
+            "path": {
+              "text": "agent.workspace.json"
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": {
+          "effect_id_as": "workspace_read_index"
+        }
+      },
+      {
+        "id": "await_workspace_read_index",
+        "op": "await_receipt",
+        "for": {
+          "ref": "@var:workspace_read_index"
+        },
+        "bind": {
+          "as": "workspace_read_index_receipt"
+        }
+      },
+      {
+        "id": "assign_index_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            {
+              "ref": "@var:workspace_read_index_receipt"
+            },
+            {
+              "text": "hash"
+            }
+          ]
+        },
+        "bind": {
+          "as": "index_ref"
+        }
+      },
+      {
+        "id": "assign_prompt_pack_ref_null",
+        "op": "assign",
+        "expr": {
+          "null": {}
+        },
+        "bind": {
+          "as": "prompt_pack_ref"
+        }
+      },
+      {
+        "id": "assign_prompt_pack_bytes_null",
+        "op": "assign",
+        "expr": {
+          "null": {}
+        },
+        "bind": {
+          "as": "prompt_pack_bytes"
+        }
+      },
+      {
+        "id": "emit_workspace_read_prompt_pack",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": {
+              "ref": "@var:workspace_root"
+            },
+            "path": {
+              "op": "concat",
+              "args": [
+                {
+                  "text": "prompts/packs/"
+                },
+                {
+                  "op": "concat",
+                  "args": [
+                    {
+                      "ref": "@plan.input.prompt_pack"
+                    },
+                    {
+                      "text": ".json"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": {
+          "effect_id_as": "workspace_read_prompt_pack"
+        }
+      },
+      {
+        "id": "await_workspace_read_prompt_pack",
+        "op": "await_receipt",
+        "for": {
+          "ref": "@var:workspace_read_prompt_pack"
+        },
+        "bind": {
+          "as": "workspace_read_prompt_pack_receipt"
+        }
+      },
+      {
+        "id": "assign_prompt_pack_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            {
+              "ref": "@var:workspace_read_prompt_pack_receipt"
+            },
+            {
+              "text": "hash"
+            }
+          ]
+        },
+        "bind": {
+          "as": "prompt_pack_ref"
+        }
+      },
+      {
+        "id": "emit_workspace_read_prompt_pack_bytes",
+        "op": "emit_effect",
+        "kind": "workspace.read_bytes",
+        "params": {
+          "record": {
+            "root_hash": {
+              "ref": "@var:workspace_root"
+            },
+            "path": {
+              "op": "concat",
+              "args": [
+                {
+                  "text": "prompts/packs/"
+                },
+                {
+                  "op": "concat",
+                  "args": [
+                    {
+                      "ref": "@plan.input.prompt_pack"
+                    },
+                    {
+                      "text": ".json"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": {
+          "effect_id_as": "workspace_read_prompt_pack_bytes"
+        }
+      },
+      {
+        "id": "await_workspace_read_prompt_pack_bytes",
+        "op": "await_receipt",
+        "for": {
+          "ref": "@var:workspace_read_prompt_pack_bytes"
+        },
+        "bind": {
+          "as": "workspace_read_prompt_pack_bytes_receipt"
+        }
+      },
+      {
+        "id": "assign_prompt_pack_bytes",
+        "op": "assign",
+        "expr": {
+          "ref": "@var:workspace_read_prompt_pack_bytes_receipt"
+        },
+        "bind": {
+          "as": "prompt_pack_bytes"
+        }
+      },
+      {
+        "id": "assign_tool_catalog_ref_null",
+        "op": "assign",
+        "expr": {
+          "null": {}
+        },
+        "bind": {
+          "as": "tool_catalog_ref"
+        }
+      },
+      {
+        "id": "assign_tool_catalog_bytes_null",
+        "op": "assign",
+        "expr": {
+          "null": {}
+        },
+        "bind": {
+          "as": "tool_catalog_bytes"
+        }
+      },
+      {
+        "id": "emit_workspace_read_tool_catalog",
+        "op": "emit_effect",
+        "kind": "workspace.read_ref",
+        "params": {
+          "record": {
+            "root_hash": {
+              "ref": "@var:workspace_root"
+            },
+            "path": {
+              "op": "concat",
+              "args": [
+                {
+                  "text": "tools/catalogs/"
+                },
+                {
+                  "op": "concat",
+                  "args": [
+                    {
+                      "ref": "@plan.input.tool_catalog"
+                    },
+                    {
+                      "text": ".json"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": {
+          "effect_id_as": "workspace_read_tool_catalog"
+        }
+      },
+      {
+        "id": "await_workspace_read_tool_catalog",
+        "op": "await_receipt",
+        "for": {
+          "ref": "@var:workspace_read_tool_catalog"
+        },
+        "bind": {
+          "as": "workspace_read_tool_catalog_receipt"
+        }
+      },
+      {
+        "id": "assign_tool_catalog_ref",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            {
+              "ref": "@var:workspace_read_tool_catalog_receipt"
+            },
+            {
+              "text": "hash"
+            }
+          ]
+        },
+        "bind": {
+          "as": "tool_catalog_ref"
+        }
+      },
+      {
+        "id": "emit_workspace_read_tool_catalog_bytes",
+        "op": "emit_effect",
+        "kind": "workspace.read_bytes",
+        "params": {
+          "record": {
+            "root_hash": {
+              "ref": "@var:workspace_root"
+            },
+            "path": {
+              "op": "concat",
+              "args": [
+                {
+                  "text": "tools/catalogs/"
+                },
+                {
+                  "op": "concat",
+                  "args": [
+                    {
+                      "ref": "@plan.input.tool_catalog"
+                    },
+                    {
+                      "text": ".json"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": {
+          "effect_id_as": "workspace_read_tool_catalog_bytes"
+        }
+      },
+      {
+        "id": "await_workspace_read_tool_catalog_bytes",
+        "op": "await_receipt",
+        "for": {
+          "ref": "@var:workspace_read_tool_catalog_bytes"
+        },
+        "bind": {
+          "as": "workspace_read_tool_catalog_bytes_receipt"
+        }
+      },
+      {
+        "id": "assign_tool_catalog_bytes",
+        "op": "assign",
+        "expr": {
+          "ref": "@var:workspace_read_tool_catalog_bytes_receipt"
+        },
+        "bind": {
+          "as": "tool_catalog_bytes"
+        }
+      },
+      {
+        "id": "raise_snapshot_ready",
+        "op": "raise_event",
+        "event": "aos.agent/WorkspaceSnapshotReady@1",
+        "value": {
+          "record": {
+            "snapshot": {
+              "record": {
+                "workspace": {
+                  "op": "get",
+                  "args": [
+                    {
+                      "ref": "@plan.input.workspace_binding"
+                    },
+                    {
+                      "text": "workspace"
+                    }
+                  ]
+                },
+                "version": {
+                  "ref": "@var:resolved_version"
+                },
+                "root_hash": {
+                  "ref": "@var:workspace_root"
+                },
+                "index_ref": {
+                  "ref": "@var:index_ref"
+                },
+                "prompt_pack": {
+                  "ref": "@plan.input.prompt_pack"
+                },
+                "tool_catalog": {
+                  "ref": "@plan.input.tool_catalog"
+                },
+                "prompt_pack_ref": {
+                  "ref": "@var:prompt_pack_ref"
+                },
+                "tool_catalog_ref": {
+                  "ref": "@var:tool_catalog_ref"
+                }
+              }
+            },
+            "prompt_pack_bytes": {
+              "ref": "@var:prompt_pack_bytes"
+            },
+            "tool_catalog_bytes": {
+              "ref": "@var:tool_catalog_bytes"
+            }
+          }
+        }
+      },
+      {
+        "id": "finish",
+        "op": "end"
+      }
+    ],
+    "edges": [
+      {
+        "from": "emit_workspace_resolve",
+        "to": "await_workspace_resolve"
+      },
+      {
+        "from": "await_workspace_resolve",
+        "to": "assign_workspace_root"
+      },
+      {
+        "from": "assign_workspace_root",
+        "to": "assign_resolved_version"
+      },
+      {
+        "from": "assign_resolved_version",
+        "to": "raise_unchanged",
+        "when": {
+          "op": "and",
+          "args": [
+            {
+              "op": "ne",
+              "args": [
+                {
+                  "ref": "@plan.input.known_version"
+                },
+                {
+                  "null": {}
+                }
+              ]
+            },
+            {
+              "op": "eq",
+              "args": [
+                {
+                  "ref": "@plan.input.known_version"
+                },
+                {
+                  "ref": "@var:resolved_version"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "from": "assign_resolved_version",
+        "to": "emit_workspace_read_index",
+        "when": {
+          "op": "or",
+          "args": [
+            {
+              "op": "eq",
+              "args": [
+                {
+                  "ref": "@plan.input.known_version"
+                },
+                {
+                  "null": {}
+                }
+              ]
+            },
+            {
+              "op": "ne",
+              "args": [
+                {
+                  "ref": "@plan.input.known_version"
+                },
+                {
+                  "ref": "@var:resolved_version"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "from": "emit_workspace_read_index",
+        "to": "await_workspace_read_index"
+      },
+      {
+        "from": "await_workspace_read_index",
+        "to": "assign_index_ref"
+      },
+      {
+        "from": "assign_index_ref",
+        "to": "emit_workspace_read_prompt_pack",
+        "when": {
+          "op": "ne",
+          "args": [
+            {
+              "ref": "@plan.input.prompt_pack"
+            },
+            {
+              "null": {}
+            }
+          ]
+        }
+      },
+      {
+        "from": "assign_index_ref",
+        "to": "assign_prompt_pack_ref_null",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "ref": "@plan.input.prompt_pack"
+            },
+            {
+              "null": {}
+            }
+          ]
+        }
+      },
+      {
+        "from": "emit_workspace_read_prompt_pack",
+        "to": "await_workspace_read_prompt_pack"
+      },
+      {
+        "from": "await_workspace_read_prompt_pack",
+        "to": "assign_prompt_pack_ref"
+      },
+      {
+        "from": "assign_prompt_pack_ref",
+        "to": "emit_workspace_read_prompt_pack_bytes"
+      },
+      {
+        "from": "emit_workspace_read_prompt_pack_bytes",
+        "to": "await_workspace_read_prompt_pack_bytes"
+      },
+      {
+        "from": "await_workspace_read_prompt_pack_bytes",
+        "to": "assign_prompt_pack_bytes"
+      },
+      {
+        "from": "assign_prompt_pack_bytes",
+        "to": "emit_workspace_read_tool_catalog",
+        "when": {
+          "op": "ne",
+          "args": [
+            {
+              "ref": "@plan.input.tool_catalog"
+            },
+            {
+              "null": {}
+            }
+          ]
+        }
+      },
+      {
+        "from": "assign_prompt_pack_bytes",
+        "to": "assign_tool_catalog_ref_null",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "ref": "@plan.input.tool_catalog"
+            },
+            {
+              "null": {}
+            }
+          ]
+        }
+      },
+      {
+        "from": "assign_prompt_pack_ref_null",
+        "to": "assign_prompt_pack_bytes_null"
+      },
+      {
+        "from": "assign_prompt_pack_bytes_null",
+        "to": "emit_workspace_read_tool_catalog",
+        "when": {
+          "op": "ne",
+          "args": [
+            {
+              "ref": "@plan.input.tool_catalog"
+            },
+            {
+              "null": {}
+            }
+          ]
+        }
+      },
+      {
+        "from": "assign_prompt_pack_bytes_null",
+        "to": "assign_tool_catalog_ref_null",
+        "when": {
+          "op": "eq",
+          "args": [
+            {
+              "ref": "@plan.input.tool_catalog"
+            },
+            {
+              "null": {}
+            }
+          ]
+        }
+      },
+      {
+        "from": "emit_workspace_read_tool_catalog",
+        "to": "await_workspace_read_tool_catalog"
+      },
+      {
+        "from": "await_workspace_read_tool_catalog",
+        "to": "assign_tool_catalog_ref"
+      },
+      {
+        "from": "assign_tool_catalog_ref",
+        "to": "emit_workspace_read_tool_catalog_bytes"
+      },
+      {
+        "from": "emit_workspace_read_tool_catalog_bytes",
+        "to": "await_workspace_read_tool_catalog_bytes"
+      },
+      {
+        "from": "await_workspace_read_tool_catalog_bytes",
+        "to": "assign_tool_catalog_bytes"
+      },
+      {
+        "from": "assign_tool_catalog_ref_null",
+        "to": "assign_tool_catalog_bytes_null"
+      },
+      {
+        "from": "assign_tool_catalog_bytes",
+        "to": "raise_snapshot_ready"
+      },
+      {
+        "from": "assign_tool_catalog_bytes_null",
+        "to": "raise_snapshot_ready"
+      },
+      {
+        "from": "raise_snapshot_ready",
+        "to": "finish"
+      },
+      {
+        "from": "raise_unchanged",
+        "to": "finish"
+      }
+    ],
+    "required_caps": [
+      "cap_workspace"
+    ],
+    "allowed_effects": [
+      "workspace.resolve",
+      "workspace.read_ref",
+      "workspace.read_bytes"
+    ]
+  }
+]

@@ -42,6 +42,7 @@ pub async fn cmd_info(opts: &WorldOpts) -> Result<()> {
                 &dirs.air_dir,
                 &dirs.reducer_dir,
             )?;
+            warnings.extend(sources.warnings.clone());
             (sources.air_dir, sources.import_dirs)
         }
         Err(_) => (dirs.air_dir.clone(), Vec::new()),

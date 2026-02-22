@@ -10,3 +10,5 @@ This directory holds canonical reusable AIR assets for the Agent SDK.
 - `plans/`: reusable plan templates (for example workspace sync)
   including sync-time workspace JSON validation inputs.
 - `exports/session-contracts/defs.air.json`: defs-only export for app/world imports
+- `exports/plan-packs/session-core/defs.air.json`: defs-only plan-pack export
+  for reusable `core_*` orchestration flows

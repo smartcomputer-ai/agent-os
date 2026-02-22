@@ -73,6 +73,7 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
     let air_sources =
         resolve_air_sources(&dirs.world, map_root, &config, &dirs.air_dir, &reducer_dir)?;
     let air_dir = air_sources.air_dir;
+    let mut warnings = air_sources.warnings.clone();
 
     let assets = manifest_loader::load_from_assets_with_imports_and_defs(
         store.clone(),
@@ -114,8 +115,6 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
 
     refresh_module_refs(&mut loaded, store.as_ref())?;
     let workspace_entries = resolve_workspace_entries(&dirs.world, map_root, &config, args)?;
-    let mut warnings = Vec::new();
-
     if let Some(base_hash) = latest_manifest_hash_from_journal(&dirs.store_root)? {
         let bundle = WorldBundle::from_loaded_assets(loaded, secrets);
         let base_hex = base_hash.to_hex();

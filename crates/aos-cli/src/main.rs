@@ -15,6 +15,7 @@ use commands::event::EventArgs;
 use commands::gov::GovArgs;
 use commands::init::InitArgs;
 use commands::manifest::ManifestArgs;
+use commands::plans::PlansArgs;
 use commands::pull::PullArgs;
 use commands::push::PushArgs;
 use commands::run::RunArgs;
@@ -80,6 +81,9 @@ enum Command {
     /// Display active manifest
     #[command(subcommand)]
     Manifest(ManifestCommand),
+
+    /// Plan-pack checks and scaffolding
+    Plans(PlansArgs),
 
     /// Force a snapshot
     #[command(subcommand)]
@@ -167,6 +171,7 @@ async fn main() -> Result<()> {
         Command::Manifest(cmd) => match cmd {
             ManifestCommand::Get(args) => commands::manifest::cmd_manifest(opts, &args).await,
         },
+        Command::Plans(args) => commands::plans::cmd_plans(opts, &args).await,
         Command::Journal(cmd) => match cmd {
             JournalCommand::Head => commands::head::cmd_head(opts).await,
             JournalCommand::Tail(args) => {

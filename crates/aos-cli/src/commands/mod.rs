@@ -10,6 +10,7 @@ pub mod info;
 pub mod init;
 pub mod journal_tail;
 pub mod manifest;
+pub mod plans;
 pub mod pull;
 pub mod push;
 pub mod replay;
