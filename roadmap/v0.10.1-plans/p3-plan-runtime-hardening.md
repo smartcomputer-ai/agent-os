@@ -1,7 +1,7 @@
 # P3: Plan Runtime Hardening (Factory-Ready, No New AIR Ops)
 
 **Priority**: P3  
-**Status**: Complete for v0.10.1 scope (2026-02-22; strict replay-parity variant deferred)  
+**Status**: Complete for v0.10.1 scope (2026-02-22)  
 **Depends on**: AIR v1 current plan semantics, P1 import reuse  
 **May run alongside**: P2 composition work
 
@@ -83,10 +83,7 @@ Implemented:
 1. [x] Add single-fixture conformance for correlated instance isolation + crash/resume with pending subplan receipts.
 2. [x] Add concurrent-instance cross-talk test (same schema, different correlation ids).
 3. [x] Add crash/resume test where waits survive restart and complete correctly.
-
-Deferred follow-up (explicitly non-gating for this release slice):
-
-1. Strict replay parity for this exact subplan-heavy fixture shape.
+4. [x] Add strict replay parity for the subplan-heavy fixture shape.
 
 Implemented in this pass:
 
@@ -95,7 +92,10 @@ Implemented in this pass:
 3. Fixture assertions in `crates/aos-smoke/src/plan_runtime_hardening.rs` for:
    - approval cross-talk isolation,
    - restart/recovery of pending worker receipts,
-   - idempotent worker dispatch (`idempotency_key`).
+   - idempotent worker dispatch (`idempotency_key`),
+   - strict replay parity (state + summary).
+4. Replay de-duplication for receipt-driven raised domain events in kernel replay path.
+5. `replay_does_not_double_apply_receipt_spawned_domain_events` (`crates/aos-host/tests/world_integration.rs`).
 
 ### C3: Lightweight Operational Summaries
 
@@ -132,6 +132,6 @@ If P2 subplan composition lands in this initiative, apply the same C1-C3 gates t
 ## Definition of Done
 
 1. Three canonical patterns (timeout, approval, correlated response) are documented and fixture-backed.
-2. v0.10.1 selected conformance gates pass (cross-talk + crash/resume); strict replay parity variant is tracked as follow-up.
+2. v0.10.1 selected conformance gates pass (replay + cross-talk + crash/resume).
 3. Lightweight journal-derived summaries are available in CI for at least one migrated flow.
 4. No additional AIR plan ops are required beyond current spec (plus any already approved in P2).

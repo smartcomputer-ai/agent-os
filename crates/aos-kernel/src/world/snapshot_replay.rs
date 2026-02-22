@@ -173,6 +173,8 @@ impl<S: Store + 'static> Kernel<S> {
             self.load_snapshot(&snapshot)?;
         }
         self.suppress_journal = true;
+        self.replay_applying_domain_record = false;
+        self.replay_generated_domain_event_hashes.clear();
         for entry in entries {
             if resume_seq.is_some_and(|seq| entry.seq < seq) {
                 continue;
@@ -183,6 +185,8 @@ impl<S: Store + 'static> Kernel<S> {
         }
         self.tick_until_idle()?;
         self.suppress_journal = false;
+        self.replay_applying_domain_record = false;
+        self.replay_generated_domain_event_hashes.clear();
         Ok(())
     }
 
@@ -190,6 +194,9 @@ impl<S: Store + 'static> Kernel<S> {
         match record {
             JournalRecord::DomainEvent(event) => {
                 self.sync_logical_from_record(event.logical_now_ns);
+                if self.consume_replay_generated_domain_event(&event.event_hash) {
+                    return Ok(());
+                }
                 let stamp = IngressStamp {
                     now_ns: event.now_ns,
                     logical_now_ns: event.logical_now_ns,
@@ -206,7 +213,10 @@ impl<S: Store + 'static> Kernel<S> {
                     value: event.value,
                     key: event.key,
                 };
-                self.process_domain_event_with_ingress(event, stamp)?;
+                self.replay_applying_domain_record = true;
+                let result = self.process_domain_event_with_ingress(event, stamp);
+                self.replay_applying_domain_record = false;
+                result?;
                 self.tick_until_idle()?;
             }
             JournalRecord::EffectIntent(record) => {

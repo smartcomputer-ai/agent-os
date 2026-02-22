@@ -1193,6 +1193,181 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
     );
 }
 
+#[test]
+fn replay_does_not_double_apply_receipt_spawned_domain_events() {
+    let store = fixtures::new_mem_store();
+    let producer_plan = "com.acme/ReceiptToEvent@1";
+    let consumer_plan = "com.acme/DoneConsumer@1";
+    let done_schema = "com.acme/Done@1";
+
+    let build_manifest = || {
+        let producer = DefPlan {
+            name: producer_plan.into(),
+            input: fixtures::schema("com.acme/PlanIn@1"),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "emit".into(),
+                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                        kind: EffectKind::http_request(),
+                        params: http_params_literal("receipt-gate"),
+                        cap: "cap_http".into(),
+                        idempotency_key: None,
+                        bind: PlanBindEffect {
+                            effect_id_as: "req".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "await".into(),
+                    kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
+                        for_expr: fixtures::var_expr("req"),
+                        bind: PlanBind {
+                            var: "receipt".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "raise".into(),
+                    kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
+                        event: fixtures::schema(done_schema),
+                        value: Expr::Ref(ExprRef {
+                            reference: "@plan.input".into(),
+                        })
+                        .into(),
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![
+                PlanEdge {
+                    from: "emit".into(),
+                    to: "await".into(),
+                    when: None,
+                },
+                PlanEdge {
+                    from: "await".into(),
+                    to: "raise".into(),
+                    when: None,
+                },
+                PlanEdge {
+                    from: "raise".into(),
+                    to: "end".into(),
+                    when: None,
+                },
+            ],
+            required_caps: vec!["cap_http".into()],
+            allowed_effects: vec![EffectKind::http_request()],
+            invariants: vec![],
+        };
+
+        let consumer = DefPlan {
+            name: consumer_plan.into(),
+            input: fixtures::schema("com.acme/PlanIn@1"),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![
+                PlanStep {
+                    id: "emit".into(),
+                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                        kind: EffectKind::http_request(),
+                        params: http_params_literal("done-consumer"),
+                        cap: "cap_http".into(),
+                        idempotency_key: None,
+                        bind: PlanBindEffect {
+                            effect_id_as: "req".into(),
+                        },
+                    }),
+                },
+                PlanStep {
+                    id: "end".into(),
+                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
+                },
+            ],
+            edges: vec![PlanEdge {
+                from: "emit".into(),
+                to: "end".into(),
+                when: None,
+            }],
+            required_caps: vec!["cap_http".into()],
+            allowed_effects: vec![EffectKind::http_request()],
+            invariants: vec![],
+        };
+
+        let mut loaded = build_loaded_manifest_with_http_enforcer(
+            &store,
+            vec![producer, consumer],
+            vec![
+                fixtures::start_trigger(producer_plan),
+                Trigger {
+                    event: fixtures::schema(done_schema),
+                    plan: consumer_plan.into(),
+                    correlate_by: None,
+                    when: None,
+                    input_expr: None,
+                },
+            ],
+            vec![],
+            vec![],
+        );
+        insert_test_schemas(
+            &mut loaded,
+            vec![
+                def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+                def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
+                def_text_record_schema(done_schema, vec![("id", text_type())]),
+            ],
+        );
+        loaded
+    };
+
+    let mut world = TestWorld::with_store(store.clone(), build_manifest()).unwrap();
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("replay-once"))
+        .expect("submit start event");
+    world.kernel.tick_until_idle().unwrap();
+    let mut initial_effects = world.drain_effects().expect("drain first effect");
+    assert_eq!(initial_effects.len(), 1);
+    assert!(effect_params_text(&initial_effects[0]).ends_with("receipt-gate"));
+
+    let receipt = EffectReceipt {
+        intent_hash: initial_effects.remove(0).intent_hash,
+        adapter_id: "adapter.http".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&ExprValue::Text("ok".into())).unwrap(),
+        cost_cents: None,
+        signature: vec![],
+    };
+    world.kernel.handle_receipt(receipt).unwrap();
+    world.kernel.tick_until_idle().unwrap();
+    let mut downstream_effects = world.drain_effects().expect("drain downstream effect");
+    assert_eq!(downstream_effects.len(), 1);
+    assert!(effect_params_text(&downstream_effects.remove(0)).ends_with("done-consumer"));
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let store_for_replay = store.clone();
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store_for_replay,
+        build_manifest(),
+        Box::new(MemJournal::from_entries(&journal_entries)),
+    )
+    .unwrap();
+
+    let replay_effects = replay_world.drain_effects().expect("drain replay effects");
+    let done_consumer_count = replay_effects
+        .iter()
+        .filter(|intent| effect_params_text(intent).ends_with("done-consumer"))
+        .count();
+    assert_eq!(
+        done_consumer_count, 1,
+        "done-trigger consumer should replay once"
+    );
+}
+
 /// Plans blocked on `await_event` should only resume when the subscribed schema fires; different
 /// schemas should remain pending even if their triggers fire later.
 #[test]

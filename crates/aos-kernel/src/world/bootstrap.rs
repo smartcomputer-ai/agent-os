@@ -93,6 +93,8 @@ impl<S: Store + 'static> Kernel<S> {
             snapshot_index: HashMap::new(),
             journal,
             suppress_journal: false,
+            replay_applying_domain_record: false,
+            replay_generated_domain_event_hashes: HashMap::new(),
             governance: GovernanceManager::new(),
             secret_resolver: secret_resolver.clone(),
             allow_placeholder_secrets: config.allow_placeholder_secrets,

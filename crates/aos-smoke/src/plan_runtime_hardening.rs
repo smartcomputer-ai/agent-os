@@ -32,7 +32,7 @@ struct ApprovalEvent {
     approved: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 struct FlowState {
     completed_count: u64,
     last_request_id: Option<u64>,
@@ -203,7 +203,32 @@ pub fn run(example_root: &Path) -> Result<()> {
     fs::write(&artifact_path, serde_json::to_vec_pretty(&summary)?)
         .with_context(|| format!("write {}", artifact_path.display()))?;
 
+    // Strict replay check for the composed flow: state + summary must match.
+    let final_entries = kernel.dump_journal()?;
+    let replay_kernel = boot_kernel(
+        store,
+        example_root,
+        &wasm_hash_ref,
+        kernel_config,
+        Box::new(MemJournal::from_entries(&final_entries)),
+    )?;
+    let replay_state_bytes = replay_kernel
+        .reducer_state(MODULE_NAME)
+        .ok_or_else(|| anyhow!("missing replay reducer state"))?;
+    let replay_state: FlowState =
+        serde_cbor::from_slice(&replay_state_bytes).context("decode replay flow state")?;
+    ensure!(
+        replay_state == state,
+        "replay mismatch: reducer state diverged"
+    );
+    let replay_summary = plan_run_summary(&replay_kernel)?;
+    ensure!(
+        replay_summary == summary,
+        "replay mismatch: plan summary diverged"
+    );
+
     println!("   crash/resume: OK (pending worker receipts recovered)");
+    println!("   replay parity: OK");
     println!("   plan summary artifact: {}", artifact_path.display());
 
     Ok(())

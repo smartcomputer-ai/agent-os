@@ -172,6 +172,8 @@ pub struct Kernel<S: Store> {
     snapshot_index: HashMap<JournalSeq, (Hash, Option<Hash>)>,
     journal: Box<dyn Journal>,
     suppress_journal: bool,
+    replay_applying_domain_record: bool,
+    replay_generated_domain_event_hashes: HashMap<String, u64>,
     governance: GovernanceManager,
     secret_resolver: Option<SharedSecretResolver>,
     allow_placeholder_secrets: bool,
@@ -1001,6 +1003,39 @@ impl<S: Store + 'static> Kernel<S> {
         self.effect_manager.update_logical_now_ns(logical_now_ns);
         let logical_now_ns = self.effect_manager.logical_now_ns();
         self.clock.sync_logical_min(logical_now_ns);
+    }
+
+    fn mark_replay_generated_domain_event(
+        &mut self,
+        event: &DomainEvent,
+    ) -> Result<(), KernelError> {
+        if !self.suppress_journal || self.replay_applying_domain_record {
+            return Ok(());
+        }
+        let hash = Hash::of_cbor(event)
+            .map_err(|err| KernelError::Journal(err.to_string()))?
+            .to_hex();
+        let count = self
+            .replay_generated_domain_event_hashes
+            .entry(hash)
+            .or_insert(0);
+        *count += 1;
+        Ok(())
+    }
+
+    fn consume_replay_generated_domain_event(&mut self, event_hash: &str) -> bool {
+        let Some(count) = self
+            .replay_generated_domain_event_hashes
+            .get_mut(event_hash)
+        else {
+            return false;
+        };
+        if *count <= 1 {
+            self.replay_generated_domain_event_hashes.remove(event_hash);
+        } else {
+            *count -= 1;
+        }
+        true
     }
 
     fn append_record(&mut self, record: JournalRecord) -> Result<(), KernelError> {

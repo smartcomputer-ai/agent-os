@@ -58,6 +58,7 @@ impl<S: Store + 'static> Kernel<S> {
         {
             event_for_plans.key = Some(key_bytes);
         }
+        self.mark_replay_generated_domain_event(&event_for_plans)?;
         self.record_domain_event(&event_for_plans, &stamp)?;
         self.deliver_event_to_waiting_plans(&event_for_plans, &stamp)?;
         self.start_plans_for_event(&event_for_plans, &stamp)?;
