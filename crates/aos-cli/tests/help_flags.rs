@@ -16,6 +16,7 @@ fn help_mentions_new_flags_and_nouns() {
         "trace",
         "trace-find",
         "trace-diagnose",
+        "trace-summary",
         "journal",
     ] {
         assert!(

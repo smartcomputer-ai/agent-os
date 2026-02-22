@@ -1,0 +1,53 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/FlowState@1",
+    "type": {
+      "record": {
+        "completed_count": { "nat": {} },
+        "last_request_id": { "option": { "nat": {} } },
+        "last_worker_count": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/RuntimeHardeningStart@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "urls": { "list": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/ApprovalEvent@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "approved": { "bool": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/WorkerUrl@1",
+    "type": { "text": {} }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/WorkerResult@1",
+    "type": { "text": {} }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/FlowCompleted@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "worker_count": { "nat": {} }
+      }
+    }
+  }
+]

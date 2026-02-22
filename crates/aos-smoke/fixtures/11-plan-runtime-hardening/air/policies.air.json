@@ -1,0 +1,17 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/runtime-hardening-policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "http.request",
+          "origin_kind": "plan",
+          "origin_name": "demo/_internal_worker_fetch@1"
+        },
+        "decision": "allow"
+      },
+      { "when": {}, "decision": "deny" }
+    ]
+  }
+]

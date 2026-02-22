@@ -74,6 +74,9 @@ pub enum ControlMsg {
         window_limit: Option<u64>,
         resp: oneshot::Sender<Result<serde_json::Value, HostError>>,
     },
+    PlanSummary {
+        resp: oneshot::Sender<Result<serde_json::Value, HostError>>,
+    },
     EventSend {
         event: ExternalEvent,
         resp: oneshot::Sender<Result<(), HostError>>,
@@ -484,6 +487,10 @@ impl<S: Store + 'static> WorldDaemon<S> {
                         window_limit,
                     },
                 );
+                let _ = resp.send(res);
+            }
+            ControlMsg::PlanSummary { resp } => {
+                let res = crate::trace::plan_run_summary(self.host.kernel());
                 let _ = resp.send(res);
             }
             ControlMsg::PutBlob { data, resp } => {

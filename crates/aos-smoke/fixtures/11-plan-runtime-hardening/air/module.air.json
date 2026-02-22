@@ -1,0 +1,15 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/FlowTracker@1",
+    "module_kind": "reducer",
+    "abi": {
+      "reducer": {
+        "state": "demo/FlowState@1",
+        "event": "demo/FlowCompleted@1",
+        "effects_emitted": [],
+        "cap_slots": {}
+      }
+    }
+  }
+]

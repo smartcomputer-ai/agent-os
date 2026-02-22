@@ -13,6 +13,7 @@ const CLI_SMOKE_TESTS: &[&str] = &[
     "llm-summarizer",
     "agent-session",
     "trace-failure-classification",
+    "plan-runtime-hardening",
     "all-agent",
 ];
 
@@ -74,6 +75,12 @@ fn agent_session_cli_runs() {
 #[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
 fn trace_failure_classification_cli_runs() {
     run_cli_smoke("trace-failure-classification");
+}
+
+#[test]
+#[ignore = "CLI smoke tests are opt-in to keep default test runs fast"]
+fn plan_runtime_hardening_cli_runs() {
+    run_cli_smoke("plan-runtime-hardening");
 }
 
 #[test]

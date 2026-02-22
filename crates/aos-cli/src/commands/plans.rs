@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use aos_air_types::{AirNode, DefPlan, PlanStepKind};
+use aos_air_types::{
+    AirNode, DefPlan, EffectKind, Expr, ExprConst, ExprOrValue, Manifest, PlanStepEmitEffect,
+    PlanStepKind, Trigger, ValueLiteral,
+};
 use aos_cbor::Hash;
 use aos_host::manifest_loader;
 use aos_store::FsStore;
@@ -215,6 +218,10 @@ async fn cmd_plans_check(opts: &WorldOpts, args: &PlansCheckArgs) -> Result<()> 
             }
         }
     }
+    warnings.extend(collect_runtime_hardening_lints(
+        &loaded.manifest,
+        &loaded.plans,
+    ));
 
     let data = json!({
         "map": map_path.display().to_string(),
@@ -361,6 +368,446 @@ async fn cmd_plans_scaffold(opts: &WorldOpts, args: &PlansScaffoldArgs) -> Resul
         None,
         warnings,
     )
+}
+
+fn collect_runtime_hardening_lints(
+    manifest: &Manifest,
+    plans: &HashMap<String, DefPlan>,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    warnings.extend(correlated_wait_lints(&manifest.triggers, plans));
+    warnings.extend(long_wait_timeout_lints(plans));
+    warnings.extend(idempotency_key_lints(plans));
+    warnings.sort();
+    warnings
+}
+
+fn correlated_wait_lints(triggers: &[Trigger], plans: &HashMap<String, DefPlan>) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for trigger in triggers {
+        let Some(correlate_by) = trigger.correlate_by.as_ref() else {
+            continue;
+        };
+        let reachable = reachable_plans(trigger.plan.as_str(), plans);
+        let mut awaited_steps = Vec::new();
+        let mut correlated_steps = 0usize;
+
+        for plan_name in reachable {
+            let Some(plan) = plans.get(&plan_name) else {
+                continue;
+            };
+            for step in &plan.steps {
+                let PlanStepKind::AwaitEvent(await_event) = &step.kind else {
+                    continue;
+                };
+                let correlated = await_event_uses_correlation(
+                    await_event.where_clause.as_ref(),
+                    correlate_by.as_str(),
+                );
+                if correlated {
+                    correlated_steps += 1;
+                }
+                awaited_steps.push((plan_name.clone(), step.id.clone(), correlated));
+            }
+        }
+
+        if awaited_steps.is_empty() {
+            continue;
+        }
+
+        if correlated_steps == 0 {
+            warnings.push(format!(
+                "trigger '{}' -> '{}' declares correlate_by='{}' but no reachable await_event.where predicate matches @event.{} against correlation source (@var:correlation_id, @var:{}, or @plan.input.{})",
+                trigger.event, trigger.plan, correlate_by, correlate_by, correlate_by, correlate_by
+            ));
+            continue;
+        }
+
+        for (plan_name, step_id, correlated) in awaited_steps {
+            if correlated {
+                continue;
+            }
+            warnings.push(format!(
+                "plan '{}' step '{}' awaits events on correlated trigger path ('{}' -> '{}') without pairing @event.{} with a correlation source (@var:correlation_id, @var:{}, or @plan.input.{})",
+                plan_name, step_id, trigger.event, trigger.plan, correlate_by, correlate_by, correlate_by
+            ));
+        }
+    }
+    warnings
+}
+
+fn long_wait_timeout_lints(plans: &HashMap<String, DefPlan>) -> Vec<String> {
+    const LONG_WAIT_THRESHOLD: usize = 2;
+    let mut warnings = Vec::new();
+
+    let mut plan_names = plans.keys().cloned().collect::<Vec<_>>();
+    plan_names.sort();
+    for plan_name in plan_names {
+        let Some(plan) = plans.get(&plan_name) else {
+            continue;
+        };
+        let wait_count = plan_wait_count(plan);
+        if wait_count < LONG_WAIT_THRESHOLD || plan_has_timeout_branch(plan) {
+            continue;
+        }
+        warnings.push(format!(
+            "plan '{}' has {} wait steps (await_event/await_receipt/await_plan/await_plans_all) but no explicit timeout branch signal (timer.set or timeout/deadline markers)",
+            plan.name, wait_count
+        ));
+    }
+    warnings
+}
+
+fn idempotency_key_lints(plans: &HashMap<String, DefPlan>) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    let mut plan_names = plans.keys().cloned().collect::<Vec<_>>();
+    plan_names.sort();
+    for plan_name in plan_names {
+        let Some(plan) = plans.get(&plan_name) else {
+            continue;
+        };
+        for step in &plan.steps {
+            let PlanStepKind::EmitEffect(emit) = &step.kind else {
+                continue;
+            };
+            if emit.idempotency_key.is_none() && !emit_effect_is_read_only(emit) {
+                warnings.push(format!(
+                    "plan '{}' step '{}' emits '{}' without idempotency_key (recommended for non-read effects)",
+                    plan.name,
+                    step.id,
+                    emit.kind
+                ));
+            }
+        }
+    }
+
+    warnings
+}
+
+fn reachable_plans(root: &str, plans: &HashMap<String, DefPlan>) -> BTreeSet<String> {
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![root.to_string()];
+
+    while let Some(plan_name) = stack.pop() {
+        if !seen.insert(plan_name.clone()) {
+            continue;
+        }
+        let Some(plan) = plans.get(&plan_name) else {
+            continue;
+        };
+        for step in &plan.steps {
+            match &step.kind {
+                PlanStepKind::SpawnPlan(spawn) => stack.push(spawn.plan.clone()),
+                PlanStepKind::SpawnForEach(spawn) => stack.push(spawn.plan.clone()),
+                _ => {}
+            }
+        }
+    }
+
+    seen
+}
+
+fn await_event_uses_correlation(where_clause: Option<&Expr>, correlate_by: &str) -> bool {
+    let Some(where_clause) = where_clause else {
+        return false;
+    };
+    let event_ref = format!("@event.{correlate_by}");
+    let event_ref_prefix = format!("{event_ref}.");
+    let has_event_ref = expr_any_ref(where_clause, &|reference| {
+        reference == event_ref || reference.starts_with(event_ref_prefix.as_str())
+    });
+    let plan_input_ref = format!("@plan.input.{correlate_by}");
+    let plan_input_ref_prefix = format!("{plan_input_ref}.");
+    let correlate_var_ref = format!("@var:{correlate_by}");
+    let correlate_var_ref_prefix = format!("{correlate_var_ref}.");
+    let has_correlation_source = expr_any_ref(where_clause, &|reference| {
+        reference == "@var:correlation_id"
+            || reference.starts_with("@var:correlation_id.")
+            || reference == plan_input_ref
+            || reference.starts_with(plan_input_ref_prefix.as_str())
+            || reference == correlate_var_ref
+            || reference.starts_with(correlate_var_ref_prefix.as_str())
+    });
+    has_event_ref && has_correlation_source
+}
+
+fn plan_wait_count(plan: &DefPlan) -> usize {
+    plan.steps
+        .iter()
+        .filter(|step| {
+            matches!(
+                step.kind,
+                PlanStepKind::AwaitReceipt(_)
+                    | PlanStepKind::AwaitEvent(_)
+                    | PlanStepKind::AwaitPlan(_)
+                    | PlanStepKind::AwaitPlansAll(_)
+            )
+        })
+        .count()
+}
+
+fn plan_has_timeout_branch(plan: &DefPlan) -> bool {
+    if has_timeout_token(plan.name.as_str()) {
+        return true;
+    }
+    for step in &plan.steps {
+        if has_timeout_token(step.id.as_str()) {
+            return true;
+        }
+        match &step.kind {
+            PlanStepKind::RaiseEvent(raise) => {
+                if has_timeout_token(raise.event.as_str())
+                    || expr_or_value_has_timeout_token(&raise.value)
+                {
+                    return true;
+                }
+            }
+            PlanStepKind::EmitEffect(emit) => {
+                if emit.kind.as_str() == EffectKind::TIMER_SET
+                    || has_timeout_token(emit.kind.as_str())
+                    || expr_or_value_has_timeout_token(&emit.params)
+                    || emit
+                        .idempotency_key
+                        .as_ref()
+                        .map(expr_or_value_has_timeout_token)
+                        .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+            PlanStepKind::AwaitReceipt(await_receipt) => {
+                if expr_has_timeout_token(&await_receipt.for_expr) {
+                    return true;
+                }
+            }
+            PlanStepKind::AwaitEvent(await_event) => {
+                if has_timeout_token(await_event.event.as_str())
+                    || await_event
+                        .where_clause
+                        .as_ref()
+                        .map(expr_has_timeout_token)
+                        .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+            PlanStepKind::SpawnPlan(spawn) => {
+                if has_timeout_token(spawn.plan.as_str())
+                    || expr_or_value_has_timeout_token(&spawn.input)
+                {
+                    return true;
+                }
+            }
+            PlanStepKind::AwaitPlan(await_plan) => {
+                if expr_has_timeout_token(&await_plan.for_expr) {
+                    return true;
+                }
+            }
+            PlanStepKind::SpawnForEach(spawn) => {
+                if has_timeout_token(spawn.plan.as_str())
+                    || expr_or_value_has_timeout_token(&spawn.inputs)
+                {
+                    return true;
+                }
+            }
+            PlanStepKind::AwaitPlansAll(await_all) => {
+                if expr_has_timeout_token(&await_all.handles) {
+                    return true;
+                }
+            }
+            PlanStepKind::Assign(assign) => {
+                if expr_or_value_has_timeout_token(&assign.expr) {
+                    return true;
+                }
+            }
+            PlanStepKind::End(end) => {
+                if end
+                    .result
+                    .as_ref()
+                    .map(expr_or_value_has_timeout_token)
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    for edge in &plan.edges {
+        if edge
+            .when
+            .as_ref()
+            .map(expr_has_timeout_token)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn emit_effect_is_read_only(emit: &PlanStepEmitEffect) -> bool {
+    match emit.kind.as_str() {
+        EffectKind::BLOB_GET
+        | EffectKind::INTROSPECT_MANIFEST
+        | EffectKind::INTROSPECT_REDUCER_STATE
+        | EffectKind::INTROSPECT_JOURNAL_HEAD
+        | EffectKind::INTROSPECT_LIST_CELLS
+        | EffectKind::WORKSPACE_RESOLVE
+        | EffectKind::WORKSPACE_LIST
+        | EffectKind::WORKSPACE_READ_REF
+        | EffectKind::WORKSPACE_READ_BYTES
+        | EffectKind::WORKSPACE_DIFF
+        | EffectKind::WORKSPACE_ANNOTATIONS_GET => true,
+        EffectKind::HTTP_REQUEST => http_method_is_read_only(&emit.params),
+        _ => {
+            emit.kind.as_str().starts_with("introspect.")
+                || emit.kind.as_str().starts_with("query.")
+        }
+    }
+}
+
+fn http_method_is_read_only(params: &ExprOrValue) -> bool {
+    method_from_expr_or_value(params)
+        .map(|method| {
+            matches!(
+                method.to_ascii_uppercase().as_str(),
+                "GET" | "HEAD" | "OPTIONS"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn method_from_expr_or_value(params: &ExprOrValue) -> Option<&str> {
+    match params {
+        ExprOrValue::Expr(expr) => method_from_expr(expr),
+        ExprOrValue::Literal(value) => method_from_value(value),
+        ExprOrValue::Json(value) => method_from_json(value),
+    }
+}
+
+fn method_from_expr(expr: &Expr) -> Option<&str> {
+    let Expr::Record(record) = expr else {
+        return None;
+    };
+    let value = record.record.get("method")?;
+    let Expr::Const(ExprConst::Text { text }) = value else {
+        return None;
+    };
+    Some(text.as_str())
+}
+
+fn method_from_value(value: &ValueLiteral) -> Option<&str> {
+    let ValueLiteral::Record(record) = value else {
+        return None;
+    };
+    let ValueLiteral::Text(method) = record.record.get("method")? else {
+        return None;
+    };
+    Some(method.text.as_str())
+}
+
+fn method_from_json(value: &Value) -> Option<&str> {
+    if let Some(method) = value.get("method").and_then(Value::as_str) {
+        return Some(method);
+    }
+    value
+        .get("record")
+        .and_then(Value::as_object)
+        .and_then(|record| record.get("method"))
+        .and_then(|method| {
+            method
+                .get("text")
+                .and_then(Value::as_str)
+                .or_else(|| method.as_str())
+        })
+}
+
+fn has_timeout_token(text: &str) -> bool {
+    let text = text.to_ascii_lowercase();
+    text.contains("timeout") || text.contains("deadline") || text.contains("ttl")
+}
+
+fn expr_or_value_has_timeout_token(value: &ExprOrValue) -> bool {
+    match value {
+        ExprOrValue::Expr(expr) => expr_has_timeout_token(expr),
+        ExprOrValue::Literal(value) => value_has_timeout_token(value),
+        ExprOrValue::Json(value) => json_has_timeout_token(value),
+    }
+}
+
+fn expr_has_timeout_token(expr: &Expr) -> bool {
+    match expr {
+        Expr::Ref(reference) => has_timeout_token(reference.reference.as_str()),
+        Expr::Const(ExprConst::Text { text }) => has_timeout_token(text.as_str()),
+        Expr::Const(_) => false,
+        Expr::Op(op) => op.args.iter().any(expr_has_timeout_token),
+        Expr::Record(record) => record.record.values().any(expr_has_timeout_token),
+        Expr::List(list) => list.list.iter().any(expr_has_timeout_token),
+        Expr::Set(set) => set.set.iter().any(expr_has_timeout_token),
+        Expr::Map(map) => map.map.iter().any(|entry| {
+            expr_has_timeout_token(&entry.key) || expr_has_timeout_token(&entry.value)
+        }),
+        Expr::Variant(variant) => variant
+            .variant
+            .value
+            .as_deref()
+            .map(expr_has_timeout_token)
+            .unwrap_or(false),
+    }
+}
+
+fn value_has_timeout_token(value: &ValueLiteral) -> bool {
+    match value {
+        ValueLiteral::Text(text) => has_timeout_token(text.text.as_str()),
+        ValueLiteral::List(list) => list.list.iter().any(value_has_timeout_token),
+        ValueLiteral::Set(set) => set.set.iter().any(value_has_timeout_token),
+        ValueLiteral::Map(map) => map.map.iter().any(|entry| {
+            value_has_timeout_token(&entry.key) || value_has_timeout_token(&entry.value)
+        }),
+        ValueLiteral::Record(record) => record.record.values().any(value_has_timeout_token),
+        ValueLiteral::Variant(variant) => variant
+            .value
+            .as_deref()
+            .map(value_has_timeout_token)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn json_has_timeout_token(value: &Value) -> bool {
+    match value {
+        Value::String(text) => has_timeout_token(text.as_str()),
+        Value::Array(items) => items.iter().any(json_has_timeout_token),
+        Value::Object(map) => map.values().any(json_has_timeout_token),
+        _ => false,
+    }
+}
+
+fn expr_any_ref<F>(expr: &Expr, predicate: &F) -> bool
+where
+    F: Fn(&str) -> bool,
+{
+    match expr {
+        Expr::Ref(reference) => predicate(reference.reference.as_str()),
+        Expr::Const(_) => false,
+        Expr::Op(op) => op.args.iter().any(|arg| expr_any_ref(arg, predicate)),
+        Expr::Record(record) => record
+            .record
+            .values()
+            .any(|value| expr_any_ref(value, predicate)),
+        Expr::List(list) => list.list.iter().any(|value| expr_any_ref(value, predicate)),
+        Expr::Set(set) => set.set.iter().any(|value| expr_any_ref(value, predicate)),
+        Expr::Map(map) => map.map.iter().any(|entry| {
+            expr_any_ref(&entry.key, predicate) || expr_any_ref(&entry.value, predicate)
+        }),
+        Expr::Variant(variant) => variant
+            .variant
+            .value
+            .as_deref()
+            .map(|value| expr_any_ref(value, predicate))
+            .unwrap_or(false),
+    }
 }
 
 fn select_plan_for_role<'a>(
@@ -989,6 +1436,10 @@ fn ensure_hash_field(map: &mut serde_json::Map<String, Value>, key: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aos_air_types::{
+        ExprOp, ExprOpCode, PlanBind, PlanBindEffect, PlanStep, PlanStepAwaitReceipt,
+    };
+    use serde_json::json;
 
     #[test]
     fn classify_role_by_stem_prefix() {
@@ -1051,5 +1502,154 @@ mod tests {
             },
         };
         assert_eq!(infer_pack_name(&import), "aos-agent-sdk");
+    }
+
+    #[test]
+    fn await_event_correlation_accepts_var_or_input_source() {
+        let expr = Expr::Op(ExprOp {
+            op: ExprOpCode::Eq,
+            args: vec![
+                Expr::Ref(aos_air_types::ExprRef {
+                    reference: "@event.request_id".into(),
+                }),
+                Expr::Ref(aos_air_types::ExprRef {
+                    reference: "@var:correlation_id".into(),
+                }),
+            ],
+        });
+        assert!(await_event_uses_correlation(Some(&expr), "request_id"));
+
+        let plan_input = Expr::Op(ExprOp {
+            op: ExprOpCode::Eq,
+            args: vec![
+                Expr::Ref(aos_air_types::ExprRef {
+                    reference: "@event.request_id".into(),
+                }),
+                Expr::Ref(aos_air_types::ExprRef {
+                    reference: "@plan.input.request_id".into(),
+                }),
+            ],
+        });
+        assert!(await_event_uses_correlation(
+            Some(&plan_input),
+            "request_id"
+        ));
+
+        let wrong_field = Expr::Op(ExprOp {
+            op: ExprOpCode::Eq,
+            args: vec![
+                Expr::Ref(aos_air_types::ExprRef {
+                    reference: "@event.request_id".into(),
+                }),
+                Expr::Ref(aos_air_types::ExprRef {
+                    reference: "@plan.input.other_id".into(),
+                }),
+            ],
+        });
+        assert!(!await_event_uses_correlation(
+            Some(&wrong_field),
+            "request_id"
+        ));
+    }
+
+    #[test]
+    fn read_only_emit_effect_detection_handles_http_get_and_blob_get() {
+        let http_get = PlanStepEmitEffect {
+            kind: EffectKind::http_request(),
+            params: ExprOrValue::Json(json!({ "record": { "method": { "text": "GET" } } })),
+            cap: "cap_http".into(),
+            idempotency_key: None,
+            bind: PlanBindEffect {
+                effect_id_as: "req".into(),
+            },
+        };
+        assert!(emit_effect_is_read_only(&http_get));
+
+        let http_post = PlanStepEmitEffect {
+            kind: EffectKind::http_request(),
+            params: ExprOrValue::Json(json!({ "record": { "method": { "text": "POST" } } })),
+            cap: "cap_http".into(),
+            idempotency_key: None,
+            bind: PlanBindEffect {
+                effect_id_as: "req".into(),
+            },
+        };
+        assert!(!emit_effect_is_read_only(&http_post));
+
+        let blob_get = PlanStepEmitEffect {
+            kind: EffectKind::blob_get(),
+            params: ExprOrValue::Json(json!({})),
+            cap: "cap_blob".into(),
+            idempotency_key: None,
+            bind: PlanBindEffect {
+                effect_id_as: "req".into(),
+            },
+        };
+        assert!(emit_effect_is_read_only(&blob_get));
+    }
+
+    #[test]
+    fn long_wait_plan_without_timeout_signal_is_detected() {
+        let plan = DefPlan {
+            name: "demo/core_waits@1".into(),
+            input: "demo/Input@1".parse().unwrap(),
+            output: None,
+            locals: Default::default(),
+            steps: vec![
+                PlanStep {
+                    id: "await_one".into(),
+                    kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
+                        for_expr: Expr::Ref(aos_air_types::ExprRef {
+                            reference: "@var:req1".into(),
+                        }),
+                        bind: PlanBind { var: "r1".into() },
+                    }),
+                },
+                PlanStep {
+                    id: "await_two".into(),
+                    kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
+                        for_expr: Expr::Ref(aos_air_types::ExprRef {
+                            reference: "@var:req2".into(),
+                        }),
+                        bind: PlanBind { var: "r2".into() },
+                    }),
+                },
+            ],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+
+        assert_eq!(plan_wait_count(&plan), 2);
+        assert!(!plan_has_timeout_branch(&plan));
+    }
+
+    #[test]
+    fn timer_set_marks_timeout_branch_present() {
+        let plan = DefPlan {
+            name: "demo/core_wait_timeout@1".into(),
+            input: "demo/Input@1".parse().unwrap(),
+            output: None,
+            locals: Default::default(),
+            steps: vec![PlanStep {
+                id: "set_timeout".into(),
+                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
+                    kind: EffectKind::timer_set(),
+                    params: ExprOrValue::Json(json!({})),
+                    cap: "cap_timer".into(),
+                    idempotency_key: None,
+                    bind: PlanBindEffect {
+                        effect_id_as: "t".into(),
+                    },
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![EffectKind::timer_set()],
+            invariants: vec![],
+        };
+
+        assert!(plan_has_timeout_branch(&plan));
     }
 }

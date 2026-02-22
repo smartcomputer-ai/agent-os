@@ -19,6 +19,7 @@ Grouping:
 | 08  | retry-backoff  | Reducer retry with timer     |
 | 09  | workspaces     | Workspace plans + caps demo  |
 | 10  | trace-failure-classification | Trace-get/diagnose failure conformance |
+| 11  | plan-runtime-hardening | Single-scenario P3 conformance + summaries |
 | 20  | agent-session  | SDK session lifecycle replay |
 | 21  | chat-live (opt-in) | Live provider tool orchestration smoke |
 | 22  | agent-live (opt-in) | SDK-driven live agent with iterative tools + follow-up |

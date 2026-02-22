@@ -410,6 +410,18 @@ async fn control_channel_round_trip() {
     assert_eq!(root_value["turn_id"], "turn-1");
     assert_eq!(root_value["step_id"], "step-1");
 
+    let plan_summary = RequestEnvelope {
+        v: 1,
+        id: "plan-summary".into(),
+        cmd: "plan-summary".into(),
+        payload: json!({}),
+    };
+    let resp = client.request(&plan_summary).await.unwrap();
+    assert!(resp.ok, "plan-summary failed: {:?}", resp.error);
+    let summary = resp.result.expect("plan summary result");
+    assert!(summary.get("plans").is_some());
+    assert!(summary.get("totals").is_some());
+
     // journal-list should include domain_event entries
     // state-get
     let query = RequestEnvelope {

@@ -9,6 +9,7 @@ mod example_host;
 mod fetch_notify;
 mod hello_timer;
 mod llm_summarizer;
+mod plan_runtime_hardening;
 mod retry_backoff;
 mod safe_upgrade;
 mod trace_failure_classification;
@@ -61,6 +62,8 @@ enum Commands {
     AgentSession,
     /// Run the trace failure-classification example
     TraceFailureClassification,
+    /// Run the plan runtime-hardening conformance example
+    PlanRuntimeHardening,
     /// Run live chat smoke (real provider + tools + follow-up)
     ChatLive {
         #[arg(long, value_enum, default_value_t = chat_live::LiveProvider::Openai)]
@@ -203,6 +206,15 @@ const EXAMPLES: &[ExampleMeta] = &[
         runner: trace_failure_classification::run,
     },
     ExampleMeta {
+        number: "11",
+        slug: "plan-runtime-hardening",
+        title: "Plan Hardening",
+        summary: "Single-scenario P3 conformance + summaries",
+        group: ExampleGroup::Core,
+        dir: "crates/aos-smoke/fixtures/11-plan-runtime-hardening",
+        runner: plan_runtime_hardening::run,
+    },
+    ExampleMeta {
         number: "20",
         slug: "agent-session",
         title: "Agent Session",
@@ -249,6 +261,7 @@ fn run_cli() -> Result<()> {
         Some(Commands::Workspaces) => run_single("workspaces"),
         Some(Commands::AgentSession) => run_single("agent-session"),
         Some(Commands::TraceFailureClassification) => run_single("trace-failure-classification"),
+        Some(Commands::PlanRuntimeHardening) => run_single("plan-runtime-hardening"),
         Some(Commands::ChatLive { provider, model }) => chat_live::run(provider, model),
         Some(Commands::AgentLive { provider, model }) => agent_live::run(provider, model),
         Some(Commands::All) => run_group(ExampleGroup::Core),

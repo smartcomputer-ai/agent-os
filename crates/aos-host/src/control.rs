@@ -348,6 +348,14 @@ pub(crate) async fn handle_request(
                     .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
                 inner.map_err(ControlError::host)
             }
+            "plan-summary" => {
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx.send(ControlMsg::PlanSummary { resp: tx }).await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)
+            }
             "event-send" => {
                 let schema = req
                     .payload
