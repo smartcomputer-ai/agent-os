@@ -534,3 +534,91 @@ fn build_resolved_wait_value(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aos_air_types::{
+        DefPlan, Expr, ExprConst, PlanBind, PlanStep, PlanStepAssign, PlanStepKind, SchemaRef,
+    };
+
+    fn instance_with_step(step_id: &str) -> PlanInstance {
+        let plan = DefPlan {
+            name: "test/resolve@1".into(),
+            input: SchemaRef::new("test/Input@1").expect("schema ref"),
+            output: None,
+            locals: IndexMap::new(),
+            steps: vec![PlanStep {
+                id: step_id.to_string(),
+                kind: PlanStepKind::Assign(PlanStepAssign {
+                    expr: Expr::Const(ExprConst::Bool { bool: true }).into(),
+                    bind: PlanBind { var: "ok".into() },
+                }),
+            }],
+            edges: vec![],
+            required_caps: vec![],
+            allowed_effects: vec![],
+            invariants: vec![],
+        };
+
+        PlanInstance::new(
+            1,
+            plan,
+            ExprValue::Unit,
+            Arc::new(SchemaIndex::new(HashMap::new())),
+            None,
+            Arc::new(HashMap::new()),
+        )
+    }
+
+    #[test]
+    fn resolve_plan_waits_all_mode_requires_all_children() {
+        let step_id = "await_all";
+        let mut instance = instance_with_step(step_id);
+        instance.plan_waits.insert(
+            step_id.to_string(),
+            PendingPlanWait {
+                handles: vec![
+                    PlanHandleValue {
+                        instance_id: 11,
+                        plan: "test/child@1".into(),
+                    },
+                    PlanHandleValue {
+                        instance_id: 22,
+                        plan: "test/child@1".into(),
+                    },
+                ],
+                mode: PendingPlanWaitMode::All,
+            },
+        );
+        instance
+            .step_states
+            .insert(step_id.to_string(), StepState::WaitingPlan);
+
+        let partial = HashMap::from([(11u64, ExprValue::Text("first".into()))]);
+        assert!(
+            !instance.resolve_plan_waits(&partial),
+            "must stay blocked until all child outcomes are available"
+        );
+        assert!(instance.plan_wait_values.get(step_id).is_none());
+        assert_eq!(
+            instance.step_states.get(step_id),
+            Some(&StepState::WaitingPlan)
+        );
+
+        let full = HashMap::from([
+            (11u64, ExprValue::Text("first".into())),
+            (22u64, ExprValue::Text("second".into())),
+        ]);
+        assert!(instance.resolve_plan_waits(&full));
+        assert!(!instance.plan_waits.contains_key(step_id));
+        assert_eq!(instance.step_states.get(step_id), Some(&StepState::Pending));
+        assert_eq!(
+            instance.plan_wait_values.get(step_id),
+            Some(&ExprValue::List(vec![
+                ExprValue::Text("first".into()),
+                ExprValue::Text("second".into())
+            ]))
+        );
+    }
+}

@@ -535,11 +535,12 @@ mod tests {
     use aos_air_types::plan_literals::SchemaIndex;
     use aos_air_types::{
         CapType, EffectKind, EmptyObject, Expr, ExprConst, ExprOp, ExprOpCode, ExprOrValue,
-        ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep, PlanStepAssign,
-        PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
-        PlanStepRaiseEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveInt,
-        TypePrimitiveText, TypeRecord, ValueInt, ValueLiteral, ValueMap, ValueNull, ValueRecord,
-        ValueText, catalog::EffectCatalog,
+        ExprRecord, ExprRef, PlanBind, PlanBindEffect, PlanBindHandle, PlanBindResults, PlanEdge,
+        PlanStep, PlanStepAssign, PlanStepAwaitEvent, PlanStepAwaitPlan, PlanStepAwaitPlansAll,
+        PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, PlanStepRaiseEvent,
+        PlanStepSpawnForEach, PlanStepSpawnPlan, SchemaRef, TypeExpr, TypePrimitive,
+        TypePrimitiveInt, TypePrimitiveText, TypeRecord, ValueInt, ValueList, ValueLiteral,
+        ValueMap, ValueNull, ValueRecord, ValueText, catalog::EffectCatalog,
     };
     use aos_effects::CapabilityGrant;
     use serde_cbor::Value as CborValue;
@@ -701,6 +702,13 @@ mod tests {
         PlanInstance::new(1, plan, default_env(), schema_index, None, cap_handles)
     }
 
+    fn plan_handle_value(instance_id: u64, plan: &str) -> ExprValue {
+        ExprValue::Record(IndexMap::from([
+            ("plan".into(), ExprValue::Text(plan.to_string())),
+            ("instance_id".into(), ExprValue::Nat(instance_id)),
+        ]))
+    }
+
     /// Assign steps should synchronously write to the plan environment.
     #[test]
     fn assign_step_updates_env() {
@@ -741,6 +749,202 @@ mod tests {
         assert_eq!(
             plan.env.vars.get("greeting"),
             Some(&ExprValue::Text("literal".into()))
+        );
+    }
+
+    #[test]
+    fn spawn_plan_sets_waiting_state_and_emits_spawn_request() {
+        let steps = vec![PlanStep {
+            id: "spawn".into(),
+            kind: PlanStepKind::SpawnPlan(PlanStepSpawnPlan {
+                plan: "test/child@1".into(),
+                input: Expr::Const(ExprConst::Int { int: 7 }).into(),
+                bind: PlanBindHandle {
+                    handle_as: "child_handle".into(),
+                },
+            }),
+        }];
+        let mut plan = new_plan_instance(base_plan(steps));
+        let mut effects = test_effect_manager();
+
+        let outcome = plan.tick(&mut effects).expect("spawn tick");
+        assert!(!outcome.completed);
+        assert_eq!(plan.step_states.get("spawn"), Some(&StepState::WaitingPlan));
+        assert_eq!(outcome.spawn_requests.len(), 1);
+        match &outcome.spawn_requests[0] {
+            PlanSpawnRequest::SpawnPlan {
+                step_id,
+                child_plan,
+                input,
+            } => {
+                assert_eq!(step_id, "spawn");
+                assert_eq!(child_plan, "test/child@1");
+                assert_eq!(input, &ExprValue::Int(7));
+            }
+            other => panic!("unexpected spawn request: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn await_plan_binds_resolved_value_without_wait_request() {
+        let steps = vec![PlanStep {
+            id: "await".into(),
+            kind: PlanStepKind::AwaitPlan(PlanStepAwaitPlan {
+                for_expr: Expr::Ref(ExprRef {
+                    reference: "@var:child_handle".into(),
+                }),
+                bind: PlanBind {
+                    var: "child_result".into(),
+                },
+            }),
+        }];
+        let mut plan = new_plan_instance(base_plan(steps));
+        plan.plan_wait_values
+            .insert("await".into(), ExprValue::Text("ready".into()));
+        let mut effects = test_effect_manager();
+
+        let outcome = plan.tick(&mut effects).expect("await tick");
+        assert!(outcome.completed);
+        assert!(outcome.wait_requests.is_empty());
+        assert_eq!(
+            plan.env.vars.get("child_result"),
+            Some(&ExprValue::Text("ready".into()))
+        );
+        assert_eq!(plan.step_states.get("await"), Some(&StepState::Completed));
+    }
+
+    #[test]
+    fn spawn_for_each_requires_list_inputs() {
+        let steps = vec![PlanStep {
+            id: "fanout".into(),
+            kind: PlanStepKind::SpawnForEach(PlanStepSpawnForEach {
+                plan: "test/child@1".into(),
+                inputs: Expr::Const(ExprConst::Int { int: 1 }).into(),
+                max_fanout: None,
+                bind: aos_air_types::PlanBindHandles {
+                    handles_as: "handles".into(),
+                },
+            }),
+        }];
+        let mut plan = new_plan_instance(base_plan(steps));
+        let mut effects = test_effect_manager();
+        let err = plan
+            .tick(&mut effects)
+            .expect_err("non-list inputs must fail");
+        assert!(
+            matches!(err, KernelError::Manifest(msg) if msg.contains("must evaluate to a list"))
+        );
+    }
+
+    #[test]
+    fn spawn_for_each_enforces_max_fanout() {
+        let steps = vec![PlanStep {
+            id: "fanout".into(),
+            kind: PlanStepKind::SpawnForEach(PlanStepSpawnForEach {
+                plan: "test/child@1".into(),
+                inputs: ValueLiteral::List(ValueList {
+                    list: vec![
+                        ValueLiteral::Int(ValueInt { int: 1 }),
+                        ValueLiteral::Int(ValueInt { int: 2 }),
+                        ValueLiteral::Int(ValueInt { int: 3 }),
+                    ],
+                })
+                .into(),
+                max_fanout: Some(2),
+                bind: aos_air_types::PlanBindHandles {
+                    handles_as: "handles".into(),
+                },
+            }),
+        }];
+        let mut plan = new_plan_instance(base_plan(steps));
+        let mut effects = test_effect_manager();
+        let err = plan.tick(&mut effects).expect_err("fanout limit must fail");
+        assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("max_fanout exceeded")));
+    }
+
+    #[test]
+    fn await_plans_all_rejects_heterogeneous_handles() {
+        let steps = vec![PlanStep {
+            id: "await_all".into(),
+            kind: PlanStepKind::AwaitPlansAll(PlanStepAwaitPlansAll {
+                handles: Expr::Ref(ExprRef {
+                    reference: "@var:handles".into(),
+                }),
+                bind: PlanBindResults {
+                    results_as: "results".into(),
+                },
+            }),
+        }];
+        let mut plan = new_plan_instance(base_plan(steps));
+        plan.env.vars.insert(
+            "handles".into(),
+            ExprValue::List(vec![
+                plan_handle_value(1, "test/child-a@1"),
+                plan_handle_value(2, "test/child-b@1"),
+            ]),
+        );
+        let mut effects = test_effect_manager();
+
+        let err = plan
+            .tick(&mut effects)
+            .expect_err("heterogeneous handles fail");
+        assert!(matches!(err, KernelError::Manifest(msg) if msg.contains("homogeneous")));
+    }
+
+    #[test]
+    fn await_plans_all_preserves_handle_order_when_binding_results() {
+        let steps = vec![PlanStep {
+            id: "await_all".into(),
+            kind: PlanStepKind::AwaitPlansAll(PlanStepAwaitPlansAll {
+                handles: Expr::Ref(ExprRef {
+                    reference: "@var:handles".into(),
+                }),
+                bind: PlanBindResults {
+                    results_as: "results".into(),
+                },
+            }),
+        }];
+        let mut plan = new_plan_instance(base_plan(steps));
+        plan.env.vars.insert(
+            "handles".into(),
+            ExprValue::List(vec![
+                plan_handle_value(2, "test/child@1"),
+                plan_handle_value(1, "test/child@1"),
+            ]),
+        );
+        let mut effects = test_effect_manager();
+
+        let first = plan.tick(&mut effects).expect("await registration");
+        assert_eq!(
+            plan.step_states.get("await_all"),
+            Some(&StepState::WaitingPlan)
+        );
+        assert_eq!(first.wait_requests.len(), 1);
+        match &first.wait_requests[0] {
+            PlanWaitRequest::AwaitPlansAll { step_id, handles } => {
+                assert_eq!(step_id, "await_all");
+                assert_eq!(
+                    handles.iter().map(|h| h.instance_id).collect::<Vec<_>>(),
+                    vec![2, 1]
+                );
+            }
+            other => panic!("unexpected wait request: {other:?}"),
+        }
+
+        let completed = HashMap::from([
+            (1u64, ExprValue::Text("one".into())),
+            (2u64, ExprValue::Text("two".into())),
+        ]);
+        assert!(plan.resolve_plan_waits(&completed));
+
+        let second = plan.tick(&mut effects).expect("await completion");
+        assert!(second.completed);
+        assert_eq!(
+            plan.env.vars.get("results"),
+            Some(&ExprValue::List(vec![
+                ExprValue::Text("two".into()),
+                ExprValue::Text("one".into())
+            ]))
         );
     }
 

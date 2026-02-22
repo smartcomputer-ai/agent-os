@@ -308,3 +308,57 @@ mod serde_bytes_opt {
         Option::<ByteBuf>::deserialize(deserializer).map(|opt| opt.map(|buf| buf.into_vec()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aos_air_exec::Value as ExprValue;
+
+    #[test]
+    fn snapshot_roundtrip_preserves_plan_wait_watchers_and_outcomes() {
+        let mut snapshot = KernelSnapshot::new(
+            7,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            9,
+            vec![],
+            vec![],
+            vec![],
+            123,
+            None,
+        );
+        snapshot.set_plan_wait_watchers(vec![(42, vec![100, 101]), (43, vec![102])]);
+        snapshot.set_completed_plan_outcomes(vec![
+            PlanCompletionSnapshot {
+                plan_id: 100,
+                value: ExprValue::Text("ok".into()),
+            },
+            PlanCompletionSnapshot {
+                plan_id: 101,
+                value: ExprValue::List(vec![ExprValue::Nat(1), ExprValue::Nat(2)]),
+            },
+        ]);
+
+        let bytes = serde_cbor::to_vec(&snapshot).expect("encode snapshot");
+        let decoded: KernelSnapshot = serde_cbor::from_slice(&bytes).expect("decode snapshot");
+
+        assert_eq!(
+            decoded.plan_wait_watchers(),
+            &[(42, vec![100, 101]), (43, vec![102])]
+        );
+        assert_eq!(decoded.completed_plan_outcomes().len(), 2);
+        assert_eq!(decoded.completed_plan_outcomes()[0].plan_id, 100);
+        assert_eq!(
+            decoded.completed_plan_outcomes()[0].value,
+            ExprValue::Text("ok".into())
+        );
+        assert_eq!(decoded.completed_plan_outcomes()[1].plan_id, 101);
+        assert_eq!(
+            decoded.completed_plan_outcomes()[1].value,
+            ExprValue::List(vec![ExprValue::Nat(1), ExprValue::Nat(2)])
+        );
+    }
+}
