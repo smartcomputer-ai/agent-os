@@ -38,6 +38,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Update `spec/schemas/manifest.schema.json` required fields and routing semantics.
 3. Update `spec/schemas/patch.schema.json` to remove plan/triggers patch ops.
 4. Add/align schema docs for the generic workflow receipt envelope contract.
+5. Add/align schema docs for workflow instance state persistence (`status`, `inflight_intents`, `last_processed_event_seq`, optional `module_version`).
 
 ### 4) Update storage + loaders
 
@@ -81,3 +82,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. Loader/store/kernel paths no longer parse or depend on `defplan`.
 4. World import/export and manifest patching work with the new contract.
 5. Manifest routing changes cannot strand in-flight receipts.
+6. No manifest field is required to recover workflow waiting state; waiting state comes from persisted instance records.

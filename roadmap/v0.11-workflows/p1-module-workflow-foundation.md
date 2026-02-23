@@ -44,6 +44,17 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 4. Route receipts to `(origin_module_id, origin_instance_key)` without consulting manifest subscriptions.
 5. Keep typed timer/blob envelopes as optional helpers, not runtime requirements.
 
+### 2.1) Define workflow instance waiting model
+
+1. Define a kernel-recognized persisted workflow instance state record, including:
+   - `state_bytes`,
+   - `inflight_intents`,
+   - `status` (`running|waiting|completed|failed`),
+   - `last_processed_event_seq`,
+   - `module_version` (optional but recommended).
+2. Define deterministic transitions for `running <-> waiting` based on inflight receipt count.
+3. Define how `last_processed_event_seq` advances for event and receipt handling.
+
 ### 3) Expand effect-origin permissions for module workflows
 
 1. Update effect origin handling so orchestration modules can emit needed kinds (`http.request`, `llm.generate`, `workspace.*`, `governance.*`, `introspect.*`) under caps/policy.
@@ -73,6 +84,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. `receipts.rs`: generic receipt event encoding path.
 3. `effects.rs`: origin scope checks updated for module orchestration requirements.
 4. `world/mod.rs` + `world/snapshot_replay.rs`: persist/restore pending receipt routing identity for replay.
+5. `world/mod.rs` + `snapshot.rs`: add persisted workflow instance waiting metadata model.
 
 ### `crates/aos-wasm-sdk`
 
@@ -96,3 +108,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 4. Caps/policies still gate every effect intent.
 5. Concurrent workflow instances emitting similar effects do not cross-deliver receipts.
 6. Receipt routing remains correct after manifest routing changes because delivery does not depend on subscriptions.
+7. Workflow instance lifecycle status (`running|waiting|completed|failed`) is persisted and restored on replay.

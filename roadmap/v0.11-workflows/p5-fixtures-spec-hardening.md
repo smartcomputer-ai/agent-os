@@ -43,6 +43,8 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. Deterministic tail/trace assertions on workflow runs.
 4. Performance sanity checks for many concurrent module instances.
 5. Deterministic receipt routing checks for concurrent identical effect emissions from distinct instances.
+6. Workflow instance state machine checks (`running|waiting|completed|failed`) and `last_processed_event_seq` monotonicity checks.
+7. Upgrade safety checks for `module_version` behavior with in-flight instances.
 
 ### 4) Dead code and roadmap cleanup
 
@@ -78,3 +80,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. Replay-or-die checks pass on new workflow fixtures.
 4. No critical dead code remains for plan execution paths.
 5. Restart/replay preserves receipt delivery to the same module instance identity.
+6. Restart/replay preserves workflow instance status and inflight intent map exactly.

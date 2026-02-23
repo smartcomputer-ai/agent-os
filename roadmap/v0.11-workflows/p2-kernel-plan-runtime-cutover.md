@@ -31,6 +31,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Remove plan-specific replay identity reconciliation.
 3. Replace manifest apply quiescence checks with module/effect queue-only checks.
 4. Introduce/retain module-workflow pending receipt state keyed by `intent_id` and resolved to `(origin_module_id, origin_instance_key)`.
+5. Introduce/retain kernel-recognized workflow instance records carrying `status`, `inflight_intents`, and `last_processed_event_seq`.
 
 ### 3) Replace runtime plan debug surfaces
 
@@ -48,6 +49,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Effect enqueue/receipt handling determinism unchanged.
 3. Snapshot and replay continue to work for non-plan flows.
 4. Receipt routing is manifest-independent and uses recorded origin identity only.
+5. Workflow instance state transitions are deterministic and replay-identical.
 
 ## Out of Scope
 
@@ -63,6 +65,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Update `world/mod.rs`, `world/event_flow.rs`, `scheduler.rs`, `world/governance_runtime.rs`.
 3. Remove plan-origin `IntentOriginRecord` production from runtime paths.
 4. Ensure receipt wakeup path targets module instances by recorded origin tuple, not router subscriptions.
+5. Ensure manifest apply quiescence uses workflow instance/inflight state instead of plan-only counters.
 
 ### `crates/aos-host`
 
@@ -81,3 +84,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. All remaining tests pass without relying on plan runtime state.
 4. Manifest apply quiescence checks do not reference plan internals.
 5. Receipt wakeups remain deterministic under concurrent in-flight module instances.
+6. Pending/waiting workflow instances survive snapshot-load-replay with identical inflight intent sets.

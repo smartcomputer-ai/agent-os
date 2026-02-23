@@ -25,6 +25,8 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Replace with module workflow execution summaries:
    - predicted effects,
    - pending receipts by `(origin_module_id, origin_instance_key, intent_id)`,
+   - workflow instance status (`running|waiting|completed|failed`),
+   - `last_processed_event_seq`,
    - relevant ledger deltas.
 3. Keep propose/shadow/approve/apply lifecycle unchanged.
 
@@ -74,3 +76,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. Control/CLI no longer expose `plan-summary` or plan-state diagnostics.
 4. Policy and secret checks no longer depend on `plan` origin identity.
 5. Observability surfaces expose deterministic receipt routing identity for debugging.
+6. Observability surfaces expose workflow instance waiting/running/completed/failed status from persisted state.

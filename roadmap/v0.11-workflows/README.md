@@ -122,6 +122,34 @@ Deterministic `intent_id` rule:
 2. This prevents ambiguous wakeups when multiple instances emit structurally similar effects concurrently.
 3. The same preimage must be used on replay.
 
+### 2.5 Required workflow instance state model
+
+Waiting state must not be an implicit convention inside arbitrary module bytes.
+
+Define a kernel-recognized persisted `WorkflowInstanceState` record (it may be physically stored in the existing cell store, but its structure is normative) with at least:
+
+1. `state_bytes` (canonical encoded module state),
+2. `inflight_intents: Map<intent_id -> metadata>`,
+3. `status: running|waiting|completed|failed`,
+4. `last_processed_event_seq`,
+5. `module_version` (optional but strongly recommended for upgrade safety).
+
+`inflight_intents` metadata must include enough data to route and diagnose receipts deterministically:
+
+1. `origin_module_id`,
+2. `origin_instance_key`,
+3. `effect_kind`,
+4. `params_hash` (optional but recommended),
+5. `emitted_at_seq`.
+
+Normative behavior:
+
+1. Kernel creates `inflight_intents[intent_id]` when intent enqueue succeeds.
+2. Kernel removes it when receipt settles (`ok|denied|faulted`) and updates `status`.
+3. Snapshot/replay must restore instance status and inflight intent map byte-identically.
+4. Governance/quiescence/observability must read pending-wait state from this model, not heuristics over opaque module bytes.
+5. Upgrade/apply logic should use `module_version` (or module hash equivalent) to block or migrate incompatible in-flight instances.
+
 ---
 
 ## 3. Pragmatic Migration Strategy
@@ -163,6 +191,7 @@ Current reducer receipt plumbing is hardcoded around timer/blob result schemas.
 3. Route receipts by stored origin identity, not by manifest routing subscriptions.
 4. Keep typed timer/blob schemas as optional convenience, not core runtime requirement.
 5. Persist pending receipt routing identity in snapshot/journal restore paths so restart/replay preserves delivery.
+6. Persist workflow instance wait state (`status`, `inflight_intents`, `last_processed_event_seq`, `module_version`) in kernel-recognized instance records.
 
 ### 1.3 Expand allowed effect origins
 
@@ -181,6 +210,7 @@ Deliverable: a module can run a multi-step async workflow without plans.
 5. Remove plan-specific replay identity reconciliation.
 6. Keep a module-workflow pending receipt index keyed by `intent_id` with target `(origin_module_id, origin_instance_key)`.
 7. Ensure receipt wakeups are manifest-independent and deterministic under concurrency.
+8. Replace plan waiters with workflow instance lifecycle state (`running|waiting|completed|failed`) backed by persisted instance records.
 
 Deliverable: kernel has no plan interpreter or plan instance state.
 
@@ -210,6 +240,7 @@ Deliverable: AIR no longer contains plans as a first-class definition.
 5. Keep governance propose/shadow/approve/apply mechanics, but report module/effect-level predictions.
 6. Ensure `ManifestApplyBlockedInFlight` checks reflect new runtime state names.
 7. Report pending receipts by `(origin_module_id, origin_instance_key, intent_id)`.
+8. Report workflow instance status and `last_processed_event_seq` from kernel-recognized instance state.
 
 Deliverable: governance remains, but no plan concepts remain in reports or checks.
 
