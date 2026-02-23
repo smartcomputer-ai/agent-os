@@ -24,7 +24,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 1. Remove `plan_results` and `pending_plan_receipts` structures from shadow summaries.
 2. Replace with module workflow execution summaries:
    - predicted effects,
-   - pending receipts by module instance,
+   - pending receipts by `(origin_module_id, origin_instance_key, intent_id)`,
    - relevant ledger deltas.
 3. Keep propose/shadow/approve/apply lifecycle unchanged.
 
@@ -73,3 +73,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Journal tail and trace tools work without plan record kinds.
 3. Control/CLI no longer expose `plan-summary` or plan-state diagnostics.
 4. Policy and secret checks no longer depend on `plan` origin identity.
+5. Observability surfaces expose deterministic receipt routing identity for debugging.

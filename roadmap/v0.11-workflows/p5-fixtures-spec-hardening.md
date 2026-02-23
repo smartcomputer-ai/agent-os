@@ -26,7 +26,8 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
    - external I/O orchestration,
    - retries/timeouts via receipts/events,
    - multi-instance concurrency and isolation,
-   - governance apply on workflow manifests.
+   - governance apply on workflow manifests,
+   - manifest routing changes while receipts are in flight.
 3. Update host integration tests accordingly.
 
 ### 2) Spec/doc rewrite
@@ -41,6 +42,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Snapshot create/load/replay gates with in-flight module receipt waits.
 3. Deterministic tail/trace assertions on workflow runs.
 4. Performance sanity checks for many concurrent module instances.
+5. Deterministic receipt routing checks for concurrent identical effect emissions from distinct instances.
 
 ### 4) Dead code and roadmap cleanup
 
@@ -75,3 +77,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Specs/docs align with code (no plan runtime references in active architecture sections).
 3. Replay-or-die checks pass on new workflow fixtures.
 4. No critical dead code remains for plan execution paths.
+5. Restart/replay preserves receipt delivery to the same module instance identity.

@@ -95,6 +95,33 @@ Implication: deleting plans is feasible, but it is a cross-cutting redesign, not
 2. Migration tooling for old plan instances.
 3. Compatibility with old plan journal semantics.
 
+### 2.4 Required workflow receipt identity contract
+
+Plans previously owned receipt wakeups. After plan removal, receipt routing identity must be explicit and deterministic.
+
+Every settled effect must produce a generic receipt envelope with at least:
+
+1. `origin_module_id` (module content hash/module key at emit time),
+2. `origin_instance_key` (cell key/instance routing key),
+3. `intent_id` (deterministic unique identifier for this emitted intent),
+4. `effect_kind`,
+5. `params_hash` (optional but recommended),
+6. `receipt_payload` (validated against effect receipt schema),
+7. `status` (`ok|denied|faulted`),
+8. `emitted_at_seq` (journal seq/logical clock for diagnostics).
+
+Deterministic routing rule:
+
+1. The kernel routes each receipt to `(origin_module_id, origin_instance_key)` using pending intent state.
+2. Receipt routing does not consult manifest event subscriptions.
+3. Manifest routing remains for domain-event ingress only.
+
+Deterministic `intent_id` rule:
+
+1. `intent_id` may reuse the existing `intent_hash` name, but its preimage must include origin instance identity (`origin_module_id`, `origin_instance_key`) in addition to effect kind/cap/params/idempotency key.
+2. This prevents ambiguous wakeups when multiple instances emit structurally similar effects concurrently.
+3. The same preimage must be used on replay.
+
 ---
 
 ## 3. Pragmatic Migration Strategy
@@ -132,8 +159,10 @@ Deliverable: a documented migration contract saying old plan worlds are unsuppor
 Current reducer receipt plumbing is hardcoded around timer/blob result schemas.
 
 1. Replace hardcoded mapping in `crates/aos-kernel/src/receipts.rs` with a generic effect-receipt event envelope.
-2. Keep typed timer/blob schemas as optional convenience, not core runtime requirement.
-3. Route receipt events deterministically by existing event routing rules.
+2. Add explicit receipt identity fields (`origin_module_id`, `origin_instance_key`, `intent_id`, `effect_kind`, `params_hash`, `status`, `receipt_payload`, `emitted_at_seq`).
+3. Route receipts by stored origin identity, not by manifest routing subscriptions.
+4. Keep typed timer/blob schemas as optional convenience, not core runtime requirement.
+5. Persist pending receipt routing identity in snapshot/journal restore paths so restart/replay preserves delivery.
 
 ### 1.3 Expand allowed effect origins
 
@@ -150,6 +179,8 @@ Deliverable: a module can run a multi-step async workflow without plans.
 3. Remove plan start/wait/spawn/runtime logic (`crates/aos-kernel/src/world/plan_runtime.rs`, `crates/aos-kernel/src/plan/*`).
 4. Remove plan-trigger startup paths from event processing (`crates/aos-kernel/src/world/event_flow.rs`).
 5. Remove plan-specific replay identity reconciliation.
+6. Keep a module-workflow pending receipt index keyed by `intent_id` with target `(origin_module_id, origin_instance_key)`.
+7. Ensure receipt wakeups are manifest-independent and deterministic under concurrency.
 
 Deliverable: kernel has no plan interpreter or plan instance state.
 
@@ -166,6 +197,7 @@ Deliverable: kernel has no plan interpreter or plan instance state.
    - `crates/aos-host/src/manifest_loader.rs`
    - `crates/aos-host/src/world_io.rs`
 4. Replace old `triggers` semantics with module/event subscriptions (or expand routing rules) as the only orchestration entry wiring.
+5. Keep receipt return routing out of manifest schema; receipts route via recorded origin identity only.
 
 Deliverable: AIR no longer contains plans as a first-class definition.
 
@@ -177,6 +209,7 @@ Deliverable: AIR no longer contains plans as a first-class definition.
 4. Replace plan-era policy/secret semantics (`origin_kind`, `allowed_plans`) with module-oriented semantics.
 5. Keep governance propose/shadow/approve/apply mechanics, but report module/effect-level predictions.
 6. Ensure `ManifestApplyBlockedInFlight` checks reflect new runtime state names.
+7. Report pending receipts by `(origin_module_id, origin_instance_key, intent_id)`.
 
 Deliverable: governance remains, but no plan concepts remain in reports or checks.
 
@@ -242,7 +275,7 @@ This gets working code workflows earlier and de-risks the design before a second
 
 1. Deterministic event-sourced stepping.
 2. Effect manager capability and policy enforcement.
-3. Adapter boundary and receipts.
+3. Adapter boundary and receipts, including deterministic origin-instance receipt routing.
 4. Journal/snapshot/replay invariants.
 5. Governance apply/shadow lifecycle (with new summary model).
 

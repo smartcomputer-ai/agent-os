@@ -31,8 +31,18 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 ### 2) Make receipt delivery generic for module-origin effects
 
 1. Replace hardcoded timer/blob reducer receipt translation with a generic receipt event envelope.
-2. Keep typed timer/blob envelopes as optional helpers, not runtime requirements.
-3. Ensure module key propagation and routing remain deterministic.
+2. Define required envelope fields:
+   - `origin_module_id`,
+   - `origin_instance_key`,
+   - `intent_id`,
+   - `effect_kind`,
+   - `params_hash` (optional),
+   - `receipt_payload`,
+   - `status` (`ok|denied|faulted`),
+   - `emitted_at_seq`.
+3. Define deterministic `intent_id` generation that includes origin instance identity and effect identity.
+4. Route receipts to `(origin_module_id, origin_instance_key)` without consulting manifest subscriptions.
+5. Keep typed timer/blob envelopes as optional helpers, not runtime requirements.
 
 ### 3) Expand effect-origin permissions for module workflows
 
@@ -62,6 +72,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 1. `world/event_flow.rs`: remove single-effect guard and add deterministic per-tick limits.
 2. `receipts.rs`: generic receipt event encoding path.
 3. `effects.rs`: origin scope checks updated for module orchestration requirements.
+4. `world/mod.rs` + `world/snapshot_replay.rs`: persist/restore pending receipt routing identity for replay.
 
 ### `crates/aos-wasm-sdk`
 
@@ -83,3 +94,5 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Flow includes multiple effects emitted from module code in one logical workflow.
 3. Replay from genesis remains deterministic for the new fixture.
 4. Caps/policies still gate every effect intent.
+5. Concurrent workflow instances emitting similar effects do not cross-deliver receipts.
+6. Receipt routing remains correct after manifest routing changes because delivery does not depend on subscriptions.

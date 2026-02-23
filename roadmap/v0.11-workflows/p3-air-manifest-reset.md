@@ -30,12 +30,14 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 1. Remove `manifest.plans` references.
 2. Remove trigger-to-plan semantics.
 3. Introduce/solidify module workflow subscription/routing model for orchestration start.
+4. Keep receipt return routing out of manifest wiring; receipt routing is origin-identity-based runtime behavior.
 
 ### 3) Update schemas
 
 1. Remove `spec/schemas/defplan.schema.json` from active AIR schema set.
 2. Update `spec/schemas/manifest.schema.json` required fields and routing semantics.
 3. Update `spec/schemas/patch.schema.json` to remove plan/triggers patch ops.
+4. Add/align schema docs for the generic workflow receipt envelope contract.
 
 ### 4) Update storage + loaders
 
@@ -78,3 +80,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. No manifest schema field requires or accepts plan refs.
 3. Loader/store/kernel paths no longer parse or depend on `defplan`.
 4. World import/export and manifest patching work with the new contract.
+5. Manifest routing changes cannot strand in-flight receipts.

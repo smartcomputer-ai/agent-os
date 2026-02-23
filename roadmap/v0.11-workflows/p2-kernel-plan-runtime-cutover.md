@@ -30,6 +30,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 1. Remove plan instance maps, waiters, pending plan receipts, completion caches.
 2. Remove plan-specific replay identity reconciliation.
 3. Replace manifest apply quiescence checks with module/effect queue-only checks.
+4. Introduce/retain module-workflow pending receipt state keyed by `intent_id` and resolved to `(origin_module_id, origin_instance_key)`.
 
 ### 3) Replace runtime plan debug surfaces
 
@@ -46,6 +47,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 1. Event routing determinism unchanged.
 2. Effect enqueue/receipt handling determinism unchanged.
 3. Snapshot and replay continue to work for non-plan flows.
+4. Receipt routing is manifest-independent and uses recorded origin identity only.
 
 ## Out of Scope
 
@@ -60,6 +62,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 1. Remove/retire `plan/*` and `world/plan_runtime.rs` execution wiring.
 2. Update `world/mod.rs`, `world/event_flow.rs`, `scheduler.rs`, `world/governance_runtime.rs`.
 3. Remove plan-origin `IntentOriginRecord` production from runtime paths.
+4. Ensure receipt wakeup path targets module instances by recorded origin tuple, not router subscriptions.
 
 ### `crates/aos-host`
 
@@ -77,3 +80,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. New workflows continue to execute end-to-end under host cycle.
 3. All remaining tests pass without relying on plan runtime state.
 4. Manifest apply quiescence checks do not reference plan internals.
+5. Receipt wakeups remain deterministic under concurrent in-flight module instances.
