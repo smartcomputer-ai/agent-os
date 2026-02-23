@@ -9,6 +9,7 @@ Roadmap slice for removing plans and moving orchestration into code workflows.
 3. `roadmap/v0.11-workflows/p3-air-manifest-reset.md`
 4. `roadmap/v0.11-workflows/p4-governance-observability-cutover.md`
 5. `roadmap/v0.11-workflows/p5-fixtures-spec-hardening.md`
+6. `roadmap/v0.11-workflows/p6-deterministic-execution-bounds-optional.md` (optional extension)
 
 ## Sequence
 
@@ -19,6 +20,8 @@ Roadmap slice for removing plans and moving orchestration into code workflows.
 5. Rewrite fixtures/docs and harden replay/snapshot conformance.
 
 Execution is intentionally serial and aggressive: run P1 -> P2 -> P3 -> P4 -> P5, allowing temporary in-between breakage.
+
+Optional extension: run P6 after P1 (or after P5) to harden deterministic compute bounds for workflow-heavy worlds.
 
 ## Migration Contract
 
