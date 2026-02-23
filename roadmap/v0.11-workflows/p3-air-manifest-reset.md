@@ -9,6 +9,7 @@
 Remove plans as a first-class AIR concept and reset manifest wiring to module-only orchestration entrypoints.
 
 This is the formal control-plane break where `defplan` and plan references disappear from type models, validators, schemas, and loaders.
+Temporary between-phase breakage is expected and acceptable while executing P1 -> P5 serially.
 
 ## Hard-Break Assumptions
 

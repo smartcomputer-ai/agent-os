@@ -9,6 +9,7 @@
 Finalize the plans-to-workflows reset by replacing old fixtures/docs and proving replay-or-die invariants on the new architecture.
 
 This phase is the completion pass that makes the repository internally consistent and operationally usable.
+Temporary between-phase breakage is expected and acceptable while executing P1 -> P5 serially.
 
 ## Hard-Break Assumptions
 

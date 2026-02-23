@@ -9,6 +9,7 @@
 Remove plan execution from the kernel runtime so orchestration is exclusively module-driven.
 
 After this phase, plans may still exist in data models temporarily, but the runtime will not execute plan instances.
+Temporary between-phase breakage is expected and acceptable while executing P1 -> P5 serially.
 
 ## Hard-Break Assumptions
 

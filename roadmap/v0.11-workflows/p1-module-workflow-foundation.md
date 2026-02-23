@@ -2,13 +2,14 @@
 
 **Priority**: P1  
 **Status**: Proposed  
-**Depends on**: `roadmap/v0.11-workflows/remove-plans.md`
+**Depends on**: `roadmap/v0.11-workflows/README.md`
 
 ## Goal
 
 Enable deterministic, event-driven orchestration directly in modules so new flows can run with zero `defplan` usage.
 
 This phase intentionally reuses the existing module/reducer execution path to avoid introducing a second VM/ABI track before behavior is proven.
+Temporary between-phase breakage is expected and acceptable while executing P1 -> P5 serially.
 
 ## Hard-Break Assumptions
 
@@ -51,7 +52,7 @@ This phase intentionally reuses the existing module/reducer execution path to av
 ## Out of Scope
 
 1. Removing plan runtime code.
-2. AIR schema/model changes.
+2. Broad AIR model/schema reset (`DefPlan` removal, manifest section removals, patch op removal).
 3. Governance summary model changes.
 
 ## Work Items by Crate

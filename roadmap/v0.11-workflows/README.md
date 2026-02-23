@@ -18,6 +18,8 @@ Roadmap slice for removing plans and moving orchestration into code workflows.
 4. Cut governance/trace/control over to workflow-module vocabulary.
 5. Rewrite fixtures/docs and harden replay/snapshot conformance.
 
+Execution is intentionally serial and aggressive: run P1 -> P2 -> P3 -> P4 -> P5, allowing temporary in-between breakage.
+
 ## Migration Contract
 
 This slice assumes intentional breaking changes:
@@ -151,16 +153,7 @@ Deliverable: a module can run a multi-step async workflow without plans.
 
 Deliverable: kernel has no plan interpreter or plan instance state.
 
-### Phase 3: Simplify journal, snapshot, replay, and trace
-
-1. Remove `PlanStarted`, `PlanResult`, `PlanEnded` journal kinds and records from `crates/aos-kernel/src/journal/mod.rs`.
-2. Remove plan fields from snapshot structs and replay logic in `crates/aos-kernel/src/snapshot.rs` and `crates/aos-kernel/src/world/snapshot_replay.rs`.
-3. Replace plan-centric debug APIs (`pending_plan_receipts`, `debug_plan_waits`, `plan-summary`) with module/workflow equivalents.
-4. Update trace diagnostics in `crates/aos-host/src/trace.rs` and CLI commands.
-
-Deliverable: observability works without any plan vocabulary.
-
-### Phase 4: AIR and manifest model reset
+### Phase 3: AIR and manifest model reset
 
 1. Remove `DefPlan`, plan steps, and trigger-to-plan bindings from `crates/aos-air-types/src/model.rs` and `crates/aos-air-types/src/validate.rs`.
 2. Remove/replace schemas:
@@ -176,15 +169,18 @@ Deliverable: observability works without any plan vocabulary.
 
 Deliverable: AIR no longer contains plans as a first-class definition.
 
-### Phase 5: Governance and shadow updates
+### Phase 4: Governance and shadow updates
 
 1. Remove plan-derived fields from shadow/governance summaries.
-2. Keep governance propose/shadow/approve/apply mechanics, but report module/effect-level predictions.
-3. Ensure `ManifestApplyBlockedInFlight` checks reflect new runtime state names.
+2. Remove `PlanStarted`, `PlanResult`, `PlanEnded` journal kinds and replay decode paths.
+3. Replace plan-centric debug/trace/control APIs with module/workflow equivalents.
+4. Replace plan-era policy/secret semantics (`origin_kind`, `allowed_plans`) with module-oriented semantics.
+5. Keep governance propose/shadow/approve/apply mechanics, but report module/effect-level predictions.
+6. Ensure `ManifestApplyBlockedInFlight` checks reflect new runtime state names.
 
 Deliverable: governance remains, but no plan concepts remain in reports or checks.
 
-### Phase 6: Tooling/docs/fixtures cleanup
+### Phase 5: Tooling/docs/fixtures cleanup
 
 1. Remove `aos plans` command family or replace with module-workflow tooling.
 2. Rewrite smoke fixtures and integration tests to workflow modules.

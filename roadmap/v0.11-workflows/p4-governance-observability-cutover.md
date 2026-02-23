@@ -9,6 +9,7 @@
 Remove plan-centric governance and diagnostics vocabulary, replacing it with module-workflow-centric reporting.
 
 This phase ensures shadow, governance effects, trace, and control APIs describe the new architecture instead of legacy plan concepts.
+Temporary between-phase breakage is expected and acceptable while executing P1 -> P5 serially.
 
 ## Hard-Break Assumptions
 
