@@ -291,7 +291,7 @@ async fn http_debug_trace_forwards_correlation_query() {
         }) = control_rx.recv().await
         {
             assert_eq!(event_hash, None);
-            assert_eq!(schema.as_deref(), Some("demiurge/ChatEvent@1"));
+            assert_eq!(schema.as_deref(), Some("aos.agent/SessionEvent@1"));
             assert_eq!(correlate_by.as_deref(), Some("$value.request_id"));
             assert_eq!(correlate_value, Some(json!(42)));
             assert_eq!(window_limit, Some(64));
@@ -313,7 +313,7 @@ async fn http_debug_trace_forwards_correlation_query() {
     });
 
     let url = format!(
-        "http://{addr}/api/debug/trace?schema=demiurge/ChatEvent@1&correlate_by=$value.request_id&value=42&window_limit=64"
+        "http://{addr}/api/debug/trace?schema=aos.agent/SessionEvent@1&correlate_by=$value.request_id&value=42&window_limit=64"
     );
     let response = reqwest::get(url).await.expect("http get");
     assert!(response.status().is_success());

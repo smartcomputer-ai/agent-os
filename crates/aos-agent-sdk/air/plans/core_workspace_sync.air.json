@@ -39,23 +39,10 @@
         "bind": { "handle_as": "prompt_handle" }
       },
       {
-        "id": "spawn_tool_sync",
-        "op": "spawn_plan",
-        "plan": "aos.agent/core_tool_catalog_sync_from_workspace@1",
-        "input": { "ref": "@var:tool_input" },
-        "bind": { "handle_as": "tool_handle" }
-      },
-      {
         "id": "await_prompt_sync",
         "op": "await_plan",
         "for": { "ref": "@var:prompt_handle" },
         "bind": { "as": "prompt_result" }
-      },
-      {
-        "id": "await_tool_sync",
-        "op": "await_plan",
-        "for": { "ref": "@var:tool_handle" },
-        "bind": { "as": "tool_result" }
       },
       {
         "id": "assign_prompt_result_tag",
@@ -67,15 +54,6 @@
         "bind": { "as": "prompt_result_tag" }
       },
       {
-        "id": "assign_tool_result_tag",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [{ "ref": "@var:tool_result" }, { "text": "$tag" }]
-        },
-        "bind": { "as": "tool_result_tag" }
-      },
-      {
         "id": "assign_prompt_event_kind",
         "op": "assign",
         "expr": {
@@ -85,15 +63,6 @@
         "bind": { "as": "prompt_event_kind" }
       },
       {
-        "id": "assign_tool_event_kind",
-        "op": "assign",
-        "expr": {
-          "op": "get",
-          "args": [{ "ref": "@var:tool_result" }, { "text": "$value" }]
-        },
-        "bind": { "as": "tool_event_kind" }
-      },
-      {
         "id": "assign_prompt_event_tag",
         "op": "assign",
         "expr": {
@@ -101,6 +70,37 @@
           "args": [{ "ref": "@var:prompt_event_kind" }, { "text": "$tag" }]
         },
         "bind": { "as": "prompt_event_tag" }
+      },
+      {
+        "id": "spawn_tool_sync",
+        "op": "spawn_plan",
+        "plan": "aos.agent/core_tool_catalog_sync_from_workspace@1",
+        "input": { "ref": "@var:tool_input" },
+        "bind": { "handle_as": "tool_handle" }
+      },
+      {
+        "id": "await_tool_sync",
+        "op": "await_plan",
+        "for": { "ref": "@var:tool_handle" },
+        "bind": { "as": "tool_result" }
+      },
+      {
+        "id": "assign_tool_result_tag",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [{ "ref": "@var:tool_result" }, { "text": "$tag" }]
+        },
+        "bind": { "as": "tool_result_tag" }
+      },
+      {
+        "id": "assign_tool_event_kind",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [{ "ref": "@var:tool_result" }, { "text": "$value" }]
+        },
+        "bind": { "as": "tool_event_kind" }
       },
       {
         "id": "assign_tool_event_tag",
@@ -321,10 +321,8 @@
     "edges": [
       { "from": "assign_prompt_input", "to": "assign_tool_input" },
       { "from": "assign_tool_input", "to": "spawn_prompt_sync" },
-      { "from": "spawn_prompt_sync", "to": "spawn_tool_sync" },
-      { "from": "spawn_tool_sync", "to": "await_prompt_sync" },
-      { "from": "await_prompt_sync", "to": "await_tool_sync" },
-      { "from": "await_tool_sync", "to": "assign_prompt_result_tag" },
+      { "from": "spawn_prompt_sync", "to": "await_prompt_sync" },
+      { "from": "await_prompt_sync", "to": "assign_prompt_result_tag" },
       {
         "from": "assign_prompt_result_tag",
         "to": "finish_prompt_spawn_failed",
@@ -335,12 +333,16 @@
       },
       {
         "from": "assign_prompt_result_tag",
-        "to": "assign_tool_result_tag",
+        "to": "assign_prompt_event_kind",
         "when": {
           "op": "eq",
           "args": [{ "ref": "@var:prompt_result_tag" }, { "text": "Ok" }]
         }
       },
+      { "from": "assign_prompt_event_kind", "to": "assign_prompt_event_tag" },
+      { "from": "assign_prompt_event_tag", "to": "spawn_tool_sync" },
+      { "from": "spawn_tool_sync", "to": "await_tool_sync" },
+      { "from": "await_tool_sync", "to": "assign_tool_result_tag" },
       {
         "from": "assign_tool_result_tag",
         "to": "finish_tool_spawn_failed",
@@ -351,15 +353,13 @@
       },
       {
         "from": "assign_tool_result_tag",
-        "to": "assign_prompt_event_kind",
+        "to": "assign_tool_event_kind",
         "when": {
           "op": "eq",
           "args": [{ "ref": "@var:tool_result_tag" }, { "text": "Ok" }]
         }
       },
-      { "from": "assign_prompt_event_kind", "to": "assign_tool_event_kind" },
-      { "from": "assign_tool_event_kind", "to": "assign_prompt_event_tag" },
-      { "from": "assign_prompt_event_tag", "to": "assign_tool_event_tag" },
+      { "from": "assign_tool_event_kind", "to": "assign_tool_event_tag" },
       {
         "from": "assign_tool_event_tag",
         "to": "finish_prompt_event",

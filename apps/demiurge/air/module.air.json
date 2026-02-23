@@ -1,18 +1,13 @@
-[
-  {
-    "$kind": "defmodule",
-    "name": "demiurge/Demiurge@1",
-    "module_kind": "reducer",
-    "key_schema": "demiurge/ChatId@1",
-    "abi": {
-      "reducer": {
-        "state": "demiurge/ChatState@1",
-        "event": "demiurge/ChatEvent@1",
-        "effects_emitted": ["blob.get", "blob.put"],
-        "cap_slots": {
-          "blob": "blob"
-        }
-      }
+{
+  "$kind": "defmodule",
+  "name": "demiurge/Demiurge@1",
+  "module_kind": "reducer",
+  "abi": {
+    "reducer": {
+      "state": "aos.agent/SessionState@1",
+      "event": "aos.agent/SessionEvent@1",
+      "effects_emitted": [],
+      "cap_slots": {}
     }
   }
-]
+}

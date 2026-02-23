@@ -1,69 +1,21 @@
 [
   {
     "$kind": "defpolicy",
-    "name": "demiurge/llm_policy@1",
+    "name": "demiurge/session_policy@1",
     "rules": [
       {
         "when": {
-          "effect_kind": "llm.generate",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/chat_plan@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "blob.get",
-          "origin_kind": "reducer",
-          "origin_name": "demiurge/Demiurge@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "blob.put",
-          "origin_kind": "reducer",
-          "origin_name": "demiurge/Demiurge@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "blob.put",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/tool_plan@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "introspect.manifest",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/tool_plan@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
           "effect_kind": "workspace.resolve",
           "origin_kind": "plan",
-          "origin_name": "demiurge/tool_plan@1"
+          "origin_name": "aos.agent/core_prompt_sync_from_workspace@1"
         },
         "decision": "allow"
       },
       {
         "when": {
-          "effect_kind": "workspace.resolve",
+          "effect_kind": "workspace.read_ref",
           "origin_kind": "plan",
-          "origin_name": "demiurge/tool_registry_plan@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.list",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/tool_registry_plan@1"
+          "origin_name": "aos.agent/core_prompt_sync_from_workspace@1"
         },
         "decision": "allow"
       },
@@ -71,7 +23,55 @@
         "when": {
           "effect_kind": "workspace.read_bytes",
           "origin_kind": "plan",
-          "origin_name": "demiurge/tool_plan@1"
+          "origin_name": "aos.agent/core_prompt_sync_from_workspace@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.resolve",
+          "origin_kind": "plan",
+          "origin_name": "aos.agent/core_tool_catalog_sync_from_workspace@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_ref",
+          "origin_kind": "plan",
+          "origin_name": "aos.agent/core_tool_catalog_sync_from_workspace@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_bytes",
+          "origin_kind": "plan",
+          "origin_name": "aos.agent/core_tool_catalog_sync_from_workspace@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "introspect.manifest",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_execute_from_request@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.resolve",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_execute_from_request@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.read_bytes",
+          "origin_kind": "plan",
+          "origin_name": "demiurge/tool_execute_from_request@1"
         },
         "decision": "allow"
       },

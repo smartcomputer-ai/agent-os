@@ -37,16 +37,16 @@
         "bind": { "as": "workspace_resolve_receipt" }
       },
       {
-        "id": "assign_workspace_root",
+        "id": "assign_workspace_exists",
         "op": "assign",
         "expr": {
           "op": "get",
           "args": [
             { "ref": "@var:workspace_resolve_receipt" },
-            { "text": "root_hash" }
+            { "text": "exists" }
           ]
         },
-        "bind": { "as": "workspace_root" }
+        "bind": { "as": "workspace_exists" }
       },
       {
         "id": "assign_resolved_version",
@@ -59,6 +59,40 @@
           ]
         },
         "bind": { "as": "resolved_version" }
+      },
+      {
+        "id": "assign_workspace_root",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_resolve_receipt" },
+            { "text": "root_hash" }
+          ]
+        },
+        "bind": { "as": "workspace_root" }
+      },
+      {
+        "id": "finish_workspace_missing",
+        "op": "end",
+        "result": {
+          "variant": {
+            "tag": "WorkspaceSyncFailed",
+            "value": {
+              "record": {
+                "workspace": {
+                  "op": "get",
+                  "args": [
+                    { "ref": "@plan.input.workspace_binding" },
+                    { "text": "workspace" }
+                  ]
+                },
+                "stage": { "text": "workspace_sync_prompt_resolve" },
+                "detail": { "text": "workspace not found" }
+              }
+            }
+          }
+        }
       },
       {
         "id": "finish_unchanged",
@@ -252,10 +286,26 @@
     ],
     "edges": [
       { "from": "emit_workspace_resolve", "to": "await_workspace_resolve" },
-      { "from": "await_workspace_resolve", "to": "assign_workspace_root" },
-      { "from": "assign_workspace_root", "to": "assign_resolved_version" },
+      { "from": "await_workspace_resolve", "to": "assign_workspace_exists" },
       {
-        "from": "assign_resolved_version",
+        "from": "assign_workspace_exists",
+        "to": "finish_workspace_missing",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@var:workspace_exists" }, { "bool": false }]
+        }
+      },
+      {
+        "from": "assign_workspace_exists",
+        "to": "assign_resolved_version",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@var:workspace_exists" }, { "bool": true }]
+        }
+      },
+      { "from": "assign_resolved_version", "to": "assign_workspace_root" },
+      {
+        "from": "assign_workspace_root",
         "to": "finish_unchanged",
         "when": {
           "op": "and",
@@ -278,7 +328,7 @@
         }
       },
       {
-        "from": "assign_resolved_version",
+        "from": "assign_workspace_root",
         "to": "emit_workspace_read_index",
         "when": {
           "op": "or",

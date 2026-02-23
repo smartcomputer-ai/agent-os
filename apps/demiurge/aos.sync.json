@@ -14,7 +14,7 @@
           "version": "0.1.0",
           "manifest_path": "../../Cargo.toml",
           "air_dir": "air",
-          "defs_hash": "sha256:7b5621a881b856c6de29991e544899dc4a166dd8b1ac1965415c7444af714c70"
+          "defs_hash": "sha256:8d6a71b099dfc418fb8da96811b483f7e4e33acad95feef77684de14917a0af9"
         }
       }
     ]
@@ -29,19 +29,12 @@
   "workspaces": [
     {
       "dir": "reducer",
-      "ignore": [
-        "target/",
-        ".git/",
-        ".aos/"
-      ],
+      "ignore": ["target/", ".git/", ".aos/"],
       "ref": "reducer"
     },
     {
-      "dir": "tools",
-      "ignore": [
-        ".git/",
-        ".aos/"
-      ],
+      "dir": "agent-ws",
+      "ignore": [".git/", ".aos/"],
       "ref": "demiurge"
     }
   ]

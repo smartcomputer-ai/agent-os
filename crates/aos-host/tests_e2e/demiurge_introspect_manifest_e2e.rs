@@ -2,29 +2,23 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use aos_air_types::HashRef;
-use aos_cbor::{Hash, to_canonical_cbor};
-use aos_effects::builtins::{LlmGenerateReceipt, TokenUsage};
-use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
-use aos_host::adapters::traits::AsyncEffectAdapter;
 use aos_host::config::HostConfig;
 use aos_host::host::WorldHost;
 use aos_host::manifest_loader;
 use aos_host::testhost::TestHost;
 use aos_kernel::journal::{JournalKind, JournalRecord};
-use aos_kernel::{Kernel, KernelConfig, cap_enforcer::CapCheckOutput};
+use aos_kernel::{Kernel, KernelConfig};
 use aos_store::{FsStore, Store};
-use aos_wasm_abi::PureOutput;
 use aos_wasm_build::builder::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
-use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 
-#[path = "../tests/fixtures.rs"]
-mod fixtures;
+const DEMIURGE_REDUCER: &str = "demiurge/Demiurge@1";
+const SESSION_ID: &str = "22222222-2222-2222-2222-222222222222";
+const TOOL_CALL_ID: &str = "call_1";
 
 fn load_world_env(world_root: &Path) -> Result<()> {
     let env_path = world_root.join(".env");
@@ -40,103 +34,30 @@ fn load_world_env(world_root: &Path) -> Result<()> {
     }
     Ok(())
 }
-const DEMIURGE_REDUCER: &str = "demiurge/Demiurge@1";
-const TOOL_CALL_ID: &str = "call_1";
 
-struct ToolLlmAdapter<S: aos_store::Store> {
-    store: Arc<S>,
-    call_count: Arc<AtomicUsize>,
-}
-
-impl<S: aos_store::Store> ToolLlmAdapter<S> {
-    fn new(store: Arc<S>, call_count: Arc<AtomicUsize>) -> Self {
-        Self { store, call_count }
-    }
-}
-
-#[async_trait::async_trait]
-impl<S: aos_store::Store + Send + Sync + 'static> AsyncEffectAdapter for ToolLlmAdapter<S> {
-    fn kind(&self) -> &str {
-        aos_effects::EffectKind::LLM_GENERATE
-    }
-
-    async fn execute(&self, intent: &EffectIntent) -> anyhow::Result<EffectReceipt> {
-        let call = self.call_count.fetch_add(1, Ordering::SeqCst);
-        let output_value = if call == 0 {
-            json!([
-                {
-                    "type": "function_call",
-                    "name": "introspect_manifest",
-                    "arguments": "{\"consistency\":\"head\"}",
-                    "call_id": TOOL_CALL_ID
-                }
-            ])
-        } else {
-            json!([
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": "manifest received"
-                        }
-                    ]
-                }
-            ])
+fn tool_request_event_hash(kernel: &aos_kernel::Kernel<FsStore>, call_id: &str) -> Result<String> {
+    let entries = kernel.dump_journal().context("dump journal")?;
+    for entry in entries {
+        if entry.kind != JournalKind::DomainEvent {
+            continue;
+        }
+        let record: JournalRecord =
+            serde_cbor::from_slice(&entry.payload).context("decode journal record")?;
+        let JournalRecord::DomainEvent(domain) = record else {
+            continue;
         };
-
-        let output_bytes = serde_json::to_vec(&output_value)?;
-        let output_hash = self.store.put_blob(&output_bytes)?;
-        let output_ref = HashRef::new(output_hash.to_hex())?;
-
-        let receipt = LlmGenerateReceipt {
-            output_ref,
-            raw_output_ref: None,
-            provider_response_id: None,
-            finish_reason: aos_effects::builtins::LlmFinishReason {
-                reason: "stop".into(),
-                raw: None,
-            },
-            token_usage: TokenUsage {
-                prompt: 5,
-                completion: 5,
-                total: Some(10),
-            },
-            usage_details: None,
-            warnings_ref: None,
-            rate_limit_ref: None,
-            cost_cents: None,
-            provider_id: "mock".into(),
+        if domain.schema != "demiurge/ToolCallRequested@1" {
+            continue;
+        }
+        let Ok(value) = serde_cbor::from_slice::<serde_json::Value>(&domain.value) else {
+            continue;
         };
-
-        Ok(EffectReceipt {
-            intent_hash: intent.intent_hash,
-            adapter_id: "llm.mock".into(),
-            status: ReceiptStatus::Ok,
-            payload_cbor: serde_cbor::to_vec(&receipt)?,
-            cost_cents: Some(0),
-            signature: vec![0; 64],
-        })
+        let same_call = value.get("call_id").and_then(|v| v.as_str()) == Some(call_id);
+        if same_call && !domain.event_hash.is_empty() {
+            return Ok(domain.event_hash);
+        }
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatState {
-    messages: Vec<ChatMessage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatMessage {
-    role: ChatRole,
-    message_ref: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "$tag", content = "$value")]
-enum ChatRole {
-    User,
-    Assistant,
+    anyhow::bail!("missing tool request root event hash for call_id={call_id}");
 }
 
 #[derive(Debug)]
@@ -149,49 +70,6 @@ struct TraceAssertions {
     has_receipt_error: bool,
     has_receipt_timeout: bool,
     has_plan_error: bool,
-}
-
-fn user_message_event_hash(
-    kernel: &aos_kernel::Kernel<FsStore>,
-    chat_id: &str,
-    request_id: u64,
-) -> Result<String> {
-    let entries = kernel.dump_journal().context("dump journal")?;
-    for entry in entries {
-        if entry.kind != JournalKind::DomainEvent {
-            continue;
-        }
-        let record: JournalRecord =
-            serde_cbor::from_slice(&entry.payload).context("decode journal record")?;
-        let JournalRecord::DomainEvent(domain) = record else {
-            continue;
-        };
-        if domain.schema != "demiurge/ChatEvent@1" {
-            continue;
-        }
-        let Ok(value) = serde_cbor::from_slice::<serde_json::Value>(&domain.value) else {
-            continue;
-        };
-        let is_user_message = value.get("$tag").and_then(|v| v.as_str()) == Some("UserMessage");
-        let same_chat = value
-            .get("$value")
-            .and_then(|v| v.get("chat_id"))
-            .and_then(|v| v.as_str())
-            == Some(chat_id);
-        let same_request = value
-            .get("$value")
-            .and_then(|v| v.get("request_id"))
-            .and_then(|v| v.as_u64())
-            == Some(request_id);
-        if is_user_message && same_chat && same_request && !domain.event_hash.is_empty() {
-            return Ok(domain.event_hash);
-        }
-    }
-    anyhow::bail!(
-        "missing demiurge UserMessage root event hash for chat_id={} request_id={}",
-        chat_id,
-        request_id
-    );
 }
 
 fn analyze_trace(
@@ -240,9 +118,9 @@ fn analyze_trace(
                 }
             }
             JournalRecord::EffectReceipt(receipt) => match receipt.status {
-                ReceiptStatus::Error => has_receipt_error = true,
-                ReceiptStatus::Timeout => has_receipt_timeout = true,
-                ReceiptStatus::Ok => {}
+                aos_effects::ReceiptStatus::Error => has_receipt_error = true,
+                aos_effects::ReceiptStatus::Timeout => has_receipt_timeout = true,
+                aos_effects::ReceiptStatus::Ok => {}
             },
             JournalRecord::PlanEnded(ended) => {
                 if matches!(ended.status, aos_kernel::journal::PlanEndStatus::Error) {
@@ -287,6 +165,45 @@ fn analyze_trace(
     })
 }
 
+async fn run_until_idle(host: &mut TestHost<FsStore>, max_cycles: usize) -> Result<()> {
+    for _ in 0..max_cycles {
+        let outcome = host.run_cycle_batch().await?;
+        if outcome.effects_dispatched == 0 && outcome.receipts_applied == 0 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn send_session_event(
+    host: &mut TestHost<FsStore>,
+    step_epoch: u64,
+    event_kind: Value,
+) -> Result<()> {
+    host.send_event(
+        "aos.agent/SessionEvent@1",
+        json!({
+            "session_id": SESSION_ID,
+            "run_id": null,
+            "turn_id": null,
+            "step_id": null,
+            "session_epoch": 0,
+            "step_epoch": step_epoch,
+            "event": event_kind,
+        }),
+    )?;
+    Ok(())
+}
+
+fn reducer_state_json(host: &TestHost<FsStore>) -> Result<Value> {
+    let state_bytes = host
+        .kernel()
+        .reducer_state_bytes(DEMIURGE_REDUCER, None)
+        .context("load reducer state")?
+        .ok_or_else(|| anyhow::anyhow!("missing reducer state"))?;
+    serde_cbor::from_slice(&state_bytes).context("decode reducer state json")
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
     let tmp = tempfile::tempdir().context("tempdir")?;
@@ -295,11 +212,13 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
     let asset_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/demiurge");
     load_world_env(&asset_root).context("load demiurge .env")?;
     let asset_root = asset_root.as_path();
-    let mut loaded = manifest_loader::load_from_assets(store.clone(), asset_root)
-        .context("load demiurge assets")?
-        .context("missing demiurge manifest")?;
-    let _manifest_bytes =
-        aos_cbor::to_canonical_cbor(&loaded.manifest).context("encode manifest bytes")?;
+
+    let sdk_air_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../aos-agent-sdk/air");
+    let import_roots = vec![sdk_air_root];
+    let mut loaded =
+        manifest_loader::load_from_assets_with_imports(store.clone(), asset_root, &import_roots)
+            .context("load demiurge assets")?
+            .context("missing demiurge manifest")?;
 
     let reducer_root = asset_root.join("reducer");
     let reducer_dir =
@@ -317,34 +236,6 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         .expect("demiurge module");
     module.wasm_hash = HashRef::new(wasm_hash.to_hex()).expect("wasm hash ref");
 
-    let allow_output = PureOutput {
-        output: serde_cbor::to_vec(&CapCheckOutput {
-            constraints_ok: true,
-            deny: None,
-        })
-        .expect("encode cap output"),
-    };
-    let llm_enforcer = fixtures::stub_pure_module(
-        &store,
-        "sys/CapEnforceLlmBasic@1",
-        &allow_output,
-        "sys/CapCheckInput@1",
-        "sys/CapCheckOutput@1",
-    );
-    let workspace_enforcer = fixtures::stub_pure_module(
-        &store,
-        "sys/CapEnforceWorkspace@1",
-        &allow_output,
-        "sys/CapCheckInput@1",
-        "sys/CapCheckOutput@1",
-    );
-    loaded
-        .modules
-        .insert(llm_enforcer.name.clone(), llm_enforcer);
-    loaded
-        .modules
-        .insert(workspace_enforcer.name.clone(), workspace_enforcer);
-
     let kernel_config = KernelConfig {
         allow_placeholder_secrets: true,
         ..KernelConfig::default()
@@ -359,102 +250,132 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
     let world = WorldHost::from_kernel(kernel, store.clone(), HostConfig::default());
     let mut host = TestHost::from_world_host(world);
 
-    let call_count = Arc::new(AtomicUsize::new(0));
-    host.register_adapter(Box::new(ToolLlmAdapter::new(
-        store.clone(),
-        call_count.clone(),
-    )));
-
-    let tool_bytes = std::fs::read(asset_root.join("tools").join("introspect.manifest.json"))
-        .context("read tool file")?;
+    let prompt_bytes = std::fs::read(asset_root.join("agent-ws/prompts/packs/default.json"))
+        .context("read prompt file")?;
+    let prompt_hash = store
+        .put_blob(&prompt_bytes)
+        .context("store prompt blob")?
+        .to_hex();
+    let tool_bytes = std::fs::read(asset_root.join("agent-ws/tools/catalogs/default.json"))
+        .context("read tool catalog file")?;
     let tool_hash = store
         .put_blob(&tool_bytes)
         .context("store tool blob")?
         .to_hex();
 
-    host.send_event(
-        "demiurge/ChatEvent@1",
+    let mut step_epoch = 1_u64;
+
+    send_session_event(
+        &mut host,
+        step_epoch,
         json!({
-            "$tag": "ChatCreated",
+            "$tag": "RunRequested",
             "$value": {
-                "chat_id": "chat-1",
-                "title": "Test",
-                "created_at_ms": 1
+                "input_ref": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "run_overrides": {
+                    "provider": "mock",
+                    "model": "gpt-mock",
+                    "reasoning_effort": null,
+                    "max_tokens": 256,
+                    "workspace_binding": null,
+                    "default_prompt_pack": null,
+                    "default_prompt_refs": [prompt_hash],
+                    "default_tool_catalog": null,
+                    "default_tool_refs": [tool_hash]
+                }
             }
         }),
     )?;
+    step_epoch += 1;
 
-    let message = json!({
-        "role": "user",
-        "content": [
-            { "type": "text", "text": "hi" }
-        ]
-    });
-    let message_bytes = serde_json::to_vec(&message).context("encode message")?;
-    let message_hash = store.put_blob(&message_bytes).context("store message")?;
+    send_session_event(&mut host, step_epoch, json!({ "$tag": "RunStarted" }))?;
+    step_epoch += 1;
+    run_until_idle(&mut host, 8).await?;
 
-    host.send_event(
-        "demiurge/ChatEvent@1",
-        json!({
-            "$tag": "UserMessage",
-            "$value": {
-                "chat_id": "chat-1",
-                "request_id": 1,
-                "text": "hi",
-                "message_ref": message_hash.to_hex(),
-                "model": "gpt-mock",
-                "provider": "mock",
-                "max_tokens": 64,
-                "tool_refs": [tool_hash],
-                "tool_choice": { "$tag": "Auto" }
-            }
-        }),
-    )?;
-
-    for _ in 0..10 {
-        let outcome = host.run_cycle_batch().await?;
-        if outcome.effects_dispatched == 0 && outcome.receipts_applied == 0 {
-            break;
-        }
-    }
-
-    let key = to_canonical_cbor(&"chat-1").context("encode chat key")?;
-    let state_bytes = host
-        .kernel()
-        .reducer_state_bytes(DEMIURGE_REDUCER, Some(&key))
-        .context("load reducer state")?
-        .ok_or_else(|| anyhow::anyhow!("missing reducer state"))?;
-    let state: ChatState = serde_cbor::from_slice(&state_bytes).context("decode reducer state")?;
-    assert!(state.messages.len() >= 3, "expected tool flow messages");
-    assert!(matches!(state.messages[0].role, ChatRole::User));
-    assert!(matches!(state.messages[1].role, ChatRole::Assistant));
-    assert!(matches!(state.messages[2].role, ChatRole::Assistant));
-
-    let tool_message_ref = state.messages[1]
-        .message_ref
-        .clone()
-        .expect("tool message ref");
-    let tool_message_hash = Hash::from_hex_str(&tool_message_ref)?;
-    let tool_message_bytes = store
-        .get_blob(tool_message_hash)
-        .context("load tool message blob")?;
-    let tool_message_value: serde_json::Value =
-        serde_json::from_slice(&tool_message_bytes).context("decode tool message")?;
-    let call_id = tool_message_value
-        .as_array()
-        .and_then(|items| items.first())
-        .and_then(|item| item.get("call_id"))
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    assert_eq!(call_id, TOOL_CALL_ID);
-
+    let state = reducer_state_json(&host)?;
+    let active_run_config = state
+        .get("active_run_config")
+        .and_then(Value::as_object)
+        .context("missing active_run_config")?;
+    let prompt_refs = active_run_config
+        .get("prompt_refs")
+        .and_then(Value::as_array)
+        .context("missing prompt_refs")?;
+    let tool_refs = active_run_config
+        .get("tool_refs")
+        .and_then(Value::as_array)
+        .context("missing tool_refs")?;
+    assert_eq!(prompt_refs.len(), 1);
+    assert_eq!(tool_refs.len(), 1);
     assert!(
-        call_count.load(Ordering::SeqCst) >= 2,
-        "expected llm adapter to be called twice"
+        active_run_config
+            .get("workspace_binding")
+            .unwrap_or(&Value::Null)
+            .is_null()
     );
 
-    // Trace-driven assertions: verify the request lineage is complete and not stuck/denied.
-    let root_hash = user_message_event_hash(host.kernel(), "chat-1", 1)?;
+    let step_id = state
+        .get("active_step_id")
+        .cloned()
+        .context("missing active_step_id")?;
+    let run_id = state.get("active_run_id").cloned().unwrap_or(Value::Null);
+    let turn_id = state.get("active_turn_id").cloned().unwrap_or(Value::Null);
+    let active_step_epoch = state.get("step_epoch").and_then(Value::as_u64).unwrap_or(0);
+
+    send_session_event(
+        &mut host,
+        step_epoch,
+        json!({
+            "$tag": "ToolBatchStarted",
+            "$value": {
+                "tool_batch_id": { "step_id": step_id, "batch_seq": 1 },
+                "expected_call_ids": [TOOL_CALL_ID]
+            }
+        }),
+    )?;
+    step_epoch += 1;
+
+    host.send_event(
+        "demiurge/ToolCallRequested@1",
+        json!({
+            "session_id": SESSION_ID,
+            "run_id": run_id,
+            "turn_id": turn_id,
+            "step_id": step_id,
+            "session_epoch": 0,
+            "step_epoch": active_step_epoch,
+            "tool_batch_id": { "step_id": state.get("active_step_id").cloned().unwrap_or(Value::Null), "batch_seq": 1 },
+            "call_id": TOOL_CALL_ID,
+            "finalize_batch": true,
+            "params": {
+                "$tag": "IntrospectManifest",
+                "$value": { "consistency": "head" }
+            }
+        }),
+    )?;
+
+    run_until_idle(&mut host, 16).await?;
+
+    let state = reducer_state_json(&host)?;
+    let batch = state
+        .get("active_tool_batch")
+        .and_then(Value::as_object)
+        .context("missing active_tool_batch")?;
+    let call_status = batch
+        .get("call_status")
+        .and_then(Value::as_object)
+        .and_then(|m| m.get(TOOL_CALL_ID))
+        .and_then(Value::as_object)
+        .and_then(|v| v.get("$tag"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    assert_eq!(call_status, "Succeeded");
+    assert!(
+        batch.get("results_ref").unwrap_or(&Value::Null).is_null(),
+        "expected null results_ref for plan-driven tool settlement"
+    );
+
+    let root_hash = tool_request_event_hash(host.kernel(), TOOL_CALL_ID)?;
     let trace = analyze_trace(host.kernel(), &root_hash)?;
     assert_eq!(
         trace.terminal_state, "completed",
@@ -496,6 +417,11 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
         "unexpected plan error in trace: {:?}",
         trace
     );
+
+    send_session_event(&mut host, step_epoch, json!({ "$tag": "StepBoundary" }))?;
+    step_epoch += 1;
+    send_session_event(&mut host, step_epoch, json!({ "$tag": "RunCompleted" }))?;
+    run_until_idle(&mut host, 8).await?;
 
     Ok(())
 }

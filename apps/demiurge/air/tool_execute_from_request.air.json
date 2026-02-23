@@ -1,0 +1,352 @@
+[
+  {
+    "$kind": "defplan",
+    "name": "demiurge/tool_execute_from_request@1",
+    "input": "demiurge/ToolCallRequested@1",
+    "steps": [
+      {
+        "id": "assign_tool_tag",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [{ "ref": "@plan.input.params" }, { "text": "$tag" }]
+        },
+        "bind": { "as": "tool_tag" }
+      },
+      {
+        "id": "emit_introspect_manifest",
+        "op": "emit_effect",
+        "kind": "introspect.manifest",
+        "params": {
+          "record": {
+            "consistency": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [{ "ref": "@plan.input.params" }, { "text": "$value" }]
+                },
+                { "text": "consistency" }
+              ]
+            }
+          }
+        },
+        "cap": "cap_query",
+        "bind": { "effect_id_as": "introspect_manifest" }
+      },
+      {
+        "id": "await_introspect_manifest",
+        "op": "await_receipt",
+        "for": { "ref": "@var:introspect_manifest" },
+        "bind": { "as": "introspect_manifest_receipt" }
+      },
+      {
+        "id": "assign_manifest_bytes",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:introspect_manifest_receipt" },
+            { "text": "manifest" }
+          ]
+        },
+        "bind": { "as": "tool_bytes" }
+      },
+      {
+        "id": "emit_workspace_resolve",
+        "op": "emit_effect",
+        "kind": "workspace.resolve",
+        "params": {
+          "record": {
+            "workspace": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [{ "ref": "@plan.input.params" }, { "text": "$value" }]
+                },
+                { "text": "workspace" }
+              ]
+            },
+            "version": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [{ "ref": "@plan.input.params" }, { "text": "$value" }]
+                },
+                { "text": "version" }
+              ]
+            }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_resolve" }
+      },
+      {
+        "id": "await_workspace_resolve",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_resolve" },
+        "bind": { "as": "workspace_resolve_receipt" }
+      },
+      {
+        "id": "assign_workspace_root",
+        "op": "assign",
+        "expr": {
+          "op": "get",
+          "args": [
+            { "ref": "@var:workspace_resolve_receipt" },
+            { "text": "root_hash" }
+          ]
+        },
+        "bind": { "as": "workspace_root" }
+      },
+      {
+        "id": "emit_workspace_read_bytes",
+        "op": "emit_effect",
+        "kind": "workspace.read_bytes",
+        "params": {
+          "record": {
+            "root_hash": { "ref": "@var:workspace_root" },
+            "path": {
+              "op": "get",
+              "args": [
+                {
+                  "op": "get",
+                  "args": [{ "ref": "@plan.input.params" }, { "text": "$value" }]
+                },
+                { "text": "path" }
+              ]
+            },
+            "range": { "null": {} }
+          }
+        },
+        "cap": "cap_workspace",
+        "bind": { "effect_id_as": "workspace_read_bytes" }
+      },
+      {
+        "id": "await_workspace_read_bytes",
+        "op": "await_receipt",
+        "for": { "ref": "@var:workspace_read_bytes" },
+        "bind": { "as": "workspace_read_bytes_receipt" }
+      },
+      {
+        "id": "assign_workspace_bytes",
+        "op": "assign",
+        "expr": { "ref": "@var:workspace_read_bytes_receipt" },
+        "bind": { "as": "tool_bytes" }
+      },
+      {
+        "id": "raise_tool_call_settled_succeeded",
+        "op": "raise_event",
+        "event": "aos.agent/SessionEvent@1",
+        "value": {
+          "record": {
+            "session_id": { "ref": "@plan.input.session_id" },
+            "run_id": { "ref": "@plan.input.run_id" },
+            "turn_id": { "ref": "@plan.input.turn_id" },
+            "step_id": { "ref": "@plan.input.step_id" },
+            "session_epoch": { "ref": "@plan.input.session_epoch" },
+            "step_epoch": { "ref": "@plan.input.step_epoch" },
+            "event": {
+              "variant": {
+                "tag": "ToolCallSettled",
+                "value": {
+                  "record": {
+                    "tool_batch_id": { "ref": "@plan.input.tool_batch_id" },
+                    "call_id": { "ref": "@plan.input.call_id" },
+                    "status": { "variant": { "tag": "Succeeded" } },
+                    "receipt_session_epoch": { "ref": "@plan.input.session_epoch" },
+                    "receipt_step_epoch": { "ref": "@plan.input.step_epoch" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "raise_tool_batch_settled_success",
+        "op": "raise_event",
+        "event": "aos.agent/SessionEvent@1",
+        "value": {
+          "record": {
+            "session_id": { "ref": "@plan.input.session_id" },
+            "run_id": { "ref": "@plan.input.run_id" },
+            "turn_id": { "ref": "@plan.input.turn_id" },
+            "step_id": { "ref": "@plan.input.step_id" },
+            "session_epoch": { "ref": "@plan.input.session_epoch" },
+            "step_epoch": { "ref": "@plan.input.step_epoch" },
+            "event": {
+              "variant": {
+                "tag": "ToolBatchSettled",
+                "value": {
+                  "record": {
+                    "tool_batch_id": { "ref": "@plan.input.tool_batch_id" },
+                    "results_ref": { "null": {} }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "raise_tool_call_failed_unknown",
+        "op": "raise_event",
+        "event": "aos.agent/SessionEvent@1",
+        "value": {
+          "record": {
+            "session_id": { "ref": "@plan.input.session_id" },
+            "run_id": { "ref": "@plan.input.run_id" },
+            "turn_id": { "ref": "@plan.input.turn_id" },
+            "step_id": { "ref": "@plan.input.step_id" },
+            "session_epoch": { "ref": "@plan.input.session_epoch" },
+            "step_epoch": { "ref": "@plan.input.step_epoch" },
+            "event": {
+              "variant": {
+                "tag": "ToolCallSettled",
+                "value": {
+                  "record": {
+                    "tool_batch_id": { "ref": "@plan.input.tool_batch_id" },
+                    "call_id": { "ref": "@plan.input.call_id" },
+                    "status": {
+                      "variant": {
+                        "tag": "Failed",
+                        "value": {
+                          "record": {
+                            "code": { "text": "tool_not_supported" },
+                            "detail": {
+                              "op": "concat",
+                              "args": [
+                                { "text": "Unsupported tool params tag: " },
+                                { "ref": "@var:tool_tag" }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "receipt_session_epoch": { "ref": "@plan.input.session_epoch" },
+                    "receipt_step_epoch": { "ref": "@plan.input.step_epoch" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "raise_tool_batch_settled_failed",
+        "op": "raise_event",
+        "event": "aos.agent/SessionEvent@1",
+        "value": {
+          "record": {
+            "session_id": { "ref": "@plan.input.session_id" },
+            "run_id": { "ref": "@plan.input.run_id" },
+            "turn_id": { "ref": "@plan.input.turn_id" },
+            "step_id": { "ref": "@plan.input.step_id" },
+            "session_epoch": { "ref": "@plan.input.session_epoch" },
+            "step_epoch": { "ref": "@plan.input.step_epoch" },
+            "event": {
+              "variant": {
+                "tag": "ToolBatchSettled",
+                "value": {
+                  "record": {
+                    "tool_batch_id": { "ref": "@plan.input.tool_batch_id" },
+                    "results_ref": { "null": {} }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      { "id": "finish", "op": "end" }
+    ],
+    "edges": [
+      {
+        "from": "assign_tool_tag",
+        "to": "emit_introspect_manifest",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@var:tool_tag" }, { "text": "IntrospectManifest" }]
+        }
+      },
+      {
+        "from": "assign_tool_tag",
+        "to": "emit_workspace_resolve",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@var:tool_tag" }, { "text": "WorkspaceReadBytes" }]
+        }
+      },
+      {
+        "from": "assign_tool_tag",
+        "to": "raise_tool_call_failed_unknown",
+        "when": {
+          "op": "and",
+          "args": [
+            {
+              "op": "ne",
+              "args": [{ "ref": "@var:tool_tag" }, { "text": "IntrospectManifest" }]
+            },
+            {
+              "op": "ne",
+              "args": [{ "ref": "@var:tool_tag" }, { "text": "WorkspaceReadBytes" }]
+            }
+          ]
+        }
+      },
+      { "from": "emit_introspect_manifest", "to": "await_introspect_manifest" },
+      { "from": "await_introspect_manifest", "to": "assign_manifest_bytes" },
+      { "from": "assign_manifest_bytes", "to": "raise_tool_call_settled_succeeded" },
+      { "from": "emit_workspace_resolve", "to": "await_workspace_resolve" },
+      { "from": "await_workspace_resolve", "to": "assign_workspace_root" },
+      { "from": "assign_workspace_root", "to": "emit_workspace_read_bytes" },
+      { "from": "emit_workspace_read_bytes", "to": "await_workspace_read_bytes" },
+      { "from": "await_workspace_read_bytes", "to": "assign_workspace_bytes" },
+      { "from": "assign_workspace_bytes", "to": "raise_tool_call_settled_succeeded" },
+      {
+        "from": "raise_tool_call_settled_succeeded",
+        "to": "raise_tool_batch_settled_success",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@plan.input.finalize_batch" }, { "bool": true }]
+        }
+      },
+      {
+        "from": "raise_tool_call_settled_succeeded",
+        "to": "finish",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@plan.input.finalize_batch" }, { "bool": false }]
+        }
+      },
+      { "from": "raise_tool_batch_settled_success", "to": "finish" },
+      {
+        "from": "raise_tool_call_failed_unknown",
+        "to": "raise_tool_batch_settled_failed",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@plan.input.finalize_batch" }, { "bool": true }]
+        }
+      },
+      {
+        "from": "raise_tool_call_failed_unknown",
+        "to": "finish",
+        "when": {
+          "op": "eq",
+          "args": [{ "ref": "@plan.input.finalize_batch" }, { "bool": false }]
+        }
+      },
+      { "from": "raise_tool_batch_settled_failed", "to": "finish" }
+    ],
+    "required_caps": ["cap_query", "cap_workspace"],
+    "allowed_effects": [
+      "introspect.manifest",
+      "workspace.resolve",
+      "workspace.read_bytes"
+    ]
+  }
+]
