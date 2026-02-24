@@ -336,9 +336,15 @@ Deliverable: governance remains, but no plan concepts remain in reports or check
 ### Phase 5: Tooling/docs/fixtures cleanup
 
 1. Remove `aos plans` command family or replace with module-workflow tooling.
-2. Rewrite smoke fixtures and integration tests to workflow modules.
-3. Rewrite specs to describe code-workflow orchestration instead of plan DAGs.
-4. Update AGENTS/overview docs to remove plan guidance.
+2. Rewrite smoke fixtures and integration tests to workflow modules, including the required upgrade-while-waiting scenario:
+   - start workflow instance and emit external effect,
+   - snapshot while waiting on receipt,
+   - attempt governance apply and assert strict-quiescence block,
+   - deliver receipt and assert deterministic continuation,
+   - re-apply and assert deterministic success.
+3. Ensure this scenario is covered both in `crates/aos-host` end-to-end tests and in `crates/aos-smoke/fixtures/06-safe-upgrade`.
+4. Rewrite specs to describe code-workflow orchestration instead of plan DAGs.
+5. Update AGENTS/overview docs to remove plan guidance.
 
 Deliverable: repository UX and docs match the new architecture.
 
