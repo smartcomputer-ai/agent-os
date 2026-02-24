@@ -209,6 +209,32 @@ Non-goal in v0.11:
 1. No promise of full future effect prediction for unexecuted workflow branches or unbounded loops.
 2. "Predicted effects" in governance output means "effects observed in bounded shadow execution horizon," not static whole-program enumeration.
 
+### 2.9 Required manifest subscription contract
+
+Post-plan orchestration start wiring must be explicit in manifest and deterministic.
+
+Chosen manifest surface for v0.11:
+
+1. Replace `routing.events` with `routing.subscriptions`.
+2. `routing.subscriptions` controls domain-event ingress to workflow modules.
+3. Receipt continuation remains manifest-independent and uses origin-instance routing contract.
+
+Each subscription entry must define:
+
+1. `event` (event schema),
+2. `module` (target workflow module),
+3. `instance_key_derivation` (for example from `event.key`, event field path, or literal),
+4. `delivery` (`fanout` or `single`),
+5. `on_missing_instance` (`create` or `reject`).
+
+Deterministic semantics:
+
+1. Evaluate matching subscriptions in canonical manifest order.
+2. `fanout` delivers to all matches in order.
+3. `single` delivers only to the first match in order.
+4. If key derivation fails for keyed delivery, fail deterministically.
+5. No legacy trigger or implicit startup fallback after P3.
+
 ---
 
 ## 3. Pragmatic Migration Strategy
@@ -287,7 +313,7 @@ Deliverable: kernel has no plan interpreter or plan instance state.
    - `crates/aos-kernel/src/manifest.rs`
    - `crates/aos-host/src/manifest_loader.rs`
    - `crates/aos-host/src/world_io.rs`
-4. Replace old `triggers` semantics with module/event subscriptions (or expand routing rules) as the only orchestration entry wiring.
+4. Replace old `triggers` semantics with manifest `routing.subscriptions` as the only orchestration entry wiring.
 5. Keep receipt return routing out of manifest schema; receipts route via recorded origin identity only.
 6. Replace reducer-era module authority vocabulary with target module kinds (`workflow|pure`) in AIR models/schemas.
 

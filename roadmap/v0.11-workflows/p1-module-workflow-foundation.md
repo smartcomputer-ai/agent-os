@@ -111,7 +111,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. Replay from genesis remains deterministic for the new fixture.
 4. Caps/policies still gate every effect intent.
 5. Concurrent workflow instances emitting similar effects do not cross-deliver receipts.
-6. Receipt routing remains correct after manifest routing changes because delivery does not depend on subscriptions.
+6. Receipt routing remains correct after manifest subscription wiring changes because delivery does not depend on subscriptions.
 7. Workflow instance lifecycle status (`running|waiting|completed|failed`) is persisted and restored on replay.
 8. Effects not declared in module `effects_emitted` are rejected before policy evaluation.
 9. Pure modules cannot originate effects.

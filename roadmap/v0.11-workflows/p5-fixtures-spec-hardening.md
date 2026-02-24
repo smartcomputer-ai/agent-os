@@ -27,7 +27,8 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
    - retries/timeouts via receipts/events,
    - multi-instance concurrency and isolation,
    - governance apply on workflow manifests,
-   - manifest routing changes while receipts are in flight.
+   - manifest subscription wiring changes while receipts are in flight,
+   - upgrade-while-waiting (pending receipt + snapshot + apply attempt + late receipt).
 3. Update host integration tests accordingly.
 
 ### 2) Spec/doc rewrite
@@ -48,6 +49,12 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 8. Structural authority checks: workflow-only effect emission and module `effects_emitted` pre-policy rejection behavior.
 9. Strict-quiescence governance tests: apply blocked with in-flight instances/intents and allowed only after terminalization.
 10. Shadow semantics tests: reported "predicted effects" must equal effects observed within bounded shadow execution horizon.
+11. Killer upgrade scenario tests:
+    - start workflow instance and emit external effect,
+    - snapshot while waiting on receipt,
+    - attempt governance apply and assert strict-quiescence block,
+    - deliver receipt and assert deterministic continuation,
+    - re-apply and assert deterministic success.
 
 ### 4) Dead code and roadmap cleanup
 
@@ -65,11 +72,13 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 
 1. Replace plan fixtures with module-workflow fixtures.
 2. Keep fixtures small, deterministic, and replay-testable.
+3. Extend `fixtures/06-safe-upgrade` to cover upgrade-while-waiting end-to-end, including snapshot + blocked apply + post-receipt apply.
 
 ### `crates/aos-host/tests` and `crates/aos-kernel/tests`
 
 1. Replace plan-era assumptions with workflow-instance assertions.
 2. Add regression coverage for replay/snapshot/tail behavior.
+3. Add an end-to-end host test for upgrade-while-waiting with strict-quiescence apply blocking and deterministic post-receipt continuation.
 
 ### `spec/*` and repo docs
 
@@ -87,3 +96,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 7. Fixtures/docs validate `workflow|pure` authority model and module allowlist guardrails.
 8. Fixture suite proves strict-quiescence manifest apply semantics for post-plan worlds.
 9. Fixture suite proves honest shadow observability semantics (no full-future prediction claim).
+10. Fixture suite includes upgrade-while-waiting with snapshot and verifies deterministic behavior under the selected upgrade rule.

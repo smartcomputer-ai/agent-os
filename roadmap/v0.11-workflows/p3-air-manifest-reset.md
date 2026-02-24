@@ -30,13 +30,13 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 
 1. Remove `manifest.plans` references.
 2. Remove trigger-to-plan semantics.
-3. Introduce/solidify module workflow subscription/routing model for orchestration start.
+3. Introduce/solidify `routing.subscriptions` (replacing `routing.events`) as the workflow orchestration-start wiring model.
 4. Keep receipt return routing out of manifest wiring; receipt routing is origin-identity-based runtime behavior.
 
 ### 3) Update schemas
 
 1. Remove `spec/schemas/defplan.schema.json` from active AIR schema set.
-2. Update `spec/schemas/manifest.schema.json` required fields and routing semantics.
+2. Update `spec/schemas/manifest.schema.json` required fields and routing semantics, including `routing.subscriptions` shape and deterministic ordering semantics.
 3. Update `spec/schemas/patch.schema.json` to remove plan/triggers patch ops.
 4. Add/align schema docs for the generic workflow receipt envelope contract.
 5. Add/align schema docs for workflow instance state persistence (`status`, `inflight_intents`, `last_processed_event_seq`, optional `module_version`).
@@ -64,7 +64,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 
 ### `spec/schemas`
 
-1. Update `manifest.schema.json`, `common.schema.json`, `patch.schema.json`.
+1. Update `manifest.schema.json`, `common.schema.json`, `patch.schema.json` for `routing.subscriptions` contract.
 2. Remove or archive `defplan.schema.json`.
 
 ### `crates/aos-store`
@@ -86,3 +86,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 5. Manifest routing changes cannot strand in-flight receipts.
 6. No manifest field is required to recover workflow waiting state; waiting state comes from persisted instance records.
 7. Active AIR schema/model expose only `workflow|pure` module authority kinds in the post-plan model.
+8. Manifest startup wiring uses `routing.subscriptions` and no longer relies on `routing.events`.
