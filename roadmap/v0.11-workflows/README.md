@@ -80,17 +80,19 @@ Implication: deleting plans is feasible, but it is a cross-cutting redesign, not
 
 ### 2.1 Core model
 
-1. Modules own orchestration logic in code (Rust or other WASM targets).
-2. Modules emit effect intents directly.
-3. Receipts return as events and are fed back into modules.
-4. Kernel still enforces capability and policy gates for every effect.
-5. Journal/snapshot/replay stay deterministic.
+1. `workflow` modules own orchestration/state-machine logic in code (Rust or other WASM targets).
+2. `workflow` modules emit effect intents directly.
+3. `pure` modules are side-effect-free compute helpers and never emit effects.
+4. Receipts return as events and are fed back into `workflow` modules.
+5. Kernel still enforces structural module guardrails, capability gates, and policy gates for every effect.
+6. Journal/snapshot/replay stay deterministic.
 
 ### 2.2 Responsibility boundaries
 
-1. Modules: deterministic state transitions and orchestration state.
-2. Kernel/effect manager: capability checks, policy checks, effect queueing, receipt ingestion.
-3. Adapters: execute side effects and return receipts.
+1. Workflow modules: deterministic state transitions and orchestration state.
+2. Pure modules: deterministic pure computation with no side effects.
+3. Kernel/effect manager: capability checks, policy checks, effect queueing, receipt ingestion.
+4. Adapters: execute side effects and return receipts.
 
 ### 2.3 Non-goals for first cut
 
@@ -98,7 +100,24 @@ Implication: deleting plans is feasible, but it is a cross-cutting redesign, not
 2. Migration tooling for old plan instances.
 3. Compatibility with old plan journal semantics.
 
-### 2.4 Required workflow receipt identity contract
+### 2.4 Required authority boundary guardrail
+
+After plan removal, authority must not depend on policy configuration alone.
+
+Normative contract:
+
+1. Module kinds are `workflow | pure` in the target model.
+2. Only `workflow` modules may emit effects.
+3. `workflow` modules must declare `effects_emitted` allowlist on module defs.
+4. Kernel must reject any effect not in that module's declared allowlist before capability/policy evaluation.
+5. Capability/policy remain mandatory additional gates; they are not the only boundary.
+
+Migration note:
+
+1. While runtime still uses reducer plumbing internally, treat reducer semantics as workflow semantics.
+2. End-state AIR/docs/policy vocabulary should not expose `reducer` as an authority class.
+
+### 2.5 Required workflow receipt identity contract
 
 Plans previously owned receipt wakeups. After plan removal, receipt routing identity must be explicit and deterministic.
 
@@ -125,7 +144,7 @@ Deterministic `intent_id` rule:
 2. This prevents ambiguous wakeups when multiple instances emit structurally similar effects concurrently.
 3. The same preimage must be used on replay.
 
-### 2.5 Required workflow instance state model
+### 2.6 Required workflow instance state model
 
 Waiting state must not be an implicit convention inside arbitrary module bytes.
 
@@ -185,9 +204,9 @@ Deliverable: a documented migration contract saying old plan worlds are unsuppor
 2. Remove `effect_used` trap in `crates/aos-wasm-sdk/src/reducers.rs`.
 3. Keep deterministic output limits via explicit per-tick guardrails in kernel.
 
-### 1.2 Generalize reducer/module receipt handling
+### 1.2 Generalize workflow/module receipt handling
 
-Current reducer receipt plumbing is hardcoded around timer/blob result schemas.
+Current module receipt plumbing is hardcoded around reducer timer/blob result schemas.
 
 1. Replace hardcoded mapping in `crates/aos-kernel/src/receipts.rs` with a generic effect-receipt event envelope.
 2. Add explicit receipt identity fields (`origin_module_id`, `origin_instance_key`, `intent_id`, `effect_kind`, `params_hash`, `status`, `receipt_payload`, `emitted_at_seq`).
@@ -199,8 +218,9 @@ Current reducer receipt plumbing is hardcoded around timer/blob result schemas.
 ### 1.3 Expand allowed effect origins
 
 1. Effects currently enforce origin scopes with plan/reducer distinctions.
-2. Update origin model to support module-origin orchestration cleanly.
-3. Ensure all required effect kinds (HTTP/LLM/workspace/governance/introspect) can be emitted by orchestrating modules where policy allows.
+2. Update origin model to support workflow-module orchestration cleanly.
+3. Ensure required effect kinds (HTTP/LLM/workspace/governance/introspect) are only emitted by `workflow` modules where schema allowlist + cap + policy all allow.
+4. Ensure `pure` modules cannot emit effects.
 
 Deliverable: a module can run a multi-step async workflow without plans.
 
@@ -231,6 +251,7 @@ Deliverable: kernel has no plan interpreter or plan instance state.
    - `crates/aos-host/src/world_io.rs`
 4. Replace old `triggers` semantics with module/event subscriptions (or expand routing rules) as the only orchestration entry wiring.
 5. Keep receipt return routing out of manifest schema; receipts route via recorded origin identity only.
+6. Replace reducer-era module authority vocabulary with target module kinds (`workflow|pure`) in AIR models/schemas.
 
 Deliverable: AIR no longer contains plans as a first-class definition.
 
@@ -276,9 +297,10 @@ The key point: version label is secondary; architecture reset is primary.
 
 Current policy matching uses `plan` vs `reducer`. Replace with runtime-accurate origins, for example:
 
-1. `module` (or `reducer`/`workflow` if we keep both labels)
+1. `workflow`
 2. `system`
 3. `governance`
+4. `pure` should be represented only if needed for diagnostics; it should not originate effects.
 
 ### 6.2 Secret policy model
 
@@ -299,9 +321,9 @@ To minimize lift, first implement workflows on top of the existing module/reduce
 
 1. Do not introduce a separate workflow VM ABI in phase 1.
 2. Use current event->module dispatch and persisted module state cells.
-3. Add a dedicated workflow module kind only if needed later for clarity.
+3. Introduce dedicated `workflow` module kind at the AIR/schema layer as early as practical (with temporary runtime aliasing if needed).
 
-This gets working code workflows earlier and de-risks the design before a second ABI expansion.
+This gets working code workflows earlier and de-risks the design before a second ABI expansion while still converging on explicit `workflow|pure` authority semantics.
 
 ---
 

@@ -44,7 +44,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 
 ### 4) Policy and secret semantics cleanup
 
-1. Replace `origin_kind: plan|reducer` model with post-plan origin semantics.
+1. Replace `origin_kind: plan|reducer` model with post-plan origin semantics (`workflow|system|governance`; `pure` is non-effect origin).
 2. Replace `allowed_plans` secret policy with module-oriented policy fields.
 
 ## Out of Scope
@@ -77,3 +77,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 4. Policy and secret checks no longer depend on `plan` origin identity.
 5. Observability surfaces expose deterministic receipt routing identity for debugging.
 6. Observability surfaces expose workflow instance waiting/running/completed/failed status from persisted state.
+7. Policy/trace/control surfaces no longer require or expose `reducer` as an authority class in post-plan mode.

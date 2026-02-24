@@ -6,7 +6,7 @@
 
 ## Goal
 
-Remove plan execution from the kernel runtime so orchestration is exclusively module-driven.
+Remove plan execution from the kernel runtime so orchestration is exclusively workflow-module-driven.
 
 After this phase, plans may still exist in data models temporarily, but the runtime will not execute plan instances.
 Temporary between-phase breakage is expected and acceptable while executing P1 -> P5 serially.
@@ -50,6 +50,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. Snapshot and replay continue to work for non-plan flows.
 4. Receipt routing is manifest-independent and uses recorded origin identity only.
 5. Workflow instance state transitions are deterministic and replay-identical.
+6. Structural module authority guardrails remain enforced during runtime cutover.
 
 ## Out of Scope
 
@@ -66,6 +67,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. Remove plan-origin `IntentOriginRecord` production from runtime paths.
 4. Ensure receipt wakeup path targets module instances by recorded origin tuple, not router subscriptions.
 5. Ensure manifest apply quiescence uses workflow instance/inflight state instead of plan-only counters.
+6. Ensure effect emission path resolves module authority as workflow (not reducer) for post-plan semantics.
 
 ### `crates/aos-host`
 
@@ -85,3 +87,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 4. Manifest apply quiescence checks do not reference plan internals.
 5. Receipt wakeups remain deterministic under concurrent in-flight module instances.
 6. Pending/waiting workflow instances survive snapshot-load-replay with identical inflight intent sets.
+7. Runtime has no plan-or-reducer-specific authority dependency for effect emission.

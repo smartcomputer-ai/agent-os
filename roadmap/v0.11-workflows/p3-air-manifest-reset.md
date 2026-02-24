@@ -24,6 +24,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 1. Remove `DefPlan`, `PlanStep*`, `PlanEdge`, and plan enums from model definitions.
 2. Remove plan-specific validation logic.
 3. Remove plan literal normalization paths.
+4. Replace reducer-era module authority vocabulary with `module_kind: workflow|pure` in active AIR model/schema.
 
 ### 2) Replace manifest sections
 
@@ -39,6 +40,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. Update `spec/schemas/patch.schema.json` to remove plan/triggers patch ops.
 4. Add/align schema docs for the generic workflow receipt envelope contract.
 5. Add/align schema docs for workflow instance state persistence (`status`, `inflight_intents`, `last_processed_event_seq`, optional `module_version`).
+6. Update `defmodule` schema to target `workflow|pure` module kinds and keep `effects_emitted` as workflow allowlist.
 
 ### 4) Update storage + loaders
 
@@ -57,7 +59,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 ### `crates/aos-air-types`
 
 1. `model.rs`: remove plan structures and plan-oriented manifest fields.
-2. `validate.rs`: remove plan and trigger checks; add module workflow wiring checks.
+2. `validate.rs`: remove plan and trigger checks; add module workflow wiring checks and `effects_emitted` allowlist semantics for workflow modules.
 3. `schemas.rs` and tests: remove `defplan` references.
 
 ### `spec/schemas`
@@ -83,3 +85,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 4. World import/export and manifest patching work with the new contract.
 5. Manifest routing changes cannot strand in-flight receipts.
 6. No manifest field is required to recover workflow waiting state; waiting state comes from persisted instance records.
+7. Active AIR schema/model expose only `workflow|pure` module authority kinds in the post-plan model.

@@ -45,6 +45,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 5. Deterministic receipt routing checks for concurrent identical effect emissions from distinct instances.
 6. Workflow instance state machine checks (`running|waiting|completed|failed`) and `last_processed_event_seq` monotonicity checks.
 7. Upgrade safety checks for `module_version` behavior with in-flight instances.
+8. Structural authority checks: workflow-only effect emission and module `effects_emitted` pre-policy rejection behavior.
 
 ### 4) Dead code and roadmap cleanup
 
@@ -71,7 +72,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 ### `spec/*` and repo docs
 
 1. Update workflow architecture descriptions.
-2. Remove references to plan interpreter behavior.
+2. Remove references to plan interpreter behavior and reducer-as-authority semantics.
 
 ## Acceptance Criteria
 
@@ -81,3 +82,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 4. No critical dead code remains for plan execution paths.
 5. Restart/replay preserves receipt delivery to the same module instance identity.
 6. Restart/replay preserves workflow instance status and inflight intent map exactly.
+7. Fixtures/docs validate `workflow|pure` authority model and module allowlist guardrails.
