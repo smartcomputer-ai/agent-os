@@ -46,6 +46,8 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 6. Workflow instance state machine checks (`running|waiting|completed|failed`) and `last_processed_event_seq` monotonicity checks.
 7. Upgrade safety checks for `module_version` behavior with in-flight instances.
 8. Structural authority checks: workflow-only effect emission and module `effects_emitted` pre-policy rejection behavior.
+9. Strict-quiescence governance tests: apply blocked with in-flight instances/intents and allowed only after terminalization.
+10. Shadow semantics tests: reported "predicted effects" must equal effects observed within bounded shadow execution horizon.
 
 ### 4) Dead code and roadmap cleanup
 
@@ -83,3 +85,5 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 5. Restart/replay preserves receipt delivery to the same module instance identity.
 6. Restart/replay preserves workflow instance status and inflight intent map exactly.
 7. Fixtures/docs validate `workflow|pure` authority model and module allowlist guardrails.
+8. Fixture suite proves strict-quiescence manifest apply semantics for post-plan worlds.
+9. Fixture suite proves honest shadow observability semantics (no full-future prediction claim).

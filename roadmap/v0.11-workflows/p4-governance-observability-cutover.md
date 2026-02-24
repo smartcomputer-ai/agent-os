@@ -23,11 +23,14 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 
 1. Remove `plan_results` and `pending_plan_receipts` structures from shadow summaries.
 2. Replace with module workflow execution summaries:
-   - predicted effects,
+   - effects observed during bounded shadow execution,
+   - current in-flight intents,
+   - declared module `effects_emitted` allowlists,
    - pending receipts by `(origin_module_id, origin_instance_key, intent_id)`,
    - workflow instance status (`running|waiting|completed|failed`),
    - `last_processed_event_seq`,
-   - relevant ledger deltas.
+   - strict-quiescence apply-block reasons when present,
+   - state hash deltas and relevant ledger deltas.
 3. Keep propose/shadow/approve/apply lifecycle unchanged.
 
 ### 2) Journal model cleanup for plan records
@@ -78,3 +81,5 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 5. Observability surfaces expose deterministic receipt routing identity for debugging.
 6. Observability surfaces expose workflow instance waiting/running/completed/failed status from persisted state.
 7. Policy/trace/control surfaces no longer require or expose `reducer` as an authority class in post-plan mode.
+8. Apply-block diagnostics clearly report strict-quiescence failures (in-flight instances/intents/queues).
+9. Shadow/governance surfaces do not claim full future effect prediction beyond bounded shadow execution.

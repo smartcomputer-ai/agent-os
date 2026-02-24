@@ -170,7 +170,44 @@ Normative behavior:
 2. Kernel removes it when receipt settles (`ok|denied|faulted`) and updates `status`.
 3. Snapshot/replay must restore instance status and inflight intent map byte-identically.
 4. Governance/quiescence/observability must read pending-wait state from this model, not heuristics over opaque module bytes.
-5. Upgrade/apply logic should use `module_version` (or module hash equivalent) to block or migrate incompatible in-flight instances.
+5. `module_version` (or module hash equivalent) is persisted for diagnostics and future upgrade policies; v0.11 apply safety uses strict quiescence.
+
+### 2.7 Required upgrade semantics for in-flight workflows
+
+Post-plan worlds must define manifest apply behavior for in-flight workflow instances.
+
+Chosen model for v0.11: **strict quiescence**.
+
+Normative apply rule:
+
+1. Block manifest apply unless all workflow instances are terminal (`completed|failed`).
+2. Block manifest apply if any workflow instance has non-empty `inflight_intents`.
+3. Block manifest apply if effect queue/scheduler still has pending work.
+4. Do not clear/abandon in-flight workflow state during apply.
+
+Explicitly not in v0.11:
+
+1. Per-instance version pinning across upgrades.
+2. Mandatory workflow state migrations at apply time.
+
+`module_version` in instance state remains useful for diagnostics and future extension to pinning/migration, but strict quiescence is the active safety rule in this roadmap slice.
+
+### 2.8 Required governance/shadow prediction semantics
+
+With Turing-complete workflow modules, governance/shadow must not imply complete static future prediction.
+
+Chosen reporting model for v0.11:
+
+1. Execute shadow deterministically on a forked world with deterministic adapter/receipt handling.
+2. Report effects observed during the shadow run so far.
+3. Report current in-flight intents.
+4. Report declared module `effects_emitted` allowlists.
+5. Report state hash deltas and relevant ledger deltas.
+
+Non-goal in v0.11:
+
+1. No promise of full future effect prediction for unexecuted workflow branches or unbounded loops.
+2. "Predicted effects" in governance output means "effects observed in bounded shadow execution horizon," not static whole-program enumeration.
 
 ---
 
@@ -234,6 +271,7 @@ Deliverable: a module can run a multi-step async workflow without plans.
 6. Keep a module-workflow pending receipt index keyed by `intent_id` with target `(origin_module_id, origin_instance_key)`.
 7. Ensure receipt wakeups are manifest-independent and deterministic under concurrency.
 8. Replace plan waiters with workflow instance lifecycle state (`running|waiting|completed|failed`) backed by persisted instance records.
+9. Replace plan-era apply checks with workflow strict-quiescence checks (instance status + inflight intents + effect queue/scheduler).
 
 Deliverable: kernel has no plan interpreter or plan instance state.
 
@@ -261,10 +299,11 @@ Deliverable: AIR no longer contains plans as a first-class definition.
 2. Remove `PlanStarted`, `PlanResult`, `PlanEnded` journal kinds and replay decode paths.
 3. Replace plan-centric debug/trace/control APIs with module/workflow equivalents.
 4. Replace plan-era policy/secret semantics (`origin_kind`, `allowed_plans`) with module-oriented semantics.
-5. Keep governance propose/shadow/approve/apply mechanics, but report module/effect-level predictions.
+5. Keep governance propose/shadow/approve/apply mechanics, but report bounded shadow-observed effects plus in-flight intents/allowlists/deltas (no full-future prediction claim).
 6. Ensure `ManifestApplyBlockedInFlight` checks reflect new runtime state names.
 7. Report pending receipts by `(origin_module_id, origin_instance_key, intent_id)`.
 8. Report workflow instance status and `last_processed_event_seq` from kernel-recognized instance state.
+9. Expose strict-quiescence block reasons in governance/trace outputs for apply attempts.
 
 Deliverable: governance remains, but no plan concepts remain in reports or checks.
 

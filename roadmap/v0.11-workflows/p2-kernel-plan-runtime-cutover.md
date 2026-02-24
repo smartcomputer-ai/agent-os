@@ -29,7 +29,10 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 
 1. Remove plan instance maps, waiters, pending plan receipts, completion caches.
 2. Remove plan-specific replay identity reconciliation.
-3. Replace manifest apply quiescence checks with module/effect queue-only checks.
+3. Replace manifest apply quiescence checks with workflow strict-quiescence checks:
+   - no non-terminal workflow instances,
+   - no in-flight intents,
+   - no queued effects/scheduler work.
 4. Introduce/retain module-workflow pending receipt state keyed by `intent_id` and resolved to `(origin_module_id, origin_instance_key)`.
 5. Introduce/retain kernel-recognized workflow instance records carrying `status`, `inflight_intents`, and `last_processed_event_seq`.
 
@@ -51,6 +54,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 4. Receipt routing is manifest-independent and uses recorded origin identity only.
 5. Workflow instance state transitions are deterministic and replay-identical.
 6. Structural module authority guardrails remain enforced during runtime cutover.
+7. Manifest apply decisions are deterministic under strict-quiescence rules.
 
 ## Out of Scope
 
@@ -68,6 +72,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 4. Ensure receipt wakeup path targets module instances by recorded origin tuple, not router subscriptions.
 5. Ensure manifest apply quiescence uses workflow instance/inflight state instead of plan-only counters.
 6. Ensure effect emission path resolves module authority as workflow (not reducer) for post-plan semantics.
+7. Replace apply-path state clearing assumptions with strict precondition checks that fail closed when in-flight workflow state exists.
 
 ### `crates/aos-host`
 
@@ -88,3 +93,4 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 5. Receipt wakeups remain deterministic under concurrent in-flight module instances.
 6. Pending/waiting workflow instances survive snapshot-load-replay with identical inflight intent sets.
 7. Runtime has no plan-or-reducer-specific authority dependency for effect emission.
+8. Manifest apply fails while any in-flight workflow instance/intents exist, with deterministic block reasons.
