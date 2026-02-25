@@ -139,6 +139,7 @@ fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), Ker
 }
 
 #[test]
+#[ignore = "P2: governance plan trigger path retired; replace with workflow-governance fixture"]
 fn governance_action_requested_trigger_runs_plan() -> Result<(), KernelError> {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/UpgradePlan@1";

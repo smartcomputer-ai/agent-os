@@ -18,7 +18,7 @@ mod helpers;
 use helpers::timer_manifest;
 
 /// Ensure a reducer-emitted `timer.set` is scheduled, fired by the daemon,
-/// and routed to the handler reducer.
+/// and routed back to the origin workflow module.
 #[tokio::test]
 async fn daemon_fires_timer_and_routes_event() {
     // Build in-memory world with timer-emitting reducer + handler.
@@ -63,10 +63,10 @@ async fn daemon_fires_timer_and_routes_event() {
     let (result, daemon) = handle.await.unwrap();
     result.unwrap();
 
-    // Timer handler should have been invoked, setting its stub state to 0xCC.
+    // The origin reducer/workflow should continue on receipt delivery.
     let state = daemon
         .host()
         .kernel()
-        .reducer_state("com.acme/TimerHandler@1");
-    assert_eq!(state, Some(vec![0xCC]));
+        .reducer_state("com.acme/TimerEmitter@1");
+    assert_eq!(state, Some(vec![0x01]));
 }

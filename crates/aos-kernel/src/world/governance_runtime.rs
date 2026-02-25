@@ -192,16 +192,27 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn ensure_manifest_apply_quiescent(&self) -> Result<(), KernelError> {
-        let plan_instances = self.plan_instances.len();
-        let waiting_events = self.waiting_events.values().map(std::vec::Vec::len).sum();
-        let pending_plan_receipts = self.pending_receipts.len();
+        let non_terminal_workflows = self
+            .workflow_instances
+            .values()
+            .filter(|instance| {
+                !matches!(
+                    instance.status,
+                    WorkflowRuntimeStatus::Completed | WorkflowRuntimeStatus::Failed
+                )
+            })
+            .count();
+        let inflight_workflow_intents = self
+            .workflow_instances
+            .values()
+            .map(|instance| instance.inflight_intents.len())
+            .sum::<usize>();
         let pending_reducer_receipts = self.pending_reducer_receipts.len();
         let queued_effects = self.effect_manager.queued().len();
         let scheduler_pending = !self.scheduler.is_empty();
 
-        if plan_instances == 0
-            && waiting_events == 0
-            && pending_plan_receipts == 0
+        if non_terminal_workflows == 0
+            && inflight_workflow_intents == 0
             && pending_reducer_receipts == 0
             && queued_effects == 0
             && !scheduler_pending
@@ -210,9 +221,9 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         Err(KernelError::ManifestApplyBlockedInFlight {
-            plan_instances,
-            waiting_events,
-            pending_plan_receipts,
+            plan_instances: non_terminal_workflows,
+            waiting_events: inflight_workflow_intents,
+            pending_plan_receipts: 0,
             pending_reducer_receipts,
             queued_effects,
             scheduler_pending,
@@ -423,11 +434,25 @@ mod tests {
     #[test]
     fn apply_patch_direct_blocks_when_runtime_not_quiescent() {
         let mut kernel = empty_kernel();
-        kernel.pending_receipts.insert(
+        let mut inflight = std::collections::BTreeMap::new();
+        inflight.insert(
             [1u8; 32],
-            PendingPlanReceiptInfo {
-                plan_id: 7,
+            WorkflowInflightIntentMeta {
+                origin_module_id: "com.acme/Workflow@1".into(),
+                origin_instance_key: None,
                 effect_kind: "sys/http.request@1".into(),
+                params_hash: None,
+                emitted_at_seq: 0,
+            },
+        );
+        kernel.workflow_instances.insert(
+            "com.acme/Workflow@1::".into(),
+            WorkflowInstanceState {
+                state_bytes: vec![1],
+                inflight_intents: inflight,
+                status: WorkflowRuntimeStatus::Waiting,
+                last_processed_event_seq: 0,
+                module_version: None,
             },
         );
         kernel.pending_reducer_receipts.insert(
@@ -442,10 +467,6 @@ mod tests {
                 None,
             ),
         );
-        kernel
-            .waiting_events
-            .insert("com.acme/Evt@1".into(), vec![9]);
-        kernel.scheduler.push_plan(9);
         kernel.effect_manager.restore_queue(vec![EffectIntent {
             kind: EffectKind::new("introspect.manifest"),
             cap_name: "sys/query@1".into(),
@@ -470,12 +491,12 @@ mod tests {
                 queued_effects,
                 scheduler_pending,
             } => {
-                assert_eq!(plan_instances, 0);
+                assert_eq!(plan_instances, 1);
                 assert_eq!(waiting_events, 1);
-                assert_eq!(pending_plan_receipts, 1);
+                assert_eq!(pending_plan_receipts, 0);
                 assert_eq!(pending_reducer_receipts, 1);
                 assert_eq!(queued_effects, 1);
-                assert!(scheduler_pending);
+                assert!(!scheduler_pending);
             }
             other => panic!("unexpected error: {other}"),
         }

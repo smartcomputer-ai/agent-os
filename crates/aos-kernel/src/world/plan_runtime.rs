@@ -279,26 +279,6 @@ impl<S: Store + 'static> Kernel<S> {
         stamp: IngressStamp,
     ) -> Result<(), KernelError> {
         Self::validate_entropy(&stamp.entropy)?;
-        if let Some(pending) = self.pending_receipts.remove(&receipt.intent_hash) {
-            self.record_effect_receipt(&receipt, &stamp)?;
-            self.record_decisions()?;
-            if let Some(instance) = self.plan_instances.get_mut(&pending.plan_id) {
-                instance.set_context(crate::plan::PlanContext::from_stamp(&stamp));
-                if instance.deliver_receipt(receipt.intent_hash, &receipt.payload_cbor)? {
-                    self.scheduler.push_plan(pending.plan_id);
-                }
-                self.remember_receipt(receipt.intent_hash);
-                return Ok(());
-            } else {
-                log::warn!(
-                    "receipt {} arrived for completed plan {}",
-                    format_intent_hash(&receipt.intent_hash),
-                    pending.plan_id
-                );
-                self.remember_receipt(receipt.intent_hash);
-                return Ok(());
-            }
-        }
 
         if self.recent_receipt_index.contains(&receipt.intent_hash) {
             log::warn!(

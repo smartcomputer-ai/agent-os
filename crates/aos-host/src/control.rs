@@ -636,9 +636,34 @@ pub(crate) async fn handle_request(
             "workspace-read-bytes" => {
                 let params: WorkspaceReadBytesParams = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
-                let bytes: Vec<u8> =
+                let payload: serde_cbor::Value =
                     internal_effect(control_tx, EffectKind::workspace_read_bytes(), &params)
                         .await?;
+                let bytes = match payload {
+                    serde_cbor::Value::Bytes(bytes) => bytes,
+                    serde_cbor::Value::Array(items) => {
+                        let mut bytes = Vec::with_capacity(items.len());
+                        for item in items {
+                            let serde_cbor::Value::Integer(v) = item else {
+                                return Err(ControlError::decode(
+                                    "workspace-read-bytes returned non-byte item",
+                                ));
+                            };
+                            let byte = u8::try_from(v).map_err(|_| {
+                                ControlError::decode(
+                                    "workspace-read-bytes returned out-of-range byte value",
+                                )
+                            })?;
+                            bytes.push(byte);
+                        }
+                        bytes
+                    }
+                    _ => {
+                        return Err(ControlError::decode(
+                            "workspace-read-bytes returned unexpected payload shape",
+                        ));
+                    }
+                };
                 Ok(serde_json::json!({
                     "data_b64": BASE64_STANDARD.encode(bytes)
                 }))

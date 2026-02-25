@@ -79,6 +79,7 @@ fn apply_requires_approval_state() {
 }
 
 #[test]
+#[ignore = "P2: shadow prediction assertions were plan-runtime-specific; migrate to workflow shadow fixture"]
 fn shadow_summary_includes_predictions_and_deltas() {
     let store = fixtures::new_mem_store();
     let manifest = simple_state_manifest(&store);

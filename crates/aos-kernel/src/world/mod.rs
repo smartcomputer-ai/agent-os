@@ -611,37 +611,14 @@ impl<S: Store + 'static> Kernel<S> {
                 );
             }
             IntentOriginRecord::Plan { name: _, plan_id } => {
-                self.reconcile_plan_replay_identity(plan_id, record.intent_hash);
-                self.pending_receipts.insert(
-                    record.intent_hash,
-                    PendingPlanReceiptInfo {
-                        plan_id,
-                        effect_kind,
-                    },
+                log::warn!(
+                    "ignoring replayed plan-origin intent {} for retired plan runtime (plan_id={})",
+                    format_intent_hash(&record.intent_hash),
+                    plan_id
                 );
             }
         }
         Ok(())
-    }
-
-    fn reconcile_plan_replay_identity(&mut self, recorded_plan_id: u64, intent_hash: [u8; 32]) {
-        let matching_instance_id = self
-            .plan_instances
-            .iter()
-            .find(|(_, instance)| instance.waiting_on_receipt(intent_hash))
-            .map(|(id, _)| *id);
-
-        if let Some(current_id) = matching_instance_id {
-            if current_id != recorded_plan_id {
-                if let Some(mut instance) = self.plan_instances.remove(&current_id) {
-                    instance.id = recorded_plan_id;
-                    instance.override_pending_receipt_hash(intent_hash);
-                    self.plan_instances.insert(recorded_plan_id, instance);
-                }
-            } else if let Some(instance) = self.plan_instances.get_mut(&current_id) {
-                instance.override_pending_receipt_hash(intent_hash);
-            }
-        }
     }
 
     pub(crate) fn record_workflow_state_transition(

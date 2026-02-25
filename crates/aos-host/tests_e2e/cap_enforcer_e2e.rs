@@ -20,6 +20,7 @@ use helpers::fixtures::{self, TestWorld};
 use indexmap::IndexMap;
 
 #[test]
+#[ignore = "P2: plan-trigger runtime retired; replace with workflow-module enforcer fixtures"]
 fn http_enforcer_module_denies_host() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/HttpPlan@1".to_string();
@@ -84,6 +85,7 @@ fn http_enforcer_module_denies_host() {
 }
 
 #[test]
+#[ignore = "P2: plan-trigger runtime retired; replace with workflow-module enforcer fixtures"]
 fn llm_enforcer_module_denies_model() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/LlmPlan@1".to_string();
@@ -153,6 +155,7 @@ fn llm_enforcer_module_denies_model() {
 }
 
 #[test]
+#[ignore = "P2: plan-trigger runtime retired; replace with workflow-module enforcer fixtures"]
 fn workspace_enforcer_module_denies_workspace() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/WorkspacePlan@1".to_string();

@@ -1,8 +1,52 @@
 # P2: Kernel Plan Runtime Cutover (Execution Path Removal)
 
 **Priority**: P1  
-**Status**: Proposed  
+**Status**: In Progress  
 **Depends on**: `roadmap/v0.11-workflows/p1-module-workflow-foundation.md`
+
+## Implementation Status
+
+### Scope
+- [ ] Scope 1.1: Remove `Task::Plan` and plan queue from scheduler.
+- [x] Scope 1.2: Remove `start_plans_for_event` and all plan task dispatch in event loop.
+- [ ] Scope 1.3: Remove plan wait/spawn/await runtime machinery.
+- [ ] Scope 2.1: Remove plan instance maps, waiters, pending plan receipts, completion caches.
+- [x] Scope 2.2: Remove plan-specific replay identity reconciliation.
+- [x] Scope 2.3: Manifest apply quiescence now uses workflow strict-quiescence checks.
+- [x] Scope 2.4: Module-workflow pending receipt state retained and keyed by intent/origin tuple.
+- [x] Scope 2.5: Kernel-recognized workflow instance records retained (`status`, `inflight_intents`, `last_processed_event_seq`).
+- [ ] Scope 3.1: Remove/replace plan debug surfaces.
+- [ ] Scope 3.2: Introduce workflow-equivalent diagnostics where required.
+- [x] Scope 4.1: Event routing determinism unchanged.
+- [x] Scope 4.2: Effect enqueue/receipt handling determinism unchanged.
+- [x] Scope 4.3: Snapshot/replay continues to work for non-plan flows.
+- [x] Scope 4.4: Receipt routing remains manifest-independent (origin identity only).
+- [x] Scope 4.5: Workflow instance state transitions remain deterministic/replay-identical.
+- [x] Scope 4.6: Structural module authority guardrails remain enforced.
+- [x] Scope 4.7: Manifest apply decisions remain deterministic under strict-quiescence rules.
+
+### Work Items by Crate
+- [x] `crates/aos-kernel/src/world/event_flow.rs`: removed plan-event dispatch from active domain event flow.
+- [x] `crates/aos-kernel/src/world/mod.rs`: removed plan replay intent reconciliation from active replay path.
+- [x] `crates/aos-kernel/src/world/plan_runtime.rs`: removed active plan-receipt wakeup handling path in kernel receipt ingress.
+- [x] `crates/aos-kernel/src/world/governance_runtime.rs`: switched apply-quiescence checks to workflow instance + inflight intent model.
+- [x] `crates/aos-host/tests/journal_integration.rs`: retired plan-runtime assertions (ignored) and kept workflow no-plan coverage active.
+- [x] `crates/aos-host/tests/{cap_enforcer_e2e,demiurge_introspect_manifest_e2e,governance_plan_integration}.rs`: marked plan-trigger fixtures retired (ignored pending workflow-native replacements).
+- [x] `crates/aos-host/src/control.rs`: fixed `workspace-read-bytes` internal effect receipt decoding for canonical byte payloads.
+- [ ] `crates/aos-host/tests/policy_integration.rs`: migrate plan-policy assertions to workflow-policy fixtures.
+- [ ] `crates/aos-kernel/src/scheduler.rs`: remove `Task::Plan`/plan queue.
+- [ ] `crates/aos-kernel/src/world/plan_runtime.rs` + `crates/aos-kernel/src/plan/*`: retire remaining plan execution machinery.
+- [ ] `crates/aos-host/src/trace.rs` + related APIs: replace plan debug surfaces with workflow diagnostics.
+
+### Acceptance Criteria
+- [ ] AC1: Kernel has no active plan scheduling/ticking path.
+- [x] AC2: New workflows continue to execute end-to-end under host cycle.
+- [ ] AC3: All remaining tests pass without relying on plan runtime state.
+- [x] AC4: Manifest apply quiescence checks do not depend on plan internals.
+- [x] AC5: Receipt wakeups remain deterministic under concurrent in-flight module instances.
+- [x] AC6: Pending/waiting workflow instances survive snapshot-load-replay with identical inflight intent sets (non-plan fixtures).
+- [x] AC7: Runtime has no plan-or-reducer-specific authority dependency for effect emission.
+- [x] AC8: Manifest apply fails while any in-flight workflow instances/intents exist, with deterministic block reasons.
 
 ## Goal
 

@@ -26,6 +26,7 @@ use helpers::{attach_default_policy, fulfillment_manifest, timer_manifest};
 
 /// Journal replay without snapshots should restore reducer state identically.
 #[test]
+#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
 fn journal_replay_restores_state() {
     let store = fixtures::new_mem_store();
     let manifest_run = fulfillment_manifest(&store);
@@ -135,6 +136,7 @@ fn reducer_timer_receipt_replays_from_journal() {
 
 /// Journal replay alone (without snapshots) should hydrate plan-origin intents waiting on receipts.
 #[test]
+#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
 fn plan_journal_replay_resumes_waiting_receipt() {
     let store = fixtures::new_mem_store();
     let manifest = fulfillment_manifest(&store);
@@ -322,6 +324,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
 
 /// Policy decisions should be journaled for plan-origin effects.
 #[test]
+#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
 fn policy_decision_is_journaled() {
     let store = fixtures::new_mem_store();
     let mut manifest = fulfillment_manifest(&store);
@@ -363,6 +366,7 @@ fn policy_decision_is_journaled() {
 
 /// Cap decisions should include a stable grant hash in the journal.
 #[test]
+#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
 fn cap_decision_includes_grant_hash() {
     let store = fixtures::new_mem_store();
     let manifest = fulfillment_manifest(&store);
@@ -707,6 +711,7 @@ fn compute_grant_hash(
 
 /// FsJournal should persist entries to disk and allow a fresh kernel to resume state.
 #[test]
+#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
 fn fs_journal_persists_across_restarts() {
     let store = fixtures::new_mem_store();
     let temp = TempDir::new().unwrap();
@@ -763,6 +768,7 @@ fn fs_journal_persists_across_restarts() {
 
 /// Trace terminal classification derived from journal + live wait state should match after replay.
 #[test]
+#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
 fn trace_terminal_classification_matches_after_replay() {
     let store = fixtures::new_mem_store();
     let manifest = fulfillment_manifest(&store);

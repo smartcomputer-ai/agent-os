@@ -205,6 +205,7 @@ fn reducer_state_json(host: &TestHost<FsStore>) -> Result<Value> {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "P2: plan-driven demiurge fixture retired; replace with workflow-native fixture"]
 async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
     let tmp = tempfile::tempdir().context("tempdir")?;
     let store = Arc::new(FsStore::open(tmp.path()).context("open store")?);
