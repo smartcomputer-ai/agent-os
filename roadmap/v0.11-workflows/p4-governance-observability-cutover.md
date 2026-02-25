@@ -27,6 +27,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
    - current in-flight intents,
    - declared module `effects_emitted` allowlists,
    - pending receipts by `(origin_module_id, origin_instance_key, intent_id)`,
+   - stream cursors/last-seq by `(origin_module_id, origin_instance_key, intent_id)` when P7 is enabled,
    - workflow instance status (`running|waiting|completed|failed`),
    - `last_processed_event_seq`,
    - strict-quiescence apply-block reasons when present,
@@ -78,7 +79,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Journal tail and trace tools work without plan record kinds.
 3. Control/CLI no longer expose `plan-summary` or plan-state diagnostics.
 4. Policy and secret checks no longer depend on `plan` origin identity.
-5. Observability surfaces expose deterministic receipt routing identity for debugging.
+5. Observability surfaces expose deterministic continuation routing identity for debugging (receipts, and stream frames when P7 is enabled).
 6. Observability surfaces expose workflow instance waiting/running/completed/failed status from persisted state.
 7. Policy/trace/control surfaces no longer require or expose `reducer` as an authority class in post-plan mode.
 8. Apply-block diagnostics clearly report strict-quiescence failures (in-flight instances/intents/queues).

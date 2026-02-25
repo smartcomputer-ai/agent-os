@@ -31,7 +31,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 1. Remove `manifest.plans` references.
 2. Remove trigger-to-plan semantics.
 3. Introduce/solidify `routing.subscriptions` (replacing `routing.events`) as the workflow orchestration-start wiring model.
-4. Keep receipt return routing out of manifest wiring; receipt routing is origin-identity-based runtime behavior.
+4. Keep continuation routing out of manifest wiring; receipt routing (and stream-frame routing if P7 is enabled) is origin-identity-based runtime behavior.
 
 ### 3) Update schemas
 
@@ -39,8 +39,9 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. Update `spec/schemas/manifest.schema.json` required fields and routing semantics, including `routing.subscriptions` shape and deterministic ordering semantics.
 3. Update `spec/schemas/patch.schema.json` to remove plan/triggers patch ops.
 4. Add/align schema docs for the generic workflow receipt envelope contract.
-5. Add/align schema docs for workflow instance state persistence (`status`, `inflight_intents`, `last_processed_event_seq`, optional `module_version`).
-6. Update `defmodule` schema to target `workflow|pure` module kinds and keep `effects_emitted` as workflow allowlist.
+5. If P7 is enabled, add/align schema docs for stream-frame envelope identity (`intent_id`, `seq`, `kind`, `payload`) and routing invariants.
+6. Add/align schema docs for workflow instance state persistence (`status`, `inflight_intents`, `last_processed_event_seq`, optional `module_version`).
+7. Update `defmodule` schema to target `workflow|pure` module kinds and keep `effects_emitted` as workflow allowlist.
 
 ### 4) Update storage + loaders
 
@@ -83,7 +84,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 2. No manifest schema field requires or accepts plan refs.
 3. Loader/store/kernel paths no longer parse or depend on `defplan`.
 4. World import/export and manifest patching work with the new contract.
-5. Manifest routing changes cannot strand in-flight receipts.
+5. Manifest routing changes cannot strand in-flight continuations (receipts, and stream frames when P7 is enabled).
 6. No manifest field is required to recover workflow waiting state; waiting state comes from persisted instance records.
 7. Active AIR schema/model expose only `workflow|pure` module authority kinds in the post-plan model.
 8. Manifest startup wiring uses `routing.subscriptions` and no longer relies on `routing.events`.

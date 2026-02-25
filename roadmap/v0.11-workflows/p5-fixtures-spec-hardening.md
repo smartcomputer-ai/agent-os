@@ -28,6 +28,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
    - multi-instance concurrency and isolation,
    - governance apply on workflow manifests,
    - manifest subscription wiring changes while receipts are in flight,
+   - manifest subscription wiring changes while continuation frames are in flight (if P7 enabled),
    - upgrade-while-waiting (pending receipt + snapshot + apply attempt + late receipt).
 3. Update host integration tests accordingly.
 
@@ -44,12 +45,13 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 3. Deterministic tail/trace assertions on workflow runs.
 4. Performance sanity checks for many concurrent module instances.
 5. Deterministic receipt routing checks for concurrent identical effect emissions from distinct instances.
-6. Workflow instance state machine checks (`running|waiting|completed|failed`) and `last_processed_event_seq` monotonicity checks.
-7. Upgrade safety checks for `module_version` behavior with in-flight instances.
-8. Structural authority checks: workflow-only effect emission and module `effects_emitted` pre-policy rejection behavior.
-9. Strict-quiescence governance tests: apply blocked with in-flight instances/intents and allowed only after terminalization.
-10. Shadow semantics tests: reported "predicted effects" must equal effects observed within bounded shadow execution horizon.
-11. Killer upgrade scenario tests:
+6. If P7 is enabled: deterministic stream-frame routing checks and sequence cursor replay checks for concurrent streaming intents.
+7. Workflow instance state machine checks (`running|waiting|completed|failed`) and `last_processed_event_seq` monotonicity checks.
+8. Upgrade safety checks for `module_version` behavior with in-flight instances.
+9. Structural authority checks: workflow-only effect emission and module `effects_emitted` pre-policy rejection behavior.
+10. Strict-quiescence governance tests: apply blocked with in-flight instances/intents and allowed only after terminalization.
+11. Shadow semantics tests: reported "predicted effects" must equal effects observed within bounded shadow execution horizon.
+12. Killer upgrade scenario tests:
     - start workflow instance and emit external effect,
     - snapshot while waiting on receipt,
     - attempt governance apply and assert strict-quiescence block,

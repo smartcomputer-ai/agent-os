@@ -10,6 +10,7 @@ Roadmap slice for removing plans and moving orchestration into code workflows.
 4. `roadmap/v0.11-workflows/p4-governance-observability-cutover.md`
 5. `roadmap/v0.11-workflows/p5-fixtures-spec-hardening.md`
 6. `roadmap/v0.11-workflows/p6-deterministic-execution-bounds-optional.md` (optional extension)
+7. `roadmap/v0.11-workflows/p7-streaming-effect-lifecycles-optional.md` (optional extension, Option A++ baseline)
 
 ## Sequence
 
@@ -22,6 +23,7 @@ Roadmap slice for removing plans and moving orchestration into code workflows.
 Execution is intentionally serial and aggressive: run P1 -> P2 -> P3 -> P4 -> P5, allowing temporary in-between breakage.
 
 Optional extension: run P6 after P1 (or after P5) to harden deterministic compute bounds for workflow-heavy worlds.
+Optional extension: run P7 after P1 (or after P5) if workloads require long-lived/streaming effects with interleaved follow-up actions on the manifest-independent continuation rail.
 
 ## Migration Contract
 
@@ -218,6 +220,7 @@ Chosen manifest surface for v0.11:
 1. Replace `routing.events` with `routing.subscriptions`.
 2. `routing.subscriptions` controls domain-event ingress to workflow modules.
 3. Receipt continuation remains manifest-independent and uses origin-instance routing contract.
+4. If P7 is enabled, stream-frame continuations follow the same manifest-independent origin-instance routing rule.
 
 Each subscription entry must define:
 
@@ -314,7 +317,7 @@ Deliverable: kernel has no plan interpreter or plan instance state.
    - `crates/aos-host/src/manifest_loader.rs`
    - `crates/aos-host/src/world_io.rs`
 4. Replace old `triggers` semantics with manifest `routing.subscriptions` as the only orchestration entry wiring.
-5. Keep receipt return routing out of manifest schema; receipts route via recorded origin identity only.
+5. Keep receipt and stream-frame continuation routing out of manifest schema; continuations route via recorded origin identity only.
 6. Replace reducer-era module authority vocabulary with target module kinds (`workflow|pure`) in AIR models/schemas.
 
 Deliverable: AIR no longer contains plans as a first-class definition.
@@ -327,7 +330,7 @@ Deliverable: AIR no longer contains plans as a first-class definition.
 4. Replace plan-era policy/secret semantics (`origin_kind`, `allowed_plans`) with module-oriented semantics.
 5. Keep governance propose/shadow/approve/apply mechanics, but report bounded shadow-observed effects plus in-flight intents/allowlists/deltas (no full-future prediction claim).
 6. Ensure `ManifestApplyBlockedInFlight` checks reflect new runtime state names.
-7. Report pending receipts by `(origin_module_id, origin_instance_key, intent_id)`.
+7. Report pending continuations by `(origin_module_id, origin_instance_key, intent_id)`, including stream cursor state when P7 is enabled.
 8. Report workflow instance status and `last_processed_event_seq` from kernel-recognized instance state.
 9. Expose strict-quiescence block reasons in governance/trace outputs for apply attempts.
 
