@@ -222,18 +222,6 @@ impl EffectManager {
         idempotency_key: [u8; 32],
         resolved: &CapGrantResolution,
     ) -> Result<EffectIntent, KernelError> {
-        if let EffectSource::Reducer { .. } = &source {
-            let scope = self
-                .effect_catalog
-                .origin_scope(&runtime_kind)
-                .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?;
-            if !scope.allows_reducers() {
-                return Err(KernelError::UnsupportedReducerReceipt(
-                    runtime_kind.as_str().into(),
-                ));
-            }
-        }
-
         let params_cbor = if let Some(preprocessor) = &self.param_preprocessor {
             preprocessor.preprocess(&source, &runtime_kind, params_cbor)?
         } else {
@@ -830,6 +818,7 @@ mod tests {
         BlobPutParams, HeaderMap, HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs,
     };
     use aos_effects::{CapabilityGrant, EffectKind};
+    use aos_wasm_abi::ReducerEffect;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -1071,5 +1060,27 @@ mod tests {
         let normalized: BlobPutParams = serde_cbor::from_slice(&intent.params_cbor).unwrap();
         assert_eq!(normalized.blob_ref, Some(expected_ref));
         assert_eq!(normalized.refs, Some(vec![]));
+    }
+
+    #[test]
+    fn reducer_origin_can_enqueue_http_when_authorized() {
+        let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
+            .build()
+            .expect("grant");
+        let mut mgr = effect_manager_with_grants(vec![(grant, CapType::http_out())]);
+        let params = HttpRequestParams {
+            method: "GET".into(),
+            url: "https://example.com/workflow".into(),
+            headers: HeaderMap::new(),
+            body_ref: None,
+        };
+        let effect = ReducerEffect::new(
+            EffectKind::HTTP_REQUEST,
+            serde_cbor::to_vec(&params).unwrap(),
+        );
+        let intent = mgr
+            .enqueue_reducer_effect("com.acme/Workflow@1", "cap_http", &effect)
+            .expect("enqueue");
+        assert_eq!(intent.kind.as_str(), EffectKind::HTTP_REQUEST);
     }
 }

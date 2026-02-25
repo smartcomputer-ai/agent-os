@@ -1,11 +1,32 @@
 use super::*;
+use serde::Serialize;
 
 impl<S: Store + 'static> Kernel<S> {
-    pub(super) fn ensure_single_effect(output: &ReducerOutput) -> Result<(), KernelError> {
-        if output.effects.len() > 1 {
-            return Err(KernelError::ReducerOutput(
-                "reducers may emit at most one effect per step; raise a domain intent and use a plan for additional effects".into(),
-            ));
+    const MAX_EFFECTS_PER_TICK: usize = 64;
+    const MAX_DOMAIN_EVENTS_PER_TICK: usize = 256;
+    const MAX_REDUCER_OUTPUT_BYTES_PER_TICK: usize = 1_048_576;
+
+    pub(super) fn enforce_reducer_output_limits(output: &ReducerOutput) -> Result<(), KernelError> {
+        if output.effects.len() > Self::MAX_EFFECTS_PER_TICK {
+            return Err(KernelError::ReducerOutput(format!(
+                "reducer exceeded max effects per tick: {} > {}",
+                output.effects.len(),
+                Self::MAX_EFFECTS_PER_TICK
+            )));
+        }
+        if output.domain_events.len() > Self::MAX_DOMAIN_EVENTS_PER_TICK {
+            return Err(KernelError::ReducerOutput(format!(
+                "reducer exceeded max domain events per tick: {} > {}",
+                output.domain_events.len(),
+                Self::MAX_DOMAIN_EVENTS_PER_TICK
+            )));
+        }
+        let output_bytes = reducer_output_size_bytes(output);
+        if output_bytes > Self::MAX_REDUCER_OUTPUT_BYTES_PER_TICK {
+            return Err(KernelError::ReducerOutput(format!(
+                "reducer exceeded max output bytes per tick: {output_bytes} > {}",
+                Self::MAX_REDUCER_OUTPUT_BYTES_PER_TICK
+            )));
         }
         Ok(())
     }
@@ -241,6 +262,11 @@ impl<S: Store + 'static> Kernel<S> {
                 .module_defs
                 .get(&reducer_name)
                 .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.clone()))?;
+            if module_def.module_kind != aos_air_types::ModuleKind::Reducer {
+                return Err(KernelError::Manifest(format!(
+                    "module '{reducer_name}' is not a reducer/workflow module"
+                )));
+            }
             self.reducers.ensure_loaded(&reducer_name, module_def)?;
             (
                 module_def.key_schema.is_some(),
@@ -332,7 +358,13 @@ impl<S: Store + 'static> Kernel<S> {
             ctx: ctx_bytes,
         };
         let output = self.reducers.invoke(&reducer_name, &input)?;
-        self.handle_reducer_output(reducer_name.clone(), key, keyed, output)?;
+        self.handle_reducer_output_with_meta(
+            reducer_name.clone(),
+            key,
+            keyed,
+            output,
+            event.stamp.journal_height,
+        )?;
         Ok(())
     }
 
@@ -343,7 +375,26 @@ impl<S: Store + 'static> Kernel<S> {
         keyed: bool,
         output: ReducerOutput,
     ) -> Result<(), KernelError> {
-        Self::ensure_single_effect(&output)?;
+        let emitted_at_seq = self.journal.next_seq();
+        self.handle_reducer_output_with_meta(reducer_name, key, keyed, output, emitted_at_seq)
+    }
+
+    fn handle_reducer_output_with_meta(
+        &mut self,
+        reducer_name: String,
+        key: Option<Vec<u8>>,
+        keyed: bool,
+        output: ReducerOutput,
+        emitted_at_seq: u64,
+    ) -> Result<(), KernelError> {
+        Self::enforce_reducer_output_limits(&output)?;
+
+        let declared_effects = self
+            .module_defs
+            .get(&reducer_name)
+            .and_then(|module| module.abi.reducer.as_ref())
+            .map(|abi| abi.effects_emitted.clone())
+            .unwrap_or_default();
 
         let index_root = self.ensure_cell_index_root(&reducer_name)?;
         let mut new_index_root: Option<Hash> = None;
@@ -395,7 +446,16 @@ impl<S: Store + 'static> Kernel<S> {
         for event in output.domain_events {
             self.process_domain_event(event)?;
         }
-        for effect in &output.effects {
+        for (effect_index, effect) in output.effects.iter().enumerate() {
+            if !declared_effects
+                .iter()
+                .any(|kind| kind.as_str() == effect.kind.as_str())
+            {
+                return Err(KernelError::ReducerOutput(format!(
+                    "module '{reducer_name}' emitted undeclared effect kind '{}'; declare it in abi.reducer.effects_emitted",
+                    effect.kind
+                )));
+            }
             let slot = effect.cap_slot.clone().unwrap_or_else(|| "default".into());
             let bound_grant = self
                 .module_cap_bindings
@@ -413,10 +473,20 @@ impl<S: Store + 'static> Kernel<S> {
                     reducer: reducer_name.clone(),
                     slot: slot.clone(),
                 })?;
+            let mut effect_for_enqueue = effect.clone();
+            let derived_idempotency = derive_reducer_intent_idempotency_key(
+                reducer_name.as_str(),
+                key.as_deref(),
+                effect,
+                effect_index,
+                emitted_at_seq,
+            )
+            .map_err(KernelError::ReducerOutput)?;
+            effect_for_enqueue.idempotency_key = Some(derived_idempotency.to_vec());
             let intent = match self.effect_manager.enqueue_reducer_effect_with_grant(
                 &reducer_name,
                 grant,
-                effect,
+                &effect_for_enqueue,
             ) {
                 Ok(intent) => intent,
                 Err(err) => {
@@ -443,6 +513,63 @@ impl<S: Store + 'static> Kernel<S> {
         }
         Ok(())
     }
+}
+
+fn reducer_output_size_bytes(output: &ReducerOutput) -> usize {
+    let mut total = 0usize;
+    if let Some(state) = &output.state {
+        total = total.saturating_add(state.len());
+    }
+    if let Some(ann) = &output.ann {
+        total = total.saturating_add(ann.len());
+    }
+    for event in &output.domain_events {
+        total = total.saturating_add(event.schema.len());
+        total = total.saturating_add(event.value.len());
+        total = total.saturating_add(event.key.as_ref().map_or(0, Vec::len));
+    }
+    for effect in &output.effects {
+        total = total.saturating_add(effect.kind.len());
+        total = total.saturating_add(effect.params_cbor.len());
+        total = total.saturating_add(effect.cap_slot.as_ref().map_or(0, String::len));
+        total = total.saturating_add(effect.idempotency_key.as_ref().map_or(0, Vec::len));
+    }
+    total
+}
+
+fn derive_reducer_intent_idempotency_key(
+    reducer_name: &str,
+    reducer_key: Option<&[u8]>,
+    effect: &aos_wasm_abi::ReducerEffect,
+    effect_index: usize,
+    emitted_at_seq: u64,
+) -> Result<[u8; 32], String> {
+    #[derive(Serialize)]
+    struct Preimage<'a> {
+        origin_module_id: &'a str,
+        #[serde(with = "serde_bytes")]
+        origin_instance_key: &'a [u8],
+        effect_kind: &'a str,
+        #[serde(with = "serde_bytes")]
+        params_cbor: &'a [u8],
+        #[serde(with = "serde_bytes")]
+        requested_idempotency_key: &'a [u8],
+        effect_index: u64,
+        emitted_at_seq: u64,
+    }
+
+    let preimage = Preimage {
+        origin_module_id: reducer_name,
+        origin_instance_key: reducer_key.unwrap_or_default(),
+        effect_kind: effect.kind.as_str(),
+        params_cbor: &effect.params_cbor,
+        requested_idempotency_key: effect.idempotency_key.as_deref().unwrap_or(&[]),
+        effect_index: effect_index as u64,
+        emitted_at_seq,
+    };
+    let bytes = to_canonical_cbor(&preimage).map_err(|err| err.to_string())?;
+    let hash = Hash::of_bytes(&bytes);
+    Ok(*hash.as_bytes())
 }
 
 fn extract_cbor_path(value: &CborValue, path: &str) -> Option<CborValue> {
@@ -538,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn reducer_output_with_multiple_effects_is_rejected() {
+    fn reducer_output_with_multiple_effects_is_allowed() {
         let output = ReducerOutput {
             effects: vec![
                 ReducerEffect::new("timer.set", vec![1]),
@@ -547,11 +674,127 @@ mod tests {
             ..Default::default()
         };
 
-        let err = Kernel::<aos_store::MemStore>::ensure_single_effect(&output).unwrap_err();
+        Kernel::<aos_store::MemStore>::enforce_reducer_output_limits(&output).expect("allowed");
+    }
+
+    #[test]
+    fn reducer_output_effect_limit_is_enforced() {
+        let effects = (0..65)
+            .map(|_| ReducerEffect::new("timer.set", vec![1]))
+            .collect::<Vec<_>>();
+        let output = ReducerOutput {
+            effects,
+            ..Default::default()
+        };
+
+        let err =
+            Kernel::<aos_store::MemStore>::enforce_reducer_output_limits(&output).unwrap_err();
         assert!(
-            matches!(err, KernelError::ReducerOutput(ref message) if message.contains("at most one effect")),
+            matches!(err, KernelError::ReducerOutput(ref message) if message.contains("max effects per tick")),
             "unexpected error: {err:?}"
         );
+    }
+
+    #[test]
+    fn reducer_output_event_limit_is_enforced() {
+        let domain_events = (0..257)
+            .map(|_| DomainEvent::new("com.acme/Event@1", vec![0]))
+            .collect::<Vec<_>>();
+        let output = ReducerOutput {
+            domain_events,
+            ..Default::default()
+        };
+
+        let err =
+            Kernel::<aos_store::MemStore>::enforce_reducer_output_limits(&output).unwrap_err();
+        assert!(
+            matches!(err, KernelError::ReducerOutput(ref message) if message.contains("max domain events per tick")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn reducer_output_bytes_limit_is_enforced() {
+        let output = ReducerOutput {
+            state: Some(vec![0u8; 1_048_577]),
+            ..Default::default()
+        };
+
+        let err =
+            Kernel::<aos_store::MemStore>::enforce_reducer_output_limits(&output).unwrap_err();
+        assert!(
+            matches!(err, KernelError::ReducerOutput(ref message) if message.contains("max output bytes per tick")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn reducer_output_rejects_undeclared_effect_kind_before_cap_resolution() {
+        let store = Arc::new(aos_store::MemStore::default());
+        let journal = Box::new(crate::journal::mem::MemJournal::new());
+        let mut kernel =
+            crate::world::test_support::kernel_with_store_and_journal(store.clone(), journal);
+        let reducer = "com.acme/Reducer@1".to_string();
+
+        let err = kernel
+            .handle_reducer_output(
+                reducer,
+                None,
+                false,
+                ReducerOutput {
+                    effects: vec![ReducerEffect::new("timer.set", vec![1])],
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, KernelError::ReducerOutput(ref message) if message.contains("undeclared effect kind")),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn intent_key_derivation_includes_instance_identity() {
+        let effect = ReducerEffect::new("http.request", vec![1, 2, 3]);
+        let key_a = derive_reducer_intent_idempotency_key(
+            "com.acme/Workflow@1",
+            Some(b"instance-a"),
+            &effect,
+            0,
+            42,
+        )
+        .expect("derive a");
+        let key_b = derive_reducer_intent_idempotency_key(
+            "com.acme/Workflow@1",
+            Some(b"instance-b"),
+            &effect,
+            0,
+            42,
+        )
+        .expect("derive b");
+        assert_ne!(key_a, key_b);
+    }
+
+    #[test]
+    fn intent_key_derivation_includes_emission_position() {
+        let effect = ReducerEffect::new("http.request", vec![1, 2, 3]);
+        let key_a = derive_reducer_intent_idempotency_key(
+            "com.acme/Workflow@1",
+            Some(b"instance-a"),
+            &effect,
+            0,
+            42,
+        )
+        .expect("derive a");
+        let key_b = derive_reducer_intent_idempotency_key(
+            "com.acme/Workflow@1",
+            Some(b"instance-a"),
+            &effect,
+            1,
+            42,
+        )
+        .expect("derive b");
+        assert_ne!(key_a, key_b);
     }
 
     #[test]

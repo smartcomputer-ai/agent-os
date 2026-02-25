@@ -37,7 +37,6 @@ pub struct ReducerCtx<S, A = Value> {
     reducer_name: &'static str,
     domain_events: Vec<PendingEvent>,
     effects: Vec<PendingEffect>,
-    effect_used: bool,
 }
 
 impl<S, A> ReducerCtx<S, A> {
@@ -49,7 +48,6 @@ impl<S, A> ReducerCtx<S, A> {
             reducer_name,
             domain_events: Vec::new(),
             effects: Vec::new(),
-            effect_used: false,
         }
     }
 
@@ -146,7 +144,7 @@ impl<S, A> ReducerCtx<S, A> {
         IntentBuilder::new(self, schema)
     }
 
-    /// Emit micro-effects (at most one per reduce call).
+    /// Emit micro-effects.
     pub fn effects(&mut self) -> Effects<'_, S, A> {
         Effects { ctx: self }
     }
@@ -156,10 +154,6 @@ impl<S, A> ReducerCtx<S, A> {
     }
 
     fn emit_effect(&mut self, effect: PendingEffect) {
-        if self.effect_used {
-            self.trap(StepError::TooManyEffects);
-        }
-        self.effect_used = true;
         self.effects.push(effect);
     }
 
@@ -408,7 +402,6 @@ pub enum StepError {
     OutputEncode(AbiEncodeError),
     IntentPayload(serde_cbor::Error),
     EffectPayload(serde_cbor::Error),
-    TooManyEffects,
     Reduce(&'static str),
 }
 
@@ -431,7 +424,6 @@ impl core::fmt::Display for StepError {
             StepError::OutputEncode(err) => write!(f, "output encode failed: {err}"),
             StepError::IntentPayload(err) => write!(f, "intent payload encode failed: {err}"),
             StepError::EffectPayload(err) => write!(f, "effect payload encode failed: {err}"),
-            StepError::TooManyEffects => write!(f, "reducers may emit at most one micro-effect"),
             StepError::Reduce(msg) => write!(f, "reduce error: {msg}"),
         }
     }
@@ -648,8 +640,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "aos-wasm-sdk(")]
-    fn effects_guard_enforces_single_effect() {
+    fn reducer_can_emit_multiple_effects() {
         #[derive(Default)]
         struct EffectReducer;
 
@@ -686,7 +677,9 @@ mod tests {
             ctx: Some(context_bytes("com.acme/EffectReducer@1")),
         };
         let bytes = input.encode().unwrap();
-        let _ = step_bytes::<EffectReducer>(&bytes);
+        let output = step_bytes::<EffectReducer>(&bytes).expect("step");
+        let decoded = ReducerOutput::decode(&output).expect("decode");
+        assert_eq!(decoded.effects.len(), 2);
     }
 
     #[test]
