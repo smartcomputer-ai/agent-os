@@ -239,6 +239,30 @@ fn handle_internal<T: serde::de::DeserializeOwned>(
     })
 }
 
+fn handle_internal_bytes(
+    kernel: &mut Kernel<TestStore>,
+    intent: aos_effects::EffectIntent,
+) -> Vec<u8> {
+    let receipt = kernel
+        .handle_internal_intent(&intent)
+        .expect("intent handled")
+        .expect("receipt");
+    assert_eq!(receipt.status, ReceiptStatus::Ok);
+    let payload: serde_cbor::Value = serde_cbor::from_slice(&receipt.payload_cbor)
+        .unwrap_or_else(|err| panic!("decode receipt payload for {}: {err}", intent.kind.as_str()));
+    match payload {
+        serde_cbor::Value::Bytes(bytes) => bytes,
+        serde_cbor::Value::Array(items) => items
+            .into_iter()
+            .map(|item| match item {
+                serde_cbor::Value::Integer(value) if (0..=255).contains(&value) => value as u8,
+                other => panic!("workspace.read_bytes returned non-byte payload item: {other:?}"),
+            })
+            .collect(),
+        other => panic!("workspace.read_bytes returned unexpected payload shape: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn workspace_commit_and_resolve() {
     let store = fixtures::new_mem_store();
@@ -387,7 +411,7 @@ async fn workspace_tree_effects_roundtrip() {
     )
     .build()
     .expect("intent");
-    let bytes: Vec<u8> = handle_internal(&mut world.kernel, intent);
+    let bytes = handle_internal_bytes(&mut world.kernel, intent);
     assert_eq!(bytes, b"fn main".to_vec());
 
     let write_params = WorkspaceWriteBytesParams {

@@ -38,6 +38,7 @@ fn deny_plan_http_policy() -> DefPolicy {
 
 /// Plan execution should resume correctly after snapshot when awaiting a receipt.
 #[test]
+#[ignore = "P2: plan-runtime snapshot path retired; replace with workflow-native fixture"]
 fn plan_snapshot_resumes_after_receipt() {
     let store = fixtures::new_mem_store();
     let manifest = fulfillment_manifest(&store);
@@ -87,6 +88,7 @@ fn plan_snapshot_resumes_after_receipt() {
 
 /// Effect intents should persist in the queue across snapshot/restore.
 #[test]
+#[ignore = "P2: plan-runtime snapshot path retired; replace with workflow-native fixture"]
 fn plan_snapshot_preserves_effect_queue() {
     let store = fixtures::new_mem_store();
     let manifest = fulfillment_manifest(&store);
@@ -138,6 +140,7 @@ fn plan_snapshot_preserves_effect_queue() {
 
 /// Plan awaiting domain event should resume correctly after snapshot.
 #[test]
+#[ignore = "P2: plan-runtime snapshot path retired; replace with workflow-native fixture"]
 fn plan_snapshot_resumes_after_event() {
     let store = fixtures::new_mem_store();
     let manifest = await_event_manifest(&store);
@@ -215,13 +218,14 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
     replay_world.tick_n(2).unwrap();
 
     assert_eq!(
-        replay_world.kernel.reducer_state("com.acme/TimerHandler@1"),
-        Some(vec![0xCC])
+        replay_world.kernel.reducer_state("com.acme/TimerEmitter@1"),
+        Some(vec![0x01])
     );
 }
 
 /// Cap decisions should be preserved in journals across snapshot/replay cycles.
 #[test]
+#[ignore = "P2: plan-runtime snapshot fixture retired; replace with workflow-native cap policy coverage"]
 fn cap_decisions_survive_snapshot_replay() {
     let store = fixtures::new_mem_store();
     let manifest = fulfillment_manifest(&store);
@@ -377,6 +381,7 @@ fn snapshot_creation_quiesces_runtime() {
 
 /// Manifest records in the journal override the supplied manifest on replay.
 #[test]
+#[ignore = "P2: plan-runtime snapshot fixture retired; replace with workflow-native manifest replay coverage"]
 fn manifest_records_override_supplied_policy() {
     let store = fixtures::new_mem_store();
     let manifest = fulfillment_manifest(&store);

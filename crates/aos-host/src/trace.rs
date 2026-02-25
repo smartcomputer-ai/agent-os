@@ -126,20 +126,27 @@ pub fn trace_get<S: Store + 'static>(
         });
     }
 
-    let pending_plan_receipts = kernel.pending_plan_receipts();
-    let plan_wait_receipts = kernel.debug_plan_waits();
-    let plan_wait_events = kernel.debug_plan_waiting_events();
+    let workflow_instances = kernel.workflow_instances_snapshot();
     let pending_reducer_receipts = kernel.pending_reducer_receipts_snapshot();
     let queued_effects = kernel.queued_effects_snapshot();
 
-    let waiting_receipt_count = pending_plan_receipts.len()
-        + pending_reducer_receipts.len()
-        + queued_effects.len()
-        + plan_wait_receipts
-            .iter()
-            .map(|(_, waits)| waits.len())
-            .sum::<usize>();
-    let waiting_event_count = plan_wait_events.len();
+    let inflight_workflow_intents = workflow_instances
+        .iter()
+        .map(|instance| instance.inflight_intents.len())
+        .sum::<usize>();
+    let non_terminal_workflow_instances = workflow_instances
+        .iter()
+        .filter(|instance| {
+            !matches!(
+                instance.status,
+                aos_kernel::snapshot::WorkflowStatusSnapshot::Completed
+                    | aos_kernel::snapshot::WorkflowStatusSnapshot::Failed
+            )
+        })
+        .count();
+    let waiting_receipt_count =
+        inflight_workflow_intents + pending_reducer_receipts.len() + queued_effects.len();
+    let waiting_event_count = non_terminal_workflow_instances;
 
     let terminal_state = if has_receipt_error || has_plan_error {
         "failed"
@@ -181,25 +188,28 @@ pub fn trace_get<S: Store + 'static>(
             "entries": window,
         },
         "live_wait": {
-            "pending_plan_receipts": pending_plan_receipts.into_iter().map(|(plan_id, intent_hash)| {
+            // Compatibility placeholders for plan-era trace clients.
+            "pending_plan_receipts": Vec::<Value>::new(),
+            "plan_waiting_receipts": Vec::<Value>::new(),
+            "plan_waiting_events": Vec::<Value>::new(),
+            "workflow_instances": workflow_instances.into_iter().map(|instance| {
                 json!({
-                    "plan_id": plan_id,
-                    "plan_name": kernel.plan_name_for_instance(plan_id),
-                    "intent_hash": hash_bytes_hex(&intent_hash),
-                })
-            }).collect::<Vec<_>>(),
-            "plan_waiting_receipts": plan_wait_receipts.into_iter().map(|(plan_id, waits)| {
-                json!({
-                    "plan_id": plan_id,
-                    "plan_name": kernel.plan_name_for_instance(plan_id),
-                    "intent_hashes": waits.into_iter().map(|h| hash_bytes_hex(&h)).collect::<Vec<_>>(),
-                })
-            }).collect::<Vec<_>>(),
-            "plan_waiting_events": plan_wait_events.into_iter().map(|(plan_id, schema)| {
-                json!({
-                    "plan_id": plan_id,
-                    "plan_name": kernel.plan_name_for_instance(plan_id),
-                    "event_schema": schema,
+                    "instance_id": instance.instance_id,
+                    "status": match instance.status {
+                        aos_kernel::snapshot::WorkflowStatusSnapshot::Running => "running",
+                        aos_kernel::snapshot::WorkflowStatusSnapshot::Waiting => "waiting",
+                        aos_kernel::snapshot::WorkflowStatusSnapshot::Completed => "completed",
+                        aos_kernel::snapshot::WorkflowStatusSnapshot::Failed => "failed",
+                    },
+                    "last_processed_event_seq": instance.last_processed_event_seq,
+                    "module_version": instance.module_version,
+                    "inflight_intents": instance.inflight_intents.into_iter().map(|intent| {
+                        json!({
+                            "intent_hash": hash_bytes_hex(&intent.intent_id),
+                            "effect_kind": intent.effect_kind,
+                            "origin_module_id": intent.origin_module_id,
+                        })
+                    }).collect::<Vec<_>>(),
                 })
             }).collect::<Vec<_>>(),
             "pending_reducer_receipts": pending_reducer_receipts.into_iter().map(|pending| {
@@ -483,6 +493,31 @@ pub fn diagnose_trace(trace: &Value) -> Value {
         .and_then(|v| v.as_array())
         .map(std::vec::Vec::len)
         .unwrap_or(0);
+    let workflow_instances = live_wait
+        .get("workflow_instances")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let waiting_workflow_instances = workflow_instances
+        .iter()
+        .filter(|instance| {
+            instance
+                .get("status")
+                .and_then(|v| v.as_str())
+                .map(|status| matches!(status, "running" | "waiting"))
+                .unwrap_or(false)
+        })
+        .count();
+    let pending_workflow_intents = workflow_instances
+        .iter()
+        .map(|instance| {
+            instance
+                .get("inflight_intents")
+                .and_then(|v| v.as_array())
+                .map(std::vec::Vec::len)
+                .unwrap_or(0)
+        })
+        .sum::<usize>();
     let queued_effects = live_wait
         .get("queued_effects")
         .and_then(|v| v.as_array())
@@ -563,14 +598,16 @@ pub fn diagnose_trace(trace: &Value) -> Value {
     };
 
     let hint = match cause {
-        "policy_denied" => "Adjust policy rules or plan origin/cap mapping.",
+        "policy_denied" => "Adjust policy rules or module-origin/cap mapping.",
         "capability_denied" => "Inspect capability grant constraints and enforcer output.",
         "adapter_timeout" => "Check adapter timeout and upstream endpoint latency.",
         "adapter_error" => "Inspect adapter receipt payload for failure details.",
-        "invariant_violation" => "Inspect plan invariants and local/step value assumptions.",
-        "unknown_failure" => "Inspect plan/runtime records to identify the failure source.",
-        "waiting_receipt" => "Flow is waiting for effect receipts or queued effect execution.",
-        "waiting_event" => "Flow is waiting for a follow-up domain event.",
+        "invariant_violation" => "Inspect module state invariants and step transitions.",
+        "unknown_failure" => "Inspect runtime records to identify the failure source.",
+        "waiting_receipt" => {
+            "Flow is waiting for workflow in-flight receipts or queued effect execution."
+        }
+        "waiting_event" => "Flow has non-terminal workflow instances pending follow-up events.",
         "completed" => "Flow completed successfully.",
         _ => "Insufficient signal; inspect full trace timeline.",
     };
@@ -600,6 +637,8 @@ pub fn diagnose_trace(trace: &Value) -> Value {
             "pending_plan_receipts": pending_plan_receipts,
             "plan_waiting_receipts": plan_waiting_receipts,
             "plan_waiting_events": plan_waiting_events,
+            "waiting_workflow_instances": waiting_workflow_instances,
+            "pending_workflow_intents": pending_workflow_intents,
             "pending_reducer_receipts": pending_reducer_receipts,
             "queued_effects": queued_effects,
         }
@@ -622,25 +661,50 @@ fn first_intent_hash(value: &Value) -> Option<String> {
         None
     };
 
-    read(
+    let workflow_hash = {
         value
-            .get("pending_plan_receipts")
-            .and_then(|v| v.as_array()),
-    )
-    .or_else(|| {
-        read(
-            value
-                .get("pending_reducer_receipts")
-                .and_then(|v| v.as_array()),
-        )
-    })
-    .or_else(|| {
-        read(
-            value
-                .get("plan_waiting_receipts")
-                .and_then(|v| v.as_array()),
-        )
-    })
+            .get("workflow_instances")
+            .and_then(|v| v.as_array())
+            .and_then(|instances| {
+                for instance in instances {
+                    let Some(inflight) =
+                        instance.get("inflight_intents").and_then(|v| v.as_array())
+                    else {
+                        continue;
+                    };
+                    if let Some(hash) = inflight
+                        .iter()
+                        .find_map(|intent| intent.get("intent_hash").and_then(|v| v.as_str()))
+                    {
+                        return Some(hash.to_string());
+                    }
+                }
+                None
+            })
+    };
+
+    workflow_hash
+        .or_else(|| {
+            read(
+                value
+                    .get("pending_plan_receipts")
+                    .and_then(|v| v.as_array()),
+            )
+        })
+        .or_else(|| {
+            read(
+                value
+                    .get("pending_reducer_receipts")
+                    .and_then(|v| v.as_array()),
+            )
+        })
+        .or_else(|| {
+            read(
+                value
+                    .get("plan_waiting_receipts")
+                    .and_then(|v| v.as_array()),
+            )
+        })
 }
 
 fn find_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {

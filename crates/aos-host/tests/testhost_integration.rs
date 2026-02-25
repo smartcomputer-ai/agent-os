@@ -496,7 +496,7 @@ async fn testhost_timer_effect_flow() {
         event: fixtures::schema("test/TimerEvent@1"),
         context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
-        effects_emitted: vec![],
+        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
 
@@ -586,7 +586,7 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
         event: fixtures::schema("test/TimerEvent@1"),
         context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
-        effects_emitted: vec![],
+        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
     let mut loaded = fixtures::build_loaded_manifest(
@@ -648,7 +648,7 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
         event: fixtures::schema("test/TimerEvent@1"),
         context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
-        effects_emitted: vec![],
+        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
     let mut loaded = fixtures::build_loaded_manifest(

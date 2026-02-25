@@ -139,6 +139,7 @@ fn rejects_event_payload_that_violates_schema() {
 /// Happy-path end-to-end: reducer emits an intent, plan does work, receipt feeds a result event
 /// back into the reducer. Mirrors the “single plan orchestration” pattern in the spec.
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn sugar_literal_plan_executes_http_flow() {
     let store = fixtures::new_mem_store();
     let mut result_module = fixtures::stub_reducer_module(
@@ -278,6 +279,7 @@ fn sugar_literal_plan_executes_http_flow() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn single_plan_orchestration_completes_after_receipt() {
     let store = fixtures::new_mem_store();
 
@@ -422,6 +424,7 @@ fn single_plan_orchestration_completes_after_receipt() {
 
 /// Reducer micro-effects and plan-sourced effects should share the same outbox without interfering.
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn reducer_and_plan_effects_are_enqueued() {
     let store = fixtures::new_mem_store();
 
@@ -523,6 +526,7 @@ fn reducer_and_plan_effects_are_enqueued() {
 /// Timer receipts emitted by reducers must route through the normal event pipeline
 /// (including duplicate suppression / unknown handling) and wrap at dispatch.
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn reducer_timer_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
@@ -591,6 +595,7 @@ fn reducer_timer_receipt_routes_event_to_handler() {
 
 /// Guards on plan edges should gate side-effects and completion state.
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn guarded_plan_branches_control_effects() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/Guarded@1".to_string();
@@ -731,6 +736,7 @@ fn guarded_plan_branches_control_effects() {
 }
 /// Blob.put receipts should map into `sys/BlobPutResult@1`, route through the bus, and wrap at dispatch.
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn blob_put_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
 
@@ -865,6 +871,7 @@ fn blob_put_receipt_routes_event_to_handler() {
 
 /// Blob.get receipts should similarly map into `sys/BlobGetResult@1`, route through the bus, and wrap at dispatch.
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn blob_get_receipt_routes_event_to_handler() {
     let store = fixtures::new_mem_store();
 
@@ -998,6 +1005,7 @@ fn blob_get_receipt_routes_event_to_handler() {
 /// Complex plan scenario: emit effect → await receipt → emit → await domain event → emit. Ensures
 /// interleaving of effect receipts and raised events still produces deterministic progression.
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn plan_waits_for_receipt_and_event_before_progressing() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/TwoStage@1".to_string();
@@ -1194,6 +1202,7 @@ fn plan_waits_for_receipt_and_event_before_progressing() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn replay_does_not_double_apply_receipt_spawned_domain_events() {
     let store = fixtures::new_mem_store();
     let producer_plan = "com.acme/ReceiptToEvent@1";
@@ -1371,6 +1380,7 @@ fn replay_does_not_double_apply_receipt_spawned_domain_events() {
 /// Plans blocked on `await_event` should only resume when the subscribed schema fires; different
 /// schemas should remain pending even if their triggers fire later.
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn plan_event_wakeup_only_resumes_matching_schema() {
     let store = fixtures::new_mem_store();
     let plan_ready = DefPlan {
@@ -1572,6 +1582,7 @@ fn plan_event_wakeup_only_resumes_matching_schema() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn trigger_when_filters_plan_start() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/FilteredPlan@1";
@@ -1652,6 +1663,7 @@ fn trigger_when_filters_plan_start() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn trigger_input_expr_projects_event_into_plan_input() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/ProjectedPlan@1";
@@ -1761,6 +1773,7 @@ fn trigger_input_expr_projects_event_into_plan_input() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn spawn_plan_await_plan_and_plan_started_parent_linkage() {
     let store = fixtures::new_mem_store();
     let parent_plan = "com.acme/ParentSpawn@1";
@@ -1982,6 +1995,7 @@ fn spawn_plan_await_plan_and_plan_started_parent_linkage() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn await_plan_surfaces_error_variant_from_failed_child() {
     let store = fixtures::new_mem_store();
     let parent_plan = "com.acme/ParentAwaitError@1";
@@ -2137,6 +2151,7 @@ fn await_plan_surfaces_error_variant_from_failed_child() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn spawn_for_each_await_plans_all_preserves_order() {
     let store = fixtures::new_mem_store();
     let parent_plan = "com.acme/ParentForEach@1";
@@ -2326,6 +2341,7 @@ fn spawn_for_each_await_plans_all_preserves_order() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn correlated_await_event_prevents_cross_talk_between_instances() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/CorrelatedWait@1";
@@ -2474,6 +2490,7 @@ fn correlated_await_event_prevents_cross_talk_between_instances() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn subplan_receipt_wait_survives_restart_and_resumes_parent() {
     let store = fixtures::new_mem_store();
     let parent_plan = "com.acme/ParentResume@1";
@@ -2746,6 +2763,7 @@ fn subplan_receipt_wait_survives_restart_and_resumes_parent() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn plan_outputs_are_journaled_and_replayed() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/OutputPlan@1";
@@ -2843,6 +2861,7 @@ fn plan_outputs_are_journaled_and_replayed() {
 }
 
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn invariant_failure_records_plan_ended_error() {
     let store = fixtures::new_mem_store();
     let plan_name = "com.acme/InvariantPlan@1";
@@ -2924,6 +2943,7 @@ fn invariant_failure_records_plan_ended_error() {
 
 /// Plans that raise events should deliver them to reducers according to manifest routing.
 #[test]
+#[ignore = "P2: plan-runtime integration fixture retired; replace with workflow-native coverage"]
 fn raised_events_are_routed_to_reducers() {
     let store = fixtures::new_mem_store();
 

@@ -6,7 +6,6 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(task) = self.scheduler.pop() {
             match task {
                 Task::Reducer(event) => self.handle_reducer_event(event)?,
-                Task::Plan(id) => self.handle_plan_task(id)?,
             }
         }
         Ok(())
