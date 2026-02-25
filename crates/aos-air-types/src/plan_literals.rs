@@ -932,14 +932,21 @@ mod tests {
                 kind: crate::PlanStepKind::EmitEffect(crate::PlanStepEmitEffect {
                     kind: EffectKind::llm_generate(),
                     params: ExprOrValue::Json(json!({
+                        "correlation_id": null,
                         "provider": "openai",
                         "model": "gpt-5.2",
                         "message_refs": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
                         "runtime": {
                             "temperature": "0.5",
+                            "top_p": null,
                             "max_tokens": 128,
                             "tool_refs": null,
-                            "tool_choice": null
+                            "tool_choice": null,
+                            "reasoning_effort": null,
+                            "stop_sequences": null,
+                            "metadata": null,
+                            "provider_options_ref": null,
+                            "response_format_ref": null
                         },
                         "api_key": null
                     })),

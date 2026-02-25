@@ -367,7 +367,7 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         event: fixtures::schema(timer_event_schema),
         context: Some(fixtures::schema("sys/ReducerContext@1")),
         annotations: None,
-        effects_emitted: vec![],
+        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
     timer_handler.abi.reducer = Some(ReducerAbi {

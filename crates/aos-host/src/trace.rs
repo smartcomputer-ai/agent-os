@@ -205,7 +205,7 @@ pub fn trace_get<S: Store + 'static>(
             "pending_reducer_receipts": pending_reducer_receipts.into_iter().map(|pending| {
                 json!({
                     "intent_hash": hash_bytes_hex(&pending.intent_hash),
-                    "reducer": pending.reducer,
+                    "origin_module_id": pending.origin_module_id,
                     "effect_kind": pending.effect_kind,
                 })
             }).collect::<Vec<_>>(),
@@ -887,6 +887,8 @@ mod tests {
                     idempotency_key: [0u8; 32],
                     origin: IntentOriginRecord::Reducer {
                         name: "com.acme/Reducer@1".into(),
+                        instance_key: None,
+                        emitted_at_seq: None,
                     },
                 }),
             ),

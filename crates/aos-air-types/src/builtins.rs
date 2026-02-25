@@ -204,6 +204,7 @@ mod tests {
         assert!(names.contains(&"sys/BlobGetParams@1"));
         assert!(names.contains(&"sys/BlobGetReceipt@1"));
         assert!(names.contains(&"sys/BlobGetResult@1"));
+        assert!(names.contains(&"sys/EffectReceiptEnvelope@1"));
         // Plan composition
         assert!(names.contains(&"sys/PlanHandle@1"));
         assert!(names.contains(&"sys/PlanError@1"));

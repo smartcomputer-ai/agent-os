@@ -89,6 +89,7 @@ impl<S: Store + 'static> Kernel<S> {
             ),
             clock: KernelClock::new(),
             reducer_state: HashMap::new(),
+            workflow_instances: HashMap::new(),
             reducer_index_roots: HashMap::new(),
             snapshot_index: HashMap::new(),
             journal,

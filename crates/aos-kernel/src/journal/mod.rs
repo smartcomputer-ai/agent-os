@@ -153,8 +153,21 @@ pub struct EffectIntentRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "origin_kind")]
 pub enum IntentOriginRecord {
-    Reducer { name: String },
-    Plan { name: String, plan_id: u64 },
+    Reducer {
+        name: String,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "serde_bytes_opt"
+        )]
+        instance_key: Option<Vec<u8>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        emitted_at_seq: Option<u64>,
+    },
+    Plan {
+        name: String,
+        plan_id: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

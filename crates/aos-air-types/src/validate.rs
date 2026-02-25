@@ -881,15 +881,6 @@ pub fn validate_manifest(
         }
     }
 
-    let receipt_schema_for_effect = |kind: &str| -> Option<&'static str> {
-        match kind {
-            EffectKind::TIMER_SET => Some("sys/TimerFired@1"),
-            EffectKind::BLOB_PUT => Some("sys/BlobPutResult@1"),
-            EffectKind::BLOB_GET => Some("sys/BlobGetResult@1"),
-            _ => None,
-        }
-    };
-
     for (reducer_name, module) in modules {
         let Some(reducer) = module.abi.reducer.as_ref() else {
             continue;
@@ -932,38 +923,9 @@ pub fn validate_manifest(
         }
 
         for effect in &reducer.effects_emitted {
-            let Some(receipt_schema) = receipt_schema_for_effect(effect.as_str()) else {
-                continue;
-            };
-            if event_schema_name == receipt_schema {
-                continue;
-            }
-            match &event_schema {
-                TypeExpr::Ref(reference) if reference.reference.as_str() == receipt_schema => {
-                    continue;
-                }
-                TypeExpr::Variant(variant) => {
-                    let mut found = false;
-                    for ty in variant.variant.values() {
-                        if let TypeExpr::Ref(reference) = ty {
-                            if reference.reference.as_str() == receipt_schema {
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-                    if found {
-                        continue;
-                    }
-                }
-                _ => {}
-            }
-            {
-                return Err(ValidationError::ReducerReceiptSchemaMissing {
-                    reducer: reducer_name.clone(),
-                    effect_kind: effect.as_str().to_string(),
-                    event_schema: event_schema_name.to_string(),
-                    receipt_schema: receipt_schema.to_string(),
+            if !known_effect_kinds.contains(effect.as_str()) {
+                return Err(ValidationError::EffectNotFound {
+                    kind: effect.as_str().to_string(),
                 });
             }
         }
@@ -2007,7 +1969,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_rejects_missing_receipt_variant_for_micro_effect() {
+    fn manifest_allows_missing_receipt_variant_for_micro_effect() {
         let reducer_name = "com.acme/Reducer@1".to_string();
         let mut modules = HashMap::new();
         modules.insert(
@@ -2084,18 +2046,10 @@ mod tests {
         let effects = HashMap::new();
         let caps = HashMap::new();
         let policies = HashMap::new();
-        let err = validate_manifest(
+        validate_manifest(
             &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
         )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::ReducerReceiptSchemaMissing { reducer, effect_kind, event_schema, receipt_schema }
-            if reducer == reducer_name
-                && effect_kind == "timer.set"
-                && event_schema == "com.acme/Event@1"
-                && receipt_schema == "sys/TimerFired@1"
-        ));
+        .expect("generic receipt envelopes remove strict micro-receipt schema requirement");
     }
 
     #[test]
@@ -2169,7 +2123,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_rejects_record_event_schema_with_micro_effect() {
+    fn manifest_allows_record_event_schema_with_micro_effect() {
         let reducer_name = "com.acme/Reducer@1".to_string();
         let mut modules = HashMap::new();
         modules.insert(
@@ -2232,18 +2186,83 @@ mod tests {
         let effects = HashMap::new();
         let caps = HashMap::new();
         let policies = HashMap::new();
+        validate_manifest(
+            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
+        )
+        .expect("generic receipt envelopes remove strict micro-receipt schema requirement");
+    }
+
+    #[test]
+    fn manifest_rejects_unknown_effect_kind_in_reducer_effects_emitted() {
+        let reducer_name = "com.acme/Reducer@1".to_string();
+        let mut modules = HashMap::new();
+        modules.insert(
+            reducer_name.clone(),
+            DefModule {
+                name: reducer_name.clone(),
+                module_kind: ModuleKind::Reducer,
+                wasm_hash: HashRef::new(
+                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+                )
+                .unwrap(),
+                key_schema: None,
+                abi: ModuleAbi {
+                    reducer: Some(ReducerAbi {
+                        state: SchemaRef::new("com.acme/State@1").unwrap(),
+                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                        annotations: None,
+                        effects_emitted: vec![EffectKind::new("com.acme/missing.effect")],
+                        cap_slots: IndexMap::new(),
+                    }),
+                    pure: None,
+                },
+            },
+        );
+        let manifest = Manifest {
+            air_version: crate::CURRENT_AIR_VERSION.to_string(),
+            schemas: vec![],
+            modules: vec![],
+            plans: vec![],
+            effects: vec![],
+            caps: vec![],
+            policies: vec![],
+            secrets: vec![],
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+            triggers: vec![],
+        };
+        let mut schemas = HashMap::new();
+        schemas.insert(
+            "com.acme/Event@1".to_string(),
+            DefSchema {
+                name: "com.acme/Event@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        schemas.insert(
+            "com.acme/State@1".to_string(),
+            DefSchema {
+                name: "com.acme/State@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        );
+        let plans = HashMap::new();
+        let effects = HashMap::new();
+        let caps = HashMap::new();
+        let policies = HashMap::new();
         let err = validate_manifest(
             &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
         )
         .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::ReducerReceiptSchemaMissing { reducer, effect_kind, event_schema, receipt_schema }
-            if reducer == reducer_name
-                && effect_kind == "timer.set"
-                && event_schema == "com.acme/Event@1"
-                && receipt_schema == "sys/TimerFired@1"
-        ));
+        assert!(
+            matches!(err, ValidationError::EffectNotFound { kind } if kind == "com.acme/missing.effect")
+        );
     }
 
     #[test]

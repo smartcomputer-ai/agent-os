@@ -23,6 +23,8 @@ pub struct KernelSnapshot {
     next_plan_id: u64,
     queued_effects: Vec<EffectIntentSnapshot>,
     pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    workflow_instances: Vec<WorkflowInstanceSnapshot>,
     plan_results: Vec<PlanResultSnapshot>,
     height: JournalSeq,
     #[serde(default)]
@@ -49,6 +51,7 @@ impl KernelSnapshot {
         next_plan_id: u64,
         queued_effects: Vec<EffectIntentSnapshot>,
         pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
+        workflow_instances: Vec<WorkflowInstanceSnapshot>,
         plan_results: Vec<PlanResultSnapshot>,
         logical_now_ns: u64,
         manifest_hash: Option<[u8; 32]>,
@@ -65,6 +68,7 @@ impl KernelSnapshot {
             next_plan_id,
             queued_effects,
             pending_reducer_receipts,
+            workflow_instances,
             plan_results,
             height,
             logical_now_ns,
@@ -131,6 +135,10 @@ impl KernelSnapshot {
 
     pub fn pending_reducer_receipts(&self) -> &[ReducerReceiptSnapshot] {
         &self.pending_reducer_receipts
+    }
+
+    pub fn workflow_instances(&self) -> &[WorkflowInstanceSnapshot] {
+        &self.workflow_instances
     }
 
     pub fn plan_results(&self) -> &[PlanResultSnapshot] {
@@ -234,31 +242,82 @@ pub struct PlanCompletionSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReducerReceiptSnapshot {
     pub intent_hash: [u8; 32],
-    pub reducer: String,
+    pub origin_module_id: String,
     pub effect_kind: String,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         with = "serde_bytes_opt"
     )]
-    pub key: Option<Vec<u8>>,
+    pub origin_instance_key: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
+    #[serde(default)]
+    pub emitted_at_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WorkflowStatusSnapshot {
+    Running,
+    Waiting,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkflowInflightIntentSnapshot {
+    pub intent_id: [u8; 32],
+    pub origin_module_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub origin_instance_key: Option<Vec<u8>>,
+    pub effect_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params_hash: Option<String>,
+    pub emitted_at_seq: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkflowInstanceSnapshot {
+    pub instance_id: String,
+    #[serde(with = "serde_bytes")]
+    pub state_bytes: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inflight_intents: Vec<WorkflowInflightIntentSnapshot>,
+    pub status: WorkflowStatusSnapshot,
+    pub last_processed_event_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_version: Option<String>,
 }
 
 impl ReducerReceiptSnapshot {
     pub fn from_context(intent_hash: [u8; 32], ctx: &ReducerEffectContext) -> Self {
         Self {
             intent_hash,
-            reducer: ctx.reducer.clone(),
+            origin_module_id: ctx.origin_module_id.clone(),
             effect_kind: ctx.effect_kind.clone(),
-            key: ctx.key.clone(),
+            origin_instance_key: ctx.origin_instance_key.clone(),
             params_cbor: ctx.params_cbor.clone(),
+            emitted_at_seq: ctx.emitted_at_seq,
+            module_version: ctx.module_version.clone(),
         }
     }
 
     pub fn into_context(self) -> ReducerEffectContext {
-        ReducerEffectContext::new(self.reducer, self.effect_kind, self.params_cbor, self.key)
+        ReducerEffectContext::new(
+            self.origin_module_id,
+            self.origin_instance_key,
+            self.effect_kind,
+            self.params_cbor,
+            self.intent_hash,
+            self.emitted_at_seq,
+            self.module_version,
+        )
     }
 }
 
@@ -324,6 +383,7 @@ mod tests {
             vec![],
             vec![],
             9,
+            vec![],
             vec![],
             vec![],
             vec![],

@@ -245,6 +245,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.waiting_events.clear();
         self.pending_receipts.clear();
         self.pending_reducer_receipts.clear();
+        self.workflow_instances.clear();
         self.recent_receipts.clear();
         self.recent_receipt_index.clear();
         self.plan_results.clear();
@@ -433,8 +434,11 @@ mod tests {
             [2u8; 32],
             ReducerEffectContext::new(
                 "com.acme/Reducer@1".into(),
+                None,
                 "timer.set".into(),
                 vec![],
+                [2u8; 32],
+                0,
                 None,
             ),
         );

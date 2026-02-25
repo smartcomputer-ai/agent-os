@@ -187,7 +187,7 @@ impl TimerScheduler {
                 } else {
                     warn!(
                         intent_hash = ?ctx.intent_hash,
-                        reducer = %ctx.reducer,
+                        reducer = %ctx.origin_module_id,
                         "failed to decode TimerSetParams while rehydrating timer; dropping entry"
                     );
                 }
@@ -319,18 +319,22 @@ mod tests {
         let contexts = vec![
             ReducerReceiptSnapshot {
                 intent_hash: [1; 32],
-                reducer: "demo/Timer@1".into(),
+                origin_module_id: "demo/Timer@1".into(),
                 effect_kind: "timer.set".into(),
+                origin_instance_key: None,
                 params_cbor: params_cbor.clone(),
-                key: None,
+                emitted_at_seq: 0,
+                module_version: None,
             },
             // Non-timer effect should be ignored
             ReducerReceiptSnapshot {
                 intent_hash: [2; 32],
-                reducer: "demo/Other@1".into(),
+                origin_module_id: "demo/Other@1".into(),
                 effect_kind: "blob.put".into(),
+                origin_instance_key: None,
                 params_cbor: vec![],
-                key: None,
+                emitted_at_seq: 0,
+                module_version: None,
             },
         ];
 

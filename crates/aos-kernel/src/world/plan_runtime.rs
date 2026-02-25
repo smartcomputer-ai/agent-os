@@ -311,8 +311,7 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
             self.record_effect_receipt(&receipt, &stamp)?;
             self.record_decisions()?;
-            let event = build_reducer_receipt_event(&context, &receipt)?;
-            self.process_domain_event(event)?;
+            self.deliver_receipt_to_workflow_instance(context, &receipt, &stamp)?;
             self.remember_receipt(receipt.intent_hash);
             return Ok(());
         }
@@ -328,6 +327,83 @@ impl<S: Store + 'static> Kernel<S> {
         Err(KernelError::UnknownReceipt(format_intent_hash(
             &receipt.intent_hash,
         )))
+    }
+
+    fn deliver_receipt_to_workflow_instance(
+        &mut self,
+        context: ReducerEffectContext,
+        receipt: &aos_effects::EffectReceipt,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
+        let reducer_name = context.origin_module_id.clone();
+        let module_def = self
+            .module_defs
+            .get(&reducer_name)
+            .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.clone()))?;
+        let reducer_abi = module_def.abi.reducer.as_ref().ok_or_else(|| {
+            KernelError::Manifest(format!("module '{reducer_name}' is not a reducer/workflow"))
+        })?;
+        let reducer_event_schema_name = reducer_abi.event.as_str().to_string();
+        let reducer_event_schema = self
+            .schema_index
+            .get(reducer_event_schema_name.as_str())
+            .ok_or_else(|| {
+                KernelError::Manifest(format!(
+                    "schema '{}' not found for workflow module '{}'",
+                    reducer_event_schema_name, reducer_name
+                ))
+            })?;
+
+        let generic_event = crate::receipts::build_workflow_receipt_event(&context, receipt)?;
+        let generic_value: CborValue = serde_cbor::from_slice(&generic_event.value)
+            .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
+        let normalized = match try_normalize_receipt_payload(
+            reducer_event_schema,
+            &self.schema_index,
+            generic_value.clone(),
+            crate::receipts::SYS_EFFECT_RECEIPT_ENVELOPE_SCHEMA,
+        ) {
+            Ok(normalized) => normalized,
+            Err(generic_err) => {
+                if let Some(legacy_event) =
+                    crate::receipts::build_legacy_reducer_receipt_event(&context, receipt)?
+                {
+                    let legacy_value: CborValue = serde_cbor::from_slice(&legacy_event.value)
+                        .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
+                    try_normalize_receipt_payload(
+                        reducer_event_schema,
+                        &self.schema_index,
+                        legacy_value,
+                        legacy_event.schema.as_str(),
+                    )
+                    .map_err(|legacy_err| {
+                        KernelError::Manifest(format!(
+                            "receipt payload for '{reducer_name}' does not match event schema '{}': generic={generic_err}; legacy={legacy_err}",
+                            reducer_event_schema_name
+                        ))
+                    })?
+                } else {
+                    return Err(KernelError::Manifest(format!(
+                        "receipt payload for '{reducer_name}' does not match event schema '{}': {generic_err}",
+                        reducer_event_schema_name
+                    )));
+                }
+            }
+        };
+
+        let mut event = DomainEvent::new(reducer_event_schema_name, normalized.bytes);
+        event.key = context.origin_instance_key.clone();
+        self.scheduler.push_reducer(ReducerEvent {
+            reducer: reducer_name.clone(),
+            event,
+            stamp: stamp.clone(),
+        });
+        self.mark_workflow_receipt_settled(
+            &reducer_name,
+            context.origin_instance_key.as_deref(),
+            receipt.intent_hash,
+        );
+        Ok(())
     }
 
     pub(super) fn deliver_event_to_waiting_plans(
@@ -623,6 +699,42 @@ impl<S: Store + 'static> Kernel<S> {
             plan_await_variant("Ok", outcome.result.clone().unwrap_or(ExprValue::Unit))
         }
     }
+}
+
+fn try_normalize_receipt_payload(
+    reducer_event_schema: &TypeExpr,
+    schema_index: &SchemaIndex,
+    payload_value: CborValue,
+    payload_schema: &str,
+) -> Result<
+    aos_air_types::value_normalize::NormalizedValue,
+    aos_air_types::value_normalize::ValueNormalizeError,
+> {
+    let mut candidates = Vec::new();
+    candidates.push(payload_value.clone());
+    if let TypeExpr::Variant(variant) = reducer_event_schema {
+        for (tag, ty) in &variant.variant {
+            if let TypeExpr::Ref(reference) = ty
+                && reference.reference.as_str() == payload_schema
+            {
+                let wrapped = CborValue::Map(BTreeMap::from([
+                    (CborValue::Text("$tag".into()), CborValue::Text(tag.clone())),
+                    (CborValue::Text("$value".into()), payload_value.clone()),
+                ]));
+                candidates.push(wrapped);
+                break;
+            }
+        }
+    }
+
+    let mut last_err = None;
+    for candidate in candidates {
+        match normalize_value_with_schema(candidate, reducer_event_schema, schema_index) {
+            Ok(normalized) => return Ok(normalized),
+            Err(err) => last_err = Some(err),
+        }
+    }
+    Err(last_err.expect("at least one candidate"))
 }
 
 fn plan_handle_expr_value(instance_id: u64, plan: String) -> ExprValue {

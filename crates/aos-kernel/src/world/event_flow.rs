@@ -407,6 +407,11 @@ impl<S: Store + 'static> Kernel<S> {
             MONO_KEY.to_vec()
         };
         let key_hash = Hash::of_bytes(&key_bytes);
+        let state_for_workflow = output.state.clone();
+        let module_version = self
+            .module_defs
+            .get(&reducer_name)
+            .map(|module| module.wasm_hash.as_str().to_string());
 
         match output.state {
             Some(state) => {
@@ -443,6 +448,13 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(root) = new_index_root {
             self.reducer_index_roots.insert(reducer_name.clone(), root);
         }
+        self.record_workflow_state_transition(
+            &reducer_name,
+            key.as_deref(),
+            state_for_workflow.as_deref(),
+            emitted_at_seq,
+            module_version,
+        );
         for event in output.domain_events {
             self.process_domain_event(event)?;
         }
@@ -499,16 +511,31 @@ impl<S: Store + 'static> Kernel<S> {
                 &intent,
                 IntentOriginRecord::Reducer {
                     name: reducer_name.clone(),
+                    instance_key: key.clone(),
+                    emitted_at_seq: Some(emitted_at_seq),
                 },
             )?;
             self.pending_reducer_receipts.insert(
                 intent.intent_hash,
                 ReducerEffectContext::new(
                     reducer_name.clone(),
+                    key.clone(),
                     effect.kind.clone(),
                     effect.params_cbor.clone(),
-                    key.clone(),
+                    intent.intent_hash,
+                    emitted_at_seq,
+                    self.module_defs
+                        .get(&reducer_name)
+                        .map(|module| module.wasm_hash.as_str().to_string()),
                 ),
+            );
+            self.record_workflow_inflight_intent(
+                &reducer_name,
+                key.as_deref(),
+                intent.intent_hash,
+                effect.kind.as_str(),
+                &effect.params_cbor,
+                emitted_at_seq,
             );
         }
         Ok(())

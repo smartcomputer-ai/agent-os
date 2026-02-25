@@ -1,17 +1,25 @@
 use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch, PolicyRule,
+    DefModule, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind, OriginKind,
+    PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, TypeExpr, TypeRecord, TypeRef,
+    TypeVariant,
 };
-use aos_effects::builtins::TimerSetReceipt;
+use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord, PolicyDecisionOutcome};
+use aos_kernel::snapshot::WorkflowStatusSnapshot;
 use helpers::fixtures::{self, START_SCHEMA, TestWorld};
 use serde_cbor;
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use tempfile::TempDir;
+use wat::parse_str;
+
+use aos_store::Store;
+use aos_wasm_abi::{DomainEvent, ReducerEffect, ReducerOutput};
 
 mod helpers;
 use helpers::{attach_default_policy, fulfillment_manifest, timer_manifest};
@@ -75,7 +83,7 @@ fn journal_replay_restores_state() {
     );
 }
 
-/// Timer receipts from reducers should replay correctly from journal, including event routing.
+/// Timer receipts from reducer/workflow modules should replay correctly from journal.
 #[test]
 fn reducer_timer_receipt_replays_from_journal() {
     let store = fixtures::new_mem_store();
@@ -108,7 +116,7 @@ fn reducer_timer_receipt_replays_from_journal() {
 
     let final_state = world
         .kernel
-        .reducer_state("com.acme/TimerHandler@1")
+        .reducer_state("com.acme/TimerEmitter@1")
         .unwrap();
     let journal_entries = world.kernel.dump_journal().unwrap();
 
@@ -120,7 +128,7 @@ fn reducer_timer_receipt_replays_from_journal() {
     .unwrap();
 
     assert_eq!(
-        replay_world.kernel.reducer_state("com.acme/TimerHandler@1"),
+        replay_world.kernel.reducer_state("com.acme/TimerEmitter@1"),
         Some(final_state)
     );
 }
@@ -210,6 +218,108 @@ fn plan_journal_replay_resumes_waiting_receipt() {
     );
 }
 
+#[test]
+fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
+    let store = fixtures::new_mem_store();
+    let manifest = no_plan_workflow_manifest(&store);
+    assert!(
+        manifest.manifest.plans.is_empty(),
+        "fixture must not define plans"
+    );
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("wf-1")
+    });
+    world
+        .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
+        .expect("submit workflow start event");
+    world.tick_n(1).unwrap();
+
+    let mut effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 2, "workflow should emit multiple effects");
+    effects.sort_by(|a, b| a.kind.as_str().cmp(b.kind.as_str()));
+    assert_eq!(effects[0].kind.as_str(), aos_effects::EffectKind::BLOB_PUT);
+    assert_eq!(effects[1].kind.as_str(), aos_effects::EffectKind::TIMER_SET);
+
+    let snapshot = world.kernel.workflow_instances_snapshot();
+    let workflow = snapshot
+        .iter()
+        .find(|instance| instance.instance_id.starts_with("com.acme/Workflow@1::"))
+        .expect("workflow instance snapshot");
+    assert_eq!(workflow.inflight_intents.len(), 2);
+    assert_eq!(workflow.status, WorkflowStatusSnapshot::Waiting);
+
+    for intent in effects {
+        let receipt = match intent.kind.as_str() {
+            aos_effects::EffectKind::BLOB_PUT => EffectReceipt {
+                intent_hash: intent.intent_hash,
+                adapter_id: "adapter.blob".into(),
+                status: ReceiptStatus::Ok,
+                payload_cbor: serde_cbor::to_vec(&BlobPutReceipt {
+                    blob_ref: fixtures::fake_hash(0x21),
+                    edge_ref: fixtures::fake_hash(0x22),
+                    size: 8,
+                })
+                .unwrap(),
+                cost_cents: Some(1),
+                signature: vec![1, 2, 3],
+            },
+            aos_effects::EffectKind::TIMER_SET => EffectReceipt {
+                intent_hash: intent.intent_hash,
+                adapter_id: "adapter.timer".into(),
+                status: ReceiptStatus::Ok,
+                payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
+                    delivered_at_ns: 42,
+                    key: Some("wf".into()),
+                })
+                .unwrap(),
+                cost_cents: Some(1),
+                signature: vec![4, 5, 6],
+            },
+            other => panic!("unexpected effect kind in fixture: {other}"),
+        };
+        world.kernel.handle_receipt(receipt).unwrap();
+    }
+    world.kernel.tick_until_idle().unwrap();
+
+    assert_eq!(
+        world.kernel.reducer_state("com.acme/WorkflowResult@1"),
+        Some(vec![0xFA]),
+        "receipt-driven continuation should raise domain event to result reducer"
+    );
+    let settled = world.kernel.workflow_instances_snapshot();
+    let workflow = settled
+        .iter()
+        .find(|instance| instance.instance_id.starts_with("com.acme/Workflow@1::"))
+        .expect("workflow instance snapshot after receipts");
+    assert!(workflow.inflight_intents.is_empty());
+    assert_eq!(workflow.status, WorkflowStatusSnapshot::Completed);
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        no_plan_workflow_manifest(&store),
+        Box::new(MemJournal::from_entries(&journal_entries)),
+    )
+    .unwrap();
+    assert_eq!(
+        replay_world
+            .kernel
+            .reducer_state("com.acme/WorkflowResult@1"),
+        Some(vec![0xFA])
+    );
+    let replay_instances = replay_world.kernel.workflow_instances_snapshot();
+    assert_eq!(replay_instances.len(), settled.len());
+    let replay_workflow = replay_instances
+        .iter()
+        .find(|instance| instance.instance_id.starts_with("com.acme/Workflow@1::"))
+        .expect("replayed workflow instance");
+    assert!(replay_workflow.inflight_intents.is_empty());
+    assert_eq!(replay_workflow.status, WorkflowStatusSnapshot::Completed);
+}
+
 /// Policy decisions should be journaled for plan-origin effects.
 #[test]
 fn policy_decision_is_journaled() {
@@ -279,6 +389,291 @@ fn cap_decision_includes_grant_hash() {
         aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new())).expect("params cbor");
     let expected = compute_grant_hash("sys/http.out@1", "http.out", &params_cbor, None);
     assert_eq!(decision.grant_hash, expected);
+}
+
+fn no_plan_workflow_manifest(
+    store: &Arc<fixtures::TestStore>,
+) -> aos_kernel::manifest::LoadedManifest {
+    let start_output = ReducerOutput {
+        state: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
+        domain_events: vec![],
+        effects: vec![
+            ReducerEffect::new(
+                aos_effects::EffectKind::TIMER_SET,
+                serde_cbor::to_vec(&TimerSetParams {
+                    deliver_at_ns: 42,
+                    key: Some("wf".into()),
+                })
+                .unwrap(),
+            ),
+            ReducerEffect::with_cap_slot(
+                aos_effects::EffectKind::BLOB_PUT,
+                serde_cbor::to_vec(&BlobPutParams {
+                    bytes: b"workflow".to_vec(),
+                    blob_ref: None,
+                    refs: None,
+                })
+                .unwrap(),
+                "blob",
+            ),
+        ],
+        ann: None,
+    };
+    let receipt_output = ReducerOutput {
+        state: None,
+        domain_events: vec![DomainEvent::new(
+            "com.acme/WorkflowDone@1",
+            serde_cbor::to_vec(&serde_json::json!({ "id": "wf-1" })).unwrap(),
+        )],
+        effects: vec![],
+        ann: None,
+    };
+
+    let mut workflow =
+        sequenced_reducer_module(store, "com.acme/Workflow@1", &start_output, &receipt_output);
+    workflow.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/WorkflowState@1"),
+        event: fixtures::schema("com.acme/WorkflowEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![
+            aos_effects::EffectKind::TIMER_SET.into(),
+            aos_effects::EffectKind::BLOB_PUT.into(),
+        ],
+        cap_slots: Default::default(),
+    });
+
+    let mut result = fixtures::stub_reducer_module(
+        store,
+        "com.acme/WorkflowResult@1",
+        &ReducerOutput {
+            state: Some(vec![0xFA]),
+            domain_events: vec![],
+            effects: vec![],
+            ann: None,
+        },
+    );
+    result.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/WorkflowResultState@1"),
+        event: fixtures::schema("com.acme/WorkflowDone@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+
+    let mut loaded = fixtures::build_loaded_manifest(
+        vec![],
+        vec![],
+        vec![workflow, result],
+        vec![
+            fixtures::routing_event("com.acme/WorkflowEvent@1", "com.acme/Workflow@1"),
+            fixtures::routing_event("com.acme/WorkflowDone@1", "com.acme/WorkflowResult@1"),
+        ],
+    );
+    fixtures::insert_test_schemas(
+        &mut loaded,
+        vec![
+            helpers::def_text_record_schema(START_SCHEMA, vec![("id", helpers::text_type())]),
+            aos_air_types::DefSchema {
+                name: "com.acme/WorkflowEvent@1".into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: indexmap::IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(START_SCHEMA),
+                            }),
+                        ),
+                        (
+                            "Receipt".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema("sys/EffectReceiptEnvelope@1"),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
+            helpers::def_text_record_schema(
+                "com.acme/WorkflowDone@1",
+                vec![("id", helpers::text_type())],
+            ),
+            aos_air_types::DefSchema {
+                name: "com.acme/WorkflowState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: indexmap::IndexMap::new(),
+                }),
+            },
+            aos_air_types::DefSchema {
+                name: "com.acme/WorkflowResultState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: indexmap::IndexMap::new(),
+                }),
+            },
+        ],
+    );
+    if let Some(binding) = loaded
+        .manifest
+        .module_bindings
+        .get_mut("com.acme/Workflow@1")
+    {
+        binding.slots.insert("blob".into(), "blob_cap".into());
+    }
+    loaded
+}
+
+fn sequenced_reducer_module<S: Store + ?Sized>(
+    store: &Arc<S>,
+    name: impl Into<String>,
+    first: &ReducerOutput,
+    then: &ReducerOutput,
+) -> DefModule {
+    let first_bytes = first.encode().expect("encode first reducer output");
+    let then_bytes = then.encode().expect("encode second reducer output");
+    let first_literal = first_bytes
+        .iter()
+        .map(|b| format!("\\{:02x}", b))
+        .collect::<String>();
+    let then_literal = then_bytes
+        .iter()
+        .map(|b| format!("\\{:02x}", b))
+        .collect::<String>();
+    let first_len = first_bytes.len();
+    let then_len = then_bytes.len();
+    let second_offset = first_len;
+    let heap_start = first_len + then_len;
+    let wat = format!(
+        r#"(module
+  (memory (export "memory") 1)
+  (global $heap (mut i32) (i32.const {heap_start}))
+  (data (i32.const 0) "{first_literal}")
+  (data (i32.const {second_offset}) "{then_literal}")
+  (func (export "alloc") (param i32) (result i32)
+    (local $old i32)
+    global.get $heap
+    local.tee $old
+    local.get 0
+    i32.add
+    global.set $heap
+    local.get $old)
+  (func $is_receipt_event (param $ptr i32) (param $len i32) (result i32)
+    (local $i i32)
+    (block $not_found
+      (loop $search
+        local.get $i
+        i32.const 6
+        i32.add
+        local.get $len
+        i32.ge_u
+        br_if $not_found
+
+        local.get $ptr
+        local.get $i
+        i32.add
+        i32.load8_u
+        i32.const 82
+        i32.eq
+        if
+          local.get $ptr
+          local.get $i
+          i32.add
+          i32.const 1
+          i32.add
+          i32.load8_u
+          i32.const 101
+          i32.eq
+          if
+            local.get $ptr
+            local.get $i
+            i32.add
+            i32.const 2
+            i32.add
+            i32.load8_u
+            i32.const 99
+            i32.eq
+            if
+              local.get $ptr
+              local.get $i
+              i32.add
+              i32.const 3
+              i32.add
+              i32.load8_u
+              i32.const 101
+              i32.eq
+              if
+                local.get $ptr
+                local.get $i
+                i32.add
+                i32.const 4
+                i32.add
+                i32.load8_u
+                i32.const 105
+                i32.eq
+                if
+                  local.get $ptr
+                  local.get $i
+                  i32.add
+                  i32.const 5
+                  i32.add
+                  i32.load8_u
+                  i32.const 112
+                  i32.eq
+                  if
+                    local.get $ptr
+                    local.get $i
+                    i32.add
+                    i32.const 6
+                    i32.add
+                    i32.load8_u
+                    i32.const 116
+                    i32.eq
+                    if
+                      i32.const 1
+                      return
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $search
+      )
+    )
+    i32.const 0
+  )
+  (func (export "step") (param i32 i32) (result i32 i32)
+    local.get 0
+    local.get 1
+    call $is_receipt_event
+    if (result i32 i32)
+      (i32.const {second_offset})
+      (i32.const {then_len})
+    else
+      (i32.const 0)
+      (i32.const {first_len})
+    end)
+)"#
+    );
+
+    let wasm_bytes = parse_str(&wat).expect("compile sequenced reducer wat");
+    let wasm_hash = store.put_blob(&wasm_bytes).expect("store reducer wasm");
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
+    DefModule {
+        name: name.into(),
+        module_kind: ModuleKind::Reducer,
+        wasm_hash: wasm_hash_ref,
+        key_schema: None,
+        abi: ModuleAbi {
+            reducer: None,
+            pure: None,
+        },
+    }
 }
 
 fn compute_grant_hash(

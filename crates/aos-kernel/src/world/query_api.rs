@@ -228,6 +228,7 @@ mod tests {
             vec![],
             vec![],
             vec![],
+            vec![],
             0,
             Some(*manifest_hash.as_bytes()),
         );

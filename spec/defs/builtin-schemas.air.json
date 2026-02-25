@@ -172,6 +172,25 @@
       }
     }
   },
+  {
+    "$kind": "defschema",
+    "name": "sys/EffectReceiptEnvelope@1",
+    "type": {
+      "record": {
+        "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
+        "origin_instance_key": { "option": { "bytes": {} } },
+        "intent_id": { "hash": {} },
+        "effect_kind": { "text": {} },
+        "params_hash": { "option": { "hash": {} } },
+        "receipt_payload": { "bytes": {} },
+        "status": { "text": {} },
+        "emitted_at_seq": { "nat": {} },
+        "adapter_id": { "text": {} },
+        "cost_cents": { "option": { "nat": {} } },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
 
   {
     "$kind": "defschema",

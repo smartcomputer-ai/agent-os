@@ -44,7 +44,7 @@ use crate::plan::{PlanCompletionValue, PlanInstance, PlanRegistry, ReducerSchema
 use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::pure::PureRegistry;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
-use crate::receipts::{ReducerEffectContext, build_reducer_receipt_event};
+use crate::receipts::ReducerEffectContext;
 use crate::reducer::ReducerRegistry;
 use crate::scheduler::{Scheduler, Task};
 use crate::schema_value::cbor_to_expr_value;
@@ -55,6 +55,7 @@ use crate::shadow::{
 use crate::snapshot::{
     EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanCompletionSnapshot,
     PlanResultSnapshot, ReducerReceiptSnapshot, ReducerStateEntry, SnapshotRootCompleteness,
+    WorkflowInflightIntentSnapshot, WorkflowInstanceSnapshot, WorkflowStatusSnapshot,
     receipts_to_vecdeque,
 };
 use std::sync::Mutex;
@@ -168,6 +169,7 @@ pub struct Kernel<S: Store> {
     effect_manager: EffectManager,
     clock: KernelClock,
     reducer_state: HashMap<Name, ReducerState>,
+    workflow_instances: HashMap<String, WorkflowInstanceState>,
     reducer_index_roots: HashMap<Name, Hash>,
     snapshot_index: HashMap<JournalSeq, (Hash, Option<Hash>)>,
     journal: Box<dyn Journal>,
@@ -206,6 +208,32 @@ struct PlanWaitWatcher {
 #[derive(Clone, Debug, PartialEq)]
 struct PlanCompletionOutcome {
     await_value: PlanCompletionValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum WorkflowRuntimeStatus {
+    Running,
+    Waiting,
+    Completed,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorkflowInflightIntentMeta {
+    pub origin_module_id: String,
+    pub origin_instance_key: Option<Vec<u8>>,
+    pub effect_kind: String,
+    pub params_hash: Option<String>,
+    pub emitted_at_seq: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorkflowInstanceState {
+    pub state_bytes: Vec<u8>,
+    pub inflight_intents: BTreeMap<[u8; 32], WorkflowInflightIntentMeta>,
+    pub status: WorkflowRuntimeStatus,
+    pub last_processed_event_seq: u64,
+    pub module_version: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -549,7 +577,11 @@ impl<S: Store + 'static> Kernel<S> {
         let effect_kind = record.kind.clone();
         let params_cbor = record.params_cbor.clone();
         match record.origin {
-            IntentOriginRecord::Reducer { name } => {
+            IntentOriginRecord::Reducer {
+                name,
+                instance_key,
+                emitted_at_seq,
+            } => {
                 if self
                     .pending_reducer_receipts
                     .contains_key(&record.intent_hash)
@@ -559,8 +591,24 @@ impl<S: Store + 'static> Kernel<S> {
                 self.pending_reducer_receipts
                     .entry(record.intent_hash)
                     .or_insert_with(|| {
-                        ReducerEffectContext::new(name, effect_kind, params_cbor, None)
+                        ReducerEffectContext::new(
+                            name.clone(),
+                            instance_key.clone(),
+                            effect_kind.clone(),
+                            params_cbor.clone(),
+                            record.intent_hash,
+                            emitted_at_seq.unwrap_or_default(),
+                            None,
+                        )
                     });
+                self.record_workflow_inflight_intent(
+                    &name,
+                    instance_key.as_deref(),
+                    record.intent_hash,
+                    &effect_kind,
+                    &params_cbor,
+                    emitted_at_seq.unwrap_or_default(),
+                );
             }
             IntentOriginRecord::Plan { name: _, plan_id } => {
                 self.reconcile_plan_replay_identity(plan_id, record.intent_hash);
@@ -594,6 +642,86 @@ impl<S: Store + 'static> Kernel<S> {
                 instance.override_pending_receipt_hash(intent_hash);
             }
         }
+    }
+
+    pub(crate) fn record_workflow_state_transition(
+        &mut self,
+        module_id: &str,
+        instance_key: Option<&[u8]>,
+        state_bytes: Option<&[u8]>,
+        last_processed_event_seq: u64,
+        module_version: Option<String>,
+    ) {
+        let instance_id = workflow_instance_id(module_id, instance_key);
+        let entry = self
+            .workflow_instances
+            .entry(instance_id)
+            .or_insert_with(|| WorkflowInstanceState {
+                state_bytes: Vec::new(),
+                inflight_intents: BTreeMap::new(),
+                status: WorkflowRuntimeStatus::Running,
+                last_processed_event_seq,
+                module_version: module_version.clone(),
+            });
+        if let Some(bytes) = state_bytes {
+            entry.state_bytes = bytes.to_vec();
+        } else {
+            entry.state_bytes.clear();
+            entry.status = WorkflowRuntimeStatus::Completed;
+        }
+        entry.last_processed_event_seq = last_processed_event_seq;
+        if module_version.is_some() {
+            entry.module_version = module_version;
+        }
+        refresh_workflow_status(entry);
+    }
+
+    pub(crate) fn record_workflow_inflight_intent(
+        &mut self,
+        module_id: &str,
+        instance_key: Option<&[u8]>,
+        intent_hash: [u8; 32],
+        effect_kind: &str,
+        params_cbor: &[u8],
+        emitted_at_seq: u64,
+    ) {
+        let instance_id = workflow_instance_id(module_id, instance_key);
+        let entry = self
+            .workflow_instances
+            .entry(instance_id)
+            .or_insert_with(|| WorkflowInstanceState {
+                state_bytes: Vec::new(),
+                inflight_intents: BTreeMap::new(),
+                status: WorkflowRuntimeStatus::Running,
+                last_processed_event_seq: emitted_at_seq,
+                module_version: None,
+            });
+        entry.inflight_intents.insert(
+            intent_hash,
+            WorkflowInflightIntentMeta {
+                origin_module_id: module_id.to_string(),
+                origin_instance_key: instance_key.map(|k| k.to_vec()),
+                effect_kind: effect_kind.to_string(),
+                params_hash: Some(Hash::of_bytes(params_cbor).to_hex()),
+                emitted_at_seq,
+            },
+        );
+        entry.last_processed_event_seq = emitted_at_seq;
+        refresh_workflow_status(entry);
+    }
+
+    pub(crate) fn mark_workflow_receipt_settled(
+        &mut self,
+        module_id: &str,
+        instance_key: Option<&[u8]>,
+        intent_hash: [u8; 32],
+    ) {
+        let instance_id = workflow_instance_id(module_id, instance_key);
+        let Some(entry) = self.workflow_instances.get_mut(&instance_id) else {
+            return;
+        };
+        entry.inflight_intents.remove(&intent_hash);
+        refresh_workflow_status(entry);
     }
 
     pub fn reducer_state(&self, reducer: &str) -> Option<Vec<u8>> {
@@ -920,6 +1048,36 @@ impl<S: Store + 'static> Kernel<S> {
         self.pending_reducer_receipts
             .iter()
             .map(|(hash, ctx)| ReducerReceiptSnapshot::from_context(*hash, ctx))
+            .collect()
+    }
+
+    pub fn workflow_instances_snapshot(&self) -> Vec<WorkflowInstanceSnapshot> {
+        self.workflow_instances
+            .iter()
+            .map(|(instance_id, state)| WorkflowInstanceSnapshot {
+                instance_id: instance_id.clone(),
+                state_bytes: state.state_bytes.clone(),
+                inflight_intents: state
+                    .inflight_intents
+                    .iter()
+                    .map(|(intent_id, meta)| WorkflowInflightIntentSnapshot {
+                        intent_id: *intent_id,
+                        origin_module_id: meta.origin_module_id.clone(),
+                        origin_instance_key: meta.origin_instance_key.clone(),
+                        effect_kind: meta.effect_kind.clone(),
+                        params_hash: meta.params_hash.clone(),
+                        emitted_at_seq: meta.emitted_at_seq,
+                    })
+                    .collect(),
+                status: match state.status {
+                    WorkflowRuntimeStatus::Running => WorkflowStatusSnapshot::Running,
+                    WorkflowRuntimeStatus::Waiting => WorkflowStatusSnapshot::Waiting,
+                    WorkflowRuntimeStatus::Completed => WorkflowStatusSnapshot::Completed,
+                    WorkflowRuntimeStatus::Failed => WorkflowStatusSnapshot::Failed,
+                },
+                last_processed_event_seq: state.last_processed_event_seq,
+                module_version: state.module_version.clone(),
+            })
             .collect()
     }
 
@@ -1314,4 +1472,23 @@ fn format_intent_hash(hash: &[u8; 32]) -> String {
     DigestHash::from_bytes(hash)
         .map(|h| h.to_hex())
         .unwrap_or_else(|_| format!("{:?}", hash))
+}
+
+fn workflow_instance_id(module_id: &str, key: Option<&[u8]>) -> String {
+    let key_hex = key.map(hex::encode).unwrap_or_default();
+    format!("{module_id}::{key_hex}")
+}
+
+fn refresh_workflow_status(state: &mut WorkflowInstanceState) {
+    if !state.inflight_intents.is_empty() {
+        state.status = WorkflowRuntimeStatus::Waiting;
+        return;
+    }
+    if matches!(
+        state.status,
+        WorkflowRuntimeStatus::Completed | WorkflowRuntimeStatus::Failed
+    ) {
+        return;
+    }
+    state.status = WorkflowRuntimeStatus::Running;
 }

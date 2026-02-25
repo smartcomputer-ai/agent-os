@@ -71,6 +71,34 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(|(hash, ctx)| ReducerReceiptSnapshot::from_context(*hash, ctx))
             .collect();
+        let workflow_instances = self
+            .workflow_instances
+            .iter()
+            .map(|(instance_id, state)| WorkflowInstanceSnapshot {
+                instance_id: instance_id.clone(),
+                state_bytes: state.state_bytes.clone(),
+                inflight_intents: state
+                    .inflight_intents
+                    .iter()
+                    .map(|(intent_id, meta)| WorkflowInflightIntentSnapshot {
+                        intent_id: *intent_id,
+                        origin_module_id: meta.origin_module_id.clone(),
+                        origin_instance_key: meta.origin_instance_key.clone(),
+                        effect_kind: meta.effect_kind.clone(),
+                        params_hash: meta.params_hash.clone(),
+                        emitted_at_seq: meta.emitted_at_seq,
+                    })
+                    .collect(),
+                status: match state.status {
+                    WorkflowRuntimeStatus::Running => WorkflowStatusSnapshot::Running,
+                    WorkflowRuntimeStatus::Waiting => WorkflowStatusSnapshot::Waiting,
+                    WorkflowRuntimeStatus::Completed => WorkflowStatusSnapshot::Completed,
+                    WorkflowRuntimeStatus::Failed => WorkflowStatusSnapshot::Failed,
+                },
+                last_processed_event_seq: state.last_processed_event_seq,
+                module_version: state.module_version.clone(),
+            })
+            .collect();
         let plan_results: Vec<PlanResultSnapshot> = self
             .plan_results
             .iter()
@@ -87,6 +115,7 @@ impl<S: Store + 'static> Kernel<S> {
             self.scheduler.next_plan_id(),
             queued_effects,
             pending_reducer_receipts,
+            workflow_instances,
             plan_results,
             logical_now_ns,
             Some(*self.manifest_hash.as_bytes()),
@@ -490,6 +519,45 @@ impl<S: Store + 'static> Kernel<S> {
             .cloned()
             .map(|snap| (snap.intent_hash, snap.into_context()))
             .collect();
+        self.workflow_instances = snapshot
+            .workflow_instances()
+            .iter()
+            .cloned()
+            .map(|snap| {
+                let inflight_intents = snap
+                    .inflight_intents
+                    .into_iter()
+                    .map(|intent| {
+                        (
+                            intent.intent_id,
+                            WorkflowInflightIntentMeta {
+                                origin_module_id: intent.origin_module_id,
+                                origin_instance_key: intent.origin_instance_key,
+                                effect_kind: intent.effect_kind,
+                                params_hash: intent.params_hash,
+                                emitted_at_seq: intent.emitted_at_seq,
+                            },
+                        )
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let status = match snap.status {
+                    WorkflowStatusSnapshot::Running => WorkflowRuntimeStatus::Running,
+                    WorkflowStatusSnapshot::Waiting => WorkflowRuntimeStatus::Waiting,
+                    WorkflowStatusSnapshot::Completed => WorkflowRuntimeStatus::Completed,
+                    WorkflowStatusSnapshot::Failed => WorkflowRuntimeStatus::Failed,
+                };
+                (
+                    snap.instance_id,
+                    WorkflowInstanceState {
+                        state_bytes: snap.state_bytes,
+                        inflight_intents,
+                        status,
+                        last_processed_event_seq: snap.last_processed_event_seq,
+                        module_version: snap.module_version,
+                    },
+                )
+            })
+            .collect();
         self.waiting_events = snapshot.waiting_events().iter().cloned().collect();
         self.plan_wait_watchers = snapshot
             .plan_wait_watchers()
@@ -736,6 +804,7 @@ mod tests {
             vec![],
             vec![],
             vec![],
+            vec![],
             0,
             Some(*hash_a.as_bytes()),
         );
@@ -851,6 +920,7 @@ mod tests {
             vec![],
             vec![],
             vec![],
+            vec![],
             0,
             None,
         );
@@ -884,6 +954,58 @@ mod tests {
             rendered.contains("root completeness") || rendered.contains("snapshot"),
             "unexpected error: {rendered}"
         );
+    }
+
+    #[test]
+    fn snapshot_restores_workflow_instance_waiting_state() {
+        let mut kernel = minimal_kernel_non_keyed();
+        let mut snapshot = KernelSnapshot::new(
+            1,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            0,
+            vec![],
+            vec![],
+            vec![WorkflowInstanceSnapshot {
+                instance_id: "com.acme/Workflow@1::".into(),
+                state_bytes: vec![1, 2, 3],
+                inflight_intents: vec![WorkflowInflightIntentSnapshot {
+                    intent_id: [9u8; 32],
+                    origin_module_id: "com.acme/Workflow@1".into(),
+                    origin_instance_key: None,
+                    effect_kind: "http.request".into(),
+                    params_hash: Some(
+                        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .into(),
+                    ),
+                    emitted_at_seq: 7,
+                }],
+                status: WorkflowStatusSnapshot::Waiting,
+                last_processed_event_seq: 7,
+                module_version: Some(
+                    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        .into(),
+                ),
+            }],
+            vec![],
+            0,
+            Some(*kernel.manifest_hash().as_bytes()),
+        );
+        snapshot.set_root_completeness(SnapshotRootCompleteness {
+            manifest_hash: Some(kernel.manifest_hash().as_bytes().to_vec()),
+            ..SnapshotRootCompleteness::default()
+        });
+        kernel.apply_snapshot(snapshot).expect("apply snapshot");
+        let instances = kernel.workflow_instances_snapshot();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].instance_id, "com.acme/Workflow@1::");
+        assert_eq!(instances[0].state_bytes, vec![1, 2, 3]);
+        assert_eq!(instances[0].status, WorkflowStatusSnapshot::Waiting);
+        assert_eq!(instances[0].inflight_intents.len(), 1);
+        assert_eq!(instances[0].inflight_intents[0].intent_id, [9u8; 32]);
     }
 
     #[test]
@@ -1022,6 +1144,8 @@ mod tests {
             idempotency_key: [2u8; 32],
             origin: IntentOriginRecord::Reducer {
                 name: "example/Reducer@1".into(),
+                instance_key: None,
+                emitted_at_seq: Some(0),
             },
         };
         let intent_bytes = serde_cbor::to_vec(&intent).unwrap();
