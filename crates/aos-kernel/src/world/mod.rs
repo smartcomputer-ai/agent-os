@@ -299,7 +299,6 @@ fn normalize_def_kind(input: &str) -> Option<&'static str> {
     match input {
         "defschema" | "schema" => Some("defschema"),
         "defmodule" | "module" => Some("defmodule"),
-        "defplan" | "plan" => Some("defplan"),
         "defcap" | "cap" => Some("defcap"),
         "defeffect" | "effect" => Some("defeffect"),
         "defpolicy" | "policy" => Some("defpolicy"),
@@ -802,9 +801,6 @@ impl<S: Store + 'static> Kernel<S> {
         if let Some(def) = self.module_defs.get(name) {
             return Some(AirNode::Defmodule(def.clone()));
         }
-        if let Some(def) = self.plan_defs.get(name) {
-            return Some(AirNode::Defplan(def.clone()));
-        }
         if let Some(def) = self.cap_defs.get(name) {
             return Some(AirNode::Defcap(def.clone()));
         }
@@ -886,27 +882,6 @@ impl<S: Store + 'static> Kernel<S> {
                     params_schema: None,
                     receipt_schema: None,
                     plan_steps: None,
-                    policy_rules: None,
-                },
-                &kind_filter,
-                prefix,
-            );
-        }
-
-        for (name, def) in self.plan_defs.iter() {
-            let steps = def.steps.len();
-            push_if(
-                &mut entries,
-                "defplan",
-                name.as_str(),
-                || DefListing {
-                    kind: "defplan".into(),
-                    name: name.clone(),
-                    hash: hash_def(AirNode::Defplan(def.clone())),
-                    cap_type: None,
-                    params_schema: None,
-                    receipt_schema: None,
-                    plan_steps: Some(steps),
                     policy_rules: None,
                 },
                 &kind_filter,

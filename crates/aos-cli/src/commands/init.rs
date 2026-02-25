@@ -174,7 +174,6 @@ fn write_manifest_file(manifest_path: &Path) -> Result<()> {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: Vec::new(),
         modules: Vec::new(),
-        plans: Vec::new(),
         effects: Vec::new(),
         caps: Vec::new(),
         policies: Vec::new(),
@@ -182,7 +181,6 @@ fn write_manifest_file(manifest_path: &Path) -> Result<()> {
         defaults: None,
         module_bindings: Default::default(),
         routing: None,
-        triggers: Vec::new(),
     };
     let node = AirNode::Manifest(manifest);
     let json = serde_json::to_string_pretty(&node).context("serialize manifest")?;

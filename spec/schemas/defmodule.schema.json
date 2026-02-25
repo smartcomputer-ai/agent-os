@@ -6,7 +6,7 @@
   "properties": {
     "$kind": { "const": "defmodule" },
     "name": { "$ref": "common.schema.json#/$defs/Name" },
-    "module_kind": { "type": "string", "enum": ["reducer", "pure"] },
+    "module_kind": { "type": "string", "enum": ["workflow", "pure"] },
     "wasm_hash": { "$ref": "common.schema.json#/$defs/Hash" },
     "key_schema": { "$ref": "common.schema.json#/$defs/SchemaRef" },
     "abi": {
@@ -51,7 +51,7 @@
   },
   "required": ["$kind","name","module_kind","wasm_hash","abi"],
   "allOf": [
-    { "if": { "properties": { "module_kind": { "const": "reducer" } } },
+    { "if": { "properties": { "module_kind": { "const": "workflow" } } },
       "then": { "required": ["abi"], "properties": { "abi": { "required": ["reducer"] } } } },
     { "if": { "properties": { "module_kind": { "const": "pure" } } },
       "then": { "required": ["abi"], "properties": { "abi": { "required": ["pure"] } } } }

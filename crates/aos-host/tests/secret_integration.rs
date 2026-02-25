@@ -104,7 +104,6 @@ fn empty_manifest() -> Manifest {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![],
-        plans: vec![],
         effects: vec![],
         caps: vec![],
         policies: vec![],
@@ -112,7 +111,6 @@ fn empty_manifest() -> Manifest {
         defaults: None,
         module_bindings: IndexMap::new(),
         routing: None,
-        triggers: vec![],
     }
 }
 
@@ -130,7 +128,6 @@ fn loaded_manifest_with_secret(binding_id: &str) -> LoadedManifest {
         manifest,
         secrets: vec![secret],
         modules: HashMap::new(),
-        plans: HashMap::new(),
         effects: HashMap::new(),
         caps: HashMap::new(),
         policies: HashMap::new(),
@@ -244,7 +241,6 @@ fn expected_digest_mismatch_fails() {
 fn secret_policy_denies_disallowed_cap_or_plan() {
     let catalog = catalog_with_secret(Some(SecretPolicy {
         allowed_caps: vec!["allowed_cap".into()],
-        allowed_plans: vec!["allowed_plan".into()],
     }));
     let _resolver = MapSecretResolver::new(HashMap::from([(
         "env:LLM_API_KEY".into(),
@@ -280,7 +276,6 @@ fn secret_policy_denies_disallowed_cap_or_plan() {
 fn secret_policy_denies_by_cap_only() {
     let catalog = catalog_with_secret(Some(SecretPolicy {
         allowed_caps: vec!["only_cap".into()],
-        allowed_plans: vec![],
     }));
     let cbor = secret_param_cbor("llm/api", 1);
     // Different cap should be denied regardless of plan
@@ -300,7 +295,6 @@ fn secret_policy_denies_by_cap_only() {
 fn secret_policy_denies_by_plan_only() {
     let catalog = catalog_with_secret(Some(SecretPolicy {
         allowed_caps: vec![],
-        allowed_plans: vec!["only_plan".into()],
     }));
     let cbor = secret_param_cbor("llm/api", 1);
     let err = enforce_secret_policy(

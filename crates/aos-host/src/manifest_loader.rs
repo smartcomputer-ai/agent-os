@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    self as air_types, AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema,
+    self as air_types, AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema,
     DefSecret, HashRef, Manifest, Name, NamedRef, SecretEntry, catalog::EffectCatalog,
     validate_manifest,
 };
@@ -33,7 +33,7 @@ pub struct LoadedAssets {
 }
 
 /// Attempts to load a manifest for the provided example directory by reading AIR JSON assets
-/// under `air/`, versioned `air.*` bundles, `plans/` (legacy), and `defs/`. The `asset_root`
+/// under `air/`, versioned `air.*` bundles, and `defs/`. The `asset_root`
 /// can itself be an AIR bundle (e.g., `examples/06-safe-upgrade/air.v2`). Returns `Ok(None)`
 /// if no manifest is found so callers can fall back to the legacy Rust-built manifests.
 pub fn load_from_assets(store: Arc<FsStore>, asset_root: &Path) -> Result<Option<LoadedManifest>> {
@@ -66,7 +66,6 @@ pub fn load_from_assets_with_imports_and_defs(
     let mut manifest: Option<Manifest> = None;
     let mut schemas: Vec<DefSchema> = Vec::new();
     let mut modules: Vec<DefModule> = Vec::new();
-    let mut plans: Vec<DefPlan> = Vec::new();
     let mut caps: Vec<DefCap> = Vec::new();
     let mut policies: Vec<DefPolicy> = Vec::new();
     let mut secrets: Vec<DefSecret> = Vec::new();
@@ -107,7 +106,6 @@ pub fn load_from_assets_with_imports_and_defs(
                         }
                         AirNode::Defschema(schema) => schemas.push(schema),
                         AirNode::Defmodule(module) => modules.push(module),
-                        AirNode::Defplan(plan) => plans.push(plan),
                         AirNode::Defcap(cap) => caps.push(cap),
                         AirNode::Defpolicy(policy) => policies.push(policy),
                         AirNode::Defsecret(secret) => secrets.push(secret),
@@ -128,7 +126,6 @@ pub fn load_from_assets_with_imports_and_defs(
         &store,
         schemas,
         modules,
-        plans,
         caps,
         policies,
         secrets.clone(),
@@ -141,7 +138,6 @@ pub fn load_from_assets_with_imports_and_defs(
         &loaded.manifest,
         &loaded.modules,
         &loaded.schemas,
-        &loaded.plans,
         &loaded.effects,
         &loaded.caps,
         &loaded.policies,
@@ -161,7 +157,6 @@ pub fn manifest_patch_from_loaded(loaded: &LoadedManifest) -> ManifestPatch {
     nodes.extend(loaded.schemas.values().cloned().map(AirNode::Defschema));
     nodes.extend(loaded.caps.values().cloned().map(AirNode::Defcap));
     nodes.extend(loaded.policies.values().cloned().map(AirNode::Defpolicy));
-    nodes.extend(loaded.plans.values().cloned().map(AirNode::Defplan));
     nodes.extend(loaded.effects.values().cloned().map(AirNode::Defeffect));
 
     ManifestPatch {
@@ -174,7 +169,6 @@ fn write_nodes(
     store: &FsStore,
     schemas: Vec<DefSchema>,
     modules: Vec<DefModule>,
-    plans: Vec<DefPlan>,
     caps: Vec<DefCap>,
     policies: Vec<DefPolicy>,
     secrets: Vec<DefSecret>,
@@ -196,14 +190,6 @@ fn write_nodes(
             .put_node(&AirNode::Defmodule(module))
             .context("store defmodule node")?;
         insert_or_verify_hash("defmodule", &mut hashes.modules, name, hash)?;
-    }
-    for plan in plans {
-        let name = plan.name.clone();
-        reject_sys_name("defplan", name.as_str())?;
-        let hash = store
-            .put_node(&AirNode::Defplan(plan))
-            .context("store defplan node")?;
-        insert_or_verify_hash("defplan", &mut hashes.plans, name, hash)?;
     }
     for cap in caps {
         let name = cap.name.clone();
@@ -273,7 +259,6 @@ fn reject_sys_name(kind: &str, name: &str) -> Result<()> {
 struct StoredHashes {
     schemas: HashMap<Name, HashRef>,
     modules: HashMap<Name, HashRef>,
-    plans: HashMap<Name, HashRef>,
     effects: HashMap<Name, HashRef>,
     caps: HashMap<Name, HashRef>,
     policies: HashMap<Name, HashRef>,
@@ -290,7 +275,6 @@ struct AssetRoot {
 fn patch_manifest_refs(manifest: &mut Manifest, hashes: &StoredHashes) -> Result<()> {
     patch_named_refs("schema", &mut manifest.schemas, &hashes.schemas)?;
     patch_named_refs("module", &mut manifest.modules, &hashes.modules)?;
-    patch_named_refs("plan", &mut manifest.plans, &hashes.plans)?;
     patch_named_refs("effect", &mut manifest.effects, &hashes.effects)?;
     patch_named_refs("cap", &mut manifest.caps, &hashes.caps)?;
     patch_named_refs("policy", &mut manifest.policies, &hashes.policies)?;
@@ -390,7 +374,7 @@ fn normalize_authoring_hashes(value: &mut Value) {
 
 fn normalize_manifest_authoring(map: &mut serde_json::Map<String, Value>) {
     for key in [
-        "schemas", "modules", "plans", "caps", "policies", "effects", "secrets",
+        "schemas", "modules", "caps", "policies", "effects", "secrets",
     ] {
         if let Some(Value::Array(entries)) = map.get_mut(key) {
             for entry in entries {
@@ -448,7 +432,6 @@ fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
         resolved_secrets,
     } = catalog;
     let mut modules = HashMap::new();
-    let mut plans = HashMap::new();
     let mut effects = HashMap::new();
     let mut caps = HashMap::new();
     let mut policies = HashMap::new();
@@ -458,9 +441,6 @@ fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
         match entry.node {
             AirNode::Defmodule(module) => {
                 modules.insert(module.name.clone(), module);
-            }
-            AirNode::Defplan(plan) => {
-                plans.insert(plan.name.clone(), plan);
             }
             AirNode::Defcap(cap) => {
                 caps.insert(cap.name.clone(), cap);
@@ -485,7 +465,6 @@ fn catalog_to_loaded(catalog: Catalog) -> LoadedManifest {
         manifest,
         secrets: resolved_secrets,
         modules,
-        plans,
         effects,
         caps,
         policies,
@@ -504,7 +483,7 @@ fn asset_search_dirs(asset_root: &Path, include_root: bool) -> Result<Vec<PathBu
     if asset_root
         .file_name()
         .and_then(|n| n.to_str())
-        .map(|n| n.starts_with("air") || n == "defs" || n == "plans")
+        .map(|n| n.starts_with("air") || n == "defs")
         .unwrap_or(false)
     {
         dirs.push(asset_root.to_path_buf());
@@ -521,7 +500,7 @@ fn asset_search_dirs(asset_root: &Path, include_root: bool) -> Result<Vec<PathBu
                 Some(s) => s.to_owned(),
                 None => continue,
             };
-            if name == "defs" || name == "plans" || name.starts_with("air") {
+            if name == "defs" || name.starts_with("air") {
                 dirs.push(entry.path());
             }
         }
@@ -672,7 +651,7 @@ mod tests {
 
         let module = DefModule {
             name: "demo/Reducer@1".into(),
-            module_kind: ModuleKind::Reducer,
+            module_kind: ModuleKind::Workflow,
             wasm_hash: HashRef::new(Hash::of_bytes(b"wasm").to_hex()).unwrap(),
             key_schema: None,
             abi: ModuleAbi {
@@ -710,7 +689,6 @@ mod tests {
                 named_ref_from_node(&event_node),
             ],
             modules: vec![named_ref_from_node(&module_node)],
-            plans: Vec::new(),
             effects: aos_air_types::builtins::builtin_effects()
                 .iter()
                 .map(|e| NamedRef {
@@ -724,7 +702,6 @@ mod tests {
             defaults: None,
             module_bindings: IndexMap::new(),
             routing: None,
-            triggers: Vec::new(),
         };
         manifest
             .schemas
@@ -786,7 +763,6 @@ mod tests {
                 hash: aos_air_types::HashRef::new(ZERO_HASH_SENTINEL).expect("zero hash"),
             }],
             modules: Vec::new(),
-            plans: Vec::new(),
             effects: Vec::new(),
             caps: Vec::new(),
             policies: Vec::new(),
@@ -794,7 +770,6 @@ mod tests {
             defaults: None,
             module_bindings: IndexMap::new(),
             routing: None,
-            triggers: Vec::new(),
         };
         write_node(
             &world_air.join("manifest.air.json"),
@@ -842,7 +817,6 @@ mod tests {
                 hash: aos_air_types::HashRef::new(ZERO_HASH_SENTINEL).expect("zero hash"),
             }],
             modules: Vec::new(),
-            plans: Vec::new(),
             effects: Vec::new(),
             caps: Vec::new(),
             policies: Vec::new(),
@@ -850,7 +824,6 @@ mod tests {
             defaults: None,
             module_bindings: IndexMap::new(),
             routing: None,
-            triggers: Vec::new(),
         };
         write_node(
             &world_air.join("manifest.air.json"),
@@ -881,7 +854,6 @@ mod tests {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: Vec::new(),
             modules: Vec::new(),
-            plans: Vec::new(),
             effects: Vec::new(),
             caps: Vec::new(),
             policies: Vec::new(),
@@ -889,7 +861,6 @@ mod tests {
             defaults: None,
             module_bindings: IndexMap::new(),
             routing: None,
-            triggers: Vec::new(),
         };
         write_node(
             &world_air.join("manifest.air.json"),
@@ -919,7 +890,6 @@ mod tests {
         let name = match node {
             AirNode::Defschema(schema) => schema.name.clone(),
             AirNode::Defmodule(module) => module.name.clone(),
-            AirNode::Defplan(plan) => plan.name.clone(),
             AirNode::Defcap(cap) => cap.name.clone(),
             AirNode::Defpolicy(policy) => policy.name.clone(),
             AirNode::Defsecret(secret) => secret.name.clone(),

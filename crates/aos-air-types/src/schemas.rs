@@ -22,12 +22,14 @@ embed_schema! {
     COMMON => "../../../spec/schemas/common.schema.json",
     DEFSCHEMA => "../../../spec/schemas/defschema.schema.json",
     DEFMODULE => "../../../spec/schemas/defmodule.schema.json",
-    DEFPLAN => "../../../spec/schemas/defplan.schema.json",
     DEFCAP => "../../../spec/schemas/defcap.schema.json",
     DEFPOLICY => "../../../spec/schemas/defpolicy.schema.json",
     MANIFEST => "../../../spec/schemas/manifest.schema.json",
     PATCH => "../../../spec/schemas/patch.schema.json",
 }
+
+// Legacy schema kept for archival/tests only; not part of active schema set.
+pub const DEFPLAN: &str = include_str!("../../../spec/schemas/defplan.schema.json");
 
 pub fn find(name: &str) -> Option<&'static str> {
     ALL.iter()

@@ -59,7 +59,7 @@ async fn control_workspace_internal_effects() {
     });
     let routing = vec![RoutingEvent {
         event: fixtures::schema("sys/WorkspaceCommit@1"),
-        reducer: "sys/Workspace@1".to_string(),
+        module: "sys/Workspace@1".to_string(),
         key_field: Some("workspace".into()),
     }];
     let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);

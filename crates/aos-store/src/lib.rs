@@ -53,18 +53,6 @@ pub enum StoreError {
         name: String,
         expected: &'static str,
     },
-    #[error("plan validation failed for '{name}': {source}")]
-    PlanValidation {
-        name: String,
-        #[source]
-        source: aos_air_types::validate::ValidationError,
-    },
-    #[error("plan literal normalization failed for '{name}': {source}")]
-    PlanNormalization {
-        name: String,
-        #[source]
-        source: aos_air_types::plan_literals::PlanLiteralError,
-    },
     #[error("secret {alias}@{version} has invalid version (must be >=1) (context: {context})")]
     InvalidSecretVersion {
         alias: String,
@@ -95,22 +83,6 @@ pub enum StoreError {
     UnsupportedAirVersion { found: String, supported: String },
     #[error("manifest must declare air_version (supported: {supported})")]
     MissingAirVersion { supported: String },
-    #[error(
-        "plan {plan} triggered with correlate_by='{key}' must have where clause on await_event step {step_id}"
-    )]
-    MissingCorrelationPredicate {
-        plan: String,
-        step_id: String,
-        key: String,
-    },
-    #[error(
-        "plan {plan} await_event step {step_id} must reference correlation key '{key}' or @var:correlation_id"
-    )]
-    MissingCorrelationReference {
-        plan: String,
-        step_id: String,
-        key: String,
-    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

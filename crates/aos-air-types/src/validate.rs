@@ -1,165 +1,44 @@
 use std::collections::{HashMap, HashSet};
 
-use petgraph::{algo::is_cyclic_directed, graphmap::DiGraphMap};
-use serde_json;
 use thiserror::Error;
 
 use crate::{
-    CapGrantName, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, EffectKind, Expr, Manifest,
-    PlanStepKind, RoutingEvent, SecretEntry, StepId, TypeExpr, builtins,
+    DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, ModuleKind, RoutingEvent,
+    SecretEntry, TypeExpr, builtins,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ValidationError {
-    #[error("plan {plan} must contain at least one step")]
-    EmptyPlan { plan: String },
-    #[error("plan {plan} has duplicate step id {step_id}")]
-    DuplicateStepId { plan: String, step_id: StepId },
-    #[error("plan {plan} has duplicate edge {from} -> {to}")]
-    DuplicateEdge {
-        plan: String,
-        from: StepId,
-        to: StepId,
-    },
-    #[error("plan {plan} edge references unknown step id {step_id}")]
-    EdgeReferencesUnknownStep { plan: String, step_id: StepId },
-    #[error("plan {plan} contains cycles")]
-    CyclicPlan { plan: String },
-    #[error(
-        "plan {plan} declared required_caps {declared:?} but derived {derived:?} from emit_effect steps"
-    )]
-    DeclaredCapsMismatch {
-        plan: String,
-        declared: Vec<CapGrantName>,
-        derived: Vec<CapGrantName>,
-    },
-    #[error(
-        "plan {plan} declared allowed_effects {declared:?} but derived {derived:?} from emit_effect steps"
-    )]
-    DeclaredEffectsMismatch {
-        plan: String,
-        declared: Vec<EffectKind>,
-        derived: Vec<EffectKind>,
-    },
-    #[error("plan {plan} declares duplicate effect handle '{handle}'")]
-    DuplicateEffectHandle { plan: String, handle: String },
-    #[error("plan {plan} step {step_id} await_receipt 'for' must be an @var:handle reference")]
-    AwaitReceiptInvalidReference { plan: String, step_id: StepId },
-    #[error("plan {plan} step {step_id} awaits receipt for unknown handle {handle}")]
-    AwaitReceiptUnknownHandle {
-        plan: String,
-        step_id: StepId,
-        handle: String,
-    },
-    #[error("plan {plan} step {step_id} spawn_plan references unknown child plan '{child_plan}'")]
-    SpawnPlanUnknownPlan {
-        plan: String,
-        step_id: StepId,
-        child_plan: String,
-    },
-    #[error(
-        "plan {plan} step {step_id} spawn_for_each references unknown child plan '{child_plan}'"
-    )]
-    SpawnForEachUnknownPlan {
-        plan: String,
-        step_id: StepId,
-        child_plan: String,
-    },
-    #[error(
-        "plan {plan} step {step_id} await_plan 'for' must be @var:<handle> or @step:<spawn>.handle"
-    )]
-    AwaitPlanInvalidReference { plan: String, step_id: StepId },
-    #[error("plan {plan} step {step_id} await_plan references unknown handle source {reference}")]
-    AwaitPlanUnknownHandle {
-        plan: String,
-        step_id: StepId,
-        reference: String,
-    },
-    #[error(
-        "plan {plan} step {step_id} await_plans_all handles must be @var:<handles> or @step:<spawn>.handles"
-    )]
-    AwaitPlansAllInvalidReference { plan: String, step_id: StepId },
-    #[error(
-        "plan {plan} step {step_id} await_plans_all references unknown handles source {reference}"
-    )]
-    AwaitPlansAllUnknownHandles {
-        plan: String,
-        step_id: StepId,
-        reference: String,
-    },
-    #[error(
-        "plan {plan} await_event step {step_id} where clause references unknown symbol {reference}"
-    )]
-    AwaitEventUnknownReference {
-        plan: String,
-        step_id: StepId,
-        reference: String,
-    },
-    #[error("plan {plan} invariant {index} references unknown symbol {reference}")]
-    InvariantUnknownReference {
-        plan: String,
-        index: usize,
-        reference: String,
-    },
-    #[error("plan {plan} invariant {index} may not reference @event")]
-    InvariantEventReference { plan: String, index: usize },
-    #[error("route to keyed reducer '{reducer}' must specify key_field")]
-    RoutingMissingKeyField { reducer: String },
-    #[error("route to non-keyed reducer '{reducer}' must not specify key_field")]
-    RoutingUnexpectedKeyField { reducer: String },
-    #[error("route to reducer '{reducer}' references unknown module")]
-    RoutingUnknownReducer { reducer: String },
-    #[error(
-        "route to reducer '{reducer}' uses schema '{event}' but reducer ABI declares '{expected}'"
-    )]
+    #[error("route to keyed module '{module}' must specify key_field")]
+    RoutingMissingKeyField { module: String },
+    #[error("route to non-keyed module '{module}' must not specify key_field")]
+    RoutingUnexpectedKeyField { module: String },
+    #[error("route to module '{module}' references unknown module")]
+    RoutingUnknownModule { module: String },
+    #[error("route to module '{module}' uses schema '{event}' but module ABI declares '{expected}'")]
     RoutingSchemaMismatch {
-        reducer: String,
+        module: String,
         event: String,
         expected: String,
     },
     #[error(
-        "route to reducer '{reducer}' uses key_field '{key_field}' with schema '{event}', but key schema '{expected}' does not match '{found}'"
+        "route to module '{module}' uses key_field '{key_field}' with schema '{event}', but key schema '{expected}' does not match '{found}'"
     )]
     RoutingKeyFieldMismatch {
-        reducer: String,
+        module: String,
         event: String,
         key_field: String,
         expected: String,
         found: String,
     },
-    #[error("reducer '{reducer}' event family schema '{event_schema}' is invalid: {reason}")]
-    ReducerEventFamilyInvalid {
-        reducer: String,
+    #[error("module '{module}' event family schema '{event_schema}' is invalid: {reason}")]
+    ModuleEventFamilyInvalid {
+        module: String,
         event_schema: String,
         reason: String,
     },
-    #[error(
-        "reducer '{reducer}' emits '{effect_kind}' but event schema '{event_schema}' lacks receipt '{receipt_schema}'"
-    )]
-    ReducerReceiptSchemaMissing {
-        reducer: String,
-        effect_kind: String,
-        event_schema: String,
-        receipt_schema: String,
-    },
     #[error("schema '{schema}' not found")]
     SchemaNotFound { schema: String },
-    #[error(
-        "trigger event '{event}' -> plan '{plan}' when clause references unsupported symbol {reference}; only @event.* is allowed"
-    )]
-    TriggerWhenInvalidReference {
-        event: String,
-        plan: String,
-        reference: String,
-    },
-    #[error(
-        "trigger event '{event}' -> plan '{plan}' input_expr references unsupported symbol {reference}; only @event.* is allowed"
-    )]
-    TriggerInputExprInvalidReference {
-        event: String,
-        plan: String,
-        reference: String,
-    },
     #[error("effect kind '{kind}' not found in catalog or built-ins")]
     EffectNotFound { kind: String },
     #[error("capability grant '{cap}' not found")]
@@ -177,445 +56,38 @@ pub enum ValidationError {
         expected: String,
         found: String,
     },
-}
-
-fn sort_and_dedup_caps(mut caps: Vec<CapGrantName>) -> Vec<CapGrantName> {
-    caps.sort();
-    caps.dedup();
-    caps
-}
-
-fn sort_and_dedup_effects(mut effects: Vec<EffectKind>) -> Vec<EffectKind> {
-    effects.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-    effects.dedup();
-    effects
-}
-
-pub fn derive_plan_caps_and_effects(plan: &DefPlan) -> (Vec<CapGrantName>, Vec<EffectKind>) {
-    let mut caps: HashSet<CapGrantName> = HashSet::new();
-    let mut effects: HashSet<EffectKind> = HashSet::new();
-
-    for step in &plan.steps {
-        if let PlanStepKind::EmitEffect(emit) = &step.kind {
-            caps.insert(emit.cap.clone());
-            effects.insert(emit.kind.clone());
-        }
-    }
-
-    let mut caps: Vec<_> = caps.into_iter().collect();
-    let mut effects: Vec<_> = effects.into_iter().collect();
-    caps.sort();
-    effects.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-    (caps, effects)
-}
-
-/// Fill derived caps/effects when the author omits them and canonicalize order when provided.
-pub fn normalize_plan_caps_and_effects(plan: &mut DefPlan) {
-    let (derived_caps, derived_effects) = derive_plan_caps_and_effects(plan);
-
-    if plan.required_caps.is_empty() {
-        plan.required_caps = derived_caps.clone();
-    } else {
-        plan.required_caps = sort_and_dedup_caps(plan.required_caps.clone());
-    }
-
-    if plan.allowed_effects.is_empty() {
-        plan.allowed_effects = derived_effects.clone();
-    } else {
-        plan.allowed_effects = sort_and_dedup_effects(plan.allowed_effects.clone());
-    }
-}
-
-pub fn validate_plan(plan: &DefPlan) -> Result<(), ValidationError> {
-    if plan.steps.is_empty() {
-        return Err(ValidationError::EmptyPlan {
-            plan: plan.name.clone(),
-        });
-    }
-
-    let mut step_ids = HashSet::new();
-    for step in &plan.steps {
-        if !step_ids.insert(step.id.as_str()) {
-            return Err(ValidationError::DuplicateStepId {
-                plan: plan.name.clone(),
-                step_id: step.id.clone(),
-            });
-        }
-    }
-
-    let mut graph = DiGraphMap::<&str, ()>::new();
-    for step in &plan.steps {
-        graph.add_node(step.id.as_str());
-    }
-    let mut edges = HashSet::new();
-    for edge in &plan.edges {
-        if !step_ids.contains(edge.from.as_str()) {
-            return Err(ValidationError::EdgeReferencesUnknownStep {
-                plan: plan.name.clone(),
-                step_id: edge.from.clone(),
-            });
-        }
-        if !step_ids.contains(edge.to.as_str()) {
-            return Err(ValidationError::EdgeReferencesUnknownStep {
-                plan: plan.name.clone(),
-                step_id: edge.to.clone(),
-            });
-        }
-        let key = (edge.from.clone(), edge.to.clone());
-        if !edges.insert(key.clone()) {
-            return Err(ValidationError::DuplicateEdge {
-                plan: plan.name.clone(),
-                from: key.0,
-                to: key.1,
-            });
-        }
-        graph.add_edge(edge.from.as_str(), edge.to.as_str(), ());
-    }
-    if is_cyclic_directed(&graph) {
-        return Err(ValidationError::CyclicPlan {
-            plan: plan.name.clone(),
-        });
-    }
-
-    let (derived_caps, derived_effects) = derive_plan_caps_and_effects(plan);
-
-    let declared_caps = sort_and_dedup_caps(plan.required_caps.clone());
-    if !plan.required_caps.is_empty() && declared_caps != derived_caps {
-        return Err(ValidationError::DeclaredCapsMismatch {
-            plan: plan.name.clone(),
-            declared: declared_caps,
-            derived: derived_caps,
-        });
-    }
-
-    let declared_effects = sort_and_dedup_effects(plan.allowed_effects.clone());
-    if !plan.allowed_effects.is_empty() && declared_effects != derived_effects {
-        return Err(ValidationError::DeclaredEffectsMismatch {
-            plan: plan.name.clone(),
-            declared: declared_effects,
-            derived: derived_effects,
-        });
-    }
-
-    // "correlation_id" is injected by the kernel when a plan is started via a trigger
-    // that specifies `correlate_by`. Allow expressions to reference it even though the
-    // value is only present at runtime when correlation is configured.
-    let mut available_vars: HashSet<String> = plan.locals.keys().cloned().collect();
-    available_vars.insert("correlation_id".into());
-    let mut effect_handles: HashSet<String> = HashSet::new();
-    let mut spawned_handle_vars: HashMap<String, String> = HashMap::new();
-    let mut spawned_handles_vars: HashMap<String, String> = HashMap::new();
-    let mut spawned_handle_steps: HashMap<String, String> = HashMap::new();
-    let mut spawned_handles_steps: HashMap<String, String> = HashMap::new();
-    for step in &plan.steps {
-        match &step.kind {
-            PlanStepKind::EmitEffect(emit) => {
-                if !effect_handles.insert(emit.bind.effect_id_as.clone()) {
-                    return Err(ValidationError::DuplicateEffectHandle {
-                        plan: plan.name.clone(),
-                        handle: emit.bind.effect_id_as.clone(),
-                    });
-                }
-                available_vars.insert(emit.bind.effect_id_as.clone());
-            }
-            PlanStepKind::Assign(assign) => {
-                available_vars.insert(assign.bind.var.clone());
-            }
-            PlanStepKind::AwaitReceipt(await_step) => {
-                validate_await_receipt(plan, &step.id, await_step, &effect_handles)?;
-                available_vars.insert(await_step.bind.var.clone());
-            }
-            PlanStepKind::AwaitEvent(await_step) => {
-                if let Some(predicate) = &await_step.where_clause {
-                    validate_where_clause(plan, &step.id, predicate, &available_vars, &step_ids)?;
-                }
-                available_vars.insert(await_step.bind.var.clone());
-            }
-            PlanStepKind::SpawnPlan(spawn) => {
-                spawned_handle_vars.insert(spawn.bind.handle_as.clone(), spawn.plan.clone());
-                spawned_handle_steps.insert(step.id.clone(), spawn.plan.clone());
-                available_vars.insert(spawn.bind.handle_as.clone());
-            }
-            PlanStepKind::AwaitPlan(await_step) => {
-                let resolved_plan =
-                    if let Some(handle_var) = extract_handle_reference(&await_step.for_expr) {
-                        spawned_handle_vars
-                            .get(&handle_var)
-                            .cloned()
-                            .ok_or_else(|| ValidationError::AwaitPlanUnknownHandle {
-                                plan: plan.name.clone(),
-                                step_id: step.id.clone(),
-                                reference: format!("@var:{handle_var}"),
-                            })?
-                    } else if let Some(step_ref) =
-                        extract_step_field_reference(&await_step.for_expr, "handle")
-                    {
-                        spawned_handle_steps
-                            .get(&step_ref)
-                            .cloned()
-                            .ok_or_else(|| ValidationError::AwaitPlanUnknownHandle {
-                                plan: plan.name.clone(),
-                                step_id: step.id.clone(),
-                                reference: format!("@step:{step_ref}.handle"),
-                            })?
-                    } else {
-                        return Err(ValidationError::AwaitPlanInvalidReference {
-                            plan: plan.name.clone(),
-                            step_id: step.id.clone(),
-                        });
-                    };
-                let _ = resolved_plan;
-                available_vars.insert(await_step.bind.var.clone());
-            }
-            PlanStepKind::SpawnForEach(spawn) => {
-                spawned_handles_vars.insert(spawn.bind.handles_as.clone(), spawn.plan.clone());
-                spawned_handles_steps.insert(step.id.clone(), spawn.plan.clone());
-                available_vars.insert(spawn.bind.handles_as.clone());
-            }
-            PlanStepKind::AwaitPlansAll(await_step) => {
-                if let Some(handles_var) = extract_handle_reference(&await_step.handles) {
-                    if !spawned_handles_vars.contains_key(&handles_var) {
-                        return Err(ValidationError::AwaitPlansAllUnknownHandles {
-                            plan: plan.name.clone(),
-                            step_id: step.id.clone(),
-                            reference: format!("@var:{handles_var}"),
-                        });
-                    }
-                } else if let Some(step_ref) =
-                    extract_step_field_reference(&await_step.handles, "handles")
-                {
-                    if !spawned_handles_steps.contains_key(&step_ref) {
-                        return Err(ValidationError::AwaitPlansAllUnknownHandles {
-                            plan: plan.name.clone(),
-                            step_id: step.id.clone(),
-                            reference: format!("@step:{step_ref}.handles"),
-                        });
-                    }
-                } else {
-                    return Err(ValidationError::AwaitPlansAllInvalidReference {
-                        plan: plan.name.clone(),
-                        step_id: step.id.clone(),
-                    });
-                }
-                available_vars.insert(await_step.bind.results_as.clone());
-            }
-            _ => {}
-        }
-    }
-
-    let declared_vars = available_vars;
-    validate_invariants(plan, &declared_vars, &step_ids)?;
-
-    Ok(())
-}
-
-pub fn validate_plans(plans: &[DefPlan]) -> HashMap<String, Result<(), ValidationError>> {
-    plans
-        .iter()
-        .map(|plan| (plan.name.clone(), validate_plan(plan)))
-        .collect()
-}
-
-fn validate_await_receipt(
-    plan: &DefPlan,
-    step_id: &StepId,
-    await_step: &crate::PlanStepAwaitReceipt,
-    effect_handles: &HashSet<String>,
-) -> Result<(), ValidationError> {
-    let handle = extract_handle_reference(&await_step.for_expr).ok_or_else(|| {
-        ValidationError::AwaitReceiptInvalidReference {
-            plan: plan.name.clone(),
-            step_id: step_id.clone(),
-        }
-    })?;
-
-    if !effect_handles.contains(&handle) {
-        return Err(ValidationError::AwaitReceiptUnknownHandle {
-            plan: plan.name.clone(),
-            step_id: step_id.clone(),
-            handle,
-        });
-    }
-
-    Ok(())
-}
-
-fn validate_where_clause(
-    plan: &DefPlan,
-    step_id: &StepId,
-    predicate: &Expr,
-    available_vars: &HashSet<String>,
-    step_ids: &HashSet<&str>,
-) -> Result<(), ValidationError> {
-    let mut refs = Vec::new();
-    collect_expr_refs(predicate, &mut refs);
-    for reference in refs {
-        match classify_reference(&reference) {
-            ReferenceKind::PlanInput => {}
-            ReferenceKind::Var(name) => {
-                if !available_vars.contains(&name) {
-                    return Err(ValidationError::AwaitEventUnknownReference {
-                        plan: plan.name.clone(),
-                        step_id: step_id.clone(),
-                        reference,
-                    });
-                }
-            }
-            ReferenceKind::Step(name) => {
-                if !step_ids.contains(name.as_str()) {
-                    return Err(ValidationError::AwaitEventUnknownReference {
-                        plan: plan.name.clone(),
-                        step_id: step_id.clone(),
-                        reference,
-                    });
-                }
-            }
-            ReferenceKind::Event => {}
-            ReferenceKind::Unknown => {
-                return Err(ValidationError::AwaitEventUnknownReference {
-                    plan: plan.name.clone(),
-                    step_id: step_id.clone(),
-                    reference,
-                });
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_invariants(
-    plan: &DefPlan,
-    declared_vars: &HashSet<String>,
-    step_ids: &HashSet<&str>,
-) -> Result<(), ValidationError> {
-    for (index, invariant) in plan.invariants.iter().enumerate() {
-        let mut refs = Vec::new();
-        collect_expr_refs(invariant, &mut refs);
-        for reference in refs {
-            match classify_reference(&reference) {
-                ReferenceKind::PlanInput => {}
-                ReferenceKind::Var(name) => {
-                    if !declared_vars.contains(&name) {
-                        return Err(ValidationError::InvariantUnknownReference {
-                            plan: plan.name.clone(),
-                            index,
-                            reference,
-                        });
-                    }
-                }
-                ReferenceKind::Step(name) => {
-                    if !step_ids.contains(name.as_str()) {
-                        return Err(ValidationError::InvariantUnknownReference {
-                            plan: plan.name.clone(),
-                            index,
-                            reference,
-                        });
-                    }
-                }
-                ReferenceKind::Event => {
-                    return Err(ValidationError::InvariantEventReference {
-                        plan: plan.name.clone(),
-                        index,
-                    });
-                }
-                ReferenceKind::Unknown => {
-                    return Err(ValidationError::InvariantUnknownReference {
-                        plan: plan.name.clone(),
-                        index,
-                        reference,
-                    });
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn extract_handle_reference(expr: &Expr) -> Option<String> {
-    if let Expr::Ref(r) = expr {
-        if let Some(rest) = r.reference.strip_prefix("@var:") {
-            let mut parts = rest.split('.');
-            let name = parts.next().unwrap_or(rest);
-            if parts.next().is_none() {
-                return Some(name.to_string());
-            }
-        }
-    }
-    None
-}
-
-fn extract_step_field_reference(expr: &Expr, field: &str) -> Option<String> {
-    let Expr::Ref(reference) = expr else {
-        return None;
-    };
-    let rest = reference.reference.strip_prefix("@step:")?;
-    let mut parts = rest.split('.');
-    let step_id = parts.next()?;
-    let step_field = parts.next()?;
-    if parts.next().is_some() || step_id.is_empty() || step_field != field {
-        return None;
-    }
-    Some(step_id.to_string())
-}
-
-fn collect_expr_refs(expr: &Expr, refs: &mut Vec<String>) {
-    match expr {
-        Expr::Ref(reference) => refs.push(reference.reference.clone()),
-        Expr::Const(_) => {}
-        Expr::Op(op) => {
-            for arg in &op.args {
-                collect_expr_refs(arg, refs);
-            }
-        }
-        Expr::Record(record) => {
-            for value in record.record.values() {
-                collect_expr_refs(value, refs);
-            }
-        }
-        Expr::List(list) => {
-            for value in &list.list {
-                collect_expr_refs(value, refs);
-            }
-        }
-        Expr::Set(set) => {
-            for value in &set.set {
-                collect_expr_refs(value, refs);
-            }
-        }
-        Expr::Map(map) => {
-            for entry in &map.map {
-                collect_expr_refs(&entry.key, refs);
-                collect_expr_refs(&entry.value, refs);
-            }
-        }
-        Expr::Variant(variant) => {
-            if let Some(value) = &variant.variant.value {
-                collect_expr_refs(value, refs);
-            }
-        }
-    }
+    #[error("workflow module '{module}' must define reducer ABI")]
+    WorkflowAbiMissingReducer { module: String },
+    #[error("pure module '{module}' must define pure ABI")]
+    PureAbiMissingPure { module: String },
+    #[error("pure module '{module}' must not define reducer ABI")]
+    PureAbiHasReducer { module: String },
 }
 
 pub fn validate_manifest(
     manifest: &Manifest,
     modules: &HashMap<String, DefModule>,
     schemas: &HashMap<String, DefSchema>,
-    plans: &HashMap<String, DefPlan>,
     effects: &HashMap<String, DefEffect>,
-    caps: &HashMap<String, crate::DefCap>,
+    caps: &HashMap<String, DefCap>,
     policies: &HashMap<String, DefPolicy>,
 ) -> Result<(), ValidationError> {
-    let schema_exists =
-        |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
-    let defcap_listed = |name: &str| {
-        manifest.caps.iter().any(|cap| cap.name.as_str() == name)
-            || builtins::find_builtin_cap(name).is_some()
+    let schema_exists = |name: &str| {
+        schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some()
     };
+    let schema_type = |name: &str| -> Option<TypeExpr> {
+        schemas
+            .get(name)
+            .map(|schema| schema.ty.clone())
+            .or_else(|| builtins::find_builtin_schema(name).map(|builtin| builtin.schema.ty.clone()))
+    };
+
     let mut known_effect_kinds: HashSet<String> = builtins::builtin_effects()
         .iter()
         .map(|e| e.effect.kind.as_str().to_string())
         .collect();
     known_effect_kinds.extend(effects.values().map(|def| def.kind.as_str().to_string()));
+
     let mut effect_cap_types: HashMap<String, String> = HashMap::new();
     for builtin in builtins::builtin_effects() {
         effect_cap_types.insert(
@@ -629,6 +101,7 @@ pub fn validate_manifest(
             effect.cap_type.as_str().to_string(),
         );
     }
+
     let mut defcap_types: HashMap<String, String> = HashMap::new();
     for builtin in builtins::builtin_caps() {
         defcap_types.insert(
@@ -639,238 +112,132 @@ pub fn validate_manifest(
     for cap in caps.values() {
         defcap_types.insert(cap.name.clone(), cap.cap_type.as_str().to_string());
     }
-    let mut grant_map: HashMap<String, &crate::CapGrant> = HashMap::new();
+
+    let defcap_listed = |name: &str| {
+        manifest.caps.iter().any(|cap| cap.name.as_str() == name)
+            || builtins::find_builtin_cap(name).is_some()
+    };
+
+    let mut grant_map: HashMap<String, String> = HashMap::new();
     if let Some(defaults) = manifest.defaults.as_ref() {
         for grant in &defaults.cap_grants {
-            if grant_map.insert(grant.name.clone(), grant).is_some() {
+            if grant_map.insert(grant.name.clone(), grant.cap.clone()).is_some() {
                 return Err(ValidationError::DuplicateCapabilityGrant {
                     cap: grant.name.clone(),
                 });
             }
-            if !defcap_listed(grant.cap.as_str()) {
-                return Err(ValidationError::CapabilityDefinitionNotFound {
-                    cap: grant.cap.clone(),
-                });
-            }
-            if !defcap_types.contains_key(grant.cap.as_str()) {
+            if !defcap_listed(grant.cap.as_str()) || !defcap_types.contains_key(grant.cap.as_str()) {
                 return Err(ValidationError::CapabilityDefinitionNotFound {
                     cap: grant.cap.clone(),
                 });
             }
         }
     }
+
     let grant_exists = |name: &str| grant_map.contains_key(name);
     let cap_type_for_grant = |grant_name: &str| -> Result<String, ValidationError> {
-        let grant = grant_map.get(grant_name).copied().ok_or_else(|| {
-            ValidationError::CapabilityNotFound {
+        let cap_name = grant_map
+            .get(grant_name)
+            .ok_or_else(|| ValidationError::CapabilityNotFound {
                 cap: grant_name.to_string(),
-            }
-        })?;
-        if !defcap_listed(grant.cap.as_str()) {
+            })?;
+        if !defcap_listed(cap_name.as_str()) {
             return Err(ValidationError::CapabilityDefinitionNotFound {
-                cap: grant.cap.clone(),
+                cap: cap_name.clone(),
             });
         }
         defcap_types
-            .get(grant.cap.as_str())
+            .get(cap_name.as_str())
             .cloned()
             .ok_or_else(|| ValidationError::CapabilityDefinitionNotFound {
-                cap: grant.cap.clone(),
+                cap: cap_name.clone(),
             })
-    };
-
-    let schema_type = |name: &str| -> Option<TypeExpr> {
-        schemas
-            .get(name)
-            .map(|schema| schema.ty.clone())
-            .or_else(|| {
-                builtins::find_builtin_schema(name).map(|builtin| builtin.schema.ty.clone())
-            })
-    };
-    let resolve_type = |ty: &TypeExpr| -> Option<TypeExpr> {
-        match ty {
-            TypeExpr::Ref(reference) => schema_type(reference.reference.as_str()),
-            _ => Some(ty.clone()),
-        }
-    };
-    let type_eq = |left: &TypeExpr, right: &TypeExpr| -> bool {
-        match (serde_json::to_value(left), serde_json::to_value(right)) {
-            (Ok(l), Ok(r)) => l == r,
-            _ => false,
-        }
-    };
-    let type_name = |ty: &TypeExpr| -> String {
-        match ty {
-            TypeExpr::Ref(reference) => reference.reference.as_str().to_string(),
-            _ => format!("{ty:?}"),
-        }
-    };
-    let event_in_family = |event: &str, family_name: &str, family_schema: &TypeExpr| -> bool {
-        if event == family_name {
-            return true;
-        }
-        match family_schema {
-            TypeExpr::Ref(reference) => reference.reference.as_str() == event,
-            TypeExpr::Variant(variant) => variant.variant.values().any(|ty| {
-                matches!(ty, TypeExpr::Ref(reference) if reference.reference.as_str() == event)
-            }),
-            _ => false,
-        }
-    };
-    let receipt_schema_allows_missing_key_field = |event_schema: &str| {
-        matches!(
-            event_schema,
-            "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
-        )
-    };
-    let key_field_type = |event_schema: &TypeExpr, key_field: &str| {
-        let segments: Vec<&str> = key_field.split('.').filter(|s| !s.is_empty()).collect();
-        if segments.is_empty() {
-            return None;
-        }
-        let resolved = resolve_type(event_schema)?;
-        if let TypeExpr::Variant(variant) = &resolved {
-            if segments[0] == "$value" {
-                let remaining = &segments[1..];
-                if remaining.is_empty() {
-                    return None;
-                }
-                let mut found: Option<TypeExpr> = None;
-                for ty in variant.variant.values() {
-                    if let TypeExpr::Ref(reference) = ty {
-                        if receipt_schema_allows_missing_key_field(reference.reference.as_str()) {
-                            continue;
-                        }
-                    }
-                    let resolved_arm = resolve_type(ty)?;
-                    let mut current = resolved_arm;
-                    for seg in remaining {
-                        current = match current {
-                            TypeExpr::Record(record) => {
-                                let field_ty = record.record.get(*seg)?;
-                                resolve_type(field_ty)?
-                            }
-                            _ => return None,
-                        };
-                    }
-                    if let Some(existing) = &found {
-                        let resolved_existing = resolve_type(existing)?;
-                        let resolved_current = resolve_type(&current)?;
-                        if !type_eq(&resolved_existing, &resolved_current) {
-                            return None;
-                        }
-                    } else {
-                        found = Some(current);
-                    }
-                }
-                return found;
-            }
-            if segments[0] == "$tag" {
-                return None;
-            }
-            return None;
-        }
-
-        let mut current = resolved;
-        for seg in segments {
-            current = match current {
-                TypeExpr::Record(record) => {
-                    let field_ty = record.record.get(seg)?;
-                    resolve_type(field_ty)?
-                }
-                _ => return None,
-            };
-        }
-        Some(current)
-    };
-    let key_type_matches = |field_ty: &TypeExpr, key_schema: &TypeExpr| {
-        let resolved_field = resolve_type(field_ty)?;
-        let resolved_key = resolve_type(key_schema)?;
-        if type_eq(&resolved_field, &resolved_key) {
-            return Some(true);
-        }
-        if let (TypeExpr::Ref(field_ref), TypeExpr::Ref(key_ref)) = (field_ty, key_schema) {
-            return Some(field_ref.reference == key_ref.reference);
-        }
-        Some(false)
     };
 
     if let Some(routing) = manifest.routing.as_ref() {
         for RoutingEvent {
             event,
-            reducer,
+            module,
             key_field,
-        } in &routing.events
+        } in &routing.subscriptions
         {
             if !schema_exists(event.as_str()) {
                 return Err(ValidationError::SchemaNotFound {
                     schema: event.as_str().to_string(),
                 });
             }
-            let module =
-                modules
-                    .get(reducer)
-                    .ok_or_else(|| ValidationError::RoutingUnknownReducer {
-                        reducer: reducer.clone(),
-                    })?;
-            if let Some(reducer_abi) = module.abi.reducer.as_ref() {
-                let expected = reducer_abi.event.as_str();
-                let family_schema =
-                    schema_type(expected).ok_or_else(|| ValidationError::SchemaNotFound {
-                        schema: expected.to_string(),
-                    })?;
-                if !event_in_family(event.as_str(), expected, &family_schema) {
-                    return Err(ValidationError::RoutingSchemaMismatch {
-                        reducer: reducer.clone(),
-                        event: event.as_str().to_string(),
-                        expected: expected.to_string(),
-                    });
-                }
+
+            let module_def = modules
+                .get(module)
+                .ok_or_else(|| ValidationError::RoutingUnknownModule {
+                    module: module.clone(),
+                })?;
+            let reducer_abi = module_def
+                .abi
+                .reducer
+                .as_ref()
+                .ok_or_else(|| ValidationError::WorkflowAbiMissingReducer {
+                    module: module.clone(),
+                })?;
+
+            let expected = reducer_abi.event.as_str();
+            let family_schema = schema_type(expected).ok_or_else(|| ValidationError::SchemaNotFound {
+                schema: expected.to_string(),
+            })?;
+            if !event_in_family(event.as_str(), expected, &family_schema) {
+                return Err(ValidationError::RoutingSchemaMismatch {
+                    module: module.clone(),
+                    event: event.as_str().to_string(),
+                    expected: expected.to_string(),
+                });
             }
-            let keyed = module.key_schema.is_some();
+
+            let keyed = module_def.key_schema.is_some();
             match (keyed, key_field.is_some()) {
                 (true, false) => {
                     if !receipt_schema_allows_missing_key_field(event.as_str()) {
                         return Err(ValidationError::RoutingMissingKeyField {
-                            reducer: reducer.clone(),
+                            module: module.clone(),
                         });
                     }
                 }
                 (false, true) => {
                     return Err(ValidationError::RoutingUnexpectedKeyField {
-                        reducer: reducer.clone(),
+                        module: module.clone(),
                     });
                 }
                 _ => {}
             }
+
             if let (true, Some(field)) = (keyed, key_field.as_ref()) {
-                let key_schema_name = module
+                let key_schema_name = module_def
                     .key_schema
                     .as_ref()
-                    .expect("keyed reducers have key_schema")
+                    .expect("keyed modules have key_schema")
                     .as_str();
                 let key_schema = schema_type(key_schema_name).ok_or_else(|| {
                     ValidationError::SchemaNotFound {
                         schema: key_schema_name.to_string(),
                     }
                 })?;
-                let event_schema =
-                    schema_type(event.as_str()).ok_or_else(|| ValidationError::SchemaNotFound {
+                let event_schema = schema_type(event.as_str()).ok_or_else(|| {
+                    ValidationError::SchemaNotFound {
                         schema: event.as_str().to_string(),
-                    })?;
-                let field_ty = key_field_type(&event_schema, field).ok_or_else(|| {
+                    }
+                })?;
+                let field_ty = key_field_type(&event_schema, field, &schema_type).ok_or_else(|| {
                     ValidationError::RoutingKeyFieldMismatch {
-                        reducer: reducer.clone(),
+                        module: module.clone(),
                         event: event.as_str().to_string(),
                         key_field: field.to_string(),
                         expected: key_schema_name.to_string(),
                         found: "missing".into(),
                     }
                 })?;
-                let matches = key_type_matches(&field_ty, &key_schema).unwrap_or(false);
+                let matches = key_type_matches(&field_ty, &key_schema, &schema_type).unwrap_or(false);
                 if !matches {
                     return Err(ValidationError::RoutingKeyFieldMismatch {
-                        reducer: reducer.clone(),
+                        module: module.clone(),
                         event: event.as_str().to_string(),
                         key_field: field.to_string(),
                         expected: key_schema_name.to_string(),
@@ -881,170 +248,109 @@ pub fn validate_manifest(
         }
     }
 
-    for (reducer_name, module) in modules {
-        let Some(reducer) = module.abi.reducer.as_ref() else {
-            continue;
-        };
-        let event_schema_name = reducer.event.as_str();
-        let event_schema =
-            schema_type(event_schema_name).ok_or_else(|| ValidationError::SchemaNotFound {
-                schema: event_schema_name.to_string(),
-            })?;
-        match &event_schema {
-            TypeExpr::Ref(_) => {}
-            TypeExpr::Variant(variant) => {
-                let mut seen = HashSet::new();
-                for ty in variant.variant.values() {
-                    let TypeExpr::Ref(reference) = ty else {
-                        return Err(ValidationError::ReducerEventFamilyInvalid {
-                            reducer: reducer_name.clone(),
-                            event_schema: event_schema_name.to_string(),
-                            reason: "variant arm is not a ref".into(),
-                        });
-                    };
-                    let name = reference.reference.as_str().to_string();
-                    if !seen.insert(name) {
-                        return Err(ValidationError::ReducerEventFamilyInvalid {
-                            reducer: reducer_name.clone(),
-                            event_schema: event_schema_name.to_string(),
-                            reason: "duplicate event schema in variant".into(),
-                        });
-                    }
+    for (module_name, module) in modules {
+        match module.module_kind {
+            ModuleKind::Workflow => {
+                if module.abi.reducer.is_none() {
+                    return Err(ValidationError::WorkflowAbiMissingReducer {
+                        module: module_name.clone(),
+                    });
                 }
             }
-            TypeExpr::Record(_) => {}
-            _ => {
-                return Err(ValidationError::ReducerEventFamilyInvalid {
-                    reducer: reducer_name.clone(),
-                    event_schema: event_schema_name.to_string(),
-                    reason: "event family must be a ref, variant of refs, or record".into(),
+            ModuleKind::Pure => {
+                if module.abi.pure.is_none() {
+                    return Err(ValidationError::PureAbiMissingPure {
+                        module: module_name.clone(),
+                    });
+                }
+                if module.abi.reducer.is_some() {
+                    return Err(ValidationError::PureAbiHasReducer {
+                        module: module_name.clone(),
+                    });
+                }
+            }
+        }
+
+        if let Some(key) = module.key_schema.as_ref() {
+            if !schema_exists(key.as_str()) {
+                return Err(ValidationError::SchemaNotFound {
+                    schema: key.as_str().to_string(),
                 });
             }
         }
 
-        for effect in &reducer.effects_emitted {
-            if !known_effect_kinds.contains(effect.as_str()) {
-                return Err(ValidationError::EffectNotFound {
-                    kind: effect.as_str().to_string(),
-                });
+        if let Some(abi) = module.abi.reducer.as_ref() {
+            for schema_ref in [
+                Some(abi.state.as_str()),
+                Some(abi.event.as_str()),
+                abi.context.as_ref().map(|s| s.as_str()),
+                abi.annotations.as_ref().map(|s| s.as_str()),
+            ]
+            .iter()
+            .flatten()
+            .filter(|s| !s.is_empty())
+            {
+                if !schema_exists(schema_ref) {
+                    return Err(ValidationError::SchemaNotFound {
+                        schema: schema_ref.to_string(),
+                    });
+                }
+            }
+
+            let event_schema_name = abi.event.as_str();
+            let event_schema = schema_type(event_schema_name).ok_or_else(|| {
+                ValidationError::SchemaNotFound {
+                    schema: event_schema_name.to_string(),
+                }
+            })?;
+            validate_event_family(module_name, event_schema_name, &event_schema)?;
+
+            for effect in &abi.effects_emitted {
+                if !known_effect_kinds.contains(effect.as_str()) {
+                    return Err(ValidationError::EffectNotFound {
+                        kind: effect.as_str().to_string(),
+                    });
+                }
+            }
+        }
+
+        if let Some(abi) = module.abi.pure.as_ref() {
+            for schema_ref in [abi.input.as_str(), abi.output.as_str()]
+                .into_iter()
+                .chain(abi.context.as_ref().map(|s| s.as_str()))
+            {
+                if !schema_exists(schema_ref) {
+                    return Err(ValidationError::SchemaNotFound {
+                        schema: schema_ref.to_string(),
+                    });
+                }
             }
         }
     }
 
     for effect in effects.values() {
-        for schema_ref in [
-            effect.params_schema.as_str(),
-            effect.receipt_schema.as_str(),
-        ] {
+        for schema_ref in [effect.params_schema.as_str(), effect.receipt_schema.as_str()] {
             if !schema_exists(schema_ref) {
                 return Err(ValidationError::SchemaNotFound {
                     schema: schema_ref.to_string(),
                 });
             }
         }
-    }
-
-    for plan in plans.values() {
-        for schema_ref in plan
-            .locals
-            .values()
-            .map(|s| s.as_str())
-            .chain(std::iter::once(plan.input.as_str()))
-            .chain(plan.output.as_ref().map(|s| s.as_str()))
-        {
-            if !schema_exists(schema_ref) {
-                return Err(ValidationError::SchemaNotFound {
-                    schema: schema_ref.to_string(),
-                });
-            }
-        }
-        for step in &plan.steps {
-            match &step.kind {
-                PlanStepKind::EmitEffect(emit) => {
-                    if !known_effect_kinds.contains(emit.kind.as_str()) {
-                        return Err(ValidationError::EffectNotFound {
-                            kind: emit.kind.as_str().to_string(),
-                        });
-                    }
-                    if !grant_exists(emit.cap.as_str()) {
-                        return Err(ValidationError::CapabilityNotFound {
-                            cap: emit.cap.clone(),
-                        });
-                    }
-                    let expected = effect_cap_types.get(emit.kind.as_str()).ok_or_else(|| {
-                        ValidationError::EffectNotFound {
-                            kind: emit.kind.as_str().to_string(),
-                        }
-                    })?;
-                    let found = cap_type_for_grant(emit.cap.as_str())?;
-                    if &found != expected {
-                        return Err(ValidationError::CapabilityTypeMismatch {
-                            cap: emit.cap.clone(),
-                            effect: emit.kind.as_str().to_string(),
-                            expected: expected.clone(),
-                            found,
-                        });
-                    }
-                }
-                PlanStepKind::SpawnPlan(spawn) => {
-                    if !plans.contains_key(spawn.plan.as_str()) {
-                        return Err(ValidationError::SpawnPlanUnknownPlan {
-                            plan: plan.name.clone(),
-                            step_id: step.id.clone(),
-                            child_plan: spawn.plan.clone(),
-                        });
-                    }
-                }
-                PlanStepKind::SpawnForEach(spawn) => {
-                    if !plans.contains_key(spawn.plan.as_str()) {
-                        return Err(ValidationError::SpawnForEachUnknownPlan {
-                            plan: plan.name.clone(),
-                            step_id: step.id.clone(),
-                            child_plan: spawn.plan.clone(),
-                        });
-                    }
-                }
-                _ => {}
-            }
-        }
-        for allowed in &plan.allowed_effects {
-            if !known_effect_kinds.contains(allowed.as_str()) {
-                return Err(ValidationError::EffectNotFound {
-                    kind: allowed.as_str().to_string(),
-                });
-            }
-        }
-        for required in &plan.required_caps {
-            if !grant_exists(required.as_str()) {
-                return Err(ValidationError::CapabilityNotFound {
-                    cap: required.clone(),
-                });
-            }
-        }
-    }
-
-    for trigger in &manifest.triggers {
-        if !schema_exists(trigger.event.as_str()) {
-            return Err(ValidationError::SchemaNotFound {
-                schema: trigger.event.as_str().to_string(),
-            });
-        }
-        validate_trigger_projection(trigger)?;
     }
 
     for policy in policies.values() {
         for rule in &policy.rules {
-            if let Some(kind) = rule.when.effect_kind.as_ref() {
-                if !known_effect_kinds.contains(kind.as_str()) {
-                    return Err(ValidationError::EffectNotFound {
-                        kind: kind.as_str().to_string(),
-                    });
-                }
+            if let Some(kind) = rule.when.effect_kind.as_ref()
+                && !known_effect_kinds.contains(kind.as_str())
+            {
+                return Err(ValidationError::EffectNotFound {
+                    kind: kind.as_str().to_string(),
+                });
             }
-            if let Some(cap) = rule.when.cap_name.as_ref() {
-                if !grant_exists(cap.as_str()) {
-                    return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
-                }
+            if let Some(cap) = rule.when.cap_name.as_ref()
+                && !grant_exists(cap.as_str())
+            {
+                return Err(ValidationError::CapabilityNotFound { cap: cap.clone() });
             }
         }
     }
@@ -1071,40 +377,39 @@ pub fn validate_manifest(
     }
 
     for module in modules.values() {
-        if let Some(key) = module.key_schema.as_ref() {
-            if !schema_exists(key.as_str()) {
-                return Err(ValidationError::SchemaNotFound {
-                    schema: key.as_str().to_string(),
-                });
-            }
-        }
         if let Some(abi) = module.abi.reducer.as_ref() {
-            for schema_ref in [
-                Some(abi.state.as_str()),
-                Some(abi.event.as_str()),
-                abi.context.as_ref().map(|s| s.as_str()),
-                abi.annotations.as_ref().map(|s| s.as_str()),
-            ]
-            .iter()
-            .flatten()
-            .filter(|s| !s.is_empty())
-            {
-                if !schema_exists(schema_ref) {
-                    return Err(ValidationError::SchemaNotFound {
-                        schema: schema_ref.to_string(),
-                    });
+            for effect in &abi.effects_emitted {
+                let expected = effect_cap_types.get(effect.as_str()).ok_or_else(|| {
+                    ValidationError::EffectNotFound {
+                        kind: effect.as_str().to_string(),
+                    }
+                })?;
+                for grant in module
+                    .abi
+                    .reducer
+                    .as_ref()
+                    .map(|r| r.cap_slots.values())
+                    .into_iter()
+                    .flatten()
+                {
+                    let _ = grant;
                 }
-            }
-        }
-        if let Some(abi) = module.abi.pure.as_ref() {
-            for schema_ref in [abi.input.as_str(), abi.output.as_str()]
-                .into_iter()
-                .chain(abi.context.as_ref().map(|s| s.as_str()))
-            {
-                if !schema_exists(schema_ref) {
-                    return Err(ValidationError::SchemaNotFound {
-                        schema: schema_ref.to_string(),
-                    });
+                for binding in manifest
+                    .module_bindings
+                    .get(&module.name)
+                    .map(|b| b.slots.values())
+                    .into_iter()
+                    .flatten()
+                {
+                    let found = cap_type_for_grant(binding.as_str())?;
+                    if &found != expected {
+                        return Err(ValidationError::CapabilityTypeMismatch {
+                            cap: binding.clone(),
+                            effect: effect.as_str().to_string(),
+                            expected: expected.clone(),
+                            found,
+                        });
+                    }
                 }
             }
         }
@@ -1113,1369 +418,206 @@ pub fn validate_manifest(
     Ok(())
 }
 
-enum ReferenceKind {
-    PlanInput,
-    Var(String),
-    Step(String),
-    Event,
-    Unknown,
+fn validate_event_family(
+    module_name: &str,
+    event_schema_name: &str,
+    event_schema: &TypeExpr,
+) -> Result<(), ValidationError> {
+    match event_schema {
+        TypeExpr::Ref(_) => Ok(()),
+        TypeExpr::Variant(variant) => {
+            let mut seen = HashSet::new();
+            for ty in variant.variant.values() {
+                let TypeExpr::Ref(reference) = ty else {
+                    return Err(ValidationError::ModuleEventFamilyInvalid {
+                        module: module_name.to_string(),
+                        event_schema: event_schema_name.to_string(),
+                        reason: "variant arm is not a ref".into(),
+                    });
+                };
+                let name = reference.reference.as_str().to_string();
+                if !seen.insert(name) {
+                    return Err(ValidationError::ModuleEventFamilyInvalid {
+                        module: module_name.to_string(),
+                        event_schema: event_schema_name.to_string(),
+                        reason: "duplicate event schema in variant".into(),
+                    });
+                }
+            }
+            Ok(())
+        }
+        TypeExpr::Record(_) => Ok(()),
+        _ => Err(ValidationError::ModuleEventFamilyInvalid {
+            module: module_name.to_string(),
+            event_schema: event_schema_name.to_string(),
+            reason: "event family must be a ref, variant of refs, or record".into(),
+        }),
+    }
 }
 
-fn classify_reference(reference: &str) -> ReferenceKind {
-    if reference.starts_with("@plan.input") {
-        ReferenceKind::PlanInput
-    } else if let Some(rest) = reference.strip_prefix("@var:") {
-        let name = rest.split('.').next().unwrap_or(rest).to_string();
-        ReferenceKind::Var(name)
-    } else if let Some(rest) = reference.strip_prefix("@step:") {
-        let name = rest.split('.').next().unwrap_or(rest).to_string();
-        ReferenceKind::Step(name)
-    } else if reference.starts_with("@event") {
-        ReferenceKind::Event
-    } else {
-        ReferenceKind::Unknown
+fn event_in_family(event: &str, family_name: &str, family_schema: &TypeExpr) -> bool {
+    if event == family_name {
+        return true;
+    }
+    match family_schema {
+        TypeExpr::Ref(reference) => reference.reference.as_str() == event,
+        TypeExpr::Variant(variant) => variant.variant.values().any(|ty| {
+            matches!(ty, TypeExpr::Ref(reference) if reference.reference.as_str() == event)
+        }),
+        _ => false,
     }
 }
 
-fn validate_trigger_projection(trigger: &crate::Trigger) -> Result<(), ValidationError> {
-    if let Some(predicate) = &trigger.when {
-        let mut refs = Vec::new();
-        collect_expr_refs(predicate, &mut refs);
-        for reference in refs {
-            if !matches!(classify_reference(&reference), ReferenceKind::Event) {
-                return Err(ValidationError::TriggerWhenInvalidReference {
-                    event: trigger.event.as_str().to_string(),
-                    plan: trigger.plan.clone(),
-                    reference,
-                });
-            }
-        }
+fn receipt_schema_allows_missing_key_field(event_schema: &str) -> bool {
+    matches!(
+        event_schema,
+        "sys/TimerFired@1" | "sys/BlobPutResult@1" | "sys/BlobGetResult@1"
+    )
+}
+
+fn resolve_type(
+    ty: &TypeExpr,
+    schema_type: &impl Fn(&str) -> Option<TypeExpr>,
+) -> Option<TypeExpr> {
+    match ty {
+        TypeExpr::Ref(reference) => schema_type(reference.reference.as_str()),
+        _ => Some(ty.clone()),
+    }
+}
+
+fn type_eq(left: &TypeExpr, right: &TypeExpr) -> bool {
+    match (serde_json::to_value(left), serde_json::to_value(right)) {
+        (Ok(l), Ok(r)) => l == r,
+        _ => false,
+    }
+}
+
+fn type_name(ty: &TypeExpr) -> String {
+    match ty {
+        TypeExpr::Ref(reference) => reference.reference.as_str().to_string(),
+        _ => format!("{ty:?}"),
+    }
+}
+
+fn key_field_type(
+    event_schema: &TypeExpr,
+    key_field: &str,
+    schema_type: &impl Fn(&str) -> Option<TypeExpr>,
+) -> Option<TypeExpr> {
+    let segments: Vec<&str> = key_field.split('.').filter(|s| !s.is_empty()).collect();
+    if segments.is_empty() {
+        return None;
     }
 
-    if let Some(crate::ExprOrValue::Expr(expr)) = &trigger.input_expr {
-        let mut refs = Vec::new();
-        collect_expr_refs(expr, &mut refs);
-        for reference in refs {
-            if !matches!(classify_reference(&reference), ReferenceKind::Event) {
-                return Err(ValidationError::TriggerInputExprInvalidReference {
-                    event: trigger.event.as_str().to_string(),
-                    plan: trigger.plan.clone(),
-                    reference,
-                });
+    let resolved = resolve_type(event_schema, schema_type)?;
+    if let TypeExpr::Variant(variant) = &resolved {
+        if segments[0] == "$value" {
+            let remaining = &segments[1..];
+            if remaining.is_empty() {
+                return None;
             }
+            let mut found: Option<TypeExpr> = None;
+            for ty in variant.variant.values() {
+                if let TypeExpr::Ref(reference) = ty
+                    && receipt_schema_allows_missing_key_field(reference.reference.as_str())
+                {
+                    continue;
+                }
+                let resolved_arm = resolve_type(ty, schema_type)?;
+                let mut current = resolved_arm;
+                for seg in remaining {
+                    current = match current {
+                        TypeExpr::Record(record) => {
+                            let field_ty = record.record.get(*seg)?;
+                            resolve_type(field_ty, schema_type)?
+                        }
+                        _ => return None,
+                    };
+                }
+                if let Some(existing) = &found {
+                    let resolved_existing = resolve_type(existing, schema_type)?;
+                    let resolved_current = resolve_type(&current, schema_type)?;
+                    if !type_eq(&resolved_existing, &resolved_current) {
+                        return None;
+                    }
+                } else {
+                    found = Some(current);
+                }
+            }
+            return found;
         }
+        if segments[0] == "$tag" {
+            return None;
+        }
+        return None;
     }
 
-    Ok(())
+    let mut current = resolved;
+    for seg in segments {
+        current = match current {
+            TypeExpr::Record(record) => {
+                let field_ty = record.record.get(seg)?;
+                resolve_type(field_ty, schema_type)?
+            }
+            _ => return None,
+        };
+    }
+    Some(current)
+}
+
+fn key_type_matches(
+    field_ty: &TypeExpr,
+    key_schema: &TypeExpr,
+    schema_type: &impl Fn(&str) -> Option<TypeExpr>,
+) -> Option<bool> {
+    let resolved_field = resolve_type(field_ty, schema_type)?;
+    let resolved_key = resolve_type(key_schema, schema_type)?;
+    if type_eq(&resolved_field, &resolved_key) {
+        return Some(true);
+    }
+    if let (TypeExpr::Ref(field_ref), TypeExpr::Ref(key_ref)) = (field_ty, key_schema) {
+        return Some(field_ref.reference == key_ref.reference);
+    }
+    Some(false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        CapEnforcer, CapGrant, CapType, DefCap, DefModule, DefPlan, DefPolicy, DefSchema,
-        EffectKind, Expr, ExprConst, ExprOrValue, ExprRecord, ExprRef, HashRef, Manifest,
-        ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, NamedRef, PlanBind, PlanBindEffect,
-        PlanBindHandle, PlanBindHandles, PlanBindResults, PlanEdge, PlanStep, PlanStepAwaitEvent,
-        PlanStepAwaitPlan, PlanStepAwaitPlansAll, PlanStepAwaitReceipt, PlanStepEmitEffect,
-        PlanStepEnd, PlanStepKind, PlanStepSpawnForEach, PlanStepSpawnPlan, PolicyDecision,
-        PolicyMatch, PolicyRule, ReducerAbi, Routing, RoutingEvent, SchemaRef, SecretDecl,
-        SecretEntry, SecretPolicy, Trigger, TypeExpr, TypeRecord, TypeRef, TypeVariant,
-        ValueLiteral, ValueRecord,
+        CapGrant, DefModule, ManifestDefaults, ModuleAbi, ModuleBinding, NamedRef, ReducerAbi,
+        Routing, SchemaRef, TypePrimitive, TypePrimitiveText,
     };
     use indexmap::IndexMap;
 
-    fn sample_plan() -> DefPlan {
-        let emit = PlanStep {
-            id: "emit".into(),
-            kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::http_request(),
-                params: Expr::Record(ExprRecord {
-                    record: IndexMap::new(),
-                })
-                .into(),
-                cap: "http_cap".into(),
-                idempotency_key: None,
-                bind: PlanBindEffect {
-                    effect_id_as: "req".into(),
-                },
-            }),
-        };
-        let end = PlanStep {
-            id: "end".into(),
-            kind: PlanStepKind::End(PlanStepEnd { result: None }),
-        };
-        DefPlan {
-            name: "com.acme/plan@1".into(),
-            input: SchemaRef::new("com.acme/Input@1").unwrap(),
-            output: None,
-            locals: IndexMap::new(),
-            steps: vec![emit, end],
-            edges: vec![PlanEdge {
-                from: "emit".into(),
-                to: "end".into(),
-                when: None,
-            }],
-            required_caps: vec!["http_cap".into()],
-            allowed_effects: vec![EffectKind::http_request()],
-            invariants: vec![],
+    fn text_type() -> TypeExpr {
+        TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
+            text: crate::EmptyObject::default(),
+        }))
+    }
+
+    fn named_ref(name: &str) -> NamedRef {
+        NamedRef {
+            name: name.to_string(),
+            hash: crate::HashRef::new(format!("sha256:{}", "a".repeat(64))).unwrap(),
         }
     }
 
-    fn plan_with_emit_and_await() -> DefPlan {
-        let mut plan = sample_plan();
-        let await_step = PlanStep {
-            id: "await".into(),
-            kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
-                for_expr: Expr::Ref(ExprRef {
-                    reference: "@var:req".into(),
-                }),
-                bind: PlanBind { var: "rcpt".into() },
-            }),
-        };
-        plan.steps.insert(1, await_step);
-        plan.edges = vec![
-            PlanEdge {
-                from: "emit".into(),
-                to: "await".into(),
-                when: None,
-            },
-            PlanEdge {
-                from: "await".into(),
-                to: "end".into(),
-                when: None,
-            },
-        ];
-        plan
-    }
-
-    fn plan_with_await_event() -> DefPlan {
-        DefPlan {
-            name: "com.acme/event-plan@1".into(),
-            input: SchemaRef::new("com.acme/Input@1").unwrap(),
-            output: None,
-            locals: IndexMap::new(),
-            steps: vec![
-                PlanStep {
-                    id: "await".into(),
-                    kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
-                        event: SchemaRef::new("com.acme/Trigger@1").unwrap(),
-                        where_clause: None,
-                        bind: PlanBind { var: "evt".into() },
-                    }),
-                },
-                PlanStep {
-                    id: "end".into(),
-                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
-                },
-            ],
-            edges: vec![PlanEdge {
-                from: "await".into(),
-                to: "end".into(),
-                when: None,
-            }],
-            required_caps: vec![],
-            allowed_effects: vec![],
-            invariants: vec![],
-        }
-    }
-
-    fn plan_with_spawn_and_await() -> DefPlan {
-        DefPlan {
-            name: "com.acme/spawn-parent@1".into(),
-            input: SchemaRef::new("com.acme/Input@1").unwrap(),
-            output: None,
-            locals: IndexMap::new(),
-            steps: vec![
-                PlanStep {
-                    id: "spawn".into(),
-                    kind: PlanStepKind::SpawnPlan(PlanStepSpawnPlan {
-                        plan: "com.acme/child@1".into(),
-                        input: Expr::Ref(ExprRef {
-                            reference: "@plan.input".into(),
-                        })
-                        .into(),
-                        bind: PlanBindHandle {
-                            handle_as: "child".into(),
-                        },
-                    }),
-                },
-                PlanStep {
-                    id: "await".into(),
-                    kind: PlanStepKind::AwaitPlan(PlanStepAwaitPlan {
-                        for_expr: Expr::Ref(ExprRef {
-                            reference: "@var:child".into(),
-                        }),
-                        bind: PlanBind {
-                            var: "child_result".into(),
-                        },
-                    }),
-                },
-                PlanStep {
-                    id: "end".into(),
-                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
-                },
-            ],
-            edges: vec![
-                PlanEdge {
-                    from: "spawn".into(),
-                    to: "await".into(),
-                    when: None,
-                },
-                PlanEdge {
-                    from: "await".into(),
-                    to: "end".into(),
-                    when: None,
-                },
-            ],
-            required_caps: vec![],
-            allowed_effects: vec![],
-            invariants: vec![],
-        }
-    }
-
-    fn plan_with_spawn_for_each_and_await_all() -> DefPlan {
-        DefPlan {
-            name: "com.acme/spawn-foreach@1".into(),
-            input: SchemaRef::new("com.acme/Input@1").unwrap(),
-            output: None,
-            locals: IndexMap::new(),
-            steps: vec![
-                PlanStep {
-                    id: "spawn_many".into(),
-                    kind: PlanStepKind::SpawnForEach(PlanStepSpawnForEach {
-                        plan: "com.acme/child@1".into(),
-                        inputs: Expr::List(crate::ExprList {
-                            list: vec![Expr::Ref(ExprRef {
-                                reference: "@plan.input".into(),
-                            })],
-                        })
-                        .into(),
-                        max_fanout: Some(4),
-                        bind: PlanBindHandles {
-                            handles_as: "children".into(),
-                        },
-                    }),
-                },
-                PlanStep {
-                    id: "await_all".into(),
-                    kind: PlanStepKind::AwaitPlansAll(PlanStepAwaitPlansAll {
-                        handles: Expr::Ref(ExprRef {
-                            reference: "@var:children".into(),
-                        }),
-                        bind: PlanBindResults {
-                            results_as: "results".into(),
-                        },
-                    }),
-                },
-                PlanStep {
-                    id: "end".into(),
-                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
-                },
-            ],
-            edges: vec![
-                PlanEdge {
-                    from: "spawn_many".into(),
-                    to: "await_all".into(),
-                    when: None,
-                },
-                PlanEdge {
-                    from: "await_all".into(),
-                    to: "end".into(),
-                    when: None,
-                },
-            ],
-            required_caps: vec![],
-            allowed_effects: vec![],
-            invariants: vec![],
-        }
-    }
-
-    #[test]
-    fn valid_plan_passes() {
-        let plan = sample_plan();
-        assert!(validate_plan(&plan).is_ok());
-    }
-
-    #[test]
-    fn duplicate_step_id_fails() {
-        let mut plan = sample_plan();
-        plan.steps[1].id = "emit".into();
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(err, ValidationError::DuplicateStepId { .. }));
-    }
-
-    #[test]
-    fn edge_missing_step_fails() {
-        let mut plan = sample_plan();
-        plan.edges[0].to = "unknown".into();
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(
-            matches!(err, ValidationError::EdgeReferencesUnknownStep { step_id, .. } if step_id == "unknown")
-        );
-    }
-
-    #[test]
-    fn cycle_detected() {
-        let mut plan = sample_plan();
-        plan.edges.push(PlanEdge {
-            from: "end".into(),
-            to: "emit".into(),
-            when: None,
-        });
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(err, ValidationError::CyclicPlan { .. }));
-    }
-
-    #[test]
-    fn disallowed_effect_detected() {
-        let mut plan = sample_plan();
-        plan.allowed_effects = vec![EffectKind::timer_set()];
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::DeclaredEffectsMismatch { declared, derived, .. }
-            if declared == vec![EffectKind::timer_set()] && derived == vec![EffectKind::http_request()]
-        ));
-    }
-
-    #[test]
-    fn missing_cap_detected() {
-        let mut plan = sample_plan();
-        plan.required_caps = vec!["other".into()];
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::DeclaredCapsMismatch { declared, derived, .. }
-            if declared == vec!["other".to_string()] && derived == vec!["http_cap".to_string()]
-        ));
-    }
-
-    #[test]
-    fn duplicate_effect_handle_detected() {
-        let mut plan = sample_plan();
-        let duplicate_emit = PlanStep {
-            id: "emit2".into(),
-            kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::http_request(),
-                params: Expr::Record(ExprRecord {
-                    record: IndexMap::new(),
-                })
-                .into(),
-                cap: "http_cap".into(),
-                idempotency_key: None,
-                bind: PlanBindEffect {
-                    effect_id_as: "req".into(),
-                },
-            }),
-        };
-        plan.steps.insert(0, duplicate_emit);
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(err, ValidationError::DuplicateEffectHandle { .. }));
-    }
-
-    #[test]
-    fn omitted_caps_and_effects_are_derived() {
-        let mut plan = sample_plan();
-        plan.required_caps.clear();
-        plan.allowed_effects.clear();
-        assert!(validate_plan(&plan).is_ok());
-    }
-
-    #[test]
-    fn normalize_plan_caps_and_effects_populates_and_sorts() {
-        let mut plan = sample_plan();
-        // Introduce disorder and duplicates.
-        plan.required_caps = vec!["b".into(), "a".into(), "a".into()];
-        plan.allowed_effects = vec![
-            EffectKind::timer_set(),
-            EffectKind::http_request(),
-            EffectKind::http_request(),
-        ];
-
-        normalize_plan_caps_and_effects(&mut plan);
-
-        assert_eq!(plan.required_caps, vec!["a".to_string(), "b".to_string()]);
-        assert_eq!(
-            plan.allowed_effects,
-            vec![EffectKind::http_request(), EffectKind::timer_set()]
-        );
-    }
-
-    #[test]
-    fn await_receipt_requires_handle_reference() {
-        let mut plan = plan_with_emit_and_await();
-        if let PlanStepKind::AwaitReceipt(step) = &mut plan.steps[1].kind {
-            step.for_expr = Expr::Const(ExprConst::Bool { bool: true });
-        }
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::AwaitReceiptInvalidReference { .. }
-        ));
-    }
-
-    #[test]
-    fn await_receipt_rejects_unknown_handle() {
-        let mut plan = plan_with_emit_and_await();
-        if let PlanStepKind::AwaitReceipt(step) = &mut plan.steps[1].kind {
-            step.for_expr = Expr::Ref(ExprRef {
-                reference: "@var:missing".into(),
-            });
-        }
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::AwaitReceiptUnknownHandle { .. }
-        ));
-    }
-
-    #[test]
-    fn await_event_where_rejects_unknown_reference() {
-        let mut plan = plan_with_await_event();
-        if let PlanStepKind::AwaitEvent(step) = &mut plan.steps[0].kind {
-            step.where_clause = Some(Expr::Ref(ExprRef {
-                reference: "@var:missing".into(),
-            }));
-        }
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::AwaitEventUnknownReference { .. }
-        ));
-    }
-
-    #[test]
-    fn await_plan_requires_handle_reference() {
-        let mut plan = plan_with_spawn_and_await();
-        if let PlanStepKind::AwaitPlan(step) = &mut plan.steps[1].kind {
-            step.for_expr = Expr::Const(ExprConst::Bool { bool: true });
-        }
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::AwaitPlanInvalidReference { .. }
-        ));
-    }
-
-    #[test]
-    fn await_plan_rejects_unknown_handle() {
-        let mut plan = plan_with_spawn_and_await();
-        if let PlanStepKind::AwaitPlan(step) = &mut plan.steps[1].kind {
-            step.for_expr = Expr::Ref(ExprRef {
-                reference: "@var:missing".into(),
-            });
-        }
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::AwaitPlanUnknownHandle { .. }
-        ));
-    }
-
-    #[test]
-    fn await_plans_all_requires_handles_reference() {
-        let mut plan = plan_with_spawn_for_each_and_await_all();
-        if let PlanStepKind::AwaitPlansAll(step) = &mut plan.steps[1].kind {
-            step.handles = Expr::Const(ExprConst::Bool { bool: true });
-        }
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::AwaitPlansAllInvalidReference { .. }
-        ));
-    }
-
-    #[test]
-    fn await_plans_all_rejects_unknown_handles() {
-        let mut plan = plan_with_spawn_for_each_and_await_all();
-        if let PlanStepKind::AwaitPlansAll(step) = &mut plan.steps[1].kind {
-            step.handles = Expr::Ref(ExprRef {
-                reference: "@var:not_handles".into(),
-            });
-        }
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::AwaitPlansAllUnknownHandles { .. }
-        ));
-    }
-
-    #[test]
-    fn invariant_unknown_reference_fails() {
-        let mut plan = sample_plan();
-        plan.invariants.push(Expr::Ref(ExprRef {
-            reference: "@var:unknown".into(),
-        }));
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::InvariantUnknownReference { .. }
-        ));
-    }
-
-    #[test]
-    fn invariant_event_reference_fails() {
-        let mut plan = sample_plan();
-        plan.invariants.push(Expr::Ref(ExprRef {
-            reference: "@event.value".into(),
-        }));
-        let err = validate_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::InvariantEventReference { .. }
-        ));
-    }
-
-    #[test]
-    fn manifest_rejects_missing_event_schema() {
-        let mut modules = HashMap::new();
-        let reducer_name = "com.acme/Reducer@1".to_string();
-        modules.insert(
-            reducer_name.clone(),
-            DefModule {
-                name: reducer_name.clone(),
-                module_kind: ModuleKind::Reducer,
-                wasm_hash: HashRef::new(
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
-                )
-                .unwrap(),
-                key_schema: None,
-                abi: ModuleAbi {
-                    reducer: Some(ReducerAbi {
-                        state: SchemaRef::new("sys/TimerFired@1").unwrap(),
-                        event: SchemaRef::new("sys/TimerFired@1").unwrap(),
-                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
-                        annotations: None,
-                        effects_emitted: vec![],
-                        cap_slots: IndexMap::new(),
-                    }),
-                    pure: None,
-                },
-            },
-        );
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: Some(Routing {
-                events: vec![RoutingEvent {
-                    event: SchemaRef::new("com.acme/MissingEvent@1").unwrap(),
-                    reducer: reducer_name.clone(),
-                    key_field: None,
-                }],
-                inboxes: vec![],
-            }),
-            triggers: vec![],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Event@1".to_string(),
-            DefSchema {
-                name: "com.acme/Event@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        schemas.insert(
-            "com.acme/Other@1".to_string(),
-            DefSchema {
-                name: "com.acme/Other@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::SchemaNotFound { schema }
-            if schema == "com.acme/MissingEvent@1"
-        ));
-    }
-
-    #[test]
-    fn manifest_rejects_trigger_when_with_non_event_reference() {
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![Trigger {
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                plan: "com.acme/Plan@1".into(),
-                correlate_by: None,
-                when: Some(Expr::Ref(ExprRef {
-                    reference: "@plan.input.id".into(),
-                })),
-                input_expr: None,
-            }],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Event@1".to_string(),
-            DefSchema {
-                name: "com.acme/Event@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        let modules = HashMap::new();
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::TriggerWhenInvalidReference { reference, .. }
-            if reference == "@plan.input.id"
-        ));
-    }
-
-    #[test]
-    fn manifest_rejects_trigger_input_expr_with_non_event_reference() {
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![Trigger {
-                event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                plan: "com.acme/Plan@1".into(),
-                correlate_by: None,
-                when: None,
-                input_expr: Some(ExprOrValue::Expr(Expr::Ref(ExprRef {
-                    reference: "@var:payload".into(),
-                }))),
-            }],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Event@1".to_string(),
-            DefSchema {
-                name: "com.acme/Event@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        let modules = HashMap::new();
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::TriggerInputExprInvalidReference { reference, .. }
-            if reference == "@var:payload"
-        ));
-    }
-
-    #[test]
-    fn manifest_rejects_routing_schema_mismatch() {
-        let reducer_name = "com.acme/Reducer@1".to_string();
-        let mut modules = HashMap::new();
-        modules.insert(
-            reducer_name.clone(),
-            DefModule {
-                name: reducer_name.clone(),
-                module_kind: ModuleKind::Reducer,
-                wasm_hash: HashRef::new(
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
-                )
-                .unwrap(),
-                key_schema: None,
-                abi: ModuleAbi {
-                    reducer: Some(ReducerAbi {
-                        state: SchemaRef::new("sys/TimerFired@1").unwrap(),
-                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
-                        annotations: None,
-                        effects_emitted: vec![],
-                        cap_slots: IndexMap::new(),
-                    }),
-                    pure: None,
-                },
-            },
-        );
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: Some(Routing {
-                events: vec![RoutingEvent {
-                    event: SchemaRef::new("com.acme/Other@1").unwrap(),
-                    reducer: reducer_name.clone(),
-                    key_field: None,
-                }],
-                inboxes: vec![],
-            }),
-            triggers: vec![],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Event@1".to_string(),
-            DefSchema {
-                name: "com.acme/Event@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        schemas.insert(
-            "com.acme/Other@1".to_string(),
-            DefSchema {
-                name: "com.acme/Other@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::RoutingSchemaMismatch { reducer, event, expected }
-            if reducer == reducer_name && event == "com.acme/Other@1" && expected == "com.acme/Event@1"
-        ));
-    }
-
-    #[test]
-    fn manifest_allows_routing_with_record_event_family() {
-        let reducer_name = "com.acme/Reducer@1".to_string();
-        let mut modules = HashMap::new();
-        modules.insert(
-            reducer_name.clone(),
-            DefModule {
-                name: reducer_name.clone(),
-                module_kind: ModuleKind::Reducer,
-                wasm_hash: HashRef::new(
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
-                )
-                .unwrap(),
-                key_schema: None,
-                abi: ModuleAbi {
-                    reducer: Some(ReducerAbi {
-                        state: SchemaRef::new("com.acme/State@1").unwrap(),
-                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
-                        annotations: None,
-                        effects_emitted: vec![],
-                        cap_slots: IndexMap::new(),
-                    }),
-                    pure: None,
-                },
-            },
-        );
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: Some(Routing {
-                events: vec![RoutingEvent {
-                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                    reducer: reducer_name.clone(),
-                    key_field: None,
-                }],
-                inboxes: vec![],
-            }),
-            triggers: vec![],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Event@1".to_string(),
-            DefSchema {
-                name: "com.acme/Event@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        schemas.insert(
-            "com.acme/State@1".to_string(),
-            DefSchema {
-                name: "com.acme/State@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .expect("record event family routing should validate");
-    }
-
-    #[test]
-    fn manifest_allows_missing_receipt_variant_for_micro_effect() {
-        let reducer_name = "com.acme/Reducer@1".to_string();
-        let mut modules = HashMap::new();
-        modules.insert(
-            reducer_name.clone(),
-            DefModule {
-                name: reducer_name.clone(),
-                module_kind: ModuleKind::Reducer,
-                wasm_hash: HashRef::new(
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
-                )
-                .unwrap(),
-                key_schema: None,
-                abi: ModuleAbi {
-                    reducer: Some(ReducerAbi {
-                        state: SchemaRef::new("com.acme/State@1").unwrap(),
-                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
-                        annotations: None,
-                        effects_emitted: vec![EffectKind::timer_set()],
-                        cap_slots: IndexMap::new(),
-                    }),
-                    pure: None,
-                },
-            },
-        );
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Event@1".to_string(),
-            DefSchema {
-                name: "com.acme/Event@1".into(),
-                ty: TypeExpr::Variant(TypeVariant {
-                    variant: IndexMap::from([(
-                        "Start".into(),
-                        TypeExpr::Ref(TypeRef {
-                            reference: SchemaRef::new("com.acme/Start@1").unwrap(),
-                        }),
-                    )]),
-                }),
-            },
-        );
-        schemas.insert(
-            "com.acme/Start@1".to_string(),
-            DefSchema {
-                name: "com.acme/Start@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        schemas.insert(
-            "com.acme/State@1".to_string(),
-            DefSchema {
-                name: "com.acme/State@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .expect("generic receipt envelopes remove strict micro-receipt schema requirement");
-    }
-
-    #[test]
-    fn manifest_allows_record_event_schema_without_micro_effects() {
-        let reducer_name = "com.acme/Reducer@1".to_string();
-        let mut modules = HashMap::new();
-        modules.insert(
-            reducer_name.clone(),
-            DefModule {
-                name: reducer_name.clone(),
-                module_kind: ModuleKind::Reducer,
-                wasm_hash: HashRef::new(
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
-                )
-                .unwrap(),
-                key_schema: None,
-                abi: ModuleAbi {
-                    reducer: Some(ReducerAbi {
-                        state: SchemaRef::new("com.acme/State@1").unwrap(),
-                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
-                        annotations: None,
-                        effects_emitted: vec![],
-                        cap_slots: IndexMap::new(),
-                    }),
-                    pure: None,
-                },
-            },
-        );
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Event@1".to_string(),
-            DefSchema {
-                name: "com.acme/Event@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        schemas.insert(
-            "com.acme/State@1".to_string(),
-            DefSchema {
-                name: "com.acme/State@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .expect("record event schema should validate");
-    }
-
-    #[test]
-    fn manifest_allows_record_event_schema_with_micro_effect() {
-        let reducer_name = "com.acme/Reducer@1".to_string();
-        let mut modules = HashMap::new();
-        modules.insert(
-            reducer_name.clone(),
-            DefModule {
-                name: reducer_name.clone(),
-                module_kind: ModuleKind::Reducer,
-                wasm_hash: HashRef::new(
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
-                )
-                .unwrap(),
-                key_schema: None,
-                abi: ModuleAbi {
-                    reducer: Some(ReducerAbi {
-                        state: SchemaRef::new("com.acme/State@1").unwrap(),
-                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
-                        annotations: None,
-                        effects_emitted: vec![EffectKind::timer_set()],
-                        cap_slots: IndexMap::new(),
-                    }),
-                    pure: None,
-                },
-            },
-        );
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Event@1".to_string(),
-            DefSchema {
-                name: "com.acme/Event@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        schemas.insert(
-            "com.acme/State@1".to_string(),
-            DefSchema {
-                name: "com.acme/State@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .expect("generic receipt envelopes remove strict micro-receipt schema requirement");
-    }
-
-    #[test]
-    fn manifest_rejects_unknown_effect_kind_in_reducer_effects_emitted() {
-        let reducer_name = "com.acme/Reducer@1".to_string();
-        let mut modules = HashMap::new();
-        modules.insert(
-            reducer_name.clone(),
-            DefModule {
-                name: reducer_name.clone(),
-                module_kind: ModuleKind::Reducer,
-                wasm_hash: HashRef::new(
-                    "sha256:0000000000000000000000000000000000000000000000000000000000000001",
-                )
-                .unwrap(),
-                key_schema: None,
-                abi: ModuleAbi {
-                    reducer: Some(ReducerAbi {
-                        state: SchemaRef::new("com.acme/State@1").unwrap(),
-                        event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
-                        annotations: None,
-                        effects_emitted: vec![EffectKind::new("com.acme/missing.effect")],
-                        cap_slots: IndexMap::new(),
-                    }),
-                    pure: None,
-                },
-            },
-        );
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Event@1".to_string(),
-            DefSchema {
-                name: "com.acme/Event@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        schemas.insert(
-            "com.acme/State@1".to_string(),
-            DefSchema {
-                name: "com.acme/State@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        );
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(
-            matches!(err, ValidationError::EffectNotFound { kind } if kind == "com.acme/missing.effect")
-        );
-    }
-
-    #[test]
-    fn manifest_rejects_unknown_effect_kind_in_plan_and_policy() {
-        let mut plans = HashMap::new();
-        let bad_kind = EffectKind::new("com.acme/missing");
-        plans.insert(
-            "com.acme/plan@1".into(),
-            DefPlan {
-                name: "com.acme/plan@1".into(),
-                input: SchemaRef::new("sys/TimerFired@1").unwrap(),
-                output: None,
-                locals: IndexMap::new(),
-                steps: vec![PlanStep {
-                    id: "emit".into(),
-                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                        kind: bad_kind.clone(),
-                        params: Expr::Record(ExprRecord {
-                            record: IndexMap::new(),
-                        })
-                        .into(),
-                        cap: "cap".into(),
-                        idempotency_key: None,
-                        bind: PlanBindEffect {
-                            effect_id_as: "id".into(),
-                        },
-                    }),
-                }],
-                edges: vec![],
-                required_caps: vec!["cap".into()],
-                allowed_effects: vec![bad_kind.clone()],
-                invariants: vec![],
-            },
-        );
-        let mut policies = HashMap::new();
-        policies.insert(
-            "pol".into(),
-            DefPolicy {
-                name: "pol".into(),
-                rules: vec![PolicyRule {
-                    when: PolicyMatch {
-                        effect_kind: Some(bad_kind.clone()),
-                        cap_name: None,
-                        cap_type: None,
-                        origin_kind: None,
-                        origin_name: None,
-                    },
-                    decision: PolicyDecision::Deny,
-                }],
-            },
-        );
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let schemas = HashMap::new();
-        let modules = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::EffectNotFound { kind }
-            if kind == bad_kind.as_str()
-        ));
-    }
-
-    #[test]
-    fn manifest_rejects_missing_cap_in_plan_and_policy() {
-        let missing_cap = "cap_missing".to_string();
-        let mut plans = HashMap::new();
-        plans.insert(
-            "com.acme/plan@1".into(),
-            DefPlan {
-                name: "com.acme/plan@1".into(),
-                input: SchemaRef::new("sys/TimerFired@1").unwrap(),
-                output: None,
-                locals: IndexMap::new(),
-                steps: vec![PlanStep {
-                    id: "emit".into(),
-                    kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                        kind: EffectKind::http_request(),
-                        params: Expr::Record(ExprRecord {
-                            record: IndexMap::new(),
-                        })
-                        .into(),
-                        cap: missing_cap.clone(),
-                        idempotency_key: None,
-                        bind: PlanBindEffect {
-                            effect_id_as: "id".into(),
-                        },
-                    }),
-                }],
-                edges: vec![],
-                required_caps: vec![missing_cap.clone()],
-                allowed_effects: vec![EffectKind::http_request()],
-                invariants: vec![],
-            },
-        );
-        let mut policies = HashMap::new();
-        policies.insert(
-            "pol".into(),
-            DefPolicy {
-                name: "pol".into(),
-                rules: vec![PolicyRule {
-                    when: PolicyMatch {
-                        effect_kind: None,
-                        cap_name: Some(missing_cap.clone()),
-                        cap_type: None,
-                        origin_kind: None,
-                        origin_name: None,
-                    },
-                    decision: PolicyDecision::Deny,
-                }],
-            },
-        );
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let schemas = HashMap::new();
-        let modules = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::CapabilityNotFound { cap }
-            if cap == missing_cap
-        ));
-    }
-
-    #[test]
-    fn manifest_rejects_missing_grant_in_module_binding() {
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::from([(
-                "com.acme/Reducer@1".into(),
-                ModuleBinding {
-                    slots: IndexMap::from([("http".into(), "cap_missing".into())]),
-                },
-            )]),
-            routing: None,
-            triggers: vec![],
-        };
-        let schemas = HashMap::new();
-        let modules = HashMap::new();
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::CapabilityNotFound { cap }
-            if cap == "cap_missing"
-        ));
-    }
-
-    #[test]
-    fn manifest_rejects_grant_missing_defcap() {
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
+    fn base_manifest() -> Manifest {
+        Manifest {
+            air_version: "1".into(),
+            schemas: vec![named_ref("com.acme/Event@1"), named_ref("com.acme/State@1")],
+            modules: vec![named_ref("com.acme/workflow@1")],
+            effects: Vec::new(),
+            caps: vec![named_ref("com.acme/http@1")],
+            policies: Vec::new(),
+            secrets: Vec::new(),
             defaults: Some(ManifestDefaults {
                 policy: None,
                 cap_grants: vec![CapGrant {
-                    name: "cap_http".into(),
+                    name: "http_cap".into(),
                     cap: "com.acme/http@1".into(),
-                    params: ValueLiteral::Record(ValueRecord {
+                    params: crate::ValueLiteral::Record(crate::ValueRecord {
                         record: IndexMap::new(),
                     }),
                     expiry_ns: None,
@@ -2483,252 +625,140 @@ mod tests {
             }),
             module_bindings: IndexMap::new(),
             routing: None,
-            triggers: vec![],
-        };
-        let schemas = HashMap::new();
-        let modules = HashMap::new();
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::CapabilityDefinitionNotFound { cap }
-            if cap == "com.acme/http@1"
-        ));
+        }
     }
 
-    #[test]
-    fn manifest_rejects_grant_cap_type_mismatch() {
-        let mut plans = HashMap::new();
-        plans.insert(
-            "com.acme/plan@1".into(),
-            DefPlan {
-                name: "com.acme/plan@1".into(),
-                input: SchemaRef::new("com.acme/Input@1").unwrap(),
-                output: None,
-                locals: IndexMap::new(),
-                steps: vec![
-                    PlanStep {
-                        id: "emit".into(),
-                        kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                            kind: EffectKind::http_request(),
-                            params: Expr::Record(ExprRecord {
-                                record: IndexMap::new(),
-                            })
-                            .into(),
-                            cap: "cap_timer".into(),
-                            idempotency_key: None,
-                            bind: PlanBindEffect {
-                                effect_id_as: "id".into(),
-                            },
-                        }),
-                    },
-                    PlanStep {
-                        id: "end".into(),
-                        kind: PlanStepKind::End(PlanStepEnd { result: None }),
-                    },
-                ],
-                edges: vec![PlanEdge {
-                    from: "emit".into(),
-                    to: "end".into(),
-                    when: None,
-                }],
-                required_caps: vec!["cap_timer".into()],
-                allowed_effects: vec![EffectKind::http_request()],
-                invariants: vec![],
-            },
-        );
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Input@1".to_string(),
-            DefSchema {
-                name: "com.acme/Input@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
+    fn base_module() -> DefModule {
+        DefModule {
+            name: "com.acme/workflow@1".into(),
+            module_kind: ModuleKind::Workflow,
+            wasm_hash: crate::HashRef::new(format!("sha256:{}", "b".repeat(64))).unwrap(),
+            key_schema: None,
+            abi: ModuleAbi {
+                reducer: Some(ReducerAbi {
+                    state: SchemaRef::new("com.acme/State@1").unwrap(),
+                    event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                    context: None,
+                    annotations: None,
+                    effects_emitted: Vec::new(),
+                    cap_slots: IndexMap::new(),
                 }),
+                pure: None,
             },
-        );
-        let defcap = DefCap {
-            name: "com.acme/cap@1".into(),
-            cap_type: CapType::timer(),
-            schema: TypeExpr::Record(TypeRecord {
-                record: IndexMap::new(),
-            }),
-            enforcer: CapEnforcer {
-                module: "sys/CapAllowAll@1".into(),
-            },
-        };
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![NamedRef {
-                name: defcap.name.clone(),
-                hash: HashRef::new(
-                    "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-                )
-                .unwrap(),
-            }],
-            policies: vec![],
-            secrets: vec![],
-            defaults: Some(ManifestDefaults {
-                policy: None,
-                cap_grants: vec![CapGrant {
-                    name: "cap_timer".into(),
-                    cap: defcap.name.clone(),
-                    params: ValueLiteral::Record(ValueRecord {
-                        record: IndexMap::new(),
-                    }),
-                    expiry_ns: None,
-                }],
-            }),
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let modules = HashMap::new();
+        }
+    }
+
+    #[test]
+    fn validate_manifest_accepts_minimal_workflow_manifest() {
+        let manifest = base_manifest();
+        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
+        let schemas = HashMap::from([
+            (
+                String::from("com.acme/Event@1"),
+                DefSchema {
+                    name: "com.acme/Event@1".into(),
+                    ty: text_type(),
+                },
+            ),
+            (
+                String::from("com.acme/State@1"),
+                DefSchema {
+                    name: "com.acme/State@1".into(),
+                    ty: text_type(),
+                },
+            ),
+        ]);
         let effects = HashMap::new();
-        let mut caps = HashMap::new();
-        caps.insert(defcap.name.clone(), defcap);
+        let caps = HashMap::from([(
+            String::from("com.acme/http@1"),
+            DefCap {
+                name: "com.acme/http@1".into(),
+                cap_type: crate::CapType::http_out(),
+                schema: text_type(),
+                enforcer: crate::CapEnforcer {
+                    module: "sys/CapAllowAll@1".into(),
+                },
+            },
+        )]);
         let policies = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
+
+        assert!(validate_manifest(&manifest, &modules, &schemas, &effects, &caps, &policies)
+            .is_ok());
+    }
+
+    #[test]
+    fn validate_manifest_rejects_unknown_routing_module() {
+        let mut manifest = base_manifest();
+        manifest.routing = Some(Routing {
+            subscriptions: vec![RoutingEvent {
+                event: SchemaRef::new("com.acme/Event@1").unwrap(),
+                module: "com.acme/missing@1".into(),
+                key_field: None,
+            }],
+            inboxes: Vec::new(),
+        });
+
+        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
+        let schemas = HashMap::from([
+            (
+                String::from("com.acme/Event@1"),
+                DefSchema {
+                    name: "com.acme/Event@1".into(),
+                    ty: text_type(),
+                },
+            ),
+            (
+                String::from("com.acme/State@1"),
+                DefSchema {
+                    name: "com.acme/State@1".into(),
+                    ty: text_type(),
+                },
+            ),
+        ]);
+
+        let err =
+            validate_manifest(&manifest, &modules, &schemas, &HashMap::new(), &HashMap::new(), &HashMap::new())
+                .unwrap_err();
         assert!(matches!(
             err,
-            ValidationError::CapabilityTypeMismatch { cap, expected, found, .. }
-            if cap == "cap_timer" && expected == "http.out" && found == "timer"
+            ValidationError::RoutingUnknownModule { module } if module == "com.acme/missing@1"
         ));
     }
 
     #[test]
-    fn manifest_rejects_missing_grant_in_secret_policy() {
-        let secret = SecretDecl {
-            alias: "com.acme/secret@1".into(),
-            version: 1,
-            binding_id: "binding".into(),
-            expected_digest: None,
-            policy: Some(SecretPolicy {
-                allowed_caps: vec!["cap_missing".into()],
-                allowed_plans: vec![],
-            }),
-        };
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![SecretEntry::Decl(secret)],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let schemas = HashMap::new();
-        let modules = HashMap::new();
-        let plans = HashMap::new();
-        let effects = HashMap::new();
-        let caps = HashMap::new();
-        let policies = HashMap::new();
-        let err = validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            err,
-            ValidationError::CapabilityNotFound { cap }
-            if cap == "cap_missing"
-        ));
-    }
-
-    #[test]
-    fn manifest_rejects_spawn_plan_with_unknown_child() {
-        let parent = DefPlan {
-            name: "com.acme/parent@1".into(),
-            input: SchemaRef::new("com.acme/Input@1").unwrap(),
-            output: None,
-            locals: IndexMap::new(),
-            steps: vec![
-                PlanStep {
-                    id: "spawn".into(),
-                    kind: PlanStepKind::SpawnPlan(PlanStepSpawnPlan {
-                        plan: "com.acme/missing-child@1".into(),
-                        input: Expr::Ref(ExprRef {
-                            reference: "@plan.input".into(),
-                        })
-                        .into(),
-                        bind: PlanBindHandle {
-                            handle_as: "h".into(),
-                        },
-                    }),
-                },
-                PlanStep {
-                    id: "end".into(),
-                    kind: PlanStepKind::End(PlanStepEnd { result: None }),
-                },
-            ],
-            edges: vec![PlanEdge {
-                from: "spawn".into(),
-                to: "end".into(),
-                when: None,
-            }],
-            required_caps: vec![],
-            allowed_effects: vec![],
-            invariants: vec![],
-        };
-
-        let manifest = Manifest {
-            air_version: crate::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: IndexMap::new(),
-            routing: None,
-            triggers: vec![],
-        };
-        let mut schemas = HashMap::new();
-        schemas.insert(
-            "com.acme/Input@1".into(),
-            DefSchema {
-                name: "com.acme/Input@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
+    fn validate_manifest_rejects_missing_binding_grant() {
+        let mut manifest = base_manifest();
+        manifest.module_bindings.insert(
+            "com.acme/workflow@1".into(),
+            ModuleBinding {
+                slots: IndexMap::from([(String::from("http"), String::from("missing_grant"))]),
             },
         );
-        let mut plans = HashMap::new();
-        plans.insert(parent.name.clone(), parent);
 
-        let err = validate_manifest(
-            &manifest,
-            &HashMap::new(),
-            &schemas,
-            &plans,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashMap::new(),
-        )
-        .unwrap_err();
+        let modules = HashMap::from([(String::from("com.acme/workflow@1"), base_module())]);
+        let schemas = HashMap::from([
+            (
+                String::from("com.acme/Event@1"),
+                DefSchema {
+                    name: "com.acme/Event@1".into(),
+                    ty: text_type(),
+                },
+            ),
+            (
+                String::from("com.acme/State@1"),
+                DefSchema {
+                    name: "com.acme/State@1".into(),
+                    ty: text_type(),
+                },
+            ),
+        ]);
+
+        let err =
+            validate_manifest(&manifest, &modules, &schemas, &HashMap::new(), &HashMap::new(), &HashMap::new())
+                .unwrap_err();
         assert!(matches!(
             err,
-            ValidationError::SpawnPlanUnknownPlan { child_plan, .. }
-            if child_plan == "com.acme/missing-child@1"
+            ValidationError::CapabilityNotFound { cap } if cap == "missing_grant"
         ));
     }
 }

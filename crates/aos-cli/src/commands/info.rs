@@ -54,9 +54,7 @@ pub async fn cmd_info(opts: &WorldOpts) -> Result<()> {
             Ok(Some(loaded)) => serde_json::json!({
                 "schemas": loaded.manifest.schemas.len(),
                 "modules": loaded.manifest.modules.len(),
-                "plans": loaded.manifest.plans.len(),
                 "effects": loaded.manifest.effects.len(),
-                "triggers": loaded.manifest.triggers.len(),
             }),
             Ok(None) => {
                 warnings.push("no manifest found in AIR directory".into());

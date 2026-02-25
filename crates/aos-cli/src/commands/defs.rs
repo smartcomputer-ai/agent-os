@@ -24,7 +24,7 @@ pub enum DefsCommand {
 
 #[derive(Args, Debug)]
 pub struct DefsGetArgs {
-    /// Definition name (schema/module/plan/cap/effect/policy/secret)
+    /// Definition name (schema/module/cap/effect/policy/secret)
     pub name: String,
 }
 
@@ -43,7 +43,6 @@ pub struct DefsListArgs {
 pub enum DefKind {
     Schema,
     Module,
-    Plan,
     Cap,
     Effect,
     Policy,
@@ -164,7 +163,6 @@ fn load_def_local(
 
     try_map!(loaded.schemas);
     try_map!(loaded.modules);
-    try_map!(loaded.plans);
     try_map!(loaded.caps);
     try_map!(loaded.effects);
     try_map!(loaded.policies);
@@ -210,13 +208,6 @@ fn list_defs_local(
             }
         }
     }
-    if allow_kind(DefKind::Plan) {
-        for d in loaded.plans.values() {
-            if prefix_match(&d.name) {
-                defs.push(serde_json::json!({ "kind": "plan", "name": d.name }));
-            }
-        }
-    }
     if allow_kind(DefKind::Cap) {
         for d in loaded.caps.values() {
             if prefix_match(&d.name) {
@@ -246,7 +237,6 @@ fn def_kind_str(kind: &DefKind) -> &'static str {
     match kind {
         DefKind::Schema => "schema",
         DefKind::Module => "module",
-        DefKind::Plan => "plan",
         DefKind::Cap => "cap",
         DefKind::Effect => "effect",
         DefKind::Policy => "policy",

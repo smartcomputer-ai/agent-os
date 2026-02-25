@@ -578,12 +578,6 @@ fn build_patch_summary(
         &mut def_changes,
     );
     refs_changed |= push_named_ref_changes(
-        "defplan",
-        &base_manifest.plans,
-        &patch.manifest.plans,
-        &mut def_changes,
-    );
-    refs_changed |= push_named_ref_changes(
         "defeffect",
         &base_manifest.effects,
         &patch.manifest.effects,
@@ -618,21 +612,18 @@ fn build_patch_summary(
         manifest_sections.insert("defaults".to_string());
     }
     let base_routing = base_manifest.routing.clone().unwrap_or_else(|| Routing {
-        events: Vec::new(),
+        subscriptions: Vec::new(),
         inboxes: Vec::new(),
     });
     let next_routing = patch.manifest.routing.clone().unwrap_or_else(|| Routing {
-        events: Vec::new(),
+        subscriptions: Vec::new(),
         inboxes: Vec::new(),
     });
-    if section_changed(&base_routing.events, &next_routing.events)? {
+    if section_changed(&base_routing.subscriptions, &next_routing.subscriptions)? {
         manifest_sections.insert("routing_events".to_string());
     }
     if section_changed(&base_routing.inboxes, &next_routing.inboxes)? {
         manifest_sections.insert("routing_inboxes".to_string());
-    }
-    if section_changed(&base_manifest.triggers, &patch.manifest.triggers)? {
-        manifest_sections.insert("triggers".to_string());
     }
     if section_changed(
         &base_manifest.module_bindings,
@@ -674,9 +665,6 @@ fn build_patch_summary(
             }
             "routing_inboxes" => {
                 ops.insert("set_routing_inboxes".to_string());
-            }
-            "triggers" => {
-                ops.insert("set_triggers".to_string());
             }
             "module_bindings" => {
                 ops.insert("set_module_bindings".to_string());

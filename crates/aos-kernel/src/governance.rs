@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
+    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name,
     SecretDecl, SecretEntry, SecretPolicy, builtins, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
@@ -144,7 +144,6 @@ impl ManifestPatch {
     pub fn to_loaded_manifest<S: Store>(&self, store: &S) -> Result<LoadedManifest, KernelError> {
         let manifest = self.manifest.clone();
         let mut modules: HashMap<Name, DefModule> = HashMap::new();
-        let mut plans: HashMap<Name, DefPlan> = HashMap::new();
         let mut effects: HashMap<Name, DefEffect> = HashMap::new();
         let mut caps: HashMap<Name, DefCap> = HashMap::new();
         let mut policies: HashMap<Name, DefPolicy> = HashMap::new();
@@ -155,9 +154,6 @@ impl ManifestPatch {
             match node {
                 AirNode::Defmodule(m) => {
                     modules.insert(m.name.clone(), m.clone());
-                }
-                AirNode::Defplan(p) => {
-                    plans.insert(p.name.clone(), p.clone());
                 }
                 AirNode::Defcap(c) => {
                     caps.insert(c.name.clone(), c.clone());
@@ -180,9 +176,8 @@ impl ManifestPatch {
                         expected_digest: s.expected_digest.clone(),
                         policy: Some(SecretPolicy {
                             allowed_caps: s.allowed_caps.clone(),
-                            allowed_plans: s.allowed_plans.clone(),
                         })
-                        .filter(|p| !p.allowed_caps.is_empty() || !p.allowed_plans.is_empty()),
+                        .filter(|p| !p.allowed_caps.is_empty()),
                     });
                 }
                 AirNode::Manifest(_) => {}
@@ -260,15 +255,6 @@ impl ManifestPatch {
                 }
             },
         )?;
-        load_defs_from_manifest(store, &manifest.plans, &mut plans, "defplan", |node| {
-            if let AirNode::Defplan(plan) = node {
-                Ok(plan)
-            } else {
-                Err(KernelError::Manifest(
-                    "manifest plan ref did not point to defplan".into(),
-                ))
-            }
-        })?;
         load_defs_from_manifest(
             store,
             &manifest.effects,
@@ -327,11 +313,8 @@ impl ManifestPatch {
                                 expected_digest: secret.expected_digest.clone(),
                                 policy: Some(SecretPolicy {
                                     allowed_caps: secret.allowed_caps.clone(),
-                                    allowed_plans: secret.allowed_plans.clone(),
                                 })
-                                .filter(|p| {
-                                    !p.allowed_caps.is_empty() || !p.allowed_plans.is_empty()
-                                }),
+                                .filter(|p| !p.allowed_caps.is_empty()),
                             });
                         }
                         _ => {
@@ -354,7 +337,6 @@ impl ManifestPatch {
             manifest,
             secrets,
             modules,
-            plans,
             effects,
             caps,
             policies,

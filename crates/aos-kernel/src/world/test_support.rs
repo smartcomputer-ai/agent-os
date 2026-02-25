@@ -29,12 +29,10 @@ pub(crate) fn minimal_manifest() -> Manifest {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![],
-        plans: vec![],
         caps: vec![],
         effects: vec![],
         policies: vec![],
         secrets: vec![],
-        triggers: vec![],
         module_bindings: IndexMap::new(),
         routing: None,
         defaults: None,
@@ -89,12 +87,10 @@ pub(crate) fn loaded_manifest_with_schema(
             hash: HashRef::new(schema_hash.to_hex()).unwrap(),
         }],
         modules: vec![],
-        plans: vec![],
         caps: vec![],
         effects: vec![],
         policies: vec![],
         secrets: vec![],
-        triggers: vec![],
         module_bindings: Default::default(),
         routing: None,
         defaults: None,
@@ -103,7 +99,6 @@ pub(crate) fn loaded_manifest_with_schema(
         manifest,
         secrets: vec![],
         modules: HashMap::new(),
-        plans: HashMap::new(),
         effects: HashMap::new(),
         caps: HashMap::new(),
         policies: HashMap::new(),
@@ -146,7 +141,7 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
     let store = aos_store::MemStore::default();
     let module = DefModule {
         name: "com.acme/Reducer@1".into(),
-        module_kind: ModuleKind::Reducer,
+        module_kind: ModuleKind::Workflow,
         wasm_hash: HashRef::new(hash(1)).unwrap(),
         key_schema: Some(SchemaRef::new("com.acme/Key@1").unwrap()),
         abi: ModuleAbi {
@@ -177,7 +172,6 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
             name: "com.acme/Reducer@1".into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
-        plans: vec![],
         effects: vec![],
         caps: vec![],
         policies: vec![],
@@ -185,20 +179,18 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
         defaults: None,
         module_bindings: Default::default(),
         routing: Some(Routing {
-            events: vec![RoutingEvent {
+            subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                reducer: "com.acme/Reducer@1".to_string(),
+                module: "com.acme/Reducer@1".to_string(),
                 key_field: Some("id".into()),
             }],
             inboxes: vec![],
         }),
-        triggers: vec![],
     };
     let loaded = LoadedManifest {
         manifest,
         secrets: vec![],
         modules,
-        plans: HashMap::new(),
         effects: HashMap::new(),
         caps: HashMap::new(),
         policies: HashMap::new(),
@@ -217,7 +209,7 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemSto
     let store = aos_store::MemStore::default();
     let module = DefModule {
         name: "com.acme/Reducer@1".into(),
-        module_kind: ModuleKind::Reducer,
+        module_kind: ModuleKind::Workflow,
         wasm_hash: HashRef::new(hash(1)).unwrap(),
         key_schema: None,
         abi: ModuleAbi {
@@ -247,7 +239,6 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemSto
             name: "com.acme/Reducer@1".into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
-        plans: vec![],
         effects: vec![],
         caps: vec![],
         policies: vec![],
@@ -255,20 +246,18 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemSto
         defaults: None,
         module_bindings: Default::default(),
         routing: Some(Routing {
-            events: vec![RoutingEvent {
+            subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                reducer: "com.acme/Reducer@1".to_string(),
+                module: "com.acme/Reducer@1".to_string(),
                 key_field: Some("id".into()),
             }],
             inboxes: vec![],
         }),
-        triggers: vec![],
     };
     let loaded = LoadedManifest {
         manifest,
         secrets: vec![],
         modules,
-        plans: HashMap::new(),
         effects: HashMap::new(),
         caps: HashMap::new(),
         policies: HashMap::new(),
@@ -287,7 +276,7 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
     let store = aos_store::MemStore::default();
     let module = DefModule {
         name: "com.acme/Reducer@1".into(),
-        module_kind: ModuleKind::Reducer,
+        module_kind: ModuleKind::Workflow,
         wasm_hash: HashRef::new(hash(1)).unwrap(),
         key_schema: None,
         abi: ModuleAbi {
@@ -317,7 +306,6 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
             name: "com.acme/Reducer@1".into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
-        plans: vec![],
         effects: vec![],
         caps: vec![],
         policies: vec![],
@@ -325,20 +313,18 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
         defaults: None,
         module_bindings: Default::default(),
         routing: Some(Routing {
-            events: vec![RoutingEvent {
+            subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                reducer: "com.acme/Reducer@1".to_string(),
+                module: "com.acme/Reducer@1".to_string(),
                 key_field: None,
             }],
             inboxes: vec![],
         }),
-        triggers: vec![],
     };
     let loaded = LoadedManifest {
         manifest,
         secrets: vec![],
         modules,
-        plans: HashMap::new(),
         effects: HashMap::new(),
         caps: HashMap::new(),
         policies: HashMap::new(),
@@ -357,7 +343,7 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemS
     let store = aos_store::MemStore::default();
     let module = DefModule {
         name: "com.acme/Reducer@1".into(),
-        module_kind: ModuleKind::Reducer,
+        module_kind: ModuleKind::Workflow,
         wasm_hash: HashRef::new(hash(1)).unwrap(),
         key_schema: Some(SchemaRef::new("com.acme/Key@1").unwrap()),
         abi: ModuleAbi {
@@ -388,7 +374,6 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemS
             name: "com.acme/Reducer@1".into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
-        plans: vec![],
         effects: vec![],
         caps: vec![],
         policies: vec![],
@@ -396,20 +381,18 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemS
         defaults: None,
         module_bindings: Default::default(),
         routing: Some(Routing {
-            events: vec![RoutingEvent {
+            subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                reducer: "com.acme/Reducer@1".to_string(),
+                module: "com.acme/Reducer@1".to_string(),
                 key_field: None,
             }],
             inboxes: vec![],
         }),
-        triggers: vec![],
     };
     let loaded = LoadedManifest {
         manifest,
         secrets: vec![],
         modules,
-        plans: HashMap::new(),
         effects: HashMap::new(),
         caps: HashMap::new(),
         policies: HashMap::new(),
@@ -429,7 +412,6 @@ pub(crate) fn empty_manifest() -> Manifest {
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![],
-        plans: vec![],
         effects: vec![],
         caps: vec![],
         policies: vec![],
@@ -437,7 +419,6 @@ pub(crate) fn empty_manifest() -> Manifest {
         defaults: None,
         module_bindings: Default::default(),
         routing: None,
-        triggers: vec![],
     }
 }
 
@@ -456,7 +437,6 @@ pub(crate) fn kernel_with_store_and_journal(
         manifest,
         secrets: vec![],
         modules: HashMap::new(),
-        plans: HashMap::new(),
         effects: HashMap::new(),
         caps: HashMap::new(),
         policies: HashMap::new(),

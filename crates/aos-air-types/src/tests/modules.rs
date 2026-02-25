@@ -25,7 +25,7 @@ fn parses_reducer_module_with_cap_slots() {
     assert_json_schema(crate::schemas::DEFMODULE, &module_json);
     let module: DefModule = serde_json::from_value(module_json).expect("parse module");
     assert_eq!(module.name, "com.acme/Reducer@1");
-    assert!(matches!(module.module_kind, ModuleKind::Reducer));
+    assert!(matches!(module.module_kind, ModuleKind::Workflow));
     let reducer = module.abi.reducer.expect("reducer abi");
     assert_eq!(reducer.state.as_str(), "com.acme/State@1");
 }

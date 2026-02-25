@@ -2,6 +2,7 @@
 
 pub mod builtins;
 pub mod catalog;
+mod legacy_plan;
 mod model;
 pub mod plan_literals;
 mod refs;
@@ -11,6 +12,7 @@ pub mod validate;
 pub mod value_normalize;
 
 pub use model::*;
+pub use legacy_plan::*;
 pub use refs::{HashRef, RefError, SchemaRef};
 pub use typecheck::{ValueTypeError, validate_value_literal};
 pub use validate::validate_manifest;

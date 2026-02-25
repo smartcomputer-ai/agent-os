@@ -243,7 +243,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.manifest_hash = Hash::of_bytes(&manifest_bytes);
         self.secrets = loaded.secrets;
         self.module_defs = loaded.modules;
-        self.plan_defs = loaded.plans;
+        self.plan_defs = HashMap::new();
         self.cap_defs = loaded.caps;
         self.effect_defs = loaded.effects;
         self.policy_defs = loaded.policies;
@@ -416,7 +416,6 @@ mod tests {
             manifest: empty_manifest(),
             secrets: vec![],
             modules: HashMap::new(),
-            plans: HashMap::new(),
             effects: HashMap::new(),
             caps: HashMap::new(),
             policies: HashMap::new(),

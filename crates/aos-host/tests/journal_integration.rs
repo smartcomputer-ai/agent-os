@@ -224,10 +224,6 @@ fn plan_journal_replay_resumes_waiting_receipt() {
 fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = no_plan_workflow_manifest(&store);
-    assert!(
-        manifest.manifest.plans.is_empty(),
-        "fixture must not define plans"
-    );
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
     let start_event = serde_json::json!({
@@ -670,7 +666,7 @@ fn sequenced_reducer_module<S: Store + ?Sized>(
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
     DefModule {
         name: name.into(),
-        module_kind: ModuleKind::Reducer,
+        module_kind: ModuleKind::Workflow,
         wasm_hash: wasm_hash_ref,
         key_schema: None,
         abi: ModuleAbi {

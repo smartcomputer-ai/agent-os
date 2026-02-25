@@ -139,7 +139,6 @@ mod tests {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: vec![],
-            plans: vec![],
             effects: vec![],
             caps: vec![],
             policies: vec![],
@@ -147,7 +146,6 @@ mod tests {
             defaults: None,
             module_bindings: Default::default(),
             routing: None,
-            triggers: vec![],
         }
     }
 

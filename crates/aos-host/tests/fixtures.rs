@@ -151,18 +151,11 @@ pub fn insert_test_schemas(loaded: &mut LoadedManifest, schemas: Vec<DefSchema>)
 
 /// Builds a `LoadedManifest` from already-parsed plan and module definitions.
 pub fn build_loaded_manifest(
-    mut plans: Vec<DefPlan>,
-    triggers: Vec<Trigger>,
+    _plans: Vec<DefPlan>,
+    _triggers: Vec<Trigger>,
     mut modules: Vec<DefModule>,
     routing_events: Vec<RoutingEvent>,
 ) -> LoadedManifest {
-    let plan_refs: Vec<NamedRef> = plans
-        .iter()
-        .map(|plan| NamedRef {
-            name: plan.name.clone(),
-            hash: zero_hash(),
-        })
-        .collect();
     let module_refs: Vec<NamedRef> = modules
         .iter()
         .map(|module| {
@@ -180,7 +173,7 @@ pub fn build_loaded_manifest(
         None
     } else {
         Some(Routing {
-            events: routing_events,
+            subscriptions: routing_events,
             inboxes: vec![],
         })
     };
@@ -189,7 +182,6 @@ pub fn build_loaded_manifest(
         air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: module_refs,
-        plans: plan_refs,
         effects: aos_air_types::builtins::builtin_effects()
             .iter()
             .map(|e| NamedRef {
@@ -203,16 +195,11 @@ pub fn build_loaded_manifest(
         defaults: None,
         module_bindings: Default::default(),
         routing,
-        triggers,
     };
 
     let modules_map: HashMap<Name, DefModule> = modules
         .drain(..)
         .map(|module| (module.name.clone(), module))
-        .collect();
-    let plans_map: HashMap<Name, DefPlan> = plans
-        .drain(..)
-        .map(|plan| (plan.name.clone(), plan))
         .collect();
 
     let effects_map: HashMap<Name, DefEffect> = aos_air_types::builtins::builtin_effects()
@@ -227,7 +214,6 @@ pub fn build_loaded_manifest(
         manifest,
         secrets: Vec::new(),
         modules: modules_map,
-        plans: plans_map,
         effects: effects_map,
         caps,
         policies: HashMap::new(),
@@ -355,28 +341,8 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
     };
 
     if let Some(routing) = &loaded.manifest.routing {
-        for event in &routing.events {
+        for event in &routing.subscriptions {
             required.insert(event.event.as_str().to_string());
-        }
-    }
-    for trigger in &loaded.manifest.triggers {
-        required.insert(trigger.event.as_str().to_string());
-    }
-    for plan in loaded.plans.values() {
-        required.insert(plan.input.as_str().to_string());
-        if let Some(output) = &plan.output {
-            required.insert(output.as_str().to_string());
-        }
-        for schema in plan.locals.values() {
-            required.insert(schema.as_str().to_string());
-        }
-        for step in &plan.steps {
-            if let PlanStepKind::AwaitEvent(step) = &step.kind {
-                required.insert(step.event.as_str().to_string());
-            }
-            if let PlanStepKind::RaiseEvent(step) = &step.kind {
-                required.insert(step.event.as_str().to_string());
-            }
         }
     }
     for module in loaded.modules.values() {
@@ -604,7 +570,7 @@ pub fn stub_reducer_module<S: Store + ?Sized>(
 
     DefModule {
         name: name.into(),
-        module_kind: ModuleKind::Reducer,
+        module_kind: ModuleKind::Workflow,
         wasm_hash: wasm_hash_ref,
         key_schema: None,
         abi: ModuleAbi {
@@ -700,7 +666,7 @@ pub fn reducer_module_from_target(
 
     DefModule {
         name: name.to_string(),
-        module_kind: ModuleKind::Reducer,
+        module_kind: ModuleKind::Workflow,
         wasm_hash: wasm_hash_ref,
         key_schema: key_schema.map(schema),
         abi: ModuleAbi {
@@ -823,7 +789,7 @@ fn expr_value_to_cbor(value: &ExprValue) -> serde_cbor::Value {
 pub fn routing_event(schema_name: &str, reducer: &str) -> RoutingEvent {
     RoutingEvent {
         event: schema(schema_name),
-        reducer: reducer.to_string(),
+        module: reducer.to_string(),
         key_field: None,
     }
 }

@@ -151,7 +151,6 @@ fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) ->
             name: REDUCER_NAME.into(),
             hash: module_with_abi.wasm_hash.clone(),
         }],
-        plans: Vec::new(),
         effects: aos_air_types::builtins::builtin_effects()
             .iter()
             .map(|e| NamedRef {
@@ -165,14 +164,13 @@ fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) ->
         defaults: None,
         module_bindings: IndexMap::new(),
         routing: Some(Routing {
-            events: vec![RoutingEvent {
+            subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new(EVENT_SCHEMA).unwrap(),
-                reducer: REDUCER_NAME.into(),
+                module: REDUCER_NAME.into(),
                 key_field: None,
             }],
             inboxes: Vec::new(),
         }),
-        triggers: Vec::new(),
     };
 
     let builtin_effects: HashMap<_, _> = aos_air_types::builtins::builtin_effects()
@@ -185,7 +183,6 @@ fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) ->
         manifest,
         secrets: Vec::new(),
         modules,
-        plans: HashMap::new(),
         effects: builtin_effects,
         caps: HashMap::new(),
         policies: HashMap::new(),

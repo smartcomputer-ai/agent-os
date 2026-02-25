@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 
-use aos_air_types::{
-    AirNode, HashRef, NamedRef, TypeExpr, builtins,
-    catalog::EffectCatalog,
-    plan_literals::{SchemaIndex, normalize_plan_literals_with_plan_inputs},
-};
+use aos_air_types::{AirNode, HashRef, NamedRef, TypeExpr, builtins, plan_literals::SchemaIndex};
 use aos_cbor::Hash;
 use aos_store::Store;
 
@@ -69,63 +65,26 @@ pub fn canonicalize_patch<S: Store>(
 ) -> Result<ManifestPatch, KernelError> {
     let mut canonical = patch.clone();
 
+    // Keep schema index warm for callers that rely on this helper's schema loading side effects.
     let mut schema_map = HashMap::new();
     for builtin in builtins::builtin_schemas() {
         schema_map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
     }
-    let mut effect_defs = Vec::new();
-
     for node in &canonical.nodes {
-        match node {
-            AirNode::Defschema(schema) => {
-                schema_map.insert(schema.name.clone(), schema.ty.clone());
-            }
-            AirNode::Defeffect(effect) => {
-                effect_defs.push(effect.clone());
-            }
-            _ => {}
+        if let AirNode::Defschema(schema) = node {
+            schema_map.insert(schema.name.clone(), schema.ty.clone());
         }
     }
-
     extend_schema_map_from_store(store, &canonical.manifest.schemas, &mut schema_map)?;
-    let schema_index = SchemaIndex::new(schema_map);
-    if effect_defs.is_empty() {
-        effect_defs.extend(builtins::builtin_effects().iter().map(|e| e.effect.clone()));
-    }
-    let effect_catalog = EffectCatalog::from_defs(effect_defs);
-    let plan_input_schemas: HashMap<String, String> = canonical
-        .nodes
-        .iter()
-        .filter_map(|node| match node {
-            AirNode::Defplan(plan) => Some((plan.name.clone(), plan.input.as_str().to_string())),
-            _ => None,
-        })
-        .collect();
-    for node in &mut canonical.nodes {
-        if let AirNode::Defplan(plan) = node {
-            normalize_plan_literals_with_plan_inputs(
-                plan,
-                &schema_index,
-                &effect_catalog,
-                &plan_input_schemas,
-            )
-            .map_err(|err| {
-                KernelError::Manifest(format!(
-                    "plan '{}' literal normalization failed: {err}",
-                    plan.name
-                ))
-            })?;
-        }
-    }
-    normalize_patch_manifest_refs(&mut canonical)?;
+    let _schema_index = SchemaIndex::new(schema_map);
 
+    normalize_patch_manifest_refs(&mut canonical)?;
     Ok(canonical)
 }
 
 fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), KernelError> {
     let mut schema_hashes = HashMap::new();
     let mut module_hashes = HashMap::new();
-    let mut plan_hashes = HashMap::new();
     let mut effect_hashes = HashMap::new();
     let mut cap_hashes = HashMap::new();
     let mut policy_hashes = HashMap::new();
@@ -143,12 +102,6 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
                     KernelError::Manifest(format!("hash module '{}': {err}", module.name))
                 })?;
                 module_hashes.insert(module.name.clone(), hash);
-            }
-            AirNode::Defplan(plan) => {
-                let hash = Hash::of_cbor(&AirNode::Defplan(plan.clone())).map_err(|err| {
-                    KernelError::Manifest(format!("hash plan '{}': {err}", plan.name))
-                })?;
-                plan_hashes.insert(plan.name.clone(), hash);
             }
             AirNode::Defeffect(effect) => {
                 let hash = Hash::of_cbor(&AirNode::Defeffect(effect.clone())).map_err(|err| {
@@ -188,14 +141,6 @@ fn normalize_patch_manifest_refs(patch: &mut ManifestPatch) -> Result<(), Kernel
         } else if let Some(hash) = module_hashes.get(&reference.name) {
             reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
                 KernelError::Manifest(format!("module hash '{}': {err}", reference.name))
-            })?;
-        }
-    }
-
-    for reference in &mut patch.manifest.plans {
-        if let Some(hash) = plan_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("plan hash '{}': {err}", reference.name))
             })?;
         }
     }

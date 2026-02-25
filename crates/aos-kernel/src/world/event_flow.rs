@@ -260,7 +260,7 @@ impl<S: Store + 'static> Kernel<S> {
                 .module_defs
                 .get(&reducer_name)
                 .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.clone()))?;
-            if module_def.module_kind != aos_air_types::ModuleKind::Reducer {
+            if module_def.module_kind != aos_air_types::ModuleKind::Workflow {
                 return Err(KernelError::Manifest(format!(
                     "module '{reducer_name}' is not a reducer/workflow module"
                 )));
@@ -926,7 +926,7 @@ mod tests {
         let store = aos_store::MemStore::default();
         let module = DefModule {
             name: "com.acme/Reducer@1".into(),
-            module_kind: ModuleKind::Reducer,
+            module_kind: ModuleKind::Workflow,
             wasm_hash: HashRef::new(hash(1)).unwrap(),
             key_schema: None,
             abi: ModuleAbi {
@@ -987,7 +987,6 @@ mod tests {
                 name: "com.acme/Reducer@1".into(),
                 hash: HashRef::new(hash(1)).unwrap(),
             }],
-            plans: vec![],
             effects: vec![],
             caps: vec![],
             policies: vec![],
@@ -995,20 +994,18 @@ mod tests {
             defaults: None,
             module_bindings: Default::default(),
             routing: Some(Routing {
-                events: vec![RoutingEvent {
+                subscriptions: vec![RoutingEvent {
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                    reducer: "com.acme/Reducer@1".to_string(),
+                    module: "com.acme/Reducer@1".to_string(),
                     key_field: None,
                 }],
                 inboxes: vec![],
             }),
-            triggers: vec![],
         };
         let loaded = LoadedManifest {
             manifest,
             secrets: vec![],
             modules,
-            plans: HashMap::new(),
             effects: HashMap::new(),
             caps: HashMap::new(),
             policies: HashMap::new(),

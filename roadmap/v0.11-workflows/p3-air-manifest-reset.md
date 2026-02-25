@@ -1,8 +1,50 @@
 # P3: AIR + Manifest Reset (Remove DefPlan and Trigger-to-Plan Model)
 
 **Priority**: P1  
-**Status**: Proposed  
+**Status**: Completed  
 **Depends on**: `roadmap/v0.11-workflows/p2-kernel-plan-runtime-cutover.md`
+
+## Implementation Status
+
+### Scope
+- [x] Scope 1.1: Removed active AIR `DefPlan`/`PlanStep*`/`PlanEdge`/`Trigger` from `model.rs` and active manifest fields.
+- [x] Scope 1.2: Removed plan-specific manifest validation checks.
+- [x] Scope 1.3: Removed plan literal normalization from active manifest load path.
+- [x] Scope 1.4: Active module authority model uses `module_kind: workflow|pure`.
+- [x] Scope 2.1: Removed `manifest.plans` references from active loader/kernel/host paths.
+- [x] Scope 2.2: Removed trigger-to-plan manifest wiring and trigger patch ops.
+- [x] Scope 2.3: Standardized on `routing.subscriptions` with compatibility aliases for `routing.events`/`reducer`.
+- [x] Scope 2.4: Kept continuation routing out of manifest startup wiring.
+- [x] Scope 3.1: Removed `defplan` from active AIR schema set.
+- [x] Scope 3.2: Updated manifest schema for post-plan sections and routing contract.
+- [x] Scope 3.3: Updated patch schema to remove plan/triggers operations.
+- [x] Scope 3.4: Updated secret policy schemas to cap-only policy (`allowed_caps`) in active model.
+- [x] Scope 3.5: Updated `defmodule` schema to `workflow|pure`.
+- [x] Scope 4.1: Store/catalog no longer load `defplan` nodes into active manifest catalogs.
+- [x] Scope 4.2: Removed manifest plan-ref hashing/rewriting logic from active loader/runtime paths.
+- [x] Scope 4.3: Host world import/export serialization no longer reads/writes plan sections/files.
+
+### Work Items by Crate
+- [x] `crates/aos-air-types`: model/validation/schema set reset to post-plan active AIR contract.
+- [x] `spec/schemas`: manifest/common/patch/defmodule/defsecret aligned with post-plan manifest and module model.
+- [x] `crates/aos-store`: manifest loader and validation pipeline no longer depends on plan nodes.
+- [x] `crates/aos-kernel`: removed remaining manifest/control-plane `defplan` dependencies in manifest/governance/patch/runtime assembly.
+- [x] `crates/aos-host`: removed remaining manifest loader and world IO dependencies on plan refs.
+- [x] `crates/aos-cli`: removed compile-required `manifest.plans`/`manifest.triggers`/`AirNode::Defplan` dependencies from active command wiring.
+
+### Validation
+- [x] `cargo check -p aos-air-types -p aos-store -p aos-kernel -p aos-host -p aos-cli`
+- [x] `cargo check --tests -p aos-air-types -p aos-store -p aos-kernel -p aos-host -p aos-cli`
+
+### Acceptance Criteria
+- [x] AC1: Active AIR model compiles with no plan data structures in `model.rs`.
+- [x] AC2: Active manifest schema/model no longer requires or consumes plan refs.
+- [x] AC3: Loader/store/kernel active paths no longer parse or depend on `defplan`.
+- [x] AC4: World import/export + manifest patching work with the post-plan contract.
+- [x] AC5: Manifest routing changes do not own continuation wakeups (origin-identity runtime behavior retained).
+- [x] AC6: Manifest fields are not required to recover waiting workflow runtime state.
+- [x] AC7: Active AIR schema/model exposes `workflow|pure` module kinds.
+- [x] AC8: Startup wiring uses `routing.subscriptions` (with compatibility aliases), not trigger-to-plan startup.
 
 ## Goal
 

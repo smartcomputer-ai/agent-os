@@ -406,7 +406,6 @@ mod tests {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: vec![],
-            plans: vec![],
             effects: vec![],
             caps: vec![],
             policies: vec![],
@@ -422,7 +421,6 @@ mod tests {
             }),
             module_bindings: IndexMap::new(),
             routing: None,
-            triggers: vec![],
         }
     }
 

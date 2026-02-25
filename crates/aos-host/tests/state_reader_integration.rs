@@ -83,7 +83,7 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
 
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("com.acme/Event@1"),
-        reducer: reducer.name.clone(),
+        module: reducer.name.clone(),
         key_field: Some(key_field.to_string()),
     }];
 

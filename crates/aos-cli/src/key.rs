@@ -119,7 +119,7 @@ pub fn derive_event_key(
 ) -> Result<Option<Vec<u8>>> {
     let loaded = load_manifest_for_keys(dirs)?;
     let route = loaded.manifest.routing.as_ref().and_then(|r| {
-        r.events
+        r.subscriptions
             .iter()
             .find(|evt| evt.event.as_str() == event_schema)
     });
@@ -138,7 +138,7 @@ pub fn derive_event_key(
         return Ok(None);
     };
 
-    let reducer = route.reducer.as_str();
+    let reducer = route.module.as_str();
     // If the route isn't keyed, we don't derive.
     let key_field = match &route.key_field {
         Some(field) => field,

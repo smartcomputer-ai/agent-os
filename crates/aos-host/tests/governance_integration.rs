@@ -1,3 +1,5 @@
+#![cfg(feature = "e2e-tests")]
+
 use std::{collections::HashMap, sync::Arc};
 
 use aos_air_types::{
@@ -431,7 +433,6 @@ fn plan_patch(plan: DefPlan) -> ManifestPatch {
             defaults: None,
             module_bindings: Default::default(),
             routing: None,
-            triggers: vec![],
         },
         nodes: vec![AirNode::Defplan(plan)],
     }

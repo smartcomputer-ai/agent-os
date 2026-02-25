@@ -200,7 +200,7 @@ fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     );
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("sys/WorkspaceCommit@1"),
-        reducer: reducer.name.clone(),
+        module: reducer.name.clone(),
         key_field: Some("workspace".into()),
     }];
     fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)

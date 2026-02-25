@@ -2,9 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aos_air_types::{
-    AirNode, DefCap, DefModule, DefPlan, DefPolicy, HashRef, Manifest, Name, NamedRef,
-    PlanStepKind, TypeExpr, TypePrimitive, builtins, catalog::EffectCatalog,
-    plan_literals::SchemaIndex,
+    AirNode, DefCap, DefModule, DefPolicy, HashRef, Manifest, Name, NamedRef, TypeExpr,
+    TypePrimitive, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex,
 };
 use aos_cbor::Hash;
 use aos_store::Store;
@@ -40,8 +39,8 @@ pub(super) fn assemble_runtime<S: Store>(
         schema_index.as_ref(),
     )?);
     let router = build_router(&loaded.manifest, reducer_schemas.as_ref())?;
-    let plan_registry = build_plan_registry(&loaded.plans);
-    let plan_triggers = build_plan_triggers(&loaded.manifest);
+    let plan_registry = PlanRegistry::default();
+    let plan_triggers = HashMap::new();
     let effect_catalog = Arc::new(loaded.effect_catalog.clone());
     let capability_resolver = CapabilityResolver::from_manifest(
         &loaded.manifest,
@@ -49,7 +48,7 @@ pub(super) fn assemble_runtime<S: Store>(
         schema_index.as_ref(),
         effect_catalog.clone(),
     )?;
-    let plan_cap_handles = resolve_plan_cap_handles(&loaded.plans, &capability_resolver)?;
+    let plan_cap_handles = HashMap::new();
     let module_cap_bindings = resolve_module_cap_bindings(&loaded.manifest, &capability_resolver)?;
     let policy_gate = build_policy_gate(&loaded.manifest, &loaded.policies)?;
 
@@ -65,37 +64,6 @@ pub(super) fn assemble_runtime<S: Store>(
         policy_gate,
         effect_catalog,
     })
-}
-
-fn build_plan_registry(plans: &HashMap<Name, DefPlan>) -> PlanRegistry {
-    let mut registry = PlanRegistry::default();
-    for plan in plans.values() {
-        registry.register(plan.clone());
-    }
-    registry
-}
-
-fn build_plan_triggers(manifest: &Manifest) -> HashMap<String, Vec<PlanTriggerBinding>> {
-    let mut plan_triggers = HashMap::new();
-    for trigger in &manifest.triggers {
-        plan_triggers
-            .entry(trigger.event.as_str().to_string())
-            .or_insert_with(Vec::new)
-            .push(PlanTriggerBinding {
-                plan: trigger.plan.clone(),
-                correlate_by: trigger.correlate_by.clone(),
-                when: trigger.when.clone(),
-                input_expr: trigger.input_expr.clone(),
-            });
-    }
-    for bindings in plan_triggers.values_mut() {
-        bindings.sort_by(|a, b| {
-            a.plan
-                .cmp(&b.plan)
-                .then_with(|| a.correlate_by.cmp(&b.correlate_by))
-        });
-    }
-    plan_triggers
 }
 
 fn build_policy_gate(
@@ -193,11 +161,11 @@ fn build_router(
         return Ok(router);
     };
 
-    for route in &routing.events {
-        let reducer_schema = reducer_schemas.get(&route.reducer).ok_or_else(|| {
+    for route in &routing.subscriptions {
+        let reducer_schema = reducer_schemas.get(&route.module).ok_or_else(|| {
             KernelError::Manifest(format!(
                 "schema for reducer '{}' not found while building router",
-                route.reducer
+                route.module
             ))
         })?;
         let route_event = route.event.as_str();
@@ -210,7 +178,7 @@ fn build_router(
                 reducer_schema,
                 route.key_field.clone(),
                 EventWrap::Identity,
-                &route.reducer,
+                &route.module,
             );
             match &reducer_schema.event_schema {
                 TypeExpr::Ref(reference) => {
@@ -222,7 +190,7 @@ fn build_router(
                         reducer_schema,
                         route.key_field.clone(),
                         EventWrap::Identity,
-                        &route.reducer,
+                        &route.module,
                     );
                 }
                 TypeExpr::Variant(variant) => {
@@ -242,7 +210,7 @@ fn build_router(
                                 reducer_schema,
                                 route.key_field.clone(),
                                 EventWrap::Variant { tag: tag.clone() },
-                                &route.reducer,
+                                &route.module,
                             );
                         }
                     }
@@ -258,7 +226,7 @@ fn build_router(
                 reducer_schema,
                 route.key_field.clone(),
                 wrap,
-                &route.reducer,
+                &route.module,
             );
         }
     }
@@ -327,32 +295,6 @@ fn wrap_for_event_schema(
     }
 }
 
-fn resolve_plan_cap_handles(
-    plans: &HashMap<Name, DefPlan>,
-    resolver: &CapabilityResolver,
-) -> Result<HashMap<Name, Arc<HashMap<String, CapGrantResolution>>>, KernelError> {
-    let mut plan_caps = HashMap::new();
-    for plan in plans.values() {
-        for cap in &plan.required_caps {
-            if !resolver.has_grant(cap) {
-                return Err(KernelError::PlanCapabilityMissing {
-                    plan: plan.name.clone(),
-                    cap: cap.clone(),
-                });
-            }
-        }
-        let mut step_caps = HashMap::new();
-        for step in &plan.steps {
-            if let PlanStepKind::EmitEffect(emit) = &step.kind {
-                let resolved = resolver.resolve(emit.cap.as_str(), emit.kind.as_str())?;
-                step_caps.insert(step.id.clone(), resolved);
-            }
-        }
-        plan_caps.insert(plan.name.clone(), Arc::new(step_caps));
-    }
-    Ok(plan_caps)
-}
-
 fn resolve_module_cap_bindings(
     manifest: &Manifest,
     resolver: &CapabilityResolver,
@@ -381,7 +323,6 @@ pub(super) fn persist_loaded_manifest<S: Store>(
 ) -> Result<(), KernelError> {
     let mut schema_hashes = HashMap::new();
     let mut module_hashes = HashMap::new();
-    let mut plan_hashes = HashMap::new();
     let mut effect_hashes = HashMap::new();
     let mut cap_hashes = HashMap::new();
     let mut policy_hashes = HashMap::new();
@@ -393,10 +334,6 @@ pub(super) fn persist_loaded_manifest<S: Store>(
     for module in loaded.modules.values() {
         let hash = store.put_node(&AirNode::Defmodule(module.clone()))?;
         module_hashes.insert(module.name.clone(), hash);
-    }
-    for plan in loaded.plans.values() {
-        let hash = store.put_node(&AirNode::Defplan(plan.clone()))?;
-        plan_hashes.insert(plan.name.clone(), hash);
     }
     for cap in loaded.caps.values() {
         let hash = store.put_node(&AirNode::Defcap(cap.clone()))?;
@@ -443,19 +380,6 @@ pub(super) fn persist_loaded_manifest<S: Store>(
             "manifest references unknown module '{}'",
             reference.name
         )));
-    }
-
-    for reference in loaded.manifest.plans.iter_mut() {
-        if let Some(hash) = plan_hashes.get(&reference.name) {
-            reference.hash = HashRef::new(hash.to_hex()).map_err(|err| {
-                KernelError::Manifest(format!("plan hash '{}': {err}", reference.name))
-            })?;
-        } else {
-            return Err(KernelError::Manifest(format!(
-                "manifest references unknown plan '{}'",
-                reference.name
-            )));
-        }
     }
 
     for reference in loaded.manifest.effects.iter_mut() {

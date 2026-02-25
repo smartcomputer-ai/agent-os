@@ -18,7 +18,7 @@ impl<S: Store + 'static> Kernel<S> {
         let mut loaded = loaded;
         let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
         let runtime = manifest_runtime::assemble_runtime(store.as_ref(), &loaded)?;
-        let plan_defs = loaded.plans.clone();
+        let plan_defs = HashMap::new();
         let cap_defs = loaded.caps.clone();
         let effect_defs = loaded.effects.clone();
         let policy_defs = loaded.policies.clone();
@@ -109,7 +109,7 @@ impl<S: Store + 'static> Kernel<S> {
         if config.eager_module_load {
             for (name, module_def) in kernel.module_defs.iter() {
                 match module_def.module_kind {
-                    aos_air_types::ModuleKind::Reducer => {
+                    aos_air_types::ModuleKind::Workflow => {
                         kernel.reducers.ensure_loaded(name, module_def)?;
                     }
                     aos_air_types::ModuleKind::Pure => {
@@ -161,7 +161,6 @@ mod tests {
                 policy: None,
             }],
             modules: HashMap::new(),
-            plans: HashMap::new(),
             effects: HashMap::new(),
             caps: HashMap::new(),
             policies: HashMap::new(),

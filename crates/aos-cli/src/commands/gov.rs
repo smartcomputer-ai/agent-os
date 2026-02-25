@@ -396,7 +396,6 @@ pub fn autofill_patchdoc_hashes(doc: &mut serde_json::Value, require_hashes: boo
 fn node_name(node: &AirNode) -> Option<&str> {
     match node {
         AirNode::Defmodule(n) => Some(n.name.as_str()),
-        AirNode::Defplan(n) => Some(n.name.as_str()),
         AirNode::Defschema(n) => Some(n.name.as_str()),
         AirNode::Defcap(n) => Some(n.name.as_str()),
         AirNode::Defpolicy(n) => Some(n.name.as_str()),

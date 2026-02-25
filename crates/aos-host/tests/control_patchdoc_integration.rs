@@ -54,9 +54,6 @@ async fn setup_daemon_with_control() -> (
     for module in manifest.modules.values() {
         let _ = store.put_node(&aos_air_types::AirNode::Defmodule(module.clone()));
     }
-    for plan in manifest.plans.values() {
-        let _ = store.put_node(&aos_air_types::AirNode::Defplan(plan.clone()));
-    }
     for cap in manifest.caps.values() {
         let _ = store.put_node(&aos_air_types::AirNode::Defcap(cap.clone()));
     }

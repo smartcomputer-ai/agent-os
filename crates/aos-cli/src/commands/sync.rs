@@ -442,11 +442,6 @@ fn import_defs_hash(root: &Path) -> Result<String> {
                     let node = AirNode::Defmodule(module);
                     add_def_entry(&mut entries, &mut seen, "defmodule", name.as_str(), &node)?;
                 }
-                AirNode::Defplan(plan) => {
-                    let name = plan.name.clone();
-                    let node = AirNode::Defplan(plan);
-                    add_def_entry(&mut entries, &mut seen, "defplan", name.as_str(), &node)?;
-                }
                 AirNode::Defcap(cap) => {
                     let name = cap.name.clone();
                     let node = AirNode::Defcap(cap);

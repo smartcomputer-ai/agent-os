@@ -415,20 +415,20 @@ fn ensure_sys_support(
     let routing = manifest
         .routing
         .get_or_insert_with(|| aos_air_types::Routing {
-            events: Vec::new(),
+            subscriptions: Vec::new(),
             inboxes: Vec::new(),
         });
 
     let mut next_events = Vec::new();
     let mut saw_publish = false;
     let mut saw_workspace = false;
-    for route in &routing.events {
-        if route.event.as_str() == PUBLISH_EVENT && route.reducer == PUBLISH_REDUCER {
+    for route in &routing.subscriptions {
+        if route.event.as_str() == PUBLISH_EVENT && route.module == PUBLISH_REDUCER {
             saw_publish = true;
             next_events.push(route.clone());
             continue;
         }
-        if route.event.as_str() == WORKSPACE_EVENT && route.reducer == WORKSPACE_REDUCER {
+        if route.event.as_str() == WORKSPACE_EVENT && route.module == WORKSPACE_REDUCER {
             saw_workspace = true;
             if route.key_field.as_deref() != Some("workspace") {
                 let mut fixed = route.clone();
@@ -445,7 +445,7 @@ fn ensure_sys_support(
     if !saw_publish {
         next_events.push(RoutingEvent {
             event: SchemaRef::new(PUBLISH_EVENT)?,
-            reducer: PUBLISH_REDUCER.to_string(),
+            module: PUBLISH_REDUCER.to_string(),
             key_field: None,
         });
         changed = true;
@@ -453,13 +453,13 @@ fn ensure_sys_support(
     if !saw_workspace {
         next_events.push(RoutingEvent {
             event: SchemaRef::new(WORKSPACE_EVENT)?,
-            reducer: WORKSPACE_REDUCER.to_string(),
+            module: WORKSPACE_REDUCER.to_string(),
             key_field: Some("workspace".to_string()),
         });
         changed = true;
     }
     if changed {
-        routing.events = next_events;
+        routing.subscriptions = next_events;
     }
 
     if !changed {
