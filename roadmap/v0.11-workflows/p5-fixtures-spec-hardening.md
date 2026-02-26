@@ -35,8 +35,8 @@ Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 - [x] `04-aggregator`: replace plan orchestration with workflow module; preserve aggregation behavior.
 - [x] `05-chain-comp`: replace charge/reserve/notify/refund plan chain with workflow compensation chain.
 - [x] `06-safe-upgrade`: rewrite `air.v1`/`air.v2` to workflow modules; preserve upgrade-while-waiting semantics.
-- [ ] `07-llm-summarizer`: replace summarize plan with workflow module orchestration.
-- [ ] `08-retry-backoff`: rebuild retries/timeouts on workflow runtime and receipt/event model.
+- [x] `07-llm-summarizer`: replace summarize plan with workflow module orchestration.
+- [x] `08-retry-backoff`: rebuild retries/timeouts on workflow runtime and receipt/event model.
 - [ ] `09-workspaces`: replace workspace plan orchestration with workflow-module-first wiring.
 - [ ] `10-trace-failure-classification`: convert trace fixtures from plan modules to workflow modules.
 - [ ] `11-plan-runtime-hardening`: replace with workflow-runtime-hardening fixture set and outputs.
@@ -133,6 +133,14 @@ Implementation log (completed 2026-02-26):
   - `crates/aos-smoke/src/safe_upgrade.rs`
 - [x] Adjusted strict-quiescence apply gate to block on actual in-flight runtime work (inflight workflow intents / pending workflow receipts / queued effects / scheduler) so apply succeeds once waiting work is settled.
   - `crates/aos-kernel/src/world/governance_runtime.rs`
+- [x] Migrated `07-llm-summarizer` from `summarize_plan` to workflow-native orchestration (`Start + Receipt(sys/EffectReceiptEnvelope@1)`), with direct `http.request -> llm.generate` emission in reducer/workflow.
+  - `crates/aos-smoke/fixtures/07-llm-summarizer/air/*`
+  - `crates/aos-smoke/fixtures/07-llm-summarizer/reducer/src/lib.rs`
+  - `crates/aos-smoke/src/llm_summarizer.rs`
+- [x] Rebuilt `08-retry-backoff` around workflow runtime receipts/events: reducer/workflow now handles `Receipt(sys/EffectReceiptEnvelope@1)` directly for both `http.request` and `timer.set`, and drives exponential backoff retries deterministically.
+  - `crates/aos-smoke/fixtures/08-retry-backoff/air/*`
+  - `crates/aos-smoke/fixtures/08-retry-backoff/reducer/src/lib.rs`
+  - `crates/aos-smoke/src/retry_backoff.rs`
 
 ### 4) Dead code and roadmap cleanup
 

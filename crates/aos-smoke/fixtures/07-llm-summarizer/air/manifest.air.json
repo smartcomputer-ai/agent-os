@@ -1,5 +1,6 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     {
       "name": "demo/LlmSummarizerPc@1"
@@ -11,16 +12,10 @@
       "name": "demo/LlmSummarizerStart@1"
     },
     {
-      "name": "demo/LlmSummarizerSummaryReady@1"
-    },
-    {
       "name": "demo/LlmSummarizerEvent@1"
     },
     {
-      "name": "demo/SummarizeRequest@1"
-    },
-    {
-      "name": "demo/SummarizeResult@1"
+      "name": "sys/EffectReceiptEnvelope@1"
     },
     {
       "name": "sys/HttpRequestParams@1"
@@ -33,27 +28,6 @@
     },
     {
       "name": "sys/LlmGenerateReceipt@1"
-    },
-    {
-      "name": "sys/SecretRef@1"
-    },
-    {
-      "name": "sys/TextOrSecretRef@1"
-    },
-    {
-      "name": "sys/BytesOrSecretRef@1"
-    },
-    {
-      "name": "sys/VaultPutParams@1"
-    },
-    {
-      "name": "sys/VaultPutReceipt@1"
-    },
-    {
-      "name": "sys/VaultRotateParams@1"
-    },
-    {
-      "name": "sys/VaultRotateReceipt@1"
     }
   ],
   "modules": [
@@ -61,12 +35,10 @@
       "name": "demo/LlmSummarizer@1"
     },
     {
-      "name": "sys/CapEnforceLlmBasic@1"
-    }
-  ],
-  "plans": [
+      "name": "sys/CapEnforceHttpOut@1"
+    },
     {
-      "name": "demo/summarize_plan@1"
+      "name": "sys/CapEnforceLlmBasic@1"
     }
   ],
   "caps": [
@@ -80,12 +52,6 @@
   "policies": [
     {
       "name": "demo/llm-policy@1"
-    }
-  ],
-  "secrets": [
-    {
-      "name": "demo/llm_api_secret@1",
-      "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     }
   ],
   "defaults": {
@@ -134,22 +100,13 @@
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/LlmSummarizerEvent@1",
-        "reducer": "demo/LlmSummarizer@1"
+        "module": "demo/LlmSummarizer@1"
       }
-    ],
-    "inboxes": []
+    ]
   },
-  "triggers": [
-    {
-      "event": "demo/SummarizeRequest@1",
-      "plan": "demo/summarize_plan@1",
-      "correlate_by": "request_id"
-    }
-  ],
-  "air_version": "1",
   "effects": [
     {
       "name": "sys/http.request@1"

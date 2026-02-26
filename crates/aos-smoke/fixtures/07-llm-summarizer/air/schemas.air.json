@@ -5,6 +5,7 @@
     "type": {
       "variant": {
         "Idle": { "unit": {} },
+        "Fetching": { "unit": {} },
         "Summarizing": { "unit": {} },
         "Done": { "unit": {} }
       }
@@ -32,47 +33,11 @@
   },
   {
     "$kind": "defschema",
-    "name": "demo/LlmSummarizerSummaryReady@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "summary": { "text": {} },
-        "tokens_prompt": { "nat": {} },
-        "tokens_completion": { "nat": {} },
-        "cost_millis": { "nat": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "demo/LlmSummarizerEvent@1",
     "type": {
       "variant": {
         "Start": { "ref": "demo/LlmSummarizerStart@1" },
-        "SummaryReady": { "ref": "demo/LlmSummarizerSummaryReady@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/SummarizeRequest@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "url": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/SummarizeResult@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "summary": { "text": {} },
-        "tokens_prompt": { "nat": {} },
-        "tokens_completion": { "nat": {} },
-        "cost_millis": { "nat": {} }
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
       }
     }
   }

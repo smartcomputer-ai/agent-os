@@ -3,36 +3,15 @@
 
 extern crate alloc;
 
-use alloc::string::String;
-use aos_wasm_sdk::{aos_reducer, aos_event_union, ReduceError, Reducer, ReducerCtx, TimerSetParams, Value};
+use alloc::{collections::BTreeMap, string::{String, ToString}};
+use aos_wasm_sdk::{
+    EffectReceiptEnvelope, ReduceError, Reducer, ReducerCtx, TimerSetParams, aos_reducer,
+    aos_variant,
+};
 use serde::{Deserialize, Serialize};
 
-const WORK_REQUESTED: &str = "demo/WorkRequested@1";
-
-aos_reducer!(RetrySm);
-
-#[derive(Default)]
-struct RetrySm;
-
-impl Reducer for RetrySm {
-    type State = RetryState;
-    type Event = RetryEvent;
-    type Ann = Value;
-
-    fn reduce(
-        &mut self,
-        event: Self::Event,
-        ctx: &mut ReducerCtx<Self::State>,
-    ) -> Result<(), ReduceError> {
-        match event {
-            RetryEvent::Start(ev) => handle_start(ctx, ev),
-            RetryEvent::Ok(ev) => handle_ok(ctx, ev),
-            RetryEvent::Err(ev) => handle_err(ctx, ev),
-            RetryEvent::Timer(timer) => handle_timer(ctx, timer),
-        }
-        Ok(())
-    }
-}
+const HTTP_REQUEST_EFFECT: &str = "http.request";
+const TIMER_SET_EFFECT: &str = "timer.set";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RetryState {
@@ -43,14 +22,20 @@ struct RetryState {
     anchor_ns: u64,
     payload: String,
     req_id: String,
+    pending_request: bool,
+    last_status: Option<i64>,
+    timers_scheduled: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum Pc {
-    Idle,
-    Waiting,
-    Done,
-    Failed,
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum Pc {
+        Idle,
+        Requesting,
+        Backoff,
+        Done,
+        Failed,
+    }
 }
 
 impl Default for Pc {
@@ -68,83 +53,148 @@ struct StartWork {
     now_ns: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WorkOk {
-    req_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WorkErr {
-    req_id: String,
-    transient: bool,
-    message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TimerFired {
-    requested: TimerSetParams,
-}
-
-aos_event_union! {
-    #[derive(Debug, Clone, Serialize)]
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     enum RetryEvent {
         Start(StartWork),
-        Ok(WorkOk),
-        Err(WorkErr),
-        Timer(TimerFired)
+        Receipt(EffectReceiptEnvelope),
     }
 }
 
-fn handle_start(ctx: &mut ReducerCtx<RetryState>, ev: StartWork) {
-    ctx.state.pc = Pc::Waiting;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HttpRequestParams {
+    method: String,
+    url: String,
+    headers: BTreeMap<String, String>,
+    body_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RequestTimings {
+    start_ns: u64,
+    end_ns: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HttpRequestReceipt {
+    status: i32,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    body_ref: Option<String>,
+    timings: RequestTimings,
+    adapter_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TimerSetReceipt {
+    delivered_at_ns: u64,
+    key: Option<String>,
+}
+
+aos_reducer!(RetrySm);
+
+#[derive(Default)]
+struct RetrySm;
+
+impl Reducer for RetrySm {
+    type State = RetryState;
+    type Event = RetryEvent;
+    type Ann = ();
+
+    fn reduce(
+        &mut self,
+        event: Self::Event,
+        ctx: &mut ReducerCtx<Self::State, ()>,
+    ) -> Result<(), ReduceError> {
+        match event {
+            RetryEvent::Start(ev) => handle_start(ctx, ev),
+            RetryEvent::Receipt(envelope) => handle_receipt(ctx, envelope)?,
+        }
+        Ok(())
+    }
+}
+
+fn handle_start(ctx: &mut ReducerCtx<RetryState, ()>, ev: StartWork) {
+    if matches!(ctx.state.pc, Pc::Requesting | Pc::Backoff) {
+        return;
+    }
+
+    ctx.state.pc = Pc::Requesting;
     ctx.state.attempt = 1;
-    ctx.state.max_attempts = ev.max_attempts.max(1); // guard against zero
+    ctx.state.max_attempts = ev.max_attempts.max(1);
     ctx.state.base_delay_ms = ev.base_delay_ms.max(1);
     ctx.state.anchor_ns = ev.now_ns;
-    ctx.state.payload = ev.payload.clone();
-    ctx.state.req_id = ev.req_id.clone();
-    emit_work_requested(ctx);
+    ctx.state.payload = ev.payload;
+    ctx.state.req_id = ev.req_id;
+    ctx.state.pending_request = true;
+    ctx.state.last_status = None;
+    ctx.state.timers_scheduled = 0;
+    emit_http_request(ctx);
 }
 
-fn handle_ok(ctx: &mut ReducerCtx<RetryState>, _ev: WorkOk) {
-    if ctx.state.req_id.is_empty() {
-        return;
+fn handle_receipt(
+    ctx: &mut ReducerCtx<RetryState, ()>,
+    envelope: EffectReceiptEnvelope,
+) -> Result<(), ReduceError> {
+    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
+        if envelope.effect_kind == TIMER_SET_EFFECT && matches!(ctx.state.pc, Pc::Backoff) {
+            let receipt: TimerSetReceipt = envelope
+                .decode_receipt_payload()
+                .map_err(|_| ReduceError::new("invalid timer.set receipt payload"))?;
+            if receipt.key.as_deref() != Some(ctx.state.req_id.as_str()) {
+                return Ok(());
+            }
+            ctx.state.pc = Pc::Requesting;
+            ctx.state.pending_request = true;
+            emit_http_request(ctx);
+            return Ok(());
+        }
+        return Ok(());
     }
-    ctx.state.pc = Pc::Done;
-}
-
-fn handle_err(ctx: &mut ReducerCtx<RetryState>, ev: WorkErr) {
-    if !matches!(ctx.state.pc, Pc::Waiting) || ev.req_id != ctx.state.req_id {
-        return;
+    if !ctx.state.pending_request || !matches!(ctx.state.pc, Pc::Requesting) {
+        return Ok(());
     }
 
-    if ev.transient && ctx.state.attempt < ctx.state.max_attempts {
+    let receipt: HttpRequestReceipt = envelope
+        .decode_receipt_payload()
+        .map_err(|_| ReduceError::new("invalid http.request receipt payload"))?;
+    let status = receipt.status as i64;
+    ctx.state.last_status = Some(status);
+    ctx.state.pending_request = false;
+
+    if status < 400 {
+        ctx.state.pc = Pc::Done;
+        return Ok(());
+    }
+
+    let transient = status >= 500;
+    if transient && ctx.state.attempt < ctx.state.max_attempts {
         schedule_retry(ctx);
-        ctx.state.attempt += 1;
+        ctx.state.attempt = ctx.state.attempt.saturating_add(1);
+        ctx.state.pc = Pc::Backoff;
     } else {
         ctx.state.pc = Pc::Failed;
     }
+    Ok(())
 }
 
-fn handle_timer(ctx: &mut ReducerCtx<RetryState>, _timer: TimerFired) {
-    if !matches!(ctx.state.pc, Pc::Waiting) {
-        return;
-    }
-    emit_work_requested(ctx);
+fn emit_http_request(ctx: &mut ReducerCtx<RetryState, ()>) {
+    let mut headers = BTreeMap::new();
+    headers.insert("x-request-id".into(), ctx.state.req_id.clone());
+    headers.insert("x-attempt".into(), ctx.state.attempt.to_string());
+
+    let params = HttpRequestParams {
+        method: "POST".into(),
+        url: "https://example.com/work".into(),
+        headers,
+        body_ref: None,
+    };
+    ctx.effects().emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
 }
 
-fn emit_work_requested(ctx: &mut ReducerCtx<RetryState>) {
-    let req_id = ctx.state.req_id.clone();
-    let payload = ctx.state.payload.clone();
-    let event = WorkRequested { req_id, payload };
-    ctx.intent(WORK_REQUESTED).payload(&event).send();
-}
-
-fn schedule_retry(ctx: &mut ReducerCtx<RetryState>) {
-    let shift = ctx.state.attempt.saturating_sub(1);
-    let factor = 1u64
-        .checked_shl(shift.min(63))
-        .unwrap_or(u64::MAX);
+fn schedule_retry(ctx: &mut ReducerCtx<RetryState, ()>) {
+    let shift = ctx.state.attempt.saturating_sub(1).min(63);
+    let factor = 1u64 << shift;
     let delay_ms = ctx.state.base_delay_ms.saturating_mul(factor);
     let delay_ns = delay_ms.saturating_mul(1_000_000);
     let deliver_at_ns = ctx.state.anchor_ns.saturating_add(delay_ns);
@@ -152,11 +202,6 @@ fn schedule_retry(ctx: &mut ReducerCtx<RetryState>) {
         deliver_at_ns,
         key: Some(ctx.state.req_id.clone()),
     };
+    ctx.state.timers_scheduled = ctx.state.timers_scheduled.saturating_add(1);
     ctx.effects().timer_set(&params, "default");
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WorkRequested {
-    req_id: String,
-    payload: String,
 }

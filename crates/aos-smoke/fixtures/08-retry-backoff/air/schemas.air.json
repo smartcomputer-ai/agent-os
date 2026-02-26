@@ -14,31 +14,14 @@
   },
   {
     "$kind": "defschema",
-    "name": "demo/WorkRequested@1",
+    "name": "demo/RetryPc@1",
     "type": {
-      "record": {
-        "req_id": { "text": {} },
-        "payload": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/WorkOk@1",
-    "type": {
-      "record": {
-        "req_id": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/WorkErr@1",
-    "type": {
-      "record": {
-        "req_id": { "text": {} },
-        "transient": { "bool": {} },
-        "message": { "text": {} }
+      "variant": {
+        "Idle": { "unit": {} },
+        "Requesting": { "unit": {} },
+        "Backoff": { "unit": {} },
+        "Done": { "unit": {} },
+        "Failed": { "unit": {} }
       }
     }
   },
@@ -47,13 +30,16 @@
     "name": "demo/RetryState@1",
     "type": {
       "record": {
-        "pc": { "text": {} },
+        "pc": { "ref": "demo/RetryPc@1" },
         "attempt": { "nat": {} },
         "max_attempts": { "nat": {} },
         "base_delay_ms": { "nat": {} },
         "anchor_ns": { "nat": {} },
         "payload": { "text": {} },
-        "req_id": { "text": {} }
+        "req_id": { "text": {} },
+        "pending_request": { "bool": {} },
+        "last_status": { "option": { "int": {} } },
+        "timers_scheduled": { "nat": {} }
       }
     }
   },
@@ -62,10 +48,8 @@
     "name": "demo/RetryEvent@1",
     "type": {
       "variant": {
-        "start": { "ref": "demo/StartWork@1" },
-        "ok": { "ref": "demo/WorkOk@1" },
-        "err": { "ref": "demo/WorkErr@1" },
-        "timer": { "ref": "sys/TimerFired@1" }
+        "Start": { "ref": "demo/StartWork@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
       }
     }
   }

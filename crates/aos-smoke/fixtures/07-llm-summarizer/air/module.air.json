@@ -2,12 +2,12 @@
   {
     "$kind": "defmodule",
     "name": "demo/LlmSummarizer@1",
-    "module_kind": "reducer",
+    "module_kind": "workflow",
     "abi": {
       "reducer": {
         "state": "demo/LlmSummarizerState@1",
         "event": "demo/LlmSummarizerEvent@1",
-        "effects_emitted": [],
+        "effects_emitted": ["http.request", "llm.generate"],
         "cap_slots": {}
       }
     }

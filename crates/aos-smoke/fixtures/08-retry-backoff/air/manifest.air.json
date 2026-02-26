@@ -6,13 +6,7 @@
       "name": "demo/StartWork@1"
     },
     {
-      "name": "demo/WorkRequested@1"
-    },
-    {
-      "name": "demo/WorkOk@1"
-    },
-    {
-      "name": "demo/WorkErr@1"
+      "name": "demo/RetryPc@1"
     },
     {
       "name": "demo/RetryState@1"
@@ -21,13 +15,13 @@
       "name": "demo/RetryEvent@1"
     },
     {
+      "name": "sys/EffectReceiptEnvelope@1"
+    },
+    {
       "name": "sys/TimerSetParams@1"
     },
     {
       "name": "sys/TimerSetReceipt@1"
-    },
-    {
-      "name": "sys/TimerFired@1"
     },
     {
       "name": "sys/HttpRequestParams@1"
@@ -39,11 +33,9 @@
   "modules": [
     {
       "name": "demo/RetrySM@1"
-    }
-  ],
-  "plans": [
+    },
     {
-      "name": "demo/WorkPlan@1"
+      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
   "effects": [
@@ -69,22 +61,37 @@
         "params": {
           "record": {}
         }
+      },
+      {
+        "name": "http_grant",
+        "cap": "sys/http.out@1",
+        "params": {
+          "record": {
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "methods": {
+              "set": [
+                {
+                  "text": "POST"
+                }
+              ]
+            }
+          }
+        }
       }
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/RetryEvent@1",
-        "reducer": "demo/RetrySM@1"
+        "module": "demo/RetrySM@1"
       }
-    ],
-    "inboxes": []
-  },
-  "triggers": [
-    {
-      "event": "demo/WorkRequested@1",
-      "plan": "demo/WorkPlan@1"
-    }
-  ]
+    ]
+  }
 }

@@ -1,14 +1,14 @@
 {
   "$kind": "defmodule",
   "name": "demo/RetrySM@1",
-  "module_kind": "reducer",
+  "module_kind": "workflow",
   "abi": {
     "reducer": {
       "state": "demo/RetryState@1",
       "event": "demo/RetryEvent@1",
       "annotations": "sys/BytesOrSecretRef@1",
-      "effects_emitted": ["timer.set"],
-      "cap_slots": { "default": "timer" }
+      "effects_emitted": ["timer.set", "http.request"],
+      "cap_slots": {}
     }
   }
 }

@@ -3,7 +3,26 @@
     "$kind": "defpolicy",
     "name": "demo/default_policy@1",
     "rules": [
-      { "when": {}, "decision": "allow" }
+      {
+        "when": {
+          "effect_kind": "http.request",
+          "origin_kind": "workflow",
+          "origin_name": "demo/RetrySM@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "timer.set",
+          "origin_kind": "workflow",
+          "origin_name": "demo/RetrySM@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {},
+        "decision": "deny"
+      }
     ]
   }
 ]
