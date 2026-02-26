@@ -1,5 +1,6 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     {
       "name": "demo/AggregatorPc@1"
@@ -11,19 +12,16 @@
       "name": "demo/AggregatorStart@1"
     },
     {
-      "name": "demo/AggregateComplete@1"
-    },
-    {
       "name": "demo/AggregatorEvent@1"
-    },
-    {
-      "name": "demo/AggregateRequested@1"
     },
     {
       "name": "demo/AggregationTarget@1"
     },
     {
       "name": "demo/AggregateResponse@1"
+    },
+    {
+      "name": "sys/EffectReceiptEnvelope@1"
     },
     {
       "name": "sys/HttpRequestParams@1"
@@ -35,11 +33,14 @@
   "modules": [
     {
       "name": "demo/Aggregator@1"
+    },
+    {
+      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
-  "plans": [
+  "effects": [
     {
-      "name": "demo/aggregator_plan@1"
+      "name": "sys/http.request@1"
     }
   ],
   "caps": [
@@ -67,11 +68,11 @@
                 }
               ]
             },
-        "methods": {
-          "set": [
-            {
-              "text": "GET"
-            }
+            "methods": {
+              "set": [
+                {
+                  "text": "GET"
+                }
               ]
             }
           }
@@ -80,25 +81,11 @@
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/AggregatorEvent@1",
-        "reducer": "demo/Aggregator@1"
+        "module": "demo/Aggregator@1"
       }
-    ],
-    "inboxes": []
-  },
-  "triggers": [
-    {
-      "event": "demo/AggregateRequested@1",
-      "plan": "demo/aggregator_plan@1",
-      "correlate_by": "request_id"
-    }
-  ],
-  "air_version": "1",
-  "effects": [
-    {
-      "name": "sys/http.request@1"
-    }
-  ]
+    ]
+  }
 }

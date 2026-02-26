@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
@@ -37,6 +38,7 @@ struct AggregatorStateView {
     pending_request: Option<u64>,
     current_topic: Option<String>,
     pending_targets: Vec<String>,
+    pending_by_hash: BTreeMap<String, String>,
     last_responses: Vec<AggregateResponseView>,
 }
 
@@ -44,7 +46,7 @@ struct AggregatorStateView {
 struct AggregateResponseView {
     source: String,
     status: i64,
-    body_preview: String,
+    body_ref: Option<String>,
 }
 
 aos_variant! {
@@ -92,7 +94,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut requests = http.collect_requests(host.kernel_mut())?;
     if requests.len() != 3 {
         return Err(anyhow!(
-            "aggregator plan expected 3 http intents, got {}",
+            "aggregator workflow expected 3 http intents, got {}",
             requests.len()
         ));
     }
@@ -125,6 +127,12 @@ pub fn run(example_root: &Path) -> Result<()> {
             state.pending_targets
         ));
     }
+    if !state.pending_by_hash.is_empty() {
+        return Err(anyhow!(
+            "fan-out should clear pending params-hash map, found {:?}",
+            state.pending_by_hash
+        ));
+    }
     if state.last_responses.len() != 3 {
         return Err(anyhow!(
             "expected 3 aggregated responses, got {}",
@@ -137,6 +145,12 @@ pub fn run(example_root: &Path) -> Result<()> {
             return Err(anyhow!(
                 "response order mismatch: {:?}",
                 state.last_responses
+            ));
+        }
+        if resp.body_ref.is_none() {
+            return Err(anyhow!(
+                "expected response body_ref for source {}",
+                resp.source
             ));
         }
     }

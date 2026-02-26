@@ -20,6 +20,12 @@
         "pending_request": { "option": { "nat": {} } },
         "current_topic": { "option": { "text": {} } },
         "pending_targets": { "list": { "text": {} } },
+        "pending_by_hash": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "text": {} }
+          }
+        },
         "last_responses": { "list": { "ref": "demo/AggregateResponse@1" } }
       }
     }
@@ -42,7 +48,7 @@
       "record": {
         "source": { "text": {} },
         "status": { "int": {} },
-        "body_preview": { "text": {} }
+        "body_ref": { "option": { "hash": {} } }
       }
     }
   },
@@ -60,37 +66,11 @@
   },
   {
     "$kind": "defschema",
-    "name": "demo/AggregateComplete@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "topic": { "text": {} },
-        "primary": { "ref": "demo/AggregateResponse@1" },
-        "secondary": { "ref": "demo/AggregateResponse@1" },
-        "tertiary": { "ref": "demo/AggregateResponse@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "demo/AggregatorEvent@1",
     "type": {
       "variant": {
         "Start": { "ref": "demo/AggregatorStart@1" },
-        "AggregateComplete": { "ref": "demo/AggregateComplete@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/AggregateRequested@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "topic": { "text": {} },
-        "primary": { "ref": "demo/AggregationTarget@1" },
-        "secondary": { "ref": "demo/AggregationTarget@1" },
-        "tertiary": { "ref": "demo/AggregationTarget@1" }
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
       }
     }
   }

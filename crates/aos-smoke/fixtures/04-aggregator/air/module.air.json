@@ -2,13 +2,15 @@
   {
     "$kind": "defmodule",
     "name": "demo/Aggregator@1",
-    "module_kind": "reducer",
+    "module_kind": "workflow",
     "abi": {
       "reducer": {
         "state": "demo/AggregatorState@1",
         "event": "demo/AggregatorEvent@1",
-        "effects_emitted": [],
-        "cap_slots": {}
+        "effects_emitted": ["http.request"],
+        "cap_slots": {
+          "default": "http.out"
+        }
       }
     }
   }
