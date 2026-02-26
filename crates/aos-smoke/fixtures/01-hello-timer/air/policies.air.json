@@ -6,7 +6,7 @@
       {
         "when": {
           "effect_kind": "timer.set",
-          "origin_kind": "reducer"
+          "origin_kind": "workflow"
         },
         "decision": "allow"
       }

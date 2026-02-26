@@ -14,7 +14,6 @@ aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     enum FetchEventEnvelope {
         Start { url: String, method: String },
-        NotifyComplete { status: i64, body_preview: String },
     }
 }
 
@@ -50,9 +49,8 @@ pub fn run(example_root: &Path) -> Result<()> {
         url: "https://example.com/data.json".into(),
         method: "GET".into(),
     };
-    if let FetchEventEnvelope::Start { url, method } = &start_event {
-        println!("     start fetch → url={url} method={method}");
-    }
+    let FetchEventEnvelope::Start { url, method } = &start_event;
+    println!("     start fetch → url={url} method={method}");
     host.send_event(&start_event)?;
 
     let mut http = MockHttpHarness::new();

@@ -1,5 +1,6 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     {
       "name": "demo/FetchNotifyPc@1"
@@ -11,31 +12,10 @@
       "name": "demo/FetchNotifyStart@1"
     },
     {
-      "name": "demo/FetchNotifyComplete@1"
-    },
-    {
       "name": "demo/FetchNotifyEvent@1"
     },
     {
-      "name": "demo/FetchRequest@1"
-    },
-    {
-      "name": "sys/BlobPutParams@1"
-    },
-    {
-      "name": "sys/BlobPutReceipt@1"
-    },
-    {
-      "name": "sys/BlobGetParams@1"
-    },
-    {
-      "name": "sys/BlobGetReceipt@1"
-    },
-    {
-      "name": "sys/BlobPutResult@1"
-    },
-    {
-      "name": "sys/BlobGetResult@1"
+      "name": "sys/EffectReceiptEnvelope@1"
     },
     {
       "name": "sys/HttpRequestParams@1"
@@ -52,9 +32,9 @@
       "name": "sys/CapEnforceHttpOut@1"
     }
   ],
-  "plans": [
+  "effects": [
     {
-      "name": "demo/fetch_plan@1"
+      "name": "sys/http.request@1"
     }
   ],
   "caps": [
@@ -95,31 +75,11 @@
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/FetchNotifyEvent@1",
-        "reducer": "demo/FetchNotify@1"
+        "module": "demo/FetchNotify@1"
       }
-    ],
-    "inboxes": []
-  },
-  "triggers": [
-    {
-      "event": "demo/FetchRequest@1",
-      "plan": "demo/fetch_plan@1",
-      "correlate_by": "request_id"
-    }
-  ],
-  "air_version": "1",
-  "effects": [
-    {
-      "name": "sys/http.request@1"
-    },
-    {
-      "name": "sys/blob.put@1"
-    },
-    {
-      "name": "sys/blob.get@1"
-    }
-  ]
+    ]
+  }
 }

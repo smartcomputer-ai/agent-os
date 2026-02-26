@@ -1,5 +1,6 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     {
       "name": "demo/BlobEchoPc@1"
@@ -37,7 +38,14 @@
       "name": "demo/BlobEchoSM@1"
     }
   ],
-  "plans": [],
+  "effects": [
+    {
+      "name": "sys/blob.put@1"
+    },
+    {
+      "name": "sys/blob.get@1"
+    }
+  ],
   "caps": [],
   "policies": [
     {
@@ -57,22 +65,11 @@
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/BlobEchoEvent@1",
-        "reducer": "demo/BlobEchoSM@1"
+        "module": "demo/BlobEchoSM@1"
       }
-    ],
-    "inboxes": []
-  },
-  "triggers": [],
-  "air_version": "1",
-  "effects": [
-    {
-      "name": "sys/blob.put@1"
-    },
-    {
-      "name": "sys/blob.get@1"
-    }
-  ]
+    ]
+  }
 }

@@ -6,14 +6,14 @@
       {
         "when": {
           "effect_kind": "blob.put",
-          "origin_kind": "reducer"
+          "origin_kind": "workflow"
         },
         "decision": "allow"
       },
       {
         "when": {
           "effect_kind": "blob.get",
-          "origin_kind": "reducer"
+          "origin_kind": "workflow"
         },
         "decision": "allow"
       }

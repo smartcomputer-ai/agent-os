@@ -2,7 +2,7 @@
   {
     "$kind": "defmodule",
     "name": "demo/BlobEchoSM@1",
-    "module_kind": "reducer",
+    "module_kind": "workflow",
     "abi": {
       "reducer": {
         "state": "demo/BlobEchoState@1",

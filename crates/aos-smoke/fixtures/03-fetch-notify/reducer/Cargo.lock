@@ -26,8 +26,10 @@ dependencies = [
 name = "fetch-notify-reducer"
 version = "0.1.0"
 dependencies = [
+ "aos-wasm-abi",
  "aos-wasm-sdk",
  "serde",
+ "serde_bytes",
  "serde_cbor",
 ]
 

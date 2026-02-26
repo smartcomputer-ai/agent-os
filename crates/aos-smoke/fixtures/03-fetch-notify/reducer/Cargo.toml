@@ -12,3 +12,7 @@ crate-type = ["cdylib"]
 aos-wasm-sdk = { path = "../../../../aos-wasm-sdk" }
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
+serde_bytes = "0.11"
+
+[dev-dependencies]
+aos-wasm-abi = { path = "../../../../aos-wasm-abi" }
