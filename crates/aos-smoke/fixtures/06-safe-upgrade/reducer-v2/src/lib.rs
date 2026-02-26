@@ -10,6 +10,7 @@ use aos_wasm_sdk::{
 use serde::{Deserialize, Serialize};
 
 const HTTP_REQUEST_EFFECT: &str = "http.request";
+const FOLLOW_URL: &str = "https://example.com/follow.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct SafeUpgradeState {
@@ -122,11 +123,17 @@ fn handle_receipt(
         .decode_receipt_payload()
         .map_err(|_| ReduceError::new("invalid http.request receipt payload"))?;
 
-    ctx.state.pending_request = None;
-    ctx.state.pc = SafeUpgradePc::Completed;
-    ctx.state.primary_status = Some(receipt.status as i64);
-    ctx.state.follow_status = None;
-    ctx.state.requests_observed = 1;
+    if ctx.state.primary_status.is_none() {
+        ctx.state.primary_status = Some(receipt.status as i64);
+        ctx.state.requests_observed = 1;
+        emit_fetch(ctx, FOLLOW_URL.into());
+    } else {
+        ctx.state.follow_status = Some(receipt.status as i64);
+        ctx.state.requests_observed = 2;
+        ctx.state.pending_request = None;
+        ctx.state.pc = SafeUpgradePc::Completed;
+    }
+
     Ok(())
 }
 

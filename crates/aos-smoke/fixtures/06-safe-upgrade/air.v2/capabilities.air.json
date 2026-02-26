@@ -9,16 +9,5 @@
         "methods": { "set": { "text": {} } }
       }
     }
-  },
-  {
-    "$kind": "defcap",
-    "name": "demo/http_followup_cap@1",
-    "cap_type": "http.out",
-    "schema": {
-      "record": {
-        "hosts": { "set": { "text": {} } },
-        "methods": { "set": { "text": {} } }
-      }
-    }
   }
 ]

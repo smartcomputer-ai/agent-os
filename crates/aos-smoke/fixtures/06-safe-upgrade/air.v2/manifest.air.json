@@ -1,5 +1,6 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     {
       "name": "demo/SafeUpgradePc@1"
@@ -11,16 +12,10 @@
       "name": "demo/SafeUpgradeStart@1"
     },
     {
-      "name": "demo/SafeUpgradeNotifyComplete@1"
-    },
-    {
       "name": "demo/SafeUpgradeEvent@1"
     },
     {
-      "name": "demo/UpgradeFetchRequest@1"
-    },
-    {
-      "name": "demo/SafeUpgradeResult@1"
+      "name": "sys/EffectReceiptEnvelope@1"
     },
     {
       "name": "sys/HttpRequestParams@1"
@@ -31,20 +26,15 @@
   ],
   "modules": [
     {
-      "name": "demo/SafeUpgrade@1"
-    }
-  ],
-  "plans": [
+      "name": "demo/SafeUpgrade@2"
+    },
     {
-      "name": "demo/fetch_plan@2"
+      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
   "caps": [
     {
       "name": "demo/http_fetch_cap@1"
-    },
-    {
-      "name": "demo/http_followup_cap@1"
     }
   ],
   "policies": [
@@ -76,48 +66,17 @@
             }
           }
         }
-      },
-      {
-        "name": "cap_http_followup",
-        "cap": "demo/http_followup_cap@1",
-        "params": {
-          "record": {
-            "hosts": {
-              "set": [
-                {
-                  "text": "example.com"
-                }
-              ]
-            },
-            "methods": {
-              "set": [
-                {
-                  "text": "GET"
-                }
-              ]
-            }
-          }
-        }
       }
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/SafeUpgradeEvent@1",
-        "reducer": "demo/SafeUpgrade@1"
+        "module": "demo/SafeUpgrade@2"
       }
-    ],
-    "inboxes": []
+    ]
   },
-  "triggers": [
-    {
-      "event": "demo/UpgradeFetchRequest@1",
-      "plan": "demo/fetch_plan@2",
-      "correlate_by": "request_id"
-    }
-  ],
-  "air_version": "1",
   "effects": [
     {
       "name": "sys/http.request@1"

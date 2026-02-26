@@ -1,5 +1,6 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     {
       "name": "demo/SafeUpgradePc@1"
@@ -11,16 +12,10 @@
       "name": "demo/SafeUpgradeStart@1"
     },
     {
-      "name": "demo/SafeUpgradeNotifyComplete@1"
-    },
-    {
       "name": "demo/SafeUpgradeEvent@1"
     },
     {
-      "name": "demo/UpgradeFetchRequest@1"
-    },
-    {
-      "name": "demo/SafeUpgradeResult@1"
+      "name": "sys/EffectReceiptEnvelope@1"
     },
     {
       "name": "sys/HttpRequestParams@1"
@@ -32,11 +27,9 @@
   "modules": [
     {
       "name": "demo/SafeUpgrade@1"
-    }
-  ],
-  "plans": [
+    },
     {
-      "name": "demo/fetch_plan@1"
+      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
   "caps": [
@@ -77,22 +70,13 @@
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/SafeUpgradeEvent@1",
-        "reducer": "demo/SafeUpgrade@1"
+        "module": "demo/SafeUpgrade@1"
       }
-    ],
-    "inboxes": []
+    ]
   },
-  "triggers": [
-    {
-      "event": "demo/UpgradeFetchRequest@1",
-      "plan": "demo/fetch_plan@1",
-      "correlate_by": "request_id"
-    }
-  ],
-  "air_version": "1",
   "effects": [
     {
       "name": "sys/http.request@1"

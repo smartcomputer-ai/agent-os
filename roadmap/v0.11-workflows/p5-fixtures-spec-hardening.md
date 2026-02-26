@@ -34,7 +34,7 @@ Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 - [x] `03-fetch-notify`: replace `defplan` assets with workflow-module orchestration; keep reducer as intent/result owner.
 - [x] `04-aggregator`: replace plan orchestration with workflow module; preserve aggregation behavior.
 - [x] `05-chain-comp`: replace charge/reserve/notify/refund plan chain with workflow compensation chain.
-- [ ] `06-safe-upgrade`: rewrite `air.v1`/`air.v2` to workflow modules; preserve upgrade-while-waiting semantics.
+- [x] `06-safe-upgrade`: rewrite `air.v1`/`air.v2` to workflow modules; preserve upgrade-while-waiting semantics.
 - [ ] `07-llm-summarizer`: replace summarize plan with workflow module orchestration.
 - [ ] `08-retry-backoff`: rebuild retries/timeouts on workflow runtime and receipt/event model.
 - [ ] `09-workspaces`: replace workspace plan orchestration with workflow-module-first wiring.
@@ -62,7 +62,7 @@ Required coverage outcomes from rewritten fixtures/suites:
 - [ ] governance apply on workflow manifests.
 - [ ] subscription wiring changes while receipts are in flight.
 - [ ] subscription wiring changes while continuation frames are in flight (if P7 enabled).
-- [ ] upgrade-while-waiting (`pending receipt + snapshot + blocked apply + late receipt + deterministic continuation`).
+- [x] upgrade-while-waiting (`pending receipt + snapshot + blocked apply + late receipt + deterministic continuation`).
 
 ### 2) Spec/doc rewrite
 
@@ -125,6 +125,14 @@ Implementation log (completed 2026-02-26):
   - `cargo run -p aos-smoke -- blob-echo`
   - `cargo run -p aos-smoke -- fetch-notify`
   - `cargo run -p aos-smoke -- retry-backoff`
+- [x] Rewrote `06-safe-upgrade` (`air.v1` + `air.v2`) to workflow modules and removed plan triggers/assets; smoke flow now proves `pending receipt + snapshot + blocked apply + late receipt continuation + post-apply upgraded behavior`.
+  - `crates/aos-smoke/fixtures/06-safe-upgrade/air.v1/*`
+  - `crates/aos-smoke/fixtures/06-safe-upgrade/air.v2/*`
+  - `crates/aos-smoke/fixtures/06-safe-upgrade/reducer/*`
+  - `crates/aos-smoke/fixtures/06-safe-upgrade/reducer-v2/*`
+  - `crates/aos-smoke/src/safe_upgrade.rs`
+- [x] Adjusted strict-quiescence apply gate to block on actual in-flight runtime work (inflight workflow intents / pending workflow receipts / queued effects / scheduler) so apply succeeds once waiting work is settled.
+  - `crates/aos-kernel/src/world/governance_runtime.rs`
 
 ### 4) Dead code and roadmap cleanup
 
@@ -142,7 +150,7 @@ Implementation log (completed 2026-02-26):
 
 1. Replace plan fixtures with module-workflow fixtures.
 2. Keep fixtures small, deterministic, and replay-testable.
-3. Extend `fixtures/06-safe-upgrade` to cover upgrade-while-waiting end-to-end, including snapshot + blocked apply + post-receipt apply.
+3. [x] Extend `fixtures/06-safe-upgrade` to cover upgrade-while-waiting end-to-end, including snapshot + blocked apply + post-receipt apply.
 
 ### `crates/aos-host/tests` and `crates/aos-kernel/tests`
 
@@ -166,4 +174,4 @@ Implementation log (completed 2026-02-26):
 7. Fixtures/docs validate `workflow|pure` authority model and module allowlist guardrails.
 8. Fixture suite proves strict-quiescence manifest apply semantics for post-plan worlds.
 9. Fixture suite proves honest shadow observability semantics (no full-future prediction claim).
-10. Fixture suite includes upgrade-while-waiting with snapshot and verifies deterministic behavior under the selected upgrade rule.
+10. [x] Fixture suite includes upgrade-while-waiting with snapshot and verifies deterministic behavior under the selected upgrade rule.

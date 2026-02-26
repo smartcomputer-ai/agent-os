@@ -193,15 +193,10 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn ensure_manifest_apply_quiescent(&self) -> Result<(), KernelError> {
-        let non_terminal_workflows = self
+        let workflows_with_inflight = self
             .workflow_instances
             .values()
-            .filter(|instance| {
-                !matches!(
-                    instance.status,
-                    WorkflowRuntimeStatus::Completed | WorkflowRuntimeStatus::Failed
-                )
-            })
+            .filter(|instance| !instance.inflight_intents.is_empty())
             .count();
         let inflight_workflow_intents = self
             .workflow_instances
@@ -212,7 +207,7 @@ impl<S: Store + 'static> Kernel<S> {
         let queued_effects = self.effect_manager.queued().len();
         let scheduler_pending = !self.scheduler.is_empty();
 
-        if non_terminal_workflows == 0
+        if workflows_with_inflight == 0
             && inflight_workflow_intents == 0
             && pending_reducer_receipts == 0
             && queued_effects == 0
@@ -222,7 +217,7 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         Err(KernelError::ManifestApplyBlockedInFlight {
-            plan_instances: non_terminal_workflows,
+            plan_instances: workflows_with_inflight,
             waiting_events: inflight_workflow_intents,
             pending_plan_receipts: 0,
             pending_reducer_receipts,
