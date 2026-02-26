@@ -20,7 +20,7 @@ use crate::util;
 
 const MODULE_NAME: &str = "demo/FlowTracker@1";
 const EVENT_SCHEMA: &str = "demo/RuntimeHardeningEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/11-plan-runtime-hardening/reducer";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/11-workflow-runtime-hardening/reducer";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -63,7 +63,6 @@ enum Commands {
     /// Run the trace failure-classification example
     TraceFailureClassification,
     /// Run the workflow runtime-hardening conformance example
-    #[command(name = "workflow-runtime-hardening", alias = "plan-runtime-hardening")]
     WorkflowRuntimeHardening,
     /// Run live chat smoke (real provider + tools + follow-up)
     ChatLive {
@@ -212,7 +211,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         title: "Workflow Hardening",
         summary: "Workflow runtime conformance + summaries",
         group: ExampleGroup::Core,
-        dir: "crates/aos-smoke/fixtures/11-plan-runtime-hardening",
+        dir: "crates/aos-smoke/fixtures/11-workflow-runtime-hardening",
         runner: workflow_runtime_hardening::run,
     },
     ExampleMeta {
