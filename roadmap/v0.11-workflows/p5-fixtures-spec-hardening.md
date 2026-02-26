@@ -1,7 +1,7 @@
 # P5: Fixtures, Specs, and Hardening (Finish the Reset)
 
 **Priority**: P2  
-**Status**: Proposed  
+**Status**: In Progress (non-deferred scope largely complete; remaining deferred Agent SDK fixtures + broader legacy archival)
 **Depends on**: `roadmap/v0.11-workflows/p4-governance-observability-cutover.md`
 
 ## Goal
@@ -25,7 +25,8 @@ Status checklist for this section:
 - [x] Inventory all smoke fixtures and integration suites for plan-era dependencies.
 - [x] Define fixture-by-fixture rewrite plan and target assertions.
 - [x] Defer Agent SDK fixtures (`20/21/22`) until Agent SDK refresh lands.
-- [ ] Implement all smoke fixture rewrites.
+- [x] Implement all non-deferred smoke fixture rewrites (`00`-`11` completed).
+- [ ] Implement deferred Agent SDK fixture rewrites (`20`/`21`/`22`) after SDK refresh.
 - [x] Implement all integration suite rewrites.
 
 Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
@@ -239,6 +240,8 @@ Implementation log (completed 2026-02-26):
     - `spec/04-reducers.md`
     - `spec/05-workflows.md`
     - `spec/06-cells.md`
+    - `spec/07-gc.md`
+    - `spec/09-control.md`
   - updated agent guidance:
     - `AGENTS.md` (and `CLAUDE.md` symlink target)
   - key updates captured:
@@ -247,11 +250,19 @@ Implementation log (completed 2026-02-26):
     - strict-quiescence governance apply semantics,
     - canonical event/effect/receipt normalization and rejected-receipt handling invariants,
     - policy origin semantics aligned to `workflow|system|governance`.
+- [x] Removed unused legacy plan-summary trace surface from active host control diagnostics (kept `trace-summary` workflow-first surface only).
+  - `crates/aos-host/src/trace.rs`
+  - verification:
+    - `cargo test -p aos-host diagnose_trace_prefers_policy_denied -q`
+- [x] Updated v0.11 roadmap index status to reflect completed phases and remaining deferred/optional scope.
+  - `roadmap/v0.11-workflows/README.md`
 
 ### 4) Dead code and roadmap cleanup
 
-1. Remove archived plan runtime code paths that survived earlier phases.
-2. Update roadmap indexes/READMEs to mark completion and superseded docs.
+Status checklist for this section:
+- [x] Remove inactive host-side legacy plan summary/aggregation code from active control trace path.
+- [ ] Remove remaining archived plan runtime/kernel compatibility structures that are no longer needed for supported worlds.
+- [x] Update roadmap indexes/READMEs to mark completion and superseded docs.
 
 ## Out of Scope
 

@@ -12,6 +12,16 @@ Roadmap slice for removing plans and moving orchestration into code workflows.
 6. `roadmap/v0.11-workflows/p6-deterministic-execution-bounds-optional.md` (optional extension)
 7. `roadmap/v0.11-workflows/p7-streaming-effect-lifecycles-optional.md` (optional extension, Option A++ baseline)
 
+## Execution Status (as of 2026-02-26)
+
+- [x] P1 complete
+- [x] P2 complete
+- [x] P3 complete
+- [x] P4 complete
+- [ ] P5 in progress (core fixtures/specs/hardening complete; deferred Agent SDK fixtures + remaining legacy archival cleanup)
+- [ ] P6 optional (not enabled in current baseline)
+- [ ] P7 optional (not enabled in current baseline)
+
 ## Sequence
 
 1. Prove module-based orchestration works without plans.
