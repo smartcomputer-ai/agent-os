@@ -38,7 +38,7 @@ Adapters own:
 
 1. Only workflow modules may originate module-emitted effects.
 2. `pure` modules cannot emit effects.
-3. Workflow modules must declare `abi.reducer.effects_emitted`.
+3. Workflow modules must declare `abi.workflow.effects_emitted`.
 4. Kernel rejects undeclared effect kinds before capability/policy evaluation.
 5. Multiple effects per step are allowed; deterministic kernel output limits apply.
 

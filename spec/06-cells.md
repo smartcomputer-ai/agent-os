@@ -16,7 +16,7 @@
   - Returning `state=null` in cell mode deletes/GCs the cell.
 - Effect authority follows workflow runtime rules:
   - only `module_kind: "workflow"` modules may emit effects
-  - emitted kinds must be declared in `abi.reducer.effects_emitted`
+  - emitted kinds must be declared in `abi.workflow.effects_emitted`
   - cap/policy checks still apply after structural allowlist checks
 
 ## Manifest & AIR hooks
