@@ -15,11 +15,11 @@ use crate::util;
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 use aos_host::manifest_loader;
 
-const REDUCER_NAME_V1: &str = "demo/SafeUpgrade@1";
-const REDUCER_NAME_V2: &str = "demo/SafeUpgrade@2";
+const WORKFLOW_NAME_V1: &str = "demo/SafeUpgrade@1";
+const WORKFLOW_NAME_V2: &str = "demo/SafeUpgrade@2";
 const EVENT_SCHEMA: &str = "demo/SafeUpgradeEvent@1";
-const MODULE_PATH_V1: &str = "crates/aos-smoke/fixtures/06-safe-upgrade/reducer";
-const MODULE_PATH_V2: &str = "crates/aos-smoke/fixtures/06-safe-upgrade/reducer-v2";
+const MODULE_PATH_V1: &str = "crates/aos-smoke/fixtures/06-safe-upgrade/workflow";
+const MODULE_PATH_V2: &str = "crates/aos-smoke/fixtures/06-safe-upgrade/workflow-v2";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,7 +51,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: Some(assets_root.as_path()),
-        reducer_name: REDUCER_NAME_V1,
+        workflow_name: WORKFLOW_NAME_V1,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_PATH_V1,
     })?;
@@ -126,18 +126,18 @@ pub fn run(example_root: &Path) -> Result<()> {
             plan_instances,
             waiting_events,
             pending_plan_receipts,
-            pending_reducer_receipts,
+            pending_workflow_receipts,
             queued_effects,
-            reducer_queue_pending,
+            workflow_queue_pending,
         }) => {
             println!(
-                "   apply blocked (strict-quiescence): workflows={} waiting={} pending_plan_receipts={} pending_workflow_receipts={} queued_effects={} reducer_queue_pending={}",
+                "   apply blocked (strict-quiescence): workflows={} waiting={} pending_plan_receipts={} pending_workflow_receipts={} queued_effects={} workflow_queue_pending={}",
                 plan_instances,
                 waiting_events,
                 pending_plan_receipts,
-                pending_reducer_receipts,
+                pending_workflow_receipts,
                 queued_effects,
-                reducer_queue_pending
+                workflow_queue_pending
             );
         }
         Err(other) => return Err(anyhow!("expected strict-quiescence block, got: {other}")),
@@ -218,10 +218,10 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     let state_v2_bytes = host
         .kernel_mut()
-        .reducer_state(REDUCER_NAME_V2)
-        .ok_or_else(|| anyhow!("missing state for upgraded module '{REDUCER_NAME_V2}'"))?;
+        .workflow_state(WORKFLOW_NAME_V2)
+        .ok_or_else(|| anyhow!("missing state for upgraded module '{WORKFLOW_NAME_V2}'"))?;
     let state_v2: UpgradeStateView =
-        serde_cbor::from_slice(&state_v2_bytes).context("decode upgraded reducer state")?;
+        serde_cbor::from_slice(&state_v2_bytes).context("decode upgraded workflow state")?;
     println!(
         "   v2 complete: pending={:?} primary_status={:?} follow_status={:?} requests={}",
         state_v2.pending_request,
@@ -247,18 +247,18 @@ fn load_upgrade_patch(example_root: &Path, host: &ExampleHost) -> Result<Manifes
     let mut loaded = manifest_loader::load_from_assets(host.store(), &upgrade_root)?
         .ok_or_else(|| anyhow!("upgrade manifest missing at {}", upgrade_root.display()))?;
 
-    let wasm_bytes = util::compile_reducer(MODULE_PATH_V2)?;
+    let wasm_bytes = util::compile_workflow(MODULE_PATH_V2)?;
     let wasm_hash = host
         .store()
         .put_blob(&wasm_bytes)
-        .context("store v2 reducer wasm blob")?;
-    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash v2 reducer wasm")?;
+        .context("store v2 workflow wasm blob")?;
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash v2 workflow wasm")?;
     let patched = aos_host::util::patch_modules(&mut loaded, &wasm_hash_ref, |name, _| {
-        name == REDUCER_NAME_V2
+        name == WORKFLOW_NAME_V2
     });
     if patched == 0 {
         return Err(anyhow!(
-            "module '{REDUCER_NAME_V2}' missing from v2 manifest"
+            "module '{WORKFLOW_NAME_V2}' missing from v2 manifest"
         ));
     }
 

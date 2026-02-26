@@ -1,6 +1,6 @@
-//! Integration tests for the Workspace reducer and internal workspace effects.
+//! Integration tests for the Workspace workflow and internal workspace effects.
 //!
-//! These tests load the actual reducer WASM built in `crates/aos-sys` from
+//! These tests load the actual workflow WASM built in `crates/aos-sys` from
 //! `target/wasm32-unknown-unknown/debug/workspace.wasm`. Build it first with:
 //! `cargo build -p aos-sys --target wasm32-unknown-unknown`.
 
@@ -190,7 +190,7 @@ struct WorkspaceAnnotationsSetReceipt {
 }
 
 fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let reducer = fixtures::reducer_module_from_target(
+    let workflow = fixtures::workflow_module_from_target(
         store,
         "sys/Workspace@1",
         "workspace.wasm",
@@ -200,10 +200,10 @@ fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
     );
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("sys/WorkspaceCommit@1"),
-        module: reducer.name.clone(),
+        module: workflow.name.clone(),
         key_field: Some("workspace".into()),
     }];
-    fixtures::build_loaded_manifest(vec![reducer], routing)
+    fixtures::build_loaded_manifest(vec![workflow], routing)
 }
 
 fn commit_event(workspace: &str, root_hash: &str, expected_head: Option<u64>) -> Vec<u8> {

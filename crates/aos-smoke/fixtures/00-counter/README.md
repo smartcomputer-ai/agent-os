@@ -5,7 +5,7 @@ A minimal counter state machine with no micro-effects.
 ## Structure
 
 - `air/` — AIR JSON definitions (schemas, module, manifest)
-- `reducer/` — WASM reducer crate
+- `workflow/` — WASM workflow crate
 
 ## Running
 

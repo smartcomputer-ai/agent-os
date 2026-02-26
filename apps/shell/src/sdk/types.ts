@@ -260,7 +260,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/state/{reducer}": {
+    "/api/state/{workflow}": {
         parameters: {
             query?: never;
             header?: never;
@@ -276,7 +276,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/state/{reducer}/cells": {
+    "/api/state/{workflow}/cells": {
         parameters: {
             query?: never;
             header?: never;
@@ -1272,8 +1272,8 @@ export interface operations {
             };
             header?: never;
             path: {
-                /** @description Reducer name */
-                reducer: string;
+                /** @description Workflow name */
+                workflow: string;
             };
             cookie?: never;
         };
@@ -1318,8 +1318,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Reducer name */
-                reducer: string;
+                /** @description Workflow name */
+                workflow: string;
             };
             cookie?: never;
         };

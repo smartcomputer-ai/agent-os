@@ -3,7 +3,7 @@ import { Box } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useDefsGet } from "@/sdk/queries";
 import { TreeNode, TreeProperty } from "./tree-node";
-import type { NamedRef, Routing, ModuleDef, ReducerAbi } from "../../lib/manifest-types";
+import type { NamedRef, Routing, ModuleDef, WorkflowAbi } from "../../lib/manifest-types";
 
 interface ModulesSectionProps {
   modules: NamedRef[];
@@ -13,13 +13,13 @@ interface ModulesSectionProps {
 export function ModulesSection({ modules, routing }: ModulesSectionProps) {
   const navigate = useNavigate();
 
-  // Build routing lookup: reducer name → events routed to it
-  const routingByReducer = new Map<string, string[]>();
+  // Build routing lookup: workflow name → events routed to it
+  const routingByWorkflow = new Map<string, string[]>();
   if (routing?.events) {
     for (const r of routing.events) {
-      const existing = routingByReducer.get(r.reducer) || [];
+      const existing = routingByWorkflow.get(r.workflow) || [];
       existing.push(r.event);
-      routingByReducer.set(r.reducer, existing);
+      routingByWorkflow.set(r.workflow, existing);
     }
   }
 
@@ -50,7 +50,7 @@ export function ModulesSection({ modules, routing }: ModulesSectionProps) {
         <ModuleNode
           key={mod.name}
           name={mod.name}
-          routedEvents={routingByReducer.get(mod.name) || []}
+          routedEvents={routingByWorkflow.get(mod.name) || []}
           onDefClick={handleDefClick}
         />
       ))}
@@ -68,7 +68,7 @@ function ModuleNode({ name, routedEvents, onDefClick }: ModuleNodeProps) {
   // Fetch module details to show ABI
   const { data } = useDefsGet({ kind: "defmodule", name });
   const def = data?.def as ModuleDef | undefined;
-  const abi = def?.abi?.reducer as ReducerAbi | undefined;
+  const abi = def?.abi?.workflow as WorkflowAbi | undefined;
 
   return (
     <TreeNode
@@ -104,7 +104,7 @@ function ModuleNode({ name, routedEvents, onDefClick }: ModuleNodeProps) {
         />
       )}
 
-      {/* Key schema (for keyed reducers) */}
+      {/* Key schema (for keyed workflows) */}
       {def?.key_schema && (
         <TreeProperty
           name="Key"

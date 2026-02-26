@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::example_host::{ExampleHost, HarnessConfig};
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
-const REDUCER_NAME: &str = "demo/ChainComp@1";
+const WORKFLOW_NAME: &str = "demo/ChainComp@1";
 const EVENT_SCHEMA: &str = "demo/ChainEvent@1";
-const MODULE_PATH: &str = "crates/aos-smoke/fixtures/05-chain-comp/reducer";
+const MODULE_PATH: &str = "crates/aos-smoke/fixtures/05-chain-comp/workflow";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,7 +24,7 @@ aos_variant! {
             notify: ChainTargetEnvelope,
             refund: ChainTargetEnvelope,
         },
-        // The reducer can also emit/route completion variants, but the host only sends Start.
+        // The workflow can also emit/route completion variants, but the host only sends Start.
     }
 }
 
@@ -71,7 +71,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_PATH,
     })?;
@@ -165,7 +165,7 @@ pub fn run(example_root: &Path) -> Result<()> {
                 return Err(anyhow!("expected refunded phase, got {:?}", state.phase));
             }
             if saga.refund_status.is_none() {
-                return Err(anyhow!("refund status missing in reducer state"));
+                return Err(anyhow!("refund status missing in workflow state"));
             }
         }
         None => return Err(anyhow!("expected active saga")),

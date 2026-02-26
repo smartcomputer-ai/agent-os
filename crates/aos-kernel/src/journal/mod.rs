@@ -156,7 +156,7 @@ pub struct EffectIntentRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "origin_kind")]
 pub enum IntentOriginRecord {
-    Reducer {
+    Workflow {
         name: String,
         #[serde(
             default,

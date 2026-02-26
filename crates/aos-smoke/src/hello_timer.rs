@@ -1,6 +1,6 @@
-//! Hello Timer demo wired up through AIR JSON assets and the reducer harness.
+//! Hello Timer demo wired up through AIR JSON assets and the workflow harness.
 //!
-//! Reducer emits a `timer.set` micro-effect, the harness drains the synthetic
+//! Workflow emits a `timer.set` micro-effect, the harness drains the synthetic
 //! receipt, and replay verification proves determinism end-to-end.
 
 use std::path::Path;
@@ -15,7 +15,7 @@ use serde_cbor;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const REDUCER_NAME: &str = "demo/TimerSM@1";
+const WORKFLOW_NAME: &str = "demo/TimerSM@1";
 const EVENT_SCHEMA: &str = "demo/TimerEvent@1";
 const ADAPTER_ID: &str = "adapter.timer.fake";
 const DELIVER_AT_NS: u64 = 1_000_000;
@@ -82,9 +82,9 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
-        module_crate: "crates/aos-smoke/fixtures/01-hello-timer/reducer",
+        module_crate: "crates/aos-smoke/fixtures/01-hello-timer/workflow",
     })?;
 
     println!("→ Hello Timer demo");

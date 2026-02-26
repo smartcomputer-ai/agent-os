@@ -169,7 +169,7 @@ mod tests {
             ),
             (
                 "spec/schemas/defmodule.schema.json",
-                "sha256:0a0fffeb19d457002e694ca5038960bd0aee1b942c0566eb4804ac1f31226e03",
+                "sha256:5f8d2c71f19d4b7269819feeacb3b63fd4f8b09d6828356e2dcaa7a6cfe51c24",
             ),
             (
                 "spec/schemas/defplan.schema.json",
@@ -185,7 +185,7 @@ mod tests {
             ),
             (
                 "spec/schemas/manifest.schema.json",
-                "sha256:2fb534eecd11aee53f614b9d8ee1e70ba1a0fcf42e45f6868e5966fca6bd9167",
+                "sha256:c7b252549814c3bbfc177708c469d63b2cf9fc50a02c797f406691971a867410",
             ),
             (
                 "spec/schemas/defsecret.schema.json",
@@ -193,7 +193,7 @@ mod tests {
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:83cd4bdca529eb574b8eea8bbb5cf827706c11d327b5ee2f014fbf20abfe6297",
+                "sha256:089150e04b04527623631f22554d1ba1104a676af783c99bcda434c8a94e5e15",
             ),
         ];
 

@@ -3,10 +3,10 @@
 extern crate alloc;
 
 mod pure;
-mod reducers;
+mod workflows;
 
 pub use pure::*;
-pub use reducers::*;
+pub use workflows::*;
 
 pub use serde_cbor::Value;
 

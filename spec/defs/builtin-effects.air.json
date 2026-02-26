@@ -203,10 +203,10 @@
   },
   {
     "$kind": "defeffect",
-    "name": "sys/introspect.reducer_state@1",
-    "kind": "introspect.reducer_state",
-    "params_schema": "sys/IntrospectReducerStateParams@1",
-    "receipt_schema": "sys/IntrospectReducerStateReceipt@1",
+    "name": "sys/introspect.workflow_state@1",
+    "kind": "introspect.workflow_state",
+    "params_schema": "sys/IntrospectWorkflowStateParams@1",
+    "receipt_schema": "sys/IntrospectWorkflowStateReceipt@1",
     "cap_type": "query",
     "origin_scope": "both"
   },

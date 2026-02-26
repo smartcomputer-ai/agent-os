@@ -52,15 +52,15 @@ impl<S: Store + 'static> Kernel<S> {
             policy_defs,
             schema_defs,
             schema_index: runtime.schema_index.clone(),
-            reducer_schemas: runtime.reducer_schemas.clone(),
+            workflow_schemas: runtime.workflow_schemas.clone(),
             module_cap_bindings: runtime.module_cap_bindings,
-            reducers: ReducerRegistry::new(store.clone(), config.module_cache_dir.clone())?,
+            workflows: WorkflowRegistry::new(store.clone(), config.module_cache_dir.clone())?,
             pures,
             router: runtime.router,
-            pending_reducer_receipts: HashMap::new(),
+            pending_workflow_receipts: HashMap::new(),
             recent_receipts: VecDeque::new(),
             recent_receipt_index: HashSet::new(),
-            reducer_queue: VecDeque::new(),
+            workflow_queue: VecDeque::new(),
             effect_manager: EffectManager::new(
                 runtime.capability_resolver,
                 runtime.policy_gate,
@@ -76,9 +76,9 @@ impl<S: Store + 'static> Kernel<S> {
                 secret_resolver.clone(),
             ),
             clock: KernelClock::new(),
-            reducer_state: HashMap::new(),
+            workflow_state: HashMap::new(),
             workflow_instances: HashMap::new(),
-            reducer_index_roots: HashMap::new(),
+            workflow_index_roots: HashMap::new(),
             snapshot_index: HashMap::new(),
             journal,
             suppress_journal: false,
@@ -98,7 +98,7 @@ impl<S: Store + 'static> Kernel<S> {
             for (name, module_def) in kernel.module_defs.iter() {
                 match module_def.module_kind {
                     aos_air_types::ModuleKind::Workflow => {
-                        kernel.reducers.ensure_loaded(name, module_def)?;
+                        kernel.workflows.ensure_loaded(name, module_def)?;
                     }
                     aos_air_types::ModuleKind::Pure => {
                         let mut pures = kernel.pures.lock().map_err(|_| {

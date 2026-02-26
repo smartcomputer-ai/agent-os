@@ -27,7 +27,7 @@ use crate::util;
 pub struct HarnessConfig<'a> {
     pub example_root: &'a Path,
     pub assets_root: Option<&'a Path>,
-    pub reducer_name: &'a str,
+    pub workflow_name: &'a str,
     pub event_schema: &'a str,
     pub module_crate: &'a str,
 }
@@ -35,7 +35,7 @@ pub struct HarnessConfig<'a> {
 /// Host-backed example driver built on TestHost, keeping explicit control flow.
 pub struct ExampleHost {
     host: TestHost<FsStore>,
-    reducer_name: String,
+    workflow_name: String,
     event_schema: String,
     store: Arc<FsStore>,
     loaded: LoadedManifest,
@@ -51,13 +51,13 @@ impl ExampleHost {
 
     pub fn prepare_with_imports(cfg: HarnessConfig<'_>, import_roots: &[PathBuf]) -> Result<Self> {
         reset_journal(cfg.example_root)?;
-        let wasm_bytes = util::compile_reducer(cfg.module_crate)?;
+        let wasm_bytes = util::compile_workflow(cfg.module_crate)?;
 
         let store = Arc::new(FsStore::open(cfg.example_root).context("open FsStore")?);
         let wasm_hash = store
             .put_blob(&wasm_bytes)
-            .context("store reducer wasm blob")?;
-        let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash reducer wasm")?;
+            .context("store workflow wasm blob")?;
+        let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash workflow wasm")?;
 
         let assets_root = cfg.assets_root.unwrap_or(cfg.example_root).to_path_buf();
 
@@ -65,14 +65,14 @@ impl ExampleHost {
             store.clone(),
             &assets_root,
             import_roots,
-            cfg.reducer_name,
+            cfg.workflow_name,
             &wasm_hash_ref,
         )?;
         let mut loaded_replay = load_and_patch(
             store.clone(),
             &assets_root,
             import_roots,
-            cfg.reducer_name,
+            cfg.workflow_name,
             &wasm_hash_ref,
         )?;
 
@@ -104,7 +104,7 @@ impl ExampleHost {
 
         Ok(Self {
             host,
-            reducer_name: cfg.reducer_name.to_string(),
+            workflow_name: cfg.workflow_name.to_string(),
             event_schema: cfg.event_schema.to_string(),
             store,
             loaded: loaded_replay,
@@ -124,7 +124,7 @@ impl ExampleHost {
         self.host
             .send_event_cbor(schema, cbor)
             .context("send event")?;
-        // Mirror the previous harness behavior: advance reducer immediately.
+        // Mirror the previous harness behavior: advance workflow immediately.
         self.host.run_to_idle().context("drain after event")
     }
 
@@ -154,8 +154,8 @@ impl ExampleHost {
 
     pub fn read_state<T: DeserializeOwned>(&self) -> Result<T> {
         self.host
-            .state(&self.reducer_name)
-            .context("read reducer state")
+            .state(&self.workflow_name)
+            .context("read workflow state")
     }
 
     pub fn kernel_mut(&mut self) -> &mut Kernel<FsStore> {
@@ -176,17 +176,17 @@ impl ExampleHost {
 
     pub fn finish_with_keyed_samples(
         self,
-        keyed_reducer: Option<&str>,
+        keyed_workflow: Option<&str>,
         keys: &[Vec<u8>],
     ) -> Result<ReplayHandle> {
         let final_state_bytes = self
             .host
-            .state_bytes(&self.reducer_name)
+            .state_bytes(&self.workflow_name)
             .unwrap_or_else(|| Vec::new());
         let journal_entries = self.host.kernel().dump_journal()?;
         let mut keyed_states = Vec::new();
-        if let Some(name) = keyed_reducer {
-            if let Some(root) = self.host.kernel().reducer_index_root(name) {
+        if let Some(name) = keyed_workflow {
+            if let Some(root) = self.host.kernel().workflow_index_root(name) {
                 let index = CellIndex::new(self.store.as_ref());
                 for meta in index.iter(root) {
                     let meta = meta?;
@@ -198,7 +198,7 @@ impl ExampleHost {
             } else {
                 // fallback to explicit keys if no root (should not happen)
                 for key in keys {
-                    if let Some(bytes) = self.host.kernel().reducer_state_bytes(name, Some(key))? {
+                    if let Some(bytes) = self.host.kernel().workflow_state_bytes(name, Some(key))? {
                         keyed_states.push((key.clone(), bytes));
                     }
                 }
@@ -209,9 +209,9 @@ impl ExampleHost {
             loaded: self.loaded,
             final_state_bytes,
             journal_entries,
-            reducer_name: self.reducer_name,
+            workflow_name: self.workflow_name,
             kernel_config: self.kernel_config,
-            keyed_reducer: keyed_reducer.map(str::to_string),
+            keyed_workflow: keyed_workflow.map(str::to_string),
             keyed_states,
         })
     }
@@ -222,9 +222,9 @@ pub struct ReplayHandle {
     loaded: LoadedManifest,
     final_state_bytes: Vec<u8>,
     journal_entries: Vec<OwnedJournalEntry>,
-    reducer_name: String,
+    workflow_name: String,
     kernel_config: KernelConfig,
-    keyed_reducer: Option<String>,
+    keyed_workflow: Option<String>,
     keyed_states: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
@@ -239,24 +239,24 @@ impl ReplayHandle {
         kernel.tick_until_idle()?;
         if !self.final_state_bytes.is_empty() {
             let replay_bytes = kernel
-                .reducer_state(&self.reducer_name)
+                .workflow_state(&self.workflow_name)
                 .ok_or_else(|| anyhow!("missing replay state"))?;
             if replay_bytes != self.final_state_bytes {
-                return Err(anyhow!("replay mismatch: reducer state diverged"));
+                return Err(anyhow!("replay mismatch: workflow state diverged"));
             }
             let state_hash = Hash::of_bytes(&self.final_state_bytes).to_hex();
             println!("   replay check: OK (state hash {state_hash})");
         } else {
-            println!("   replay check: no reducer state captured");
+            println!("   replay check: no workflow state captured");
         }
 
-        if let Some(name) = &self.keyed_reducer {
+        if let Some(name) = &self.keyed_workflow {
             for (key, bytes) in &self.keyed_states {
                 let replayed = kernel
-                    .reducer_state_bytes(name, Some(key))?
+                    .workflow_state_bytes(name, Some(key))?
                     .ok_or_else(|| anyhow!("missing keyed state for replay"))?;
                 if replayed != *bytes {
-                    return Err(anyhow!("replay mismatch for keyed reducer {name}"));
+                    return Err(anyhow!("replay mismatch for keyed workflow {name}"));
                 }
             }
             println!(
@@ -272,12 +272,12 @@ impl ReplayHandle {
 
 fn patch_module_hash(
     loaded: &mut LoadedManifest,
-    reducer_name: &str,
+    workflow_name: &str,
     wasm_hash: &HashRef,
 ) -> Result<()> {
-    let patched = patch_modules(loaded, wasm_hash, |name, _| name == reducer_name);
+    let patched = patch_modules(loaded, wasm_hash, |name, _| name == workflow_name);
     if patched == 0 {
-        anyhow::bail!("module '{reducer_name}' missing from manifest");
+        anyhow::bail!("module '{workflow_name}' missing from manifest");
     }
     Ok(())
 }
@@ -286,14 +286,14 @@ fn load_and_patch(
     store: Arc<FsStore>,
     assets_root: &Path,
     import_roots: &[PathBuf],
-    reducer_name: &str,
+    workflow_name: &str,
     wasm_hash: &HashRef,
 ) -> Result<LoadedManifest> {
     let mut loaded =
         manifest_loader::load_from_assets_with_imports(store, assets_root, import_roots)
             .context("load manifest from assets")?
             .ok_or_else(|| anyhow!("example manifest missing at {}", assets_root.display()))?;
-    patch_module_hash(&mut loaded, reducer_name, wasm_hash)?;
+    patch_module_hash(&mut loaded, workflow_name, wasm_hash)?;
     Ok(loaded)
 }
 

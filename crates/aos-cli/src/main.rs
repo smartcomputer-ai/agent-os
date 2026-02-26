@@ -61,7 +61,7 @@ enum Command {
     #[command(subcommand)]
     Event(EventCommand),
 
-    /// Query reducer state
+    /// Query workflow state
     #[command(subcommand)]
     State(StateCommand),
 
@@ -113,9 +113,9 @@ enum EventCommand {
 
 #[derive(Subcommand, Debug)]
 enum StateCommand {
-    /// Get reducer state
+    /// Get workflow state
     Get(StateArgs),
-    /// List keys (cells) for a keyed reducer
+    /// List keys (cells) for a keyed workflow
     Ls(CellsArgs),
 }
 

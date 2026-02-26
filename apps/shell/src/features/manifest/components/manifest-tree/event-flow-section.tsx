@@ -45,11 +45,11 @@ export function EventFlowSection({ routing, triggers }: EventFlowSectionProps) {
       defaultExpanded
       level={0}
     >
-      {/* Routing: events → reducers */}
+      {/* Routing: events → workflows */}
       {routingEvents.length > 0 && (
         <TreeNode
           label="Routing"
-          metadata="events → reducers"
+          metadata="events → workflows"
           badge={
             <span className="text-xs text-muted-foreground">{routingEvents.length}</span>
           }
@@ -58,7 +58,7 @@ export function EventFlowSection({ routing, triggers }: EventFlowSectionProps) {
         >
           {routingEvents.map((r, i) => (
             <TreeLeaf
-              key={`${r.event}-${r.reducer}-${i}`}
+              key={`${r.event}-${r.workflow}-${i}`}
               level={2}
               label={
                 <span className="flex items-center gap-1.5">
@@ -77,11 +77,11 @@ export function EventFlowSection({ routing, triggers }: EventFlowSectionProps) {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDefClick("defmodule", r.reducer);
+                      handleDefClick("defmodule", r.workflow);
                     }}
                     className="text-primary hover:underline font-mono text-xs"
                   >
-                    {r.reducer}
+                    {r.workflow}
                   </button>
                   {r.key_field && (
                     <span className="text-muted-foreground text-xs">
@@ -145,11 +145,11 @@ export function EventFlowSection({ routing, triggers }: EventFlowSectionProps) {
         </TreeNode>
       )}
 
-      {/* Inboxes: external sources → reducers */}
+      {/* Inboxes: external sources → workflows */}
       {inboxes.length > 0 && (
         <TreeNode
           label="Inboxes"
-          metadata="sources → reducers"
+          metadata="sources → workflows"
           badge={
             <span className="text-xs text-muted-foreground">{inboxes.length}</span>
           }
@@ -158,7 +158,7 @@ export function EventFlowSection({ routing, triggers }: EventFlowSectionProps) {
         >
           {inboxes.map((inbox, i) => (
             <TreeLeaf
-              key={`${inbox.source}-${inbox.reducer}-${i}`}
+              key={`${inbox.source}-${inbox.workflow}-${i}`}
               level={2}
               label={
                 <span className="flex items-center gap-1.5">
@@ -170,11 +170,11 @@ export function EventFlowSection({ routing, triggers }: EventFlowSectionProps) {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleDefClick("defmodule", inbox.reducer);
+                      handleDefClick("defmodule", inbox.workflow);
                     }}
                     className="text-primary hover:underline font-mono text-xs"
                   >
-                    {inbox.reducer}
+                    {inbox.workflow}
                   </button>
                 </span>
               }

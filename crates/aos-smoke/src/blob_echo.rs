@@ -1,6 +1,6 @@
-//! Blob Echo demo wired up through AIR assets and the reducer harness.
+//! Blob Echo demo wired up through AIR assets and the workflow harness.
 //!
-//! Reducer emits `blob.put`/`blob.get` micro-effects; this runner drains the
+//! Workflow emits `blob.put`/`blob.get` micro-effects; this runner drains the
 //! intents, synthesizes receipts, and relies on the shared harness for setup and
 //! deterministic replay.
 
@@ -22,7 +22,7 @@ use serde_cbor;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const REDUCER_NAME: &str = "demo/BlobEchoSM@1";
+const WORKFLOW_NAME: &str = "demo/BlobEchoSM@1";
 const EVENT_SCHEMA: &str = "demo/BlobEchoEvent@1";
 const ADAPTER_ID: &str = "adapter.blob.fake";
 
@@ -40,9 +40,9 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
-        module_crate: "crates/aos-smoke/fixtures/02-blob-echo/reducer",
+        module_crate: "crates/aos-smoke/fixtures/02-blob-echo/workflow",
     })?;
 
     let input = BlobEchoInput {
@@ -52,7 +52,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     println!("→ Blob Echo demo");
     drive_blob_echo(&mut host, input)?;
 
-    let final_state: ReducerEchoState = host.read_state()?;
+    let final_state: WorkflowEchoState = host.read_state()?;
     let data_ok =
         final_state.retrieved_blob_hash.as_deref() == final_state.stored_blob_ref.as_deref();
     println!(
@@ -175,8 +175,8 @@ fn handle_blob_get(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ReducerEchoState {
-    pc: ReducerPc,
+struct WorkflowEchoState {
+    pc: WorkflowPc,
     pending_blob_ref: Option<String>,
     stored_blob_ref: Option<String>,
     retrieved_blob_ref: Option<String>,
@@ -185,7 +185,7 @@ struct ReducerEchoState {
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    enum ReducerPc {
+    enum WorkflowPc {
         Idle,
         Putting,
         Getting,

@@ -165,26 +165,26 @@ impl<S: Store + 'static> TestHost<S> {
         self.host.snapshot()
     }
 
-    /// Get reducer state as raw bytes.
-    pub fn state_bytes(&self, reducer: &str) -> Option<Vec<u8>> {
-        self.host.state(reducer, None)
+    /// Get workflow state as raw bytes.
+    pub fn state_bytes(&self, workflow: &str) -> Option<Vec<u8>> {
+        self.host.state(workflow, None)
     }
 
-    /// Get reducer state deserialized to type T.
-    pub fn state<T: DeserializeOwned>(&self, reducer: &str) -> Result<T, HostError> {
+    /// Get workflow state deserialized to type T.
+    pub fn state<T: DeserializeOwned>(&self, workflow: &str) -> Result<T, HostError> {
         let bytes = self
             .host
-            .state(reducer, None)
-            .ok_or_else(|| HostError::External(format!("reducer '{reducer}' has no state")))?;
+            .state(workflow, None)
+            .ok_or_else(|| HostError::External(format!("workflow '{workflow}' has no state")))?;
         serde_cbor::from_slice(&bytes).map_err(|e| HostError::External(e.to_string()))
     }
 
-    /// Get reducer state decoded to JSON for quick assertions/logging.
-    pub fn state_json(&self, reducer: &str) -> Result<JsonValue, HostError> {
+    /// Get workflow state decoded to JSON for quick assertions/logging.
+    pub fn state_json(&self, workflow: &str) -> Result<JsonValue, HostError> {
         let bytes = self
             .host
-            .state(reducer, None)
-            .ok_or_else(|| HostError::External(format!("reducer '{reducer}' has no state")))?;
+            .state(workflow, None)
+            .ok_or_else(|| HostError::External(format!("workflow '{workflow}' has no state")))?;
         let cbor_value: serde_cbor::Value =
             serde_cbor::from_slice(&bytes).map_err(|e| HostError::External(e.to_string()))?;
         serde_json::to_value(cbor_value).map_err(|e| HostError::External(e.to_string()))

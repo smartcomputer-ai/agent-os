@@ -1,8 +1,8 @@
 #![cfg(feature = "e2e-tests")]
 
-use aos_air_types::{DefSchema, ReducerAbi, TypeExpr, TypeRecord};
+use aos_air_types::{DefSchema, WorkflowAbi, TypeExpr, TypeRecord};
 use aos_kernel::error::KernelError;
-use aos_wasm_abi::{DomainEvent, ReducerOutput};
+use aos_wasm_abi::{DomainEvent, WorkflowOutput};
 use helpers::fixtures::{self, TestWorld, START_SCHEMA};
 use indexmap::IndexMap;
 
@@ -31,13 +31,13 @@ fn rejects_event_payload_that_violates_schema() {
 }
 
 #[test]
-fn raised_events_are_routed_to_reducers() {
+fn raised_events_are_routed_to_workflows() {
     let store = fixtures::new_mem_store();
 
-    let mut emitter = fixtures::stub_reducer_module(
+    let mut emitter = fixtures::stub_workflow_module(
         &store,
         "com.acme/RaisedEmitter@1",
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(vec![0x01]),
             domain_events: vec![DomainEvent::new(
                 "com.acme/Raised@1".to_string(),
@@ -47,29 +47,29 @@ fn raised_events_are_routed_to_reducers() {
             ann: None,
         },
     );
-    emitter.abi.reducer = Some(ReducerAbi {
+    emitter.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/RaisedEmitterState@1"),
         event: fixtures::schema(START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
 
-    let mut consumer = fixtures::stub_reducer_module(
+    let mut consumer = fixtures::stub_workflow_module(
         &store,
         "com.acme/RaisedConsumer@1",
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(vec![0xEE]),
             domain_events: vec![],
             effects: vec![],
             ann: None,
         },
     );
-    consumer.abi.reducer = Some(ReducerAbi {
+    consumer.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/RaisedConsumerState@1"),
         event: fixtures::schema("com.acme/Raised@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -114,7 +114,7 @@ fn raised_events_are_routed_to_reducers() {
     world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(
-        world.kernel.reducer_state("com.acme/RaisedConsumer@1"),
+        world.kernel.workflow_state("com.acme/RaisedConsumer@1"),
         Some(vec![0xEE])
     );
 }

@@ -25,7 +25,7 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "workflow": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
@@ -38,7 +38,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ReducerContext@1",
+    "name": "sys/WorkflowContext@1",
     "type": {
       "record": {
         "now_ns": { "nat": {} },
@@ -47,7 +47,7 @@
         "entropy": { "bytes": {} },
         "event_hash": { "hash": {} },
         "manifest_hash": { "hash": {} },
-        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "workflow": { "text": {}, "$comment": "Name-formatted string" },
         "key": { "option": { "bytes": {} } },
         "cell_mode": { "bool": {} }
       }
@@ -144,7 +144,7 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "workflow": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
@@ -161,7 +161,7 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "workflow": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
@@ -1175,10 +1175,10 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/IntrospectReducerStateParams@1",
+    "name": "sys/IntrospectWorkflowStateParams@1",
     "type": {
       "record": {
-        "reducer": { "text": {} },
+        "workflow": { "text": {} },
         "key": { "option": { "bytes": {} } },
         "consistency": { "text": {}, "$comment": "head | exact:<height> | at_least:<height>" }
       }
@@ -1186,7 +1186,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/IntrospectReducerStateReceipt@1",
+    "name": "sys/IntrospectWorkflowStateReceipt@1",
     "type": {
       "record": {
         "state": { "option": { "bytes": {} } },
@@ -1213,7 +1213,7 @@
     "name": "sys/IntrospectListCellsParams@1",
     "type": {
       "record": {
-        "reducer": { "text": {} }
+        "workflow": { "text": {} }
       }
     }
   },

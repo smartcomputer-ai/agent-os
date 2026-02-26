@@ -1,6 +1,6 @@
 use aos_air_types::{
     DefModule, DefPolicy, DefSchema, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind,
-    OriginKind, PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, TypeExpr, TypeRecord, TypeRef,
+    OriginKind, PolicyDecision, PolicyMatch, PolicyRule, WorkflowAbi, TypeExpr, TypeRecord, TypeRef,
     TypeVariant,
 };
 use aos_effects::builtins::{BlobPutParams, TimerSetParams, TimerSetReceipt};
@@ -10,7 +10,7 @@ use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::JournalKind;
 use aos_kernel::Kernel;
 use aos_store::{FsStore, Store};
-use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use std::sync::Arc;
 use tempfile::TempDir;
 use wat::parse_str;
@@ -35,7 +35,7 @@ fn deny_workflow_timer_policy() -> DefPolicy {
 }
 
 #[test]
-fn reducer_timer_snapshot_resumes_on_receipt() {
+fn workflow_timer_snapshot_resumes_on_receipt() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
@@ -77,7 +77,7 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
     replay_world.tick_n(2).unwrap();
 
     assert_eq!(
-        replay_world.kernel.reducer_state("com.acme/TimerEmitter@1"),
+        replay_world.kernel.workflow_state("com.acme/TimerEmitter@1"),
         Some(vec![0x01])
     );
 }
@@ -221,7 +221,7 @@ fn snapshot_replay_restores_state() {
 
     world.kernel.create_snapshot().unwrap();
 
-    let final_state = world.kernel.reducer_state("com.acme/Simple@1").unwrap();
+    let final_state = world.kernel.workflow_state("com.acme/Simple@1").unwrap();
     let entries = world.kernel.dump_journal().unwrap();
 
     let replay_world = TestWorld::with_store_and_journal(
@@ -232,7 +232,7 @@ fn snapshot_replay_restores_state() {
     .unwrap();
 
     assert_eq!(
-        replay_world.kernel.reducer_state("com.acme/Simple@1"),
+        replay_world.kernel.workflow_state("com.acme/Simple@1"),
         Some(final_state)
     );
 }
@@ -264,7 +264,7 @@ fn fs_store_and_journal_restore_snapshot() {
             .unwrap();
 
     assert_eq!(
-        kernel_replay.reducer_state("com.acme/SimpleFs@1"),
+        kernel_replay.workflow_state("com.acme/SimpleFs@1"),
         Some(vec![0xAA])
     );
 }
@@ -289,7 +289,7 @@ fn snapshot_creation_quiesces_runtime() {
     .unwrap();
 
     assert_eq!(
-        replay_world.kernel.reducer_state("com.acme/Simple@1"),
+        replay_world.kernel.workflow_state("com.acme/Simple@1"),
         Some(vec![0xAA])
     );
 }
@@ -357,10 +357,10 @@ fn workflow_manifest_records_override_supplied_policy() {
 fn workflow_resume_manifest(
     store: &Arc<helpers::fixtures::TestStore>,
 ) -> aos_kernel::manifest::LoadedManifest {
-    let start_output = ReducerOutput {
+    let start_output = WorkflowOutput {
         state: Some(vec![0x51]),
         domain_events: vec![],
-        effects: vec![ReducerEffect::new(
+        effects: vec![WorkflowEffect::new(
             aos_effects::EffectKind::TIMER_SET,
             serde_cbor::to_vec(&TimerSetParams {
                 deliver_at_ns: 5,
@@ -370,10 +370,10 @@ fn workflow_resume_manifest(
         )],
         ann: None,
     };
-    let receipt_output = ReducerOutput {
+    let receipt_output = WorkflowOutput {
         state: Some(vec![0x52]),
         domain_events: vec![],
-        effects: vec![ReducerEffect::with_cap_slot(
+        effects: vec![WorkflowEffect::with_cap_slot(
             aos_effects::EffectKind::BLOB_PUT,
             serde_cbor::to_vec(&BlobPutParams {
                 bytes: b"resumed".to_vec(),
@@ -385,16 +385,16 @@ fn workflow_resume_manifest(
         )],
         ann: None,
     };
-    let mut workflow = sequenced_reducer_module(
+    let mut workflow = sequenced_workflow_module(
         store,
         "com.acme/WorkflowResume@1",
         &start_output,
         &receipt_output,
     );
-    workflow.abi.reducer = Some(ReducerAbi {
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/WorkflowResumeState@1"),
         event: fixtures::schema("com.acme/WorkflowResumeEvent@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![
             aos_effects::EffectKind::TIMER_SET.into(),
@@ -451,14 +451,14 @@ fn workflow_resume_manifest(
     loaded
 }
 
-fn sequenced_reducer_module<S: Store + ?Sized>(
+fn sequenced_workflow_module<S: Store + ?Sized>(
     store: &Arc<S>,
     name: impl Into<String>,
-    first: &ReducerOutput,
-    then: &ReducerOutput,
+    first: &WorkflowOutput,
+    then: &WorkflowOutput,
 ) -> DefModule {
-    let first_bytes = first.encode().expect("encode first reducer output");
-    let then_bytes = then.encode().expect("encode second reducer output");
+    let first_bytes = first.encode().expect("encode first workflow output");
+    let then_bytes = then.encode().expect("encode second workflow output");
     let first_literal = first_bytes
         .iter()
         .map(|b| format!("\\{:02x}", b))
@@ -588,8 +588,8 @@ fn sequenced_reducer_module<S: Store + ?Sized>(
 )"#
     );
 
-    let wasm_bytes = parse_str(&wat).expect("compile sequenced reducer wat");
-    let wasm_hash = store.put_blob(&wasm_bytes).expect("store reducer wasm");
+    let wasm_bytes = parse_str(&wat).expect("compile sequenced workflow wat");
+    let wasm_hash = store.put_blob(&wasm_bytes).expect("store workflow wasm");
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
     DefModule {
         name: name.into(),
@@ -597,33 +597,33 @@ fn sequenced_reducer_module<S: Store + ?Sized>(
         wasm_hash: wasm_hash_ref,
         key_schema: None,
         abi: ModuleAbi {
-            reducer: None,
+            workflow: None,
             pure: None,
         },
     }
 }
 
 fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedManifest {
-    let mut reducer = fixtures::stub_reducer_module(
+    let mut workflow = fixtures::stub_workflow_module(
         store,
         "com.acme/SimpleFs@1",
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(vec![0xAA]),
             domain_events: vec![],
             effects: vec![],
             ann: None,
         },
     );
-    reducer.abi.reducer = Some(ReducerAbi {
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/SimpleFsState@1"),
         event: fixtures::schema(START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
+    let routing = vec![fixtures::routing_event(START_SCHEMA, &workflow.name)];
+    let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![

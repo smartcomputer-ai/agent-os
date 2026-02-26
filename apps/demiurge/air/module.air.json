@@ -1,9 +1,9 @@
 {
   "$kind": "defmodule",
   "name": "demiurge/Demiurge@1",
-  "module_kind": "reducer",
+  "module_kind": "workflow",
   "abi": {
-    "reducer": {
+    "workflow": {
       "state": "aos.agent/SessionState@1",
       "event": "aos.agent/SessionEvent@1",
       "effects_emitted": [],

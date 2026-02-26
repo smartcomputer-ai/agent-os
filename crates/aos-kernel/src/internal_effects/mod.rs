@@ -15,7 +15,7 @@ const GOVERNANCE_ADAPTER_ID: &str = "kernel.governance";
 /// Kinds handled entirely inside the kernel (no host adapter).
 pub(crate) static INTERNAL_EFFECT_KINDS: &[&str] = &[
     "introspect.manifest",
-    "introspect.reducer_state",
+    "introspect.workflow_state",
     "introspect.journal_head",
     "introspect.list_cells",
     "workspace.resolve",
@@ -93,7 +93,7 @@ where
 
         let receipt_result = match intent.kind.as_str() {
             EffectKind::INTROSPECT_MANIFEST => self.handle_manifest(intent),
-            EffectKind::INTROSPECT_REDUCER_STATE => self.handle_reducer_state(intent),
+            EffectKind::INTROSPECT_WORKFLOW_STATE => self.handle_workflow_state(intent),
             EffectKind::INTROSPECT_JOURNAL_HEAD => self.handle_journal_head(intent),
             EffectKind::INTROSPECT_LIST_CELLS => self.handle_list_cells(intent),
             "workspace.resolve" => self.handle_workspace_resolve(intent),
@@ -240,7 +240,7 @@ mod tests {
     fn list_cells_empty_for_non_keyed() {
         let mut kernel = open_kernel();
         let params = ListCellsParams {
-            reducer: "missing/Reducer@1".into(),
+            workflow: "missing/Workflow@1".into(),
         };
         let intent =
             IntentBuilder::new(EffectKind::introspect_list_cells(), "sys/query@1", &params)

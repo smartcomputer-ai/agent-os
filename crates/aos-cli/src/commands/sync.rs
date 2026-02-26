@@ -82,7 +82,7 @@ pub struct CargoAirImport {
 
 #[derive(Debug, Deserialize)]
 pub struct BuildSync {
-    pub reducer_dir: Option<PathBuf>,
+    pub workflow_dir: Option<PathBuf>,
     pub module: Option<String>,
 }
 
@@ -146,14 +146,14 @@ pub fn resolve_air_sources(
     map_root: &Path,
     config: &SyncConfig,
     default_air_dir: &Path,
-    default_reducer_dir: &Path,
+    default_workflow_dir: &Path,
 ) -> Result<ResolvedAirSources> {
     resolve_air_sources_with_mode(
         world_root,
         map_root,
         config,
         default_air_dir,
-        default_reducer_dir,
+        default_workflow_dir,
         lock_mode_from_env(),
     )
 }
@@ -163,7 +163,7 @@ fn resolve_air_sources_with_mode(
     map_root: &Path,
     config: &SyncConfig,
     default_air_dir: &Path,
-    default_reducer_dir: &Path,
+    default_workflow_dir: &Path,
     lock_mode: LockEnforcementMode,
 ) -> Result<ResolvedAirSources> {
     let air_dir = config
@@ -183,7 +183,7 @@ fn resolve_air_sources_with_mode(
             let resolved = resolve_air_import(
                 world_root,
                 map_root,
-                default_reducer_dir,
+                default_workflow_dir,
                 import,
                 &mut metadata_cache,
             )?;
@@ -209,7 +209,7 @@ fn resolve_air_sources_with_mode(
 fn resolve_air_import(
     world_root: &Path,
     map_root: &Path,
-    default_reducer_dir: &Path,
+    default_workflow_dir: &Path,
     import: &AirImport,
     metadata_cache: &mut HashMap<PathBuf, CargoMetadata>,
 ) -> Result<ResolvedAirImport> {
@@ -235,7 +235,7 @@ fn resolve_air_import(
         (None, Some(cargo)) => resolve_cargo_import(
             world_root,
             map_root,
-            default_reducer_dir,
+            default_workflow_dir,
             cargo,
             metadata_cache,
         ),
@@ -249,13 +249,13 @@ fn resolve_air_import(
 fn resolve_cargo_import(
     world_root: &Path,
     map_root: &Path,
-    default_reducer_dir: &Path,
+    default_workflow_dir: &Path,
     import: &CargoAirImport,
     metadata_cache: &mut HashMap<PathBuf, CargoMetadata>,
 ) -> Result<ResolvedAirImport> {
     let manifest_path = match import.manifest_path.as_ref() {
         Some(path) => resolve_map_path(map_root, path),
-        None => default_metadata_manifest(world_root, default_reducer_dir)?,
+        None => default_metadata_manifest(world_root, default_workflow_dir)?,
     };
 
     let metadata = if let Some(existing) = metadata_cache.get(&manifest_path) {
@@ -499,10 +499,10 @@ fn add_def_entry(
     Ok(())
 }
 
-fn default_metadata_manifest(world_root: &Path, default_reducer_dir: &Path) -> Result<PathBuf> {
-    let reducer_manifest = default_reducer_dir.join("Cargo.toml");
-    if reducer_manifest.exists() {
-        return Ok(reducer_manifest);
+fn default_metadata_manifest(world_root: &Path, default_workflow_dir: &Path) -> Result<PathBuf> {
+    let workflow_manifest = default_workflow_dir.join("Cargo.toml");
+    if workflow_manifest.exists() {
+        return Ok(workflow_manifest);
     }
     let world_manifest = world_root.join("Cargo.toml");
     if world_manifest.exists() {
@@ -510,7 +510,7 @@ fn default_metadata_manifest(world_root: &Path, default_reducer_dir: &Path) -> R
     }
     anyhow::bail!(
         "cargo air import requires Cargo.toml; checked {} and {}",
-        reducer_manifest.display(),
+        workflow_manifest.display(),
         world_manifest.display()
     )
 }
@@ -709,7 +709,7 @@ mod tests {
         let temp = tempfile::TempDir::new().expect("tempdir");
         let world_root = temp.path().join("world");
         let map_root = world_root.clone();
-        let reducer_dir = world_root.join("reducer");
+        let workflow_dir = world_root.join("workflow");
         let default_air = world_root.join("air-default");
         let import_root = world_root.join("../sdk/air");
         std::fs::create_dir_all(&import_root).expect("mkdir import");
@@ -731,7 +731,7 @@ mod tests {
         });
 
         let resolved =
-            resolve_air_sources(&world_root, &map_root, &config, &default_air, &reducer_dir)
+            resolve_air_sources(&world_root, &map_root, &config, &default_air, &workflow_dir)
                 .expect("resolve");
         assert_eq!(resolved.air_dir, world_root.join("air"));
         assert_eq!(resolved.import_dirs, vec![world_root.join("../sdk/air")]);
@@ -741,7 +741,7 @@ mod tests {
     fn resolve_air_sources_rejects_invalid_import_shape() {
         let world_root = PathBuf::from("/tmp/world");
         let map_root = world_root.clone();
-        let reducer_dir = world_root.join("reducer");
+        let workflow_dir = world_root.join("workflow");
         let default_air = world_root.join("air-default");
 
         let mut config = empty_config();
@@ -760,7 +760,7 @@ mod tests {
             }],
         });
 
-        let err = resolve_air_sources(&world_root, &map_root, &config, &default_air, &reducer_dir)
+        let err = resolve_air_sources(&world_root, &map_root, &config, &default_air, &workflow_dir)
             .expect_err("expected error");
         assert!(err.to_string().contains("exactly one"));
     }
@@ -770,7 +770,7 @@ mod tests {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let world_root = workspace_root.clone();
         let map_root = workspace_root.clone();
-        let reducer_dir = workspace_root.join("apps/demiurge/reducer");
+        let workflow_dir = workspace_root.join("apps/demiurge/workflow");
         let default_air = workspace_root.join("air");
 
         let mut config = empty_config();
@@ -792,7 +792,7 @@ mod tests {
         });
 
         let resolved =
-            resolve_air_sources(&world_root, &map_root, &config, &default_air, &reducer_dir)
+            resolve_air_sources(&world_root, &map_root, &config, &default_air, &workflow_dir)
                 .expect("resolve");
         let actual = std::fs::canonicalize(&resolved.import_dirs[0]).expect("canonical actual");
         let expected = std::fs::canonicalize(workspace_root.join("crates/aos-agent-sdk/air"))
@@ -826,7 +826,7 @@ mod tests {
             temp.path(),
             &config,
             &temp.path().join("air"),
-            &temp.path().join("reducer"),
+            &temp.path().join("workflow"),
             LockEnforcementMode::Warn,
         )
         .expect("resolve");
@@ -904,7 +904,7 @@ mod tests {
             temp.path(),
             &config,
             &temp.path().join("air"),
-            &temp.path().join("reducer"),
+            &temp.path().join("workflow"),
             LockEnforcementMode::Error,
         )
         .expect_err("should fail");

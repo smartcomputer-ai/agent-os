@@ -3,7 +3,7 @@ use predicates::prelude::*;
 use std::process::Command;
 
 #[test]
-fn blob_echo_returns_data_to_reducer() {
+fn blob_echo_returns_data_to_workflow() {
     if !wasm_target_installed() {
         eprintln!("skipping blob-echo data test (missing wasm target)");
         return;

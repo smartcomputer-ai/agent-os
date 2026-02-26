@@ -87,11 +87,11 @@
     "events": [
       {
         "event": "aos.agent/SessionEvent@1",
-        "reducer": "demiurge/Demiurge@1"
+        "workflow": "demiurge/Demiurge@1"
       },
       {
         "event": "sys/WorkspaceCommit@1",
-        "reducer": "sys/Workspace@1",
+        "workflow": "sys/Workspace@1",
         "key_field": "workspace"
       }
     ],

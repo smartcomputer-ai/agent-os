@@ -565,7 +565,7 @@ fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
 mod tests {
     use super::*;
     use aos_air_types::{
-        HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef, SecretEntry, TypeExpr,
+        HashRef, ModuleAbi, ModuleKind, WorkflowAbi, SchemaRef, SecretEntry, TypeExpr,
         TypePrimitive, TypePrimitiveNat, TypeRef, TypeVariant,
     };
     use aos_cbor::Hash;
@@ -618,10 +618,10 @@ mod tests {
     fn defmodule_allows_missing_wasm_hash() {
         let json = r#"{
             "$kind": "defmodule",
-            "name": "demo/Reducer@1",
-            "module_kind": "reducer",
+            "name": "demo/Workflow@1",
+            "module_kind": "workflow",
             "abi": {
-                "reducer": {
+                "workflow": {
                     "state": "demo/State@1",
                     "event": "demo/Event@1"
                 }
@@ -667,15 +667,15 @@ mod tests {
         };
 
         let module = DefModule {
-            name: "demo/Reducer@1".into(),
+            name: "demo/Workflow@1".into(),
             module_kind: ModuleKind::Workflow,
             wasm_hash: HashRef::new(Hash::of_bytes(b"wasm").to_hex()).unwrap(),
             key_schema: None,
             abi: ModuleAbi {
-                reducer: Some(ReducerAbi {
+                workflow: Some(WorkflowAbi {
                     state: SchemaRef::new(&state_schema.name).unwrap(),
                     event: SchemaRef::new(&event_schema.name).unwrap(),
-                    context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                    context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                     annotations: None,
                     effects_emitted: Vec::new(),
                     cap_slots: IndexMap::new(),
@@ -739,7 +739,7 @@ mod tests {
         let loaded = load_from_assets(store, example_root).expect("load");
 
         let loaded = loaded.expect("manifest present");
-        assert!(loaded.modules.contains_key("demo/Reducer@1"));
+        assert!(loaded.modules.contains_key("demo/Workflow@1"));
         assert!(loaded.schemas.contains_key("demo/State@1"));
         assert!(loaded.schemas.contains_key("demo/EventPayload@1"));
         assert!(loaded.schemas.contains_key("demo/Event@1"));

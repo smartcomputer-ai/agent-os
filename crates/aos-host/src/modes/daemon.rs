@@ -103,13 +103,13 @@ pub enum ControlMsg {
         resp: oneshot::Sender<Result<Vec<aos_kernel::DefListing>, HostError>>,
     },
     StateGet {
-        reducer: String,
+        workflow: String,
         key: Option<Vec<u8>>,
         consistency: String,
         resp: oneshot::Sender<Result<Option<(aos_kernel::ReadMeta, Option<Vec<u8>>)>, HostError>>,
     },
     StateList {
-        reducer: String,
+        workflow: String,
         resp: oneshot::Sender<Result<Vec<CellMeta>, HostError>>,
     },
     PutBlob {
@@ -202,7 +202,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
             http_server,
         };
 
-        // Automatically rehydrate timers from pending reducer receipts so callers
+        // Automatically rehydrate timers from pending workflow receipts so callers
         // can't forget to restore timers after a restart.
         daemon.rehydrate_timers();
         daemon
@@ -217,7 +217,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
             tracing::debug!("Timer scheduler already populated; skipping rehydrate");
             return;
         }
-        let pending = self.host.kernel().pending_reducer_receipts_snapshot();
+        let pending = self.host.kernel().pending_workflow_receipts_snapshot();
         self.timer_scheduler.rehydrate_from_pending(&pending);
         let count = self.timer_scheduler.len();
         if count > 0 {
@@ -317,8 +317,8 @@ impl<S: Store + 'static> WorldDaemon<S> {
 
     /// Run cycles in daemon mode until quiescent (no more pending effects).
     ///
-    /// A single cycle may apply receipts whose reducer handlers emit new
-    /// effects (e.g. a blob.get receipt triggers a reducer that emits
+    /// A single cycle may apply receipts whose workflow handlers emit new
+    /// effects (e.g. a blob.get receipt triggers a workflow that emits
     /// blob.put).  Without re-cycling, those effects would sit in the queue
     /// until the next external event, causing the system to appear stuck.
     async fn run_daemon_cycle(&mut self) -> Result<(), HostError> {
@@ -391,7 +391,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let _ = resp.send(res);
             }
             ControlMsg::StateGet {
-                reducer,
+                workflow,
                 key,
                 consistency,
                 resp,
@@ -399,7 +399,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let consistency = parse_consistency(&self.host, &consistency);
                 let result = self
                     .host
-                    .query_state(&reducer, key.as_deref(), consistency)
+                    .query_state(&workflow, key.as_deref(), consistency)
                     .map(|read| (read.meta, read.value));
                 let _ = resp.send(Ok(result));
             }
@@ -415,8 +415,8 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let res = self.host.list_defs(kinds.as_deref(), prefix.as_deref());
                 let _ = resp.send(res);
             }
-            ControlMsg::StateList { reducer, resp } => {
-                let res = self.host.list_cells(&reducer);
+            ControlMsg::StateList { workflow, resp } => {
+                let res = self.host.list_cells(&workflow);
                 let _ = resp.send(res);
             }
             ControlMsg::BlobGet { hash_hex, resp } => {

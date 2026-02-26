@@ -33,7 +33,7 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
         "$kind": "manifest",
         "air_version": "1",
         "schemas": [{"name": "com.acme/Schema@1", "hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
-        "modules": [{"name": "com.acme/Reducer@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
+        "modules": [{"name": "com.acme/Workflow@1", "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}],
         "effects": [],
         "caps": [{"name": "com.acme/Cap@1", "hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}],
         "policies": [{"name": "com.acme/Policy@1", "hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}],
@@ -48,7 +48,7 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
             ]
         },
         "module_bindings": {
-            "com.acme/Reducer@1": {
+            "com.acme/Workflow@1": {
                 "slots": {
                     "http": "cap_http"
                 }
@@ -57,12 +57,12 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
         "routing": {
             "subscriptions": [{
                 "event": "com.acme/Event@1",
-                "module": "com.acme/Reducer@1",
+                "module": "com.acme/Workflow@1",
                 "key_field": "id"
             }],
             "inboxes": [{
                 "source": "mailbox://alerts",
-                "reducer": "com.acme/Reducer@1"
+                "workflow": "com.acme/Workflow@1"
             }]
         }
     });
@@ -82,7 +82,7 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
 }
 
 #[test]
-fn manifest_event_alias_maps_to_subscriptions() {
+fn manifest_rejects_legacy_events_alias() {
     let manifest_json = json!({
         "$kind": "manifest",
         "air_version": "1",
@@ -94,16 +94,13 @@ fn manifest_event_alias_maps_to_subscriptions() {
         "routing": {
             "events": [{
                 "event": "com.acme/Event@1",
-                "reducer": "com.acme/Reducer@1"
+                "workflow": "com.acme/Workflow@1"
             }]
         }
     });
-    let manifest: Manifest = serde_json::from_value(manifest_json).expect("manifest");
-    let routing = manifest.routing.expect("routing");
-    assert_eq!(routing.subscriptions.len(), 1);
-    assert_eq!(
-        routing.subscriptions[0].module.as_str(),
-        "com.acme/Reducer@1"
+    assert!(
+        serde_json::from_value::<Manifest>(manifest_json).is_err(),
+        "legacy routing.events alias should be rejected"
     );
 }
 
@@ -117,7 +114,7 @@ fn module_binding_requires_slots_schema() {
         "caps": [],
         "policies": [],
         "module_bindings": {
-            "com.acme/Reducer@1": {}
+            "com.acme/Workflow@1": {}
         }
     });
     assert!(

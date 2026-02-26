@@ -1,6 +1,6 @@
 use aos_air_types::{
     DefModule, DefPolicy, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind, OriginKind,
-    PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, TypeExpr, TypeRecord, TypeRef,
+    PolicyDecision, PolicyMatch, PolicyRule, WorkflowAbi, TypeExpr, TypeRecord, TypeRef,
     TypeVariant,
 };
 use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt};
@@ -10,7 +10,7 @@ use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{JournalKind, JournalRecord, PolicyDecisionOutcome};
 use aos_kernel::snapshot::WorkflowStatusSnapshot;
 use aos_store::Store;
-use aos_wasm_abi::{DomainEvent, ReducerEffect, ReducerOutput};
+use aos_wasm_abi::{DomainEvent, WorkflowEffect, WorkflowOutput};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ mod helpers;
 use helpers::{attach_default_policy, timer_manifest};
 
 #[test]
-fn reducer_timer_receipt_replays_from_journal() {
+fn workflow_timer_receipt_replays_from_journal() {
     let store = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
@@ -54,7 +54,7 @@ fn reducer_timer_receipt_replays_from_journal() {
 
     let final_state = world
         .kernel
-        .reducer_state("com.acme/TimerEmitter@1")
+        .workflow_state("com.acme/TimerEmitter@1")
         .unwrap();
     let journal_entries = world.kernel.dump_journal().unwrap();
 
@@ -66,7 +66,7 @@ fn reducer_timer_receipt_replays_from_journal() {
     .unwrap();
 
     assert_eq!(
-        replay_world.kernel.reducer_state("com.acme/TimerEmitter@1"),
+        replay_world.kernel.workflow_state("com.acme/TimerEmitter@1"),
         Some(final_state)
     );
 }
@@ -134,7 +134,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(
-        world.kernel.reducer_state("com.acme/WorkflowResult@1"),
+        world.kernel.workflow_state("com.acme/WorkflowResult@1"),
         Some(vec![0xFA])
     );
     let settled = world.kernel.workflow_instances_snapshot();
@@ -155,7 +155,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     assert_eq!(
         replay_world
             .kernel
-            .reducer_state("com.acme/WorkflowResult@1"),
+            .workflow_state("com.acme/WorkflowResult@1"),
         Some(vec![0xFA])
     );
     let replay_instances = replay_world.kernel.workflow_instances_snapshot();
@@ -280,7 +280,7 @@ fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending(
         .handle_receipt(malformed)
         .expect("fault handled");
 
-    assert!(world.kernel.pending_reducer_receipts_snapshot().is_empty());
+    assert!(world.kernel.pending_workflow_receipts_snapshot().is_empty());
     let status = world
         .kernel
         .workflow_instances_snapshot()
@@ -290,7 +290,7 @@ fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending(
         .status;
     assert_eq!(status, WorkflowStatusSnapshot::Failed);
     assert_eq!(
-        world.kernel.reducer_state("com.acme/WorkflowResult@1"),
+        world.kernel.workflow_state("com.acme/WorkflowResult@1"),
         None
     );
 
@@ -352,7 +352,7 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
         .handle_receipt(malformed)
         .expect("fault handled");
 
-    let pending_after_rejected = world.kernel.pending_reducer_receipts_snapshot();
+    let pending_after_rejected = world.kernel.pending_workflow_receipts_snapshot();
     assert_eq!(pending_after_rejected.len(), 1);
     assert!(pending_after_rejected
         .iter()
@@ -374,7 +374,7 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
     world.kernel.tick_until_idle().unwrap();
 
     assert_eq!(
-        world.kernel.reducer_state("com.acme/WorkflowResult@1"),
+        world.kernel.workflow_state("com.acme/WorkflowResult@1"),
         Some(vec![0xFA])
     );
 }
@@ -503,7 +503,7 @@ fn workflow_fs_journal_persists_waiting_state_across_restarts() {
             .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
             .expect("submit workflow start");
         world.tick_n(1).unwrap();
-        assert_eq!(world.kernel.pending_reducer_receipts_snapshot().len(), 2);
+        assert_eq!(world.kernel.pending_workflow_receipts_snapshot().len(), 2);
     }
 
     let replay_world = TestWorld::with_store_and_journal(
@@ -515,7 +515,7 @@ fn workflow_fs_journal_persists_waiting_state_across_restarts() {
     assert_eq!(
         replay_world
             .kernel
-            .pending_reducer_receipts_snapshot()
+            .pending_workflow_receipts_snapshot()
             .len(),
         2
     );
@@ -538,11 +538,11 @@ fn no_plan_workflow_manifest_impl(
     store: &Arc<fixtures::TestStore>,
     include_rejected_variant: bool,
 ) -> aos_kernel::manifest::LoadedManifest {
-    let start_output = ReducerOutput {
+    let start_output = WorkflowOutput {
         state: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
         domain_events: vec![],
         effects: vec![
-            ReducerEffect::new(
+            WorkflowEffect::new(
                 aos_effects::EffectKind::TIMER_SET,
                 serde_cbor::to_vec(&TimerSetParams {
                     deliver_at_ns: 42,
@@ -550,7 +550,7 @@ fn no_plan_workflow_manifest_impl(
                 })
                 .unwrap(),
             ),
-            ReducerEffect::with_cap_slot(
+            WorkflowEffect::with_cap_slot(
                 aos_effects::EffectKind::BLOB_PUT,
                 serde_cbor::to_vec(&BlobPutParams {
                     bytes: b"workflow".to_vec(),
@@ -563,7 +563,7 @@ fn no_plan_workflow_manifest_impl(
         ],
         ann: None,
     };
-    let receipt_output = ReducerOutput {
+    let receipt_output = WorkflowOutput {
         state: None,
         domain_events: vec![DomainEvent::new(
             "com.acme/WorkflowDone@1",
@@ -574,11 +574,11 @@ fn no_plan_workflow_manifest_impl(
     };
 
     let mut workflow =
-        sequenced_reducer_module(store, "com.acme/Workflow@1", &start_output, &receipt_output);
-    workflow.abi.reducer = Some(ReducerAbi {
+        sequenced_workflow_module(store, "com.acme/Workflow@1", &start_output, &receipt_output);
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/WorkflowState@1"),
         event: fixtures::schema("com.acme/WorkflowEvent@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![
             aos_effects::EffectKind::TIMER_SET.into(),
@@ -587,20 +587,20 @@ fn no_plan_workflow_manifest_impl(
         cap_slots: Default::default(),
     });
 
-    let mut result = fixtures::stub_reducer_module(
+    let mut result = fixtures::stub_workflow_module(
         store,
         "com.acme/WorkflowResult@1",
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(vec![0xFA]),
             domain_events: vec![],
             effects: vec![],
             ann: None,
         },
     );
-    result.abi.reducer = Some(ReducerAbi {
+    result.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/WorkflowResultState@1"),
         event: fixtures::schema("com.acme/WorkflowDone@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -675,14 +675,14 @@ fn no_plan_workflow_manifest_impl(
     loaded
 }
 
-fn sequenced_reducer_module<S: Store + ?Sized>(
+fn sequenced_workflow_module<S: Store + ?Sized>(
     store: &Arc<S>,
     name: impl Into<String>,
-    first: &ReducerOutput,
-    then: &ReducerOutput,
+    first: &WorkflowOutput,
+    then: &WorkflowOutput,
 ) -> DefModule {
-    let first_bytes = first.encode().expect("encode first reducer output");
-    let then_bytes = then.encode().expect("encode second reducer output");
+    let first_bytes = first.encode().expect("encode first workflow output");
+    let then_bytes = then.encode().expect("encode second workflow output");
     let first_literal = first_bytes
         .iter()
         .map(|b| format!("\\{:02x}", b))
@@ -812,8 +812,8 @@ fn sequenced_reducer_module<S: Store + ?Sized>(
 )"#
     );
 
-    let wasm_bytes = parse_str(&wat).expect("compile sequenced reducer wat");
-    let wasm_hash = store.put_blob(&wasm_bytes).expect("store reducer wasm");
+    let wasm_bytes = parse_str(&wat).expect("compile sequenced workflow wat");
+    let wasm_hash = store.put_blob(&wasm_bytes).expect("store workflow wasm");
     let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).expect("hash ref");
     DefModule {
         name: name.into(),
@@ -821,7 +821,7 @@ fn sequenced_reducer_module<S: Store + ?Sized>(
         wasm_hash: wasm_hash_ref,
         key_schema: None,
         abi: ModuleAbi {
-            reducer: None,
+            workflow: None,
             pure: None,
         },
     }

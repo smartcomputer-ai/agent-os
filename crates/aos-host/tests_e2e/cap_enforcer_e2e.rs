@@ -11,23 +11,23 @@ mod helpers;
 
 use aos_air_types::{
     CapEnforcer, CapGrant, CapType, DefCap, EffectKind as AirEffectKind, EmptyObject, NamedRef,
-    ReducerAbi, TypeExpr, TypeList, TypeOption, TypePrimitive, TypePrimitiveNat, TypePrimitiveText,
+    WorkflowAbi, TypeExpr, TypeList, TypeOption, TypePrimitive, TypePrimitiveNat, TypePrimitiveText,
     TypeRecord, TypeSet, ValueList, ValueLiteral, ValueRecord, ValueSet, ValueText,
 };
 use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs};
-use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use helpers::fixtures::{self, TestWorld};
 use indexmap::IndexMap;
 
 #[test]
 fn http_enforcer_module_denies_host() {
     let store = fixtures::new_mem_store();
-    let reducer_name = "com.acme/HttpWorkflow@1";
+    let workflow_name = "com.acme/HttpWorkflow@1";
 
-    let output = ReducerOutput {
+    let output = WorkflowOutput {
         state: None,
         domain_events: vec![],
-        effects: vec![ReducerEffect::with_cap_slot(
+        effects: vec![WorkflowEffect::with_cap_slot(
             aos_effects::EffectKind::HTTP_REQUEST,
             serde_cbor::to_vec(&HttpRequestParams {
                 method: "GET".into(),
@@ -40,11 +40,11 @@ fn http_enforcer_module_denies_host() {
         )],
         ann: None,
     };
-    let mut reducer = fixtures::stub_reducer_module(&store, reducer_name, &output);
-    reducer.abi.reducer = Some(ReducerAbi {
+    let mut workflow = fixtures::stub_workflow_module(&store, workflow_name, &output);
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/HttpState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
         cap_slots: Default::default(),
@@ -59,8 +59,8 @@ fn http_enforcer_module_denies_host() {
     );
 
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![reducer, enforcer],
-        vec![fixtures::routing_event(fixtures::START_SCHEMA, reducer_name)],
+        vec![workflow, enforcer],
+        vec![fixtures::routing_event(fixtures::START_SCHEMA, workflow_name)],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -83,7 +83,7 @@ fn http_enforcer_module_denies_host() {
     loaded
         .manifest
         .module_bindings
-        .get_mut(reducer_name)
+        .get_mut(workflow_name)
         .expect("module binding")
         .slots
         .insert("http".into(), "cap_http".into());
@@ -109,12 +109,12 @@ fn http_enforcer_module_denies_host() {
 #[test]
 fn llm_enforcer_module_denies_model() {
     let store = fixtures::new_mem_store();
-    let reducer_name = "com.acme/LlmWorkflow@1";
+    let workflow_name = "com.acme/LlmWorkflow@1";
 
-    let output = ReducerOutput {
+    let output = WorkflowOutput {
         state: None,
         domain_events: vec![],
-        effects: vec![ReducerEffect::with_cap_slot(
+        effects: vec![WorkflowEffect::with_cap_slot(
             aos_effects::EffectKind::LLM_GENERATE,
             serde_cbor::to_vec(&LlmGenerateParams {
                 correlation_id: None,
@@ -140,11 +140,11 @@ fn llm_enforcer_module_denies_model() {
         )],
         ann: None,
     };
-    let mut reducer = fixtures::stub_reducer_module(&store, reducer_name, &output);
-    reducer.abi.reducer = Some(ReducerAbi {
+    let mut workflow = fixtures::stub_workflow_module(&store, workflow_name, &output);
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/LlmState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::LLM_GENERATE.into()],
         cap_slots: Default::default(),
@@ -159,8 +159,8 @@ fn llm_enforcer_module_denies_model() {
     );
 
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![reducer, enforcer],
-        vec![fixtures::routing_event(fixtures::START_SCHEMA, reducer_name)],
+        vec![workflow, enforcer],
+        vec![fixtures::routing_event(fixtures::START_SCHEMA, workflow_name)],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -188,7 +188,7 @@ fn llm_enforcer_module_denies_model() {
     loaded
         .manifest
         .module_bindings
-        .get_mut(reducer_name)
+        .get_mut(workflow_name)
         .expect("module binding")
         .slots
         .insert("llm".into(), "cap_llm".into());
@@ -214,12 +214,12 @@ fn llm_enforcer_module_denies_model() {
 #[test]
 fn workspace_enforcer_module_denies_workspace() {
     let store = fixtures::new_mem_store();
-    let reducer_name = "com.acme/WorkspaceWorkflow@1";
+    let workflow_name = "com.acme/WorkspaceWorkflow@1";
 
-    let output = ReducerOutput {
+    let output = WorkflowOutput {
         state: None,
         domain_events: vec![],
-        effects: vec![ReducerEffect::with_cap_slot(
+        effects: vec![WorkflowEffect::with_cap_slot(
             aos_effects::EffectKind::WORKSPACE_RESOLVE,
             serde_cbor::to_vec(&serde_json::json!({
                 "workspace": "alpha",
@@ -230,11 +230,11 @@ fn workspace_enforcer_module_denies_workspace() {
         )],
         ann: None,
     };
-    let mut reducer = fixtures::stub_reducer_module(&store, reducer_name, &output);
-    reducer.abi.reducer = Some(ReducerAbi {
+    let mut workflow = fixtures::stub_workflow_module(&store, workflow_name, &output);
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/WorkspaceState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::WORKSPACE_RESOLVE.into()],
         cap_slots: Default::default(),
@@ -249,8 +249,8 @@ fn workspace_enforcer_module_denies_workspace() {
     );
 
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![reducer, enforcer],
-        vec![fixtures::routing_event(fixtures::START_SCHEMA, reducer_name)],
+        vec![workflow, enforcer],
+        vec![fixtures::routing_event(fixtures::START_SCHEMA, workflow_name)],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -280,7 +280,7 @@ fn workspace_enforcer_module_denies_workspace() {
     loaded
         .manifest
         .module_bindings
-        .get_mut(reducer_name)
+        .get_mut(workflow_name)
         .expect("module binding")
         .slots
         .insert("workspace".into(), "cap_workspace".into());

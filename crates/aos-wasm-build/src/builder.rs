@@ -52,16 +52,16 @@ impl Builder {
                 cache::lookup(&fingerprint, cache_override.as_deref()).map_err(BuildError::Io)?
             {
                 let digest = WasmDigest::of_bytes(&bytes);
-                debug!("cache hit for reducer (fingerprint {fingerprint})");
+                debug!("cache hit for workflow (fingerprint {fingerprint})");
                 return Ok(BuildArtifact {
                     wasm_bytes: bytes,
                     wasm_hash: digest,
                     build_log: Some("cache hit".into()),
                 });
             }
-            debug!("cache miss for reducer (fingerprint {fingerprint})");
+            debug!("cache miss for workflow (fingerprint {fingerprint})");
         } else {
-            debug!("cache disabled; building reducer");
+            debug!("cache disabled; building workflow");
         }
         let artifact = match request.backend {
             BackendKind::Rust => RustBackend::new().compile(request)?,
@@ -82,14 +82,14 @@ mod tests {
     use camino::Utf8PathBuf;
 
     #[test]
-    fn builds_counter_reducer() {
+    fn builds_counter_workflow() {
         let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let source = root.join("../aos-smoke/fixtures/01-hello-timer/reducer");
+        let source = root.join("../aos-smoke/fixtures/01-hello-timer/workflow");
         let mut request = BuildRequest::new(source);
         request.config.release = false;
-        let artifact = Builder::compile(request.clone()).expect("compile hello timer reducer");
+        let artifact = Builder::compile(request.clone()).expect("compile hello timer workflow");
         assert!(!artifact.wasm_bytes.is_empty());
-        let artifact_cached = Builder::compile(request).expect("compile cached reducer");
+        let artifact_cached = Builder::compile(request).expect("compile cached workflow");
         assert_eq!(artifact.wasm_hash.0, artifact_cached.wasm_hash.0);
     }
 }

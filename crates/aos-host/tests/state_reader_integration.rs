@@ -1,37 +1,37 @@
 mod helpers;
 use aos_air_types::{
-    plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name, DefSchema, ReducerAbi,
+    plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name, DefSchema, WorkflowAbi,
 };
 use aos_kernel::{Consistency, StateReader};
-use aos_wasm_abi::ReducerOutput;
+use aos_wasm_abi::WorkflowOutput;
 use helpers::fixtures;
 use std::collections::HashMap;
 
-/// Build a test world with a single stub reducer whose state is set to `payload` on first event.
+/// Build a test world with a single stub workflow whose state is set to `payload` on first event.
 fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
     let store = fixtures::new_mem_store();
 
-    // Stub reducer that always returns the provided state.
-    let mut module = fixtures::stub_reducer_module(
+    // Stub workflow that always returns the provided state.
+    let mut module = fixtures::stub_workflow_module(
         &store,
         "com.acme/Store@1",
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(payload.to_vec()),
             domain_events: vec![],
             effects: vec![],
             ann: None,
         },
     );
-    module.abi.reducer = Some(ReducerAbi {
+    module.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/StoreState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
 
-    // Simple schema for start event routed to the reducer.
+    // Simple schema for start event routed to the workflow.
     let start_schema = fixtures::def_text_record_schema(
         fixtures::START_SCHEMA,
         vec![("id", fixtures::text_type())],
@@ -56,26 +56,26 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
     fixtures::TestWorld::with_store(store, loaded).expect("build world")
 }
 
-/// Build a keyed reducer world: reducer expects key and stores payload per key.
+/// Build a keyed workflow world: workflow expects key and stores payload per key.
 fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
     let store = fixtures::new_mem_store();
 
-    // Match the keyed manifest setup from keyed_reducer_integration.
-    let mut reducer = fixtures::stub_reducer_module(
+    // Match the keyed manifest setup from keyed_workflow_integration.
+    let mut workflow = fixtures::stub_workflow_module(
         &store,
         "com.acme/Keyed@1",
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(payload.to_vec()),
             domain_events: vec![],
             effects: vec![],
             ann: None,
         },
     );
-    reducer.key_schema = Some(fixtures::schema("com.acme/Key@1"));
-    reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
+    workflow.key_schema = Some(fixtures::schema("com.acme/Key@1"));
+    workflow.abi.workflow = Some(aos_air_types::WorkflowAbi {
         state: fixtures::schema("com.acme/State@1"),
         event: fixtures::schema("com.acme/Event@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -83,11 +83,11 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
 
     let routing = vec![aos_air_types::RoutingEvent {
         event: fixtures::schema("com.acme/Event@1"),
-        module: reducer.name.clone(),
+        module: workflow.name.clone(),
         key_field: Some(key_field.to_string()),
     }];
 
-    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
+    let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![
@@ -137,7 +137,7 @@ fn head_reads_state_and_meta() {
 
     let read = world
         .kernel
-        .get_reducer_state("com.acme/Store@1", None, Consistency::Head)
+        .get_workflow_state("com.acme/Store@1", None, Consistency::Head)
         .expect("head read");
 
     assert_eq!(read.value.as_deref(), Some("hello".as_bytes()));
@@ -158,7 +158,7 @@ fn exact_errors_without_snapshot() {
 
     let err = world
         .kernel
-        .get_reducer_state("com.acme/Store@1", None, Consistency::Exact(999))
+        .get_workflow_state("com.acme/Store@1", None, Consistency::Exact(999))
         .unwrap_err();
     assert!(format!("{err:?}").contains("SnapshotUnavailable"));
 }
@@ -180,7 +180,7 @@ fn exact_uses_snapshot_when_available() {
 
     let read = world
         .kernel
-        .get_reducer_state("com.acme/Store@1", None, Consistency::Exact(snap_height))
+        .get_workflow_state("com.acme/Store@1", None, Consistency::Exact(snap_height))
         .expect("exact read");
 
     assert_eq!(read.value.as_deref(), Some("snap".as_bytes()));
@@ -195,7 +195,7 @@ fn keyed_head_and_exact_reads_state() {
     let key_val = "k1";
     let mut world = test_world_keyed(b"cell", key_field);
 
-    // Submit an event with key field so it routes to the keyed reducer instance.
+    // Submit an event with key field so it routes to the keyed workflow instance.
     let payload = serde_cbor::to_vec(&serde_json::json!({ key_field: key_val })).unwrap();
     world
         .kernel
@@ -210,7 +210,7 @@ fn keyed_head_and_exact_reads_state() {
     let key_bytes = canonical_key_bytes(key_val);
     let head_read = world
         .kernel
-        .get_reducer_state("com.acme/Keyed@1", Some(&key_bytes), Consistency::Head)
+        .get_workflow_state("com.acme/Keyed@1", Some(&key_bytes), Consistency::Head)
         .expect("head read keyed");
     assert_eq!(head_read.value.as_deref(), Some("cell".as_bytes()));
 
@@ -219,7 +219,7 @@ fn keyed_head_and_exact_reads_state() {
     let snap_height = world.kernel.heights().snapshot.unwrap();
     let exact_read = world
         .kernel
-        .get_reducer_state(
+        .get_workflow_state(
             "com.acme/Keyed@1",
             Some(&key_bytes),
             Consistency::Exact(snap_height),

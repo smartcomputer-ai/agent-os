@@ -149,7 +149,7 @@ fn effect_kind_matches(matcher: &AirEffectKind, actual: &str) -> bool {
 
 fn origin_kind_matches(expected: &OriginKind, source: &EffectSource) -> bool {
     match (expected, source) {
-        (OriginKind::Workflow, EffectSource::Plan { .. } | EffectSource::Reducer { .. }) => true,
+        (OriginKind::Workflow, EffectSource::Plan { .. } | EffectSource::Workflow { .. }) => true,
         _ => false,
     }
 }
@@ -181,7 +181,7 @@ mod tests {
             .decide(
                 &http_intent(),
                 &dummy_grant(),
-                &EffectSource::Reducer { name: "r".into() },
+                &EffectSource::Workflow { name: "r".into() },
                 &CapType::http_out(),
             )
             .unwrap();
@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn reducer_http_can_be_denied() {
+    fn workflow_http_can_be_denied() {
         let policy = DefPolicy {
             name: "com.acme/policy@1".into(),
             rules: vec![PolicyRule {
@@ -207,7 +207,7 @@ mod tests {
             .decide(
                 &http_intent(),
                 &dummy_grant(),
-                &EffectSource::Reducer { name: "r".into() },
+                &EffectSource::Workflow { name: "r".into() },
                 &CapType::http_out(),
             )
             .unwrap();

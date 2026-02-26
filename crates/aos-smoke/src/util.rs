@@ -28,13 +28,13 @@ fn force_build() -> bool {
     FORCE_BUILD.get().copied().unwrap_or(false)
 }
 
-pub fn compile_reducer(crate_rel: &str) -> Result<Vec<u8>> {
+pub fn compile_workflow(crate_rel: &str) -> Result<Vec<u8>> {
     let source_path = workspace_root().join(crate_rel);
     let utf_path = Utf8PathBuf::from_path_buf(source_path.clone())
         .map_err(|_| anyhow!("path is not utf-8: {}", source_path.display()))?;
     let example_root = source_path
         .parent()
-        .ok_or_else(|| anyhow!("reducer path missing parent: {}", source_path.display()))?;
+        .ok_or_else(|| anyhow!("workflow path missing parent: {}", source_path.display()))?;
     let cache_dir = example_root.join(".aos").join("cache").join("modules");
     fs::create_dir_all(&cache_dir)
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
@@ -45,7 +45,7 @@ pub fn compile_reducer(crate_rel: &str) -> Result<Vec<u8>> {
         debug!("forcing rebuild for {crate_rel}");
         request.use_cache = false;
     }
-    let artifact = Builder::compile(request).context("compile reducer via aos-wasm-build")?;
+    let artifact = Builder::compile(request).context("compile workflow via aos-wasm-build")?;
     debug!(
         "build result: {} ({} bytes)",
         hex::encode(&artifact.wasm_hash.0),
@@ -68,7 +68,7 @@ pub fn kernel_config(example_root: &Path) -> Result<KernelConfig> {
 }
 
 /// Compile a specific binary in a workspace package to wasm32.
-/// Intended for built-in system reducers like sys/Workspace.
+/// Intended for built-in system workflows like sys/Workspace.
 pub fn compile_wasm_bin(
     workspace_root: &Path,
     package: &str,

@@ -13,11 +13,11 @@ use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use crate::policy::{AllowAllPolicy, PolicyGate, RulePolicy};
 
-use super::{EventWrap, ReducerSchema, RouteBinding};
+use super::{EventWrap, WorkflowSchema, RouteBinding};
 
 pub(super) struct RuntimeAssembly {
     pub schema_index: Arc<SchemaIndex>,
-    pub reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
+    pub workflow_schemas: Arc<HashMap<Name, WorkflowSchema>>,
     pub router: HashMap<String, Vec<RouteBinding>>,
     pub module_cap_bindings: HashMap<Name, HashMap<String, CapGrantResolution>>,
     pub capability_resolver: CapabilityResolver,
@@ -30,11 +30,11 @@ pub(super) fn assemble_runtime<S: Store>(
     loaded: &LoadedManifest,
 ) -> Result<RuntimeAssembly, KernelError> {
     let schema_index = Arc::new(build_schema_index_from_loaded(store, loaded)?);
-    let reducer_schemas = Arc::new(build_reducer_schemas(
+    let workflow_schemas = Arc::new(build_workflow_schemas(
         &loaded.modules,
         schema_index.as_ref(),
     )?);
-    let router = build_router(&loaded.manifest, reducer_schemas.as_ref())?;
+    let router = build_router(&loaded.manifest, workflow_schemas.as_ref())?;
     let effect_catalog = Arc::new(loaded.effect_catalog.clone());
     let capability_resolver = CapabilityResolver::from_manifest(
         &loaded.manifest,
@@ -47,7 +47,7 @@ pub(super) fn assemble_runtime<S: Store>(
 
     Ok(RuntimeAssembly {
         schema_index,
-        reducer_schemas,
+        workflow_schemas,
         router,
         module_cap_bindings,
         capability_resolver,
@@ -92,19 +92,19 @@ pub(super) fn build_schema_index_from_loaded<S: Store>(
     Ok(SchemaIndex::new(schema_map))
 }
 
-fn build_reducer_schemas(
+fn build_workflow_schemas(
     modules: &HashMap<Name, DefModule>,
     schema_index: &SchemaIndex,
-) -> Result<HashMap<Name, ReducerSchema>, KernelError> {
+) -> Result<HashMap<Name, WorkflowSchema>, KernelError> {
     let mut map = HashMap::new();
     for (name, module) in modules {
-        if let Some(reducer) = module.abi.reducer.as_ref() {
-            let schema_name = reducer.event.as_str();
+        if let Some(workflow) = module.abi.workflow.as_ref() {
+            let schema_name = workflow.event.as_str();
             let event_schema = schema_index
                 .get(schema_name)
                 .ok_or_else(|| {
                     KernelError::Manifest(format!(
-                        "schema '{schema_name}' not found for reducer '{name}'"
+                        "schema '{schema_name}' not found for workflow '{name}'"
                     ))
                 })?
                 .clone();
@@ -115,7 +115,7 @@ fn build_reducer_schemas(
                         .get(schema_name)
                         .ok_or_else(|| {
                             KernelError::Manifest(format!(
-                                "schema '{schema_name}' not found for reducer '{name}' key"
+                                "schema '{schema_name}' not found for workflow '{name}' key"
                             ))
                         })?
                         .clone(),
@@ -125,7 +125,7 @@ fn build_reducer_schemas(
             };
             map.insert(
                 name.clone(),
-                ReducerSchema {
+                WorkflowSchema {
                     event_schema_name: schema_name.to_string(),
                     event_schema,
                     key_schema,
@@ -138,7 +138,7 @@ fn build_reducer_schemas(
 
 fn build_router(
     manifest: &Manifest,
-    reducer_schemas: &HashMap<Name, ReducerSchema>,
+    workflow_schemas: &HashMap<Name, WorkflowSchema>,
 ) -> Result<HashMap<String, Vec<RouteBinding>>, KernelError> {
     let mut router = HashMap::new();
     let receipt_schema_allows_missing_key_field = |event_schema: &str| {
@@ -152,32 +152,32 @@ fn build_router(
     };
 
     for route in &routing.subscriptions {
-        let reducer_schema = reducer_schemas.get(&route.module).ok_or_else(|| {
+        let workflow_schema = workflow_schemas.get(&route.module).ok_or_else(|| {
             KernelError::Manifest(format!(
-                "schema for reducer '{}' not found while building router",
+                "schema for workflow '{}' not found while building router",
                 route.module
             ))
         })?;
         let route_event = route.event.as_str();
-        let reducer_event_schema = reducer_schema.event_schema_name.as_str();
-        if route_event == reducer_event_schema {
+        let workflow_event_schema = workflow_schema.event_schema_name.as_str();
+        if route_event == workflow_event_schema {
             push_route_binding(
                 &mut router,
                 route_event,
                 route_event,
-                reducer_schema,
+                workflow_schema,
                 route.key_field.clone(),
                 EventWrap::Identity,
                 &route.module,
             );
-            match &reducer_schema.event_schema {
+            match &workflow_schema.event_schema {
                 TypeExpr::Ref(reference) => {
                     let member = reference.reference.as_str();
                     push_route_binding(
                         &mut router,
                         member,
                         route_event,
-                        reducer_schema,
+                        workflow_schema,
                         route.key_field.clone(),
                         EventWrap::Identity,
                         &route.module,
@@ -197,7 +197,7 @@ fn build_router(
                                 &mut router,
                                 reference.reference.as_str(),
                                 route_event,
-                                reducer_schema,
+                                workflow_schema,
                                 route.key_field.clone(),
                                 EventWrap::Variant { tag: tag.clone() },
                                 &route.module,
@@ -208,12 +208,12 @@ fn build_router(
                 _ => {}
             }
         } else {
-            let wrap = wrap_for_event_schema(route_event, reducer_schema)?;
+            let wrap = wrap_for_event_schema(route_event, workflow_schema)?;
             push_route_binding(
                 &mut router,
                 route_event,
                 route_event,
-                reducer_schema,
+                workflow_schema,
                 route.key_field.clone(),
                 wrap,
                 &route.module,
@@ -228,31 +228,31 @@ fn push_route_binding(
     router: &mut HashMap<String, Vec<RouteBinding>>,
     event_key: &str,
     route_event_schema: &str,
-    reducer_schema: &ReducerSchema,
+    workflow_schema: &WorkflowSchema,
     key_field: Option<String>,
     wrap: EventWrap,
-    reducer: &str,
+    workflow: &str,
 ) {
     router
         .entry(event_key.to_string())
         .or_insert_with(Vec::new)
         .push(RouteBinding {
-            reducer: reducer.to_string(),
+            workflow: workflow.to_string(),
             key_field,
             route_event_schema: route_event_schema.to_string(),
-            reducer_event_schema: reducer_schema.event_schema_name.clone(),
+            workflow_event_schema: workflow_schema.event_schema_name.clone(),
             wrap,
         });
 }
 
 fn wrap_for_event_schema(
     event_schema: &str,
-    reducer_schema: &ReducerSchema,
+    workflow_schema: &WorkflowSchema,
 ) -> Result<EventWrap, KernelError> {
-    if event_schema == reducer_schema.event_schema_name {
+    if event_schema == workflow_schema.event_schema_name {
         return Ok(EventWrap::Identity);
     }
-    match &reducer_schema.event_schema {
+    match &workflow_schema.event_schema {
         TypeExpr::Ref(reference) if reference.reference.as_str() == event_schema => {
             Ok(EventWrap::Identity)
         }
@@ -263,8 +263,8 @@ fn wrap_for_event_schema(
                     if reference.reference.as_str() == event_schema {
                         if found.is_some() {
                             return Err(KernelError::Manifest(format!(
-                                "event '{event_schema}' appears in multiple variant arms for reducer schema '{}'",
-                                reducer_schema.event_schema_name
+                                "event '{event_schema}' appears in multiple variant arms for workflow schema '{}'",
+                                workflow_schema.event_schema_name
                             )));
                         }
                         found = Some(tag.clone());
@@ -273,14 +273,14 @@ fn wrap_for_event_schema(
             }
             found.map(|tag| EventWrap::Variant { tag }).ok_or_else(|| {
                 KernelError::Manifest(format!(
-                    "event '{event_schema}' is not in reducer schema '{}' family",
-                    reducer_schema.event_schema_name
+                    "event '{event_schema}' is not in workflow schema '{}' family",
+                    workflow_schema.event_schema_name
                 ))
             })
         }
         _ => Err(KernelError::Manifest(format!(
-            "event '{event_schema}' is not in reducer schema '{}' family",
-            reducer_schema.event_schema_name
+            "event '{event_schema}' is not in workflow schema '{}' family",
+            workflow_schema.event_schema_name
         ))),
     }
 }

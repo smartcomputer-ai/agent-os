@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const REDUCER_NAME: &str = "demo/RetrySM@1";
+const WORKFLOW_NAME: &str = "demo/RetrySM@1";
 const EVENT_SCHEMA: &str = "demo/RetryEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/08-retry-backoff/reducer";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/08-retry-backoff/workflow";
 const ADAPTER_ID_HTTP: &str = "adapter.http.fake";
 const ADAPTER_ID_TIMER: &str = "adapter.timer.fake";
 
@@ -65,7 +65,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_CRATE,
     })?;

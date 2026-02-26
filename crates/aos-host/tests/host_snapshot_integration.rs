@@ -7,13 +7,13 @@ use aos_host::config::HostConfig;
 use aos_host::{ExternalEvent, WorldHost};
 use aos_kernel::KernelConfig;
 use aos_store::FsStore;
-use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use helpers::fixtures;
 use serde_cbor;
 use serde_json;
 use tempfile::TempDir;
 
-use aos_air_types::{DefSchema, ReducerAbi, TypeExpr, TypeRef, TypeVariant};
+use aos_air_types::{DefSchema, WorkflowAbi, TypeExpr, TypeRef, TypeVariant};
 use indexmap::IndexMap;
 
 use helpers::{def_text_record_schema, insert_test_schemas, text_type};
@@ -63,7 +63,7 @@ async fn worldhost_snapshot_preserves_effect_queue() {
 }
 
 fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
-    let effect = ReducerEffect::with_cap_slot(
+    let effect = WorkflowEffect::with_cap_slot(
         aos_effects::EffectKind::TIMER_SET,
         serde_cbor::to_vec(&serde_json::json!({
             "deliver_at_ns": 99u64,
@@ -72,17 +72,17 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
         .unwrap(),
         "default",
     );
-    let output = ReducerOutput {
+    let output = WorkflowOutput {
         state: Some(vec![0xAA]),
         domain_events: vec![],
         effects: vec![effect],
         ann: None,
     };
-    let mut module = fixtures::stub_reducer_module(store, "demo/TimerReducer@1", &output);
-    module.abi.reducer = Some(ReducerAbi {
+    let mut module = fixtures::stub_workflow_module(store, "demo/TimerWorkflow@1", &output);
+    module.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("demo/TimerState@1"),
         event: fixtures::schema("demo/TimerEvent@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
@@ -90,7 +90,7 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
     let mut loaded = fixtures::build_loaded_manifest(vec![module],
         vec![fixtures::routing_event(
             "demo/TimerEvent@1",
-            "demo/TimerReducer@1",
+            "demo/TimerWorkflow@1",
         )],
     );
     insert_test_schemas(

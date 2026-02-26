@@ -203,9 +203,9 @@
                 "type": "object",
                 "properties": {
                   "source": { "type": "string" },
-                  "reducer": { "$ref": "common.schema.json#/$defs/Name" }
+                  "workflow": { "$ref": "common.schema.json#/$defs/Name" }
                 },
-                "required": ["source","reducer"],
+                "required": ["source","workflow"],
                 "additionalProperties": false
               }
             }

@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use crate::example_host::{ExampleHost, HarnessConfig};
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
-const REDUCER_NAME: &str = "demo/FetchNotify@1";
+const WORKFLOW_NAME: &str = "demo/FetchNotify@1";
 const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
-const MODULE_PATH: &str = "crates/aos-smoke/fixtures/03-fetch-notify/reducer";
+const MODULE_PATH: &str = "crates/aos-smoke/fixtures/03-fetch-notify/workflow";
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     enum FetchEventEnvelope {
@@ -41,7 +41,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_PATH,
     })?;

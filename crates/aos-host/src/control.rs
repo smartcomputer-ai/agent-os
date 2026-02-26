@@ -534,12 +534,12 @@ pub(crate) async fn handle_request(
                 }))
             }
             "state-get" => {
-                let reducer = req
+                let workflow = req
                     .payload
-                    .get("reducer")
+                    .get("workflow")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
+                    .ok_or_else(|| ControlError::invalid_request("missing workflow"))?;
                 let key = req
                     .payload
                     .get("key_b64")
@@ -553,7 +553,7 @@ pub(crate) async fn handle_request(
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
                     .send(ControlMsg::StateGet {
-                        reducer,
+                        workflow,
                         key,
                         consistency: consistency.to_string(),
                         resp: tx,
@@ -577,15 +577,15 @@ pub(crate) async fn handle_request(
                 }
             }
             "state-list" => {
-                let reducer = req
+                let workflow = req
                     .payload
-                    .get("reducer")
+                    .get("workflow")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
+                    .ok_or_else(|| ControlError::invalid_request("missing workflow"))?;
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::StateList { reducer, resp: tx })
+                    .send(ControlMsg::StateList { workflow, resp: tx })
                     .await;
                 let inner = rx
                     .await
@@ -1472,11 +1472,11 @@ impl ControlClient {
     pub async fn query_state(
         &mut self,
         id: impl Into<String>,
-        reducer: &str,
+        workflow: &str,
         key: Option<&[u8]>,
         consistency: Option<&str>,
     ) -> std::io::Result<ResponseEnvelope> {
-        let mut payload = serde_json::json!({ "reducer": reducer });
+        let mut payload = serde_json::json!({ "workflow": workflow });
         if let Some(key) = key {
             payload["key_b64"] = serde_json::json!(BASE64_STANDARD.encode(key));
         }
@@ -1496,13 +1496,13 @@ impl ControlClient {
     pub async fn list_cells(
         &mut self,
         id: impl Into<String>,
-        reducer: &str,
+        workflow: &str,
     ) -> std::io::Result<ResponseEnvelope> {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
             cmd: "state-list".into(),
-            payload: serde_json::json!({ "reducer": reducer }),
+            payload: serde_json::json!({ "workflow": workflow }),
         };
         self.request(&env).await
     }
@@ -1582,15 +1582,15 @@ impl ControlClient {
         Ok((meta, bytes))
     }
 
-    /// Query reducer state with meta.
+    /// Query workflow state with meta.
     pub async fn query_state_decoded(
         &mut self,
         id: impl Into<String>,
-        reducer: &str,
+        workflow: &str,
         key: Option<&[u8]>,
         consistency: Option<&str>,
     ) -> std::io::Result<(ReadMeta, Option<Vec<u8>>)> {
-        let resp = self.query_state(id, reducer, key, consistency).await?;
+        let resp = self.query_state(id, workflow, key, consistency).await?;
         if !resp.ok {
             return Err(io_err(format!(
                 "state-get failed: {:?}",
@@ -1617,13 +1617,13 @@ impl ControlClient {
         Ok((meta, state))
     }
 
-    /// List cells (keyed reducers) with meta.
+    /// List cells (keyed workflows) with meta.
     pub async fn list_cells_decoded(
         &mut self,
         id: impl Into<String>,
-        reducer: &str,
+        workflow: &str,
     ) -> std::io::Result<(ReadMeta, Vec<ClientCellEntry>)> {
-        let resp = self.list_cells(id, reducer).await?;
+        let resp = self.list_cells(id, workflow).await?;
         if !resp.ok {
             return Err(io_err(format!(
                 "state-list failed: {:?}",

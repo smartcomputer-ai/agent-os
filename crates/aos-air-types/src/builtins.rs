@@ -277,8 +277,8 @@ mod tests {
         assert!(names.contains(&"sys/ReadMeta@1"));
         assert!(names.contains(&"sys/IntrospectManifestParams@1"));
         assert!(names.contains(&"sys/IntrospectManifestReceipt@1"));
-        assert!(names.contains(&"sys/IntrospectReducerStateParams@1"));
-        assert!(names.contains(&"sys/IntrospectReducerStateReceipt@1"));
+        assert!(names.contains(&"sys/IntrospectWorkflowStateParams@1"));
+        assert!(names.contains(&"sys/IntrospectWorkflowStateReceipt@1"));
         assert!(names.contains(&"sys/IntrospectJournalHeadParams@1"));
         assert!(names.contains(&"sys/IntrospectJournalHeadReceipt@1"));
         assert!(names.contains(&"sys/IntrospectListCellsParams@1"));

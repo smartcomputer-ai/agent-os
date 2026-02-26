@@ -5,15 +5,15 @@ use serde::{Deserialize, Serialize};
 use serde_bytes;
 
 use crate::journal::JournalSeq;
-use crate::receipts::ReducerEffectContext;
+use crate::receipts::WorkflowEffectContext;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelSnapshot {
-    reducer_state: Vec<ReducerStateEntry>,
-    reducer_index_roots: Vec<(String, [u8; 32])>,
+    workflow_state: Vec<WorkflowStateEntry>,
+    workflow_index_roots: Vec<(String, [u8; 32])>,
     recent_receipts: Vec<[u8; 32]>,
     queued_effects: Vec<EffectIntentSnapshot>,
-    pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
+    pending_workflow_receipts: Vec<WorkflowReceiptSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     workflow_instances: Vec<WorkflowInstanceSnapshot>,
     height: JournalSeq,
@@ -33,20 +33,20 @@ impl KernelSnapshot {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         height: JournalSeq,
-        reducer_state: Vec<ReducerStateEntry>,
+        workflow_state: Vec<WorkflowStateEntry>,
         recent_receipts: Vec<[u8; 32]>,
         queued_effects: Vec<EffectIntentSnapshot>,
-        pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
+        pending_workflow_receipts: Vec<WorkflowReceiptSnapshot>,
         workflow_instances: Vec<WorkflowInstanceSnapshot>,
         logical_now_ns: u64,
         manifest_hash: Option<[u8; 32]>,
     ) -> Self {
         Self {
-            reducer_state,
-            reducer_index_roots: Vec::new(),
+            workflow_state,
+            workflow_index_roots: Vec::new(),
             recent_receipts,
             queued_effects,
-            pending_reducer_receipts,
+            pending_workflow_receipts,
             workflow_instances,
             height,
             logical_now_ns,
@@ -55,16 +55,16 @@ impl KernelSnapshot {
         }
     }
 
-    pub fn reducer_state_entries(&self) -> &[ReducerStateEntry] {
-        &self.reducer_state
+    pub fn workflow_state_entries(&self) -> &[WorkflowStateEntry] {
+        &self.workflow_state
     }
 
-    pub fn reducer_index_roots(&self) -> &[(String, [u8; 32])] {
-        &self.reducer_index_roots
+    pub fn workflow_index_roots(&self) -> &[(String, [u8; 32])] {
+        &self.workflow_index_roots
     }
 
-    pub fn set_reducer_index_roots(&mut self, roots: Vec<(String, [u8; 32])>) {
-        self.reducer_index_roots = roots;
+    pub fn set_workflow_index_roots(&mut self, roots: Vec<(String, [u8; 32])>) {
+        self.workflow_index_roots = roots;
     }
 
     pub fn recent_receipts(&self) -> &[[u8; 32]] {
@@ -79,8 +79,8 @@ impl KernelSnapshot {
         &self.queued_effects
     }
 
-    pub fn pending_reducer_receipts(&self) -> &[ReducerReceiptSnapshot] {
-        &self.pending_reducer_receipts
+    pub fn pending_workflow_receipts(&self) -> &[WorkflowReceiptSnapshot] {
+        &self.pending_workflow_receipts
     }
 
     pub fn workflow_instances(&self) -> &[WorkflowInstanceSnapshot] {
@@ -113,7 +113,7 @@ pub struct SnapshotRootCompleteness {
     )]
     pub manifest_hash: Option<Vec<u8>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub reducer_state_roots: Vec<[u8; 32]>,
+    pub workflow_state_roots: Vec<[u8; 32]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cell_index_roots: Vec<[u8; 32]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -169,7 +169,7 @@ impl EffectIntentSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReducerReceiptSnapshot {
+pub struct WorkflowReceiptSnapshot {
     pub intent_hash: [u8; 32],
     pub origin_module_id: String,
     pub effect_kind: String,
@@ -226,8 +226,8 @@ pub struct WorkflowInstanceSnapshot {
     pub module_version: Option<String>,
 }
 
-impl ReducerReceiptSnapshot {
-    pub fn from_context(intent_hash: [u8; 32], ctx: &ReducerEffectContext) -> Self {
+impl WorkflowReceiptSnapshot {
+    pub fn from_context(intent_hash: [u8; 32], ctx: &WorkflowEffectContext) -> Self {
         Self {
             intent_hash,
             origin_module_id: ctx.origin_module_id.clone(),
@@ -239,8 +239,8 @@ impl ReducerReceiptSnapshot {
         }
     }
 
-    pub fn into_context(self) -> ReducerEffectContext {
-        ReducerEffectContext::new(
+    pub fn into_context(self) -> WorkflowEffectContext {
+        WorkflowEffectContext::new(
             self.origin_module_id,
             self.origin_instance_key,
             self.effect_kind,
@@ -253,8 +253,8 @@ impl ReducerReceiptSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReducerStateEntry {
-    pub reducer: String,
+pub struct WorkflowStateEntry {
+    pub workflow: String,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

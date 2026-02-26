@@ -1,4 +1,4 @@
-//! Deterministic WASM runner that executes reducer modules via the shared ABI.
+//! Deterministic WASM runner that executes workflow modules via the shared ABI.
 
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use aos_wasm_abi::{PureInput, PureOutput, ReducerInput, ReducerOutput};
+use aos_wasm_abi::{PureInput, PureOutput, WorkflowInput, WorkflowOutput};
 use log::debug;
 use sha2::{Digest, Sha256};
 use wasmtime::{Config, Engine, Linker, Module, Store};
@@ -19,13 +19,13 @@ const MEMORY_EXPORT: &str = "memory";
 const WASMTIME_VERSION: &str = "36.0.3";
 
 /// Deterministic runtime wrapper around Wasmtime.
-pub struct ReducerRuntime {
+pub struct WorkflowRuntime {
     engine: Arc<Engine>,
     module_cache: Mutex<HashMap<ModuleKey, Arc<Module>>>,
     disk_cache: Option<DiskCache>,
 }
 
-impl ReducerRuntime {
+impl WorkflowRuntime {
     /// Build a runtime with deterministic configuration (no threads, no fuel, no debug info).
     pub fn new() -> Result<Self> {
         Self::new_with_disk_cache(None)
@@ -60,7 +60,7 @@ impl ReducerRuntime {
         })
     }
 
-    /// Compile a reducer WASM blob into a reusable Wasmtime module.
+    /// Compile a workflow WASM blob into a reusable Wasmtime module.
     pub fn compile(&self, wasm_bytes: &[u8]) -> Result<Module> {
         Module::new(&self.engine, wasm_bytes)
     }
@@ -71,7 +71,7 @@ impl ReducerRuntime {
     }
 
     /// Execute an already-compiled module with the given ABI envelope.
-    pub fn run_compiled(&self, module: &Module, input: &ReducerInput) -> Result<ReducerOutput> {
+    pub fn run_compiled(&self, module: &Module, input: &WorkflowInput) -> Result<WorkflowOutput> {
         let mut store = Store::new(&self.engine, ());
         let linker = Linker::new(&self.engine);
         let instance = linker.instantiate(&mut store, module)?;
@@ -130,12 +130,12 @@ impl ReducerRuntime {
             }
         };
 
-        let reducer_output = ReducerOutput::decode(&output)?;
-        Ok(reducer_output)
+        let workflow_output = WorkflowOutput::decode(&output)?;
+        Ok(workflow_output)
     }
 
-    /// Execute a reducer WASM module with the given ABI envelope (compiles each time).
-    pub fn run(&self, wasm_bytes: &[u8], input: &ReducerInput) -> Result<ReducerOutput> {
+    /// Execute a workflow WASM module with the given ABI envelope (compiles each time).
+    pub fn run(&self, wasm_bytes: &[u8], input: &WorkflowInput) -> Result<WorkflowOutput> {
         let module = self.module_from_cache(wasm_bytes)?;
         self.run_compiled(&module, input)
     }
@@ -144,17 +144,17 @@ impl ReducerRuntime {
         let key = ModuleKey::from_bytes(wasm_bytes);
         let key_hex = key.hex();
         if let Some(existing) = self.get_cached_module(&key) {
-            debug!("aos-wasm: memory cache hit for reducer {key_hex}");
+            debug!("aos-wasm: memory cache hit for workflow {key_hex}");
             return Ok(existing);
         }
 
         if let Some(serialized) = self.load_serialized(&key, &key_hex)? {
-            debug!("aos-wasm: disk cache hit for reducer {key_hex}");
+            debug!("aos-wasm: disk cache hit for workflow {key_hex}");
             self.insert_cached_module(key, serialized.clone());
             return Ok(serialized);
         }
 
-        debug!("aos-wasm: cache miss for reducer {key_hex}; compiling module");
+        debug!("aos-wasm: cache miss for workflow {key_hex}; compiling module");
         let compiled = Arc::new(self.compile(wasm_bytes)?);
         self.store_serialized(&key, &key_hex, &compiled).ok();
         self.insert_cached_module(key, compiled.clone());
@@ -210,7 +210,7 @@ impl ReducerRuntime {
         };
         let bytes = module
             .serialize()
-            .context("serialize compiled reducer module")?;
+            .context("serialize compiled workflow module")?;
         let path = cache.module_path(key);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -219,7 +219,7 @@ impl ReducerRuntime {
         fs::write(&path, bytes)
             .with_context(|| format!("write serialized module {}", path.display()))?;
         debug!(
-            "aos-wasm: serialized reducer {key_hex} to {}",
+            "aos-wasm: serialized workflow {key_hex} to {}",
             path.display()
         );
         Ok(())
@@ -480,11 +480,11 @@ fn engine_cache_fingerprint() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_wasm_abi::{ABI_VERSION, DomainEvent, ReducerContext, ReducerEffect};
+    use aos_wasm_abi::{ABI_VERSION, DomainEvent, WorkflowContext, WorkflowEffect};
     use tempfile::TempDir;
 
-    fn ctx_bytes(reducer: &str) -> Vec<u8> {
-        let ctx = ReducerContext {
+    fn ctx_bytes(workflow: &str) -> Vec<u8> {
+        let ctx = WorkflowContext {
             now_ns: 1,
             logical_now_ns: 2,
             journal_height: 3,
@@ -493,30 +493,30 @@ mod tests {
                 .into(),
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
-            reducer: reducer.into(),
+            workflow: workflow.into(),
             key: None,
             cell_mode: false,
         };
         serde_cbor::to_vec(&ctx).expect("ctx bytes")
     }
     #[test]
-    fn reducer_round_trip_with_stub_module() {
-        let runtime = ReducerRuntime::new().unwrap();
-        let expected_output = ReducerOutput {
+    fn workflow_round_trip_with_stub_module() {
+        let runtime = WorkflowRuntime::new().unwrap();
+        let expected_output = WorkflowOutput {
             state: None,
             domain_events: vec![DomainEvent::new("com.acme/Event@1", vec![0x10])],
-            effects: vec![ReducerEffect::new("timer.set", vec![0x42])],
+            effects: vec![WorkflowEffect::new("timer.set", vec![0x42])],
             ann: None,
         };
         let expected_bytes = expected_output.encode().unwrap();
         let wat = build_stub_module(&expected_bytes);
         let wasm_bytes = wat::parse_str(&wat).unwrap();
 
-        let input = ReducerInput {
+        let input = WorkflowInput {
             version: ABI_VERSION,
             state: Some(vec![0xde, 0xad]),
             event: DomainEvent::new("com.acme/Event@1", vec![0x01]),
-            ctx: Some(ctx_bytes("com.acme/Reducer@1")),
+            ctx: Some(ctx_bytes("com.acme/Workflow@1")),
         };
 
         let output = runtime.run(&wasm_bytes, &input).unwrap();
@@ -525,8 +525,8 @@ mod tests {
 
     #[test]
     fn run_reuses_compiled_module() {
-        let runtime = ReducerRuntime::new().unwrap();
-        let expected_output = ReducerOutput {
+        let runtime = WorkflowRuntime::new().unwrap();
+        let expected_output = WorkflowOutput {
             state: None,
             domain_events: vec![DomainEvent::new("demo/Event@1", vec![])],
             effects: Vec::new(),
@@ -534,11 +534,11 @@ mod tests {
         };
         let expected_bytes = expected_output.encode().unwrap();
         let wasm_bytes = wat::parse_str(&build_stub_module(&expected_bytes)).unwrap();
-        let input = ReducerInput {
+        let input = WorkflowInput {
             version: ABI_VERSION,
             state: None,
             event: DomainEvent::new("demo/Event@1", vec![]),
-            ctx: Some(ctx_bytes("demo/Reducer@1")),
+            ctx: Some(ctx_bytes("demo/Workflow@1")),
         };
 
         runtime.run(&wasm_bytes, &input).unwrap();
@@ -553,7 +553,7 @@ mod tests {
     fn serialized_module_cache_round_trip() {
         let temp = TempDir::new().unwrap();
         let cache_root = temp.path().join("cache");
-        let expected_output = ReducerOutput {
+        let expected_output = WorkflowOutput {
             state: None,
             domain_events: vec![DomainEvent::new("demo/Event@1", vec![])],
             effects: Vec::new(),
@@ -561,14 +561,14 @@ mod tests {
         };
         let wasm_bytes =
             wat::parse_str(&build_stub_module(&expected_output.encode().unwrap())).unwrap();
-        let input = ReducerInput {
+        let input = WorkflowInput {
             version: ABI_VERSION,
             state: None,
             event: DomainEvent::new("demo/Event@1", vec![]),
-            ctx: Some(ctx_bytes("demo/Reducer@1")),
+            ctx: Some(ctx_bytes("demo/Workflow@1")),
         };
 
-        let runtime = ReducerRuntime::new_with_disk_cache(Some(cache_root.clone())).unwrap();
+        let runtime = WorkflowRuntime::new_with_disk_cache(Some(cache_root.clone())).unwrap();
         runtime.run(&wasm_bytes, &input).unwrap();
         let key = ModuleKey::from_bytes(&wasm_bytes);
         let serialized_path = runtime
@@ -579,7 +579,7 @@ mod tests {
         assert!(serialized_path.exists(), "serialized module missing");
         drop(runtime);
 
-        let runtime2 = ReducerRuntime::new_with_disk_cache(Some(cache_root)).unwrap();
+        let runtime2 = WorkflowRuntime::new_with_disk_cache(Some(cache_root)).unwrap();
         runtime2.run(&wasm_bytes, &input).unwrap();
         assert_eq!(runtime2.cached_module_count(), 1);
     }
@@ -614,7 +614,7 @@ mod tests {
 }
 
 #[cfg(test)]
-impl ReducerRuntime {
+impl WorkflowRuntime {
     fn cached_module_count(&self) -> usize {
         self.module_cache
             .lock()

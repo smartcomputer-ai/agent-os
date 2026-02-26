@@ -4,7 +4,7 @@
     "name": "demo/Aggregator@1",
     "module_kind": "workflow",
     "abi": {
-      "reducer": {
+      "workflow": {
         "state": "demo/AggregatorState@1",
         "event": "demo/AggregatorEvent@1",
         "effects_emitted": ["http.request"],

@@ -18,7 +18,7 @@ flowchart TD
   H --> I[workspace.list]
   I --> J[update README.txt]
   J --> K[workspace.diff]
-  K --> L[update reducer state]
+  K --> L[update workflow state]
   L --> M[emit WorkspaceCommit]
 ```
 

@@ -9,7 +9,7 @@ use aos_agent_sdk::{
     SessionEffectCommand, SessionReduceError, SessionState, SessionWorkflowEvent,
     apply_session_workflow_event,
 };
-use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_reducer};
+use aos_wasm_sdk::{ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
 
 #[cfg(target_arch = "wasm32")]
 fn main() {}
@@ -17,12 +17,12 @@ fn main() {}
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {}
 
-aos_reducer!(SessionWorkflow);
+aos_workflow!(SessionWorkflow);
 
 #[derive(Default)]
 struct SessionWorkflow;
 
-impl Reducer for SessionWorkflow {
+impl Workflow for SessionWorkflow {
     type State = SessionState;
     type Event = SessionWorkflowEvent;
     type Ann = Value;
@@ -30,7 +30,7 @@ impl Reducer for SessionWorkflow {
     fn reduce(
         &mut self,
         event: Self::Event,
-        ctx: &mut ReducerCtx<Self::State, Self::Ann>,
+        ctx: &mut WorkflowCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
         let out = apply_session_workflow_event(&mut ctx.state, &event).map_err(map_reduce_error)?;
         for effect in out.effects {

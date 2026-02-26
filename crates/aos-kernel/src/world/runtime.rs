@@ -3,14 +3,14 @@ use serde::Serialize;
 
 impl<S: Store + 'static> Kernel<S> {
     pub fn tick(&mut self) -> Result<(), KernelError> {
-        if let Some(event) = self.reducer_queue.pop_front() {
-            self.handle_reducer_event(event)?;
+        if let Some(event) = self.workflow_queue.pop_front() {
+            self.handle_workflow_event(event)?;
         }
         Ok(())
     }
 
     pub fn tick_until_idle(&mut self) -> Result<(), KernelError> {
-        while !self.reducer_queue.is_empty() {
+        while !self.workflow_queue.is_empty() {
             self.tick()?;
         }
         Ok(())
@@ -62,7 +62,7 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         if let Some(context) = self
-            .pending_reducer_receipts
+            .pending_workflow_receipts
             .get(&receipt.intent_hash)
             .cloned()
         {
@@ -129,7 +129,7 @@ impl<S: Store + 'static> Kernel<S> {
     ) -> Result<(), KernelError> {
         Self::validate_entropy(&stamp.entropy)?;
 
-        let Some(context) = self.pending_reducer_receipts.get(&frame.intent_hash).cloned() else {
+        let Some(context) = self.pending_workflow_receipts.get(&frame.intent_hash).cloned() else {
             self.record_workflow_stream_drop(
                 &frame,
                 "stream.unknown_intent",
@@ -204,7 +204,7 @@ impl<S: Store + 'static> Kernel<S> {
     fn normalize_receipt_payload_for_effect(
         &self,
         mut receipt: aos_effects::EffectReceipt,
-        context: &ReducerEffectContext,
+        context: &WorkflowEffectContext,
     ) -> Result<aos_effects::EffectReceipt, KernelError> {
         let receipt_schema = self
             .effect_defs
@@ -226,19 +226,19 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn deliver_receipt_to_workflow_instance(
         &mut self,
-        context: &ReducerEffectContext,
+        context: &WorkflowEffectContext,
         receipt: &aos_effects::EffectReceipt,
         stamp: &IngressStamp,
     ) -> Result<(), KernelError> {
-        let reducer_name = context.origin_module_id.clone();
-        let (reducer_event_schema_name, reducer_event_schema) =
-            self.resolve_workflow_event_schema(&reducer_name)?;
+        let workflow_name = context.origin_module_id.clone();
+        let (workflow_event_schema_name, workflow_event_schema) =
+            self.resolve_workflow_event_schema(&workflow_name)?;
 
         let generic_event = crate::receipts::build_workflow_receipt_event(context, receipt)?;
         let generic_value: CborValue = serde_cbor::from_slice(&generic_event.value)
             .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
         let normalized = match try_normalize_receipt_payload(
-            reducer_event_schema,
+            workflow_event_schema,
             &self.schema_index,
             generic_value.clone(),
             crate::receipts::SYS_EFFECT_RECEIPT_ENVELOPE_SCHEMA,
@@ -246,35 +246,35 @@ impl<S: Store + 'static> Kernel<S> {
             Ok(normalized) => normalized,
             Err(generic_err) => {
                 if let Some(legacy_event) =
-                    crate::receipts::build_legacy_reducer_receipt_event(context, receipt)?
+                    crate::receipts::build_legacy_workflow_receipt_event(context, receipt)?
                 {
                     let legacy_value: CborValue = serde_cbor::from_slice(&legacy_event.value)
                         .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
                     try_normalize_receipt_payload(
-                        reducer_event_schema,
+                        workflow_event_schema,
                         &self.schema_index,
                         legacy_value,
                         legacy_event.schema.as_str(),
                     )
                     .map_err(|legacy_err| {
                         KernelError::Manifest(format!(
-                            "receipt payload for '{reducer_name}' does not match event schema '{}': generic={generic_err}; legacy={legacy_err}",
-                            reducer_event_schema_name
+                            "receipt payload for '{workflow_name}' does not match event schema '{}': generic={generic_err}; legacy={legacy_err}",
+                            workflow_event_schema_name
                         ))
                     })?
                 } else {
                     return Err(KernelError::Manifest(format!(
-                        "receipt payload for '{reducer_name}' does not match event schema '{}': {generic_err}",
-                        reducer_event_schema_name
+                        "receipt payload for '{workflow_name}' does not match event schema '{}': {generic_err}",
+                        workflow_event_schema_name
                     )));
                 }
             }
         };
 
-        let mut event = DomainEvent::new(reducer_event_schema_name, normalized.bytes);
+        let mut event = DomainEvent::new(workflow_event_schema_name, normalized.bytes);
         event.key = context.origin_instance_key.clone();
-        self.reducer_queue.push_back(ReducerEvent {
-            reducer: reducer_name.clone(),
+        self.workflow_queue.push_back(WorkflowEvent {
+            workflow: workflow_name.clone(),
             event,
             stamp: stamp.clone(),
         });
@@ -283,34 +283,34 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn deliver_stream_frame_to_workflow_instance(
         &mut self,
-        context: &ReducerEffectContext,
+        context: &WorkflowEffectContext,
         frame: &aos_effects::EffectStreamFrame,
         stamp: &IngressStamp,
     ) -> Result<(), KernelError> {
-        let reducer_name = context.origin_module_id.clone();
-        let (reducer_event_schema_name, reducer_event_schema) =
-            self.resolve_workflow_event_schema(&reducer_name)?;
+        let workflow_name = context.origin_module_id.clone();
+        let (workflow_event_schema_name, workflow_event_schema) =
+            self.resolve_workflow_event_schema(&workflow_name)?;
 
         let stream_event = crate::receipts::build_workflow_stream_frame_event(context, frame)?;
         let stream_value: CborValue = serde_cbor::from_slice(&stream_event.value)
             .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
         let normalized = try_normalize_receipt_payload(
-            reducer_event_schema,
+            workflow_event_schema,
             &self.schema_index,
             stream_value,
             crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA,
         )
         .map_err(|err| {
             KernelError::Manifest(format!(
-                "stream frame payload for '{reducer_name}' does not match event schema '{}': {err}",
-                reducer_event_schema_name
+                "stream frame payload for '{workflow_name}' does not match event schema '{}': {err}",
+                workflow_event_schema_name
             ))
         })?;
 
-        let mut event = DomainEvent::new(reducer_event_schema_name, normalized.bytes);
+        let mut event = DomainEvent::new(workflow_event_schema_name, normalized.bytes);
         event.key = context.origin_instance_key.clone();
-        self.reducer_queue.push_back(ReducerEvent {
-            reducer: reducer_name,
+        self.workflow_queue.push_back(WorkflowEvent {
+            workflow: workflow_name,
             event,
             stamp: stamp.clone(),
         });
@@ -319,34 +319,34 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn resolve_workflow_event_schema<'a>(
         &'a self,
-        reducer_name: &str,
+        workflow_name: &str,
     ) -> Result<(String, &'a TypeExpr), KernelError> {
         let module_def = self
             .module_defs
-            .get(reducer_name)
-            .ok_or_else(|| KernelError::ReducerNotFound(reducer_name.to_string()))?;
-        let reducer_abi = module_def.abi.reducer.as_ref().ok_or_else(|| {
-            KernelError::Manifest(format!("module '{reducer_name}' is not a reducer/workflow"))
+            .get(workflow_name)
+            .ok_or_else(|| KernelError::WorkflowNotFound(workflow_name.to_string()))?;
+        let workflow_abi = module_def.abi.workflow.as_ref().ok_or_else(|| {
+            KernelError::Manifest(format!("module '{workflow_name}' is not a workflow/workflow"))
         })?;
-        let reducer_event_schema_name = reducer_abi.event.as_str().to_string();
-        let reducer_event_schema = self
+        let workflow_event_schema_name = workflow_abi.event.as_str().to_string();
+        let workflow_event_schema = self
             .schema_index
-            .get(reducer_event_schema_name.as_str())
+            .get(workflow_event_schema_name.as_str())
             .ok_or_else(|| {
                 KernelError::Manifest(format!(
                     "schema '{}' not found for workflow module '{}'",
-                    reducer_event_schema_name, reducer_name
+                    workflow_event_schema_name, workflow_name
                 ))
             })?;
-        Ok((reducer_event_schema_name, reducer_event_schema))
+        Ok((workflow_event_schema_name, workflow_event_schema))
     }
 
     fn settle_workflow_receipt_intent(
         &mut self,
-        context: &ReducerEffectContext,
+        context: &WorkflowEffectContext,
         intent_hash: [u8; 32],
     ) {
-        self.pending_reducer_receipts.remove(&intent_hash);
+        self.pending_workflow_receipts.remove(&intent_hash);
         self.mark_workflow_receipt_settled(
             &context.origin_module_id,
             context.origin_instance_key.as_deref(),
@@ -357,7 +357,7 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn fail_workflow_instance(
         &mut self,
-        context: &ReducerEffectContext,
+        context: &WorkflowEffectContext,
         last_processed_event_seq: u64,
     ) {
         let instance_id = workflow_instance_id(
@@ -385,10 +385,10 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn clear_pending_receipts_for_workflow_instance(
         &mut self,
-        context: &ReducerEffectContext,
+        context: &WorkflowEffectContext,
     ) -> usize {
         let pending_hashes: Vec<[u8; 32]> = self
-            .pending_reducer_receipts
+            .pending_workflow_receipts
             .iter()
             .filter_map(|(hash, pending_ctx)| {
                 if pending_ctx.origin_module_id == context.origin_module_id
@@ -408,15 +408,15 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn try_deliver_workflow_rejected_receipt_event(
         &mut self,
-        context: &ReducerEffectContext,
+        context: &WorkflowEffectContext,
         receipt: &aos_effects::EffectReceipt,
         stamp: &IngressStamp,
         error_code: &str,
         error_message: &str,
     ) -> Result<bool, KernelError> {
-        let reducer_name = context.origin_module_id.clone();
-        let (reducer_event_schema_name, reducer_event_schema) =
-            self.resolve_workflow_event_schema(&reducer_name)?;
+        let workflow_name = context.origin_module_id.clone();
+        let (workflow_event_schema_name, workflow_event_schema) =
+            self.resolve_workflow_event_schema(&workflow_name)?;
         let rejected_event = crate::receipts::build_workflow_receipt_rejected_event(
             context,
             receipt,
@@ -426,7 +426,7 @@ impl<S: Store + 'static> Kernel<S> {
         let rejected_value: CborValue = serde_cbor::from_slice(&rejected_event.value)
             .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
         let Ok(normalized) = try_normalize_receipt_payload(
-            reducer_event_schema,
+            workflow_event_schema,
             &self.schema_index,
             rejected_value,
             crate::receipts::SYS_EFFECT_RECEIPT_REJECTED_SCHEMA,
@@ -434,10 +434,10 @@ impl<S: Store + 'static> Kernel<S> {
             return Ok(false);
         };
 
-        let mut event = DomainEvent::new(reducer_event_schema_name, normalized.bytes);
+        let mut event = DomainEvent::new(workflow_event_schema_name, normalized.bytes);
         event.key = context.origin_instance_key.clone();
-        self.reducer_queue.push_back(ReducerEvent {
-            reducer: reducer_name,
+        self.workflow_queue.push_back(WorkflowEvent {
+            workflow: workflow_name,
             event,
             stamp: stamp.clone(),
         });
@@ -446,7 +446,7 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn handle_workflow_receipt_fault(
         &mut self,
-        context: &ReducerEffectContext,
+        context: &WorkflowEffectContext,
         receipt: &aos_effects::EffectReceipt,
         stamp: &IngressStamp,
         error_code: &str,
@@ -493,7 +493,7 @@ impl<S: Store + 'static> Kernel<S> {
 
     fn record_workflow_receipt_fault(
         &mut self,
-        context: &ReducerEffectContext,
+        context: &WorkflowEffectContext,
         receipt: &aos_effects::EffectReceipt,
         error_code: &str,
         error_message: &str,
@@ -585,7 +585,7 @@ impl<S: Store + 'static> Kernel<S> {
 }
 
 fn try_normalize_receipt_payload(
-    reducer_event_schema: &TypeExpr,
+    workflow_event_schema: &TypeExpr,
     schema_index: &SchemaIndex,
     payload_value: CborValue,
     payload_schema: &str,
@@ -595,7 +595,7 @@ fn try_normalize_receipt_payload(
 > {
     let mut candidates = Vec::new();
     candidates.push(payload_value.clone());
-    if let TypeExpr::Variant(variant) = reducer_event_schema {
+    if let TypeExpr::Variant(variant) = workflow_event_schema {
         for (tag, ty) in &variant.variant {
             if let TypeExpr::Ref(reference) = ty
                 && reference.reference.as_str() == payload_schema
@@ -614,7 +614,7 @@ fn try_normalize_receipt_payload(
     for candidate in candidates {
         match aos_air_types::value_normalize::normalize_value_with_schema(
             candidate,
-            reducer_event_schema,
+            workflow_event_schema,
             schema_index,
         ) {
             Ok(normalized) => return Ok(normalized),
@@ -706,7 +706,7 @@ mod tests {
     use super::*;
     use crate::journal::JournalKind;
     use crate::journal::mem::MemJournal;
-    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef};
+    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, WorkflowAbi, SchemaRef};
     use aos_effects::EffectStreamFrame;
     use aos_store::MemStore;
     use std::sync::Arc;
@@ -718,7 +718,7 @@ mod tests {
             wasm_hash: HashRef::new(format!("sha256:{}", "1".repeat(64))).unwrap(),
             key_schema: None,
             abi: ModuleAbi {
-                reducer: Some(ReducerAbi {
+                workflow: Some(WorkflowAbi {
                     state: SchemaRef::new("sys/PlanError@1").unwrap(),
                     event: SchemaRef::new(crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA).unwrap(),
                     context: None,
@@ -741,7 +741,7 @@ mod tests {
         let journal = Box::new(MemJournal::new());
         let mut kernel = crate::world::test_support::kernel_with_store_and_journal(store, journal);
         install_stream_module(&mut kernel, module_name);
-        let context = ReducerEffectContext::new(
+        let context = WorkflowEffectContext::new(
             module_name.into(),
             None,
             "http.request".into(),
@@ -751,7 +751,7 @@ mod tests {
             None,
         );
         kernel
-            .pending_reducer_receipts
+            .pending_workflow_receipts
             .insert(intent_hash, context.clone());
         kernel.record_workflow_inflight_intent(
             module_name,
@@ -782,7 +782,7 @@ mod tests {
             signature: vec![],
         };
         kernel.handle_stream_frame(frame.clone()).expect("accept stream");
-        assert_eq!(kernel.reducer_queue.len(), 1);
+        assert_eq!(kernel.workflow_queue.len(), 1);
         let instances = kernel.workflow_instances_snapshot();
         assert_eq!(instances.len(), 1);
         assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 1);
@@ -794,13 +794,13 @@ mod tests {
             "expected stream frame record in journal"
         );
 
-        kernel.reducer_queue.clear();
+        kernel.workflow_queue.clear();
         kernel
             .handle_stream_frame(frame)
             .expect("duplicate frame should be dropped");
         assert!(
-            kernel.reducer_queue.is_empty(),
-            "duplicate frame must not enqueue reducer event"
+            kernel.workflow_queue.is_empty(),
+            "duplicate frame must not enqueue workflow event"
         );
         let instances = kernel.workflow_instances_snapshot();
         assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 1);

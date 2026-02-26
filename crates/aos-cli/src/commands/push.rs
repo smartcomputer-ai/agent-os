@@ -19,7 +19,7 @@ use crate::opts::WorldOpts;
 use crate::opts::resolve_dirs;
 use crate::output::print_success;
 use crate::util::{
-    compile_reducer, latest_manifest_hash_from_journal, resolve_placeholder_modules,
+    compile_workflow, latest_manifest_hash_from_journal, resolve_placeholder_modules,
 };
 
 use super::create_host;
@@ -58,12 +58,12 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
     let store = FsStore::open(&dirs.store_root).context("open store")?;
     let store = Arc::new(store);
 
-    let reducer_dir = config
+    let workflow_dir = config
         .build
         .as_ref()
-        .and_then(|build| build.reducer_dir.as_ref())
+        .and_then(|build| build.workflow_dir.as_ref())
         .map(|dir| resolve_map_path(map_root, dir))
-        .unwrap_or_else(|| dirs.reducer_dir.clone());
+        .unwrap_or_else(|| dirs.workflow_dir.clone());
     let target_module = config
         .build
         .as_ref()
@@ -71,7 +71,7 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
         .or(opts.module.as_deref());
 
     let air_sources =
-        resolve_air_sources(&dirs.world, map_root, &config, &dirs.air_dir, &reducer_dir)?;
+        resolve_air_sources(&dirs.world, map_root, &config, &dirs.air_dir, &workflow_dir)?;
     let air_dir = air_sources.air_dir;
     let mut warnings = air_sources.warnings.clone();
 
@@ -85,16 +85,16 @@ pub async fn cmd_push(opts: &WorldOpts, args: &PushArgs) -> Result<()> {
 
     let mut loaded = assets.loaded;
     let secrets = assets.secrets;
-    let compiled = if reducer_dir.exists() {
-        let compiled = compile_reducer(
-            &reducer_dir,
+    let compiled = if workflow_dir.exists() {
+        let compiled = compile_workflow(
+            &workflow_dir,
             &dirs.store_root,
             store.as_ref(),
             opts.force_build,
         )?;
         if !compiled.cache_hit {
-            println!("Compiled reducer from {}", reducer_dir.display());
-            println!("Reducer compiled: {}", compiled.hash.as_str());
+            println!("Compiled workflow from {}", workflow_dir.display());
+            println!("Workflow compiled: {}", compiled.hash.as_str());
         }
         Some(compiled.hash)
     } else {

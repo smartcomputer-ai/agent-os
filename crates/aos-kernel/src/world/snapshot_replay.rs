@@ -3,13 +3,13 @@ use super::*;
 impl<S: Store + 'static> Kernel<S> {
     pub fn create_snapshot(&mut self) -> Result<(), KernelError> {
         self.tick_until_idle()?;
-        if !self.reducer_queue.is_empty() {
+        if !self.workflow_queue.is_empty() {
             return Err(KernelError::SnapshotUnavailable(
-                "reducer queue must be idle before snapshot".into(),
+                "workflow queue must be idle before snapshot".into(),
             ));
         }
         let height = self.journal.next_seq();
-        let reducer_state: Vec<ReducerStateEntry> = Vec::new();
+        let workflow_state: Vec<WorkflowStateEntry> = Vec::new();
         let recent_receipts: Vec<[u8; 32]> = self.recent_receipts.iter().cloned().collect();
         let queued_effects = self
             .effect_manager
@@ -17,15 +17,15 @@ impl<S: Store + 'static> Kernel<S> {
             .iter()
             .map(EffectIntentSnapshot::from_intent)
             .collect();
-        let reducer_index_roots = self
-            .reducer_index_roots
+        let workflow_index_roots = self
+            .workflow_index_roots
             .iter()
             .map(|(name, hash)| (name.clone(), *hash.as_bytes()))
             .collect();
-        let pending_reducer_receipts = self
-            .pending_reducer_receipts
+        let pending_workflow_receipts = self
+            .pending_workflow_receipts
             .iter()
-            .map(|(hash, ctx)| ReducerReceiptSnapshot::from_context(*hash, ctx))
+            .map(|(hash, ctx)| WorkflowReceiptSnapshot::from_context(*hash, ctx))
             .collect();
         let workflow_instances = self
             .workflow_instances
@@ -59,24 +59,24 @@ impl<S: Store + 'static> Kernel<S> {
         let logical_now_ns = self.effect_manager.logical_now_ns();
         let mut snapshot = KernelSnapshot::new(
             height,
-            reducer_state,
+            workflow_state,
             recent_receipts,
             queued_effects,
-            pending_reducer_receipts,
+            pending_workflow_receipts,
             workflow_instances,
             logical_now_ns,
             Some(*self.manifest_hash.as_bytes()),
         );
-        snapshot.set_reducer_index_roots(reducer_index_roots);
+        snapshot.set_workflow_index_roots(workflow_index_roots);
         let root_completeness = SnapshotRootCompleteness {
             manifest_hash: Some(self.manifest_hash.as_bytes().to_vec()),
-            reducer_state_roots: snapshot
-                .reducer_state_entries()
+            workflow_state_roots: snapshot
+                .workflow_state_entries()
                 .iter()
                 .map(|entry| entry.state_hash)
                 .collect(),
             cell_index_roots: snapshot
-                .reducer_index_roots()
+                .workflow_index_roots()
                 .iter()
                 .map(|(_, root)| *root)
                 .collect(),
@@ -329,7 +329,7 @@ impl<S: Store + 'static> Kernel<S> {
             .workflow_instances
             .values()
             .any(|instance| !instance.inflight_intents.is_empty());
-        if self.pending_reducer_receipts.is_empty() && !has_inflight_workflow_intents {
+        if self.pending_workflow_receipts.is_empty() && !has_inflight_workflow_intents {
             Some(height)
         } else {
             None
@@ -372,20 +372,20 @@ impl<S: Store + 'static> Kernel<S> {
             ));
         }
 
-        let state_roots: HashSet<[u8; 32]> = roots.reducer_state_roots.iter().cloned().collect();
-        for entry in snapshot.reducer_state_entries() {
+        let state_roots: HashSet<[u8; 32]> = roots.workflow_state_roots.iter().cloned().collect();
+        for entry in snapshot.workflow_state_entries() {
             if !state_roots.contains(&entry.state_hash) {
                 return Err(KernelError::SnapshotUnavailable(
-                    "root completeness missing reducer state root".into(),
+                    "root completeness missing workflow state root".into(),
                 ));
             }
         }
 
         let index_roots: HashSet<[u8; 32]> = roots.cell_index_roots.iter().cloned().collect();
-        for (_, root) in snapshot.reducer_index_roots() {
+        for (_, root) in snapshot.workflow_index_roots() {
             if !index_roots.contains(root) {
                 return Err(KernelError::SnapshotUnavailable(
-                    "root completeness missing reducer cell_index_root".into(),
+                    "root completeness missing workflow cell_index_root".into(),
                 ));
             }
         }
@@ -393,8 +393,8 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn apply_snapshot(&mut self, snapshot: KernelSnapshot) -> Result<(), KernelError> {
-        self.reducer_index_roots = snapshot
-            .reducer_index_roots()
+        self.workflow_index_roots = snapshot
+            .workflow_index_roots()
             .iter()
             .filter_map(|(name, bytes)| Hash::from_bytes(bytes).ok().map(|h| (name.clone(), h)))
             .collect();
@@ -405,16 +405,16 @@ impl<S: Store + 'static> Kernel<S> {
             self.manifest_hash = hash;
         }
 
-        let mut restored: HashMap<Name, ReducerState> = HashMap::new();
-        for entry in snapshot.reducer_state_entries().iter().cloned() {
+        let mut restored: HashMap<Name, WorkflowState> = HashMap::new();
+        for entry in snapshot.workflow_state_entries().iter().cloned() {
             // Ensure blobs are present in store for deterministic reloads.
             self.store.put_blob(&entry.state)?;
-            let state_entry = restored.entry(entry.reducer.clone()).or_default();
+            let state_entry = restored.entry(entry.workflow.clone()).or_default();
             let state_hash = Hash::from_bytes(&entry.state_hash)
                 .unwrap_or_else(|_| Hash::of_bytes(&entry.state));
             let key_bytes = entry.key.unwrap_or_else(|| MONO_KEY.to_vec());
             let key_hash = Hash::of_bytes(&key_bytes);
-            let root = self.ensure_cell_index_root(&entry.reducer)?;
+            let root = self.ensure_cell_index_root(&entry.workflow)?;
             let meta = CellMeta {
                 key_hash: *key_hash.as_bytes(),
                 key_bytes: key_bytes.clone(),
@@ -424,8 +424,8 @@ impl<S: Store + 'static> Kernel<S> {
             };
             let index = CellIndex::new(self.store.as_ref());
             let new_root = index.upsert(root, meta)?;
-            self.reducer_index_roots
-                .insert(entry.reducer.clone(), new_root);
+            self.workflow_index_roots
+                .insert(entry.workflow.clone(), new_root);
             state_entry.cell_cache.insert(
                 key_bytes,
                 CellEntry {
@@ -435,13 +435,13 @@ impl<S: Store + 'static> Kernel<S> {
                 },
             );
         }
-        self.reducer_state = restored;
+        self.workflow_state = restored;
         let (deque, set) = receipts_to_vecdeque(snapshot.recent_receipts(), RECENT_RECEIPT_CACHE);
         self.recent_receipts = deque;
         self.recent_receipt_index = set;
 
-        self.pending_reducer_receipts = snapshot
-            .pending_reducer_receipts()
+        self.pending_workflow_receipts = snapshot
+            .pending_workflow_receipts()
             .iter()
             .cloned()
             .map(|snap| (snap.intent_hash, snap.into_context()))
@@ -500,7 +500,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.clock
             .sync_logical_min(self.effect_manager.logical_now_ns());
 
-        self.reducer_queue.clear();
+        self.workflow_queue.clear();
 
         Ok(())
     }
@@ -622,12 +622,12 @@ fn decode_tail_record(kind: JournalKind, payload: &[u8]) -> Result<JournalRecord
 mod tests {
     use super::*;
     use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
-    use crate::receipts::ReducerEffectContext;
+    use crate::receipts::WorkflowEffectContext;
     use crate::world::test_support::{
         append_record, empty_manifest, event_record, kernel_with_store_and_journal,
         loaded_manifest_with_schema, minimal_kernel_non_keyed, write_manifest,
     };
-    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef};
+    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, WorkflowAbi, SchemaRef};
     use aos_effects::EffectStreamFrame;
     use aos_store::MemStore;
     use serde_json::json;
@@ -641,7 +641,7 @@ mod tests {
             wasm_hash: HashRef::new(format!("sha256:{}", "1".repeat(64))).unwrap(),
             key_schema: None,
             abi: ModuleAbi {
-                reducer: Some(ReducerAbi {
+                workflow: Some(WorkflowAbi {
                     state: SchemaRef::new("sys/PlanError@1").unwrap(),
                     event: SchemaRef::new(crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA).unwrap(),
                     context: None,
@@ -797,9 +797,9 @@ mod tests {
             .expect("initial baseline")
             .height;
 
-        kernel.pending_reducer_receipts.insert(
+        kernel.pending_workflow_receipts.insert(
             [9u8; 32],
-            ReducerEffectContext::new(
+            WorkflowEffectContext::new(
                 "com.acme/Workflow@1".into(),
                 None,
                 "http.request".into(),
@@ -927,7 +927,7 @@ mod tests {
         install_stream_module(&mut kernel, "com.acme/Workflow@1");
 
         let intent_hash = [4u8; 32];
-        let context = ReducerEffectContext::new(
+        let context = WorkflowEffectContext::new(
             "com.acme/Workflow@1".into(),
             None,
             "http.request".into(),
@@ -941,7 +941,7 @@ mod tests {
             vec![],
             vec![],
             vec![],
-            vec![ReducerReceiptSnapshot::from_context(intent_hash, &context)],
+            vec![WorkflowReceiptSnapshot::from_context(intent_hash, &context)],
             vec![WorkflowInstanceSnapshot {
                 instance_id: "com.acme/Workflow@1::".into(),
                 state_bytes: vec![0xAA],
@@ -983,7 +983,7 @@ mod tests {
         kernel
             .handle_stream_frame(duplicate)
             .expect("duplicate stream frame should be dropped");
-        assert!(kernel.reducer_queue.is_empty());
+        assert!(kernel.workflow_queue.is_empty());
 
         let next = EffectStreamFrame {
             intent_hash,
@@ -1001,7 +1001,7 @@ mod tests {
         kernel
             .handle_stream_frame(next)
             .expect("next stream frame should be accepted");
-        assert_eq!(kernel.reducer_queue.len(), 1);
+        assert_eq!(kernel.workflow_queue.len(), 1);
         let instances = kernel.workflow_instances_snapshot();
         assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 3);
     }
@@ -1072,7 +1072,7 @@ mod tests {
             "manifest hash must be identical after baseline+tail and full replay"
         );
         assert_eq!(
-            kernel_full.reducer_index_roots, kernel_baseline.reducer_index_roots,
+            kernel_full.workflow_index_roots, kernel_baseline.workflow_index_roots,
             "cell index roots must be identical after baseline+tail and full replay"
         );
     }
@@ -1082,22 +1082,22 @@ mod tests {
         let store = Arc::new(MemStore::default());
         let journal = Box::new(MemJournal::new());
         let mut kernel = kernel_with_store_and_journal(store.clone(), journal);
-        let reducer = "com.acme/Reducer@1".to_string();
+        let workflow = "com.acme/Workflow@1".to_string();
         let key = b"k".to_vec();
         let state_bytes = vec![9u8, 9u8];
 
         kernel
-            .handle_reducer_output(
-                reducer.clone(),
+            .handle_workflow_output(
+                workflow.clone(),
                 Some(key.clone()),
                 true,
-                ReducerOutput {
+                WorkflowOutput {
                     state: Some(state_bytes.clone()),
                     ..Default::default()
                 },
             )
             .unwrap();
-        let root_before = *kernel.reducer_index_roots.get(&reducer).unwrap();
+        let root_before = *kernel.workflow_index_roots.get(&workflow).unwrap();
 
         kernel.create_snapshot().unwrap();
         let entries = kernel.journal.load_from(0).expect("load journal entries");
@@ -1108,7 +1108,7 @@ mod tests {
         };
         kernel2.tick_until_idle().unwrap();
 
-        let root_after = *kernel2.reducer_index_roots.get(&reducer).unwrap();
+        let root_after = *kernel2.workflow_index_roots.get(&workflow).unwrap();
         assert_eq!(root_before, root_after);
 
         let index = CellIndex::new(store.as_ref());
@@ -1140,8 +1140,8 @@ mod tests {
             cap_name: "cap/http@1".into(),
             params_cbor: vec![1],
             idempotency_key: [2u8; 32],
-            origin: IntentOriginRecord::Reducer {
-                name: "example/Reducer@1".into(),
+            origin: IntentOriginRecord::Workflow {
+                name: "example/Workflow@1".into(),
                 instance_key: None,
                 emitted_at_seq: Some(0),
             },

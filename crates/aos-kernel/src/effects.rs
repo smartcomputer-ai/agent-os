@@ -5,7 +5,7 @@ use aos_effects::builtins::{BlobPutParams, HttpRequestParams, LlmGenerateParams}
 use aos_effects::{
     CapabilityGrant, EffectIntent, EffectKind, EffectSource, normalize_effect_params,
 };
-use aos_wasm_abi::{PureContext, ReducerEffect};
+use aos_wasm_abi::{PureContext, WorkflowEffect};
 use serde::de::DeserializeOwned;
 use serde_cbor::Value as CborValue;
 use url::Url;
@@ -112,14 +112,14 @@ impl EffectManager {
         }
     }
 
-    pub fn enqueue_reducer_effect(
+    pub fn enqueue_workflow_effect(
         &mut self,
-        reducer_name: &str,
+        workflow_name: &str,
         cap_name: &str,
-        effect: &ReducerEffect,
+        effect: &WorkflowEffect,
     ) -> Result<EffectIntent, KernelError> {
-        let source = EffectSource::Reducer {
-            name: reducer_name.to_string(),
+        let source = EffectSource::Workflow {
+            name: workflow_name.to_string(),
         };
         let runtime_kind = EffectKind::new(effect.kind.clone());
         let idempotency_key = normalize_idempotency_key(effect.idempotency_key.as_deref())?;
@@ -140,14 +140,14 @@ impl EffectManager {
             .unique_grant_for_effect_kind(effect_kind)
     }
 
-    pub fn enqueue_reducer_effect_with_grant(
+    pub fn enqueue_workflow_effect_with_grant(
         &mut self,
-        reducer_name: &str,
+        workflow_name: &str,
         grant: &CapGrantResolution,
-        effect: &ReducerEffect,
+        effect: &WorkflowEffect,
     ) -> Result<EffectIntent, KernelError> {
-        let source = EffectSource::Reducer {
-            name: reducer_name.to_string(),
+        let source = EffectSource::Workflow {
+            name: workflow_name.to_string(),
         };
         let runtime_kind = EffectKind::new(effect.kind.clone());
         let idempotency_key = normalize_idempotency_key(effect.idempotency_key.as_deref())?;
@@ -492,7 +492,7 @@ fn normalize_blob_put_params(params_cbor: Vec<u8>) -> Result<Vec<u8>, KernelErro
 
 fn format_effect_origin(source: &EffectSource) -> String {
     match source {
-        EffectSource::Reducer { name } => format!("reducer '{name}'"),
+        EffectSource::Workflow { name } => format!("workflow '{name}'"),
         EffectSource::Plan { name } => format!("plan '{name}'"),
     }
 }
@@ -599,8 +599,8 @@ fn invoke_enforcer(
     cap_context: Option<&CapContext>,
 ) -> Result<(), CapDenyReason> {
     let origin = match origin {
-        EffectSource::Reducer { name } => CapEffectOrigin {
-            kind: "reducer".into(),
+        EffectSource::Workflow { name } => CapEffectOrigin {
+            kind: "workflow".into(),
             name: name.clone(),
         },
         EffectSource::Plan { name } => CapEffectOrigin {
@@ -818,7 +818,7 @@ mod tests {
         BlobPutParams, HeaderMap, HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs,
     };
     use aos_effects::{CapabilityGrant, EffectKind};
-    use aos_wasm_abi::ReducerEffect;
+    use aos_wasm_abi::WorkflowEffect;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -1063,7 +1063,7 @@ mod tests {
     }
 
     #[test]
-    fn reducer_origin_can_enqueue_http_when_authorized() {
+    fn workflow_origin_can_enqueue_http_when_authorized() {
         let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
             .build()
             .expect("grant");
@@ -1074,12 +1074,12 @@ mod tests {
             headers: HeaderMap::new(),
             body_ref: None,
         };
-        let effect = ReducerEffect::new(
+        let effect = WorkflowEffect::new(
             EffectKind::HTTP_REQUEST,
             serde_cbor::to_vec(&params).unwrap(),
         );
         let intent = mgr
-            .enqueue_reducer_effect("com.acme/Workflow@1", "cap_http", &effect)
+            .enqueue_workflow_effect("com.acme/Workflow@1", "cap_http", &effect)
             .expect("enqueue");
         assert_eq!(intent.kind.as_str(), EffectKind::HTTP_REQUEST);
     }

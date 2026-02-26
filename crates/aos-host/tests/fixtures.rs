@@ -1,7 +1,7 @@
-//! Test fixtures for building manifests, stub reducers, and test data.
+//! Test fixtures for building manifests, stub workflows, and test data.
 //!
 //! This module provides utilities for programmatically constructing manifests,
-//! stub WASM reducers, and other test fixtures. Enable with the `e2e-tests` feature.
+//! stub WASM workflows, and other test fixtures. Enable with the `e2e-tests` feature.
 
 #![allow(dead_code)]
 
@@ -18,7 +18,7 @@ use aos_air_types::{
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
 use aos_store::{MemStore, Store};
-use aos_wasm_abi::{DomainEvent, PureOutput, ReducerOutput};
+use aos_wasm_abi::{DomainEvent, PureOutput, WorkflowOutput};
 use indexmap::IndexMap;
 use std::fs;
 use std::path::PathBuf;
@@ -165,7 +165,7 @@ pub fn build_loaded_manifest(
     loaded
 }
 
-/// Populates the manifest with default capability grants and module slot bindings so reducers
+/// Populates the manifest with default capability grants and module slot bindings so workflows
 /// can emit timer/blob effects without extra ceremony.
 pub fn attach_test_capabilities<'a, I>(manifest: &mut Manifest, modules: I) -> HashMap<Name, DefCap>
 where
@@ -240,10 +240,10 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
         }
     }
     for module in loaded.modules.values() {
-        if let Some(reducer) = module.abi.reducer.as_ref() {
-            required.insert(reducer.state.as_str().to_string());
-            required.insert(reducer.event.as_str().to_string());
-            if let Some(event_schema) = schema_type(reducer.event.as_str(), loaded) {
+        if let Some(workflow) = module.abi.workflow.as_ref() {
+            required.insert(workflow.state.as_str().to_string());
+            required.insert(workflow.event.as_str().to_string());
+            if let Some(event_schema) = schema_type(workflow.event.as_str(), loaded) {
                 match event_schema {
                     TypeExpr::Ref(reference) => {
                         required.insert(reference.reference.as_str().to_string());
@@ -258,7 +258,7 @@ fn ensure_placeholder_schemas(loaded: &mut LoadedManifest) {
                     _ => {}
                 }
             }
-            for effect in &reducer.effects_emitted {
+            for effect in &workflow.effects_emitted {
                 if let Some(receipt_schema) = loaded.effect_catalog.receipt_schema(effect) {
                     required.insert(receipt_schema.as_str().to_string());
                 }
@@ -426,13 +426,13 @@ pub fn new_mem_store() -> Arc<TestStore> {
 }
 
 /// Compiles a trivial WAT module whose `step` export always returns the provided
-/// `ReducerOutput` bytes. Useful for reducers that simply emit domain events or effects.
-pub fn stub_reducer_module<S: Store + ?Sized>(
+/// `WorkflowOutput` bytes. Useful for workflows that simply emit domain events or effects.
+pub fn stub_workflow_module<S: Store + ?Sized>(
     store: &Arc<S>,
     name: impl Into<String>,
-    output: &ReducerOutput,
+    output: &WorkflowOutput,
 ) -> DefModule {
-    let output_bytes = output.encode().expect("encode reducer output");
+    let output_bytes = output.encode().expect("encode workflow output");
     let data_literal = output_bytes
         .iter()
         .map(|b| format!("\\{:02x}", b))
@@ -468,7 +468,7 @@ pub fn stub_reducer_module<S: Store + ?Sized>(
         wasm_hash: wasm_hash_ref,
         key_schema: None,
         abi: ModuleAbi {
-            reducer: None,
+            workflow: None,
             pure: None,
         },
     }
@@ -519,7 +519,7 @@ pub fn stub_pure_module<S: Store + ?Sized>(
         wasm_hash: wasm_hash_ref,
         key_schema: None,
         abi: ModuleAbi {
-            reducer: None,
+            workflow: None,
             pure: Some(aos_air_types::PureAbi {
                 input: schema(input_schema),
                 output: schema(output_schema),
@@ -529,11 +529,11 @@ pub fn stub_pure_module<S: Store + ?Sized>(
     }
 }
 
-/// Load a real reducer WASM from `target/wasm32-unknown-unknown/<profile>/<file>` and register
+/// Load a real workflow WASM from `target/wasm32-unknown-unknown/<profile>/<file>` and register
 /// it in the store, returning a fully populated DefModule.
 ///
-/// This is useful for integration tests that want to exercise actual reducers instead of stubs.
-pub fn reducer_module_from_target(
+/// This is useful for integration tests that want to exercise actual workflows instead of stubs.
+pub fn workflow_module_from_target(
     store: &Arc<TestStore>,
     name: &str,
     wasm_file: &str,
@@ -564,10 +564,10 @@ pub fn reducer_module_from_target(
         wasm_hash: wasm_hash_ref,
         key_schema: key_schema.map(schema),
         abi: ModuleAbi {
-            reducer: Some(aos_air_types::ReducerAbi {
+            workflow: Some(aos_air_types::WorkflowAbi {
                 state: schema(state_schema),
                 event: schema(event_schema),
-                context: Some(schema("sys/ReducerContext@1")),
+                context: Some(schema("sys/WorkflowContext@1")),
                 annotations: None,
                 effects_emitted: vec![],
                 cap_slots: IndexMap::new(),
@@ -609,7 +609,7 @@ pub fn pure_module_from_target(
         wasm_hash: wasm_hash_ref,
         key_schema: None,
         abi: ModuleAbi {
-            reducer: None,
+            workflow: None,
             pure: Some(aos_air_types::PureAbi {
                 input: schema(input_schema),
                 output: schema(output_schema),
@@ -619,19 +619,19 @@ pub fn pure_module_from_target(
     }
 }
 
-/// Convenience: build a reducer module that emits the supplied domain events (and no state).
-pub fn stub_event_emitting_reducer(
+/// Convenience: build a workflow module that emits the supplied domain events (and no state).
+pub fn stub_event_emitting_workflow(
     store: &Arc<TestStore>,
     name: impl Into<String>,
     events: Vec<DomainEvent>,
 ) -> DefModule {
-    let output = ReducerOutput {
+    let output = WorkflowOutput {
         state: None,
         domain_events: events,
         effects: vec![],
         ann: None,
     };
-    stub_reducer_module(store, name, &output)
+    stub_workflow_module(store, name, &output)
 }
 
 /// Helper for synthesizing domain events by name and an already-materialized value.
@@ -679,16 +679,16 @@ fn expr_value_to_cbor(value: &ExprValue) -> serde_cbor::Value {
     }
 }
 
-/// Utility for building a routing rule from an event schema to a reducer.
-pub fn routing_event(schema_name: &str, reducer: &str) -> RoutingEvent {
+/// Utility for building a routing rule from an event schema to a workflow.
+pub fn routing_event(schema_name: &str, workflow: &str) -> RoutingEvent {
     RoutingEvent {
         event: schema(schema_name),
-        module: reducer.to_string(),
+        module: workflow.to_string(),
         key_field: None,
     }
 }
 
-/// Suggest routing entries for reducer-emitted micro-effect receipts.
+/// Suggest routing entries for workflow-emitted micro-effect receipts.
 ///
 /// This does not mutate a manifest; it just returns the recommended routes so tests can opt in.
 pub fn recommended_receipt_routes<'a>(
@@ -703,14 +703,14 @@ pub fn recommended_receipt_routes<'a>(
     let mut seen: HashSet<(String, String)> = HashSet::new();
 
     for module in modules {
-        let Some(reducer) = module.abi.reducer.as_ref() else {
+        let Some(workflow) = module.abi.workflow.as_ref() else {
             continue;
         };
-        for effect in &reducer.effects_emitted {
+        for effect in &workflow.effects_emitted {
             let Some(entry) = catalog.get(effect) else {
                 continue;
             };
-            if entry.origin_scope != OriginScope::Reducer {
+            if entry.origin_scope != OriginScope::Workflow {
                 continue;
             }
             let schema_name = entry.receipt_schema.as_str();

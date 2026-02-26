@@ -1,7 +1,7 @@
 # 22-agent-live
 
 Live SDK agent smoke fixture:
-- reducer is built on `aos-agent-sdk` session primitives,
+- workflow is built on `aos-agent-sdk` session primitives,
 - AIR session schemas are imported from `aos-agent-sdk` defs-only export,
 - imported `aos.agent/core_workspace_sync@1` composes prompt/tool workspace sync,
 - fixture-local `demo/session_workspace_sync_wrapper@1` is a thin adapter from

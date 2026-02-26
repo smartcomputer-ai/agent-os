@@ -27,7 +27,7 @@ use super::{create_host, prepare_world, should_use_control, try_control_client};
 
 const WORKSPACE_CAP: &str = "sys/workspace@1";
 const WORKSPACE_EVENT: &str = "sys/WorkspaceCommit@1";
-const WORKSPACE_REDUCER: &str = "sys/Workspace@1";
+const WORKSPACE_WORKFLOW: &str = "sys/Workspace@1";
 
 #[derive(Args, Debug)]
 pub struct WorkspaceArgs {
@@ -481,7 +481,7 @@ async fn ws_ls_workspaces(opts: &WorldOpts, dirs: &crate::opts::ResolvedDirs) ->
                     v: 1,
                     id: "cli-ws-ls".into(),
                     cmd: "state-list".into(),
-                    payload: serde_json::json!({ "reducer": WORKSPACE_REDUCER }),
+                    payload: serde_json::json!({ "workflow": WORKSPACE_WORKFLOW }),
                 })
                 .await?;
             if !resp.ok {
@@ -506,7 +506,7 @@ async fn ws_ls_workspaces(opts: &WorldOpts, dirs: &crate::opts::ResolvedDirs) ->
     load_world_env(&dirs.world)?;
     let (store, loaded) = prepare_world(dirs, opts)?;
     let host = create_host(store, loaded, dirs, opts)?;
-    let metas = host.list_cells(WORKSPACE_REDUCER)?;
+    let metas = host.list_cells(WORKSPACE_WORKFLOW)?;
     let mut names = Vec::new();
     for meta in metas {
         if let Some(name) = decode_workspace_key(&meta.key_bytes) {
@@ -827,7 +827,7 @@ async fn ws_log(opts: &WorldOpts, args: &WorkspaceLogArgs) -> Result<()> {
     let history = if should_use_control(opts) {
         if let Some(mut client) = try_control_client(&dirs).await {
             let (_meta, state_opt) = client
-                .query_state_decoded("cli-ws-log", WORKSPACE_REDUCER, Some(&key_bytes), None)
+                .query_state_decoded("cli-ws-log", WORKSPACE_WORKFLOW, Some(&key_bytes), None)
                 .await?;
             match state_opt {
                 Some(bytes) => serde_cbor::from_slice::<WorkspaceHistory>(&bytes)
@@ -1825,7 +1825,7 @@ fn read_workspace_history(
 ) -> Result<WorkspaceHistory> {
     let read = host
         .query_state(
-            WORKSPACE_REDUCER,
+            WORKSPACE_WORKFLOW,
             Some(key_bytes),
             aos_kernel::Consistency::Head,
         )

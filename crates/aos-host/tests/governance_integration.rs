@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use aos_air_types::{
-    AirNode, CapGrant, CapType, DefCap, DefSchema, ManifestDefaults, NamedRef, ReducerAbi,
+    AirNode, CapGrant, CapType, DefCap, DefSchema, ManifestDefaults, NamedRef, WorkflowAbi,
     TypeExpr, TypeRecord, ValueLiteral, ValueRecord,
 };
 use aos_cbor::{to_canonical_cbor, Hash};
@@ -11,7 +11,7 @@ use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
 use aos_kernel::shadow::ShadowHarness;
-use aos_wasm_abi::ReducerOutput;
+use aos_wasm_abi::WorkflowOutput;
 use helpers::fixtures::{self, TestStore, TestWorld, START_SCHEMA};
 use indexmap::IndexMap;
 
@@ -24,7 +24,7 @@ fn governance_flow_applies_manifest_patch() {
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let patch_loaded = manifest_with_reducer(&store, "com.acme/Patched@1", 0xBB);
+    let patch_loaded = manifest_with_workflow(&store, "com.acme/Patched@1", 0xBB);
     let patch = manifest_patch_from_loaded(&patch_loaded);
     let proposal_id = world
         .kernel
@@ -45,11 +45,11 @@ fn governance_flow_applies_manifest_patch() {
         .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "start" }))
         .expect("submit start event");
     world.tick_n(1).unwrap();
-    let reducer_state = world
+    let workflow_state = world
         .kernel
-        .reducer_state("com.acme/Patched@1")
-        .expect("reducer state");
-    assert_eq!(reducer_state, vec![0xBB]);
+        .workflow_state("com.acme/Patched@1")
+        .expect("workflow state");
+    assert_eq!(workflow_state, vec![0xBB]);
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn apply_requires_approval_state() {
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let patch_loaded = manifest_with_reducer(&store, "com.acme/Patched@1", 0xBC);
+    let patch_loaded = manifest_with_workflow(&store, "com.acme/Patched@1", 0xBC);
     let patch = manifest_patch_from_loaded(&patch_loaded);
     let proposal_id = world
         .kernel
@@ -78,7 +78,7 @@ fn proposals_with_same_patch_hash_do_not_collide() {
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let loaded = manifest_with_reducer(&store, "com.acme/Collision@1", 0xCD);
+    let loaded = manifest_with_workflow(&store, "com.acme/Collision@1", 0xCD);
     let patch = manifest_patch_from_loaded(&loaded);
 
     let first = world
@@ -115,7 +115,7 @@ fn reject_prevents_apply_and_records_decision() {
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let patch_loaded = manifest_with_reducer(&store, "com.acme/Reject@1", 0xEE);
+    let patch_loaded = manifest_with_workflow(&store, "com.acme/Reject@1", 0xEE);
     let patch = manifest_patch_from_loaded(&patch_loaded);
     let proposal_id = world
         .kernel
@@ -162,7 +162,7 @@ fn applied_records_manifest_root_not_patch_hash() {
     let manifest = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
-    let patch_loaded = manifest_with_reducer(&store, "com.acme/AppliedRoot@1", 0xEF);
+    let patch_loaded = manifest_with_workflow(&store, "com.acme/AppliedRoot@1", 0xEF);
     let patch = manifest_patch_from_loaded(&patch_loaded);
     let proposal_id = world
         .kernel
@@ -235,31 +235,31 @@ fn shadow_upgrade_reports_followup_effect_cap_delta() {
         .any(|delta| delta.name == "com.acme/http_followup_cap@1"));
 }
 
-fn manifest_with_reducer(
+fn manifest_with_workflow(
     store: &Arc<TestStore>,
     name: &str,
     state_byte: u8,
 ) -> aos_kernel::manifest::LoadedManifest {
-    let mut reducer = fixtures::stub_reducer_module(
+    let mut workflow = fixtures::stub_workflow_module(
         store,
         name,
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(vec![state_byte]),
             domain_events: vec![],
             effects: vec![],
             ann: None,
         },
     );
-    reducer.abi.reducer = Some(ReducerAbi {
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/PatchedState@1"),
         event: fixtures::schema(START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
+    let routing = vec![fixtures::routing_event(START_SCHEMA, &workflow.name)];
+    let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
     helpers::insert_test_schemas(
         &mut loaded,
         vec![

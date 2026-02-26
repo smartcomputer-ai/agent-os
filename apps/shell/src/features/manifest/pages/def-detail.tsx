@@ -202,13 +202,13 @@ function ModuleSummary({ def }: { def: ModuleDef }) {
           <CopyableHash hash={def.wasm_hash} truncate={20} />
         </SummaryRow>
       )}
-      {def.abi?.reducer && (
+      {def.abi?.workflow && (
         <>
           <SummaryRow label="State schema">
-            <span className="font-mono text-xs">{def.abi.reducer.state}</span>
+            <span className="font-mono text-xs">{def.abi.workflow.state}</span>
           </SummaryRow>
           <SummaryRow label="Event schema">
-            <span className="font-mono text-xs">{def.abi.reducer.event}</span>
+            <span className="font-mono text-xs">{def.abi.workflow.event}</span>
           </SummaryRow>
         </>
       )}
@@ -307,7 +307,7 @@ function getKindDescription(kind: string): string {
     case "schema":
       return "Type definition for values in the system.";
     case "module":
-      return "WASM reducer or pure function with ABI.";
+      return "WASM workflow or pure function with ABI.";
     case "effect":
       return "External action definition.";
     case "cap":

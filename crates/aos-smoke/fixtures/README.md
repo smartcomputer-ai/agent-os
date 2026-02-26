@@ -8,15 +8,15 @@ Grouping:
 
 | No. | Slug           | Summary                      |
 | --- | -------------- | ---------------------------- |
-| 00  | counter        | Deterministic reducer SM     |
-| 01  | hello-timer    | Reducer micro-effect demo    |
-| 02  | blob-echo      | Reducer blob round-trip      |
+| 00  | counter        | Deterministic workflow SM     |
+| 01  | hello-timer    | Workflow micro-effect demo    |
+| 02  | blob-echo      | Workflow blob round-trip      |
 | 03  | fetch-notify   | Workflow-driven HTTP demo    |
 | 04  | aggregator     | Workflow fan-out join demo   |
 | 05  | chain-comp     | Workflow saga + refund       |
 | 06  | safe-upgrade   | Governance shadow/apply demo |
 | 07  | llm-summarizer | HTTP + LLM summarization     |
-| 08  | retry-backoff  | Reducer retry with timer     |
+| 08  | retry-backoff  | Workflow retry with timer     |
 | 09  | workspaces     | Workspace workflow + caps demo |
 | 10  | trace-failure-classification | Trace-get/diagnose failure conformance |
 | 11  | workflow-runtime-hardening | Single-scenario workflow runtime conformance + summaries |
@@ -40,4 +40,4 @@ Live smoke notes:
 - Reads secrets from process env or `.env` files at repo root.
 - Runs a multi-tool agent flow (`echo_payload`, `sum_pair`) plus a follow-up user turn.
 - Ends with replay verification.
-- `fixtures/22-agent-live` uses `aos.agent/*` schemas + `aos-agent-sdk` reducer helpers and runs a dynamic tool-traversal flow (`search_step`) to completion, then follow-up + replay verification.
+- `fixtures/22-agent-live` uses `aos.agent/*` schemas + `aos-agent-sdk` workflow helpers and runs a dynamic tool-traversal flow (`search_step`) to completion, then follow-up + replay verification.

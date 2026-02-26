@@ -110,7 +110,7 @@ async fn cmd_plans_check(opts: &WorldOpts, args: &PlansCheckArgs) -> Result<()> 
         map_root,
         &config,
         &dirs.air_dir,
-        &dirs.reducer_dir,
+        &dirs.workflow_dir,
     )?;
 
     let mut warnings = air_sources.warnings.clone();
@@ -255,7 +255,7 @@ async fn cmd_plans_scaffold(opts: &WorldOpts, args: &PlansScaffoldArgs) -> Resul
         map_root,
         &config,
         &dirs.air_dir,
-        &dirs.reducer_dir,
+        &dirs.workflow_dir,
     )?;
 
     let packs = analyze_import_packs(&air_sources.imports)?;
@@ -650,7 +650,7 @@ fn emit_effect_is_read_only(emit: &PlanStepEmitEffect) -> bool {
     match emit.kind.as_str() {
         EffectKind::BLOB_GET
         | EffectKind::INTROSPECT_MANIFEST
-        | EffectKind::INTROSPECT_REDUCER_STATE
+        | EffectKind::INTROSPECT_WORKFLOW_STATE
         | EffectKind::INTROSPECT_JOURNAL_HEAD
         | EffectKind::INTROSPECT_LIST_CELLS
         | EffectKind::WORKSPACE_RESOLVE

@@ -5,7 +5,7 @@ Thank you for your interest in contributing!
 ## How to Contribute
 1. Fork the repository and create a topic branch.
 2. Make changes in line with the coding style and determinism rules
-   described in the design docs (reducers, AIR, etc.).
+   described in the design docs (workflows, AIR, etc.).
 3. Include tests or replay vectors for any change to kernel logic.
 4. Submit a pull request with a clear description.
 

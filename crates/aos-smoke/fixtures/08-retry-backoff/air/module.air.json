@@ -3,7 +3,7 @@
   "name": "demo/RetrySM@1",
   "module_kind": "workflow",
   "abi": {
-    "reducer": {
+    "workflow": {
       "state": "demo/RetryState@1",
       "event": "demo/RetryEvent@1",
       "annotations": "sys/BytesOrSecretRef@1",

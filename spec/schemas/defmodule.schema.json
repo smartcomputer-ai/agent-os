@@ -12,7 +12,7 @@
     "abi": {
       "type": "object",
       "properties": {
-        "reducer": {
+        "workflow": {
           "type": "object",
           "properties": {
             "state": { "$ref": "common.schema.json#/$defs/SchemaRef" },
@@ -52,7 +52,7 @@
   "required": ["$kind","name","module_kind","wasm_hash","abi"],
   "allOf": [
     { "if": { "properties": { "module_kind": { "const": "workflow" } } },
-      "then": { "required": ["abi"], "properties": { "abi": { "required": ["reducer"] } } } },
+      "then": { "required": ["abi"], "properties": { "abi": { "required": ["workflow"] } } } },
     { "if": { "properties": { "module_kind": { "const": "pure" } } },
       "then": { "required": ["abi"], "properties": { "abi": { "required": ["pure"] } } } }
   ],

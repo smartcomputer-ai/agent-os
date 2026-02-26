@@ -170,7 +170,7 @@ function findHint(trace: Record<string, unknown>): string | null {
   if (terminalState === "waiting_receipt") {
     const pending =
       ((liveWait.pending_plan_receipts as unknown[] | undefined)?.length ?? 0) +
-      ((liveWait.pending_reducer_receipts as unknown[] | undefined)?.length ?? 0) +
+      ((liveWait.pending_workflow_receipts as unknown[] | undefined)?.length ?? 0) +
       ((liveWait.queued_effects as unknown[] | undefined)?.length ?? 0);
     if (pending > 0) {
       return "Plan is waiting for effect receipts.";
@@ -201,7 +201,7 @@ function firstIntentHash(liveWait: Record<string, unknown>): string | null {
   };
   return (
     read(liveWait.pending_plan_receipts) ??
-    read(liveWait.pending_reducer_receipts) ??
+    read(liveWait.pending_workflow_receipts) ??
     read(liveWait.plan_waiting_receipts)
   );
 }
@@ -417,9 +417,9 @@ export function ChatMessage({ chatId, message }: ChatMessageProps) {
                   {Array.isArray(liveWait.plan_waiting_events)
                     ? liveWait.plan_waiting_events.length
                     : 0}{" "}
-                  reducer_receipts=
-                  {Array.isArray(liveWait.pending_reducer_receipts)
-                    ? liveWait.pending_reducer_receipts.length
+                  workflow_receipts=
+                  {Array.isArray(liveWait.pending_workflow_receipts)
+                    ? liveWait.pending_workflow_receipts.length
                     : 0}{" "}
                   queued_effects=
                   {Array.isArray(liveWait.queued_effects)

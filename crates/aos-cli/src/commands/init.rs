@@ -18,7 +18,7 @@ pub struct InitArgs {
     #[arg(long)]
     pub template: Option<String>,
 
-    /// Create missing directories (air/, reducer/, modules/, .aos/)
+    /// Create missing directories (air/, workflow/, modules/, .aos/)
     #[arg(long)]
     pub dirs: bool,
 
@@ -46,7 +46,7 @@ pub struct InitArgs {
 pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
     let world_root = resolve_world_root(opts, args)?;
     let air_dir = resolve_opt_path(&world_root, opts.air.as_deref(), "air");
-    let reducer_dir = resolve_opt_path(&world_root, opts.reducer.as_deref(), "reducer");
+    let workflow_dir = resolve_opt_path(&world_root, opts.workflow.as_deref(), "workflow");
     let store_root = resolve_opt_path(&world_root, opts.store.as_deref(), "");
     let modules_dir = world_root.join("modules");
     let store_dir = store_root.join(".aos");
@@ -68,18 +68,18 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
 
     let world_status = init_dir(&world_root, true)?;
     let air_status = init_dir(&air_dir, do_dirs || do_manifest)?;
-    let reducer_root_status = init_dir(&reducer_dir, do_dirs)?;
-    let reducer_src_status = init_dir(&reducer_dir.join("src"), do_dirs)?;
-    let reducer_status = if do_dirs {
-        if matches!(reducer_root_status, InitStatus::Created)
-            || matches!(reducer_src_status, InitStatus::Created)
+    let workflow_root_status = init_dir(&workflow_dir, do_dirs)?;
+    let workflow_src_status = init_dir(&workflow_dir.join("src"), do_dirs)?;
+    let workflow_status = if do_dirs {
+        if matches!(workflow_root_status, InitStatus::Created)
+            || matches!(workflow_src_status, InitStatus::Created)
         {
             InitStatus::Created
         } else {
-            reducer_root_status
+            workflow_root_status
         }
     } else {
-        reducer_root_status
+        workflow_root_status
     };
     let modules_status = init_dir(&modules_dir, do_modules_dir)?;
     let store_was_reset = if args.fresh {
@@ -99,7 +99,7 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
 
     let sync_path = world_root.join("aos.sync.json");
     let sync_status = init_file(&sync_path, do_sync, args.sync_force, || {
-        write_sync_file(&sync_path, &world_root, &air_dir, &reducer_dir)
+        write_sync_file(&sync_path, &world_root, &air_dir, &workflow_dir)
     })?;
 
     // TODO: Support --template to scaffold different starter manifests
@@ -115,9 +115,9 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
         air_status.label()
     );
     println!(
-        "  Reducer:    {} ({})",
-        reducer_dir.display(),
-        reducer_status.label()
+        "  Workflow:    {} ({})",
+        workflow_dir.display(),
+        workflow_status.label()
     );
     println!(
         "  Modules:    {} ({})",
@@ -192,19 +192,19 @@ fn write_sync_file(
     sync_path: &Path,
     world_root: &Path,
     air_dir: &Path,
-    reducer_dir: &Path,
+    workflow_dir: &Path,
 ) -> Result<()> {
     let air_value = map_path_value(world_root, air_dir, "air");
-    let reducer_value = map_path_value(world_root, reducer_dir, "reducer");
+    let workflow_value = map_path_value(world_root, workflow_dir, "workflow");
     let sync = serde_json::json!({
         "version": 1,
         "air": { "dir": air_value },
-        "build": { "reducer_dir": reducer_value },
+        "build": { "workflow_dir": workflow_value },
         "modules": { "pull": false },
         "workspaces": [
             {
-                "ref": "reducer",
-                "dir": reducer_value,
+                "ref": "workflow",
+                "dir": workflow_value,
                 "ignore": ["target/", ".git/", ".aos/"]
             }
         ]

@@ -1,9 +1,9 @@
 {
   "$kind": "defmodule",
   "name": "demo/LiveChat@1",
-  "module_kind": "reducer",
+  "module_kind": "workflow",
   "abi": {
-    "reducer": {
+    "workflow": {
       "state": "demo/LiveState@1",
       "event": "demo/LiveEvent@1",
       "effects_emitted": [],

@@ -76,7 +76,7 @@
             "properties": {
               "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
               "module": { "$ref": "common.schema.json#/$defs/Name" },
-              "key_field": { "type": "string", "description": "Field in event value that carries the cell key (for keyed reducers)" }
+              "key_field": { "type": "string", "description": "Field in event value that carries the cell key (for keyed workflows)" }
             },
             "required": ["event","module"],
             "additionalProperties": false
@@ -88,9 +88,9 @@
             "type": "object",
             "properties": {
               "source": { "type": "string", "description": "External inbox or adapter channel name (e.g., http.inbox:contact_form)" },
-              "reducer": { "$ref": "common.schema.json#/$defs/Name", "description": "Reducer that will receive messages from this inbox; Name-formatted string" }
+              "workflow": { "$ref": "common.schema.json#/$defs/Name", "description": "Workflow that will receive messages from this inbox; Name-formatted string" }
             },
-            "required": ["source","reducer"],
+            "required": ["source","workflow"],
             "additionalProperties": false
           }
         }

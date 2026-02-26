@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use aos_air_types::{ReducerAbi, RoutingEvent};
+use aos_air_types::{WorkflowAbi, RoutingEvent};
 use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
 use aos_host::{WorldHost, config::HostConfig};
 use aos_kernel::Kernel;
 use aos_kernel::journal::mem::MemJournal;
-use aos_wasm_abi::ReducerOutput;
+use aos_wasm_abi::WorkflowOutput;
 use base64::prelude::*;
 use serde_json::json;
 use std::os::unix::net::UnixListener;
@@ -41,18 +41,18 @@ async fn control_workspace_internal_effects() {
     }
 
     let store: Arc<TestStore> = fixtures::new_mem_store();
-    let reducer_output = ReducerOutput {
+    let workflow_output = WorkflowOutput {
         state: None,
         domain_events: vec![],
         effects: vec![],
         ann: None,
     };
-    let mut reducer = fixtures::stub_reducer_module(&store, "sys/Workspace@1", &reducer_output);
-    reducer.key_schema = Some(fixtures::schema("sys/WorkspaceName@1"));
-    reducer.abi.reducer = Some(ReducerAbi {
+    let mut workflow = fixtures::stub_workflow_module(&store, "sys/Workspace@1", &workflow_output);
+    workflow.key_schema = Some(fixtures::schema("sys/WorkspaceName@1"));
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("sys/WorkspaceHistory@1"),
         event: fixtures::schema("sys/WorkspaceCommit@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -62,7 +62,7 @@ async fn control_workspace_internal_effects() {
         module: "sys/Workspace@1".to_string(),
         key_field: Some("workspace".into()),
     }];
-    let manifest = fixtures::build_loaded_manifest(vec![reducer], routing);
+    let manifest = fixtures::build_loaded_manifest(vec![workflow], routing);
 
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();

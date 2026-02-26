@@ -19,7 +19,7 @@ use aos_kernel::policy::AllowAllPolicy;
 use aos_kernel::Consistency;
 use aos_kernel::StateReader;
 use aos_store::Store;
-use aos_wasm_abi::ReducerEffect;
+use aos_wasm_abi::WorkflowEffect;
 use serde::Deserialize;
 
 #[path = "fixtures.rs"]
@@ -52,10 +52,10 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
     let patch_doc_bytes =
         serde_json::to_vec(&patch_doc).map_err(|err| KernelError::Manifest(err.to_string()))?;
 
-    let propose_intent = effect_manager.enqueue_reducer_effect_with_grant(
+    let propose_intent = effect_manager.enqueue_workflow_effect_with_grant(
         "com.acme/Simple@1",
         &grant,
-        &ReducerEffect::new("governance.propose", propose_params_cbor(&patch_doc_bytes)?),
+        &WorkflowEffect::new("governance.propose", propose_params_cbor(&patch_doc_bytes)?),
     )?;
     let propose_receipt = world
         .kernel
@@ -71,10 +71,10 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
         .expect("proposal stored");
     assert_eq!(proposal.state, ProposalState::Submitted);
 
-    let shadow_intent = effect_manager.enqueue_reducer_effect_with_grant(
+    let shadow_intent = effect_manager.enqueue_workflow_effect_with_grant(
         "com.acme/Simple@1",
         &grant,
-        &ReducerEffect::new(
+        &WorkflowEffect::new(
             "governance.shadow",
             shadow_params_cbor(propose.proposal_id)?,
         ),
@@ -92,10 +92,10 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
         .expect("proposal stored");
     assert_eq!(proposal.state, ProposalState::Shadowed);
 
-    let approve_intent = effect_manager.enqueue_reducer_effect_with_grant(
+    let approve_intent = effect_manager.enqueue_workflow_effect_with_grant(
         "com.acme/Simple@1",
         &grant,
-        &ReducerEffect::new(
+        &WorkflowEffect::new(
             "governance.approve",
             approve_params_cbor(propose.proposal_id)?,
         ),
@@ -113,10 +113,10 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
         .expect("proposal stored");
     assert_eq!(proposal.state, ProposalState::Approved);
 
-    let apply_intent = effect_manager.enqueue_reducer_effect_with_grant(
+    let apply_intent = effect_manager.enqueue_workflow_effect_with_grant(
         "com.acme/Simple@1",
         &grant,
-        &ReducerEffect::new("governance.apply", apply_params_cbor(propose.proposal_id)?),
+        &WorkflowEffect::new("governance.apply", apply_params_cbor(propose.proposal_id)?),
     )?;
     let apply_receipt = world
         .kernel

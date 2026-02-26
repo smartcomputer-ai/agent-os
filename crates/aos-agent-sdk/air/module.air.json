@@ -5,7 +5,7 @@
     "module_kind": "workflow",
     "key_schema": "aos.agent/SessionId@1",
     "abi": {
-      "reducer": {
+      "workflow": {
         "state": "aos.agent/SessionState@1",
         "event": "aos.agent/SessionWorkflowEvent@1",
         "effects_emitted": ["llm.generate"],

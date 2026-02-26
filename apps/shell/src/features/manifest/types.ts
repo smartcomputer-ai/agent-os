@@ -109,11 +109,11 @@ export interface SchemaDef extends BaseDef {
 /** Module definition */
 export interface ModuleDef extends BaseDef {
   $kind: "defmodule";
-  module_kind: "reducer" | "pure";
+  module_kind: "workflow" | "pure";
   wasm_hash: string;
   key_schema?: string;
   abi: {
-    reducer?: {
+    workflow?: {
       state: string;
       event: string;
       context?: string;
@@ -171,7 +171,7 @@ export interface EffectDef extends BaseDef {
   params_schema: string;
   receipt_schema: string;
   cap_type: string;
-  origin_scope?: "reducer" | "plan" | "both";
+  origin_scope?: "workflow" | "plan" | "both";
 }
 
 /** Capability definition */
@@ -190,7 +190,7 @@ export interface PolicyRule {
     effect_kind?: string;
     cap_name?: string;
     cap_type?: string;
-    origin_kind?: "plan" | "reducer";
+    origin_kind?: "plan" | "workflow";
     origin_name?: string;
   };
   decision: "allow" | "deny";

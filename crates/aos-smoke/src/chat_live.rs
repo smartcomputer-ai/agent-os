@@ -13,9 +13,9 @@ use serde_json::{Value, json};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const REDUCER_NAME: &str = "demo/LiveChat@1";
+const WORKFLOW_NAME: &str = "demo/LiveChat@1";
 const EVENT_SCHEMA: &str = "demo/LiveEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/21-chat-live/reducer";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/21-chat-live/workflow";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/21-chat-live";
 
 const OPENAI_KEY_ENV: &str = "OPENAI_API_KEY";
@@ -55,7 +55,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root: &fixture_root,
         assets_root: Some(&assets_root),
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_CRATE,
     })?;

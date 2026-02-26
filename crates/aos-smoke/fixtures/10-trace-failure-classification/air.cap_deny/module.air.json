@@ -4,7 +4,7 @@
     "name": "demo/FetchNotify@1",
     "module_kind": "workflow",
     "abi": {
-      "reducer": {
+      "workflow": {
         "state": "demo/FetchNotifyState@1",
         "event": "demo/FetchNotifyEvent@1",
         "effects_emitted": ["http.request"],

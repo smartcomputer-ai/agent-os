@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::example_host::{ExampleHost, HarnessConfig};
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 
-const REDUCER_NAME: &str = "demo/LlmSummarizer@1";
+const WORKFLOW_NAME: &str = "demo/LlmSummarizer@1";
 const EVENT_SCHEMA: &str = "demo/LlmSummarizerEvent@1";
-const MODULE_PATH: &str = "crates/aos-smoke/fixtures/07-llm-summarizer/reducer";
+const MODULE_PATH: &str = "crates/aos-smoke/fixtures/07-llm-summarizer/workflow";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,7 +46,7 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_PATH,
     })?;
@@ -66,7 +66,7 @@ pub fn run(example_root: &Path) -> Result<()> {
         ));
     }
     let http_ctx = requests.into_iter().next().unwrap();
-    let document = "AOS keeps workflows and reducers separate. Summaries should be deterministic so"
+    let document = "AOS keeps workflows and workflows separate. Summaries should be deterministic so"
         .to_string() + " reviewers can trust the replay path.";
     let store = host.store();
     http.respond_with_body(
@@ -115,7 +115,7 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     let state: LlmSummarizerStateView = host.read_state()?;
     if state.last_summary.is_none() {
-        return Err(anyhow!("summary missing from reducer state"));
+        return Err(anyhow!("summary missing from workflow state"));
     }
     println!(
         "   summary_ref={:?} tokens={{prompt:{:?}, completion:{:?}}} cost_millis={:?}",

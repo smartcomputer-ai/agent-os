@@ -203,15 +203,15 @@ impl<S: Store + 'static> Kernel<S> {
             .values()
             .map(|instance| instance.inflight_intents.len())
             .sum::<usize>();
-        let pending_reducer_receipts = self.pending_reducer_receipts.len();
+        let pending_workflow_receipts = self.pending_workflow_receipts.len();
         let queued_effects = self.effect_manager.queued().len();
-        let reducer_queue_pending = !self.reducer_queue.is_empty();
+        let workflow_queue_pending = !self.workflow_queue.is_empty();
 
         if workflows_with_inflight == 0
             && inflight_workflow_intents == 0
-            && pending_reducer_receipts == 0
+            && pending_workflow_receipts == 0
             && queued_effects == 0
-            && !reducer_queue_pending
+            && !workflow_queue_pending
         {
             return Ok(());
         }
@@ -220,9 +220,9 @@ impl<S: Store + 'static> Kernel<S> {
             plan_instances: workflows_with_inflight,
             waiting_events: inflight_workflow_intents,
             pending_plan_receipts: 0,
-            pending_reducer_receipts,
+            pending_workflow_receipts,
             queued_effects,
-            reducer_queue_pending,
+            workflow_queue_pending,
         })
     }
 
@@ -245,13 +245,13 @@ impl<S: Store + 'static> Kernel<S> {
         self.schema_defs = loaded.schemas;
         self.router = runtime.router;
 
-        self.pending_reducer_receipts.clear();
+        self.pending_workflow_receipts.clear();
         self.workflow_instances.clear();
         self.recent_receipts.clear();
         self.recent_receipt_index.clear();
 
         self.schema_index = runtime.schema_index.clone();
-        self.reducer_schemas = runtime.reducer_schemas;
+        self.workflow_schemas = runtime.workflow_schemas;
         self.secret_resolver = ensure_secret_resolver(
             !self.secrets.is_empty(),
             self.secret_resolver.clone(),
@@ -343,7 +343,7 @@ impl<S: Store + 'static> Kernel<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::receipts::ReducerEffectContext;
+    use crate::receipts::WorkflowEffectContext;
     use crate::world::test_support::{empty_manifest, hash, named_ref};
     use aos_effects::{EffectIntent, EffectKind};
     use aos_store::MemStore;
@@ -443,10 +443,10 @@ mod tests {
                 module_version: None,
             },
         );
-        kernel.pending_reducer_receipts.insert(
+        kernel.pending_workflow_receipts.insert(
             [2u8; 32],
-            ReducerEffectContext::new(
-                "com.acme/Reducer@1".into(),
+            WorkflowEffectContext::new(
+                "com.acme/Workflow@1".into(),
                 None,
                 "timer.set".into(),
                 vec![],
@@ -475,16 +475,16 @@ mod tests {
                 plan_instances,
                 waiting_events,
                 pending_plan_receipts,
-                pending_reducer_receipts,
+                pending_workflow_receipts,
                 queued_effects,
-                reducer_queue_pending,
+                workflow_queue_pending,
             } => {
                 assert_eq!(plan_instances, 1);
                 assert_eq!(waiting_events, 1);
                 assert_eq!(pending_plan_receipts, 0);
-                assert_eq!(pending_reducer_receipts, 1);
+                assert_eq!(pending_workflow_receipts, 1);
                 assert_eq!(queued_effects, 1);
-                assert!(!reducer_queue_pending);
+                assert!(!workflow_queue_pending);
             }
             other => panic!("unexpected error: {other}"),
         }

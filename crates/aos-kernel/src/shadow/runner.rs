@@ -41,8 +41,8 @@ impl ShadowExecutor {
             .modules
             .values()
             .filter_map(|module| {
-                let reducer = module.abi.reducer.as_ref()?;
-                let mut effects = reducer
+                let workflow = module.abi.workflow.as_ref()?;
+                let mut effects = workflow
                     .effects_emitted
                     .iter()
                     .map(|kind| kind.as_str().to_string())

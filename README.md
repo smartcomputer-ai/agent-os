@@ -34,7 +34,7 @@ Start here:
 1. **[spec/01-overview.md](spec/01-overview.md)** — Core concepts, mental model, why this exists
 2. **[spec/02-architecture.md](spec/02-architecture.md)** — Runtime components, event flow, storage layout
 3. **[spec/03-air.md](spec/03-air.md)** — Complete AIR v1 spec (schemas, modules, plans, capabilities, policies)
-4. **[spec/04-reducers.md](spec/04-reducers.md)** — Reducer semantics, ABI, relationship to plans
+4. **[spec/04-workflows.md](spec/04-workflows.md)** — Workflow semantics, ABI, relationship to plans
 5. **[spec/05-workflows.md](spec/05-workflows.md)** — Coordinating complex workflows (patterns, compensations, retries)
 
 For implementation guidance, project structure, and coding conventions, see **[AGENTS.md](AGENTS.md)**.
@@ -46,12 +46,12 @@ All ladder demos live under `crates/aos-smoke/fixtures/` and share the `aos-smok
 - List demos: `cargo run -p aos-smoke --`
 - Run a single demo (e.g., counter): `cargo run -p aos-smoke -- counter`
 - Run them sequentially: `cargo run -p aos-smoke -- all`
-- Force a rebuild of reducer WASM/artifacts: add `--force-build`, e.g. `cargo run -p aos-smoke -- --force-build counter`
+- Force a rebuild of workflow WASM/artifacts: add `--force-build`, e.g. `cargo run -p aos-smoke -- --force-build counter`
 - Increase logging by exporting `RUST_LOG=debug` before invoking the CLI if you need cache/build insight
 
 ## Workspaces and Sync
 
-AgentOS stores code and artifacts in **workspaces**: versioned trees managed by the built-in `sys/Workspace@1` reducer. Use `aos ws` for inspection/editing and `aos push`/`aos pull` to sync local directories via `aos.sync.json`.
+AgentOS stores code and artifacts in **workspaces**: versioned trees managed by the built-in `sys/Workspace@1` workflow. Use `aos ws` for inspection/editing and `aos push`/`aos pull` to sync local directories via `aos.sync.json`.
 
 Examples:
 - `aos ws ls`

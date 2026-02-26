@@ -4,7 +4,7 @@
     "name": "demo/ChainComp@1",
     "module_kind": "workflow",
     "abi": {
-      "reducer": {
+      "workflow": {
         "state": "demo/ChainState@1",
         "event": "demo/ChainEvent@1",
         "effects_emitted": ["http.request"],

@@ -3,7 +3,7 @@ name = "aos-wasm-build"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "Deterministic WASM compiler for AOS reducers"
+description = "Deterministic WASM compiler for AOS workflows"
 
 [dependencies]
 anyhow = "1"

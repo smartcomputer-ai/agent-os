@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use aos_air_types::ReducerAbi;
+use aos_air_types::WorkflowAbi;
 use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
 use aos_host::{WorldHost, config::HostConfig};
 use aos_kernel::Kernel;
 use aos_kernel::journal::JournalRecord;
 use aos_kernel::journal::mem::MemJournal;
-use aos_wasm_abi::ReducerOutput;
+use aos_wasm_abi::WorkflowOutput;
 use base64::prelude::*;
 use serde_json::json;
 use std::os::unix::net::UnixListener;
@@ -46,42 +46,42 @@ async fn control_channel_round_trip() {
 
     let store: Arc<TestStore> = fixtures::new_mem_store();
 
-    // Build simple manifest: reducers set fixed state when invoked.
-    let reducer_output = ReducerOutput {
+    // Build simple manifest: workflows set fixed state when invoked.
+    let workflow_output = WorkflowOutput {
         state: Some(vec![0xAA]),
         domain_events: vec![],
         effects: vec![],
         ann: None,
     };
-    let mut reducer = fixtures::stub_reducer_module(&store, "com.acme/Echo@1", &reducer_output);
-    reducer.abi.reducer = Some(ReducerAbi {
+    let mut workflow = fixtures::stub_workflow_module(&store, "com.acme/Echo@1", &workflow_output);
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let session_reducer_output = ReducerOutput {
+    let session_workflow_output = WorkflowOutput {
         state: Some(vec![0xAB]),
         domain_events: vec![],
         effects: vec![],
         ann: None,
     };
-    let mut session_reducer = fixtures::stub_reducer_module(
+    let mut session_workflow = fixtures::stub_workflow_module(
         &store,
         "com.acme/SessionEventEcho@1",
-        &session_reducer_output,
+        &session_workflow_output,
     );
-    session_reducer.abi.reducer = Some(ReducerAbi {
+    session_workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(SESSION_EVENT_SCHEMA),
         event: fixtures::schema(SESSION_EVENT_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let mut manifest = fixtures::build_loaded_manifest(vec![reducer, session_reducer],
+    let mut manifest = fixtures::build_loaded_manifest(vec![workflow, session_workflow],
         vec![
             fixtures::routing_event(START_SCHEMA, "com.acme/Echo@1"),
             fixtures::routing_event(SESSION_EVENT_SCHEMA, "com.acme/SessionEventEcho@1"),
@@ -424,7 +424,7 @@ async fn control_channel_round_trip() {
         v: 1,
         id: "2".into(),
         cmd: "state-get".into(),
-        payload: json!({ "reducer": "com.acme/Echo@1" }),
+        payload: json!({ "workflow": "com.acme/Echo@1" }),
     };
     let resp = client.request(&query).await.unwrap();
     assert!(resp.ok);
@@ -476,12 +476,12 @@ async fn control_channel_round_trip() {
         "defs-list should include the schema"
     );
 
-    // state-get with key_b64 on a non-keyed reducer should return null (state keyed lookup unsupported)
+    // state-get with key_b64 on a non-keyed workflow should return null (state keyed lookup unsupported)
     let query_key = RequestEnvelope {
         v: 1,
         id: "2b".into(),
         cmd: "state-get".into(),
-        payload: json!({ "reducer": "com.acme/Echo@1", "key_b64": BASE64_STANDARD.encode(b"k1") }),
+        payload: json!({ "workflow": "com.acme/Echo@1", "key_b64": BASE64_STANDARD.encode(b"k1") }),
     };
     let resp = client.request(&query_key).await.unwrap();
     assert!(resp.ok);

@@ -193,18 +193,13 @@ fn render_trace_human(result: &Value) {
             .and_then(|v| v.as_array())
             .map(std::vec::Vec::len)
             .unwrap_or(0);
-        let pending_reducer_receipts = wait
-            .get("pending_reducer_receipts")
-            .and_then(|v| v.as_array())
-            .map(std::vec::Vec::len)
-            .unwrap_or(0);
         let queued_effects = wait
             .get("queued_effects")
             .and_then(|v| v.as_array())
             .map(std::vec::Vec::len)
             .unwrap_or(0);
         println!(
-            "wait: workflow_receipts={pending_workflow_receipts} workflow_instances={workflow_instances} reducer_receipts={pending_reducer_receipts} queued_effects={queued_effects}"
+            "wait: workflow_receipts={pending_workflow_receipts} workflow_instances={workflow_instances} queued_effects={queued_effects}"
         );
     }
 

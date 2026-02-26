@@ -5,25 +5,25 @@
 #![allow(dead_code)]
 
 use aos_air_types::{
-    DefPolicy, DefSchema, EmptyObject, ManifestDefaults, NamedRef, ReducerAbi, TypeExpr,
+    DefPolicy, DefSchema, EmptyObject, ManifestDefaults, NamedRef, WorkflowAbi, TypeExpr,
     TypePrimitive, TypePrimitiveInt, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant,
 };
 use aos_effects::builtins::TimerSetParams;
 #[path = "fixtures.rs"]
 pub mod fixtures;
 
-use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use fixtures::{zero_hash, TestStore, START_SCHEMA};
 use indexmap::IndexMap;
 use std::sync::Arc;
 
-/// Builds a test manifest with a reducer that emits a timer effect and another reducer
+/// Builds a test manifest with a workflow that emits a timer effect and another workflow
 /// that handles the timer receipt event.
 pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let timer_output = ReducerOutput {
+    let timer_output = WorkflowOutput {
         state: Some(vec![0x01]),
         domain_events: vec![],
-        effects: vec![ReducerEffect::new(
+        effects: vec![WorkflowEffect::new(
             aos_effects::EffectKind::TIMER_SET,
             serde_cbor::to_vec(&TimerSetParams {
                 deliver_at_ns: 5,
@@ -34,34 +34,34 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         ann: None,
     };
     let mut timer_emitter =
-        fixtures::stub_reducer_module(store, "com.acme/TimerEmitter@1", &timer_output);
+        fixtures::stub_workflow_module(store, "com.acme/TimerEmitter@1", &timer_output);
 
-    let handler_output = ReducerOutput {
+    let handler_output = WorkflowOutput {
         state: Some(vec![0xCC]),
         domain_events: vec![],
         effects: vec![],
         ann: None,
     };
     let mut timer_handler =
-        fixtures::stub_reducer_module(store, "com.acme/TimerHandler@1", &handler_output);
+        fixtures::stub_workflow_module(store, "com.acme/TimerHandler@1", &handler_output);
 
     let timer_event_schema = "com.acme/TimerEvent@1";
     let routing = vec![
         fixtures::routing_event(fixtures::START_SCHEMA, &timer_emitter.name),
         fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
     ];
-    timer_emitter.abi.reducer = Some(ReducerAbi {
+    timer_emitter.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(timer_event_schema),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
-    timer_handler.abi.reducer = Some(ReducerAbi {
+    timer_handler.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(timer_event_schema),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
@@ -95,28 +95,28 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
     loaded
 }
 
-/// Builds a simple manifest with a single reducer that sets deterministic state when invoked.
+/// Builds a simple manifest with a single workflow that sets deterministic state when invoked.
 pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let mut reducer = fixtures::stub_reducer_module(
+    let mut workflow = fixtures::stub_workflow_module(
         store,
         "com.acme/Simple@1",
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(vec![0xAA]),
             domain_events: vec![],
             effects: vec![],
             ann: None,
         },
     );
-    reducer.abi.reducer = Some(ReducerAbi {
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/SimpleState@1"),
         event: fixtures::schema(START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
+    let routing = vec![fixtures::routing_event(START_SCHEMA, &workflow.name)];
+    let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
     insert_test_schemas(
         &mut loaded,
         vec![

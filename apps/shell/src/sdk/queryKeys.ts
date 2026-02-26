@@ -39,8 +39,8 @@ export const queryKeys = {
     ] as const,
   manifest: (params?: ManifestQuery) => ["manifest", params ?? {}] as const,
   stateGet: (path: StateGetPath, query?: StateGetQuery) =>
-    ["state_get", path.reducer, query ?? {}] as const,
-  stateCells: (path: StateCellsPath) => ["state_cells", path.reducer] as const,
+    ["state_get", path.workflow, query ?? {}] as const,
+  stateCells: (path: StateCellsPath) => ["state_cells", path.workflow] as const,
   workspaceAnnotationsGet: (params?: WorkspaceAnnotationsGetQuery) =>
     ["workspace_annotations_get", params ?? {}] as const,
   workspaceList: (params?: WorkspaceListQuery) =>

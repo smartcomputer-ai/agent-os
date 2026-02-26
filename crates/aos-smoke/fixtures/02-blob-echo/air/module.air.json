@@ -4,7 +4,7 @@
     "name": "demo/BlobEchoSM@1",
     "module_kind": "workflow",
     "abi": {
-      "reducer": {
+      "workflow": {
         "state": "demo/BlobEchoState@1",
         "event": "demo/BlobEchoEvent@1",
         "effects_emitted": ["blob.put", "blob.get"],

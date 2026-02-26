@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Args;
 use serde_json::Value as JsonValue;
 
-use crate::key::{KeyOverrides, encode_key_for_reducer};
+use crate::key::{KeyOverrides, encode_key_for_workflow};
 use crate::opts::{Mode, WorldOpts, resolve_dirs};
 use crate::output::print_success;
 use crate::util::load_world_env;
@@ -13,10 +13,10 @@ use super::{create_host, prepare_world, should_use_control, try_control_client};
 
 #[derive(Args, Debug)]
 pub struct StateArgs {
-    /// Reducer name (e.g., demo/Counter@1)
-    pub reducer_name: String,
+    /// Workflow name (e.g., demo/Counter@1)
+    pub workflow_name: String,
 
-    /// Key for keyed reducers (UTF-8)
+    /// Key for keyed workflows (UTF-8)
     #[arg(long)]
     pub key: Option<String>,
 
@@ -63,7 +63,7 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
             let (meta, state_opt) = client
                 .query_state_decoded(
                     "cli-state",
-                    &args.reducer_name,
+                    &args.workflow_name,
                     key_bytes_opt.as_deref(),
                     consistency.as_deref(),
                 )
@@ -95,7 +95,7 @@ pub async fn cmd_state(opts: &WorldOpts, args: &StateArgs) -> Result<()> {
 
     // Query state directly from host
     let read = host.query_state(
-        &args.reducer_name,
+        &args.workflow_name,
         key_bytes_opt.as_deref(),
         consistency
             .as_deref()
@@ -147,7 +147,7 @@ fn resolve_key(dirs: &crate::opts::ResolvedDirs, args: &StateArgs) -> Result<Opt
     {
         return Ok(None);
     }
-    encode_key_for_reducer(dirs, &args.reducer_name, &overrides).map(Some)
+    encode_key_for_workflow(dirs, &args.workflow_name, &overrides).map(Some)
 }
 
 fn parse_consistency(s: &str) -> aos_kernel::Consistency {

@@ -1,7 +1,7 @@
 use super::*;
 use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
 use aos_air_types::{
-    CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, ReducerAbi,
+    CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, WorkflowAbi,
     Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord,
     catalog::EffectCatalog,
 };
@@ -141,15 +141,15 @@ pub(crate) fn append_record(journal: &mut MemJournal, record: JournalRecord) {
 pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
     let store = aos_store::MemStore::default();
     let module = DefModule {
-        name: "com.acme/Reducer@1".into(),
+        name: "com.acme/Workflow@1".into(),
         module_kind: ModuleKind::Workflow,
         wasm_hash: HashRef::new(hash(1)).unwrap(),
         key_schema: Some(SchemaRef::new("com.acme/Key@1").unwrap()),
         abi: ModuleAbi {
-            reducer: Some(ReducerAbi {
+            workflow: Some(WorkflowAbi {
                 state: SchemaRef::new("com.acme/State@1").unwrap(),
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: vec![],
                 cap_slots: Default::default(),
@@ -170,7 +170,7 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![NamedRef {
-            name: "com.acme/Reducer@1".into(),
+            name: "com.acme/Workflow@1".into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
         effects: vec![],
@@ -182,7 +182,7 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                module: "com.acme/Reducer@1".to_string(),
+                module: "com.acme/Workflow@1".to_string(),
                 key_field: Some("id".into()),
             }],
             inboxes: vec![],
@@ -209,15 +209,15 @@ pub(crate) fn minimal_kernel_with_router() -> Kernel<aos_store::MemStore> {
 pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemStore> {
     let store = aos_store::MemStore::default();
     let module = DefModule {
-        name: "com.acme/Reducer@1".into(),
+        name: "com.acme/Workflow@1".into(),
         module_kind: ModuleKind::Workflow,
         wasm_hash: HashRef::new(hash(1)).unwrap(),
         key_schema: None,
         abi: ModuleAbi {
-            reducer: Some(ReducerAbi {
+            workflow: Some(WorkflowAbi {
                 state: SchemaRef::new("com.acme/State@1").unwrap(),
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: vec![],
                 cap_slots: Default::default(),
@@ -237,7 +237,7 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemSto
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![NamedRef {
-            name: "com.acme/Reducer@1".into(),
+            name: "com.acme/Workflow@1".into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
         effects: vec![],
@@ -249,7 +249,7 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemSto
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                module: "com.acme/Reducer@1".to_string(),
+                module: "com.acme/Workflow@1".to_string(),
                 key_field: Some("id".into()),
             }],
             inboxes: vec![],
@@ -276,15 +276,15 @@ pub(crate) fn minimal_kernel_with_router_non_keyed() -> Kernel<aos_store::MemSto
 pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
     let store = aos_store::MemStore::default();
     let module = DefModule {
-        name: "com.acme/Reducer@1".into(),
+        name: "com.acme/Workflow@1".into(),
         module_kind: ModuleKind::Workflow,
         wasm_hash: HashRef::new(hash(1)).unwrap(),
         key_schema: None,
         abi: ModuleAbi {
-            reducer: Some(ReducerAbi {
+            workflow: Some(WorkflowAbi {
                 state: SchemaRef::new("com.acme/State@1").unwrap(),
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: vec![],
                 cap_slots: Default::default(),
@@ -304,7 +304,7 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![NamedRef {
-            name: "com.acme/Reducer@1".into(),
+            name: "com.acme/Workflow@1".into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
         effects: vec![],
@@ -316,7 +316,7 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                module: "com.acme/Reducer@1".to_string(),
+                module: "com.acme/Workflow@1".to_string(),
                 key_field: None,
             }],
             inboxes: vec![],
@@ -343,15 +343,15 @@ pub(crate) fn minimal_kernel_non_keyed() -> Kernel<aos_store::MemStore> {
 pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemStore> {
     let store = aos_store::MemStore::default();
     let module = DefModule {
-        name: "com.acme/Reducer@1".into(),
+        name: "com.acme/Workflow@1".into(),
         module_kind: ModuleKind::Workflow,
         wasm_hash: HashRef::new(hash(1)).unwrap(),
         key_schema: Some(SchemaRef::new("com.acme/Key@1").unwrap()),
         abi: ModuleAbi {
-            reducer: Some(ReducerAbi {
+            workflow: Some(WorkflowAbi {
                 state: SchemaRef::new("com.acme/State@1").unwrap(),
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: vec![],
                 cap_slots: Default::default(),
@@ -372,7 +372,7 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemS
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![NamedRef {
-            name: "com.acme/Reducer@1".into(),
+            name: "com.acme/Workflow@1".into(),
             hash: HashRef::new(hash(1)).unwrap(),
         }],
         effects: vec![],
@@ -384,7 +384,7 @@ pub(crate) fn minimal_kernel_keyed_missing_key_field() -> Kernel<aos_store::MemS
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
-                module: "com.acme/Reducer@1".to_string(),
+                module: "com.acme/Workflow@1".to_string(),
                 key_field: None,
             }],
             inboxes: vec![],

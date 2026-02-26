@@ -4,7 +4,7 @@
     "name": "demo/WorkspaceDemo@1",
     "module_kind": "workflow",
     "abi": {
-      "reducer": {
+      "workflow": {
         "state": "demo/WorkspaceState@1",
         "event": "demo/WorkspaceEvent@1",
         "effects_emitted": [

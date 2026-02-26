@@ -58,12 +58,12 @@ pub enum ValidationError {
         expected: String,
         found: String,
     },
-    #[error("workflow module '{module}' must define reducer ABI")]
-    WorkflowAbiMissingReducer { module: String },
+    #[error("workflow module '{module}' must define workflow ABI")]
+    WorkflowAbiMissingWorkflow { module: String },
     #[error("pure module '{module}' must define pure ABI")]
     PureAbiMissingPure { module: String },
-    #[error("pure module '{module}' must not define reducer ABI")]
-    PureAbiHasReducer { module: String },
+    #[error("pure module '{module}' must not define workflow ABI")]
+    PureAbiHasWorkflow { module: String },
 }
 
 pub fn validate_manifest(
@@ -166,13 +166,13 @@ pub fn validate_manifest(
                     .ok_or_else(|| ValidationError::RoutingUnknownModule {
                         module: module.clone(),
                     })?;
-            let reducer_abi = module_def.abi.reducer.as_ref().ok_or_else(|| {
-                ValidationError::WorkflowAbiMissingReducer {
+            let workflow_abi = module_def.abi.workflow.as_ref().ok_or_else(|| {
+                ValidationError::WorkflowAbiMissingWorkflow {
                     module: module.clone(),
                 }
             })?;
 
-            let expected = reducer_abi.event.as_str();
+            let expected = workflow_abi.event.as_str();
             let family_schema =
                 schema_type(expected).ok_or_else(|| ValidationError::SchemaNotFound {
                     schema: expected.to_string(),
@@ -245,8 +245,8 @@ pub fn validate_manifest(
     for (module_name, module) in modules {
         match module.module_kind {
             ModuleKind::Workflow => {
-                if module.abi.reducer.is_none() {
-                    return Err(ValidationError::WorkflowAbiMissingReducer {
+                if module.abi.workflow.is_none() {
+                    return Err(ValidationError::WorkflowAbiMissingWorkflow {
                         module: module_name.clone(),
                     });
                 }
@@ -257,8 +257,8 @@ pub fn validate_manifest(
                         module: module_name.clone(),
                     });
                 }
-                if module.abi.reducer.is_some() {
-                    return Err(ValidationError::PureAbiHasReducer {
+                if module.abi.workflow.is_some() {
+                    return Err(ValidationError::PureAbiHasWorkflow {
                         module: module_name.clone(),
                     });
                 }
@@ -273,7 +273,7 @@ pub fn validate_manifest(
             }
         }
 
-        if let Some(abi) = module.abi.reducer.as_ref() {
+        if let Some(abi) = module.abi.workflow.as_ref() {
             for schema_ref in [
                 Some(abi.state.as_str()),
                 Some(abi.event.as_str()),
@@ -373,7 +373,7 @@ pub fn validate_manifest(
     }
 
     for module in modules.values() {
-        if let Some(abi) = module.abi.reducer.as_ref() {
+        if let Some(abi) = module.abi.workflow.as_ref() {
             let Some(binding) = manifest.module_bindings.get(&module.name) else {
                 continue;
             };
@@ -564,7 +564,7 @@ fn key_type_matches(
 mod tests {
     use super::*;
     use crate::{
-        CapGrant, DefModule, ManifestDefaults, ModuleAbi, ModuleBinding, NamedRef, ReducerAbi,
+        CapGrant, DefModule, ManifestDefaults, ModuleAbi, ModuleBinding, NamedRef, WorkflowAbi,
         Routing, SchemaRef, TypePrimitive, TypePrimitiveText, TypeRecord,
     };
     use indexmap::IndexMap;
@@ -620,7 +620,7 @@ mod tests {
             wasm_hash: crate::HashRef::new(format!("sha256:{}", "b".repeat(64))).unwrap(),
             key_schema: None,
             abi: ModuleAbi {
-                reducer: Some(ReducerAbi {
+                workflow: Some(WorkflowAbi {
                     state: SchemaRef::new("com.acme/State@1").unwrap(),
                     event: SchemaRef::new("com.acme/Event@1").unwrap(),
                     context: None,

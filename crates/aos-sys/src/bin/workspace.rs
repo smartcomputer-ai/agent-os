@@ -1,6 +1,6 @@
-//! Workspace reducer (`sys/Workspace@1`).
+//! Workspace workflow (`sys/Workspace@1`).
 //!
-//! A keyed reducer that maintains append-only workspace commit history.
+//! A keyed workflow that maintains append-only workspace commit history.
 
 #![allow(improper_ctypes_definitions)]
 #![no_std]
@@ -9,7 +9,7 @@ extern crate alloc;
 
 use alloc::string::String;
 use aos_sys::{WorkspaceCommit, WorkspaceHistory, WorkspaceVersion};
-use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_reducer};
+use aos_wasm_sdk::{ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
 use serde_cbor;
 
 // Required for WASM binary entry point
@@ -19,9 +19,9 @@ fn main() {}
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {}
 
-aos_reducer!(Workspace);
+aos_workflow!(Workspace);
 
-/// Workspace reducer — keyed by workspace name.
+/// Workspace workflow — keyed by workspace name.
 ///
 /// Invariants:
 /// - Key must equal `event.workspace` (enforced via `ensure_key_eq`)
@@ -30,7 +30,7 @@ aos_reducer!(Workspace);
 #[derive(Default)]
 struct Workspace;
 
-impl Reducer for Workspace {
+impl Workflow for Workspace {
     type State = WorkspaceHistory;
     type Event = WorkspaceCommit;
     type Ann = Value;
@@ -38,7 +38,7 @@ impl Reducer for Workspace {
     fn reduce(
         &mut self,
         event: Self::Event,
-        ctx: &mut ReducerCtx<Self::State, Self::Ann>,
+        ctx: &mut WorkflowCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
         let workspace = event.workspace;
         if !is_valid_workspace_name(&workspace) {
@@ -47,8 +47,11 @@ impl Reducer for Workspace {
 
         // Key must match event.workspace for keyed routing (safeguard).
         if let Some(key) = ctx.key() {
-            let decoded_key: String =
-                serde_cbor::from_slice(key).map_err(|_| ReduceError::new("key decode failed"))?;
+            let decoded_key: String = if let Ok(decoded) = serde_cbor::from_slice(key) {
+                decoded
+            } else {
+                String::from_utf8(key.to_vec()).map_err(|_| ReduceError::new("key decode failed"))?
+            };
             if decoded_key != workspace {
                 return Err(ReduceError::new("key mismatch"));
             }

@@ -16,7 +16,7 @@ use aos_wasm_build::builder::{BuildRequest, Builder};
 use camino::Utf8PathBuf;
 use serde_json::{Value, json};
 
-const DEMIURGE_REDUCER: &str = "demiurge/Demiurge@1";
+const DEMIURGE_WORKFLOW: &str = "demiurge/Demiurge@1";
 const SESSION_ID: &str = "22222222-2222-2222-2222-222222222222";
 const TOOL_CALL_ID: &str = "call_1";
 
@@ -132,7 +132,7 @@ fn analyze_trace(
     }
 
     let workflow_instances = kernel.workflow_instances_snapshot();
-    let waiting_receipt_count = kernel.pending_reducer_receipts_snapshot().len()
+    let waiting_receipt_count = kernel.pending_workflow_receipts_snapshot().len()
         + kernel.queued_effects_snapshot().len()
         + workflow_instances
             .iter()
@@ -203,13 +203,13 @@ fn send_session_event(
     Ok(())
 }
 
-fn reducer_state_json(host: &TestHost<FsStore>) -> Result<Value> {
+fn workflow_state_json(host: &TestHost<FsStore>) -> Result<Value> {
     let state_bytes = host
         .kernel()
-        .reducer_state_bytes(DEMIURGE_REDUCER, None)
-        .context("load reducer state")?
-        .ok_or_else(|| anyhow::anyhow!("missing reducer state"))?;
-    serde_cbor::from_slice(&state_bytes).context("decode reducer state json")
+        .workflow_state_bytes(DEMIURGE_WORKFLOW, None)
+        .context("load workflow state")?
+        .ok_or_else(|| anyhow::anyhow!("missing workflow state"))?;
+    serde_cbor::from_slice(&state_bytes).context("decode workflow state json")
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -229,19 +229,19 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
             .context("load demiurge assets")?
             .context("missing demiurge manifest")?;
 
-    let reducer_root = asset_root.join("reducer");
-    let reducer_dir =
-        Utf8PathBuf::from_path_buf(reducer_root.to_path_buf()).expect("utf8 reducer path");
-    let mut request = BuildRequest::new(reducer_dir);
+    let workflow_root = asset_root.join("workflow");
+    let workflow_dir =
+        Utf8PathBuf::from_path_buf(workflow_root.to_path_buf()).expect("utf8 workflow path");
+    let mut request = BuildRequest::new(workflow_dir);
     request.config.release = false;
-    let artifact = Builder::compile(request).context("compile demiurge reducer")?;
+    let artifact = Builder::compile(request).context("compile demiurge workflow")?;
     let wasm_hash = store
         .put_blob(&artifact.wasm_bytes)
-        .context("store reducer wasm")?;
+        .context("store workflow wasm")?;
 
     let module = loaded
         .modules
-        .get_mut(DEMIURGE_REDUCER)
+        .get_mut(DEMIURGE_WORKFLOW)
         .expect("demiurge module");
     module.wasm_hash = HashRef::new(wasm_hash.to_hex()).expect("wasm hash ref");
 
@@ -301,7 +301,7 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
     step_epoch += 1;
     run_until_idle(&mut host, 8).await?;
 
-    let state = reducer_state_json(&host)?;
+    let state = workflow_state_json(&host)?;
     let active_run_config = state
         .get("active_run_config")
         .and_then(Value::as_object)
@@ -365,7 +365,7 @@ async fn demiurge_introspect_manifest_roundtrip() -> Result<()> {
 
     run_until_idle(&mut host, 16).await?;
 
-    let state = reducer_state_json(&host)?;
+    let state = workflow_state_json(&host)?;
     let batch = state
         .get("active_tool_batch")
         .and_then(Value::as_object)

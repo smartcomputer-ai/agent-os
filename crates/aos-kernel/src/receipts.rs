@@ -15,9 +15,9 @@ const SYS_TIMER_FIRED_SCHEMA: &str = "sys/TimerFired@1";
 const SYS_BLOB_PUT_RESULT_SCHEMA: &str = "sys/BlobPutResult@1";
 const SYS_BLOB_GET_RESULT_SCHEMA: &str = "sys/BlobGetResult@1";
 
-/// Metadata describing a workflow/reducer-origin effect that is awaiting a receipt.
+/// Metadata describing a workflow/workflow-origin effect that is awaiting a receipt.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReducerEffectContext {
+pub struct WorkflowEffectContext {
     pub origin_module_id: String,
     pub origin_instance_key: Option<Vec<u8>>,
     pub effect_kind: String,
@@ -27,7 +27,7 @@ pub struct ReducerEffectContext {
     pub module_version: Option<String>,
 }
 
-impl ReducerEffectContext {
+impl WorkflowEffectContext {
     pub fn new(
         origin_module_id: String,
         origin_instance_key: Option<Vec<u8>>,
@@ -123,7 +123,7 @@ struct WorkflowReceiptRejected {
 #[derive(Serialize)]
 struct TimerReceiptEvent {
     intent_hash: String,
-    reducer: String,
+    workflow: String,
     effect_kind: String,
     adapter_id: String,
     status: ReceiptStatus,
@@ -138,7 +138,7 @@ struct TimerReceiptEvent {
 #[derive(Serialize)]
 struct BlobReceiptEvent<TParams, TReceipt> {
     intent_hash: String,
-    reducer: String,
+    workflow: String,
     effect_kind: String,
     adapter_id: String,
     status: ReceiptStatus,
@@ -151,7 +151,7 @@ struct BlobReceiptEvent<TParams, TReceipt> {
 }
 
 pub fn build_workflow_receipt_event(
-    ctx: &ReducerEffectContext,
+    ctx: &WorkflowEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<DomainEvent, KernelError> {
     let payload = WorkflowReceiptEnvelope {
@@ -171,7 +171,7 @@ pub fn build_workflow_receipt_event(
 }
 
 pub fn build_workflow_receipt_rejected_event(
-    ctx: &ReducerEffectContext,
+    ctx: &WorkflowEffectContext,
     receipt: &EffectReceipt,
     error_code: &str,
     error_message: &str,
@@ -194,7 +194,7 @@ pub fn build_workflow_receipt_rejected_event(
 }
 
 pub fn build_workflow_stream_frame_event(
-    ctx: &ReducerEffectContext,
+    ctx: &WorkflowEffectContext,
     frame: &EffectStreamFrame,
 ) -> Result<DomainEvent, KernelError> {
     let payload = WorkflowStreamFrameEnvelope {
@@ -215,8 +215,8 @@ pub fn build_workflow_stream_frame_event(
 }
 
 /// Optional compatibility path for typed timer/blob receipt envelopes.
-pub fn build_legacy_reducer_receipt_event(
-    ctx: &ReducerEffectContext,
+pub fn build_legacy_workflow_receipt_event(
+    ctx: &WorkflowEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<Option<DomainEvent>, KernelError> {
     let event = match ctx.effect_kind.as_str() {
@@ -229,14 +229,14 @@ pub fn build_legacy_reducer_receipt_event(
 }
 
 fn build_timer_event(
-    ctx: &ReducerEffectContext,
+    ctx: &WorkflowEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<DomainEvent, KernelError> {
     let requested: TimerSetParams = decode(&ctx.params_cbor)?;
     let timer_receipt: TimerSetReceipt = decode(&receipt.payload_cbor)?;
     let payload = TimerReceiptEvent {
         intent_hash: hash_to_hex(&ctx.intent_id),
-        reducer: ctx.origin_module_id.clone(),
+        workflow: ctx.origin_module_id.clone(),
         effect_kind: ctx.effect_kind.clone(),
         adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
@@ -249,14 +249,14 @@ fn build_timer_event(
 }
 
 fn build_blob_put_event(
-    ctx: &ReducerEffectContext,
+    ctx: &WorkflowEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<DomainEvent, KernelError> {
     let requested: BlobPutParams = decode(&ctx.params_cbor)?;
     let blob_receipt: BlobPutReceipt = decode(&receipt.payload_cbor)?;
     let payload = BlobReceiptEvent {
         intent_hash: hash_to_hex(&ctx.intent_id),
-        reducer: ctx.origin_module_id.clone(),
+        workflow: ctx.origin_module_id.clone(),
         effect_kind: ctx.effect_kind.clone(),
         adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
@@ -269,14 +269,14 @@ fn build_blob_put_event(
 }
 
 fn build_blob_get_event(
-    ctx: &ReducerEffectContext,
+    ctx: &WorkflowEffectContext,
     receipt: &EffectReceipt,
 ) -> Result<DomainEvent, KernelError> {
     let requested: BlobGetParams = decode(&ctx.params_cbor)?;
     let blob_receipt: BlobGetReceipt = decode(&receipt.payload_cbor)?;
     let payload = BlobReceiptEvent {
         intent_hash: hash_to_hex(&ctx.intent_id),
-        reducer: ctx.origin_module_id.clone(),
+        workflow: ctx.origin_module_id.clone(),
         effect_kind: ctx.effect_kind.clone(),
         adapter_id: receipt.adapter_id.clone(),
         status: receipt.status.clone(),
@@ -352,8 +352,8 @@ mod tests {
         }
     }
 
-    fn base_context(effect_kind: &str) -> ReducerEffectContext {
-        ReducerEffectContext::new(
+    fn base_context(effect_kind: &str) -> WorkflowEffectContext {
+        WorkflowEffectContext::new(
             "com.acme/Workflow@1".into(),
             Some(b"order-123".to_vec()),
             effect_kind.into(),
@@ -409,7 +409,7 @@ mod tests {
     fn legacy_unknown_effect_returns_none() {
         let ctx = base_context("custom.effect");
         let receipt = base_receipt();
-        let legacy = build_legacy_reducer_receipt_event(&ctx, &receipt).expect("legacy");
+        let legacy = build_legacy_workflow_receipt_event(&ctx, &receipt).expect("legacy");
         assert!(legacy.is_none());
     }
 
@@ -529,7 +529,7 @@ mod tests {
         let mut receipt = base_receipt();
         receipt.payload_cbor = serde_cbor::to_vec(&timer_receipt).unwrap();
 
-        let event = build_legacy_reducer_receipt_event(&ctx, &receipt)
+        let event = build_legacy_workflow_receipt_event(&ctx, &receipt)
             .expect("legacy")
             .expect("timer event");
         assert_eq!(event.schema, SYS_TIMER_FIRED_SCHEMA);
@@ -551,7 +551,7 @@ mod tests {
         };
         let mut receipt = base_receipt();
         receipt.payload_cbor = serde_cbor::to_vec(&receipt_body).unwrap();
-        let event = build_legacy_reducer_receipt_event(&ctx, &receipt)
+        let event = build_legacy_workflow_receipt_event(&ctx, &receipt)
             .expect("legacy")
             .expect("blob.put event");
         assert_eq!(event.schema, SYS_BLOB_PUT_RESULT_SCHEMA);
@@ -571,7 +571,7 @@ mod tests {
         };
         let mut receipt = base_receipt();
         receipt.payload_cbor = serde_cbor::to_vec(&receipt_body).unwrap();
-        let event = build_legacy_reducer_receipt_event(&ctx, &receipt)
+        let event = build_legacy_workflow_receipt_event(&ctx, &receipt)
             .expect("legacy")
             .expect("blob.get event");
         assert_eq!(event.schema, SYS_BLOB_GET_RESULT_SCHEMA);

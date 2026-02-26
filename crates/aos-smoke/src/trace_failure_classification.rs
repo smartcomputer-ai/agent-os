@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const REDUCER_NAME: &str = "demo/FetchNotify@1";
+const WORKFLOW_NAME: &str = "demo/FetchNotify@1";
 const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/reducer";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/workflow";
 
 const AIR_ALLOW: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/air.allow";
 const AIR_CAP_DENY: &str = "crates/aos-smoke/fixtures/10-trace-failure-classification/air.cap_deny";
@@ -41,7 +41,7 @@ fn run_policy_denied(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: Some(Path::new(AIR_POLICY_DENY)),
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_CRATE,
     })?;
@@ -58,7 +58,7 @@ fn run_capability_denied(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: Some(Path::new(AIR_CAP_DENY)),
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_CRATE,
     })?;
@@ -75,7 +75,7 @@ fn run_adapter_timeout(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: Some(Path::new(AIR_ALLOW)),
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_CRATE,
     })?;
@@ -106,7 +106,7 @@ fn run_adapter_error(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: Some(Path::new(AIR_ALLOW)),
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
         module_crate: MODULE_CRATE,
     })?;

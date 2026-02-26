@@ -10,20 +10,20 @@ pub enum KernelError {
     Wasm(#[from] anyhow::Error),
     #[error("manifest loader error: {0}")]
     Manifest(String),
-    #[error("missing reducer '{0}'")]
-    ReducerNotFound(String),
+    #[error("missing workflow '{0}'")]
+    WorkflowNotFound(String),
     #[error("missing pure module '{0}'")]
     PureNotFound(String),
-    #[error("invalid reducer output: {0}")]
-    ReducerOutput(String),
+    #[error("invalid workflow output: {0}")]
+    WorkflowOutput(String),
     #[error("effect manager error: {0}")]
     EffectManager(String),
     #[error("unknown effect receipt for {0}")]
     UnknownReceipt(String),
     #[error("failed to decode receipt payload: {0}")]
     ReceiptDecode(String),
-    #[error("unsupported reducer receipt kind '{0}'")]
-    UnsupportedReducerReceipt(String),
+    #[error("unsupported workflow receipt kind '{0}'")]
+    UnsupportedWorkflowReceipt(String),
     #[error("capability grant '{0}' not found")]
     CapabilityGrantNotFound(String),
     #[error("capability definition '{0}' not found")]
@@ -43,8 +43,8 @@ pub enum KernelError {
     },
     #[error("unsupported effect kind '{0}'")]
     UnsupportedEffectKind(String),
-    #[error("capability binding missing for reducer '{reducer}' slot '{slot}'")]
-    CapabilityBindingMissing { reducer: String, slot: String },
+    #[error("capability binding missing for workflow '{workflow}' slot '{slot}'")]
+    CapabilityBindingMissing { workflow: String, slot: String },
     #[error("capability grant '{cap}' referenced by plan '{plan}' is missing")]
     PlanCapabilityMissing { plan: String, cap: String },
     #[error("module '{module}' binding references missing capability '{cap}'")]
@@ -89,15 +89,15 @@ pub enum KernelError {
     #[error("proposal {0} already applied")]
     ProposalAlreadyApplied(u64),
     #[error(
-        "manifest apply blocked: in-flight runtime state exists (plans={plan_instances}, waiting_events={waiting_events}, pending_plan_receipts={pending_plan_receipts}, pending_reducer_receipts={pending_reducer_receipts}, queued_effects={queued_effects}, reducer_queue_pending={reducer_queue_pending})"
+        "manifest apply blocked: in-flight runtime state exists (plans={plan_instances}, waiting_events={waiting_events}, pending_plan_receipts={pending_plan_receipts}, pending_workflow_receipts={pending_workflow_receipts}, queued_effects={queued_effects}, workflow_queue_pending={workflow_queue_pending})"
     )]
     ManifestApplyBlockedInFlight {
         plan_instances: usize,
         waiting_events: usize,
         pending_plan_receipts: usize,
-        pending_reducer_receipts: usize,
+        pending_workflow_receipts: usize,
         queued_effects: usize,
-        reducer_queue_pending: bool,
+        workflow_queue_pending: bool,
     },
     #[error("shadow patch hash mismatch: expected {expected}, got {actual}")]
     ShadowPatchMismatch { expected: String, actual: String },
@@ -128,13 +128,13 @@ impl KernelError {
             KernelError::Store(_) => "store.error",
             KernelError::Wasm(_) => "wasm.error",
             KernelError::Manifest(_) => "manifest.error",
-            KernelError::ReducerNotFound(_) => "reducer.missing",
+            KernelError::WorkflowNotFound(_) => "workflow.missing",
             KernelError::PureNotFound(_) => "pure.missing",
-            KernelError::ReducerOutput(_) => "reducer.output_invalid",
+            KernelError::WorkflowOutput(_) => "workflow.output_invalid",
             KernelError::EffectManager(_) => "effect.manager",
             KernelError::UnknownReceipt(_) => "receipt.unknown",
             KernelError::ReceiptDecode(_) => "receipt.decode",
-            KernelError::UnsupportedReducerReceipt(_) => "receipt.reducer_unsupported",
+            KernelError::UnsupportedWorkflowReceipt(_) => "receipt.workflow_unsupported",
             KernelError::CapabilityGrantNotFound(_) => "cap.grant_missing",
             KernelError::CapabilityDefinitionNotFound(_) => "cap.def_missing",
             KernelError::DuplicateCapabilityGrant(_) => "cap.grant_duplicate",

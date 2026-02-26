@@ -93,11 +93,13 @@ fn rule_without_when_is_rejected_by_schema() {
 }
 
 #[test]
-fn legacy_origin_alias_plan_deserializes_as_workflow() {
+fn policy_rejects_legacy_origin_alias_plan() {
     let legacy = json!({
         "effect_kind": "http.request",
         "origin_kind": "plan"
     });
-    let r#match: PolicyMatch = serde_json::from_value(legacy).expect("legacy match");
-    assert_eq!(r#match.origin_kind, Some(crate::OriginKind::Workflow));
+    assert!(
+        serde_json::from_value::<PolicyMatch>(legacy).is_err(),
+        "legacy origin_kind=plan alias should be rejected"
+    );
 }

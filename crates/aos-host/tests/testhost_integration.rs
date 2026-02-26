@@ -10,14 +10,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aos_air_types::{
-    DefModule, DefSchema, Manifest, ModuleAbi, NamedRef, ReducerAbi, Routing, RoutingEvent,
+    DefModule, DefSchema, Manifest, ModuleAbi, NamedRef, WorkflowAbi, Routing, RoutingEvent,
     SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveNat, TypePrimitiveUnit, TypeRecord, TypeRef,
     TypeVariant, catalog::EffectCatalog,
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_host::testhost::TestHost;
 use aos_kernel::LoadedManifest;
-use aos_wasm_abi::{ReducerEffect, ReducerOutput};
+use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
 use helpers::fixtures::{self, TestStore};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -86,32 +86,32 @@ enum CounterEvent {
     Tick,
 }
 
-const REDUCER_NAME: &str = "demo/CounterSM@1";
+const WORKFLOW_NAME: &str = "demo/CounterSM@1";
 const STATE_SCHEMA: &str = "demo/CounterState@1";
 const EVENT_SCHEMA: &str = "demo/CounterEvent@1";
 const PC_SCHEMA: &str = "demo/CounterPc@1";
 
-/// Build a counter-like manifest using a stub reducer that returns a predetermined state.
+/// Build a counter-like manifest using a stub workflow that returns a predetermined state.
 fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) -> LoadedManifest {
-    // Stub reducer that outputs the given final state
-    let output = ReducerOutput {
+    // Stub workflow that outputs the given final state
+    let output = WorkflowOutput {
         state: Some(serde_cbor::to_vec(final_state).unwrap()),
         domain_events: vec![],
         effects: vec![],
         ann: None,
     };
 
-    let module = fixtures::stub_reducer_module(store, REDUCER_NAME, &output);
+    let module = fixtures::stub_workflow_module(store, WORKFLOW_NAME, &output);
     let module_with_abi = DefModule {
         name: module.name.clone(),
         module_kind: module.module_kind.clone(),
         wasm_hash: module.wasm_hash.clone(),
         key_schema: None,
         abi: ModuleAbi {
-            reducer: Some(ReducerAbi {
+            workflow: Some(WorkflowAbi {
                 state: SchemaRef::new(STATE_SCHEMA).unwrap(),
                 event: SchemaRef::new(EVENT_SCHEMA).unwrap(),
-                context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+                context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
                 annotations: None,
                 effects_emitted: Vec::new(),
                 cap_slots: IndexMap::new(),
@@ -148,7 +148,7 @@ fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) ->
             },
         ],
         modules: vec![NamedRef {
-            name: REDUCER_NAME.into(),
+            name: WORKFLOW_NAME.into(),
             hash: module_with_abi.wasm_hash.clone(),
         }],
         effects: aos_air_types::builtins::builtin_effects()
@@ -166,7 +166,7 @@ fn build_counter_manifest(store: &Arc<TestStore>, final_state: &CounterState) ->
         routing: Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new(EVENT_SCHEMA).unwrap(),
-                module: REDUCER_NAME.into(),
+                module: WORKFLOW_NAME.into(),
                 key_field: None,
             }],
             inboxes: Vec::new(),
@@ -270,7 +270,7 @@ async fn testhost_from_loaded_manifest_counter_flow() {
     assert!(cycle.initial_drain.idle);
 
     // Check state
-    let state: CounterState = host.state(REDUCER_NAME).unwrap();
+    let state: CounterState = host.state(WORKFLOW_NAME).unwrap();
     assert_eq!(state.pc, CounterPc::Done);
     assert_eq!(state.remaining, 0);
 
@@ -288,7 +288,7 @@ async fn testhost_drain_effects_empty_for_counter() {
     let loaded = build_counter_manifest(&store, &final_state);
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
-    // Counter reducer doesn't emit effects
+    // Counter workflow doesn't emit effects
     let effects = host.drain_effects().expect("drain effects");
     assert!(effects.is_empty());
 }
@@ -326,8 +326,8 @@ async fn testhost_state_bytes_and_typed_state_match() {
     host.run_cycle_batch().await.unwrap();
 
     // Compare both access methods
-    let bytes = host.state_bytes(REDUCER_NAME).unwrap();
-    let typed: CounterState = host.state(REDUCER_NAME).unwrap();
+    let bytes = host.state_bytes(WORKFLOW_NAME).unwrap();
+    let typed: CounterState = host.state(WORKFLOW_NAME).unwrap();
     let from_bytes: CounterState = serde_cbor::from_slice(&bytes).unwrap();
 
     assert_eq!(typed, from_bytes);
@@ -352,7 +352,7 @@ async fn testhost_state_json() {
     .unwrap();
     host.run_cycle_batch().await.unwrap();
 
-    let json = host.state_json(REDUCER_NAME).unwrap();
+    let json = host.state_json(WORKFLOW_NAME).unwrap();
     assert_eq!(json["remaining"], 2);
 }
 
@@ -361,18 +361,18 @@ async fn testhost_state_json() {
 async fn testhost_with_fixtures_build_loaded_manifest() {
     let store = fixtures::new_mem_store();
 
-    // Use fixtures helpers to build a simple reducer stub
-    let output = ReducerOutput {
+    // Use fixtures helpers to build a simple workflow stub
+    let output = WorkflowOutput {
         state: Some(vec![0xAA, 0xBB]),
         domain_events: vec![],
         effects: vec![],
         ann: None,
     };
-    let mut module = fixtures::stub_reducer_module(&store, "test/Reducer@1", &output);
-    module.abi.reducer = Some(ReducerAbi {
+    let mut module = fixtures::stub_workflow_module(&store, "test/Workflow@1", &output);
+    module.abi.workflow = Some(WorkflowAbi {
         state: SchemaRef::new("test/State@1").unwrap(),
         event: SchemaRef::new("test/Event@1").unwrap(),
-        context: Some(SchemaRef::new("sys/ReducerContext@1").unwrap()),
+        context: Some(SchemaRef::new("sys/WorkflowContext@1").unwrap()),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: IndexMap::new(),
@@ -380,8 +380,8 @@ async fn testhost_with_fixtures_build_loaded_manifest() {
 
     // Build manifest using fixtures helper
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![module], // one reducer
-        vec![fixtures::routing_event("test/Event@1", "test/Reducer@1")],
+        vec![module], // one workflow
+        vec![fixtures::routing_event("test/Event@1", "test/Workflow@1")],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -403,13 +403,13 @@ async fn testhost_with_fixtures_build_loaded_manifest() {
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
-    // Send event to trigger reducer
+    // Send event to trigger workflow
     host.send_event("test/Event@1", serde_json::json!({}))
         .unwrap();
     host.run_cycle_batch().await.unwrap();
 
     // Check state was set
-    let bytes = host.state_bytes("test/Reducer@1").unwrap();
+    let bytes = host.state_bytes("test/Workflow@1").unwrap();
     assert_eq!(bytes, vec![0xAA, 0xBB]);
 }
 
@@ -443,7 +443,7 @@ async fn testhost_replay_smoke() {
     host.snapshot().unwrap();
 
     // State should still be accessible
-    let state: CounterState = host.state(REDUCER_NAME).unwrap();
+    let state: CounterState = host.state(WORKFLOW_NAME).unwrap();
     assert_eq!(state.pc, CounterPc::Done);
 }
 
@@ -462,34 +462,34 @@ struct TimerSetReceipt {
     key: Option<String>,
 }
 
-/// Test timer micro-effect flow: reducer emits timer.set, we drain and inject receipt
+/// Test timer micro-effect flow: workflow emits timer.set, we drain and inject receipt
 #[tokio::test]
 async fn testhost_timer_effect_flow() {
     let store = fixtures::new_mem_store();
 
-    // Build reducer that emits a timer.set effect
+    // Build workflow that emits a timer.set effect
     let timer_params = TimerSetParams {
         deliver_at_ns: 1_000_000,
         key: Some("test-timer".into()),
     };
-    let effect = ReducerEffect::with_cap_slot(
+    let effect = WorkflowEffect::with_cap_slot(
         aos_effects::EffectKind::TIMER_SET,
         serde_cbor::to_vec(&timer_params).unwrap(),
         "default",
     );
 
-    let output = ReducerOutput {
+    let output = WorkflowOutput {
         state: Some(vec![0x01]), // "awaiting" state
         domain_events: vec![],
         effects: vec![effect],
         ann: None,
     };
 
-    let mut module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
-    module.abi.reducer = Some(ReducerAbi {
+    let mut module = fixtures::stub_workflow_module(&store, "test/TimerWorkflow@1", &output);
+    module.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("test/TimerState@1"),
         event: fixtures::schema("test/TimerEvent@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
@@ -499,7 +499,7 @@ async fn testhost_timer_effect_flow() {
     let mut loaded = fixtures::build_loaded_manifest(vec![module],
         vec![fixtures::routing_event(
             "test/TimerEvent@1",
-            "test/TimerReducer@1",
+            "test/TimerWorkflow@1",
         )],
     );
     fixtures::insert_test_schemas(
@@ -509,11 +509,11 @@ async fn testhost_timer_effect_flow() {
 
     let mut host = TestHost::from_loaded_manifest(store, loaded).unwrap();
 
-    // Send event to trigger reducer
+    // Send event to trigger workflow
     host.send_event("test/TimerEvent@1", timer_start_event())
         .unwrap();
 
-    // Run cycle - this will drain reducer but not dispatch effects yet
+    // Run cycle - this will drain workflow but not dispatch effects yet
     host.kernel_mut().tick_until_idle().unwrap();
 
     // Drain the timer effect
@@ -545,7 +545,7 @@ async fn testhost_timer_effect_flow() {
     host.kernel_mut().tick_until_idle().unwrap();
 
     // State should still be accessible after receipt processing
-    let state_bytes = host.state_bytes("test/TimerReducer@1").unwrap();
+    let state_bytes = host.state_bytes("test/TimerWorkflow@1").unwrap();
     assert_eq!(state_bytes, vec![0x01]);
 }
 
@@ -554,29 +554,29 @@ async fn testhost_timer_effect_flow() {
 async fn testhost_run_cycle_batch_with_timer_effect() {
     let store = fixtures::new_mem_store();
 
-    // Build reducer that emits a timer.set effect
+    // Build workflow that emits a timer.set effect
     let timer_params = TimerSetParams {
         deliver_at_ns: 500_000,
         key: None,
     };
-    let effect = ReducerEffect::with_cap_slot(
+    let effect = WorkflowEffect::with_cap_slot(
         aos_effects::EffectKind::TIMER_SET,
         serde_cbor::to_vec(&timer_params).unwrap(),
         "default",
     );
 
-    let output = ReducerOutput {
+    let output = WorkflowOutput {
         state: Some(vec![0xBB]),
         domain_events: vec![],
         effects: vec![effect],
         ann: None,
     };
 
-    let mut module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
-    module.abi.reducer = Some(ReducerAbi {
+    let mut module = fixtures::stub_workflow_module(&store, "test/TimerWorkflow@1", &output);
+    module.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("test/TimerState@1"),
         event: fixtures::schema("test/TimerEvent@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
@@ -584,7 +584,7 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
     let mut loaded = fixtures::build_loaded_manifest(vec![module],
         vec![fixtures::routing_event(
             "test/TimerEvent@1",
-            "test/TimerReducer@1",
+            "test/TimerWorkflow@1",
         )],
     );
     fixtures::insert_test_schemas(
@@ -606,7 +606,7 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
     assert_eq!(cycle.receipts_applied, 1);
 
     // State should be set
-    let state_bytes = host.state_bytes("test/TimerReducer@1").unwrap();
+    let state_bytes = host.state_bytes("test/TimerWorkflow@1").unwrap();
     assert_eq!(state_bytes, vec![0xBB]);
 }
 
@@ -615,27 +615,27 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
 async fn testhost_run_cycle_with_timers_schedules_and_fires() {
     let store = fixtures::new_mem_store();
 
-    // Reducer emits a timer.set effect
+    // Workflow emits a timer.set effect
     let timer_params = TimerSetParams {
         deliver_at_ns: 123,
         key: None,
     };
-    let effect = ReducerEffect::with_cap_slot(
+    let effect = WorkflowEffect::with_cap_slot(
         aos_effects::EffectKind::TIMER_SET,
         serde_cbor::to_vec(&timer_params).unwrap(),
         "default",
     );
-    let output = ReducerOutput {
+    let output = WorkflowOutput {
         state: Some(vec![0xCC]),
         domain_events: vec![],
         effects: vec![effect],
         ann: None,
     };
-    let mut module = fixtures::stub_reducer_module(&store, "test/TimerReducer@1", &output);
-    module.abi.reducer = Some(ReducerAbi {
+    let mut module = fixtures::stub_workflow_module(&store, "test/TimerWorkflow@1", &output);
+    module.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("test/TimerState@1"),
         event: fixtures::schema("test/TimerEvent@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
@@ -643,7 +643,7 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
     let mut loaded = fixtures::build_loaded_manifest(vec![module],
         vec![fixtures::routing_event(
             "test/TimerEvent@1",
-            "test/TimerReducer@1",
+            "test/TimerWorkflow@1",
         )],
     );
     fixtures::insert_test_schemas(
@@ -659,6 +659,6 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
     assert_eq!(cycle.effects_dispatched, 1);
     assert_eq!(cycle.receipts_applied, 1);
 
-    let state_bytes = host.state_bytes("test/TimerReducer@1").unwrap();
+    let state_bytes = host.state_bytes("test/TimerWorkflow@1").unwrap();
     assert_eq!(state_bytes, vec![0xCC]);
 }

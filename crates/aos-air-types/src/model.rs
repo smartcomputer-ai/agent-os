@@ -445,7 +445,6 @@ pub struct DefModule {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ModuleKind {
-    #[serde(rename = "workflow", alias = "reducer")]
     Workflow,
     Pure,
 }
@@ -453,13 +452,13 @@ pub enum ModuleKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleAbi {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reducer: Option<ReducerAbi>,
+    pub workflow: Option<WorkflowAbi>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pure: Option<PureAbi>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReducerAbi {
+pub struct WorkflowAbi {
     pub state: SchemaRef,
     pub event: SchemaRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -503,7 +502,7 @@ fn default_cap_enforcer() -> CapEnforcer {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum OriginScope {
-    Reducer,
+    Workflow,
     Plan,
     Both,
 }
@@ -513,8 +512,8 @@ impl OriginScope {
         matches!(self, OriginScope::Plan | OriginScope::Both)
     }
 
-    pub fn allows_reducers(self) -> bool {
-        matches!(self, OriginScope::Reducer | OriginScope::Both)
+    pub fn allows_workflows(self) -> bool {
+        matches!(self, OriginScope::Workflow | OriginScope::Both)
     }
 }
 
@@ -640,7 +639,6 @@ pub struct PolicyMatch {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum OriginKind {
-    #[serde(alias = "plan", alias = "reducer")]
     Workflow,
     System,
     Governance,
@@ -722,7 +720,6 @@ pub struct Routing {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingSubscription {
     pub event: SchemaRef,
-    #[serde(alias = "reducer")]
     pub module: Name,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_field: Option<String>,
@@ -733,7 +730,7 @@ pub type RoutingEvent = RoutingSubscription;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InboxRoute {
     pub source: String,
-    pub reducer: Name,
+    pub workflow: Name,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -758,7 +755,7 @@ impl EffectKind {
     pub const VAULT_PUT: &'static str = "vault.put";
     pub const VAULT_ROTATE: &'static str = "vault.rotate";
     pub const INTROSPECT_MANIFEST: &'static str = "introspect.manifest";
-    pub const INTROSPECT_REDUCER_STATE: &'static str = "introspect.reducer_state";
+    pub const INTROSPECT_WORKFLOW_STATE: &'static str = "introspect.workflow_state";
     pub const INTROSPECT_JOURNAL_HEAD: &'static str = "introspect.journal_head";
     pub const INTROSPECT_LIST_CELLS: &'static str = "introspect.list_cells";
     pub const WORKSPACE_RESOLVE: &'static str = "workspace.resolve";
@@ -812,8 +809,8 @@ impl EffectKind {
         Self::new(Self::INTROSPECT_MANIFEST)
     }
 
-    pub fn introspect_reducer_state() -> Self {
-        Self::new(Self::INTROSPECT_REDUCER_STATE)
+    pub fn introspect_workflow_state() -> Self {
+        Self::new(Self::INTROSPECT_WORKFLOW_STATE)
     }
 
     pub fn introspect_journal_head() -> Self {
@@ -994,7 +991,7 @@ mod tests {
             ],
             "modules": [
                 {
-                    "name": "com.acme/order_reducer@1",
+                    "name": "com.acme/order_workflow@1",
                     "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                 }
             ],
@@ -1004,7 +1001,7 @@ mod tests {
                 "subscriptions": [
                     {
                         "event": "com.acme/OrderCreated@1",
-                        "module": "com.acme/order_reducer@1"
+                        "module": "com.acme/order_workflow@1"
                     }
                 ]
             }

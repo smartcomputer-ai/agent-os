@@ -12,7 +12,7 @@
           "source": "cargo",
           "package": "aos-agent-sdk",
           "version": "0.1.0",
-          "manifest_path": "reducer/Cargo.toml",
+          "manifest_path": "workflow/Cargo.toml",
           "air_dir": "air",
           "defs_hash": "sha256:7b5621a881b856c6de29991e544899dc4a166dd8b1ac1965415c7444af714c70"
         }
@@ -20,7 +20,7 @@
     ]
   },
   "build": {
-    "reducer_dir": "reducer"
+    "workflow_dir": "workflow"
   },
   "workspaces": [
     {

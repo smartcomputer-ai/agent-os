@@ -93,7 +93,7 @@ export function ChatDebugPanel() {
   const liveWait = (traceQuery.data?.live_wait as Record<string, unknown> | undefined) ?? {};
   const pendingPlanReceipts = asArray(liveWait.pending_plan_receipts).length;
   const waitingEvents = asArray(liveWait.waiting_events).length;
-  const pendingReducerReceipts = asArray(liveWait.pending_reducer_receipts).length;
+  const pendingWorkflowReceipts = asArray(liveWait.pending_workflow_receipts).length;
   const queuedEffects = asArray(liveWait.queued_effects).length;
 
   return (
@@ -131,7 +131,7 @@ export function ChatDebugPanel() {
               </div>
               <div>
                 waits plan_receipts={pendingPlanReceipts} waiting_events={waitingEvents}{" "}
-                reducer_receipts={pendingReducerReceipts} queued_effects={queuedEffects}
+                workflow_receipts={pendingWorkflowReceipts} queued_effects={queuedEffects}
               </div>
               <div className="max-h-48 overflow-auto rounded border bg-muted/30 p-2 font-mono">
                 {journalEntries.slice(-30).map((raw, idx) => {

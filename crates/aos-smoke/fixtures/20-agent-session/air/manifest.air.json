@@ -29,7 +29,7 @@
     { "name": "aos.agent/SessionEvent@1" }
   ],
   "modules": [
-    { "name": "demo/AgentSessionReducer@1" }
+    { "name": "demo/AgentSessionWorkflow@1" }
   ],
   "plans": [],
   "caps": [],
@@ -40,7 +40,7 @@
     "events": [
       {
         "event": "aos.agent/SessionEvent@1",
-        "reducer": "demo/AgentSessionReducer@1"
+        "workflow": "demo/AgentSessionWorkflow@1"
       }
     ],
     "inboxes": []

@@ -1,18 +1,18 @@
 use aos_air_types::{
     DefPolicy, DefSchema, EffectKind as AirEffectKind, OriginKind, PolicyDecision, PolicyMatch,
-    PolicyRule, ReducerAbi,
+    PolicyRule, WorkflowAbi,
 };
 use aos_effects::builtins::HttpRequestParams;
 use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
-use aos_wasm_abi::{PureOutput, ReducerEffect, ReducerOutput};
+use aos_wasm_abi::{PureOutput, WorkflowEffect, WorkflowOutput};
 use helpers::fixtures::{self, zero_hash, TestStore, TestWorld};
 use indexmap::IndexMap;
 
 mod helpers;
 use helpers::{attach_default_policy, def_text_record_schema, text_type};
 
-fn http_reducer_output(url: &str) -> ReducerOutput {
+fn http_workflow_output(url: &str) -> WorkflowOutput {
     let mut headers = IndexMap::new();
     headers.insert("x-test".into(), "1".into());
     let params = HttpRequestParams {
@@ -21,10 +21,10 @@ fn http_reducer_output(url: &str) -> ReducerOutput {
         headers,
         body_ref: Some(zero_hash()),
     };
-    ReducerOutput {
+    WorkflowOutput {
         state: None,
         domain_events: vec![],
-        effects: vec![ReducerEffect::new(
+        effects: vec![WorkflowEffect::new(
             aos_effects::EffectKind::HTTP_REQUEST,
             serde_cbor::to_vec(&params).unwrap(),
         )],
@@ -32,12 +32,12 @@ fn http_reducer_output(url: &str) -> ReducerOutput {
     }
 }
 
-fn introspect_reducer_output() -> ReducerOutput {
+fn introspect_workflow_output() -> WorkflowOutput {
     let params = serde_json::json!({ "consistency": "head" });
-    ReducerOutput {
+    WorkflowOutput {
         state: None,
         domain_events: vec![],
-        effects: vec![ReducerEffect::new(
+        effects: vec![WorkflowEffect::new(
             aos_effects::EffectKind::INTROSPECT_MANIFEST,
             serde_cbor::to_vec(&params).unwrap(),
         )],
@@ -65,14 +65,14 @@ fn allow_http_enforcer(store: &std::sync::Arc<TestStore>) -> aos_air_types::DefM
 
 fn build_http_workflow_manifest(
     store: &std::sync::Arc<TestStore>,
-    reducer_name: &str,
-    output: ReducerOutput,
+    workflow_name: &str,
+    output: WorkflowOutput,
 ) -> aos_kernel::manifest::LoadedManifest {
-    let mut reducer = fixtures::stub_reducer_module(store, reducer_name, &output);
-    reducer.abi.reducer = Some(ReducerAbi {
+    let mut workflow = fixtures::stub_workflow_module(store, workflow_name, &output);
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/HttpState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
         cap_slots: Default::default(),
@@ -80,10 +80,10 @@ fn build_http_workflow_manifest(
 
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
-        reducer_name,
+        workflow_name,
     )];
     let mut loaded =
-        fixtures::build_loaded_manifest(vec![reducer, allow_http_enforcer(store)], routing);
+        fixtures::build_loaded_manifest(vec![workflow, allow_http_enforcer(store)], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![
@@ -94,7 +94,7 @@ fn build_http_workflow_manifest(
             },
         ],
     );
-    if let Some(binding) = loaded.manifest.module_bindings.get_mut(reducer_name) {
+    if let Some(binding) = loaded.manifest.module_bindings.get_mut(workflow_name) {
         binding.slots.insert("default".into(), "cap_http".into());
     }
     loaded
@@ -103,13 +103,13 @@ fn build_http_workflow_manifest(
 fn build_introspect_workflow_manifest(
     store: &std::sync::Arc<TestStore>,
 ) -> aos_kernel::manifest::LoadedManifest {
-    let reducer_name = "com.acme/IntrospectWorkflow@1";
-    let mut reducer =
-        fixtures::stub_reducer_module(store, reducer_name, &introspect_reducer_output());
-    reducer.abi.reducer = Some(ReducerAbi {
+    let workflow_name = "com.acme/IntrospectWorkflow@1";
+    let mut workflow =
+        fixtures::stub_workflow_module(store, workflow_name, &introspect_workflow_output());
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/IntrospectState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::INTROSPECT_MANIFEST.into()],
         cap_slots: Default::default(),
@@ -117,9 +117,9 @@ fn build_introspect_workflow_manifest(
 
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
-        reducer_name,
+        workflow_name,
     )];
-    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
+    let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![
@@ -130,18 +130,18 @@ fn build_introspect_workflow_manifest(
             },
         ],
     );
-    if let Some(binding) = loaded.manifest.module_bindings.get_mut(reducer_name) {
+    if let Some(binding) = loaded.manifest.module_bindings.get_mut(workflow_name) {
         binding.slots.insert("default".into(), "query_cap".into());
     }
     loaded
 }
 
 #[test]
-fn reducer_http_effect_is_denied() {
+fn workflow_http_effect_is_denied() {
     let store = fixtures::new_mem_store();
-    let reducer_name = "com.acme/HttpReducer@1";
+    let workflow_name = "com.acme/HttpWorkflow@1";
     let mut loaded =
-        build_http_workflow_manifest(&store, reducer_name, http_reducer_output("https://denied"));
+        build_http_workflow_manifest(&store, workflow_name, http_workflow_output("https://denied"));
 
     let policy = DefPolicy {
         name: "com.acme/policy@1".into(),
@@ -173,11 +173,11 @@ fn reducer_http_effect_is_denied() {
 #[test]
 fn workflow_effect_allowed_by_policy() {
     let store = fixtures::new_mem_store();
-    let reducer_name = "com.acme/HttpAllowed@1";
+    let workflow_name = "com.acme/HttpAllowed@1";
     let mut loaded = build_http_workflow_manifest(
         &store,
-        reducer_name,
-        http_reducer_output("https://example.com/allowed"),
+        workflow_name,
+        http_workflow_output("https://example.com/allowed"),
     );
 
     let policy = DefPolicy {
@@ -210,10 +210,10 @@ fn workflow_effect_allowed_by_policy() {
 #[test]
 fn workflow_effect_params_are_preserved() {
     let store = fixtures::new_mem_store();
-    let reducer_name = "com.acme/HttpParams@1";
+    let workflow_name = "com.acme/HttpParams@1";
     let expected_url = "https://example.com/preserved";
     let mut loaded =
-        build_http_workflow_manifest(&store, reducer_name, http_reducer_output(expected_url));
+        build_http_workflow_manifest(&store, workflow_name, http_workflow_output(expected_url));
 
     let policy = DefPolicy {
         name: "com.acme/workflow-policy@1".into(),

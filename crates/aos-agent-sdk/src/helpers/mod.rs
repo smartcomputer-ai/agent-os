@@ -3,7 +3,7 @@ mod ids;
 mod lifecycle;
 mod llm;
 mod queue;
-mod reducer;
+mod workflow;
 mod workspace;
 
 pub use failure::*;
@@ -11,5 +11,5 @@ pub use ids::*;
 pub use lifecycle::*;
 pub use llm::*;
 pub use queue::*;
-pub use reducer::*;
+pub use workflow::*;
 pub use workspace::*;

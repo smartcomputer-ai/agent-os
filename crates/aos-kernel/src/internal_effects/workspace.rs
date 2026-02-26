@@ -631,7 +631,7 @@ where
         validate_workspace_name(&params.workspace)?;
         let key_bytes = self.canonical_key_bytes("sys/WorkspaceName@1", &params.workspace)?;
         let state_read =
-            self.get_reducer_state("sys/Workspace@1", Some(&key_bytes), Consistency::Head)?;
+            self.get_workflow_state("sys/Workspace@1", Some(&key_bytes), Consistency::Head)?;
         let Some(state_bytes) = state_read.value else {
             let receipt = WorkspaceResolveReceipt {
                 exists: false,

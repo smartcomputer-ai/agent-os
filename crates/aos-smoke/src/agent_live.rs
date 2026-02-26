@@ -5,9 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent_sdk::{
-    LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionEvent, SessionEventKind,
-    SessionId, SessionState, ToolBatchId, ToolCallStatus, WorkspaceApplyMode, WorkspaceBinding,
-    materialize_llm_generate_params_with_workspace,
+    LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionId, SessionIngress,
+    SessionIngressKind, SessionState, SessionWorkflowEvent, ToolBatchId, ToolCallStatus,
+    WorkspaceApplyMode, WorkspaceBinding, materialize_llm_generate_params_with_workspace,
 };
 use aos_cbor::Hash;
 use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope};
@@ -24,9 +24,9 @@ use walkdir::WalkDir;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const REDUCER_NAME: &str = "demo/AgentLiveSessionReducer@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/22-agent-live/reducer";
+const WORKFLOW_NAME: &str = "demo/AgentLiveSessionWorkflow@1";
+const EVENT_SCHEMA: &str = "aos.agent/SessionWorkflowEvent@1";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/22-agent-live/workflow";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
 const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
 const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
@@ -97,7 +97,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         HarnessConfig {
             example_root: &fixture_root,
             assets_root: Some(&assets_root),
-            reducer_name: REDUCER_NAME,
+            workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
             module_crate: MODULE_CRATE,
         },
@@ -123,11 +123,10 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     send_session_event(
         &mut host,
         &mut event_clock,
-        SessionEventKind::WorkspaceSyncRequested {
+        SessionIngressKind::WorkspaceSyncRequested {
             workspace_binding: workspace_binding.clone(),
             prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
             tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
-            known_version: None,
         },
     )?;
     drain_internal_effects(&mut host)?;
@@ -139,7 +138,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     send_session_event(
         &mut host,
         &mut event_clock,
-        SessionEventKind::WorkspaceApplyRequested {
+        SessionIngressKind::WorkspaceApplyRequested {
             mode: WorkspaceApplyMode::NextRun,
         },
     )?;
@@ -147,7 +146,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     send_session_event(
         &mut host,
         &mut event_clock,
-        SessionEventKind::RunRequested {
+        SessionIngressKind::RunRequested {
             input_ref: fake_hash('a'),
             run_overrides: Some(SessionConfig {
                 provider: provider.provider_id.clone(),
@@ -171,8 +170,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             == Some(AGENT_WORKSPACE_NAME),
         "expected active workspace snapshot applied on next run"
     );
-    send_session_event(&mut host, &mut event_clock, SessionEventKind::RunStarted)?;
-
     let mut history: Vec<Value> = vec![json!({
         "role": "user",
         "content": format!(
@@ -246,20 +243,22 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 calls.len()
             );
 
-            let step_id = state
-                .active_step_id
+            let run_id = state
+                .active_run_id
                 .clone()
-                .ok_or_else(|| anyhow!("missing active_step_id"))?;
+                .ok_or_else(|| anyhow!("missing active_run_id"))?;
             let batch_id = ToolBatchId {
-                step_id,
+                run_id,
                 batch_seq: 1,
             };
 
             send_session_event(
                 &mut host,
                 &mut event_clock,
-                SessionEventKind::ToolBatchStarted {
+                SessionIngressKind::ToolBatchStarted {
                     tool_batch_id: batch_id.clone(),
+                    intent_id: fake_hash('b'),
+                    params_hash: None,
                     expected_call_ids: calls.iter().map(|call| call.call_id.clone()).collect(),
                 },
             )?;
@@ -304,12 +303,10 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 send_session_event(
                     &mut host,
                     &mut event_clock,
-                    SessionEventKind::ToolCallSettled {
+                    SessionIngressKind::ToolCallSettled {
                         tool_batch_id: batch_id.clone(),
                         call_id: call.call_id.clone(),
                         status: ToolCallStatus::Succeeded,
-                        receipt_session_epoch: state.session_epoch,
-                        receipt_step_epoch: state.step_epoch,
                     },
                 )?;
             }
@@ -318,12 +315,11 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             send_session_event(
                 &mut host,
                 &mut event_clock,
-                SessionEventKind::ToolBatchSettled {
+                SessionIngressKind::ToolBatchSettled {
                     tool_batch_id: batch_id,
                     results_ref: Some(results_ref),
                 },
             )?;
-            send_session_event(&mut host, &mut event_clock, SessionEventKind::StepBoundary)?;
             if found_target && matches!(phase, SearchPhase::Looking) {
                 let nudge = "Tool output is now found=true. Stop calling tools and answer now in the format: TARGET=<value>; SECOND_CLUE=<text>; STEPS=<n>.";
                 println!("   turn {} user: {}", llm_turn + 1, preview(nudge));
@@ -359,7 +355,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
                 history.push(json!({"role":"user","content":followup_prompt}));
 
                 phase = SearchPhase::NeedFollowUp;
-                send_session_event(&mut host, &mut event_clock, SessionEventKind::StepBoundary)?;
                 llm_turn = llm_turn.saturating_add(1);
             }
             SearchPhase::NeedFollowUp => {
@@ -394,7 +389,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         stats.tool_calls
     );
 
-    send_session_event(&mut host, &mut event_clock, SessionEventKind::RunCompleted)?;
+    send_session_event(&mut host, &mut event_clock, SessionIngressKind::RunCompleted)?;
 
     let final_state: SessionState = host.read_state()?;
     ensure!(
@@ -415,18 +410,14 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
 fn send_session_event(
     host: &mut ExampleHost,
     clock: &mut u64,
-    kind: SessionEventKind,
+    kind: SessionIngressKind,
 ) -> Result<()> {
     *clock = clock.saturating_add(1);
-    let event = SessionEvent {
+    let event = SessionWorkflowEvent::Ingress(SessionIngress {
         session_id: SessionId(SESSION_ID.into()),
-        run_id: None,
-        turn_id: None,
-        step_id: None,
-        session_epoch: 0,
-        step_epoch: *clock,
-        event: kind,
-    };
+        observed_at_ns: *clock,
+        ingress: kind,
+    });
     host.send_event(&event)
 }
 

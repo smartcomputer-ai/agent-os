@@ -20,7 +20,7 @@ use crate::util;
 
 const MODULE_NAME: &str = "demo/FlowTracker@1";
 const EVENT_SCHEMA: &str = "demo/RuntimeHardeningEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/11-workflow-runtime-hardening/reducer";
+const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/11-workflow-runtime-hardening/workflow";
 
 aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,10 +53,10 @@ pub fn run(example_root: &Path) -> Result<()> {
     println!("→ Workflow Runtime Hardening demo");
     util::reset_journal(example_root)?;
 
-    let wasm_bytes = util::compile_reducer(MODULE_CRATE)?;
+    let wasm_bytes = util::compile_workflow(MODULE_CRATE)?;
     let store = Arc::new(FsStore::open(example_root).context("open fixture store")?);
-    let wasm_hash = store.put_blob(&wasm_bytes).context("store reducer wasm")?;
-    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash reducer wasm")?;
+    let wasm_hash = store.put_blob(&wasm_bytes).context("store workflow wasm")?;
+    let wasm_hash_ref = HashRef::new(wasm_hash.to_hex()).context("hash workflow wasm")?;
     let kernel_config = util::kernel_config(example_root)?;
 
     let mut kernel = boot_kernel(
@@ -168,8 +168,8 @@ pub fn run(example_root: &Path) -> Result<()> {
     }
 
     let state_bytes = kernel
-        .reducer_state(MODULE_NAME)
-        .ok_or_else(|| anyhow!("missing reducer state"))?;
+        .workflow_state(MODULE_NAME)
+        .ok_or_else(|| anyhow!("missing workflow state"))?;
     let state: FlowState = serde_cbor::from_slice(&state_bytes).context("decode flow state")?;
     ensure!(state.completed_count == 2, "expected completed_count=2");
     ensure!(
@@ -196,8 +196,8 @@ pub fn run(example_root: &Path) -> Result<()> {
         "expected zero failed workflow instances"
     );
     ensure!(
-        summary["runtime_wait"]["pending_reducer_receipts"].as_u64() == Some(0),
-        "expected no pending reducer receipts"
+        summary["runtime_wait"]["pending_workflow_receipts"].as_u64() == Some(0),
+        "expected no pending workflow receipts"
     );
     ensure!(
         summary["runtime_wait"]["queued_effects"].as_u64() == Some(0),
@@ -220,13 +220,13 @@ pub fn run(example_root: &Path) -> Result<()> {
         Box::new(MemJournal::from_entries(&final_entries)),
     )?;
     let replay_state_bytes = replay_kernel
-        .reducer_state(MODULE_NAME)
-        .ok_or_else(|| anyhow!("missing replay reducer state"))?;
+        .workflow_state(MODULE_NAME)
+        .ok_or_else(|| anyhow!("missing replay workflow state"))?;
     let replay_state: FlowState =
         serde_cbor::from_slice(&replay_state_bytes).context("decode replay flow state")?;
     ensure!(
         replay_state == state,
-        "replay mismatch: reducer state diverged"
+        "replay mismatch: workflow state diverged"
     );
     ensure!(
         journal_counters(&replay_kernel)? == journal_summary,

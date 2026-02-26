@@ -21,15 +21,15 @@ pub(super) struct ManifestReceipt {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ReducerStateParams {
-    reducer: String,
+struct WorkflowStateParams {
+    workflow: String,
     #[serde(default)]
     key: Option<Vec<u8>>, // bytes
     consistency: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ReducerStateReceipt {
+struct WorkflowStateReceipt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     state: Option<Vec<u8>>,
     meta: MetaSer,
@@ -37,7 +37,7 @@ struct ReducerStateReceipt {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct ListCellsParams {
-    pub(super) reducer: String,
+    pub(super) workflow: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -79,17 +79,17 @@ where
         Ok(to_canonical_cbor(&receipt).map_err(|e| KernelError::Manifest(e.to_string()))?)
     }
 
-    pub(super) fn handle_reducer_state(
+    pub(super) fn handle_workflow_state(
         &self,
         intent: &EffectIntent,
     ) -> Result<Vec<u8>, KernelError> {
-        let params: ReducerStateParams = intent
+        let params: WorkflowStateParams = intent
             .params()
             .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
         let consistency = parse_consistency(&params.consistency)?;
         let state_read =
-            self.get_reducer_state(&params.reducer, params.key.as_deref(), consistency)?;
-        let receipt = ReducerStateReceipt {
+            self.get_workflow_state(&params.workflow, params.key.as_deref(), consistency)?;
+        let receipt = WorkflowStateReceipt {
             state: state_read.value,
             meta: to_meta(&state_read.meta),
         };
@@ -111,7 +111,7 @@ where
         let params: ListCellsParams = intent
             .params()
             .map_err(|e| KernelError::Query(format!("decode params: {e}")))?;
-        let cells_meta = self.list_cells(&params.reducer)?;
+        let cells_meta = self.list_cells(&params.workflow)?;
         let cells: Vec<CellEntry> = cells_meta
             .into_iter()
             .map(|meta: CellMeta| CellEntry {

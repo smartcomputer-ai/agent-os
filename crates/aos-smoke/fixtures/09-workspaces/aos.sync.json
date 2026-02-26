@@ -3,7 +3,7 @@
     "dir": "air"
   },
   "build": {
-    "reducer_dir": "reducer"
+    "workflow_dir": "workflow"
   },
   "modules": {
     "pull": false
@@ -11,13 +11,13 @@
   "version": 1,
   "workspaces": [
     {
-      "dir": "reducer",
+      "dir": "workflow",
       "ignore": [
         "target/",
         ".git/",
         ".aos/"
       ],
-      "ref": "reducer"
+      "ref": "workflow"
     }
   ]
 }

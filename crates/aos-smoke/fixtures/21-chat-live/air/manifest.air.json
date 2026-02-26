@@ -57,7 +57,7 @@
     "events": [
       {
         "event": "demo/LiveEvent@1",
-        "reducer": "demo/LiveChat@1"
+        "workflow": "demo/LiveChat@1"
       }
     ],
     "inboxes": []

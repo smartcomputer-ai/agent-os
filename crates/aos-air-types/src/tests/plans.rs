@@ -114,7 +114,7 @@ fn normalizes_all_expr_or_value_slots() {
                 "event": "sys/TimerFired@1",
                 "value": {
                     "intent_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-                    "reducer": "com.acme/Reducer@1",
+                    "workflow": "com.acme/Workflow@1",
                     "effect_kind": "timer.set",
                     "adapter_id": "timer",
                     "status": "ok",

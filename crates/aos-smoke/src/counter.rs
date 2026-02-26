@@ -1,7 +1,7 @@
-//! Counter demo wired up through AIR JSON assets and the reducer harness.
+//! Counter demo wired up through AIR JSON assets and the workflow harness.
 //!
 //! This is a minimal example with no micro-effects, showing how to load
-//! a manifest from AIR JSON assets and drive a reducer through events.
+//! a manifest from AIR JSON assets and drive a workflow through events.
 
 use std::path::Path;
 
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const REDUCER_NAME: &str = "demo/CounterSM@1";
+const WORKFLOW_NAME: &str = "demo/CounterSM@1";
 const EVENT_SCHEMA: &str = "demo/CounterEvent@1";
 const TARGET_COUNT: u64 = 3;
 
@@ -48,9 +48,9 @@ pub fn run(example_root: &Path) -> Result<()> {
     let mut host = ExampleHost::prepare(HarnessConfig {
         example_root,
         assets_root: None,
-        reducer_name: REDUCER_NAME,
+        workflow_name: WORKFLOW_NAME,
         event_schema: EVENT_SCHEMA,
-        module_crate: "crates/aos-smoke/fixtures/00-counter/reducer",
+        module_crate: "crates/aos-smoke/fixtures/00-counter/workflow",
     })?;
 
     println!("→ Counter demo (target {TARGET_COUNT})");

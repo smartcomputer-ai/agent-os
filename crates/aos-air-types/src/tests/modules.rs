@@ -2,17 +2,17 @@ use serde_json::json;
 use std::panic::{self, AssertUnwindSafe};
 
 use super::assert_json_schema;
-use crate::{DefModule, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef};
+use crate::{DefModule, ModuleAbi, ModuleKind, WorkflowAbi, SchemaRef};
 
 #[test]
-fn parses_reducer_module_with_cap_slots() {
+fn parses_workflow_module_with_cap_slots() {
     let module_json = json!({
         "$kind": "defmodule",
-        "name": "com.acme/Reducer@1",
+        "name": "com.acme/Workflow@1",
         "module_kind": "workflow",
         "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
         "abi": {
-            "reducer": {
+            "workflow": {
                 "state": "com.acme/State@1",
                 "event": "com.acme/Event@1",
                 "effects_emitted": ["http.request"],
@@ -24,17 +24,17 @@ fn parses_reducer_module_with_cap_slots() {
     });
     assert_json_schema(crate::schemas::DEFMODULE, &module_json);
     let module: DefModule = serde_json::from_value(module_json).expect("parse module");
-    assert_eq!(module.name, "com.acme/Reducer@1");
+    assert_eq!(module.name, "com.acme/Workflow@1");
     assert!(matches!(module.module_kind, ModuleKind::Workflow));
-    let reducer = module.abi.reducer.expect("reducer abi");
-    assert_eq!(reducer.state.as_str(), "com.acme/State@1");
+    let workflow = module.abi.workflow.expect("workflow abi");
+    assert_eq!(workflow.state.as_str(), "com.acme/State@1");
 }
 
 #[test]
 fn rejects_module_with_unknown_kind() {
     let bad_module_json = json!({
         "$kind": "defmodule",
-        "name": "com.acme/Reducer@1",
+        "name": "com.acme/Workflow@1",
         "module_kind": "plan",
         "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
         "abi": {}
@@ -43,9 +43,9 @@ fn rejects_module_with_unknown_kind() {
 }
 
 #[test]
-fn reducer_abi_struct_round_trip() {
+fn workflow_abi_struct_round_trip() {
     let abi = ModuleAbi {
-        reducer: Some(ReducerAbi {
+        workflow: Some(WorkflowAbi {
             context: None,
             state: SchemaRef::new("com.acme/State@1").unwrap(),
             event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -57,19 +57,19 @@ fn reducer_abi_struct_round_trip() {
     };
     let json = serde_json::to_value(&abi).expect("serialize");
     let round_trip: ModuleAbi = serde_json::from_value(json).expect("deserialize");
-    assert!(round_trip.reducer.is_some());
+    assert!(round_trip.workflow.is_some());
 }
 
 #[test]
-fn reducer_module_with_annotations_and_key_schema_validates() {
+fn workflow_module_with_annotations_and_key_schema_validates() {
     let module_json = json!({
         "$kind": "defmodule",
-        "name": "com.acme/Reducer@2",
+        "name": "com.acme/Workflow@2",
         "module_kind": "workflow",
         "wasm_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
         "key_schema": "com.acme/Key@1",
         "abi": {
-            "reducer": {
+            "workflow": {
                 "state": "com.acme/State@1",
                 "event": "com.acme/Event@1",
                 "annotations": "com.acme/Annotations@1",
@@ -87,16 +87,16 @@ fn reducer_module_with_annotations_and_key_schema_validates() {
         module.key_schema.as_ref().unwrap().as_str(),
         "com.acme/Key@1"
     );
-    let reducer = module.abi.reducer.expect("reducer abi");
-    assert_eq!(reducer.effects_emitted.len(), 2);
-    assert_eq!(reducer.cap_slots.len(), 2);
+    let workflow = module.abi.workflow.expect("workflow abi");
+    assert_eq!(workflow.effects_emitted.len(), 2);
+    assert_eq!(workflow.cap_slots.len(), 2);
 }
 
 #[test]
-fn reducer_module_without_abi_is_rejected_by_schema() {
+fn workflow_module_without_abi_is_rejected_by_schema() {
     let module_json = json!({
         "$kind": "defmodule",
-        "name": "com.acme/Reducer@1",
+        "name": "com.acme/Workflow@1",
         "module_kind": "workflow",
         "wasm_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
         "abi": {}
@@ -107,7 +107,7 @@ fn reducer_module_without_abi_is_rejected_by_schema() {
             &module_json
         )))
         .is_err(),
-        "schema should reject reducer modules missing reducer ABI"
+        "schema should reject workflow modules missing workflow ABI"
     );
 }
 
@@ -156,11 +156,11 @@ fn pure_module_without_abi_is_rejected_by_schema() {
 fn cap_slot_names_must_match_pattern() {
     let module_json = json!({
         "$kind": "defmodule",
-        "name": "com.acme/Reducer@1",
+        "name": "com.acme/Workflow@1",
         "module_kind": "workflow",
         "wasm_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
         "abi": {
-            "reducer": {
+            "workflow": {
                 "state": "com.acme/State@1",
                 "event": "com.acme/Event@1",
                 "cap_slots": {

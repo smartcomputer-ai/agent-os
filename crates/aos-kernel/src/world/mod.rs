@@ -13,7 +13,7 @@ use aos_air_types::{
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
 use aos_store::Store;
-use aos_wasm_abi::{ABI_VERSION, DomainEvent, PureInput, PureOutput, ReducerInput, ReducerOutput};
+use aos_wasm_abi::{ABI_VERSION, DomainEvent, PureInput, PureOutput, WorkflowInput, WorkflowOutput};
 use getrandom::getrandom;
 use serde::Serialize;
 use serde_cbor;
@@ -24,7 +24,7 @@ use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::cell_index::{CellIndex, CellMeta};
 use crate::effects::{EffectManager, EffectParamPreprocessor};
 use crate::error::KernelError;
-use crate::event::{IngressStamp, KernelEvent, ReducerEvent};
+use crate::event::{IngressStamp, KernelEvent, WorkflowEvent};
 use crate::governance::{GovernanceManager, ManifestPatch, ProposalState};
 use crate::governance_effects::GovernanceParamPreprocessor;
 use crate::journal::fs::FsJournal;
@@ -38,15 +38,15 @@ use crate::journal::{
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::pure::PureRegistry;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
-use crate::receipts::ReducerEffectContext;
-use crate::reducer::ReducerRegistry;
+use crate::receipts::WorkflowEffectContext;
+use crate::workflow::WorkflowRegistry;
 use crate::schema_value::cbor_to_expr_value;
 use crate::secret::{PlaceholderSecretResolver, SharedSecretResolver};
 use crate::shadow::{
     DeltaKind, LedgerDelta, LedgerKind, ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary,
 };
 use crate::snapshot::{
-    EffectIntentSnapshot, KernelSnapshot, ReducerReceiptSnapshot, ReducerStateEntry,
+    EffectIntentSnapshot, KernelSnapshot, WorkflowReceiptSnapshot, WorkflowStateEntry,
     SnapshotRootCompleteness, WorkflowInflightIntentSnapshot, WorkflowInstanceSnapshot,
     WorkflowStatusSnapshot, receipts_to_vecdeque,
 };
@@ -135,21 +135,21 @@ pub struct Kernel<S: Store> {
     effect_defs: HashMap<Name, DefEffect>,
     policy_defs: HashMap<Name, DefPolicy>,
     schema_defs: HashMap<Name, DefSchema>,
-    reducers: ReducerRegistry<S>,
+    workflows: WorkflowRegistry<S>,
     pures: Arc<Mutex<PureRegistry<S>>>,
     router: HashMap<String, Vec<RouteBinding>>,
     schema_index: Arc<SchemaIndex>,
-    reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
+    workflow_schemas: Arc<HashMap<Name, WorkflowSchema>>,
     module_cap_bindings: HashMap<Name, HashMap<String, CapGrantResolution>>,
-    pending_reducer_receipts: HashMap<[u8; 32], ReducerEffectContext>,
+    pending_workflow_receipts: HashMap<[u8; 32], WorkflowEffectContext>,
     recent_receipts: VecDeque<[u8; 32]>,
     recent_receipt_index: HashSet<[u8; 32]>,
-    reducer_queue: VecDeque<ReducerEvent>,
+    workflow_queue: VecDeque<WorkflowEvent>,
     effect_manager: EffectManager,
     clock: KernelClock,
-    reducer_state: HashMap<Name, ReducerState>,
+    workflow_state: HashMap<Name, WorkflowState>,
     workflow_instances: HashMap<String, WorkflowInstanceState>,
-    reducer_index_roots: HashMap<Name, Hash>,
+    workflow_index_roots: HashMap<Name, Hash>,
     snapshot_index: HashMap<JournalSeq, (Hash, Option<Hash>)>,
     journal: Box<dyn Journal>,
     suppress_journal: bool,
@@ -263,7 +263,7 @@ fn normalize_def_kind(input: &str) -> Option<&'static str> {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct ReducerSchema {
+pub(super) struct WorkflowSchema {
     pub event_schema_name: String,
     pub event_schema: TypeExpr,
     pub key_schema: Option<TypeExpr>,
@@ -277,19 +277,19 @@ enum EventWrap {
 
 #[derive(Clone, Debug)]
 struct RouteBinding {
-    reducer: Name,
+    workflow: Name,
     key_field: Option<String>,
     route_event_schema: String,
-    reducer_event_schema: String,
+    workflow_event_schema: String,
     wrap: EventWrap,
 }
 
 #[derive(Clone)]
-struct ReducerState {
+struct WorkflowState {
     cell_cache: CellCache,
 }
 
-impl Default for ReducerState {
+impl Default for WorkflowState {
     fn default() -> Self {
         Self {
             cell_cache: CellCache::new(CELL_CACHE_SIZE),
@@ -421,15 +421,15 @@ impl<S: Store + 'static> KernelBuilder<S> {
 }
 
 impl<S: Store + 'static> Kernel<S> {
-    fn ensure_cell_index_root(&mut self, reducer: &Name) -> Result<Hash, KernelError> {
-        if let Some(root) = self.reducer_index_roots.get(reducer) {
+    fn ensure_cell_index_root(&mut self, workflow: &Name) -> Result<Hash, KernelError> {
+        if let Some(root) = self.workflow_index_roots.get(workflow) {
             return Ok(*root);
         }
         let index = CellIndex::new(self.store.as_ref());
         let root = index
             .empty()
             .map_err(|err| KernelError::SnapshotUnavailable(err.to_string()))?;
-        self.reducer_index_roots.insert(reducer.clone(), root);
+        self.workflow_index_roots.insert(workflow.clone(), root);
         Ok(root)
     }
 
@@ -484,21 +484,21 @@ impl<S: Store + 'static> Kernel<S> {
         let effect_kind = record.kind.clone();
         let params_cbor = record.params_cbor.clone();
         match record.origin {
-            IntentOriginRecord::Reducer {
+            IntentOriginRecord::Workflow {
                 name,
                 instance_key,
                 emitted_at_seq,
             } => {
                 if self
-                    .pending_reducer_receipts
+                    .pending_workflow_receipts
                     .contains_key(&record.intent_hash)
                 {
                     return Ok(());
                 }
-                self.pending_reducer_receipts
+                self.pending_workflow_receipts
                     .entry(record.intent_hash)
                     .or_insert_with(|| {
-                        ReducerEffectContext::new(
+                        WorkflowEffectContext::new(
                             name.clone(),
                             instance_key.clone(),
                             effect_kind.clone(),
@@ -640,18 +640,18 @@ impl<S: Store + 'static> Kernel<S> {
         true
     }
 
-    pub fn reducer_state(&self, reducer: &str) -> Option<Vec<u8>> {
-        self.reducer_state_bytes(reducer, None).ok().flatten()
+    pub fn workflow_state(&self, workflow: &str) -> Option<Vec<u8>> {
+        self.workflow_state_bytes(workflow, None).ok().flatten()
     }
 
-    /// Fetch reducer state bytes via the cell index (non-keyed reducers use the sentinel key).
-    pub fn reducer_state_bytes(
+    /// Fetch workflow state bytes via the cell index (non-keyed workflows use the sentinel key).
+    pub fn workflow_state_bytes(
         &self,
-        reducer: &str,
+        workflow: &str,
         key: Option<&[u8]>,
     ) -> Result<Option<Vec<u8>>, KernelError> {
         let key = key.unwrap_or(MONO_KEY);
-        let Some(root) = self.reducer_index_roots.get(reducer) else {
+        let Some(root) = self.workflow_index_roots.get(workflow) else {
             return Ok(None);
         };
         let index = CellIndex::new(self.store.as_ref());
@@ -666,31 +666,31 @@ impl<S: Store + 'static> Kernel<S> {
         }
     }
 
-    /// Returns typed hash references reachable from reducer state by traversing the reducer's
+    /// Returns typed hash references reachable from workflow state by traversing the workflow's
     /// declared state schema. Hash-like text/bytes in opaque fields are ignored.
-    pub fn reducer_state_typed_hash_refs(
+    pub fn workflow_state_typed_hash_refs(
         &self,
-        reducer: &str,
+        workflow: &str,
         key: Option<&[u8]>,
     ) -> Result<Vec<Hash>, KernelError> {
-        let Some(state_bytes) = self.reducer_state_bytes(reducer, key)? else {
+        let Some(state_bytes) = self.workflow_state_bytes(workflow, key)? else {
             return Ok(Vec::new());
         };
         let module = self
             .module_defs
-            .get(reducer)
-            .ok_or_else(|| KernelError::ReducerNotFound(reducer.to_string()))?;
-        let reducer_abi =
-            module.abi.reducer.as_ref().ok_or_else(|| {
-                KernelError::Manifest(format!("module '{reducer}' is not a reducer"))
+            .get(workflow)
+            .ok_or_else(|| KernelError::WorkflowNotFound(workflow.to_string()))?;
+        let workflow_abi =
+            module.abi.workflow.as_ref().ok_or_else(|| {
+                KernelError::Manifest(format!("module '{workflow}' is not a workflow"))
             })?;
         let schema = self
             .schema_index
-            .get(reducer_abi.state.as_str())
+            .get(workflow_abi.state.as_str())
             .ok_or_else(|| {
                 KernelError::Manifest(format!(
-                    "state schema '{}' not found for reducer '{reducer}'",
-                    reducer_abi.state
+                    "state schema '{}' not found for workflow '{workflow}'",
+                    workflow_abi.state
                 ))
             })?;
         let value: CborValue = serde_cbor::from_slice(&state_bytes)
@@ -893,11 +893,11 @@ impl<S: Store + 'static> Kernel<S> {
         entries
     }
 
-    /// List all cells for a reducer using the persisted CellIndex.
+    /// List all cells for a workflow using the persisted CellIndex.
     ///
-    /// Returns an empty Vec if the reducer has no cells yet.
-    pub fn list_cells(&self, reducer: &str) -> Result<Vec<CellMeta>, KernelError> {
-        let Some(root) = self.reducer_index_roots.get(reducer) else {
+    /// Returns an empty Vec if the workflow has no cells yet.
+    pub fn list_cells(&self, workflow: &str) -> Result<Vec<CellMeta>, KernelError> {
+        let Some(root) = self.workflow_index_roots.get(workflow) else {
             return Ok(Vec::new());
         };
         let index = CellIndex::new(self.store.as_ref());
@@ -931,15 +931,15 @@ impl<S: Store + 'static> Kernel<S> {
             .collect()
     }
 
-    /// Expose reducer index root hash (if present) for keyed reducers; useful for diagnostics/tests.
-    pub fn reducer_index_root(&self, reducer: &str) -> Option<Hash> {
-        self.reducer_index_roots.get(reducer).copied()
+    /// Expose workflow index root hash (if present) for keyed workflows; useful for diagnostics/tests.
+    pub fn workflow_index_root(&self, workflow: &str) -> Option<Hash> {
+        self.workflow_index_roots.get(workflow).copied()
     }
 
-    pub fn pending_reducer_receipts_snapshot(&self) -> Vec<ReducerReceiptSnapshot> {
-        self.pending_reducer_receipts
+    pub fn pending_workflow_receipts_snapshot(&self) -> Vec<WorkflowReceiptSnapshot> {
+        self.pending_workflow_receipts
             .iter()
-            .map(|(hash, ctx)| ReducerReceiptSnapshot::from_context(*hash, ctx))
+            .map(|(hash, ctx)| WorkflowReceiptSnapshot::from_context(*hash, ctx))
             .collect()
     }
 

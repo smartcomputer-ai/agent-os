@@ -325,27 +325,27 @@ impl<S: Store + 'static> WorldHost<S> {
         })
     }
 
-    pub fn state(&self, reducer: &str, key: Option<&[u8]>) -> Option<Vec<u8>> {
+    pub fn state(&self, workflow: &str, key: Option<&[u8]>) -> Option<Vec<u8>> {
         self.kernel
-            .reducer_state_bytes(reducer, key)
+            .workflow_state_bytes(workflow, key)
             .unwrap_or(None)
     }
 
-    /// Query reducer state with consistency metadata.
+    /// Query workflow state with consistency metadata.
     pub fn query_state(
         &self,
-        reducer: &str,
+        workflow: &str,
         key: Option<&[u8]>,
         consistency: aos_kernel::Consistency,
     ) -> Option<aos_kernel::StateRead<Option<Vec<u8>>>> {
         self.kernel
-            .get_reducer_state(reducer, key, consistency)
+            .get_workflow_state(workflow, key, consistency)
             .ok()
     }
 
-    /// List all cells for a keyed reducer. Returns empty if reducer is not keyed or has no cells.
-    pub fn list_cells(&self, reducer: &str) -> Result<Vec<CellMeta>, HostError> {
-        self.kernel.list_cells(reducer).map_err(HostError::from)
+    /// List all cells for a keyed workflow. Returns empty if workflow is not keyed or has no cells.
+    pub fn list_cells(&self, workflow: &str) -> Result<Vec<CellMeta>, HostError> {
+        self.kernel.list_cells(workflow).map_err(HostError::from)
     }
 
     pub fn list_defs(
@@ -468,10 +468,10 @@ impl<S: Store + 'static> WorldHost<S> {
     /// Fire all due timers by building receipts and calling `handle_receipt`.
     ///
     /// This is the correct way to fire timers in daemon mode. The kernel will:
-    /// 1. Remove context from `pending_reducer_receipts`
+    /// 1. Remove context from `pending_workflow_receipts`
     /// 2. Record receipt in journal
-    /// 3. Build a `sys/TimerFired@1` receipt event via `build_reducer_receipt_event()`
-    /// 4. Route/wrap at dispatch and push reducer event to scheduler
+    /// 3. Build a `sys/TimerFired@1` receipt event via `build_workflow_receipt_event()`
+    /// 4. Route/wrap at dispatch and push workflow event to scheduler
     ///
     /// Uses kernel logical time for scheduling and receipt timestamps.
     ///
@@ -573,7 +573,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn write_minimal_manifest(path: &std::path::Path) {
-        // Minimal manifest: no reducers/plans; just air_version and empty lists.
+        // Minimal manifest: no workflows/plans; just air_version and empty lists.
         let manifest = json!({
             "air_version": "1",
             "schemas": [],
@@ -643,7 +643,7 @@ mod tests {
         let kernel_config = KernelConfig::default();
         let mut host = WorldHost::open(store, &manifest_path, host_config, kernel_config).unwrap();
 
-        // No reducers, but we can still apply a receipt (should be ignored gracefully)
+        // No workflows, but we can still apply a receipt (should be ignored gracefully)
         let fake_receipt = aos_effects::EffectReceipt {
             intent_hash: [9u8; 32],
             adapter_id: "stub.http".into(),

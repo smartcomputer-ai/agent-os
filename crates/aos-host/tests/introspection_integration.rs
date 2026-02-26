@@ -5,36 +5,36 @@ use helpers::fixtures;
 
 use aos_effects::{EffectKind, IntentBuilder, ReceiptStatus};
 use aos_kernel::StateReader;
-use aos_wasm_abi::ReducerOutput;
+use aos_wasm_abi::WorkflowOutput;
 use serde::Deserialize;
 use serde_json::json;
 
-/// Build a simple world with a monolithic reducer that sets state on the first event.
+/// Build a simple world with a monolithic workflow that sets state on the first event.
 fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
     let store = fixtures::new_mem_store();
-    let mut reducer = fixtures::stub_reducer_module(
+    let mut workflow = fixtures::stub_workflow_module(
         &store,
         "com.acme/Store@1",
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(bytes.to_vec()),
             domain_events: vec![],
             effects: vec![],
             ann: None,
         },
     );
-    reducer.abi.reducer = Some(aos_air_types::ReducerAbi {
+    workflow.abi.workflow = Some(aos_air_types::WorkflowAbi {
         state: fixtures::schema("com.acme/StoreState@1"),
         event: fixtures::schema(fixtures::START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
-        &reducer.name,
+        &workflow.name,
     )];
-    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
+    let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![
@@ -97,7 +97,7 @@ fn introspect_manifest_matches_kernel_manifest() {
 }
 
 #[test]
-fn introspect_reducer_state_returns_value_and_meta() {
+fn introspect_workflow_state_returns_value_and_meta() {
     let mut world = world_with_state(b"payload");
     world
         .submit_event_result(fixtures::START_SCHEMA, &json!({ "id": "start" }))
@@ -106,10 +106,10 @@ fn introspect_reducer_state_returns_value_and_meta() {
 
     let kernel = &mut world.kernel;
     let intent = IntentBuilder::new(
-        EffectKind::introspect_reducer_state(),
+        EffectKind::introspect_workflow_state(),
         "sys/query@1",
         &json!({
-            "reducer": "com.acme/Store@1",
+            "workflow": "com.acme/Store@1",
             "consistency": "head"
         }),
     )
@@ -123,12 +123,12 @@ fn introspect_reducer_state_returns_value_and_meta() {
     assert_eq!(receipt.status, ReceiptStatus::Ok);
 
     #[derive(Deserialize)]
-    struct ReducerReceipt {
+    struct WorkflowReceipt {
         #[serde(default)]
         state: Option<Vec<u8>>,
     }
 
-    let decoded: ReducerReceipt = receipt.payload().unwrap();
+    let decoded: WorkflowReceipt = receipt.payload().unwrap();
     assert_eq!(decoded.state.as_deref(), Some("payload".as_bytes()));
 }
 
@@ -144,7 +144,7 @@ fn introspect_list_cells_returns_sentinel_for_non_keyed() {
     let intent = IntentBuilder::new(
         EffectKind::introspect_list_cells(),
         "sys/query@1",
-        &json!({ "reducer": "com.acme/Store@1" }),
+        &json!({ "workflow": "com.acme/Store@1" }),
     )
     .build()
     .unwrap();
@@ -171,7 +171,7 @@ fn introspect_list_cells_returns_sentinel_for_non_keyed() {
     assert_eq!(
         cells.len(),
         1,
-        "expected sentinel cell for non-keyed reducer"
+        "expected sentinel cell for non-keyed workflow"
     );
     let key_len = match &cells[0] {
         serde_cbor::Value::Map(cell_map) => cell_map

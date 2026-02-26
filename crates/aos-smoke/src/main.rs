@@ -29,7 +29,7 @@ struct Cli {
     #[arg(
         long,
         default_value_t = false,
-        help = "Force recompilation of reducers, bypassing cache"
+        help = "Force recompilation of workflows, bypassing cache"
     )]
     force_build: bool,
     #[command(subcommand)]
@@ -54,7 +54,7 @@ enum Commands {
     SafeUpgrade,
     /// Run the LLM summarizer example
     LlmSummarizer,
-    /// Run the reducer-driven retry with backoff example
+    /// Run the workflow-driven retry with backoff example
     RetryBackoff,
     /// Run the workspace workflow + caps example
     Workspaces,
@@ -110,7 +110,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "00",
         slug: "counter",
         title: "CounterSM",
-        summary: "Reducer typestate without effects",
+        summary: "Workflow typestate without effects",
         group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/00-counter",
         runner: counter::run,
@@ -119,7 +119,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "01",
         slug: "hello-timer",
         title: "Hello Timer",
-        summary: "Reducer micro-effect timer demo",
+        summary: "Workflow micro-effect timer demo",
         group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/01-hello-timer",
         runner: hello_timer::run,
@@ -128,7 +128,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "02",
         slug: "blob-echo",
         title: "Blob Echo",
-        summary: "Reducer blob.put/get demo",
+        summary: "Workflow blob.put/get demo",
         group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/02-blob-echo",
         runner: blob_echo::run,
@@ -182,7 +182,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "08",
         slug: "retry-backoff",
         title: "Retry Backoff",
-        summary: "Reducer-driven retries w/ timer.set",
+        summary: "Workflow-driven retries w/ timer.set",
         group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/08-retry-backoff",
         runner: retry_backoff::run,

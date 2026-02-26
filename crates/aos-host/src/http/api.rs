@@ -374,8 +374,8 @@ pub fn router() -> Router<HttpState> {
         .route("/manifest", get(manifest))
         .route("/defs", get(defs_list))
         .route("/defs/{kind}/{name}", get(defs_get))
-        .route("/state/{reducer}", get(state_get))
-        .route("/state/{reducer}/cells", get(state_cells))
+        .route("/state/{workflow}", get(state_get))
+        .route("/state/{workflow}/cells", get(state_cells))
         .route("/events", post(events_post))
         .route("/journal/head", get(journal_head))
         .route("/journal", get(journal_tail))
@@ -623,10 +623,10 @@ struct StateQuery {
 
 #[utoipa::path(
     get,
-    path = "/api/state/{reducer}",
+    path = "/api/state/{workflow}",
     tag = "general",
     params(
-        ("reducer" = String, Path, description = "Reducer name"),
+        ("workflow" = String, Path, description = "Workflow name"),
         StateQuery
     ),
     responses(
@@ -638,11 +638,11 @@ struct StateQuery {
 )]
 async fn state_get(
     State(state): State<HttpState>,
-    Path(reducer): Path<String>,
+    Path(workflow): Path<String>,
     Query(query): Query<StateQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let payload = serde_json::json!({
-        "reducer": reducer,
+        "workflow": workflow,
         "key_b64": query.key_b64,
         "consistency": query.consistency,
     });
@@ -652,10 +652,10 @@ async fn state_get(
 
 #[utoipa::path(
     get,
-    path = "/api/state/{reducer}/cells",
+    path = "/api/state/{workflow}/cells",
     tag = "general",
     params(
-        ("reducer" = String, Path, description = "Reducer name")
+        ("workflow" = String, Path, description = "Workflow name")
     ),
     responses(
         (status = 200, body = StateListResponse),
@@ -666,9 +666,9 @@ async fn state_get(
 )]
 async fn state_cells(
     State(state): State<HttpState>,
-    Path(reducer): Path<String>,
+    Path(workflow): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let payload = serde_json::json!({ "reducer": reducer });
+    let payload = serde_json::json!({ "workflow": workflow });
     let result = control_call(&state, "state-list", payload).await?;
     Ok(Json(result))
 }
@@ -1364,7 +1364,7 @@ async fn list_workspaces(state: &HttpState) -> Result<WorkspaceListResponse, Api
     let result = control_call(
         state,
         "state-list",
-        serde_json::json!({ "reducer": "sys/Workspace@1" }),
+        serde_json::json!({ "workflow": "sys/Workspace@1" }),
     )
     .await?;
     let cells = result

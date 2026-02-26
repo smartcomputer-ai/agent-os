@@ -274,7 +274,7 @@ export function useChatState(
     queryKey: queryKeys.chatState(chatId),
     queryFn: () =>
       endpoints.stateGet(
-        { reducer: "demiurge/Demiurge@1" },
+        { workflow: "demiurge/Demiurge@1" },
         { key_b64: encodeCborTextToBase64(chatId) },
       ),
     refetchInterval: 3000,
@@ -287,7 +287,7 @@ export function useChatList(
 ) {
   return useQuery({
     queryKey: queryKeys.chatList(),
-    queryFn: () => endpoints.stateCells({ reducer: "demiurge/Demiurge@1" }),
+    queryFn: () => endpoints.stateCells({ workflow: "demiurge/Demiurge@1" }),
     refetchInterval: 5000,
     ...options,
   });

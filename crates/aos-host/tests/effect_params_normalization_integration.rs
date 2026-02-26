@@ -6,7 +6,7 @@ use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::EffectManager;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::policy::AllowAllPolicy;
-use aos_wasm_abi::ReducerEffect;
+use aos_wasm_abi::WorkflowEffect;
 use indexmap::IndexMap;
 use serde_cbor::Value as CborValue;
 use serde_json;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use aos_air_types::{
     builtins, catalog::EffectCatalog, plan_literals::SchemaIndex, DefSchema, EffectKind,
-    ReducerAbi, TypeExpr, TypeRef, TypeVariant,
+    WorkflowAbi, TypeExpr, TypeRef, TypeVariant,
 };
 
 /// Plan-origin effects with semantically identical params but different CBOR shapes
@@ -65,10 +65,10 @@ fn plan_effect_params_canonicalize_before_hashing() {
     );
 }
 
-/// Reducer-emitted micro-effects should already be canonical; normalizer must preserve bytes and
+/// Workflow-emitted micro-effects should already be canonical; normalizer must preserve bytes and
 /// hash while still enforcing schema conformance (field ordering canonicalized).
 #[test]
-fn reducer_effect_params_canonicalize_noop() {
+fn workflow_effect_params_canonicalize_noop() {
     // Capability: timer cap
     let grant = CapabilityGrant::builder("cap_timer", "sys/timer@1", &serde_json::json!({}))
         .build()
@@ -90,14 +90,14 @@ fn reducer_effect_params_canonicalize_noop() {
     );
     let params_cbor = serde_cbor::to_vec(&CborValue::Map(params)).expect("encode");
 
-    let effect = ReducerEffect::with_cap_slot(
+    let effect = WorkflowEffect::with_cap_slot(
         aos_effects::EffectKind::TIMER_SET,
         params_cbor.clone(),
         "timer",
     );
     let intent = mgr
-        .enqueue_reducer_effect("com.acme/Timer", "cap_timer", &effect)
-        .expect("enqueue reducer effect");
+        .enqueue_workflow_effect("com.acme/Timer", "cap_timer", &effect)
+        .expect("enqueue workflow effect");
 
     let (effects, schemas) = builtin_effect_context();
 
@@ -196,41 +196,41 @@ fn sugar_forms_share_intent_hash_and_params_ref() {
     assert_eq!(params_ref_a, params_ref_b, "params_ref");
 }
 
-/// Reducer-emitted canonical params should be identical across enqueue, journal, and replay.
+/// Workflow-emitted canonical params should be identical across enqueue, journal, and replay.
 #[test]
-fn reducer_params_round_trip_journal_replay() {
-    // Build reducer that emits a timer.set micro-effect.
-    let reducer_event_schema = "com.acme/ReducerEvent@1";
+fn workflow_params_round_trip_journal_replay() {
+    // Build workflow that emits a timer.set micro-effect.
+    let workflow_event_schema = "com.acme/WorkflowEvent@1";
     let params = timer_params_cbor(42, Some("k".into()));
-    let effect = ReducerEffect::with_cap_slot(
+    let effect = WorkflowEffect::with_cap_slot(
         aos_effects::EffectKind::TIMER_SET,
         params.clone(),
         "default",
     );
     let store = fixtures::new_mem_store();
-    let mut reducer = fixtures::stub_reducer_module(
+    let mut workflow = fixtures::stub_workflow_module(
         &store,
-        "com.acme/Reducer@1",
-        &aos_wasm_abi::ReducerOutput {
+        "com.acme/Workflow@1",
+        &aos_wasm_abi::WorkflowOutput {
             state: None,
             domain_events: vec![],
             effects: vec![effect.clone()],
             ann: None,
         },
     );
-    reducer.abi.reducer = Some(ReducerAbi {
-        state: fixtures::schema("com.acme/ReducerState@1"),
-        event: fixtures::schema(reducer_event_schema),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+    workflow.abi.workflow = Some(WorkflowAbi {
+        state: fixtures::schema("com.acme/WorkflowState@1"),
+        event: fixtures::schema(workflow_event_schema),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
     let routing = vec![fixtures::routing_event(
         fixtures::START_SCHEMA,
-        &reducer.name,
+        &workflow.name,
     )];
-    let mut manifest = fixtures::build_loaded_manifest(vec![reducer], routing.clone());
+    let mut manifest = fixtures::build_loaded_manifest(vec![workflow], routing.clone());
     fixtures::insert_test_schemas(
         &mut manifest,
         vec![
@@ -239,7 +239,7 @@ fn reducer_params_round_trip_journal_replay() {
                 vec![("id", fixtures::text_type())],
             ),
             DefSchema {
-                name: reducer_event_schema.into(),
+                name: workflow_event_schema.into(),
                 ty: TypeExpr::Variant(TypeVariant {
                     variant: IndexMap::from([
                         (
@@ -258,7 +258,7 @@ fn reducer_params_round_trip_journal_replay() {
                 }),
             },
             DefSchema {
-                name: "com.acme/ReducerState@1".into(),
+                name: "com.acme/WorkflowState@1".into(),
                 ty: fixtures::text_type(),
             },
         ],
@@ -280,25 +280,25 @@ fn reducer_params_round_trip_journal_replay() {
         {
             let mut replay_manifest = fixtures::build_loaded_manifest(
                 {
-                    let mut reducer = fixtures::stub_reducer_module(
+                    let mut workflow = fixtures::stub_workflow_module(
                         &store,
-                        "com.acme/Reducer@1",
-                        &aos_wasm_abi::ReducerOutput {
+                        "com.acme/Workflow@1",
+                        &aos_wasm_abi::WorkflowOutput {
                             state: None,
                             domain_events: vec![],
                             effects: vec![effect.clone()],
                             ann: None,
                         },
                     );
-                    reducer.abi.reducer = Some(ReducerAbi {
-                        state: fixtures::schema("com.acme/ReducerState@1"),
-                        event: fixtures::schema(reducer_event_schema),
-                        context: Some(fixtures::schema("sys/ReducerContext@1")),
+                    workflow.abi.workflow = Some(WorkflowAbi {
+                        state: fixtures::schema("com.acme/WorkflowState@1"),
+                        event: fixtures::schema(workflow_event_schema),
+                        context: Some(fixtures::schema("sys/WorkflowContext@1")),
                         annotations: None,
                         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
                         cap_slots: Default::default(),
                     });
-                    vec![reducer]
+                    vec![workflow]
                 },
                 routing.clone(),
             );
@@ -310,7 +310,7 @@ fn reducer_params_round_trip_journal_replay() {
                         vec![("id", fixtures::text_type())],
                     ),
                     DefSchema {
-                        name: reducer_event_schema.into(),
+                        name: workflow_event_schema.into(),
                         ty: TypeExpr::Variant(TypeVariant {
                             variant: IndexMap::from([
                                 (
@@ -329,7 +329,7 @@ fn reducer_params_round_trip_journal_replay() {
                         }),
                     },
                     DefSchema {
-                        name: "com.acme/ReducerState@1".into(),
+                        name: "com.acme/WorkflowState@1".into(),
                         ty: fixtures::text_type(),
                     },
                 ],

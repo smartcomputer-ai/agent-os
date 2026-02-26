@@ -125,7 +125,7 @@ pub fn trace_get<S: Store + 'static>(
     }
 
     let workflow_instances = kernel.workflow_instances_snapshot();
-    let pending_reducer_receipts = kernel.pending_reducer_receipts_snapshot();
+    let pending_workflow_receipts = kernel.pending_workflow_receipts_snapshot();
     let queued_effects = kernel.queued_effects_snapshot();
     let journal_head = kernel.journal_head();
 
@@ -143,10 +143,10 @@ pub fn trace_get<S: Store + 'static>(
             )
         })
         .count();
-    let pending_reducer_receipts_count = pending_reducer_receipts.len();
+    let pending_workflow_receipts_count = pending_workflow_receipts.len();
     let queued_effects_count = queued_effects.len();
     let waiting_receipt_count =
-        inflight_workflow_intents + pending_reducer_receipts_count + queued_effects_count;
+        inflight_workflow_intents + pending_workflow_receipts_count + queued_effects_count;
     let waiting_event_count = non_terminal_workflow_instances;
 
     let terminal_state = if has_receipt_error || has_workflow_error {
@@ -228,7 +228,7 @@ pub fn trace_get<S: Store + 'static>(
                     })
                 })
             }).collect::<Vec<_>>(),
-            "pending_reducer_receipts": pending_reducer_receipts.into_iter().map(|pending| {
+            "pending_workflow_receipts": pending_workflow_receipts.into_iter().map(|pending| {
                 json!({
                     "intent_hash": hash_bytes_hex(&pending.intent_hash),
                     "origin_module_id": pending.origin_module_id,
@@ -247,7 +247,7 @@ pub fn trace_get<S: Store + 'static>(
             "strict_quiescence": {
                 "non_terminal_workflow_instances": non_terminal_workflow_instances,
                 "inflight_workflow_intents": inflight_workflow_intents,
-                "pending_reducer_receipts": pending_reducer_receipts_count,
+                "pending_workflow_receipts": pending_workflow_receipts_count,
                 "queued_effects": queued_effects_count,
                 "open_streaming_intents": kernel.workflow_instances_snapshot().into_iter().flat_map(|instance| {
                     let instance_id = instance.instance_id.clone();
@@ -318,7 +318,7 @@ pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<
     }
 
     let workflow_instances = kernel.workflow_instances_snapshot();
-    let pending_reducer_receipts = kernel.pending_reducer_receipts_snapshot();
+    let pending_workflow_receipts = kernel.pending_workflow_receipts_snapshot();
     let queued_effects = kernel.queued_effects_snapshot();
 
     let mut running = 0u64;
@@ -384,13 +384,13 @@ pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<
             }
         },
         "runtime_wait": {
-            "pending_reducer_receipts": pending_reducer_receipts.len(),
+            "pending_workflow_receipts": pending_workflow_receipts.len(),
             "queued_effects": queued_effects.len(),
         },
         "strict_quiescence": {
             "non_terminal_workflow_instances": (running + waiting),
             "inflight_workflow_intents": inflight_total,
-            "pending_reducer_receipts": pending_reducer_receipts.len(),
+            "pending_workflow_receipts": pending_workflow_receipts.len(),
             "queued_effects": queued_effects.len(),
         },
         "continuations": continuations,
@@ -418,11 +418,6 @@ pub fn diagnose_trace(trace: &Value) -> Value {
 
     let pending_workflow_receipts = live_wait
         .get("pending_workflow_receipts")
-        .and_then(|v| v.as_array())
-        .map(std::vec::Vec::len)
-        .unwrap_or(0);
-    let pending_reducer_receipts = live_wait
-        .get("pending_reducer_receipts")
         .and_then(|v| v.as_array())
         .map(std::vec::Vec::len)
         .unwrap_or(0);
@@ -580,7 +575,6 @@ pub fn diagnose_trace(trace: &Value) -> Value {
             "pending_workflow_receipts": pending_workflow_receipts,
             "waiting_workflow_instances": waiting_workflow_instances,
             "pending_workflow_intents": pending_workflow_intents,
-            "pending_reducer_receipts": pending_reducer_receipts,
             "queued_effects": queued_effects,
         }
     })
@@ -635,7 +629,7 @@ fn first_intent_hash(value: &Value) -> Option<String> {
         .or_else(|| {
             read(
                 value
-                    .get("pending_reducer_receipts")
+                    .get("pending_workflow_receipts")
                     .and_then(|v| v.as_array()),
             )
         })

@@ -21,7 +21,7 @@ pub async fn cmd_info(opts: &WorldOpts) -> Result<()> {
             serde_json::json!({
                 "world": dirs.world,
                 "air": dirs.air_dir,
-                "reducer": dirs.reducer_dir,
+                "workflow": dirs.workflow_dir,
                 "store": dirs.store_root,
                 "status": "not-initialized",
             }),
@@ -40,7 +40,7 @@ pub async fn cmd_info(opts: &WorldOpts) -> Result<()> {
                 map_root,
                 &config,
                 &dirs.air_dir,
-                &dirs.reducer_dir,
+                &dirs.workflow_dir,
             )?;
             warnings.extend(sources.warnings.clone());
             (sources.air_dir, sources.import_dirs)
@@ -77,7 +77,7 @@ pub async fn cmd_info(opts: &WorldOpts) -> Result<()> {
         serde_json::json!({
             "world": dirs.world,
             "air": air_dir,
-            "reducer": dirs.reducer_dir,
+            "workflow": dirs.workflow_dir,
             "store": dirs.store_root,
             "manifest": manifest_info,
             "daemon": daemon,

@@ -1,7 +1,7 @@
 use super::*;
 
 impl<S: Store + 'static> StateReader for Kernel<S> {
-    fn get_reducer_state(
+    fn get_workflow_state(
         &self,
         module: &str,
         key: Option<&[u8]>,
@@ -12,7 +12,7 @@ impl<S: Store + 'static> StateReader for Kernel<S> {
             Consistency::Head => {
                 return Ok(StateRead {
                     meta: self.read_meta(),
-                    value: self.reducer_state_bytes(module, key)?,
+                    value: self.workflow_state_bytes(module, key)?,
                 });
             }
             Consistency::AtLeast(h) => {
@@ -23,19 +23,19 @@ impl<S: Store + 'static> StateReader for Kernel<S> {
                 }
                 return Ok(StateRead {
                     meta: self.read_meta(),
-                    value: self.reducer_state_bytes(module, key)?,
+                    value: self.workflow_state_bytes(module, key)?,
                 });
             }
             Consistency::Exact(h) => {
                 if h == head {
                     return Ok(StateRead {
                         meta: self.read_meta(),
-                        value: self.reducer_state_bytes(module, key)?,
+                        value: self.workflow_state_bytes(module, key)?,
                     });
                 }
                 if let Some((snap_hash, snap_manifest)) = self.snapshot_at_height(h) {
                     let snapshot = self.load_snapshot_blob(snap_hash)?;
-                    let value = self.read_reducer_state_from_snapshot(&snapshot, module, key)?;
+                    let value = self.read_workflow_state_from_snapshot(&snapshot, module, key)?;
                     let meta = ReadMeta {
                         journal_height: h,
                         snapshot_hash: Some(snap_hash),
@@ -127,18 +127,18 @@ impl<S: Store + 'static> Kernel<S> {
         Ok(snapshot)
     }
 
-    fn read_reducer_state_from_snapshot(
+    fn read_workflow_state_from_snapshot(
         &self,
         snapshot: &KernelSnapshot,
-        reducer: &str,
+        workflow: &str,
         key: Option<&[u8]>,
     ) -> Result<Option<Vec<u8>>, KernelError> {
         let key_bytes = key.unwrap_or(MONO_KEY);
         // Preferred path: use index root recorded in snapshot to find cell state in CAS.
         if let Some(root) = snapshot
-            .reducer_index_roots()
+            .workflow_index_roots()
             .iter()
-            .find(|(name, _)| name == reducer)
+            .find(|(name, _)| name == workflow)
             .and_then(|(_, bytes)| Hash::from_bytes(bytes).ok())
         {
             let index = CellIndex::new(self.store.as_ref());
@@ -152,9 +152,9 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         // Legacy snapshots: fall back to inline entries (monolithic or keyed).
-        for entry in snapshot.reducer_state_entries() {
+        for entry in snapshot.workflow_state_entries() {
             let entry_key = entry.key.as_deref().unwrap_or(MONO_KEY);
-            if entry.reducer == reducer && entry_key == key_bytes {
+            if entry.workflow == workflow && entry_key == key_bytes {
                 return Ok(Some(entry.state.clone()));
             }
         }
@@ -251,10 +251,10 @@ mod tests {
     }
 
     #[test]
-    fn reducer_state_exact_missing_snapshot_errors() {
+    fn workflow_state_exact_missing_snapshot_errors() {
         let kernel = kernel_with_snapshot(3);
         let err = kernel
-            .get_reducer_state("missing", None, Consistency::Exact(7))
+            .get_workflow_state("missing", None, Consistency::Exact(7))
             .expect_err("missing exact snapshot should fail");
         let rendered = err.to_string();
         assert!(

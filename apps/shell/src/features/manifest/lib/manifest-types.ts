@@ -9,17 +9,17 @@ export interface NamedRef {
   hash?: string;
 }
 
-/** Event routing rule: event schema → reducer module */
+/** Event routing rule: event schema → workflow module */
 export interface RoutingEvent {
   event: string;
-  reducer: string;
+  workflow: string;
   key_field?: string;
 }
 
-/** Inbox routing: external source → reducer */
+/** Inbox routing: external source → workflow */
 export interface RoutingInbox {
   source: string;
-  reducer: string;
+  workflow: string;
 }
 
 /** Routing configuration */
@@ -80,8 +80,8 @@ export interface Manifest {
 // Enriched types (with fetched def details)
 // ============================================
 
-/** Module ABI for reducers */
-export interface ReducerAbi {
+/** Module ABI for workflows */
+export interface WorkflowAbi {
   state: string;
   event: string;
   context?: string;
@@ -101,11 +101,11 @@ export interface PureAbi {
 export interface ModuleDef {
   $kind: "defmodule";
   name: string;
-  module_kind: "reducer" | "pure";
+  module_kind: "workflow" | "pure";
   wasm_hash?: string;
   key_schema?: string;
   abi: {
-    reducer?: ReducerAbi;
+    workflow?: WorkflowAbi;
     pure?: PureAbi;
   };
 }
@@ -170,13 +170,13 @@ export function buildTriggersByPlan(triggers: Trigger[]): Map<string, Trigger> {
   return map;
 }
 
-/** Build a map of routing by reducer name */
-export function buildRoutingByReducer(routing: Routing): Map<string, RoutingEvent[]> {
+/** Build a map of routing by workflow name */
+export function buildRoutingByWorkflow(routing: Routing): Map<string, RoutingEvent[]> {
   const map = new Map<string, RoutingEvent[]>();
   for (const event of routing.events) {
-    const existing = map.get(event.reducer) || [];
+    const existing = map.get(event.workflow) || [];
     existing.push(event);
-    map.set(event.reducer, existing);
+    map.set(event.workflow, existing);
   }
   return map;
 }
