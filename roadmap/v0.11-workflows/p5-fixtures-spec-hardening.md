@@ -171,6 +171,14 @@ Implementation log (completed 2026-02-26):
   - rewrote `crates/aos-host/tests/governance_integration.rs` to workflow-manifest governance assertions only (removed `DefPlan`/`AirNode::Defplan`/manifest `plans` assumptions).
   - targeted verification:
     - `cargo test -p aos-host --test governance_effects_integration --features e2e-tests -q`
+- [x] `world_integration.rs` drop-only pass completed per migration map: removed all plan-only tests explicitly marked `Drop`; retained `Keep`/`Migrate` tests for follow-up workflow rewrites.
+  - map: `roadmap/v0.11-workflows/p5-world-integration-migration-map.md`
+  - verification: `cargo test -p aos-host --test world_integration --features e2e-tests -q`
+- [x] `world_integration.rs` migration batch 1 completed: moved five workflow-relevant ignored tests into `crates/aos-host/tests/workflow_runtime_integration.rs` and removed the old plan-era variants from `world_integration.rs`.
+  - migrated: `single_plan_orchestration_completes_after_receipt`, `reducer_and_plan_effects_are_enqueued`, `reducer_timer_receipt_routes_event_to_handler`, `blob_put_receipt_routes_event_to_handler`, `blob_get_receipt_routes_event_to_handler`
+  - verification:
+    - `cargo test -p aos-host --test workflow_runtime_integration --features e2e-tests -q`
+    - `cargo test -p aos-host --test world_integration --features e2e-tests -q`
 
 ### 4) Dead code and roadmap cleanup
 
