@@ -17,17 +17,7 @@ pub struct EffectReceipt {
 
 impl EffectReceipt {
     pub fn payload<T: DeserializeOwned>(&self) -> Result<T, ReceiptDecodeError> {
-        const SELF_DESCRIBE_TAG: &[u8] = &[0xd9, 0xd9, 0xf7];
-        match serde_cbor::from_slice(&self.payload_cbor) {
-            Ok(value) => Ok(value),
-            Err(err) => {
-                if self.payload_cbor.starts_with(SELF_DESCRIBE_TAG) {
-                    return serde_cbor::from_slice(&self.payload_cbor[SELF_DESCRIBE_TAG.len()..])
-                        .map_err(ReceiptDecodeError::Payload);
-                }
-                Err(ReceiptDecodeError::Payload(err))
-            }
-        }
+        serde_cbor::from_slice(&self.payload_cbor).map_err(ReceiptDecodeError::Payload)
     }
 }
 

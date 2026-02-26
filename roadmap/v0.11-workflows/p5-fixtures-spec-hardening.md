@@ -89,6 +89,33 @@ Required coverage outcomes from rewritten fixtures/suites:
     - attempt governance apply and assert strict-quiescence block,
     - deliver receipt and assert deterministic continuation,
     - re-apply and assert deterministic success.
+13. [x] Strict receipt settlement invariant: malformed receipt payloads are rejected without consuming pending workflow/reducer intent state.
+14. [x] Remove receipt/event decode compatibility fallbacks in runtime SDK layers; require canonical schema-conformant payloads.
+
+Implementation log (completed 2026-02-26):
+- [x] Kernel receipt handling now validates/normalizes and delivers before removing pending receipt context, so malformed receipts do not consume pending state.
+  - `crates/aos-kernel/src/world/plan_runtime.rs`
+- [x] Removed receipt decode compatibility fallback (`self-describe` tag stripping); decoding now requires canonical schema-conformant CBOR.
+  - `crates/aos-effects/src/receipt.rs`
+  - `crates/aos-wasm-sdk/src/reducers.rs`
+- [x] Tightened event decode compatibility: `aos_event_union!` now requires canonical tagged event payloads (`$tag`/`$value`) and no longer accepts untagged fallback payloads.
+  - `crates/aos-wasm-sdk/src/reducers.rs`
+- [x] Removed adapter receipt-payload encoding fallbacks (`unwrap_or_default`) in host HTTP/LLM adapters.
+  - `crates/aos-host/src/adapters/http.rs`
+  - `crates/aos-host/src/adapters/llm.rs`
+- [x] Replaced generic stub receipt payloads with per-effect typed schema-conformant receipts (`http.request`, `llm.generate`, `blob.put`, `blob.get`, `timer.set`).
+  - `crates/aos-host/src/adapters/stub.rs`
+- [x] Added active regression test: malformed workflow receipt is rejected and pending receipt state remains until a valid receipt arrives.
+  - `crates/aos-host/tests/journal_integration.rs` (`malformed_workflow_receipt_does_not_consume_pending_intent`)
+- [x] Verified with targeted checks:
+  - `cargo test -p aos-effects -q`
+  - `cargo test -p aos-wasm-sdk -q`
+  - `cargo check -p aos-host`
+  - `cargo test -p aos-host --test journal_integration malformed_workflow_receipt_does_not_consume_pending_intent -q`
+  - `cargo run -p aos-smoke -- hello-timer`
+  - `cargo run -p aos-smoke -- blob-echo`
+  - `cargo run -p aos-smoke -- fetch-notify`
+  - `cargo run -p aos-smoke -- retry-backoff`
 
 ### 4) Dead code and roadmap cleanup
 

@@ -71,7 +71,8 @@ impl<S: Store> LlmAdapter<S> {
             intent_hash: intent.intent_hash,
             adapter_id: format!("host.llm.{provider_id}"),
             status,
-            payload_cbor: serde_cbor::to_vec(&receipt).unwrap_or_default(),
+            payload_cbor: serde_cbor::to_vec(&receipt)
+                .expect("encode host.llm failure receipt payload"),
             cost_cents: None,
             signature: vec![0; 64],
         }

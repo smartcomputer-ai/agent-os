@@ -6,6 +6,7 @@ use aos_air_types::{
 };
 use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_kernel::KernelError;
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord, PolicyDecisionOutcome};
@@ -316,6 +317,99 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
         .expect("replayed workflow instance");
     assert!(replay_workflow.inflight_intents.is_empty());
     assert_eq!(replay_workflow.status, WorkflowStatusSnapshot::Completed);
+}
+
+#[test]
+fn malformed_workflow_receipt_does_not_consume_pending_intent() {
+    let store = fixtures::new_mem_store();
+    let manifest = no_plan_workflow_manifest(&store);
+    let mut world = TestWorld::with_store(store, manifest).unwrap();
+
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("wf-1")
+    });
+    world
+        .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
+        .expect("submit workflow start event");
+    world.tick_n(1).unwrap();
+
+    let effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 2);
+    let blob_intent = effects
+        .iter()
+        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT)
+        .expect("blob.put intent");
+    let timer_intent = effects
+        .iter()
+        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
+        .expect("timer.set intent");
+
+    let pending_before = world.kernel.pending_reducer_receipts_snapshot();
+    assert_eq!(pending_before.len(), 2);
+    assert!(
+        pending_before
+            .iter()
+            .any(|entry| entry.intent_hash == blob_intent.intent_hash)
+    );
+
+    let malformed = EffectReceipt {
+        intent_hash: blob_intent.intent_hash,
+        adapter_id: "adapter.blob".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: vec![0xa0], // {} does not satisfy sys/BlobPutReceipt@1
+        cost_cents: None,
+        signature: vec![],
+    };
+    let err = world
+        .kernel
+        .handle_receipt(malformed)
+        .expect_err("reject malformed");
+    assert!(matches!(err, KernelError::ReceiptDecode(_)));
+
+    let pending_after_err = world.kernel.pending_reducer_receipts_snapshot();
+    assert_eq!(pending_after_err.len(), 2);
+    assert!(
+        pending_after_err
+            .iter()
+            .any(|entry| entry.intent_hash == blob_intent.intent_hash)
+    );
+
+    let blob_receipt = EffectReceipt {
+        intent_hash: blob_intent.intent_hash,
+        adapter_id: "adapter.blob".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&BlobPutReceipt {
+            blob_ref: fixtures::fake_hash(0x21),
+            edge_ref: fixtures::fake_hash(0x22),
+            size: 8,
+        })
+        .unwrap(),
+        cost_cents: Some(1),
+        signature: vec![1, 2, 3],
+    };
+    world.kernel.handle_receipt(blob_receipt).unwrap();
+
+    let timer_receipt = EffectReceipt {
+        intent_hash: timer_intent.intent_hash,
+        adapter_id: "adapter.timer".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
+            delivered_at_ns: 42,
+            key: Some("wf".into()),
+        })
+        .unwrap(),
+        cost_cents: Some(1),
+        signature: vec![4, 5, 6],
+    };
+    world.kernel.handle_receipt(timer_receipt).unwrap();
+    world.kernel.tick_until_idle().unwrap();
+
+    assert_eq!(
+        world.kernel.reducer_state("com.acme/WorkflowResult@1"),
+        Some(vec![0xFA]),
+        "workflow should continue once valid receipts arrive"
+    );
 }
 
 /// Policy decisions should be journaled for plan-origin effects.

@@ -359,18 +359,7 @@ pub struct EffectReceiptEnvelope {
 impl EffectReceiptEnvelope {
     /// Decode the embedded receipt payload into a typed struct.
     pub fn decode_receipt_payload<T: DeserializeOwned>(&self) -> Result<T, serde_cbor::Error> {
-        const SELF_DESCRIBE_TAG: &[u8] = &[0xd9, 0xd9, 0xf7];
-        match serde_cbor::from_slice(&self.receipt_payload) {
-            Ok(value) => Ok(value),
-            Err(err) => {
-                if self.receipt_payload.starts_with(SELF_DESCRIBE_TAG) {
-                    return serde_cbor::from_slice(
-                        &self.receipt_payload[SELF_DESCRIBE_TAG.len()..],
-                    );
-                }
-                Err(err)
-            }
-        }
+        serde_cbor::from_slice(&self.receipt_payload)
     }
 }
 
@@ -588,8 +577,8 @@ macro_rules! aos_variant {
     };
 }
 
-/// Helper macro to define an enum that can deserialize either a tagged (canonical `$tag`/`$value`)
-/// variant form or any number of plain record forms (useful for mixing app events with receipt records).
+/// Helper macro to define an enum that deserializes from AIR's canonical tagged
+/// variant form (`$tag`/`$value`).
 #[macro_export]
 macro_rules! aos_event_union {
     ($(#[$meta:meta])* $vis:vis enum $name:ident { $($variant:ident ( $ty:ty )),+ $(,)? }) => {
@@ -604,28 +593,32 @@ macro_rules! aos_event_union {
                 D: serde::Deserializer<'de>,
             {
                 let value = serde_cbor::Value::deserialize(deserializer)?;
+                let serde_cbor::Value::Map(map) = value else {
+                    return Err(serde::de::Error::custom(
+                        "event union expects canonical tagged object",
+                    ));
+                };
+                let Some(serde_cbor::Value::Text(tag)) =
+                    map.get(&serde_cbor::Value::Text("$tag".into()))
+                else {
+                    return Err(serde::de::Error::custom(
+                        "event union payload missing '$tag'",
+                    ));
+                };
+                let inner = map
+                    .get(&serde_cbor::Value::Text("$value".into()))
+                    .cloned()
+                    .unwrap_or(serde_cbor::Value::Null);
                 $(
-                    // First, try canonical tagged form: {"$tag":"Variant", "$value": ...}
-                    if let serde_cbor::Value::Map(map) = &value {
-                        if let Some(serde_cbor::Value::Text(tag)) = map.get(&serde_cbor::Value::Text("$tag".into())) {
-                            let expected = stringify!($variant);
-                            let expected_lower = expected.to_ascii_lowercase();
-                            if tag == expected || tag == expected_lower.as_str() {
-                                let inner = map.get(&serde_cbor::Value::Text("$value".into()))
-                                    .cloned()
-                                    .unwrap_or(serde_cbor::Value::Null);
-                                if let Ok(v) = serde_cbor::value::from_value::<$ty>(inner) {
-                                    return Ok(Self::$variant(v));
-                                }
-                            }
-                        }
-                    }
-                    // Fallback: try to deserialize the entire value as the variant payload (record-shaped receipts, legacy untagged Start, etc.)
-                    if let Ok(v) = serde_cbor::value::from_value::<$ty>(value.clone()) {
-                        return Ok(Self::$variant(v));
+                    let expected = stringify!($variant);
+                    let expected_lower = expected.to_ascii_lowercase();
+                    if tag == expected || tag == expected_lower.as_str() {
+                        let decoded = serde_cbor::value::from_value::<$ty>(inner.clone())
+                            .map_err(serde::de::Error::custom)?;
+                        return Ok(Self::$variant(decoded));
                     }
                 )+
-                Err(serde::de::Error::custom("no union variant matched payload"))
+                Err(serde::de::Error::custom("event union tag did not match any variant"))
             }
         }
     };
@@ -634,6 +627,7 @@ macro_rules! aos_event_union {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use aos_wasm_abi::{DomainEvent, ReducerContext, ReducerInput};
     use serde::{Deserialize, Serialize};
@@ -809,8 +803,8 @@ mod tests {
         let envelope = EffectReceiptEnvelope {
             origin_module_id: "com.acme/Workflow@1".into(),
             origin_instance_key: Some(b"key-1".to_vec()),
-            intent_id:
-                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            intent_id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .into(),
             effect_kind: "http.request".into(),
             params_hash: None,
             receipt_payload: payload,
@@ -823,5 +817,37 @@ mod tests {
 
         let decoded: DummyReceipt = envelope.decode_receipt_payload().unwrap();
         assert_eq!(decoded, DummyReceipt { status: 200 });
+    }
+
+    #[test]
+    fn event_union_requires_canonical_tagged_payload() {
+        #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+        struct StartPayload {
+            id: u64,
+        }
+
+        aos_event_union! {
+            #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+            enum UnionEvent {
+                Start(StartPayload),
+            }
+        }
+
+        let tagged = serde_cbor::to_vec(&serde_cbor::Value::Map(BTreeMap::from([
+            (
+                serde_cbor::Value::Text("$tag".into()),
+                serde_cbor::Value::Text("Start".into()),
+            ),
+            (
+                serde_cbor::Value::Text("$value".into()),
+                serde_cbor::value::to_value(StartPayload { id: 7 }).unwrap(),
+            ),
+        ])))
+        .unwrap();
+        let decoded: UnionEvent = serde_cbor::from_slice(&tagged).unwrap();
+        assert_eq!(decoded, UnionEvent::Start(StartPayload { id: 7 }));
+
+        let untagged = serde_cbor::to_vec(&StartPayload { id: 7 }).unwrap();
+        assert!(serde_cbor::from_slice::<UnionEvent>(&untagged).is_err());
     }
 }

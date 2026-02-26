@@ -287,11 +287,16 @@ impl<S: Store + 'static> Kernel<S> {
             return Ok(());
         }
 
-        if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
+        if let Some(context) = self
+            .pending_reducer_receipts
+            .get(&receipt.intent_hash)
+            .cloned()
+        {
             let receipt = self.normalize_receipt_payload_for_effect(receipt, &context)?;
             self.record_effect_receipt(&receipt, &stamp)?;
             self.record_decisions()?;
             self.deliver_receipt_to_workflow_instance(context, &receipt, &stamp)?;
+            self.pending_reducer_receipts.remove(&receipt.intent_hash);
             self.remember_receipt(receipt.intent_hash);
             return Ok(());
         }
@@ -320,17 +325,14 @@ impl<S: Store + 'static> Kernel<S> {
             .find(|def| def.kind.as_str() == context.effect_kind)
             .map(|def| def.receipt_schema.as_str().to_string())
             .ok_or_else(|| KernelError::UnsupportedEffectKind(context.effect_kind.clone()))?;
-        let normalized = normalize_cbor_by_name(
-            &self.schema_index,
-            &receipt_schema,
-            &receipt.payload_cbor,
-        )
-        .map_err(|err| {
-            KernelError::ReceiptDecode(format!(
-                "receipt payload for '{}' failed schema '{}': {err}",
-                context.effect_kind, receipt_schema
-            ))
-        })?;
+        let normalized =
+            normalize_cbor_by_name(&self.schema_index, &receipt_schema, &receipt.payload_cbor)
+                .map_err(|err| {
+                    KernelError::ReceiptDecode(format!(
+                        "receipt payload for '{}' failed schema '{}': {err}",
+                        context.effect_kind, receipt_schema
+                    ))
+                })?;
         receipt.payload_cbor = normalized.bytes;
         Ok(receipt)
     }
