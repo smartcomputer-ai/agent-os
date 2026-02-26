@@ -51,8 +51,8 @@ Integration suite rewrite checklist:
 - [ ] `crates/aos-host/tests/world_integration.rs`: replace ignored plan-runtime tests with workflow-runtime equivalents.
 - [ ] `crates/aos-host/tests/journal_integration.rs`: migrate journal assertions from plan records to workflow records/state.
 - [ ] `crates/aos-host/tests/snapshot_integration.rs`: migrate snapshot/replay assertions to workflow in-flight state semantics.
-- [ ] `crates/aos-host/tests/governance_plan_integration.rs`: migrate governance coverage to workflow manifests/subscriptions.
-- [ ] `crates/aos-host/tests/governance_integration.rs`: replace plan patch/apply checks with workflow wiring/apply checks.
+- [x] `crates/aos-host/tests/governance_effects_integration.rs` (replaces `governance_plan_integration.rs`): governance propose/shadow/approve/apply exercised via workflow-origin effects (no plan APIs).
+- [x] `crates/aos-host/tests/governance_integration.rs`: removed plan patch/apply assertions and kept workflow-manifest governance checks only.
 - [ ] `crates/aos-host/tests/fixtures.rs`: replace plan-oriented fixtures/helpers with workflow-oriented fixtures/helpers.
 - [ ] `crates/aos-host/tests/helpers.rs`: replace plan-oriented helpers and names with workflow-oriented helpers.
 
@@ -166,6 +166,11 @@ Implementation log (completed 2026-02-26):
   - `crates/aos-smoke/fixtures/README.md`
   - `crates/aos-smoke/src/main.rs`
   - `crates/aos-smoke/src/chat_live.rs`
+- [x] Integration deletion pass (plan surface first):
+  - replaced `crates/aos-host/tests/governance_plan_integration.rs` with `crates/aos-host/tests/governance_effects_integration.rs` using workflow-origin effect intents (`enqueue_reducer_effect_with_grant`).
+  - rewrote `crates/aos-host/tests/governance_integration.rs` to workflow-manifest governance assertions only (removed `DefPlan`/`AirNode::Defplan`/manifest `plans` assumptions).
+  - targeted verification:
+    - `cargo test -p aos-host --test governance_effects_integration --features e2e-tests -q`
 
 ### 4) Dead code and roadmap cleanup
 

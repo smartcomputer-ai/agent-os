@@ -1,27 +1,19 @@
 #![cfg(feature = "e2e-tests")]
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use aos_air_types::{
-    AirNode, CapGrant, CapType, DefCap, DefPlan, DefSchema, EffectKind, EmptyObject, Expr,
-    ExprConst, ExprOrValue, ExprRecord, ExprRef, Manifest, ManifestDefaults, NamedRef, PlanBind,
-    PlanBindEffect, PlanEdge, PlanStep, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd,
-    PlanStepKind, ReducerAbi, TypeExpr, TypeRecord, ValueLiteral, ValueMap, ValueNull, ValueRecord,
-    ValueText,
-    builtins::builtin_schemas,
-    plan_literals::{SchemaIndex, normalize_plan_literals},
+    AirNode, CapGrant, CapType, DefCap, DefSchema, ManifestDefaults, NamedRef, ReducerAbi,
+    TypeExpr, TypeRecord, ValueLiteral, ValueRecord,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
-use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ManifestPatch;
 use aos_kernel::journal::{GovernanceRecord, JournalKind, JournalRecord};
 use aos_kernel::shadow::ShadowHarness;
-use aos_wasm_abi::{PureOutput, ReducerOutput};
+use aos_wasm_abi::ReducerOutput;
 use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld};
 use indexmap::IndexMap;
-use serde_cbor;
-use serde_json::json;
 
 mod helpers;
 use helpers::simple_state_manifest;
@@ -78,93 +70,6 @@ fn apply_requires_approval_state() {
         err,
         KernelError::ProposalStateInvalid { required, .. } if required == "approved"
     ));
-}
-
-#[test]
-#[ignore = "P2: shadow prediction assertions were plan-runtime-specific; migrate to workflow shadow fixture"]
-fn shadow_summary_includes_predictions_and_deltas() {
-    let store = fixtures::new_mem_store();
-    let manifest = simple_state_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-
-    let loaded = shadow_plan_manifest(&store);
-    let mut patch = manifest_patch_from_loaded(&loaded);
-    patch.manifest.caps.push(NamedRef {
-        name: "sys/http.out@1".into(),
-        hash: fixtures::zero_hash(),
-    });
-    let proposal_id = world
-        .kernel
-        .submit_proposal(patch, Some("shadow".into()))
-        .unwrap();
-
-    let harness = ShadowHarness {
-        seed_events: vec![start_seed_event()],
-    };
-    let summary = world.kernel.run_shadow(proposal_id, Some(harness)).unwrap();
-
-    assert_eq!(summary.predicted_effects.len(), 1);
-    assert_eq!(summary.pending_receipts.len(), 0);
-    assert_eq!(summary.plan_results.len(), 1);
-    // Cap was already present in the baseline manifest (fixtures attach defaults),
-    // so this patch should produce no capability deltas.
-    assert!(
-        summary.ledger_deltas.is_empty(),
-        "expected no capability deltas, got {:?}",
-        summary.ledger_deltas
-    );
-}
-
-#[test]
-fn patch_hash_is_identical_for_sugar_and_canonical_plans() {
-    let store = fixtures::new_mem_store();
-    let manifest = simple_state_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-
-    let sugar_plan: DefPlan = serde_json::from_value(sample_plan_json()).expect("plan json");
-    let mut canonical_plan: DefPlan =
-        serde_json::from_value(sample_plan_json()).expect("plan json");
-    let effect_catalog = aos_air_types::catalog::EffectCatalog::from_defs(
-        aos_air_types::builtins::builtin_effects()
-            .iter()
-            .map(|e| e.effect.clone()),
-    );
-    normalize_plan_literals(
-        &mut canonical_plan,
-        &builtin_schema_index(),
-        &effect_catalog,
-    )
-    .expect("normalize canonical plan");
-
-    let sugar_patch = plan_patch(sugar_plan);
-    let canonical_patch = plan_patch(canonical_plan);
-
-    let sugar_id = world
-        .kernel
-        .submit_proposal(sugar_patch, Some("sugar".into()))
-        .unwrap();
-    let canonical_id = world
-        .kernel
-        .submit_proposal(canonical_patch, Some("canonical".into()))
-        .unwrap();
-
-    let hash_sugar = world
-        .kernel
-        .governance()
-        .proposals()
-        .get(&sugar_id)
-        .unwrap()
-        .patch_hash
-        .clone();
-    let hash_canonical = world
-        .kernel
-        .governance()
-        .proposals()
-        .get(&canonical_id)
-        .unwrap()
-        .patch_hash
-        .clone();
-    assert_eq!(hash_sugar, hash_canonical);
 }
 
 #[test]
@@ -308,12 +213,12 @@ fn applied_records_manifest_root_not_patch_hash() {
 }
 
 #[test]
-fn shadow_upgrade_reports_followup_effects() {
+fn shadow_upgrade_reports_followup_effect_cap_delta() {
     let store = fixtures::new_mem_store();
-    let base = upgrade_manifest(&store, false);
+    let base = simple_state_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), base).unwrap();
 
-    let upgraded = upgrade_manifest(&store, true);
+    let upgraded = manifest_with_added_cap(&store);
     let patch = manifest_patch_from_loaded(&upgraded);
     let proposal_id = world
         .kernel
@@ -324,19 +229,12 @@ fn shadow_upgrade_reports_followup_effects() {
         .kernel
         .run_shadow(proposal_id, Some(ShadowHarness::default()))
         .unwrap();
-    assert!(summary.predicted_effects.is_empty());
     assert!(
         summary
             .ledger_deltas
             .iter()
             .any(|delta| delta.name == "com.acme/http_followup_cap@1")
     );
-
-    world
-        .kernel
-        .approve_proposal(proposal_id, "approver")
-        .unwrap();
-    world.kernel.apply_proposal(proposal_id).unwrap();
 }
 
 fn manifest_with_reducer(
@@ -377,73 +275,36 @@ fn manifest_with_reducer(
     loaded
 }
 
-fn sample_plan_json() -> serde_json::Value {
-    json!({
-        "$kind": "defplan",
-        "name": "com.acme/SugarHttp@1",
-        "input": "sys/HttpRequestParams@1",
-        "steps": [
-            {
-                "id": "emit",
-                "op": "emit_effect",
-                "kind": "http.request",
-                "params": {
-                    "headers": {
-                        "content-type": "application/json",
-                        "accept": "*/*"
-                    },
-                    "method": "POST",
-                    "url": "https://example.com",
-                    "body_ref": null
-                },
-                "cap": "cap_http",
-                "bind": { "effect_id_as": "req" }
-            },
-            {
-                "id": "await",
-                "op": "await_receipt",
-                "for": { "ref": "@var:req" },
-                "bind": { "as": "resp" }
-            },
-            { "id": "end", "op": "end" }
-        ],
-        "edges": [
-            { "from": "emit", "to": "await" },
-            { "from": "await", "to": "end" }
-        ],
-        "required_caps": ["cap_http"],
-        "allowed_effects": ["http.request"]
-    })
-}
+fn manifest_with_added_cap(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
+    let mut loaded = simple_state_manifest(store);
+    let followup_cap = test_http_cap("com.acme/http_followup_cap@1");
 
-fn plan_patch(plan: DefPlan) -> ManifestPatch {
-    ManifestPatch {
-        manifest: Manifest {
-            air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
-            schemas: vec![],
-            modules: vec![],
-            plans: vec![NamedRef {
-                name: plan.name.clone(),
-                hash: fixtures::zero_hash(),
-            }],
-            effects: vec![],
-            caps: vec![],
-            policies: vec![],
-            secrets: vec![],
-            defaults: None,
-            module_bindings: Default::default(),
-            routing: None,
-        },
-        nodes: vec![AirNode::Defplan(plan)],
-    }
-}
+    loaded.manifest.caps.push(NamedRef {
+        name: followup_cap.name.clone(),
+        hash: fixtures::zero_hash(),
+    });
+    loaded
+        .caps
+        .insert(followup_cap.name.clone(), followup_cap.clone());
 
-fn builtin_schema_index() -> SchemaIndex {
-    let mut map = HashMap::new();
-    for builtin in builtin_schemas() {
-        map.insert(builtin.schema.name.clone(), builtin.schema.ty.clone());
-    }
-    SchemaIndex::new(map)
+    let mut cap_grants = loaded
+        .manifest
+        .defaults
+        .clone()
+        .map(|defaults| defaults.cap_grants)
+        .unwrap_or_default();
+    cap_grants.push(CapGrant {
+        name: "cap_http_followup".into(),
+        cap: followup_cap.name,
+        params: empty_literal(),
+        expiry_ns: None,
+    });
+    loaded.manifest.defaults = Some(ManifestDefaults {
+        policy: None,
+        cap_grants,
+    });
+
+    loaded
 }
 
 fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> ManifestPatch {
@@ -455,7 +316,6 @@ fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> 
         .collect();
     nodes.extend(loaded.caps.values().cloned().map(AirNode::Defcap));
     nodes.extend(loaded.policies.values().cloned().map(AirNode::Defpolicy));
-    nodes.extend(loaded.plans.values().cloned().map(AirNode::Defplan));
     nodes.extend(loaded.effects.values().cloned().map(AirNode::Defeffect));
     nodes.extend(loaded.schemas.values().cloned().map(AirNode::Defschema));
 
@@ -463,214 +323,6 @@ fn manifest_patch_from_loaded(loaded: &aos_kernel::manifest::LoadedManifest) -> 
         manifest: loaded.manifest.clone(),
         nodes,
     }
-}
-
-fn start_seed_event() -> (String, Vec<u8>) {
-    let bytes =
-        serde_cbor::to_vec(&serde_json::json!({ "id": "seed" })).expect("encode start event");
-    (START_SCHEMA.to_string(), bytes)
-}
-
-fn upgrade_manifest(
-    store: &Arc<TestStore>,
-    followup: bool,
-) -> aos_kernel::manifest::LoadedManifest {
-    let plan_name = if followup {
-        "com.acme/UpgradePlan@2"
-    } else {
-        "com.acme/UpgradePlan@1"
-    };
-    let plan = if followup {
-        upgrade_plan_v2(plan_name)
-    } else {
-        upgrade_plan_v1(plan_name)
-    };
-    let mut reducer = fixtures::stub_reducer_module(
-        store,
-        "com.acme/UpgradeReducer@1",
-        &ReducerOutput {
-            state: Some(vec![0xAA]),
-            domain_events: vec![],
-            effects: vec![],
-            ann: None,
-        },
-    );
-    reducer.abi.reducer = Some(ReducerAbi {
-        state: fixtures::schema(START_SCHEMA),
-        event: fixtures::schema(START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
-        annotations: None,
-        effects_emitted: vec![],
-        cap_slots: IndexMap::new(),
-    });
-
-    let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![plan],
-        vec![fixtures::start_trigger(plan_name)],
-        vec![reducer],
-        routing,
-    );
-
-    let primary_cap = test_http_cap("com.acme/http_primary_cap@1");
-    let followup_cap = test_http_cap("com.acme/http_followup_cap@1");
-    let mut cap_refs = loaded.manifest.caps.clone();
-    cap_refs.push(NamedRef {
-        name: primary_cap.name.clone(),
-        hash: fixtures::zero_hash(),
-    });
-    loaded.manifest.caps = cap_refs;
-    loaded
-        .caps
-        .insert(primary_cap.name.clone(), primary_cap.clone());
-    let mut cap_grants = loaded
-        .manifest
-        .defaults
-        .clone()
-        .map(|defaults| defaults.cap_grants)
-        .unwrap_or_default();
-    cap_grants.push(CapGrant {
-        name: "cap_http_primary".into(),
-        cap: primary_cap.name.clone(),
-        params: empty_literal(),
-        expiry_ns: None,
-    });
-    if followup {
-        loaded.manifest.caps.push(NamedRef {
-            name: followup_cap.name.clone(),
-            hash: fixtures::zero_hash(),
-        });
-        loaded
-            .caps
-            .insert(followup_cap.name.clone(), followup_cap.clone());
-        cap_grants.push(CapGrant {
-            name: "cap_http_followup".into(),
-            cap: followup_cap.name,
-            params: empty_literal(),
-            expiry_ns: None,
-        });
-    }
-    loaded.manifest.defaults = Some(ManifestDefaults {
-        policy: None,
-        cap_grants,
-    });
-
-    helpers::insert_test_schemas(
-        &mut loaded,
-        vec![helpers::def_text_record_schema(
-            START_SCHEMA,
-            vec![("id", helpers::text_type())],
-        )],
-    );
-
-    loaded
-}
-
-fn upgrade_plan_v1(name: &str) -> DefPlan {
-    DefPlan {
-        name: name.to_string(),
-        input: fixtures::schema(START_SCHEMA),
-        output: None,
-        locals: IndexMap::new(),
-        steps: vec![
-            PlanStep {
-                id: "emit".into(),
-                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::http_request(),
-                    params: http_params_literal("v1"),
-                    cap: "cap_http_primary".into(),
-                    idempotency_key: None,
-                    bind: PlanBindEffect {
-                        effect_id_as: "req".into(),
-                    },
-                }),
-            },
-            PlanStep {
-                id: "await".into(),
-                kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
-                    for_expr: fixtures::var_expr("req"),
-                    bind: PlanBind {
-                        var: "receipt".into(),
-                    },
-                }),
-            },
-            PlanStep {
-                id: "end".into(),
-                kind: PlanStepKind::End(PlanStepEnd { result: None }),
-            },
-        ],
-        edges: vec![
-            PlanEdge {
-                from: "emit".into(),
-                to: "await".into(),
-                when: None,
-            },
-            PlanEdge {
-                from: "await".into(),
-                to: "end".into(),
-                when: None,
-            },
-        ],
-        required_caps: vec!["cap_http_primary".into()],
-        allowed_effects: vec![EffectKind::http_request()],
-        invariants: vec![],
-    }
-}
-
-fn upgrade_plan_v2(name: &str) -> DefPlan {
-    let mut plan = upgrade_plan_v1(name);
-    plan.name = name.to_string();
-    plan.steps.insert(
-        1,
-        PlanStep {
-            id: "emit_followup".into(),
-            kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::http_request(),
-                params: http_params_literal("v2"),
-                cap: "cap_http_followup".into(),
-                idempotency_key: None,
-                bind: PlanBindEffect {
-                    effect_id_as: "req_follow".into(),
-                },
-            }),
-        },
-    );
-    plan.steps.insert(
-        2,
-        PlanStep {
-            id: "await_followup".into(),
-            kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
-                for_expr: fixtures::var_expr("req_follow"),
-                bind: PlanBind {
-                    var: "receipt_follow".into(),
-                },
-            }),
-        },
-    );
-    plan.edges = vec![
-        PlanEdge {
-            from: "emit".into(),
-            to: "emit_followup".into(),
-            when: None,
-        },
-        PlanEdge {
-            from: "emit_followup".into(),
-            to: "await_followup".into(),
-            when: None,
-        },
-        PlanEdge {
-            from: "await_followup".into(),
-            to: "await".into(),
-            when: None,
-        },
-        PlanEdge {
-            from: "await".into(),
-            to: "end".into(),
-            when: None,
-        },
-    ];
-    plan.required_caps.push("cap_http_followup".to_string());
-    plan
 }
 
 fn test_http_cap(name: &str) -> DefCap {
@@ -690,134 +342,4 @@ fn empty_literal() -> ValueLiteral {
     ValueLiteral::Record(ValueRecord {
         record: IndexMap::new(),
     })
-}
-
-fn shadow_plan_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let _ = store;
-    let plan_name = "com.acme/ShadowPlan@1".to_string();
-    let plan = DefPlan {
-        name: plan_name.clone(),
-        input: fixtures::schema(START_SCHEMA),
-        output: Some(fixtures::schema("com.acme/ShadowOut@1")),
-        locals: IndexMap::new(),
-        steps: vec![
-            PlanStep {
-                id: "emit".into(),
-                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::http_request(),
-                    params: http_params_literal("shadow"),
-                    cap: "cap_http".into(),
-                    idempotency_key: None,
-                    bind: PlanBindEffect {
-                        effect_id_as: "req".into(),
-                    },
-                }),
-            },
-            PlanStep {
-                id: "await".into(),
-                kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
-                    for_expr: Expr::Ref(ExprRef {
-                        reference: "@var:req".into(),
-                    }),
-                    bind: PlanBind { var: "resp".into() },
-                }),
-            },
-            PlanStep {
-                id: "end".into(),
-                kind: PlanStepKind::End(PlanStepEnd {
-                    result: Some(
-                        Expr::Record(ExprRecord {
-                            record: IndexMap::from([(
-                                "value".into(),
-                                Expr::Const(ExprConst::Text {
-                                    text: "done".into(),
-                                }),
-                            )]),
-                        })
-                        .into(),
-                    ),
-                }),
-            },
-        ],
-        edges: vec![
-            PlanEdge {
-                from: "emit".into(),
-                to: "await".into(),
-                when: None,
-            },
-            PlanEdge {
-                from: "await".into(),
-                to: "end".into(),
-                when: None,
-            },
-        ],
-        required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::http_request()],
-        invariants: vec![],
-    };
-
-    let allow_output = CapCheckOutput {
-        constraints_ok: true,
-        deny: None,
-    };
-    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
-    let pure_output = PureOutput {
-        output: output_bytes,
-    };
-    let enforcer = fixtures::stub_pure_module(
-        store,
-        "sys/CapEnforceHttpOut@1",
-        &pure_output,
-        "sys/CapCheckInput@1",
-        "sys/CapCheckOutput@1",
-    );
-
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![plan],
-        vec![fixtures::start_trigger(&plan_name)],
-        vec![enforcer],
-        vec![],
-    );
-
-    helpers::insert_test_schemas(
-        &mut loaded,
-        vec![
-            helpers::def_text_record_schema(START_SCHEMA, vec![("id", helpers::text_type())]),
-            helpers::def_text_record_schema(
-                "com.acme/ShadowOut@1",
-                vec![("value", helpers::text_type())],
-            ),
-        ],
-    );
-
-    loaded
-}
-
-fn http_params_literal(tag: &str) -> ExprOrValue {
-    ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
-        record: IndexMap::from([
-            (
-                "method".into(),
-                ValueLiteral::Text(ValueText { text: "GET".into() }),
-            ),
-            (
-                "url".into(),
-                ValueLiteral::Text(ValueText {
-                    text: format!("https://example.com/{tag}"),
-                }),
-            ),
-            (
-                "headers".into(),
-                ValueLiteral::Map(ValueMap {
-                    map: vec![], // empty header map is allowed
-                }),
-            ),
-            (
-                "body_ref".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject {},
-                }),
-            ),
-        ]),
-    }))
 }

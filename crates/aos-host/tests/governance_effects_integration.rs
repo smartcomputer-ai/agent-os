@@ -1,10 +1,10 @@
+#![cfg(feature = "e2e-tests")]
+
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use aos_air_types::{
-    AirNode, CapEnforcer, CapGrant, DefPlan, DefSchema, EffectKind, EmptyObject, Expr, ExprOrValue,
-    ExprRecord, HashRef, ManifestDefaults, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind, ReducerAbi, Trigger,
+    AirNode, CapEnforcer, CapGrant, DefSchema, EmptyObject, HashRef, ManifestDefaults, NamedRef,
     TypeExpr, TypePrimitive, TypePrimitiveText, builtins, catalog::EffectCatalog,
     plan_literals::SchemaIndex,
 };
@@ -19,13 +19,15 @@ use aos_kernel::governance::ProposalState;
 use aos_kernel::governance_effects::GovernanceParamPreprocessor;
 use aos_kernel::policy::AllowAllPolicy;
 use aos_store::Store;
-use aos_wasm_abi::ReducerOutput;
-use indexmap::IndexMap;
+use aos_wasm_abi::ReducerEffect;
 use serde::Deserialize;
 
 #[path = "fixtures.rs"]
 mod fixtures;
+#[path = "helpers.rs"]
+mod helpers;
 use fixtures::TestWorld;
+use helpers::simple_state_manifest;
 
 #[derive(Debug, Deserialize)]
 struct GovProposeReceipt {
@@ -33,7 +35,7 @@ struct GovProposeReceipt {
 }
 
 #[test]
-fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), KernelError> {
+fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), KernelError> {
     let store = fixtures::new_mem_store();
     let mut loaded = simple_state_manifest(&store);
     hydrate_schema_hashes(&store, &mut loaded)?;
@@ -50,12 +52,10 @@ fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), Ker
     let patch_doc_bytes =
         serde_json::to_vec(&patch_doc).map_err(|err| KernelError::Manifest(err.to_string()))?;
 
-    let propose_intent = effect_manager.enqueue_plan_effect_with_grant(
-        "upgrade-plan",
-        &EffectKind::new("governance.propose"),
+    let propose_intent = effect_manager.enqueue_reducer_effect_with_grant(
+        "com.acme/Simple@1",
         &grant,
-        propose_params_cbor(&patch_doc_bytes)?,
-        [0u8; 32],
+        &ReducerEffect::new("governance.propose", propose_params_cbor(&patch_doc_bytes)?),
     )?;
     let propose_receipt = world
         .kernel
@@ -71,12 +71,10 @@ fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), Ker
         .expect("proposal stored");
     assert_eq!(proposal.state, ProposalState::Submitted);
 
-    let shadow_intent = effect_manager.enqueue_plan_effect_with_grant(
-        "upgrade-plan",
-        &EffectKind::new("governance.shadow"),
+    let shadow_intent = effect_manager.enqueue_reducer_effect_with_grant(
+        "com.acme/Simple@1",
         &grant,
-        shadow_params_cbor(propose.proposal_id)?,
-        [0u8; 32],
+        &ReducerEffect::new("governance.shadow", shadow_params_cbor(propose.proposal_id)?),
     )?;
     let shadow_receipt = world
         .kernel
@@ -91,12 +89,10 @@ fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), Ker
         .expect("proposal stored");
     assert_eq!(proposal.state, ProposalState::Shadowed);
 
-    let approve_intent = effect_manager.enqueue_plan_effect_with_grant(
-        "upgrade-plan",
-        &EffectKind::new("governance.approve"),
+    let approve_intent = effect_manager.enqueue_reducer_effect_with_grant(
+        "com.acme/Simple@1",
         &grant,
-        approve_params_cbor(propose.proposal_id)?,
-        [0u8; 32],
+        &ReducerEffect::new("governance.approve", approve_params_cbor(propose.proposal_id)?),
     )?;
     let approve_receipt = world
         .kernel
@@ -111,12 +107,10 @@ fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), Ker
         .expect("proposal stored");
     assert_eq!(proposal.state, ProposalState::Approved);
 
-    let apply_intent = effect_manager.enqueue_plan_effect_with_grant(
-        "upgrade-plan",
-        &EffectKind::new("governance.apply"),
+    let apply_intent = effect_manager.enqueue_reducer_effect_with_grant(
+        "com.acme/Simple@1",
         &grant,
-        apply_params_cbor(propose.proposal_id)?,
-        [0u8; 32],
+        &ReducerEffect::new("governance.apply", apply_params_cbor(propose.proposal_id)?),
     )?;
     let apply_receipt = world
         .kernel
@@ -135,119 +129,6 @@ fn governance_effects_apply_patch_doc_from_plan_like_intents() -> Result<(), Ker
         world.kernel.get_def("com.acme/UpgradeSchema@1").is_some(),
         "patched schema not found in manifest"
     );
-    Ok(())
-}
-
-#[test]
-#[ignore = "P2: governance plan trigger path retired; replace with workflow-governance fixture"]
-fn governance_action_requested_trigger_runs_plan() -> Result<(), KernelError> {
-    let store = fixtures::new_mem_store();
-    let plan_name = "com.acme/UpgradePlan@1";
-    let plan = DefPlan {
-        name: plan_name.into(),
-        input: fixtures::schema("sys/GovActionRequested@1"),
-        output: None,
-        locals: IndexMap::new(),
-        steps: vec![
-            PlanStep {
-                id: "emit".into(),
-                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::new("governance.propose"),
-                    params: ExprOrValue::Expr(Expr::Record(ExprRecord {
-                        record: IndexMap::from([
-                            ("patch".into(), fixtures::plan_input_expr("patch")),
-                            (
-                                "manifest_base".into(),
-                                fixtures::plan_input_expr("manifest_base"),
-                            ),
-                            (
-                                "description".into(),
-                                fixtures::plan_input_expr("description"),
-                            ),
-                        ]),
-                    })),
-                    cap: "gov_cap".into(),
-                    idempotency_key: None,
-                    bind: PlanBindEffect {
-                        effect_id_as: "proposal".into(),
-                    },
-                }),
-            },
-            PlanStep {
-                id: "await".into(),
-                kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
-                    for_expr: fixtures::var_expr("proposal"),
-                    bind: PlanBind {
-                        var: "receipt".into(),
-                    },
-                }),
-            },
-            PlanStep {
-                id: "end".into(),
-                kind: PlanStepKind::End(PlanStepEnd { result: None }),
-            },
-        ],
-        edges: vec![
-            PlanEdge {
-                from: "emit".into(),
-                to: "await".into(),
-                when: None,
-            },
-            PlanEdge {
-                from: "await".into(),
-                to: "end".into(),
-                when: None,
-            },
-        ],
-        required_caps: vec!["gov_cap".into()],
-        allowed_effects: vec![EffectKind::new("governance.propose")],
-        invariants: vec![],
-    };
-    let trigger = Trigger {
-        event: fixtures::schema("sys/GovActionRequested@1"),
-        plan: plan_name.into(),
-        correlate_by: None,
-        when: None,
-        input_expr: None,
-    };
-    let mut loaded = fixtures::build_loaded_manifest(vec![plan], vec![trigger], vec![], vec![]);
-    attach_governance_cap_allow_all(&mut loaded);
-
-    let mut world = TestWorld::with_store(store, loaded)?;
-    let base_manifest = world.kernel.get_manifest(Consistency::Head)?.value;
-    let base_hash = Hash::of_cbor(&AirNode::Manifest(base_manifest))
-        .map_err(|err| KernelError::Manifest(err.to_string()))?
-        .to_hex();
-    let patch_doc = patch_doc_add_schema(base_hash, "com.acme/UpgradeSchema@1");
-    let patch_doc_bytes =
-        serde_json::to_vec(&patch_doc).map_err(|err| KernelError::Manifest(err.to_string()))?;
-    let event_payload = gov_action_requested_event_cbor(&patch_doc_bytes);
-    world.submit_event_result("sys/GovActionRequested@1", &event_payload)?;
-    world.tick_n(1)?;
-
-    let intents = world.drain_effects().expect("drain effects");
-    assert_eq!(intents.len(), 1, "expected one governance.propose intent");
-    let intent = intents.into_iter().next().expect("governance intent");
-    assert_eq!(intent.kind.as_str(), "governance.propose");
-    assert!(
-        world
-            .kernel
-            .pending_plan_receipts()
-            .iter()
-            .any(|(_, hash)| *hash == intent.intent_hash),
-        "plan should be awaiting governance receipt"
-    );
-
-    let receipt = world
-        .kernel
-        .handle_internal_intent(&intent)?
-        .expect("internal receipt");
-    assert_eq!(receipt.status, ReceiptStatus::Ok, "propose failed");
-    world.kernel.handle_receipt(receipt)?;
-
-    world.tick_n(1)?;
-    assert!(world.kernel.pending_plan_receipts().is_empty());
-    assert_eq!(world.kernel.governance().proposals().len(), 1);
     Ok(())
 }
 
@@ -367,28 +248,6 @@ fn patch_doc_add_schema(base_manifest_hash: String, name: &str) -> serde_json::V
     })
 }
 
-fn gov_action_requested_event_cbor(patch_doc_bytes: &[u8]) -> serde_cbor::Value {
-    let mut patch_map = BTreeMap::new();
-    patch_map.insert(
-        serde_cbor::Value::Text("patch_doc_json".into()),
-        serde_cbor::Value::Bytes(patch_doc_bytes.to_vec()),
-    );
-    let mut event = BTreeMap::new();
-    event.insert(
-        serde_cbor::Value::Text("patch".into()),
-        serde_cbor::Value::Map(patch_map),
-    );
-    event.insert(
-        serde_cbor::Value::Text("manifest_base".into()),
-        serde_cbor::Value::Null,
-    );
-    event.insert(
-        serde_cbor::Value::Text("description".into()),
-        serde_cbor::Value::Text("upgrade request".into()),
-    );
-    serde_cbor::Value::Map(event)
-}
-
 fn propose_params_cbor(patch_doc_bytes: &[u8]) -> Result<Vec<u8>, KernelError> {
     let mut patch_map = BTreeMap::new();
     patch_map.insert(
@@ -462,44 +321,4 @@ fn apply_params_cbor(proposal_id: u64) -> Result<Vec<u8>, KernelError> {
     );
     to_canonical_cbor(&serde_cbor::Value::Map(params))
         .map_err(|err| KernelError::Manifest(err.to_string()))
-}
-
-fn simple_state_manifest(store: &Arc<fixtures::TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let mut reducer = fixtures::stub_reducer_module(
-        store,
-        "com.acme/Simple@1",
-        &ReducerOutput {
-            state: Some(vec![0xAA]),
-            domain_events: vec![],
-            effects: vec![],
-            ann: None,
-        },
-    );
-    reducer.abi.reducer = Some(ReducerAbi {
-        state: fixtures::schema("com.acme/SimpleState@1"),
-        event: fixtures::schema(fixtures::START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
-        annotations: None,
-        effects_emitted: vec![],
-        cap_slots: Default::default(),
-    });
-    let routing = vec![fixtures::routing_event(
-        fixtures::START_SCHEMA,
-        &reducer.name,
-    )];
-    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
-    fixtures::insert_test_schemas(
-        &mut loaded,
-        vec![
-            fixtures::def_text_record_schema(
-                fixtures::START_SCHEMA,
-                vec![("id", fixtures::text_type())],
-            ),
-            DefSchema {
-                name: "com.acme/SimpleState@1".into(),
-                ty: fixtures::text_type(),
-            },
-        ],
-    );
-    loaded
 }
