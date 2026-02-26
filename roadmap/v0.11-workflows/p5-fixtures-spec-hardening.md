@@ -21,16 +21,48 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 
 ### 1) Rewrite smoke fixtures and integration suites
 
-1. Remove plan-based fixture ladders.
-2. Add workflow-module-first fixtures for:
-   - external I/O orchestration,
-   - retries/timeouts via receipts/events,
-   - multi-instance concurrency and isolation,
-   - governance apply on workflow manifests,
-   - manifest subscription wiring changes while receipts are in flight,
-   - manifest subscription wiring changes while continuation frames are in flight (if P7 enabled),
-   - upgrade-while-waiting (pending receipt + snapshot + apply attempt + late receipt).
-3. Update host integration tests accordingly.
+Status checklist for this section:
+- [x] Inventory all smoke fixtures and integration suites for plan-era dependencies.
+- [x] Define fixture-by-fixture rewrite plan and target assertions.
+- [ ] Implement all smoke fixture rewrites.
+- [ ] Implement all integration suite rewrites.
+
+Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
+- [x] `00-counter`: remove legacy manifest keys/vocabulary (`plans`, `triggers`, old routing/policy aliases), keep behavior identical.
+- [ ] `01-hello-timer`: remove legacy manifest keys/vocabulary, preserve reducer micro-effect flow.
+- [ ] `02-blob-echo`: remove legacy manifest keys/vocabulary and reducer-origin policy aliases, keep behavior identical.
+- [ ] `03-fetch-notify`: replace `defplan` assets with workflow-module orchestration; keep reducer as intent/result owner.
+- [ ] `04-aggregator`: replace plan orchestration with workflow module; preserve aggregation behavior.
+- [ ] `05-chain-comp`: replace charge/reserve/notify/refund plan chain with workflow compensation chain.
+- [ ] `06-safe-upgrade`: rewrite `air.v1`/`air.v2` to workflow modules; preserve upgrade-while-waiting semantics.
+- [ ] `07-llm-summarizer`: replace summarize plan with workflow module orchestration.
+- [ ] `08-retry-backoff`: rebuild retries/timeouts on workflow runtime and receipt/event model.
+- [ ] `09-workspaces`: replace workspace plan orchestration with workflow-module-first wiring.
+- [ ] `10-trace-failure-classification`: convert trace fixtures from plan modules to workflow modules.
+- [ ] `11-plan-runtime-hardening`: replace with workflow-runtime-hardening fixture set and outputs.
+- [ ] `20-agent-session`: remove remaining legacy manifest vocabulary; keep behavior unchanged.
+- [ ] `21-chat-live`: remove wrapper plan; use workflow subscription/orchestration directly.
+- [ ] `22-agent-live`: remove wrapper plan; use workflow subscription/orchestration directly.
+- [ ] Update `crates/aos-smoke/fixtures/README.md` to describe only workflow-era fixtures and scenarios.
+- [ ] Update `crates/aos-smoke/src` runners to remove plan-era naming/artifacts (`plan-summary`, `PlanEnded` assumptions, etc.).
+
+Integration suite rewrite checklist:
+- [ ] `crates/aos-host/tests/world_integration.rs`: replace ignored plan-runtime tests with workflow-runtime equivalents.
+- [ ] `crates/aos-host/tests/journal_integration.rs`: migrate journal assertions from plan records to workflow records/state.
+- [ ] `crates/aos-host/tests/snapshot_integration.rs`: migrate snapshot/replay assertions to workflow in-flight state semantics.
+- [ ] `crates/aos-host/tests/governance_plan_integration.rs`: migrate governance coverage to workflow manifests/subscriptions.
+- [ ] `crates/aos-host/tests/governance_integration.rs`: replace plan patch/apply checks with workflow wiring/apply checks.
+- [ ] `crates/aos-host/tests/fixtures.rs`: replace plan-oriented fixtures/helpers with workflow-oriented fixtures/helpers.
+- [ ] `crates/aos-host/tests/helpers.rs`: replace plan-oriented helpers and names with workflow-oriented helpers.
+
+Required coverage outcomes from rewritten fixtures/suites:
+- [ ] external I/O orchestration.
+- [ ] retries/timeouts via receipts/events.
+- [ ] multi-instance concurrency and isolation.
+- [ ] governance apply on workflow manifests.
+- [ ] subscription wiring changes while receipts are in flight.
+- [ ] subscription wiring changes while continuation frames are in flight (if P7 enabled).
+- [ ] upgrade-while-waiting (`pending receipt + snapshot + blocked apply + late receipt + deterministic continuation`).
 
 ### 2) Spec/doc rewrite
 

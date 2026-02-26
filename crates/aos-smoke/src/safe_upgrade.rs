@@ -103,9 +103,9 @@ pub fn run(example_root: &Path) -> Result<()> {
     )?;
 
     println!(
-        "   shadow: {} predicted effect(s), {} plan result(s), {} ledger delta(s)",
+        "   shadow: {} predicted effect(s), {} workflow instance(s), {} ledger delta(s)",
         summary.predicted_effects.len(),
-        summary.plan_results.len(),
+        summary.workflow_instances.len(),
         summary.ledger_deltas.len()
     );
     for delta in &summary.ledger_deltas {

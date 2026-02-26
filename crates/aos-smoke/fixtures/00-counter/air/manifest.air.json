@@ -1,5 +1,6 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     {
       "name": "demo/CounterPc@1"
@@ -22,19 +23,15 @@
       "name": "demo/CounterSM@1"
     }
   ],
-  "plans": [],
+  "effects": [],
   "caps": [],
   "policies": [],
-  "effects": [],
-  "triggers": [],
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/CounterEvent@1",
-        "reducer": "demo/CounterSM@1"
+        "module": "demo/CounterSM@1"
       }
-    ],
-    "inboxes": []
-  },
-  "air_version": "1"
+    ]
+  }
 }
