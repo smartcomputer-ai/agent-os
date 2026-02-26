@@ -1,11 +1,14 @@
-//! Session reducer scaffold (`aos.agent/SessionReducer@1`).
+//! Session workflow scaffold (`aos.agent/SessionWorkflow@1`).
 
 #![allow(improper_ctypes_definitions)]
 #![no_std]
 
 extern crate alloc;
 
-use aos_agent_sdk::{SessionEvent, SessionReduceError, SessionState, apply_session_event};
+use aos_agent_sdk::{
+    SessionEffectCommand, SessionReduceError, SessionState, SessionWorkflowEvent,
+    apply_session_workflow_event,
+};
 use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_reducer};
 
 #[cfg(target_arch = "wasm32")]
@@ -14,14 +17,14 @@ fn main() {}
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {}
 
-aos_reducer!(SessionReducer);
+aos_reducer!(SessionWorkflow);
 
 #[derive(Default)]
-struct SessionReducer;
+struct SessionWorkflow;
 
-impl Reducer for SessionReducer {
+impl Reducer for SessionWorkflow {
     type State = SessionState;
-    type Event = SessionEvent;
+    type Event = SessionWorkflowEvent;
     type Ann = Value;
 
     fn reduce(
@@ -29,7 +32,17 @@ impl Reducer for SessionReducer {
         event: Self::Event,
         ctx: &mut ReducerCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
-        apply_session_event(&mut ctx.state, &event).map_err(map_reduce_error)
+        let out = apply_session_workflow_event(&mut ctx.state, &event).map_err(map_reduce_error)?;
+        for effect in out.effects {
+            match effect {
+                SessionEffectCommand::LlmGenerate {
+                    params, cap_slot, ..
+                } => ctx
+                    .effects()
+                    .emit_raw("llm.generate", &params, cap_slot.as_deref()),
+            }
+        }
+        Ok(())
     }
 }
 
@@ -39,15 +52,11 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
             ReduceError::new("invalid lifecycle transition")
         }
         SessionReduceError::HostCommandRejected => ReduceError::new("host command rejected"),
-        SessionReduceError::StepBoundaryRejected => ReduceError::new("step boundary rejected"),
         SessionReduceError::ToolBatchAlreadyActive => ReduceError::new("tool batch already active"),
         SessionReduceError::ToolBatchNotActive => ReduceError::new("tool batch not active"),
         SessionReduceError::ToolBatchIdMismatch => ReduceError::new("tool batch id mismatch"),
         SessionReduceError::ToolCallUnknown => ReduceError::new("tool call id not expected"),
         SessionReduceError::ToolBatchNotSettled => ReduceError::new("tool batch not settled"),
-        SessionReduceError::MissingRunConfig => ReduceError::new("run config missing"),
-        SessionReduceError::MissingActiveRun => ReduceError::new("active run missing"),
-        SessionReduceError::MissingActiveTurn => ReduceError::new("active turn missing"),
         SessionReduceError::MissingProvider => ReduceError::new("run config provider missing"),
         SessionReduceError::MissingModel => ReduceError::new("run config model missing"),
         SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),
@@ -65,5 +74,6 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         SessionReduceError::MissingWorkspaceToolCatalogBytes => {
             ReduceError::new("workspace tool catalog bytes missing for validation")
         }
+        SessionReduceError::TooManyPendingIntents => ReduceError::new("too many pending intents"),
     }
 }

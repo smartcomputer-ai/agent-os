@@ -113,6 +113,7 @@ dependencies = [
  "serde_bytes",
  "serde_cbor",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

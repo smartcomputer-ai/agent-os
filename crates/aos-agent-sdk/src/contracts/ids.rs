@@ -11,19 +11,7 @@ pub struct RunId {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-pub struct TurnId {
-    pub run_id: RunId,
-    pub turn_seq: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-pub struct StepId {
-    pub turn_id: TurnId,
-    pub step_seq: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub struct ToolBatchId {
-    pub step_id: StepId,
+    pub run_id: RunId,
     pub batch_seq: u64,
 }

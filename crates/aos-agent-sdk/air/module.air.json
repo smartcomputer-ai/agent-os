@@ -1,17 +1,16 @@
 [
   {
     "$kind": "defmodule",
-    "name": "aos.agent/SessionReducer@1",
-    "module_kind": "reducer",
+    "name": "aos.agent/SessionWorkflow@1",
+    "module_kind": "workflow",
     "key_schema": "aos.agent/SessionId@1",
     "abi": {
       "reducer": {
         "state": "aos.agent/SessionState@1",
-        "event": "aos.agent/SessionEvent@1",
-        "effects_emitted": ["blob.get", "blob.put", "timer.set"],
+        "event": "aos.agent/SessionWorkflowEvent@1",
+        "effects_emitted": ["llm.generate"],
         "cap_slots": {
-          "blob": "blob",
-          "timer": "timer"
+          "llm": "llm.basic"
         }
       }
     }
@@ -22,8 +21,8 @@
     "module_kind": "pure",
     "abi": {
       "pure": {
-        "input": "aos.agent/SessionEvent@1",
-        "output": "aos.agent/SessionEvent@1"
+        "input": "aos.agent/SessionWorkflowEvent@1",
+        "output": "aos.agent/SessionWorkflowEvent@1"
       }
     }
   }

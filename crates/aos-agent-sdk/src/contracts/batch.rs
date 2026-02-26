@@ -9,7 +9,7 @@ pub enum ToolCallStatus {
     Pending,
     Succeeded,
     Failed { code: String, detail: String },
-    IgnoredStale,
+    Ignored,
     Cancelled,
 }
 
@@ -17,7 +17,7 @@ impl ToolCallStatus {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Succeeded | Self::Failed { .. } | Self::IgnoredStale | Self::Cancelled
+            Self::Succeeded | Self::Failed { .. } | Self::Ignored | Self::Cancelled
         )
     }
 }
@@ -25,7 +25,8 @@ impl ToolCallStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ActiveToolBatch {
     pub tool_batch_id: ToolBatchId,
-    pub issued_at_step_epoch: u64,
+    pub intent_id: String,
+    pub params_hash: Option<String>,
     pub expected_call_ids: BTreeSet<String>,
     pub call_status: BTreeMap<String, ToolCallStatus>,
     pub results_ref: Option<String>,

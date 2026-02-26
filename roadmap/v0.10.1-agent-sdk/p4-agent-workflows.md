@@ -72,7 +72,7 @@ Implementation target files:
 
 1. `crates/aos-agent-sdk/src/contracts/*`
 2. `crates/aos-agent-sdk/src/helpers/*`
-3. `crates/aos-agent-sdk/src/bin/session_reducer.rs`
+3. `crates/aos-agent-sdk/src/bin/session_workflow.rs`
 
 ## 3) AIR Asset Reset (SDK-Owned)
 

@@ -1,9 +1,10 @@
 use super::{
-    HostCommand, RunId, RunLease, SessionConfig, SessionId, SessionLifecycle, StepId, ToolBatchId,
-    ToolCallStatus, TurnId, WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
+    ActiveToolBatch, HostCommand, SessionConfig, SessionId, ToolBatchId, ToolCallStatus,
+    WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot,
 };
 use alloc::string::String;
 use alloc::vec::Vec;
+use aos_wasm_sdk::EffectReceiptEnvelope;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod serde_bytes_opt {
@@ -28,66 +29,104 @@ mod serde_bytes_opt {
     }
 }
 
+mod serde_bytes_vec {
+    use super::*;
+    use serde_bytes::ByteBuf;
+
+    pub fn serialize<S>(value: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(value)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        ByteBuf::deserialize(deserializer).map(ByteBuf::into_vec)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct WorkspaceSnapshotReady {
+    pub snapshot: WorkspaceSnapshot,
+    #[serde(
+        default,
+        with = "serde_bytes_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub prompt_pack_bytes: Option<Vec<u8>>,
+    #[serde(
+        default,
+        with = "serde_bytes_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub tool_catalog_bytes: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct EffectReceiptRejected {
+    pub origin_module_id: String,
+    #[serde(
+        default,
+        with = "serde_bytes_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub origin_instance_key: Option<Vec<u8>>,
+    pub intent_id: String,
+    pub effect_kind: String,
+    pub params_hash: Option<String>,
+    pub adapter_id: String,
+    pub status: String,
+    pub error_code: String,
+    pub error_message: String,
+    pub payload_hash: String,
+    pub payload_size: u64,
+    pub emitted_at_seq: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct EffectStreamFrameEnvelope {
+    pub origin_module_id: String,
+    #[serde(
+        default,
+        with = "serde_bytes_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub origin_instance_key: Option<Vec<u8>>,
+    pub intent_id: String,
+    pub effect_kind: String,
+    pub params_hash: Option<String>,
+    pub emitted_at_seq: u64,
+    pub seq: u64,
+    pub kind: String,
+    #[serde(with = "serde_bytes_vec")]
+    pub payload: Vec<u8>,
+    pub payload_ref: Option<String>,
+    pub adapter_id: String,
+    #[serde(with = "serde_bytes_vec")]
+    pub signature: Vec<u8>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(tag = "$tag", content = "$value")]
-pub enum SessionEventKind {
+pub enum SessionIngressKind {
     RunRequested {
         input_ref: String,
         run_overrides: Option<SessionConfig>,
     },
-    RunStarted,
     HostCommandReceived(HostCommand),
-    HostCommandApplied {
-        command_id: String,
-    },
-    LifecycleChanged(SessionLifecycle),
-    StepBoundary,
-    ToolBatchStarted {
-        tool_batch_id: ToolBatchId,
-        expected_call_ids: Vec<String>,
-    },
-    ToolCallSettled {
-        tool_batch_id: ToolBatchId,
-        call_id: String,
-        status: ToolCallStatus,
-        receipt_session_epoch: u64,
-        receipt_step_epoch: u64,
-    },
-    ToolBatchSettled {
-        tool_batch_id: ToolBatchId,
-        results_ref: Option<String>,
-    },
-    LeaseIssued {
-        lease: RunLease,
-    },
-    LeaseExpiryCheck {
-        observed_time_ns: u64,
-    },
     WorkspaceSyncRequested {
         workspace_binding: WorkspaceBinding,
         prompt_pack: Option<String>,
         tool_catalog: Option<String>,
-        known_version: Option<u64>,
     },
     WorkspaceSyncUnchanged {
         workspace: String,
         version: Option<u64>,
     },
-    WorkspaceSnapshotReady {
-        snapshot: WorkspaceSnapshot,
-        #[serde(
-            default,
-            with = "serde_bytes_opt",
-            skip_serializing_if = "Option::is_none"
-        )]
-        prompt_pack_bytes: Option<Vec<u8>>,
-        #[serde(
-            default,
-            with = "serde_bytes_opt",
-            skip_serializing_if = "Option::is_none"
-        )]
-        tool_catalog_bytes: Option<Vec<u8>>,
-    },
+    WorkspaceSnapshotReady(WorkspaceSnapshotReady),
     WorkspaceSyncFailed {
         workspace: String,
         stage: String,
@@ -96,6 +135,22 @@ pub enum SessionEventKind {
     WorkspaceApplyRequested {
         mode: WorkspaceApplyMode,
     },
+    ToolBatchStarted {
+        tool_batch_id: ToolBatchId,
+        intent_id: String,
+        params_hash: Option<String>,
+        expected_call_ids: Vec<String>,
+    },
+    ToolCallSettled {
+        tool_batch_id: ToolBatchId,
+        call_id: String,
+        status: ToolCallStatus,
+    },
+    ToolBatchSettled {
+        tool_batch_id: ToolBatchId,
+        results_ref: Option<String>,
+    },
+    ActiveToolBatchReplaced(ActiveToolBatch),
     RunCompleted,
     RunFailed {
         code: String,
@@ -109,12 +164,19 @@ pub enum SessionEventKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct SessionEvent {
+pub struct SessionIngress {
     pub session_id: SessionId,
-    pub run_id: Option<RunId>,
-    pub turn_id: Option<TurnId>,
-    pub step_id: Option<StepId>,
-    pub session_epoch: u64,
-    pub step_epoch: u64,
-    pub event: SessionEventKind,
+    pub observed_at_ns: u64,
+    pub ingress: SessionIngressKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "$tag", content = "$value")]
+pub enum SessionWorkflowEvent {
+    Ingress(SessionIngress),
+    Receipt(EffectReceiptEnvelope),
+    ReceiptRejected(EffectReceiptRejected),
+    StreamFrame(EffectStreamFrameEnvelope),
+    #[default]
+    Noop,
 }

@@ -33,16 +33,20 @@ pub fn transition_lifecycle(
         (SessionLifecycle::Idle, SessionLifecycle::Running)
             | (SessionLifecycle::Running, SessionLifecycle::WaitingInput)
             | (SessionLifecycle::WaitingInput, SessionLifecycle::Running)
-            | (SessionLifecycle::Completed, SessionLifecycle::Running)
-            | (SessionLifecycle::Failed, SessionLifecycle::Running)
-            | (SessionLifecycle::Cancelled, SessionLifecycle::Running)
+            | (SessionLifecycle::WaitingInput, SessionLifecycle::Paused)
             | (SessionLifecycle::Running, SessionLifecycle::Paused)
             | (SessionLifecycle::Paused, SessionLifecycle::Running)
             | (SessionLifecycle::Running, SessionLifecycle::Cancelling)
+            | (SessionLifecycle::WaitingInput, SessionLifecycle::Cancelling)
             | (SessionLifecycle::Paused, SessionLifecycle::Cancelling)
             | (SessionLifecycle::Cancelling, SessionLifecycle::Cancelled)
             | (SessionLifecycle::Running, SessionLifecycle::Completed)
+            | (SessionLifecycle::WaitingInput, SessionLifecycle::Completed)
             | (SessionLifecycle::Running, SessionLifecycle::Failed)
+            | (SessionLifecycle::WaitingInput, SessionLifecycle::Failed)
+            | (SessionLifecycle::Completed, SessionLifecycle::Running)
+            | (SessionLifecycle::Failed, SessionLifecycle::Running)
+            | (SessionLifecycle::Cancelled, SessionLifecycle::Running)
     );
 
     if !allowed {
@@ -56,19 +60,21 @@ pub fn transition_lifecycle(
     Ok(())
 }
 
-pub fn apply_cancel_fence(state: &mut SessionState) {
-    state.session_epoch += 1;
-    state.step_epoch += 1;
-}
-
 pub fn can_apply_host_command(state: &SessionState, command: &HostCommandKind) -> bool {
     match command {
-        HostCommandKind::Pause => matches!(state.lifecycle, SessionLifecycle::Running),
+        HostCommandKind::Pause => {
+            matches!(
+                state.lifecycle,
+                SessionLifecycle::Running | SessionLifecycle::WaitingInput
+            )
+        }
         HostCommandKind::Resume => matches!(state.lifecycle, SessionLifecycle::Paused),
         HostCommandKind::Cancel { .. } => {
             matches!(
                 state.lifecycle,
-                SessionLifecycle::Running | SessionLifecycle::Paused
+                SessionLifecycle::Running
+                    | SessionLifecycle::WaitingInput
+                    | SessionLifecycle::Paused
             )
         }
         _ => !state.lifecycle.is_terminal(),

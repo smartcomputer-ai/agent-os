@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use aos_agent_sdk::SessionEvent;
+use aos_agent_sdk::SessionWorkflowEvent;
 use aos_wasm_abi::PureContext;
 use aos_wasm_sdk::{PureError, PureModule, aos_pure};
 
@@ -21,8 +21,8 @@ aos_pure!(SessionEventEcho);
 struct SessionEventEcho;
 
 impl PureModule for SessionEventEcho {
-    type Input = SessionEvent;
-    type Output = SessionEvent;
+    type Input = SessionWorkflowEvent;
+    type Output = SessionWorkflowEvent;
 
     fn run(
         &mut self,

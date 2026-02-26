@@ -12,7 +12,6 @@ pub struct WorkspaceBinding {
 pub enum WorkspaceApplyMode {
     #[default]
     NextRun,
-    NextStepBoundary,
     ImmediateIfIdle,
 }
 
