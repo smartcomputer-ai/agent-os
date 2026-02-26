@@ -57,12 +57,12 @@ Integration suite rewrite checklist:
 - [x] `crates/aos-host/tests/helpers.rs`: replace plan-oriented helpers and names with workflow-oriented helpers.
 
 Required coverage outcomes from rewritten fixtures/suites:
-- [ ] external I/O orchestration.
-- [ ] retries/timeouts via receipts/events.
-- [ ] multi-instance concurrency and isolation.
-- [ ] governance apply on workflow manifests.
-- [ ] subscription wiring changes while receipts are in flight.
-- [ ] subscription wiring changes while continuation frames are in flight (if P7 enabled).
+- [x] external I/O orchestration.
+- [x] retries/timeouts via receipts/events.
+- [x] multi-instance concurrency and isolation.
+- [x] governance apply on workflow manifests.
+- [x] subscription wiring changes while receipts are in flight.
+- [x] subscription wiring changes while continuation frames are in flight (if P7 enabled; N/A for current baseline where P7 is not enabled).
 - [x] upgrade-while-waiting (`pending receipt + snapshot + blocked apply + late receipt + deterministic continuation`).
 
 ### 2) Spec/doc rewrite
@@ -206,6 +206,31 @@ Implementation log (completed 2026-02-26):
     - `cargo test -p aos-effects -q`
     - `cargo test -p aos-host --features e2e-tests workspace_tree_effects_roundtrip -- --nocapture`
     - `cargo test -p aos-host --features e2e-tests -q`
+- [x] Required coverage outcomes section completed with explicit workflow-era fixture/suite evidence:
+  - external I/O orchestration:
+    - `crates/aos-host/tests/workflow_runtime_integration.rs::workflow_orchestration_completes_after_receipt`
+    - smoke fixtures `03-fetch-notify`, `04-aggregator`, `05-chain-comp`, `07-llm-summarizer`
+  - retries/timeouts via receipts/events:
+    - smoke fixtures `08-retry-backoff`, `10-trace-failure-classification` (`adapter_timeout`)
+  - multi-instance concurrency and isolation:
+    - `crates/aos-host/tests/workflow_runtime_integration.rs::keyed_workflow_receipt_routing_is_instance_isolated`
+    - smoke fixture `11-workflow-runtime-hardening` (cross-talk gate + crash/resume)
+  - governance apply on workflow manifests:
+    - `crates/aos-host/tests/governance_integration.rs::governance_flow_applies_manifest_patch`
+    - `crates/aos-host/tests/governance_effects_integration.rs::governance_effects_apply_patch_doc_from_workflow_origin`
+  - subscription wiring changes while receipts are in flight:
+    - smoke fixture `06-safe-upgrade` (proposal+approval attempted while waiting; apply blocked by strict quiescence; late receipt settles deterministic continuation; apply then succeeds on upgraded wiring)
+  - continuation-frame wiring:
+    - marked N/A because P7 streaming continuation frames are optional and not enabled in the current baseline.
+  - verification:
+    - `cargo test -p aos-host --features e2e-tests --test workflow_runtime_integration workflow_orchestration_completes_after_receipt -q`
+    - `cargo test -p aos-host --features e2e-tests --test workflow_runtime_integration keyed_workflow_receipt_routing_is_instance_isolated -q`
+    - `cargo test -p aos-host --features e2e-tests --test governance_integration governance_flow_applies_manifest_patch -q`
+    - `cargo test -p aos-host --features e2e-tests --test governance_effects_integration governance_effects_apply_patch_doc_from_workflow_origin -q`
+    - `cargo run -p aos-smoke -- safe-upgrade`
+    - `cargo run -p aos-smoke -- retry-backoff`
+    - `cargo run -p aos-smoke -- workflow-runtime-hardening`
+    - `cargo run -p aos-smoke -- trace-failure-classification`
 
 ### 4) Dead code and roadmap cleanup
 
