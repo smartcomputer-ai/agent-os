@@ -44,7 +44,7 @@ enum Commands {
     HelloTimer,
     /// Run the Blob Echo micro-effect example
     BlobEcho,
-    /// Run the Fetch & Notify plan example
+    /// Run the Fetch & Notify workflow example
     FetchNotify,
     /// Run the Aggregator fan-out example
     Aggregator,
@@ -56,7 +56,7 @@ enum Commands {
     LlmSummarizer,
     /// Run the reducer-driven retry with backoff example
     RetryBackoff,
-    /// Run the workspace plan + caps example
+    /// Run the workspace workflow + caps example
     Workspaces,
     /// Run the agent session lifecycle example
     AgentSession,
@@ -137,7 +137,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "03",
         slug: "fetch-notify",
         title: "Fetch & Notify",
-        summary: "Plan-triggered HTTP orchestration",
+        summary: "Workflow-driven HTTP orchestration",
         group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/03-fetch-notify",
         runner: fetch_notify::run,
@@ -146,7 +146,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "04",
         slug: "aggregator",
         title: "Aggregator",
-        summary: "Fan-out plan with http receipts",
+        summary: "Workflow fan-out with http receipts",
         group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/04-aggregator",
         runner: aggregator::run,
@@ -155,7 +155,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "05",
         slug: "chain-comp",
         title: "Chain + Compensation",
-        summary: "Multi-plan saga w/ refund path",
+        summary: "Workflow saga w/ refund path",
         group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/05-chain-comp",
         runner: chain_comp::run,
@@ -191,7 +191,7 @@ const EXAMPLES: &[ExampleMeta] = &[
         number: "09",
         slug: "workspaces",
         title: "Workspaces",
-        summary: "Workspace plan + caps demo",
+        summary: "Workspace workflow + caps demo",
         group: ExampleGroup::Core,
         dir: "crates/aos-smoke/fixtures/09-workspaces",
         runner: workspaces::run,

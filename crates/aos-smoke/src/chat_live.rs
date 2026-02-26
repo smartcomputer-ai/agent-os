@@ -398,13 +398,13 @@ fn print_live_diagnostics(host: &mut ExampleHost) -> Result<()> {
         let Ok(record) = serde_cbor::from_slice::<JournalRecord>(&entry.payload) else {
             continue;
         };
-        if let JournalRecord::PlanEnded(ended) = record {
-            if ended.status == aos_kernel::journal::PlanEndStatus::Error {
-                println!(
-                    "   diagnostics: plan error plan={} id={} code={:?}",
-                    ended.plan_name, ended.plan_id, ended.error_code
-                );
-            }
+        if let JournalRecord::Custom(custom) = record
+            && custom.tag == "workflow_error"
+        {
+            let message = String::from_utf8(custom.data)
+                .unwrap_or_else(|_| "<unable to decode workflow_error payload>".to_string());
+            println!("   diagnostics: workflow error {}", preview(&message));
+            break;
         }
     }
 

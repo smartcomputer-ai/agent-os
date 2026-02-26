@@ -24,6 +24,7 @@ Temporary between-phase breakage is expected and acceptable while executing P1 -
 Status checklist for this section:
 - [x] Inventory all smoke fixtures and integration suites for plan-era dependencies.
 - [x] Define fixture-by-fixture rewrite plan and target assertions.
+- [x] Defer Agent SDK fixtures (`20/21/22`) until Agent SDK refresh lands.
 - [ ] Implement all smoke fixture rewrites.
 - [ ] Implement all integration suite rewrites.
 
@@ -40,11 +41,11 @@ Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 - [x] `09-workspaces`: replace workspace plan orchestration with workflow-module-first wiring.
 - [x] `10-trace-failure-classification`: convert trace fixtures from plan modules to workflow modules.
 - [x] `11-workflow-runtime-hardening`: workflow-runtime-hardening fixture set and outputs.
-- [ ] `20-agent-session`: remove remaining legacy manifest vocabulary; keep behavior unchanged.
-- [ ] `21-chat-live`: remove wrapper plan; use workflow subscription/orchestration directly.
-- [ ] `22-agent-live`: remove wrapper plan; use workflow subscription/orchestration directly.
-- [ ] Update `crates/aos-smoke/fixtures/README.md` to describe only workflow-era fixtures and scenarios.
-- [ ] Update `crates/aos-smoke/src` runners to remove plan-era naming/artifacts (`plan-summary`, `PlanEnded` assumptions, etc.).
+- [ ] `20-agent-session`: deferred (blocked on Agent SDK refresh); remove remaining legacy manifest vocabulary after SDK update.
+- [ ] `21-chat-live`: deferred (blocked on Agent SDK refresh); remove wrapper plan and use workflow subscription/orchestration directly after SDK update.
+- [ ] `22-agent-live`: deferred (blocked on Agent SDK refresh); remove wrapper plan and use workflow subscription/orchestration directly after SDK update.
+- [x] Update `crates/aos-smoke/fixtures/README.md` to describe only workflow-era fixtures and scenarios.
+- [x] Update `crates/aos-smoke/src` runners to remove plan-era naming/artifacts (`plan-summary`, `PlanEnded` assumptions, etc.).
 
 Integration suite rewrite checklist:
 - [ ] `crates/aos-host/tests/world_integration.rs`: replace ignored plan-runtime tests with workflow-runtime equivalents.
@@ -159,6 +160,12 @@ Implementation log (completed 2026-02-26):
   - `crates/aos-smoke/src/workflow_runtime_hardening.rs`
   - `crates/aos-smoke/src/main.rs`
   - verification: `cargo run -p aos-smoke -- workflow-runtime-hardening`
+- [x] Deferred Agent SDK smoke fixtures (`20-agent-session`, `21-chat-live`, `22-agent-live`) pending Agent SDK update; fixture migration resumes after SDK refresh.
+  - tracked in this checklist as deferred scope, not yet implemented
+- [x] Removed remaining plan-era wording/artifacts from smoke fixture index and runner metadata/diagnostics (workflow-first terminology only).
+  - `crates/aos-smoke/fixtures/README.md`
+  - `crates/aos-smoke/src/main.rs`
+  - `crates/aos-smoke/src/chat_live.rs`
 
 ### 4) Dead code and roadmap cleanup
 
