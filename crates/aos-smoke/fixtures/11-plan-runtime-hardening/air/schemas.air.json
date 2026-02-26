@@ -1,12 +1,33 @@
 [
   {
     "$kind": "defschema",
+    "name": "demo/FlowRequest@1",
+    "type": {
+      "record": {
+        "request_id": { "nat": {} },
+        "approved": { "bool": {} },
+        "worker_count": { "nat": {} },
+        "completed_workers": { "nat": {} },
+        "urls": { "list": { "text": {} } },
+        "done": { "bool": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demo/FlowState@1",
     "type": {
       "record": {
         "completed_count": { "nat": {} },
         "last_request_id": { "option": { "nat": {} } },
-        "last_worker_count": { "option": { "nat": {} } }
+        "last_worker_count": { "option": { "nat": {} } },
+        "requests": { "list": { "ref": "demo/FlowRequest@1" } },
+        "pending_by_hash": {
+          "map": {
+            "key": { "text": {} },
+            "value": { "nat": {} }
+          }
+        }
       }
     }
   },
@@ -32,21 +53,12 @@
   },
   {
     "$kind": "defschema",
-    "name": "demo/WorkerUrl@1",
-    "type": { "text": {} }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/WorkerResult@1",
-    "type": { "text": {} }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/FlowCompleted@1",
+    "name": "demo/RuntimeHardeningEvent@1",
     "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "worker_count": { "nat": {} }
+      "variant": {
+        "Start": { "ref": "demo/RuntimeHardeningStart@1" },
+        "Approval": { "ref": "demo/ApprovalEvent@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
       }
     }
   }

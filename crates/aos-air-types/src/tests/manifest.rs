@@ -68,7 +68,14 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
     });
     assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
     let manifest: Manifest = serde_json::from_value(manifest_json).expect("manifest");
-    assert!(manifest.defaults.as_ref().expect("defaults").policy.is_some());
+    assert!(
+        manifest
+            .defaults
+            .as_ref()
+            .expect("defaults")
+            .policy
+            .is_some()
+    );
     assert_eq!(manifest.module_bindings.len(), 1);
     let routing = manifest.routing.expect("routing");
     assert_eq!(routing.subscriptions.len(), 1);
@@ -94,7 +101,10 @@ fn manifest_event_alias_maps_to_subscriptions() {
     let manifest: Manifest = serde_json::from_value(manifest_json).expect("manifest");
     let routing = manifest.routing.expect("routing");
     assert_eq!(routing.subscriptions.len(), 1);
-    assert_eq!(routing.subscriptions[0].module.as_str(), "com.acme/Reducer@1");
+    assert_eq!(
+        routing.subscriptions[0].module.as_str(),
+        "com.acme/Reducer@1"
+    );
 }
 
 #[test]

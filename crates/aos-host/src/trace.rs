@@ -837,13 +837,7 @@ fn first_intent_hash(value: &Value) -> Option<String> {
                     .and_then(|v| v.as_array()),
             )
         })
-        .or_else(|| {
-            read(
-                value
-                    .get("queued_effects")
-                    .and_then(|v| v.as_array()),
-            )
-        })
+        .or_else(|| read(value.get("queued_effects").and_then(|v| v.as_array())))
 }
 
 fn find_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {

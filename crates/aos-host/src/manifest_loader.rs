@@ -10,9 +10,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    self as air_types, AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema,
-    DefSecret, HashRef, Manifest, Name, NamedRef, SecretEntry, catalog::EffectCatalog,
-    validate_manifest,
+    self as air_types, AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, DefSecret,
+    HashRef, Manifest, Name, NamedRef, SecretEntry, catalog::EffectCatalog, validate_manifest,
 };
 use aos_cbor::Hash;
 use aos_kernel::{LoadedManifest, governance::ManifestPatch};

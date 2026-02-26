@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name,
-    SecretDecl, SecretEntry, SecretPolicy, builtins, catalog::EffectCatalog,
+    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
+    SecretEntry, SecretPolicy, builtins, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_store::Store;

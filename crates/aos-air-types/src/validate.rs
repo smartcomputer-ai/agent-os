@@ -15,7 +15,9 @@ pub enum ValidationError {
     RoutingUnexpectedKeyField { module: String },
     #[error("route to module '{module}' references unknown module")]
     RoutingUnknownModule { module: String },
-    #[error("route to module '{module}' uses schema '{event}' but module ABI declares '{expected}'")]
+    #[error(
+        "route to module '{module}' uses schema '{event}' but module ABI declares '{expected}'"
+    )]
     RoutingSchemaMismatch {
         module: String,
         event: String,
@@ -72,14 +74,15 @@ pub fn validate_manifest(
     caps: &HashMap<String, DefCap>,
     policies: &HashMap<String, DefPolicy>,
 ) -> Result<(), ValidationError> {
-    let schema_exists = |name: &str| {
-        schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some()
-    };
+    let schema_exists =
+        |name: &str| schemas.contains_key(name) || builtins::find_builtin_schema(name).is_some();
     let schema_type = |name: &str| -> Option<TypeExpr> {
         schemas
             .get(name)
             .map(|schema| schema.ty.clone())
-            .or_else(|| builtins::find_builtin_schema(name).map(|builtin| builtin.schema.ty.clone()))
+            .or_else(|| {
+                builtins::find_builtin_schema(name).map(|builtin| builtin.schema.ty.clone())
+            })
     };
 
     let mut known_effect_kinds: HashSet<String> = builtins::builtin_effects()
@@ -107,12 +110,16 @@ pub fn validate_manifest(
     let mut grant_map: HashMap<String, String> = HashMap::new();
     if let Some(defaults) = manifest.defaults.as_ref() {
         for grant in &defaults.cap_grants {
-            if grant_map.insert(grant.name.clone(), grant.cap.clone()).is_some() {
+            if grant_map
+                .insert(grant.name.clone(), grant.cap.clone())
+                .is_some()
+            {
                 return Err(ValidationError::DuplicateCapabilityGrant {
                     cap: grant.name.clone(),
                 });
             }
-            if !defcap_listed(grant.cap.as_str()) || !defcap_types.contains_key(grant.cap.as_str()) {
+            if !defcap_listed(grant.cap.as_str()) || !defcap_types.contains_key(grant.cap.as_str())
+            {
                 return Err(ValidationError::CapabilityDefinitionNotFound {
                     cap: grant.cap.clone(),
                 });
@@ -122,22 +129,22 @@ pub fn validate_manifest(
 
     let grant_exists = |name: &str| grant_map.contains_key(name);
     let cap_type_for_grant = |grant_name: &str| -> Result<String, ValidationError> {
-        let cap_name = grant_map
-            .get(grant_name)
-            .ok_or_else(|| ValidationError::CapabilityNotFound {
-                cap: grant_name.to_string(),
-            })?;
+        let cap_name =
+            grant_map
+                .get(grant_name)
+                .ok_or_else(|| ValidationError::CapabilityNotFound {
+                    cap: grant_name.to_string(),
+                })?;
         if !defcap_listed(cap_name.as_str()) {
             return Err(ValidationError::CapabilityDefinitionNotFound {
                 cap: cap_name.clone(),
             });
         }
-        defcap_types
-            .get(cap_name.as_str())
-            .cloned()
-            .ok_or_else(|| ValidationError::CapabilityDefinitionNotFound {
+        defcap_types.get(cap_name.as_str()).cloned().ok_or_else(|| {
+            ValidationError::CapabilityDefinitionNotFound {
                 cap: cap_name.clone(),
-            })
+            }
+        })
     };
 
     if let Some(routing) = manifest.routing.as_ref() {
@@ -153,23 +160,23 @@ pub fn validate_manifest(
                 });
             }
 
-            let module_def = modules
-                .get(module)
-                .ok_or_else(|| ValidationError::RoutingUnknownModule {
+            let module_def =
+                modules
+                    .get(module)
+                    .ok_or_else(|| ValidationError::RoutingUnknownModule {
+                        module: module.clone(),
+                    })?;
+            let reducer_abi = module_def.abi.reducer.as_ref().ok_or_else(|| {
+                ValidationError::WorkflowAbiMissingReducer {
                     module: module.clone(),
-                })?;
-            let reducer_abi = module_def
-                .abi
-                .reducer
-                .as_ref()
-                .ok_or_else(|| ValidationError::WorkflowAbiMissingReducer {
-                    module: module.clone(),
-                })?;
+                }
+            })?;
 
             let expected = reducer_abi.event.as_str();
-            let family_schema = schema_type(expected).ok_or_else(|| ValidationError::SchemaNotFound {
-                schema: expected.to_string(),
-            })?;
+            let family_schema =
+                schema_type(expected).ok_or_else(|| ValidationError::SchemaNotFound {
+                    schema: expected.to_string(),
+                })?;
             if !event_in_family(event.as_str(), expected, &family_schema) {
                 return Err(ValidationError::RoutingSchemaMismatch {
                     module: module.clone(),
@@ -206,21 +213,22 @@ pub fn validate_manifest(
                         schema: key_schema_name.to_string(),
                     }
                 })?;
-                let event_schema = schema_type(event.as_str()).ok_or_else(|| {
-                    ValidationError::SchemaNotFound {
+                let event_schema =
+                    schema_type(event.as_str()).ok_or_else(|| ValidationError::SchemaNotFound {
                         schema: event.as_str().to_string(),
-                    }
-                })?;
-                let field_ty = key_field_type(&event_schema, field, &schema_type).ok_or_else(|| {
-                    ValidationError::RoutingKeyFieldMismatch {
-                        module: module.clone(),
-                        event: event.as_str().to_string(),
-                        key_field: field.to_string(),
-                        expected: key_schema_name.to_string(),
-                        found: "missing".into(),
-                    }
-                })?;
-                let matches = key_type_matches(&field_ty, &key_schema, &schema_type).unwrap_or(false);
+                    })?;
+                let field_ty =
+                    key_field_type(&event_schema, field, &schema_type).ok_or_else(|| {
+                        ValidationError::RoutingKeyFieldMismatch {
+                            module: module.clone(),
+                            event: event.as_str().to_string(),
+                            key_field: field.to_string(),
+                            expected: key_schema_name.to_string(),
+                            found: "missing".into(),
+                        }
+                    })?;
+                let matches =
+                    key_type_matches(&field_ty, &key_schema, &schema_type).unwrap_or(false);
                 if !matches {
                     return Err(ValidationError::RoutingKeyFieldMismatch {
                         module: module.clone(),
@@ -284,11 +292,10 @@ pub fn validate_manifest(
             }
 
             let event_schema_name = abi.event.as_str();
-            let event_schema = schema_type(event_schema_name).ok_or_else(|| {
-                ValidationError::SchemaNotFound {
+            let event_schema =
+                schema_type(event_schema_name).ok_or_else(|| ValidationError::SchemaNotFound {
                     schema: event_schema_name.to_string(),
-                }
-            })?;
+                })?;
             validate_event_family(module_name, event_schema_name, &event_schema)?;
 
             for effect in &abi.effects_emitted {
@@ -315,7 +322,10 @@ pub fn validate_manifest(
     }
 
     for effect in effects.values() {
-        for schema_ref in [effect.params_schema.as_str(), effect.receipt_schema.as_str()] {
+        for schema_ref in [
+            effect.params_schema.as_str(),
+            effect.receipt_schema.as_str(),
+        ] {
             if !schema_exists(schema_ref) {
                 return Err(ValidationError::SchemaNotFound {
                     schema: schema_ref.to_string(),
@@ -430,9 +440,9 @@ fn event_in_family(event: &str, family_name: &str, family_schema: &TypeExpr) -> 
     }
     match family_schema {
         TypeExpr::Ref(reference) => reference.reference.as_str() == event,
-        TypeExpr::Variant(variant) => variant.variant.values().any(|ty| {
-            matches!(ty, TypeExpr::Ref(reference) if reference.reference.as_str() == event)
-        }),
+        TypeExpr::Variant(variant) => variant.variant.values().any(
+            |ty| matches!(ty, TypeExpr::Ref(reference) if reference.reference.as_str() == event),
+        ),
         _ => false,
     }
 }
@@ -657,8 +667,9 @@ mod tests {
         )]);
         let policies = HashMap::new();
 
-        assert!(validate_manifest(&manifest, &modules, &schemas, &effects, &caps, &policies)
-            .is_ok());
+        assert!(
+            validate_manifest(&manifest, &modules, &schemas, &effects, &caps, &policies).is_ok()
+        );
     }
 
     #[test]
@@ -692,9 +703,15 @@ mod tests {
             ),
         ]);
 
-        let err =
-            validate_manifest(&manifest, &modules, &schemas, &HashMap::new(), &HashMap::new(), &HashMap::new())
-                .unwrap_err();
+        let err = validate_manifest(
+            &manifest,
+            &modules,
+            &schemas,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             ValidationError::RoutingUnknownModule { module } if module == "com.acme/missing@1"
@@ -730,9 +747,15 @@ mod tests {
             ),
         ]);
 
-        let err =
-            validate_manifest(&manifest, &modules, &schemas, &HashMap::new(), &HashMap::new(), &HashMap::new())
-                .unwrap_err();
+        let err = validate_manifest(
+            &manifest,
+            &modules,
+            &schemas,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .unwrap_err();
         assert!(matches!(
             err,
             ValidationError::CapabilityNotFound { cap } if cap == "missing_grant"

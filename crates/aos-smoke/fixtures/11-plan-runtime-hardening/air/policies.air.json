@@ -6,8 +6,8 @@
       {
         "when": {
           "effect_kind": "http.request",
-          "origin_kind": "plan",
-          "origin_name": "demo/_internal_worker_fetch@1"
+          "origin_kind": "workflow",
+          "origin_name": "demo/FlowTracker@1"
         },
         "decision": "allow"
       },

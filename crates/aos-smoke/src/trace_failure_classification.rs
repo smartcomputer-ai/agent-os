@@ -1,12 +1,12 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow, ensure};
+use aos_effects::builtins::{HeaderMap, HttpRequestReceipt, RequestTimings};
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_host::trace::{TraceQuery, diagnose_trace, trace_get};
 use aos_kernel::journal::{JournalKind, JournalRecord};
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
@@ -23,7 +23,6 @@ aos_variant! {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     enum FetchEventEnvelope {
         Start { url: String, method: String },
-        NotifyComplete { status: i64, body_preview: String },
     }
 }
 
@@ -93,7 +92,7 @@ fn run_adapter_timeout(example_root: &Path) -> Result<()> {
         intent_hash: intent.intent_hash,
         adapter_id: "http.mock".into(),
         status: ReceiptStatus::Timeout,
-        payload_cbor: serde_cbor::to_vec(&CborValue::Null)?,
+        payload_cbor: serde_cbor::to_vec(&http_receipt_payload(504)?)?,
         cost_cents: Some(0),
         signature: vec![0; 64],
     })?;
@@ -124,7 +123,7 @@ fn run_adapter_error(example_root: &Path) -> Result<()> {
         intent_hash: intent.intent_hash,
         adapter_id: "http.mock".into(),
         status: ReceiptStatus::Error,
-        payload_cbor: serde_cbor::to_vec(&CborValue::Null)?,
+        payload_cbor: serde_cbor::to_vec(&http_receipt_payload(500)?)?,
         cost_cents: Some(0),
         signature: vec![0; 64],
     })?;
@@ -183,4 +182,17 @@ fn start_event(url: &str) -> FetchEventEnvelope {
         url: url.into(),
         method: "GET".into(),
     }
+}
+
+fn http_receipt_payload(status: i32) -> Result<HttpRequestReceipt> {
+    Ok(HttpRequestReceipt {
+        status,
+        headers: HeaderMap::new(),
+        body_ref: None,
+        timings: RequestTimings {
+            start_ns: 10,
+            end_ns: 20,
+        },
+        adapter_id: "http.mock".into(),
+    })
 }

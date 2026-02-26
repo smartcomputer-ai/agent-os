@@ -82,7 +82,10 @@ pub fn run(example_root: &Path) -> Result<()> {
         .kernel_mut()
         .snapshot_hash()
         .ok_or_else(|| anyhow!("snapshot hash missing after create_snapshot"))?;
-    println!("   snapshot created while waiting: {}", snapshot_hash.to_hex());
+    println!(
+        "   snapshot created while waiting: {}",
+        snapshot_hash.to_hex()
+    );
 
     let waiting_instances = host
         .kernel_mut()
@@ -97,9 +100,10 @@ pub fn run(example_root: &Path) -> Result<()> {
     }
 
     let proposal_patch = load_upgrade_patch(example_root, &host)?;
-    let proposal_id = host
-        .kernel_mut()
-        .submit_proposal(proposal_patch, Some("upgrade to SafeUpgrade workflow v2".into()))?;
+    let proposal_id = host.kernel_mut().submit_proposal(
+        proposal_patch,
+        Some("upgrade to SafeUpgrade workflow v2".into()),
+    )?;
     let summary = host.kernel_mut().run_shadow(
         proposal_id,
         Some(ShadowHarness {
@@ -216,8 +220,8 @@ pub fn run(example_root: &Path) -> Result<()> {
         .kernel_mut()
         .reducer_state(REDUCER_NAME_V2)
         .ok_or_else(|| anyhow!("missing state for upgraded module '{REDUCER_NAME_V2}'"))?;
-    let state_v2: UpgradeStateView = serde_cbor::from_slice(&state_v2_bytes)
-        .context("decode upgraded reducer state")?;
+    let state_v2: UpgradeStateView =
+        serde_cbor::from_slice(&state_v2_bytes).context("decode upgraded reducer state")?;
     println!(
         "   v2 complete: pending={:?} primary_status={:?} follow_status={:?} requests={}",
         state_v2.pending_request,

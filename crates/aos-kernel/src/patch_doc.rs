@@ -25,19 +25,33 @@ fn default_patch_version() -> String {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PatchOp {
-    AddDef { add_def: AddDef },
-    ReplaceDef { replace_def: ReplaceDef },
-    RemoveDef { remove_def: RemoveDef },
-    SetManifestRefs { set_manifest_refs: SetManifestRefs },
-    SetDefaults { set_defaults: SetDefaults },
-    SetRoutingEvents { set_routing_events: SetRoutingEvents },
+    AddDef {
+        add_def: AddDef,
+    },
+    ReplaceDef {
+        replace_def: ReplaceDef,
+    },
+    RemoveDef {
+        remove_def: RemoveDef,
+    },
+    SetManifestRefs {
+        set_manifest_refs: SetManifestRefs,
+    },
+    SetDefaults {
+        set_defaults: SetDefaults,
+    },
+    SetRoutingEvents {
+        set_routing_events: SetRoutingEvents,
+    },
     SetRoutingInboxes {
         set_routing_inboxes: SetRoutingInboxes,
     },
     SetModuleBindings {
         set_module_bindings: SetModuleBindings,
     },
-    SetSecrets { set_secrets: SetSecrets },
+    SetSecrets {
+        set_secrets: SetSecrets,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -202,7 +216,8 @@ pub fn compile_patch_document<S: Store>(
 
     let mut hash_map: HashMap<String, Hash> = HashMap::new();
     for node in &canonical.nodes {
-        let h = Hash::of_cbor(node).map_err(|e| KernelError::Manifest(format!("hash node: {e}")))?;
+        let h =
+            Hash::of_cbor(node).map_err(|e| KernelError::Manifest(format!("hash node: {e}")))?;
         if let Some(name) = node_name(node) {
             hash_map.insert(name.to_string(), h);
         }
@@ -255,7 +270,9 @@ fn update_manifest_ref_hash(
                 && let Some(pre) = pre_hash
                 && nr.hash.as_str() != pre
             {
-                return Err(KernelError::Manifest(format!("pre_hash mismatch for {name}")));
+                return Err(KernelError::Manifest(format!(
+                    "pre_hash mismatch for {name}"
+                )));
             }
             if remove.is_some() {
                 manifest.secrets.remove(pos);
@@ -273,8 +290,12 @@ fn update_manifest_ref_hash(
 
     let refs = refs_for_kind_mut(manifest, kind)?;
     if let Some(idx) = refs.iter().position(|r| r.name.as_str() == name) {
-        if let Some(pre) = pre_hash && refs[idx].hash.as_str() != pre {
-            return Err(KernelError::Manifest(format!("pre_hash mismatch for {name}")));
+        if let Some(pre) = pre_hash
+            && refs[idx].hash.as_str() != pre
+        {
+            return Err(KernelError::Manifest(format!(
+                "pre_hash mismatch for {name}"
+            )));
         }
         if remove.is_some() {
             refs.remove(idx);
@@ -340,10 +361,12 @@ fn apply_routing_events(manifest: &mut Manifest, op: SetRoutingEvents) -> Result
         .map(|r| r.subscriptions.clone())
         .unwrap_or_default();
     verify_block_pre_hash(&current, &op.pre_hash, "routing.subscriptions")?;
-    let routing = manifest.routing.get_or_insert_with(|| aos_air_types::Routing {
-        subscriptions: vec![],
-        inboxes: vec![],
-    });
+    let routing = manifest
+        .routing
+        .get_or_insert_with(|| aos_air_types::Routing {
+            subscriptions: vec![],
+            inboxes: vec![],
+        });
     routing.subscriptions = op.subscriptions;
     Ok(())
 }
@@ -358,10 +381,12 @@ fn apply_routing_inboxes(
         .map(|r| r.inboxes.clone())
         .unwrap_or_default();
     verify_block_pre_hash(&current, &op.pre_hash, "routing.inboxes")?;
-    let routing = manifest.routing.get_or_insert_with(|| aos_air_types::Routing {
-        subscriptions: vec![],
-        inboxes: vec![],
-    });
+    let routing = manifest
+        .routing
+        .get_or_insert_with(|| aos_air_types::Routing {
+            subscriptions: vec![],
+            inboxes: vec![],
+        });
     routing.inboxes = op.inboxes;
     Ok(())
 }
@@ -391,7 +416,9 @@ fn verify_block_pre_hash<T: serde::Serialize>(
     let found = Hash::from_hex_str(pre_hash_hex)
         .map_err(|err| KernelError::Manifest(format!("invalid pre_hash for {label}: {err}")))?;
     if expected != found {
-        return Err(KernelError::Manifest(format!("pre_hash mismatch for {label}")));
+        return Err(KernelError::Manifest(format!(
+            "pre_hash mismatch for {label}"
+        )));
     }
     Ok(())
 }
@@ -456,7 +483,11 @@ fn zero_hash_ref() -> Result<HashRef, KernelError> {
         .map_err(|e| KernelError::Manifest(e.to_string()))
 }
 
-fn insert_placeholder_ref(manifest: &mut Manifest, kind: &str, name: &str) -> Result<(), KernelError> {
+fn insert_placeholder_ref(
+    manifest: &mut Manifest,
+    kind: &str,
+    name: &str,
+) -> Result<(), KernelError> {
     if kind == "defsecret" {
         apply_secret_ref_add(manifest, name, &format!("sha256:{}", "0".repeat(64)))?;
         return Ok(());
@@ -472,8 +503,13 @@ fn insert_placeholder_ref(manifest: &mut Manifest, kind: &str, name: &str) -> Re
     Ok(())
 }
 
-fn apply_secret_ref_add(manifest: &mut Manifest, name: &str, hash: &str) -> Result<(), KernelError> {
-    let hash_ref = HashRef::new(hash.to_string()).map_err(|e| KernelError::Manifest(e.to_string()))?;
+fn apply_secret_ref_add(
+    manifest: &mut Manifest,
+    name: &str,
+    hash: &str,
+) -> Result<(), KernelError> {
+    let hash_ref =
+        HashRef::new(hash.to_string()).map_err(|e| KernelError::Manifest(e.to_string()))?;
     if let Some(pos) = manifest
         .secrets
         .iter()

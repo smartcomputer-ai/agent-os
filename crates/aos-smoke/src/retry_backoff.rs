@@ -96,7 +96,11 @@ pub fn run(example_root: &Path) -> Result<()> {
         "expected retry workflow to finish Done, got {:?}",
         final_state.pc
     );
-    ensure!(final_state.attempt == 3, "expected 3 attempts, got {}", final_state.attempt);
+    ensure!(
+        final_state.attempt == 3,
+        "expected 3 attempts, got {}",
+        final_state.attempt
+    );
     ensure!(
         final_state.timers_scheduled == 2,
         "expected 2 scheduled timers, got {}",
@@ -180,7 +184,10 @@ fn drive_retry_flow(kernel: &mut Kernel<FsStore>) -> Result<()> {
         ensure!(safety < 32, "safety trip: too many retry cycles");
     }
 
-    ensure!(http_attempts == 3, "expected 3 http attempts, got {http_attempts}");
+    ensure!(
+        http_attempts == 3,
+        "expected 3 http attempts, got {http_attempts}"
+    );
     ensure!(
         scheduled_timers == vec![11_000_000, 21_000_000],
         "unexpected timer schedule {:?}",

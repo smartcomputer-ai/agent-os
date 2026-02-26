@@ -2,13 +2,15 @@
   {
     "$kind": "defmodule",
     "name": "demo/FlowTracker@1",
-    "module_kind": "reducer",
+    "module_kind": "workflow",
     "abi": {
       "reducer": {
         "state": "demo/FlowState@1",
-        "event": "demo/FlowCompleted@1",
-        "effects_emitted": [],
-        "cap_slots": {}
+        "event": "demo/RuntimeHardeningEvent@1",
+        "effects_emitted": ["http.request"],
+        "cap_slots": {
+          "default": "http.out"
+        }
       }
     }
   }

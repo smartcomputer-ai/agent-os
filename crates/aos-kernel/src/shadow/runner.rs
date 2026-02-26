@@ -9,8 +9,8 @@ use crate::world::{Kernel, KernelConfig};
 use crate::{
     error::KernelError,
     shadow::{
-        ModuleEffectAllowlist, PendingWorkflowReceipt, PredictedEffect, ShadowConfig, ShadowSummary,
-        WorkflowInstancePreview,
+        ModuleEffectAllowlist, PendingWorkflowReceipt, PredictedEffect, ShadowConfig,
+        ShadowSummary, WorkflowInstancePreview,
     },
 };
 use base64::Engine as _;

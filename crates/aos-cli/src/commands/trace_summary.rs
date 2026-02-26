@@ -94,5 +94,7 @@ fn render_human(summary: &Value) {
         .and_then(|v| v.get("waiting"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    println!("trace-summary: intents={intents} receipts(ok={ok} error={err} timeout={timeout}) waiting_workflows={waiting}");
+    println!(
+        "trace-summary: intents={intents} receipts(ok={ok} error={err} timeout={timeout}) waiting_workflows={waiting}"
+    );
 }

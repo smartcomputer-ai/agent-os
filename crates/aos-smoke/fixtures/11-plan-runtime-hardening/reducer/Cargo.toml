@@ -1,7 +1,7 @@
 [workspace]
 
 [package]
-name = "plan-runtime-hardening-reducer"
+name = "workflow-runtime-hardening-reducer"
 version = "0.1.0"
 edition = "2024"
 
@@ -11,3 +11,5 @@ crate-type = ["cdylib"]
 [dependencies]
 aos-wasm-sdk = { path = "../../../../aos-wasm-sdk" }
 serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
+sha2 = { version = "0.10", default-features = false }

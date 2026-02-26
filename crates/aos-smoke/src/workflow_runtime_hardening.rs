@@ -6,27 +6,37 @@ use anyhow::{Context, Result, anyhow, ensure};
 use aos_air_types::HashRef;
 use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
 use aos_host::manifest_loader;
-use aos_host::trace::plan_run_summary;
-use aos_host::util::patch_modules;
+use aos_host::trace::workflow_trace_summary;
+use aos_host::util::{is_placeholder_hash, patch_modules};
 use aos_kernel::journal::mem::MemJournal;
+use aos_kernel::journal::{CapDecisionOutcome, JournalRecord, PolicyDecisionOutcome};
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_store::{FsStore, Store};
+use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::util;
 
 const MODULE_NAME: &str = "demo/FlowTracker@1";
-const START_SCHEMA: &str = "demo/RuntimeHardeningStart@1";
-const APPROVAL_SCHEMA: &str = "demo/ApprovalEvent@1";
+const EVENT_SCHEMA: &str = "demo/RuntimeHardeningEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/11-plan-runtime-hardening/reducer";
 
-#[derive(Debug, Clone, Serialize)]
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum RuntimeHardeningEvent {
+        Start(StartEvent),
+        Approval(ApprovalEvent),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartEvent {
     request_id: u64,
     urls: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ApprovalEvent {
     request_id: u64,
     approved: bool,
@@ -40,7 +50,7 @@ struct FlowState {
 }
 
 pub fn run(example_root: &Path) -> Result<()> {
-    println!("→ Plan Runtime Hardening demo");
+    println!("→ Workflow Runtime Hardening demo");
     util::reset_journal(example_root)?;
 
     let wasm_bytes = util::compile_reducer(MODULE_CRATE)?;
@@ -57,30 +67,25 @@ pub fn run(example_root: &Path) -> Result<()> {
         Box::new(MemJournal::new()),
     )?;
 
-    // Two concurrent starts become two independent plan instances.
-    submit_event_with_key(
+    submit_event(
         &mut kernel,
-        START_SCHEMA,
-        &StartEvent {
+        &RuntimeHardeningEvent::Start(StartEvent {
             request_id: 1,
             urls: vec![
                 "https://example.com/req-1-a".into(),
                 "https://example.com/req-1-b".into(),
             ],
-        },
-        1,
+        }),
     )?;
-    submit_event_with_key(
+    submit_event(
         &mut kernel,
-        START_SCHEMA,
-        &StartEvent {
+        &RuntimeHardeningEvent::Start(StartEvent {
             request_id: 2,
             urls: vec![
                 "https://example.com/req-2-a".into(),
                 "https://example.com/req-2-b".into(),
             ],
-        },
-        2,
+        }),
     )?;
 
     let mut http = MockHttpHarness::new();
@@ -89,15 +94,12 @@ pub fn run(example_root: &Path) -> Result<()> {
         "workers must not run before approval"
     );
 
-    // Cross-talk gate: approving request 2 only must only release request 2 workers.
-    submit_event_with_key(
+    submit_event(
         &mut kernel,
-        APPROVAL_SCHEMA,
-        &ApprovalEvent {
+        &RuntimeHardeningEvent::Approval(ApprovalEvent {
             request_id: 2,
             approved: true,
-        },
-        2,
+        }),
     )?;
 
     let req2_requests = http.collect_requests(&mut kernel)?;
@@ -114,7 +116,6 @@ pub fn run(example_root: &Path) -> Result<()> {
     );
     println!("   cross-talk gate: OK (only request_id=2 released)");
 
-    // Crash/resume while child workers wait on receipts.
     let pre_restart_entries = kernel.dump_journal()?;
     let mut kernel = boot_kernel(
         store.clone(),
@@ -138,16 +139,14 @@ pub fn run(example_root: &Path) -> Result<()> {
         )?;
     }
 
-    // Now approve request 1 and complete the remaining workers.
-    submit_event_with_key(
+    submit_event(
         &mut kernel,
-        APPROVAL_SCHEMA,
-        &ApprovalEvent {
+        &RuntimeHardeningEvent::Approval(ApprovalEvent {
             request_id: 1,
             approved: true,
-        },
-        1,
+        }),
     )?;
+
     let mut req1_requests = http.collect_requests(&mut kernel)?;
     ensure!(
         req1_requests.len() == 2,
@@ -182,28 +181,36 @@ pub fn run(example_root: &Path) -> Result<()> {
         "expected worker_count=2"
     );
 
-    let summary = plan_run_summary(&kernel)?;
+    let summary = workflow_trace_summary(&kernel)?;
+    let journal_summary = journal_counters(&kernel)?;
     ensure!(
-        summary["totals"]["runs"]["started"].as_u64() == Some(8),
-        "expected 8 total starts (2 parent + 2 gate + 4 worker)"
+        summary["totals"]["effects"]["intents"].as_u64() == Some(4),
+        "expected 4 total http.request intents"
     );
     ensure!(
-        summary["totals"]["runs"]["ok"].as_u64() == Some(8),
-        "expected all composed plans to complete"
+        summary["totals"]["effects"]["receipts"]["ok"].as_u64() == Some(4),
+        "expected 4 successful receipts"
     );
     ensure!(
-        summary["totals"]["runs"]["error"].as_u64() == Some(0),
-        "expected zero plan errors"
+        summary["totals"]["workflows"]["failed"].as_u64() == Some(0),
+        "expected zero failed workflow instances"
+    );
+    ensure!(
+        summary["runtime_wait"]["pending_reducer_receipts"].as_u64() == Some(0),
+        "expected no pending reducer receipts"
+    );
+    ensure!(
+        summary["runtime_wait"]["queued_effects"].as_u64() == Some(0),
+        "expected no queued effects"
     );
 
     let artifact_dir = example_root.join(".aos").join("artifacts");
     fs::create_dir_all(&artifact_dir)
         .with_context(|| format!("create artifact dir {}", artifact_dir.display()))?;
-    let artifact_path = artifact_dir.join("plan-summary.json");
+    let artifact_path = artifact_dir.join("workflow-summary.json");
     fs::write(&artifact_path, serde_json::to_vec_pretty(&summary)?)
         .with_context(|| format!("write {}", artifact_path.display()))?;
 
-    // Strict replay check for the composed flow: state + summary must match.
     let final_entries = kernel.dump_journal()?;
     let replay_kernel = boot_kernel(
         store,
@@ -221,32 +228,22 @@ pub fn run(example_root: &Path) -> Result<()> {
         replay_state == state,
         "replay mismatch: reducer state diverged"
     );
-    let replay_summary = plan_run_summary(&replay_kernel)?;
     ensure!(
-        replay_summary == summary,
-        "replay mismatch: plan summary diverged"
+        journal_counters(&replay_kernel)? == journal_summary,
+        "replay mismatch: journal counters diverged"
     );
 
     println!("   crash/resume: OK (pending worker receipts recovered)");
     println!("   replay parity: OK");
-    println!("   plan summary artifact: {}", artifact_path.display());
+    println!("   workflow summary artifact: {}", artifact_path.display());
 
     Ok(())
 }
 
-fn submit_event_with_key<T: Serialize>(
-    kernel: &mut Kernel<FsStore>,
-    schema: &str,
-    value: &T,
-    request_id: u64,
-) -> Result<()> {
+fn submit_event(kernel: &mut Kernel<FsStore>, value: &RuntimeHardeningEvent) -> Result<()> {
     let payload = serde_cbor::to_vec(value).context("encode event")?;
     kernel
-        .submit_domain_event_with_key(
-            schema.to_string(),
-            payload,
-            request_id.to_be_bytes().to_vec(),
-        )
+        .submit_domain_event(EVENT_SCHEMA.to_string(), payload)
         .context("submit event")?;
     kernel.tick_until_idle().context("tick to idle")
 }
@@ -268,13 +265,109 @@ fn load_manifest_for_runtime(
     assets_root: &Path,
     wasm_hash: &HashRef,
 ) -> Result<LoadedManifest> {
-    let mut loaded = manifest_loader::load_from_assets_with_imports(store, assets_root, &[])
-        .context("load fixture manifest")?
-        .ok_or_else(|| anyhow!("manifest missing at {}", assets_root.display()))?;
+    let mut loaded =
+        manifest_loader::load_from_assets_with_imports(store.clone(), assets_root, &[])
+            .context("load fixture manifest")?
+            .ok_or_else(|| anyhow!("manifest missing at {}", assets_root.display()))?;
 
     let patched = patch_modules(&mut loaded, wasm_hash, |name, _| name == MODULE_NAME);
     if patched == 0 {
         anyhow::bail!("module '{}' missing from manifest", MODULE_NAME);
     }
+
+    maybe_patch_sys_module(
+        assets_root,
+        store,
+        &mut loaded,
+        "sys/CapEnforceHttpOut@1",
+        "cap_enforce_http_out",
+    )?;
+
     Ok(loaded)
+}
+
+fn maybe_patch_sys_module(
+    assets_root: &Path,
+    store: Arc<FsStore>,
+    loaded: &mut LoadedManifest,
+    module_name: &str,
+    bin_name: &str,
+) -> Result<()> {
+    let needs_patch = loaded
+        .modules
+        .get(module_name)
+        .map(is_placeholder_hash)
+        .unwrap_or(false);
+    if !needs_patch {
+        return Ok(());
+    }
+
+    let cache_dir = assets_root.join(".aos").join("cache").join("modules");
+    let wasm_bytes =
+        util::compile_wasm_bin(crate::workspace_root(), "aos-sys", bin_name, &cache_dir)?;
+    let wasm_hash = store
+        .put_blob(&wasm_bytes)
+        .with_context(|| format!("store {module_name} wasm blob"))?;
+    let wasm_hash_ref =
+        HashRef::new(wasm_hash.to_hex()).with_context(|| format!("hash {module_name}"))?;
+    let patched = patch_modules(loaded, &wasm_hash_ref, |name, _| name == module_name);
+    if patched == 0 {
+        anyhow::bail!("module '{}' missing in manifest", module_name);
+    }
+    Ok(())
+}
+
+fn journal_counters(kernel: &Kernel<FsStore>) -> Result<serde_json::Value> {
+    let mut effect_intents = 0u64;
+    let mut receipt_ok = 0u64;
+    let mut receipt_error = 0u64;
+    let mut receipt_timeout = 0u64;
+    let mut policy_allow = 0u64;
+    let mut policy_deny = 0u64;
+    let mut cap_allow = 0u64;
+    let mut cap_deny = 0u64;
+    let mut governance_total = 0u64;
+
+    for entry in kernel.dump_journal()? {
+        let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
+            .with_context(|| format!("decode journal seq {}", entry.seq))?;
+        match record {
+            JournalRecord::EffectIntent(_) => effect_intents += 1,
+            JournalRecord::EffectReceipt(receipt) => match receipt.status {
+                aos_effects::ReceiptStatus::Ok => receipt_ok += 1,
+                aos_effects::ReceiptStatus::Error => receipt_error += 1,
+                aos_effects::ReceiptStatus::Timeout => receipt_timeout += 1,
+            },
+            JournalRecord::PolicyDecision(decision) => match decision.decision {
+                PolicyDecisionOutcome::Allow => policy_allow += 1,
+                PolicyDecisionOutcome::Deny => policy_deny += 1,
+            },
+            JournalRecord::CapDecision(decision) => match decision.decision {
+                CapDecisionOutcome::Allow => cap_allow += 1,
+                CapDecisionOutcome::Deny => cap_deny += 1,
+            },
+            JournalRecord::Governance(_) => governance_total += 1,
+            _ => {}
+        }
+    }
+
+    Ok(json!({
+        "effects": {
+            "intents": effect_intents,
+            "receipts": {
+                "ok": receipt_ok,
+                "error": receipt_error,
+                "timeout": receipt_timeout,
+            }
+        },
+        "policy_decisions": {
+            "allow": policy_allow,
+            "deny": policy_deny,
+        },
+        "cap_decisions": {
+            "allow": cap_allow,
+            "deny": cap_deny,
+        },
+        "governance_records": governance_total,
+    }))
 }

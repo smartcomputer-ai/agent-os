@@ -3,11 +3,36 @@
 
 extern crate alloc;
 
-use alloc::string::String;
-use aos_wasm_sdk::{aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
+use alloc::{collections::BTreeMap, string::String};
+use aos_wasm_sdk::{
+    EffectReceiptEnvelope, ReduceError, Reducer, ReducerCtx, aos_reducer, aos_variant,
+};
 use serde::{Deserialize, Serialize};
 
-const FETCH_REQUEST_SCHEMA: &str = "demo/FetchRequest@1";
+const HTTP_REQUEST_EFFECT: &str = "http.request";
+
+aos_reducer!(FetchNotifySm);
+
+#[derive(Default)]
+struct FetchNotifySm;
+
+impl Reducer for FetchNotifySm {
+    type State = FetchState;
+    type Event = FetchEvent;
+    type Ann = ();
+
+    fn reduce(
+        &mut self,
+        event: Self::Event,
+        ctx: &mut ReducerCtx<Self::State, ()>,
+    ) -> Result<(), ReduceError> {
+        match event {
+            FetchEvent::Start { url, method } => handle_start(ctx, url, method),
+            FetchEvent::Receipt(envelope) => handle_receipt(ctx, envelope)?,
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct FetchState {
@@ -15,7 +40,7 @@ struct FetchState {
     next_request_id: u64,
     pending_request: Option<u64>,
     last_status: Option<i64>,
-    last_body_preview: Option<String>,
+    last_body_ref: Option<String>,
 }
 
 aos_variant! {
@@ -37,40 +62,32 @@ aos_variant! {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum FetchEvent {
     Start { url: String, method: String },
-    NotifyComplete { status: i64, body_preview: String },
+    Receipt(EffectReceiptEnvelope),
+}
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct FetchRequest {
-    request_id: u64,
-    url: String,
+struct HttpRequestParams {
     method: String,
+    url: String,
+    headers: BTreeMap<String, String>,
+    body_ref: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RequestTimings {
+    start_ns: u64,
+    end_ns: u64,
 }
 
-aos_reducer!(FetchNotifySm);
-
-#[derive(Default)]
-struct FetchNotifySm;
-
-impl Reducer for FetchNotifySm {
-    type State = FetchState;
-    type Event = FetchEvent;
-    type Ann = ();
-
-    fn reduce(
-        &mut self,
-        event: Self::Event,
-        ctx: &mut ReducerCtx<Self::State, ()>,
-    ) -> Result<(), ReduceError> {
-        match event {
-            FetchEvent::Start { url, method } => handle_start(ctx, url, method),
-            FetchEvent::NotifyComplete { status, body_preview } => {
-                handle_notify(ctx, status, body_preview)
-            }
-        }
-        Ok(())
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HttpRequestReceipt {
+    status: i32,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    body_ref: Option<String>,
+    timings: RequestTimings,
+    adapter_id: String,
 }
 
 fn handle_start(ctx: &mut ReducerCtx<FetchState, ()>, url: String, method: String) {
@@ -82,26 +99,51 @@ fn handle_start(ctx: &mut ReducerCtx<FetchState, ()>, url: String, method: Strin
     ctx.state.pending_request = Some(request_id);
     ctx.state.pc = FetchPc::Fetching;
     ctx.state.last_status = None;
-    ctx.state.last_body_preview = None;
+    ctx.state.last_body_ref = None;
 
-    let intent_value = FetchRequest {
-        request_id,
-        url,
+    let params = HttpRequestParams {
         method,
+        url,
+        headers: BTreeMap::new(),
+        body_ref: None,
     };
-    let key = request_id.to_be_bytes();
-    ctx.intent(FETCH_REQUEST_SCHEMA)
-        .key_bytes(&key)
-        .payload(&intent_value)
-        .send();
+    ctx.effects()
+        .emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
 }
 
-fn handle_notify(ctx: &mut ReducerCtx<FetchState, ()>, status: i64, body_preview: String) {
+fn handle_receipt(
+    ctx: &mut ReducerCtx<FetchState, ()>,
+    envelope: EffectReceiptEnvelope,
+) -> Result<(), ReduceError> {
     if ctx.state.pending_request.is_none() {
-        return;
+        return Ok(());
     }
+    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
+        return Ok(());
+    }
+
+    match envelope.status.as_str() {
+        "ok" => {
+            let receipt: HttpRequestReceipt = envelope
+                .decode_receipt_payload()
+                .map_err(|_| ReduceError::new("invalid http.request receipt payload"))?;
+            ctx.state.last_status = Some(receipt.status as i64);
+            ctx.state.last_body_ref = receipt.body_ref;
+        }
+        "timeout" => {
+            ctx.state.last_status = Some(-2);
+            ctx.state.last_body_ref = None;
+        }
+        "error" => {
+            ctx.state.last_status = Some(-1);
+            ctx.state.last_body_ref = None;
+        }
+        _ => {
+            return Err(ReduceError::new("unknown receipt status for http.request"));
+        }
+    }
+
     ctx.state.pending_request = None;
     ctx.state.pc = FetchPc::Done;
-    ctx.state.last_status = Some(status);
-    ctx.state.last_body_preview = Some(body_preview);
+    Ok(())
 }

@@ -4,7 +4,8 @@ use aos_cbor::to_canonical_cbor;
 use thiserror::Error;
 
 use crate::{
-    TypeExpr, TypeMapKey, TypePrimitive, ValueLiteral, ValueMapEntry, typecheck::validate_value_literal,
+    TypeExpr, TypeMapKey, TypePrimitive, ValueLiteral, ValueMapEntry,
+    typecheck::validate_value_literal,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -223,17 +224,17 @@ fn canonical_bytes(value: &ValueLiteral) -> Result<Vec<u8>, PlanLiteralError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        EmptyObject, TypePrimitive, TypePrimitiveText, ValueRecord, ValueSet, ValueText,
-    };
+    use crate::{EmptyObject, TypePrimitive, TypePrimitiveText, ValueRecord, ValueSet, ValueText};
     use indexmap::IndexMap;
 
     #[test]
     fn canonicalize_set_is_sorted_and_deduped() {
         let schema = TypeExpr::Set(crate::TypeSet {
-            set: Box::new(TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
-                text: EmptyObject::default(),
-            }))),
+            set: Box::new(TypeExpr::Primitive(TypePrimitive::Text(
+                TypePrimitiveText {
+                    text: EmptyObject::default(),
+                },
+            ))),
         });
         let mut literal = ValueLiteral::Set(ValueSet {
             set: vec![

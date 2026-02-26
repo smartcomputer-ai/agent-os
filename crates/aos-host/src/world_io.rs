@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, DefSecret, Manifest,
-    SecretEntry, builtins,
+    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, DefSecret, Manifest, SecretEntry,
+    builtins,
 };
 use aos_cbor::{Hash, to_canonical_cbor};
 use aos_kernel::LoadedManifest;

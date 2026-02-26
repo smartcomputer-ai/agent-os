@@ -38,8 +38,8 @@ Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 - [x] `07-llm-summarizer`: replace summarize plan with workflow module orchestration.
 - [x] `08-retry-backoff`: rebuild retries/timeouts on workflow runtime and receipt/event model.
 - [x] `09-workspaces`: replace workspace plan orchestration with workflow-module-first wiring.
-- [ ] `10-trace-failure-classification`: convert trace fixtures from plan modules to workflow modules.
-- [ ] `11-plan-runtime-hardening`: replace with workflow-runtime-hardening fixture set and outputs.
+- [x] `10-trace-failure-classification`: convert trace fixtures from plan modules to workflow modules.
+- [x] `11-plan-runtime-hardening`: replace with workflow-runtime-hardening fixture set and outputs.
 - [ ] `20-agent-session`: remove remaining legacy manifest vocabulary; keep behavior unchanged.
 - [ ] `21-chat-live`: remove wrapper plan; use workflow subscription/orchestration directly.
 - [ ] `22-agent-live`: remove wrapper plan; use workflow subscription/orchestration directly.
@@ -146,6 +146,19 @@ Implementation log (completed 2026-02-26):
   - `crates/aos-smoke/fixtures/09-workspaces/reducer/src/lib.rs`
   - `crates/aos-smoke/src/workspaces.rs`
   - verification: `cargo test --manifest-path crates/aos-smoke/fixtures/09-workspaces/reducer/Cargo.toml -q`, `cargo run -p aos-smoke -- workspaces`
+- [x] Rewrote `10-trace-failure-classification` to workflow-native failure routing across all fixture variants (`allow`, `cap_deny`, `policy_deny`): removed `defplan` assets/triggers, switched policy origin checks to `workflow`, and updated reducer to emit `http.request` directly and handle `Receipt(sys/EffectReceiptEnvelope@1)`.
+  - `crates/aos-smoke/fixtures/10-trace-failure-classification/air.allow/*`
+  - `crates/aos-smoke/fixtures/10-trace-failure-classification/air.cap_deny/*`
+  - `crates/aos-smoke/fixtures/10-trace-failure-classification/air.policy_deny/*`
+  - `crates/aos-smoke/fixtures/10-trace-failure-classification/reducer/src/lib.rs`
+  - `crates/aos-smoke/src/trace_failure_classification.rs`
+  - verification: `cargo run -p aos-smoke -- trace-failure-classification`
+- [x] Replaced `11-plan-runtime-hardening` with workflow-runtime-hardening behavior/output: removed plan assets, rewired AIR to workflow subscriptions, implemented direct workflow state-machine orchestration (`Start/Approval/Receipt`) for cross-talk isolation + crash/resume, and renamed runner/CLI surface to `workflow-runtime-hardening` (with `plan-runtime-hardening` alias).
+  - `crates/aos-smoke/fixtures/11-plan-runtime-hardening/air/*`
+  - `crates/aos-smoke/fixtures/11-plan-runtime-hardening/reducer/*`
+  - `crates/aos-smoke/src/workflow_runtime_hardening.rs`
+  - `crates/aos-smoke/src/main.rs`
+  - verification: `cargo run -p aos-smoke -- workflow-runtime-hardening`, `cargo run -p aos-smoke -- plan-runtime-hardening`
 
 ### 4) Dead code and roadmap cleanup
 

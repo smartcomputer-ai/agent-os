@@ -57,8 +57,14 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     let state: WorkspaceStateView = host.read_state()?;
     println!("   seeded {} workspaces", state.workspaces.len());
-    ensure!(state.workspaces.contains_key("alpha"), "missing alpha workspace summary");
-    ensure!(state.workspaces.contains_key("beta"), "missing beta workspace summary");
+    ensure!(
+        state.workspaces.contains_key("alpha"),
+        "missing alpha workspace summary"
+    );
+    ensure!(
+        state.workspaces.contains_key("beta"),
+        "missing beta workspace summary"
+    );
     for (name, summary) in &state.workspaces {
         ensure!(
             summary.root_hash.starts_with("sha256:"),

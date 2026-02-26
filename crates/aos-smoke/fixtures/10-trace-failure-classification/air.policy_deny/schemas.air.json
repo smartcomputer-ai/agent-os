@@ -35,32 +35,11 @@
   },
   {
     "$kind": "defschema",
-    "name": "demo/FetchNotifyComplete@1",
-    "type": {
-      "record": {
-        "status": { "int": {} },
-        "body_preview": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "demo/FetchNotifyEvent@1",
     "type": {
       "variant": {
         "Start": { "ref": "demo/FetchNotifyStart@1" },
-        "NotifyComplete": { "ref": "demo/FetchNotifyComplete@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/FetchRequest@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "url": { "text": {} },
-        "method": { "text": {} }
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
       }
     }
   }
