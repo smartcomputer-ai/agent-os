@@ -89,12 +89,17 @@ Required coverage outcomes from rewritten fixtures/suites:
     - attempt governance apply and assert strict-quiescence block,
     - deliver receipt and assert deterministic continuation,
     - re-apply and assert deterministic success.
-13. [x] Strict receipt settlement invariant: malformed receipt payloads are rejected without consuming pending workflow/reducer intent state.
-14. [x] Remove receipt/event decode compatibility fallbacks in runtime SDK layers; require canonical schema-conformant payloads.
+13. [x] Strict receipt settlement invariant: malformed receipt payloads are terminalized (pending intent consumed) so faulty adapters cannot clog runtime progress.
+14. [x] Optional rejected-receipt continuation: workflows may handle `sys/EffectReceiptRejected@1`; if not handled, instance is marked failed and remaining in-flight intents are drained.
+15. [x] Remove receipt/event decode compatibility fallbacks in runtime SDK layers; require canonical schema-conformant payloads.
 
 Implementation log (completed 2026-02-26):
-- [x] Kernel receipt handling now validates/normalizes and delivers before removing pending receipt context, so malformed receipts do not consume pending state.
+- [x] Kernel receipt handling now terminalizes malformed receipt paths: pending intent is consumed; optional `sys/EffectReceiptRejected@1` event is delivered when supported; otherwise the workflow instance is marked `failed` and remaining in-flight intents are drained.
   - `crates/aos-kernel/src/world/plan_runtime.rs`
+- [x] Added built-in rejected-receipt schema for optional workflow handling.
+  - `spec/defs/builtin-schemas.air.json`
+  - `crates/aos-air-types/src/builtins.rs`
+  - `crates/aos-kernel/src/receipts.rs`
 - [x] Removed receipt decode compatibility fallback (`self-describe` tag stripping); decoding now requires canonical schema-conformant CBOR.
   - `crates/aos-effects/src/receipt.rs`
   - `crates/aos-wasm-sdk/src/reducers.rs`
@@ -105,13 +110,17 @@ Implementation log (completed 2026-02-26):
   - `crates/aos-host/src/adapters/llm.rs`
 - [x] Replaced generic stub receipt payloads with per-effect typed schema-conformant receipts (`http.request`, `llm.generate`, `blob.put`, `blob.get`, `timer.set`).
   - `crates/aos-host/src/adapters/stub.rs`
-- [x] Added active regression test: malformed workflow receipt is rejected and pending receipt state remains until a valid receipt arrives.
-  - `crates/aos-host/tests/journal_integration.rs` (`malformed_workflow_receipt_does_not_consume_pending_intent`)
+- [x] Added active regression coverage for both rejected-receipt modes:
+  - workflow without rejected variant: malformed receipt fails instance and clears pending intents.
+  - workflow with rejected variant: malformed receipt raises rejected event and workflow continues deterministically.
+  - `crates/aos-host/tests/journal_integration.rs`
 - [x] Verified with targeted checks:
   - `cargo test -p aos-effects -q`
   - `cargo test -p aos-wasm-sdk -q`
+  - `cargo test -p aos-air-types -q`
+  - `cargo test -p aos-kernel receipts::tests::workflow_rejected_receipt_event_is_structured -q`
   - `cargo check -p aos-host`
-  - `cargo test -p aos-host --test journal_integration malformed_workflow_receipt_does_not_consume_pending_intent -q`
+  - `cargo test -p aos-host --test journal_integration malformed_workflow_receipt -q`
   - `cargo run -p aos-smoke -- hello-timer`
   - `cargo run -p aos-smoke -- blob-echo`
   - `cargo run -p aos-smoke -- fetch-notify`

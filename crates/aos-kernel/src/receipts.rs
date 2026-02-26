@@ -9,6 +9,7 @@ use serde::Serialize;
 use crate::error::KernelError;
 
 pub const SYS_EFFECT_RECEIPT_ENVELOPE_SCHEMA: &str = "sys/EffectReceiptEnvelope@1";
+pub const SYS_EFFECT_RECEIPT_REJECTED_SCHEMA: &str = "sys/EffectReceiptRejected@1";
 const SYS_TIMER_FIRED_SCHEMA: &str = "sys/TimerFired@1";
 const SYS_BLOB_PUT_RESULT_SCHEMA: &str = "sys/BlobPutResult@1";
 const SYS_BLOB_GET_RESULT_SCHEMA: &str = "sys/BlobGetResult@1";
@@ -72,6 +73,28 @@ struct WorkflowReceiptEnvelope {
 }
 
 #[derive(Serialize)]
+struct WorkflowReceiptRejected {
+    origin_module_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    origin_instance_key: Option<Vec<u8>>,
+    intent_id: String,
+    effect_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    params_hash: Option<String>,
+    adapter_id: String,
+    status: ReceiptStatus,
+    error_code: String,
+    error_message: String,
+    payload_hash: String,
+    payload_size: u64,
+    emitted_at_seq: u64,
+}
+
+#[derive(Serialize)]
 struct TimerReceiptEvent {
     intent_hash: String,
     reducer: String,
@@ -119,6 +142,29 @@ pub fn build_workflow_receipt_event(
         signature: receipt.signature.clone(),
     };
     encode_event(SYS_EFFECT_RECEIPT_ENVELOPE_SCHEMA, payload)
+}
+
+pub fn build_workflow_receipt_rejected_event(
+    ctx: &ReducerEffectContext,
+    receipt: &EffectReceipt,
+    error_code: &str,
+    error_message: &str,
+) -> Result<DomainEvent, KernelError> {
+    let payload = WorkflowReceiptRejected {
+        origin_module_id: ctx.origin_module_id.clone(),
+        origin_instance_key: ctx.origin_instance_key.clone(),
+        intent_id: hash_to_hex(&ctx.intent_id),
+        effect_kind: ctx.effect_kind.clone(),
+        params_hash: Some(Hash::of_bytes(&ctx.params_cbor).to_hex()),
+        adapter_id: receipt.adapter_id.clone(),
+        status: receipt.status.clone(),
+        error_code: error_code.to_string(),
+        error_message: error_message.to_string(),
+        payload_hash: Hash::of_bytes(&receipt.payload_cbor).to_hex(),
+        payload_size: receipt.payload_cbor.len() as u64,
+        emitted_at_seq: ctx.emitted_at_seq,
+    };
+    encode_event(SYS_EFFECT_RECEIPT_REJECTED_SCHEMA, payload)
 }
 
 /// Optional compatibility path for typed timer/blob receipt envelopes.
@@ -318,6 +364,53 @@ mod tests {
         let receipt = base_receipt();
         let legacy = build_legacy_reducer_receipt_event(&ctx, &receipt).expect("legacy");
         assert!(legacy.is_none());
+    }
+
+    #[test]
+    fn workflow_rejected_receipt_event_is_structured() {
+        let mut ctx = base_context(aos_effects::EffectKind::HTTP_REQUEST);
+        ctx.params_cbor = vec![1, 2, 3];
+        let mut receipt = base_receipt();
+        receipt.payload_cbor = vec![0xff, 0xa0];
+        let event = build_workflow_receipt_rejected_event(
+            &ctx,
+            &receipt,
+            "receipt.invalid_payload",
+            "schema mismatch",
+        )
+        .expect("rejected event");
+        assert_eq!(event.schema, SYS_EFFECT_RECEIPT_REJECTED_SCHEMA);
+
+        #[derive(Deserialize)]
+        struct Payload {
+            origin_module_id: String,
+            #[serde(default, with = "super::serde_bytes_opt")]
+            origin_instance_key: Option<Vec<u8>>,
+            intent_id: String,
+            effect_kind: String,
+            params_hash: Option<String>,
+            adapter_id: String,
+            status: ReceiptStatus,
+            error_code: String,
+            error_message: String,
+            payload_hash: String,
+            payload_size: u64,
+            emitted_at_seq: u64,
+        }
+
+        let decoded: Payload = serde_cbor::from_slice(&event.value).unwrap();
+        assert_eq!(decoded.origin_module_id, "com.acme/Workflow@1");
+        assert_eq!(decoded.origin_instance_key, Some(b"order-123".to_vec()));
+        assert_eq!(decoded.intent_id, hash_to_hex(&[7u8; 32]));
+        assert_eq!(decoded.effect_kind, aos_effects::EffectKind::HTTP_REQUEST);
+        assert_eq!(decoded.adapter_id, "adapter.test");
+        assert_eq!(decoded.status, ReceiptStatus::Ok);
+        assert_eq!(decoded.error_code, "receipt.invalid_payload");
+        assert_eq!(decoded.error_message, "schema mismatch");
+        assert_eq!(decoded.payload_size, 2);
+        assert_eq!(decoded.emitted_at_seq, 42);
+        assert!(decoded.params_hash.is_some());
+        assert!(!decoded.payload_hash.is_empty());
     }
 
     #[test]

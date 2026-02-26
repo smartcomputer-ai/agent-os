@@ -191,6 +191,26 @@
       }
     }
   },
+  {
+    "$kind": "defschema",
+    "name": "sys/EffectReceiptRejected@1",
+    "type": {
+      "record": {
+        "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
+        "origin_instance_key": { "option": { "bytes": {} } },
+        "intent_id": { "hash": {} },
+        "effect_kind": { "text": {} },
+        "params_hash": { "option": { "hash": {} } },
+        "adapter_id": { "text": {} },
+        "status": { "text": {} },
+        "error_code": { "text": {} },
+        "error_message": { "text": {} },
+        "payload_hash": { "hash": {} },
+        "payload_size": { "nat": {} },
+        "emitted_at_seq": { "nat": {} }
+      }
+    }
+  },
 
   {
     "$kind": "defschema",

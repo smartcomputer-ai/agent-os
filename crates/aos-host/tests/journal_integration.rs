@@ -6,7 +6,6 @@ use aos_air_types::{
 };
 use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt};
 use aos_effects::{EffectReceipt, ReceiptStatus};
-use aos_kernel::KernelError;
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord, PolicyDecisionOutcome};
@@ -320,7 +319,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
 }
 
 #[test]
-fn malformed_workflow_receipt_does_not_consume_pending_intent() {
+fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending() {
     let store = fixtures::new_mem_store();
     let manifest = no_plan_workflow_manifest(&store);
     let mut world = TestWorld::with_store(store, manifest).unwrap();
@@ -345,14 +344,6 @@ fn malformed_workflow_receipt_does_not_consume_pending_intent() {
         .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
         .expect("timer.set intent");
 
-    let pending_before = world.kernel.pending_reducer_receipts_snapshot();
-    assert_eq!(pending_before.len(), 2);
-    assert!(
-        pending_before
-            .iter()
-            .any(|entry| entry.intent_hash == blob_intent.intent_hash)
-    );
-
     let malformed = EffectReceipt {
         intent_hash: blob_intent.intent_hash,
         adapter_id: "adapter.blob".into(),
@@ -361,34 +352,94 @@ fn malformed_workflow_receipt_does_not_consume_pending_intent() {
         cost_cents: None,
         signature: vec![],
     };
-    let err = world
+    world
         .kernel
         .handle_receipt(malformed)
-        .expect_err("reject malformed");
-    assert!(matches!(err, KernelError::ReceiptDecode(_)));
+        .expect("fault handled");
 
-    let pending_after_err = world.kernel.pending_reducer_receipts_snapshot();
-    assert_eq!(pending_after_err.len(), 2);
+    let pending_after = world.kernel.pending_reducer_receipts_snapshot();
     assert!(
-        pending_after_err
-            .iter()
-            .any(|entry| entry.intent_hash == blob_intent.intent_hash)
+        pending_after.is_empty(),
+        "failed workflow should not keep pending receipts"
+    );
+    let status = world
+        .kernel
+        .workflow_instances_snapshot()
+        .into_iter()
+        .find(|instance| instance.instance_id.starts_with("com.acme/Workflow@1::"))
+        .expect("workflow instance")
+        .status;
+    assert_eq!(status, WorkflowStatusSnapshot::Failed);
+    assert_eq!(
+        world.kernel.reducer_state("com.acme/WorkflowResult@1"),
+        None
     );
 
-    let blob_receipt = EffectReceipt {
-        intent_hash: blob_intent.intent_hash,
-        adapter_id: "adapter.blob".into(),
+    let timer_receipt = EffectReceipt {
+        intent_hash: timer_intent.intent_hash,
+        adapter_id: "adapter.timer".into(),
         status: ReceiptStatus::Ok,
-        payload_cbor: serde_cbor::to_vec(&BlobPutReceipt {
-            blob_ref: fixtures::fake_hash(0x21),
-            edge_ref: fixtures::fake_hash(0x22),
-            size: 8,
+        payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
+            delivered_at_ns: 42,
+            key: Some("wf".into()),
         })
         .unwrap(),
         cost_cents: Some(1),
-        signature: vec![1, 2, 3],
+        signature: vec![4, 5, 6],
     };
-    world.kernel.handle_receipt(blob_receipt).unwrap();
+    world
+        .kernel
+        .handle_receipt(timer_receipt)
+        .expect("late timer receipt ignored");
+    world.kernel.tick_until_idle().unwrap();
+}
+
+#[test]
+fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues() {
+    let store = fixtures::new_mem_store();
+    let manifest = no_plan_workflow_manifest_with_rejected_variant(&store);
+    let mut world = TestWorld::with_store(store, manifest).unwrap();
+
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("wf-1")
+    });
+    world
+        .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
+        .expect("submit workflow start event");
+    world.tick_n(1).unwrap();
+
+    let effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 2);
+    let blob_intent = effects
+        .iter()
+        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT)
+        .expect("blob.put intent");
+    let timer_intent = effects
+        .iter()
+        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
+        .expect("timer.set intent");
+
+    let malformed = EffectReceipt {
+        intent_hash: blob_intent.intent_hash,
+        adapter_id: "adapter.blob".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: vec![0xa0],
+        cost_cents: None,
+        signature: vec![],
+    };
+    world
+        .kernel
+        .handle_receipt(malformed)
+        .expect("fault handled");
+
+    let pending_after_rejected = world.kernel.pending_reducer_receipts_snapshot();
+    assert_eq!(pending_after_rejected.len(), 1);
+    assert!(
+        pending_after_rejected
+            .iter()
+            .any(|entry| entry.intent_hash == timer_intent.intent_hash)
+    );
 
     let timer_receipt = EffectReceipt {
         intent_hash: timer_intent.intent_hash,
@@ -488,6 +539,19 @@ fn cap_decision_includes_grant_hash() {
 fn no_plan_workflow_manifest(
     store: &Arc<fixtures::TestStore>,
 ) -> aos_kernel::manifest::LoadedManifest {
+    no_plan_workflow_manifest_impl(store, false)
+}
+
+fn no_plan_workflow_manifest_with_rejected_variant(
+    store: &Arc<fixtures::TestStore>,
+) -> aos_kernel::manifest::LoadedManifest {
+    no_plan_workflow_manifest_impl(store, true)
+}
+
+fn no_plan_workflow_manifest_impl(
+    store: &Arc<fixtures::TestStore>,
+    include_rejected_variant: bool,
+) -> aos_kernel::manifest::LoadedManifest {
     let start_output = ReducerOutput {
         state: Some(vec![0xDE, 0xAD, 0xBE, 0xEF]),
         domain_events: vec![],
@@ -572,20 +636,31 @@ fn no_plan_workflow_manifest(
             aos_air_types::DefSchema {
                 name: "com.acme/WorkflowEvent@1".into(),
                 ty: TypeExpr::Variant(TypeVariant {
-                    variant: indexmap::IndexMap::from([
-                        (
-                            "Start".into(),
-                            TypeExpr::Ref(TypeRef {
-                                reference: fixtures::schema(START_SCHEMA),
-                            }),
-                        ),
-                        (
-                            "Receipt".into(),
-                            TypeExpr::Ref(TypeRef {
-                                reference: fixtures::schema("sys/EffectReceiptEnvelope@1"),
-                            }),
-                        ),
-                    ]),
+                    variant: {
+                        let mut variant = indexmap::IndexMap::from([
+                            (
+                                "Start".into(),
+                                TypeExpr::Ref(TypeRef {
+                                    reference: fixtures::schema(START_SCHEMA),
+                                }),
+                            ),
+                            (
+                                "Receipt".into(),
+                                TypeExpr::Ref(TypeRef {
+                                    reference: fixtures::schema("sys/EffectReceiptEnvelope@1"),
+                                }),
+                            ),
+                        ]);
+                        if include_rejected_variant {
+                            variant.insert(
+                                "ReceiptRejected".into(),
+                                TypeExpr::Ref(TypeRef {
+                                    reference: fixtures::schema("sys/EffectReceiptRejected@1"),
+                                }),
+                            );
+                        }
+                        variant
+                    },
                 }),
             },
             helpers::def_text_record_schema(
