@@ -67,9 +67,9 @@ Required coverage outcomes from rewritten fixtures/suites:
 
 ### 2) Spec/doc rewrite
 
-1. Update `spec/03-air.md`, `spec/05-workflows.md`, and architecture docs to remove plan model claims.
-2. Update `AGENTS.md` architecture summary and boundaries.
-3. Ensure schema docs match implementation.
+- [x] Update `spec/03-air.md`, `spec/05-workflows.md`, and architecture docs to remove plan model claims.
+- [x] Update `AGENTS.md` architecture summary and boundaries.
+- [x] Ensure schema docs match implementation.
 
 ### 3) Hardening and quality gates
 
@@ -231,6 +231,22 @@ Implementation log (completed 2026-02-26):
     - `cargo run -p aos-smoke -- retry-backoff`
     - `cargo run -p aos-smoke -- workflow-runtime-hardening`
     - `cargo run -p aos-smoke -- trace-failure-classification`
+- [x] Spec/doc rewrite completed for post-plan active architecture contract.
+  - rewritten specs:
+    - `spec/01-overview.md`
+    - `spec/02-architecture.md`
+    - `spec/03-air.md`
+    - `spec/04-reducers.md`
+    - `spec/05-workflows.md`
+    - `spec/06-cells.md`
+  - updated agent guidance:
+    - `AGENTS.md` (and `CLAUDE.md` symlink target)
+  - key updates captured:
+    - workflow-only orchestration model (`defplan` removed from active spec narrative),
+    - manifest `routing.subscriptions` ingress model + manifest-independent receipt continuation routing,
+    - strict-quiescence governance apply semantics,
+    - canonical event/effect/receipt normalization and rejected-receipt handling invariants,
+    - policy origin semantics aligned to `workflow|system|governance`.
 
 ### 4) Dead code and roadmap cleanup
 
