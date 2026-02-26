@@ -46,12 +46,12 @@
         },
         "origin_kind": {
           "type": "string",
-          "enum": ["plan", "reducer"],
-          "description": "Match whether effect originates from a plan or reducer"
+          "enum": ["workflow", "system", "governance"],
+          "description": "Match whether effect originates from workflow module, system module, or governance pipeline"
         },
         "origin_name": {
           "$ref": "common.schema.json#/$defs/Name",
-          "description": "Match specific plan or reducer name"
+          "description": "Match specific workflow/system/governance origin name"
         }
       },
       "additionalProperties": false

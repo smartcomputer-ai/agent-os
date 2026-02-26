@@ -64,8 +64,9 @@ impl<S: Store + 'static> Kernel<S> {
             patch_hash: proposal.patch_hash.clone(),
             manifest_hash: summary.manifest_hash.clone(),
             effects_predicted: summary.predicted_effects.clone(),
-            pending_receipts: summary.pending_receipts.clone(),
-            plan_results: summary.plan_results.clone(),
+            pending_workflow_receipts: summary.pending_workflow_receipts.clone(),
+            workflow_instances: summary.workflow_instances.clone(),
+            module_effect_allowlists: summary.module_effect_allowlists.clone(),
             ledger_deltas: summary.ledger_deltas.clone(),
         });
         self.append_record(JournalRecord::Governance(record.clone()))?;

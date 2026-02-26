@@ -238,7 +238,7 @@ fn expected_digest_mismatch_fails() {
 }
 
 #[test]
-fn secret_policy_denies_disallowed_cap_or_plan() {
+fn secret_policy_denies_disallowed_cap() {
     let catalog = catalog_with_secret(Some(SecretPolicy {
         allowed_caps: vec!["allowed_cap".into()],
     }));
@@ -259,8 +259,8 @@ fn secret_policy_denies_disallowed_cap_or_plan() {
     .unwrap_err();
     assert!(matches!(err, KernelError::SecretPolicyDenied { .. }));
 
-    // Plan not allowlisted
-    let err = enforce_secret_policy(
+    // Allowed cap passes regardless of origin identity in post-plan semantics.
+    enforce_secret_policy(
         &cbor,
         &catalog,
         &aos_effects::EffectSource::Plan {
@@ -268,8 +268,7 @@ fn secret_policy_denies_disallowed_cap_or_plan() {
         },
         "allowed_cap",
     )
-    .unwrap_err();
-    assert!(matches!(err, KernelError::SecretPolicyDenied { .. }));
+    .expect("allowed cap should pass");
 }
 
 #[test]
@@ -292,12 +291,12 @@ fn secret_policy_denies_by_cap_only() {
 }
 
 #[test]
-fn secret_policy_denies_by_plan_only() {
+fn secret_policy_without_cap_constraints_allows_any_origin() {
     let catalog = catalog_with_secret(Some(SecretPolicy {
         allowed_caps: vec![],
     }));
     let cbor = secret_param_cbor("llm/api", 1);
-    let err = enforce_secret_policy(
+    enforce_secret_policy(
         &cbor,
         &catalog,
         &aos_effects::EffectSource::Plan {
@@ -305,8 +304,7 @@ fn secret_policy_denies_by_plan_only() {
         },
         "any_cap",
     )
-    .unwrap_err();
-    assert!(matches!(err, KernelError::SecretPolicyDenied { .. }));
+    .expect("empty allowed_caps should not deny by origin");
 }
 
 #[test]

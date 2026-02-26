@@ -39,12 +39,12 @@ pub async fn cmd_trace_summary(opts: &WorldOpts, args: &TraceSummaryArgs) -> Res
     let req = RequestEnvelope {
         v: 1,
         id: "cli-trace-summary".into(),
-        cmd: "plan-summary".into(),
+        cmd: "trace-summary".into(),
         payload: json!({}),
     };
     let resp = client.request(&req).await?;
     if !resp.ok {
-        anyhow::bail!("plan-summary failed: {:?}", resp.error);
+        anyhow::bail!("trace-summary failed: {:?}", resp.error);
     }
 
     let summary = resp.result.unwrap_or_else(|| json!({}));
@@ -61,63 +61,38 @@ pub async fn cmd_trace_summary(opts: &WorldOpts, args: &TraceSummaryArgs) -> Res
 }
 
 fn render_human(summary: &Value) {
-    let started = summary
+    let intents = summary
         .get("totals")
-        .and_then(|v| v.get("runs"))
-        .and_then(|v| v.get("started"))
+        .and_then(|v| v.get("effects"))
+        .and_then(|v| v.get("intents"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     let ok = summary
         .get("totals")
-        .and_then(|v| v.get("runs"))
+        .and_then(|v| v.get("effects"))
+        .and_then(|v| v.get("receipts"))
         .and_then(|v| v.get("ok"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     let err = summary
         .get("totals")
-        .and_then(|v| v.get("runs"))
+        .and_then(|v| v.get("effects"))
+        .and_then(|v| v.get("receipts"))
         .and_then(|v| v.get("error"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    let timeout_path = summary
+    let timeout = summary
         .get("totals")
-        .and_then(|v| v.get("failure_signals"))
-        .and_then(|v| v.get("timeout_path"))
+        .and_then(|v| v.get("effects"))
+        .and_then(|v| v.get("receipts"))
+        .and_then(|v| v.get("timeout"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    let adapter_error = summary
+    let waiting = summary
         .get("totals")
-        .and_then(|v| v.get("failure_signals"))
-        .and_then(|v| v.get("adapter_error"))
+        .and_then(|v| v.get("workflows"))
+        .and_then(|v| v.get("waiting"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-
-    println!(
-        "trace-summary: runs started={started} ok={ok} error={err} timeout_path={timeout_path} adapter_error={adapter_error}"
-    );
-
-    if let Some(plans) = summary.get("plans").and_then(|v| v.as_array()) {
-        for plan in plans {
-            let name = plan
-                .get("plan_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let started = plan
-                .get("runs")
-                .and_then(|v| v.get("started"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let ok = plan
-                .get("runs")
-                .and_then(|v| v.get("ok"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let err = plan
-                .get("runs")
-                .and_then(|v| v.get("error"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            println!("  {name}: started={started} ok={ok} error={err}");
-        }
-    }
+    println!("trace-summary: intents={intents} receipts(ok={ok} error={err} timeout={timeout}) waiting_workflows={waiting}");
 }

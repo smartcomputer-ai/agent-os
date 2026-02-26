@@ -88,20 +88,6 @@ pub fn validate_manifest(
         .collect();
     known_effect_kinds.extend(effects.values().map(|def| def.kind.as_str().to_string()));
 
-    let mut effect_cap_types: HashMap<String, String> = HashMap::new();
-    for builtin in builtins::builtin_effects() {
-        effect_cap_types.insert(
-            builtin.effect.kind.as_str().to_string(),
-            builtin.effect.cap_type.as_str().to_string(),
-        );
-    }
-    for effect in effects.values() {
-        effect_cap_types.insert(
-            effect.kind.as_str().to_string(),
-            effect.cap_type.as_str().to_string(),
-        );
-    }
-
     let mut defcap_types: HashMap<String, String> = HashMap::new();
     for builtin in builtins::builtin_caps() {
         defcap_types.insert(
@@ -378,38 +364,21 @@ pub fn validate_manifest(
 
     for module in modules.values() {
         if let Some(abi) = module.abi.reducer.as_ref() {
-            for effect in &abi.effects_emitted {
-                let expected = effect_cap_types.get(effect.as_str()).ok_or_else(|| {
-                    ValidationError::EffectNotFound {
-                        kind: effect.as_str().to_string(),
-                    }
-                })?;
-                for grant in module
-                    .abi
-                    .reducer
-                    .as_ref()
-                    .map(|r| r.cap_slots.values())
-                    .into_iter()
-                    .flatten()
-                {
-                    let _ = grant;
-                }
-                for binding in manifest
-                    .module_bindings
-                    .get(&module.name)
-                    .map(|b| b.slots.values())
-                    .into_iter()
-                    .flatten()
-                {
-                    let found = cap_type_for_grant(binding.as_str())?;
-                    if &found != expected {
-                        return Err(ValidationError::CapabilityTypeMismatch {
-                            cap: binding.clone(),
-                            effect: effect.as_str().to_string(),
-                            expected: expected.clone(),
-                            found,
-                        });
-                    }
+            let Some(binding) = manifest.module_bindings.get(&module.name) else {
+                continue;
+            };
+            for (slot, expected) in &abi.cap_slots {
+                let Some(grant_name) = binding.slots.get(slot) else {
+                    continue;
+                };
+                let found = cap_type_for_grant(grant_name.as_str())?;
+                if found != expected.as_str() {
+                    return Err(ValidationError::CapabilityTypeMismatch {
+                        cap: grant_name.clone(),
+                        effect: format!("slot:{slot}"),
+                        expected: expected.as_str().to_string(),
+                        found,
+                    });
                 }
             }
         }
@@ -586,7 +555,7 @@ mod tests {
     use super::*;
     use crate::{
         CapGrant, DefModule, ManifestDefaults, ModuleAbi, ModuleBinding, NamedRef, ReducerAbi,
-        Routing, SchemaRef, TypePrimitive, TypePrimitiveText,
+        Routing, SchemaRef, TypePrimitive, TypePrimitiveText, TypeRecord,
     };
     use indexmap::IndexMap;
 
@@ -594,6 +563,12 @@ mod tests {
         TypeExpr::Primitive(TypePrimitive::Text(TypePrimitiveText {
             text: crate::EmptyObject::default(),
         }))
+    }
+
+    fn record_type() -> TypeExpr {
+        TypeExpr::Record(TypeRecord {
+            record: IndexMap::new(),
+        })
     }
 
     fn named_ref(name: &str) -> NamedRef {
@@ -657,7 +632,7 @@ mod tests {
                 String::from("com.acme/Event@1"),
                 DefSchema {
                     name: "com.acme/Event@1".into(),
-                    ty: text_type(),
+                    ty: record_type(),
                 },
             ),
             (
@@ -689,6 +664,7 @@ mod tests {
     #[test]
     fn validate_manifest_rejects_unknown_routing_module() {
         let mut manifest = base_manifest();
+        manifest.defaults = None;
         manifest.routing = Some(Routing {
             subscriptions: vec![RoutingEvent {
                 event: SchemaRef::new("com.acme/Event@1").unwrap(),
@@ -704,7 +680,7 @@ mod tests {
                 String::from("com.acme/Event@1"),
                 DefSchema {
                     name: "com.acme/Event@1".into(),
-                    ty: text_type(),
+                    ty: record_type(),
                 },
             ),
             (
@@ -728,6 +704,7 @@ mod tests {
     #[test]
     fn validate_manifest_rejects_missing_binding_grant() {
         let mut manifest = base_manifest();
+        manifest.defaults = None;
         manifest.module_bindings.insert(
             "com.acme/workflow@1".into(),
             ModuleBinding {
@@ -741,7 +718,7 @@ mod tests {
                 String::from("com.acme/Event@1"),
                 DefSchema {
                     name: "com.acme/Event@1".into(),
-                    ty: text_type(),
+                    ty: record_type(),
                 },
             ),
             (

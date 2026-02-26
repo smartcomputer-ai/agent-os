@@ -209,9 +209,9 @@ mod tests {
     }
 
     #[test]
-    fn diagnose_invariant_violation() {
+    fn diagnose_invariant_violation_from_legacy_record() {
         let trace = trace_with_entries(vec![json!({
-            "kind": "plan_ended",
+            "kind": "legacy_plan_ended",
             "record": { "status": "error", "error_code": "invariant_violation" }
         })]);
         let diagnosis = diagnose(&trace);
@@ -219,9 +219,9 @@ mod tests {
     }
 
     #[test]
-    fn diagnose_unknown_failure_for_generic_plan_error() {
+    fn diagnose_unknown_failure_for_generic_legacy_error() {
         let trace = trace_with_entries(vec![json!({
-            "kind": "plan_ended",
+            "kind": "legacy_plan_ended",
             "record": { "status": "error", "error_code": "other_error" }
         })]);
         let diagnosis = diagnose(&trace);

@@ -295,8 +295,7 @@ Example `defsecret` for an LLM API key:
   "$kind": "defsecret",
   "name": "llm/api@1",
   "binding_id": "env:LLM_API_KEY",
-  "allowed_caps": ["cap_llm"],
-  "allowed_plans": ["demiurge/chat_plan@1"]
+  "allowed_caps": ["cap_llm"]
 }
 ```
 
@@ -791,7 +790,7 @@ The journal records both design-time (governance) and runtime (execution) events
 ### Governance and Control Plane (Design Time)
 
 - **Proposed** `{ proposal_id:u64, patch_hash, author, manifest_base, description? }`
-- **ShadowReport** `{ proposal_id:u64, patch_hash, manifest_hash, effects_predicted:[EffectKind…], pending_receipts?:[PendingPlanReceipt], plan_results?:[PlanResultPreview], ledger_deltas?:[LedgerDelta] }`
+- **ShadowReport** `{ proposal_id:u64, patch_hash, manifest_hash, effects_predicted:[EffectKind…], pending_workflow_receipts?:[PendingWorkflowReceipt], workflow_instances?:[WorkflowInstancePreview], module_effect_allowlists?:[ModuleEffectAllowlist], ledger_deltas?:[LedgerDelta] }`
 - **Approved** `{ proposal_id:u64, patch_hash, approver, decision:"approve"|"reject" }`
 - **Applied** `{ proposal_id:u64, patch_hash, manifest_hash_new }`
 - **Manifest** `{ manifest_hash }`

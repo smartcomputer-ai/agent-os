@@ -587,21 +587,34 @@
             }
           }
         },
-        "pending_receipts": {
+        "pending_workflow_receipts": {
           "list": {
             "record": {
-              "plan_id": { "nat": {} },
-              "plan": { "option": { "text": {} } },
-              "intent_hash": { "hash": {} }
+              "instance_id": { "text": {} },
+              "origin_module_id": { "text": {} },
+              "origin_instance_key_b64": { "option": { "text": {} } },
+              "intent_hash": { "hash": {} },
+              "effect_kind": { "text": {} },
+              "emitted_at_seq": { "nat": {} }
             }
           }
         },
-        "plan_results": {
+        "workflow_instances": {
           "list": {
             "record": {
-              "plan": { "text": {} },
-              "plan_id": { "nat": {} },
-              "output_schema": { "text": {} }
+              "instance_id": { "text": {} },
+              "status": { "text": {} },
+              "last_processed_event_seq": { "nat": {} },
+              "module_version": { "option": { "text": {} } },
+              "inflight_intents": { "nat": {} }
+            }
+          }
+        },
+        "module_effect_allowlists": {
+          "list": {
+            "record": {
+              "module": { "text": {} },
+              "effects_emitted": { "list": { "text": {} } }
             }
           }
         },

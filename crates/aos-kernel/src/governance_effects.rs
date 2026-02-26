@@ -117,9 +117,11 @@ pub(crate) struct GovShadowReceipt {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub predicted_effects: Vec<GovPredictedEffect>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_receipts: Vec<GovPendingReceipt>,
+    pub pending_workflow_receipts: Vec<GovPendingWorkflowReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub plan_results: Vec<GovPlanResultPreview>,
+    pub workflow_instances: Vec<GovWorkflowInstancePreview>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub module_effect_allowlists: Vec<GovModuleEffectAllowlist>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ledger_deltas: Vec<GovLedgerDelta>,
 }
@@ -151,18 +153,31 @@ pub(crate) struct GovPredictedEffect {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GovPendingReceipt {
-    pub plan_id: u64,
+pub(crate) struct GovPendingWorkflowReceipt {
+    pub instance_id: String,
+    pub origin_module_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan: Option<String>,
+    pub origin_instance_key_b64: Option<String>,
     pub intent_hash: HashRef,
+    pub effect_kind: String,
+    pub emitted_at_seq: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GovPlanResultPreview {
-    pub plan: String,
-    pub plan_id: u64,
-    pub output_schema: String,
+pub(crate) struct GovWorkflowInstancePreview {
+    pub instance_id: String,
+    pub status: String,
+    pub last_processed_event_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_version: Option<String>,
+    pub inflight_intents: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GovModuleEffectAllowlist {
+    pub module: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects_emitted: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

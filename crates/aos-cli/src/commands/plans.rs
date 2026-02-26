@@ -869,7 +869,7 @@ fn build_turnkey_scaffold(
             json!({
                 "when": {
                     "effect_kind": effect,
-                    "origin_kind": "plan",
+                    "origin_kind": "workflow",
                     "origin_name": target.name,
                 },
                 "decision": "allow"
@@ -936,7 +936,7 @@ fn build_composable_scaffold(pack: &PackReport, target: &PlanContract) -> Result
             json!({
                 "when": {
                     "effect_kind": effect,
-                    "origin_kind": "plan",
+                    "origin_kind": "workflow",
                     "origin_name": target.name,
                 },
                 "decision": "allow"

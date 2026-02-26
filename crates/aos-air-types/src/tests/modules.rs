@@ -9,7 +9,7 @@ fn parses_reducer_module_with_cap_slots() {
     let module_json = json!({
         "$kind": "defmodule",
         "name": "com.acme/Reducer@1",
-        "module_kind": "reducer",
+        "module_kind": "workflow",
         "wasm_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
         "abi": {
             "reducer": {
@@ -65,7 +65,7 @@ fn reducer_module_with_annotations_and_key_schema_validates() {
     let module_json = json!({
         "$kind": "defmodule",
         "name": "com.acme/Reducer@2",
-        "module_kind": "reducer",
+        "module_kind": "workflow",
         "wasm_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
         "key_schema": "com.acme/Key@1",
         "abi": {
@@ -97,7 +97,7 @@ fn reducer_module_without_abi_is_rejected_by_schema() {
     let module_json = json!({
         "$kind": "defmodule",
         "name": "com.acme/Reducer@1",
-        "module_kind": "reducer",
+        "module_kind": "workflow",
         "wasm_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
         "abi": {}
     });
@@ -157,7 +157,7 @@ fn cap_slot_names_must_match_pattern() {
     let module_json = json!({
         "$kind": "defmodule",
         "name": "com.acme/Reducer@1",
-        "module_kind": "reducer",
+        "module_kind": "workflow",
         "wasm_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
         "abi": {
             "reducer": {

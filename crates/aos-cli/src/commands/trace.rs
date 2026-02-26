@@ -183,13 +183,13 @@ fn render_trace_human(result: &Value) {
     println!("trace: {event_hash} schema={schema} seq={seq} terminal={terminal_state}");
 
     if let Some(wait) = result.get("live_wait") {
-        let pending_plan_receipts = wait
-            .get("pending_plan_receipts")
+        let pending_workflow_receipts = wait
+            .get("pending_workflow_receipts")
             .and_then(|v| v.as_array())
             .map(std::vec::Vec::len)
             .unwrap_or(0);
-        let waiting_events = wait
-            .get("waiting_events")
+        let workflow_instances = wait
+            .get("workflow_instances")
             .and_then(|v| v.as_array())
             .map(std::vec::Vec::len)
             .unwrap_or(0);
@@ -204,7 +204,7 @@ fn render_trace_human(result: &Value) {
             .map(std::vec::Vec::len)
             .unwrap_or(0);
         println!(
-            "wait: plan_receipts={pending_plan_receipts} waiting_events={waiting_events} reducer_receipts={pending_reducer_receipts} queued_effects={queued_effects}"
+            "wait: workflow_receipts={pending_workflow_receipts} workflow_instances={workflow_instances} reducer_receipts={pending_reducer_receipts} queued_effects={queued_effects}"
         );
     }
 

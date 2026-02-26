@@ -74,7 +74,7 @@ pub enum ControlMsg {
         window_limit: Option<u64>,
         resp: oneshot::Sender<Result<serde_json::Value, HostError>>,
     },
-    PlanSummary {
+    TraceSummary {
         resp: oneshot::Sender<Result<serde_json::Value, HostError>>,
     },
     EventSend {
@@ -489,8 +489,8 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 );
                 let _ = resp.send(res);
             }
-            ControlMsg::PlanSummary { resp } => {
-                let res = crate::trace::plan_run_summary(self.host.kernel());
+            ControlMsg::TraceSummary { resp } => {
+                let res = crate::trace::workflow_trace_summary(self.host.kernel());
                 let _ = resp.send(res);
             }
             ControlMsg::PutBlob { data, resp } => {
@@ -661,9 +661,9 @@ fn journal_kind_name(kind: aos_kernel::journal::JournalKind) -> &'static str {
         JournalKind::Snapshot => "snapshot",
         JournalKind::PolicyDecision => "policy_decision",
         JournalKind::Governance => "governance",
-        JournalKind::PlanStarted => "plan_started",
-        JournalKind::PlanResult => "plan_result",
-        JournalKind::PlanEnded => "plan_ended",
+        JournalKind::PlanStarted => "legacy_plan_started",
+        JournalKind::PlanResult => "legacy_plan_result",
+        JournalKind::PlanEnded => "legacy_plan_ended",
         JournalKind::Custom => "custom",
     }
 }

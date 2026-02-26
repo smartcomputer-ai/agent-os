@@ -88,8 +88,9 @@ impl GovernanceManager {
                     proposal.shadow_summary = Some(ShadowSummary {
                         manifest_hash: shadow.manifest_hash.clone(),
                         predicted_effects: shadow.effects_predicted.clone(),
-                        pending_receipts: shadow.pending_receipts.clone(),
-                        plan_results: shadow.plan_results.clone(),
+                        pending_workflow_receipts: shadow.pending_workflow_receipts.clone(),
+                        workflow_instances: shadow.workflow_instances.clone(),
+                        module_effect_allowlists: shadow.module_effect_allowlists.clone(),
                         ledger_deltas: shadow.ledger_deltas.clone(),
                     });
                 }

@@ -304,9 +304,11 @@ pub struct ShadowReportRecord {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects_predicted: Vec<crate::shadow::PredictedEffect>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_receipts: Vec<crate::shadow::PendingPlanReceipt>,
+    pub pending_workflow_receipts: Vec<crate::shadow::PendingWorkflowReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub plan_results: Vec<crate::shadow::PlanResultPreview>,
+    pub workflow_instances: Vec<crate::shadow::WorkflowInstancePreview>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub module_effect_allowlists: Vec<crate::shadow::ModuleEffectAllowlist>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ledger_deltas: Vec<crate::shadow::LedgerDelta>,
 }

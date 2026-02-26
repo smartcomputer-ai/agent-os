@@ -423,7 +423,7 @@ fn import_defs_hash(root: &Path) -> Result<String> {
     let mut seen: HashMap<(String, String), String> = HashMap::new();
 
     for path in collect_json_files(root)? {
-        for node in parse_air_nodes(&path)
+        for node in parse_air_nodes_for_import_hash(&path)
             .with_context(|| format!("parse AIR nodes from {}", path.display()))?
         {
             match node {
@@ -587,21 +587,36 @@ fn collect_json_files(dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
+fn parse_air_nodes_for_import_hash(path: &Path) -> Result<Vec<AirNode>> {
     let data = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let trimmed = data.trim_start();
-    if trimmed.starts_with('[') {
-        let mut value: Value = serde_json::from_str(&data).context("parse AIR node array")?;
-        normalize_authoring_hashes(&mut value);
-        serde_json::from_value(value).context("deserialize AIR node array")
-    } else if trimmed.is_empty() {
-        Ok(Vec::new())
-    } else {
-        let mut value: Value = serde_json::from_str(&data).context("parse AIR node")?;
-        normalize_authoring_hashes(&mut value);
-        let node: AirNode = serde_json::from_value(value).context("deserialize AIR node")?;
-        Ok(vec![node])
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
     }
+
+    let mut value: Value = serde_json::from_str(&data).context("parse AIR json")?;
+    normalize_authoring_hashes(&mut value);
+    let items = match value {
+        Value::Array(items) => items,
+        other => vec![other],
+    };
+
+    let mut nodes = Vec::new();
+    for item in items {
+        let kind = item
+            .get("$kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        match serde_json::from_value::<AirNode>(item) {
+            Ok(node) => nodes.push(node),
+            Err(_) if kind == "defplan" => {
+                // Legacy plan defs do not contribute to post-plan import identity.
+            }
+            Err(err) => return Err(err).context("deserialize AIR node"),
+        }
+    }
+    Ok(nodes)
 }
 
 fn normalize_authoring_hashes(value: &mut Value) {
@@ -839,6 +854,28 @@ mod tests {
 
         let hash = import_defs_hash(&import_root).expect("hash");
         assert!(hash.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn import_defs_hash_ignores_legacy_defplan_nodes() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let with_plan = temp.path().join("with-plan");
+        let no_plan = temp.path().join("no-plan");
+        std::fs::create_dir_all(&with_plan).expect("mkdir with-plan");
+        std::fs::create_dir_all(&no_plan).expect("mkdir no-plan");
+
+        let defs_only = r#"[{"$kind":"defschema","name":"demo/S@1","type":{"text":{}}}]"#;
+        std::fs::write(with_plan.join("defs.air.json"), defs_only).expect("write defs with-plan");
+        std::fs::write(no_plan.join("defs.air.json"), defs_only).expect("write defs no-plan");
+        std::fs::write(
+            with_plan.join("legacy-plan.air.json"),
+            r#"[{"$kind":"defplan","name":"legacy/Plan@1"}]"#,
+        )
+        .expect("write legacy plan");
+
+        let with_plan_hash = import_defs_hash(&with_plan).expect("hash with plan");
+        let no_plan_hash = import_defs_hash(&no_plan).expect("hash no plan");
+        assert_eq!(with_plan_hash, no_plan_hash);
     }
 
     #[test]

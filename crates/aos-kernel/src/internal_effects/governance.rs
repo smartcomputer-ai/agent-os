@@ -4,9 +4,9 @@ use aos_effects::EffectIntent;
 
 use crate::governance_effects::{
     GovApplyParams, GovApplyReceipt, GovApprovalDecision, GovApproveParams, GovApproveReceipt,
-    GovDeltaKind, GovLedgerDelta, GovLedgerKind, GovPatchInput, GovPendingReceipt,
-    GovPlanResultPreview, GovPredictedEffect, GovProposeParams, GovProposeReceipt, GovShadowParams,
-    GovShadowReceipt,
+    GovDeltaKind, GovLedgerDelta, GovLedgerKind, GovModuleEffectAllowlist, GovPatchInput,
+    GovPendingWorkflowReceipt, GovPredictedEffect, GovProposeParams, GovProposeReceipt,
+    GovShadowParams, GovShadowReceipt, GovWorkflowInstancePreview,
 };
 use crate::{Kernel, KernelError};
 
@@ -76,24 +76,37 @@ where
                     })
                 })
                 .collect::<Result<Vec<_>, KernelError>>()?,
-            pending_receipts: summary
-                .pending_receipts
+            pending_workflow_receipts: summary
+                .pending_workflow_receipts
                 .into_iter()
                 .map(|pending| {
-                    Ok(GovPendingReceipt {
-                        plan_id: pending.plan_id,
-                        plan: pending.plan,
+                    Ok(GovPendingWorkflowReceipt {
+                        instance_id: pending.instance_id,
+                        origin_module_id: pending.origin_module_id,
+                        origin_instance_key_b64: pending.origin_instance_key_b64,
                         intent_hash: hash_ref_from_hex(&pending.intent_hash)?,
+                        effect_kind: pending.effect_kind,
+                        emitted_at_seq: pending.emitted_at_seq,
                     })
                 })
                 .collect::<Result<Vec<_>, KernelError>>()?,
-            plan_results: summary
-                .plan_results
+            workflow_instances: summary
+                .workflow_instances
                 .into_iter()
-                .map(|result| GovPlanResultPreview {
-                    plan: result.plan,
-                    plan_id: result.plan_id,
-                    output_schema: result.output_schema,
+                .map(|instance| GovWorkflowInstancePreview {
+                    instance_id: instance.instance_id,
+                    status: instance.status,
+                    last_processed_event_seq: instance.last_processed_event_seq,
+                    module_version: instance.module_version,
+                    inflight_intents: instance.inflight_intents as u64,
+                })
+                .collect(),
+            module_effect_allowlists: summary
+                .module_effect_allowlists
+                .into_iter()
+                .map(|allowlist| GovModuleEffectAllowlist {
+                    module: allowlist.module,
+                    effects_emitted: allowlist.effects_emitted,
                 })
                 .collect(),
             ledger_deltas: summary

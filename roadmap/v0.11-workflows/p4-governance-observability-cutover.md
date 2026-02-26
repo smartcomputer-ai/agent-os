@@ -1,8 +1,43 @@
 # P4: Governance + Observability Cutover (Post-Plan Runtime)
 
 **Priority**: P2  
-**Status**: Proposed  
+**Status**: Completed  
 **Depends on**: `roadmap/v0.11-workflows/p3-air-manifest-reset.md`
+
+## Implementation Status
+
+### Scope
+- [x] Scope 1.1: Removed shadow summary `plan_results` / `pending_plan_receipts` fields from active governance receipts and summaries.
+- [x] Scope 1.2: Shadow/governance receipts now report bounded workflow-era data (`pending_workflow_receipts`, `workflow_instances`, `module_effect_allowlists`, `ledger_deltas`).
+- [x] Scope 2.1: Journal tail/trace surfaces no longer depend on `plan_*` labels; legacy record kinds are surfaced as `legacy_plan_*` when present.
+- [x] Scope 2.2: Trace/diagnose waiting and failure classification now key off workflow instance state + receipt outcomes.
+- [x] Scope 3.1: Removed control/CLI `plan-summary`; replaced with `trace-summary`.
+- [x] Scope 3.2: Updated `trace`, `trace-diagnose`, and `trace-summary` outputs to workflow-centric wait/continuation fields.
+- [x] Scope 4.1: Policy origin model aligned to post-plan semantics (`workflow|system|governance`) in active model + schema.
+- [x] Scope 4.2: Secret policy checks are cap-oriented and no longer rely on plan identity.
+
+### Work Items by Crate
+- [x] `crates/aos-kernel`: shadow summary/governance receipt structures updated; policy origin matching aligned to workflow semantics.
+- [x] `crates/aos-host`: control command cutover (`trace-summary`), trace live-wait/failure diagnosis cutover, manifest loader made tolerant of legacy `defplan` assets during fixture transition.
+- [x] `crates/aos-cli`: trace/journal/summary command surfaces updated to workflow terminology; import lock hashing ignores legacy `defplan` nodes.
+- [x] `crates/aos-air-types`: `OriginKind` and `defpolicy` schema aligned to post-plan origins; validation/tests updated.
+- [x] `spec/*`: control/shadow/policy references updated for workflow-era governance/observability fields.
+
+### Validation
+- [x] `cargo check -p aos-kernel -p aos-host -p aos-cli`
+- [x] `cargo check --tests -p aos-kernel -p aos-host -p aos-cli -p aos-air-types`
+- [x] `cargo test -p aos-air-types -p aos-kernel -p aos-host -p aos-cli`
+
+### Acceptance Criteria
+- [x] AC1: Governance/shadow outputs contain no active `plan_results`/`pending_plan_receipts` fields.
+- [x] AC2: Journal tail and trace tooling function without relying on `plan_*` output kinds.
+- [x] AC3: Control/CLI no longer expose `plan-summary`.
+- [x] AC4: Policy/secret enforcement does not require `plan` origin identity.
+- [x] AC5: Observability exposes deterministic continuation routing identity (`intent_hash`, origin module, instance key, effect kind, emitted seq).
+- [x] AC6: Observability exposes workflow instance lifecycle status (`running|waiting|completed|failed`) and waiting counters.
+- [x] AC7: Policy/trace/control surfaces use workflow-era authority vocabulary.
+- [x] AC8: Apply-block diagnostics report strict-quiescence blockers via workflow/inflight/queue counters.
+- [x] AC9: Shadow/governance reporting is explicitly bounded to observed execution horizon.
 
 ## Goal
 

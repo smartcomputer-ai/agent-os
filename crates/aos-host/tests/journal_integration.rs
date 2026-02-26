@@ -329,7 +329,7 @@ fn policy_decision_is_journaled() {
         rules: vec![PolicyRule {
             when: PolicyMatch {
                 effect_kind: Some(AirEffectKind::http_request()),
-                origin_kind: Some(OriginKind::Plan),
+                origin_kind: Some(OriginKind::Workflow),
                 ..Default::default()
             },
             decision: PolicyDecision::Allow,

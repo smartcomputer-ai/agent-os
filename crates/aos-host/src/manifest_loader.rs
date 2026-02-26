@@ -530,17 +530,35 @@ fn collect_json_files(dir: &Path) -> Result<Vec<PathBuf>> {
 fn parse_air_nodes(path: &Path) -> Result<Vec<AirNode>> {
     let data = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let trimmed = data.trim_start();
-    if trimmed.starts_with('[') {
-        let mut value: Value = serde_json::from_str(&data).context("parse AIR node array")?;
-        normalize_authoring_hashes(&mut value);
-        serde_json::from_value(value).context("deserialize AIR node array")
-    } else if trimmed.is_empty() {
+    if trimmed.is_empty() {
         Ok(Vec::new())
     } else {
-        let mut value: Value = serde_json::from_str(&data).context("parse AIR node")?;
+        let mut value: Value = if trimmed.starts_with('[') {
+            serde_json::from_str(&data).context("parse AIR node array")?
+        } else {
+            serde_json::from_str(&data).context("parse AIR node")?
+        };
         normalize_authoring_hashes(&mut value);
-        let node: AirNode = serde_json::from_value(value).context("deserialize AIR node")?;
-        Ok(vec![node])
+        let items = match value {
+            Value::Array(items) => items,
+            other => vec![other],
+        };
+        let mut nodes = Vec::new();
+        for item in items {
+            let kind = item
+                .get("$kind")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            match serde_json::from_value::<AirNode>(item) {
+                Ok(node) => nodes.push(node),
+                Err(_) if kind == "defplan" => {
+                    // Legacy plan defs are ignored after workflow cutover.
+                }
+                Err(err) => return Err(err).context("deserialize AIR node"),
+            }
+        }
+        Ok(nodes)
     }
 }
 
@@ -874,6 +892,38 @@ mod tests {
         let store = Arc::new(FsStore::open(tmp.path()).expect("store"));
         load_from_assets_with_imports(store, &world_air, &[import_air])
             .expect("load should ignore import manifest nodes");
+    }
+
+    #[test]
+    fn ignores_legacy_defplan_nodes() {
+        let tmp = TempDir::new().expect("tmp");
+        let world_air = tmp.path().join("air");
+        fs::create_dir_all(&world_air).expect("mkdir world air");
+
+        let manifest = Manifest {
+            air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
+            schemas: Vec::new(),
+            modules: Vec::new(),
+            effects: Vec::new(),
+            caps: Vec::new(),
+            policies: Vec::new(),
+            secrets: Vec::new(),
+            defaults: None,
+            module_bindings: IndexMap::new(),
+            routing: None,
+        };
+        write_node(
+            &world_air.join("manifest.air.json"),
+            &[AirNode::Manifest(manifest)],
+        );
+        fs::write(
+            world_air.join("legacy-plan.air.json"),
+            r#"[{"$kind":"defplan","name":"legacy/Plan@1"}]"#,
+        )
+        .expect("write legacy plan");
+
+        let store = Arc::new(FsStore::open(tmp.path()).expect("store"));
+        load_from_assets(store, &world_air).expect("load should ignore legacy plans");
     }
 
     fn write_node(path: &Path, nodes: &[AirNode]) {

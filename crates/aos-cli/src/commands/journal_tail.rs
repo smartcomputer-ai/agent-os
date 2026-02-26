@@ -126,10 +126,10 @@ fn summarize_record(kind: &str, record: &Value) -> String {
             let decision = find_str(record, "decision").unwrap_or("?");
             format!("intent={intent} decision={decision}")
         }
-        "plan_ended" => {
-            let plan = find_str(record, "plan_id").unwrap_or("?");
+        "legacy_plan_ended" => {
+            let flow = find_str(record, "plan_id").unwrap_or("?");
             let status = find_str(record, "status").unwrap_or("?");
-            format!("plan_id={plan} status={status}")
+            format!("legacy_flow_id={flow} status={status}")
         }
         _ => String::new(),
     }

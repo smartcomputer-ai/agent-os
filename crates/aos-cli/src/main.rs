@@ -78,7 +78,7 @@ enum Command {
     /// Diagnose a trace root into likely cause + next hint
     TraceDiagnose(TraceDiagnoseArgs),
 
-    /// Summarize plan runs/failures from journal records
+    /// Summarize workflow runtime and receipt signals
     TraceSummary(TraceSummaryArgs),
 
     /// Display active manifest

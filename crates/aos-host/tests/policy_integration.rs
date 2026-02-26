@@ -152,7 +152,7 @@ fn reducer_http_effect_is_denied() {
         rules: vec![PolicyRule {
             when: PolicyMatch {
                 effect_kind: Some(AirEffectKind::http_request()),
-                origin_kind: Some(OriginKind::Reducer),
+                origin_kind: Some(OriginKind::Workflow),
                 ..Default::default()
             },
             decision: PolicyDecision::Deny,
@@ -189,7 +189,7 @@ fn workflow_effect_allowed_by_policy() {
         rules: vec![PolicyRule {
             when: PolicyMatch {
                 effect_kind: Some(AirEffectKind::http_request()),
-                origin_kind: Some(OriginKind::Reducer),
+                origin_kind: Some(OriginKind::Workflow),
                 ..Default::default()
             },
             decision: PolicyDecision::Allow,
@@ -224,7 +224,7 @@ fn workflow_effect_params_are_preserved() {
         rules: vec![PolicyRule {
             when: PolicyMatch {
                 effect_kind: Some(AirEffectKind::http_request()),
-                origin_kind: Some(OriginKind::Reducer),
+                origin_kind: Some(OriginKind::Workflow),
                 ..Default::default()
             },
             decision: PolicyDecision::Allow,
@@ -254,7 +254,7 @@ fn workflow_introspect_denied_by_policy() {
         rules: vec![PolicyRule {
             when: PolicyMatch {
                 effect_kind: Some(AirEffectKind::introspect_manifest()),
-                origin_kind: Some(OriginKind::Reducer),
+                origin_kind: Some(OriginKind::Workflow),
                 ..Default::default()
             },
             decision: PolicyDecision::Deny,

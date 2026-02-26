@@ -28,7 +28,7 @@ fn deny_plan_http_policy() -> DefPolicy {
         rules: vec![PolicyRule {
             when: PolicyMatch {
                 effect_kind: Some(AirEffectKind::http_request()),
-                origin_kind: Some(OriginKind::Plan),
+                origin_kind: Some(OriginKind::Workflow),
                 ..Default::default()
             },
             decision: PolicyDecision::Deny,

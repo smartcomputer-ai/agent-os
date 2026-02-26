@@ -100,7 +100,7 @@ pub fn trace_get<S: Store + 'static>(
     let limit = window_limit.unwrap_or(400) as usize;
     let mut window = Vec::new();
     let mut has_receipt_error = false;
-    let mut has_plan_error = false;
+    let mut has_workflow_error = false;
     for entry in entries
         .into_iter()
         .filter(|entry| entry.seq >= root_seq)
@@ -113,9 +113,9 @@ pub fn trace_get<S: Store + 'static>(
                 has_receipt_error = true;
             }
         }
-        if let JournalRecord::PlanEnded(ended) = &record {
-            if matches!(ended.status, PlanEndStatus::Error) {
-                has_plan_error = true;
+        if let JournalRecord::Custom(custom) = &record {
+            if custom.tag == "workflow_error" {
+                has_workflow_error = true;
             }
         }
         window.push(crate::control::JournalTailEntry {
@@ -144,11 +144,13 @@ pub fn trace_get<S: Store + 'static>(
             )
         })
         .count();
+    let pending_reducer_receipts_count = pending_reducer_receipts.len();
+    let queued_effects_count = queued_effects.len();
     let waiting_receipt_count =
-        inflight_workflow_intents + pending_reducer_receipts.len() + queued_effects.len();
+        inflight_workflow_intents + pending_reducer_receipts_count + queued_effects_count;
     let waiting_event_count = non_terminal_workflow_instances;
 
-    let terminal_state = if has_receipt_error || has_plan_error {
+    let terminal_state = if has_receipt_error || has_workflow_error {
         "failed"
     } else if waiting_receipt_count > 0 {
         "waiting_receipt"
@@ -188,10 +190,6 @@ pub fn trace_get<S: Store + 'static>(
             "entries": window,
         },
         "live_wait": {
-            // Compatibility placeholders for plan-era trace clients.
-            "pending_plan_receipts": Vec::<Value>::new(),
-            "plan_waiting_receipts": Vec::<Value>::new(),
-            "plan_waiting_events": Vec::<Value>::new(),
             "workflow_instances": workflow_instances.into_iter().map(|instance| {
                 json!({
                     "instance_id": instance.instance_id,
@@ -208,8 +206,23 @@ pub fn trace_get<S: Store + 'static>(
                             "intent_hash": hash_bytes_hex(&intent.intent_id),
                             "effect_kind": intent.effect_kind,
                             "origin_module_id": intent.origin_module_id,
+                            "origin_instance_key_b64": intent.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
+                            "emitted_at_seq": intent.emitted_at_seq,
                         })
                     }).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>(),
+            "pending_workflow_receipts": kernel.workflow_instances_snapshot().into_iter().flat_map(|instance| {
+                let instance_id = instance.instance_id.clone();
+                instance.inflight_intents.into_iter().map(move |intent| {
+                    json!({
+                        "instance_id": instance_id,
+                        "intent_hash": hash_bytes_hex(&intent.intent_id),
+                        "origin_module_id": intent.origin_module_id,
+                        "origin_instance_key_b64": intent.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
+                        "effect_kind": intent.effect_kind,
+                        "emitted_at_seq": intent.emitted_at_seq,
+                    })
                 })
             }).collect::<Vec<_>>(),
             "pending_reducer_receipts": pending_reducer_receipts.into_iter().map(|pending| {
@@ -217,6 +230,8 @@ pub fn trace_get<S: Store + 'static>(
                     "intent_hash": hash_bytes_hex(&pending.intent_hash),
                     "origin_module_id": pending.origin_module_id,
                     "effect_kind": pending.effect_kind,
+                    "origin_instance_key_b64": pending.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
+                    "emitted_at_seq": pending.emitted_at_seq,
                 })
             }).collect::<Vec<_>>(),
             "queued_effects": queued_effects.into_iter().map(|queued| {
@@ -226,6 +241,12 @@ pub fn trace_get<S: Store + 'static>(
                     "cap_name": queued.cap_name,
                 })
             }).collect::<Vec<_>>(),
+            "strict_quiescence": {
+                "non_terminal_workflow_instances": non_terminal_workflow_instances,
+                "inflight_workflow_intents": inflight_workflow_intents,
+                "pending_reducer_receipts": pending_reducer_receipts_count,
+                "queued_effects": queued_effects_count,
+            },
         },
         "terminal_state": terminal_state,
         "meta": {
@@ -245,6 +266,126 @@ pub fn plan_run_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<Value,
         records.push((entry.seq, record));
     }
     Ok(summarize_plan_runs_from_records(records))
+}
+
+pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<Value, HostError> {
+    let mut effect_intents = 0u64;
+    let mut receipt_ok = 0u64;
+    let mut receipt_error = 0u64;
+    let mut receipt_timeout = 0u64;
+    let mut policy_allow = 0u64;
+    let mut policy_deny = 0u64;
+    let mut cap_allow = 0u64;
+    let mut cap_deny = 0u64;
+    let mut proposed = 0u64;
+    let mut shadowed = 0u64;
+    let mut approved = 0u64;
+    let mut applied = 0u64;
+
+    for entry in kernel.dump_journal()? {
+        let record: JournalRecord = serde_cbor::from_slice(&entry.payload)
+            .map_err(|e| HostError::External(format!("decode journal record: {e}")))?;
+        match record {
+            JournalRecord::EffectIntent(_) => effect_intents += 1,
+            JournalRecord::EffectReceipt(receipt) => match receipt.status {
+                ReceiptStatus::Ok => receipt_ok += 1,
+                ReceiptStatus::Error => receipt_error += 1,
+                ReceiptStatus::Timeout => receipt_timeout += 1,
+            },
+            JournalRecord::PolicyDecision(decision) => match decision.decision {
+                PolicyDecisionOutcome::Allow => policy_allow += 1,
+                PolicyDecisionOutcome::Deny => policy_deny += 1,
+            },
+            JournalRecord::CapDecision(decision) => match decision.decision {
+                CapDecisionOutcome::Allow => cap_allow += 1,
+                CapDecisionOutcome::Deny => cap_deny += 1,
+            },
+            JournalRecord::Governance(governance) => match governance {
+                aos_kernel::journal::GovernanceRecord::Proposed(_) => proposed += 1,
+                aos_kernel::journal::GovernanceRecord::ShadowReport(_) => shadowed += 1,
+                aos_kernel::journal::GovernanceRecord::Approved(_) => approved += 1,
+                aos_kernel::journal::GovernanceRecord::Applied(_) => applied += 1,
+            },
+            _ => {}
+        }
+    }
+
+    let workflow_instances = kernel.workflow_instances_snapshot();
+    let pending_reducer_receipts = kernel.pending_reducer_receipts_snapshot();
+    let queued_effects = kernel.queued_effects_snapshot();
+
+    let mut running = 0u64;
+    let mut waiting = 0u64;
+    let mut completed = 0u64;
+    let mut failed = 0u64;
+    let mut inflight_total = 0u64;
+    let mut continuations = Vec::new();
+
+    for instance in &workflow_instances {
+        match instance.status {
+            aos_kernel::snapshot::WorkflowStatusSnapshot::Running => running += 1,
+            aos_kernel::snapshot::WorkflowStatusSnapshot::Waiting => waiting += 1,
+            aos_kernel::snapshot::WorkflowStatusSnapshot::Completed => completed += 1,
+            aos_kernel::snapshot::WorkflowStatusSnapshot::Failed => failed += 1,
+        }
+        inflight_total += instance.inflight_intents.len() as u64;
+        for intent in &instance.inflight_intents {
+            continuations.push(json!({
+                "instance_id": instance.instance_id,
+                "intent_hash": hash_bytes_hex(&intent.intent_id),
+                "origin_module_id": intent.origin_module_id,
+                "origin_instance_key_b64": intent.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
+                "effect_kind": intent.effect_kind,
+                "emitted_at_seq": intent.emitted_at_seq,
+            }));
+        }
+    }
+
+    Ok(json!({
+        "totals": {
+            "effects": {
+                "intents": effect_intents,
+                "receipts": {
+                    "ok": receipt_ok,
+                    "error": receipt_error,
+                    "timeout": receipt_timeout,
+                }
+            },
+            "policy_decisions": {
+                "allow": policy_allow,
+                "deny": policy_deny,
+            },
+            "cap_decisions": {
+                "allow": cap_allow,
+                "deny": cap_deny,
+            },
+            "workflows": {
+                "total": workflow_instances.len(),
+                "running": running,
+                "waiting": waiting,
+                "completed": completed,
+                "failed": failed,
+                "inflight_intents": inflight_total,
+            },
+            "governance": {
+                "proposed": proposed,
+                "shadowed": shadowed,
+                "approved": approved,
+                "applied": applied,
+            }
+        },
+        "runtime_wait": {
+            "pending_reducer_receipts": pending_reducer_receipts.len(),
+            "queued_effects": queued_effects.len(),
+        },
+        "strict_quiescence": {
+            "non_terminal_workflow_instances": (running + waiting),
+            "inflight_workflow_intents": inflight_total,
+            "pending_reducer_receipts": pending_reducer_receipts.len(),
+            "queued_effects": queued_effects.len(),
+        },
+        "continuations": continuations,
+    }))
 }
 
 #[derive(Default)]
@@ -473,18 +614,8 @@ pub fn diagnose_trace(trace: &Value) -> Value {
         .cloned()
         .unwrap_or_default();
 
-    let pending_plan_receipts = live_wait
-        .get("pending_plan_receipts")
-        .and_then(|v| v.as_array())
-        .map(std::vec::Vec::len)
-        .unwrap_or(0);
-    let plan_waiting_receipts = live_wait
-        .get("plan_waiting_receipts")
-        .and_then(|v| v.as_array())
-        .map(std::vec::Vec::len)
-        .unwrap_or(0);
-    let plan_waiting_events = live_wait
-        .get("plan_waiting_events")
+    let pending_workflow_receipts = live_wait
+        .get("pending_workflow_receipts")
         .and_then(|v| v.as_array())
         .map(std::vec::Vec::len)
         .unwrap_or(0);
@@ -528,7 +659,7 @@ pub fn diagnose_trace(trace: &Value) -> Value {
     let mut capability_denied = false;
     let mut adapter_error = false;
     let mut adapter_timeout = false;
-    let mut plan_error = false;
+    let mut workflow_failed = false;
     let mut invariant_violation = false;
 
     for entry in entries {
@@ -560,19 +691,29 @@ pub fn diagnose_trace(trace: &Value) -> Value {
                     adapter_timeout = true;
                 }
             }
-            "plan_ended" => {
+            "legacy_plan_ended" => {
                 let status = find_str(&record, "status").unwrap_or_default();
                 if status.eq_ignore_ascii_case("error") {
                     let error_code = find_str(&record, "error_code").unwrap_or_default();
                     if error_code.eq_ignore_ascii_case("invariant_violation") {
                         invariant_violation = true;
                     } else {
-                        plan_error = true;
+                        workflow_failed = true;
                     }
                 }
             }
             _ => {}
         }
+    }
+
+    if workflow_instances.iter().any(|instance| {
+        instance
+            .get("status")
+            .and_then(|v| v.as_str())
+            .map(|status| status == "failed")
+            .unwrap_or(false)
+    }) {
+        workflow_failed = true;
     }
 
     let cause = if policy_denied {
@@ -585,7 +726,7 @@ pub fn diagnose_trace(trace: &Value) -> Value {
         "adapter_error"
     } else if invariant_violation {
         "invariant_violation"
-    } else if plan_error {
+    } else if workflow_failed {
         "unknown_failure"
     } else if terminal == "waiting_receipt" {
         "waiting_receipt"
@@ -634,9 +775,7 @@ pub fn diagnose_trace(trace: &Value) -> Value {
             "intent_hash": intent_hash,
         },
         "waits": {
-            "pending_plan_receipts": pending_plan_receipts,
-            "plan_waiting_receipts": plan_waiting_receipts,
-            "plan_waiting_events": plan_waiting_events,
+            "pending_workflow_receipts": pending_workflow_receipts,
             "waiting_workflow_instances": waiting_workflow_instances,
             "pending_workflow_intents": pending_workflow_intents,
             "pending_reducer_receipts": pending_reducer_receipts,
@@ -687,7 +826,7 @@ fn first_intent_hash(value: &Value) -> Option<String> {
         .or_else(|| {
             read(
                 value
-                    .get("pending_plan_receipts")
+                    .get("pending_workflow_receipts")
                     .and_then(|v| v.as_array()),
             )
         })
@@ -701,7 +840,7 @@ fn first_intent_hash(value: &Value) -> Option<String> {
         .or_else(|| {
             read(
                 value
-                    .get("plan_waiting_receipts")
+                    .get("queued_effects")
                     .and_then(|v| v.as_array()),
             )
         })
@@ -742,9 +881,9 @@ fn journal_kind_name(kind: JournalKind) -> &'static str {
         JournalKind::Snapshot => "snapshot",
         JournalKind::PolicyDecision => "policy_decision",
         JournalKind::Governance => "governance",
-        JournalKind::PlanStarted => "plan_started",
-        JournalKind::PlanResult => "plan_result",
-        JournalKind::PlanEnded => "plan_ended",
+        JournalKind::PlanStarted => "legacy_plan_started",
+        JournalKind::PlanResult => "legacy_plan_result",
+        JournalKind::PlanEnded => "legacy_plan_ended",
         JournalKind::Custom => "custom",
     }
 }

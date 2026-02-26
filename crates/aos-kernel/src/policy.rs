@@ -149,8 +149,7 @@ fn effect_kind_matches(matcher: &AirEffectKind, actual: &str) -> bool {
 
 fn origin_kind_matches(expected: &OriginKind, source: &EffectSource) -> bool {
     match (expected, source) {
-        (OriginKind::Plan, EffectSource::Plan { .. }) => true,
-        (OriginKind::Reducer, EffectSource::Reducer { .. }) => true,
+        (OriginKind::Workflow, EffectSource::Plan { .. } | EffectSource::Reducer { .. }) => true,
         _ => false,
     }
 }
@@ -197,7 +196,7 @@ mod tests {
             rules: vec![PolicyRule {
                 when: PolicyMatch {
                     effect_kind: Some(AirEffectKind::new(AirEffectKind::HTTP_REQUEST)),
-                    origin_kind: Some(OriginKind::Reducer),
+                    origin_kind: Some(OriginKind::Workflow),
                     ..Default::default()
                 },
                 decision: AirDecision::Deny,
@@ -217,13 +216,13 @@ mod tests {
     }
 
     #[test]
-    fn plan_allowed_by_rule() {
+    fn workflow_allowed_by_rule() {
         let policy = DefPolicy {
             name: "com.acme/policy@2".into(),
             rules: vec![PolicyRule {
                 when: PolicyMatch {
                     effect_kind: Some(AirEffectKind::new(AirEffectKind::HTTP_REQUEST)),
-                    origin_kind: Some(OriginKind::Plan),
+                    origin_kind: Some(OriginKind::Workflow),
                     ..Default::default()
                 },
                 decision: AirDecision::Allow,

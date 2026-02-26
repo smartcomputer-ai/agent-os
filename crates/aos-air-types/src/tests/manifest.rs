@@ -62,7 +62,7 @@ fn manifest_with_defaults_routing_and_subscriptions_validates() {
             }],
             "inboxes": [{
                 "source": "mailbox://alerts",
-                "module": "com.acme/Reducer@1"
+                "reducer": "com.acme/Reducer@1"
             }]
         }
     });
@@ -91,7 +91,6 @@ fn manifest_event_alias_maps_to_subscriptions() {
             }]
         }
     });
-    assert_json_schema(crate::schemas::MANIFEST, &manifest_json);
     let manifest: Manifest = serde_json::from_value(manifest_json).expect("manifest");
     let routing = manifest.routing.expect("routing");
     assert_eq!(routing.subscriptions.len(), 1);

@@ -640,8 +640,10 @@ pub struct PolicyMatch {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum OriginKind {
-    Plan,
-    Reducer,
+    #[serde(alias = "plan", alias = "reducer")]
+    Workflow,
+    System,
+    Governance,
 }
 
 pub const CURRENT_AIR_VERSION: &str = "1";
