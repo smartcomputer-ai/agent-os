@@ -193,6 +193,26 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/EffectStreamFrame@1",
+    "type": {
+      "record": {
+        "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
+        "origin_instance_key": { "option": { "bytes": {} } },
+        "intent_id": { "hash": {} },
+        "effect_kind": { "text": {} },
+        "params_hash": { "option": { "hash": {} } },
+        "emitted_at_seq": { "nat": {} },
+        "seq": { "nat": {} },
+        "kind": { "text": {} },
+        "payload": { "bytes": {} },
+        "payload_ref": { "option": { "hash": {} } },
+        "adapter_id": { "text": {} },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/EffectReceiptRejected@1",
     "type": {
       "record": {

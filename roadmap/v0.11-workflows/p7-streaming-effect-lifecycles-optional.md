@@ -1,7 +1,7 @@
 # P7 (Optional): Streaming Effect Intents and Continuation Frames
 
 **Priority**: P3 (optional extension)  
-**Status**: Proposed (Option A++ recommended baseline)  
+**Status**: Complete (Option A++ baseline implemented on 2026-02-26)  
 **Depends on**: `roadmap/v0.11-workflows/p1-module-workflow-foundation.md`
 
 ## Goal
@@ -83,6 +83,20 @@ Cons:
 ## Recommended Direction for v0.11
 
 Choose **Option A++** unless there is a hard requirement that every adapter-origin intermediate datum must be represented as a receipt frame.
+
+## Implementation Status (2026-02-26)
+
+- [x] Option A++ selected and implemented (`EffectStreamFrame` continuation rail + single terminal receipt settlement).
+- [x] Added builtin `sys/EffectStreamFrame@1` schema and wired builtin schema loading assertions.
+- [x] Added `aos-effects::EffectStreamFrame` type and exports.
+- [x] Added kernel stream-frame journaling (`JournalKind::StreamFrame`, `JournalRecord::StreamFrame`).
+- [x] Added deterministic stream ingestion rules: unknown intent drop, identity/fence mismatch drop, non-monotonic drop, deterministic gap diagnostic, monotonic cursor advance.
+- [x] Added workflow continuation delivery for stream frames using pending-intent origin routing (manifest-independent).
+- [x] Persisted `last_stream_seq` in workflow in-flight state across snapshot/replay and restored acceptance behavior.
+- [x] Added host ingress/control support for stream frames (`ExternalEvent::StreamFrame`, `stream-frame-inject` control command).
+- [x] Added trace/observability updates for stream frames and open streaming-intent diagnostics.
+- [x] Added/updated tests for stream event shaping, runtime routing/cursor behavior, snapshot/replay cursor restore, and replay decode for stream-frame records.
+- [x] Workspace validation passed via `cargo test` (2026-02-26).
 
 ## Normative Contract (Option A++)
 
@@ -248,9 +262,17 @@ If multi-frame receipts are adopted, these invariants are required:
 4. Governance/trace diagnostics identify open streaming intents and explicit apply-block reasons.
 5. Exactly one terminal settlement remains the completion point per start intent.
 
-## Decision Gate (Before Implementation)
+## Acceptance Status (2026-02-26)
+
+- [x] Workflows can react to intermediate stream updates before terminal receipt via `sys/EffectStreamFrame@1` continuation delivery.
+- [x] Stream frames and receipts route via pending-intent origin identity, independent of `routing.subscriptions`.
+- [x] Replay/snapshot behavior preserves stream cursor state (`last_stream_seq`) and deterministic acceptance.
+- [x] Trace surfaces open streaming intents and stream cursors for quiescence/apply-block diagnostics.
+- [x] Single terminal receipt settlement semantics remain unchanged.
+
+## Decision Gate
 
 Default for v0.11:
 
-1. Implement Option A++ (intent-id-only correlation, stream frames on receipt-routed continuation rail, one terminal receipt).
+1. Implement Option A++ (intent-id-only correlation, stream frames on receipt-routed continuation rail, one terminal receipt). **Selected and completed.**
 2. Escalate to Option B only if there is a strict product/security requirement that all intermediate adapter-origin data be modeled as receipt frames.

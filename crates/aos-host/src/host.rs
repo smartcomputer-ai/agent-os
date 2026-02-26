@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
 use aos_effects::builtins::TimerSetReceipt;
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectKind, EffectReceipt, EffectStreamFrame, ReceiptStatus};
 use aos_kernel::{
     DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, ManifestLoader,
     TailIntent, TailScan, cell_index::CellMeta,
@@ -34,6 +34,7 @@ pub enum ExternalEvent {
         key: Option<Vec<u8>>,
     },
     Receipt(EffectReceipt),
+    StreamFrame(EffectStreamFrame),
 }
 
 /// Execution mode for `run_cycle`.
@@ -308,6 +309,9 @@ impl<S: Store + 'static> WorldHost<S> {
             }
             ExternalEvent::Receipt(receipt) => {
                 self.kernel.handle_receipt(receipt)?;
+            }
+            ExternalEvent::StreamFrame(frame) => {
+                self.kernel.handle_stream_frame(frame)?;
             }
         }
         Ok(())

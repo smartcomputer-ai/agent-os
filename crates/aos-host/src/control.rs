@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use aos_cbor::Hash;
-use aos_effects::{EffectKind, EffectReceipt, IntentBuilder, ReceiptStatus};
+use aos_effects::{EffectKind, EffectReceipt, EffectStreamFrame, IntentBuilder, ReceiptStatus};
 use aos_kernel::DefListing;
 use aos_kernel::governance::{ManifestPatch, Proposal, ProposalState};
 use aos_kernel::journal::ApprovalDecisionRecord;
@@ -416,6 +416,43 @@ pub(crate) async fn handle_request(
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
                     .send(ControlMsg::ReceiptInject { receipt, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({}))
+            }
+            "stream-frame-inject" => {
+                let p: InjectStreamFramePayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let payload = BASE64_STANDARD
+                    .decode(p.payload_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let origin_instance_key = p
+                    .origin_instance_key_b64
+                    .map(|b64| {
+                        BASE64_STANDARD.decode(&b64).map_err(|e| {
+                            ControlError::decode(format!("invalid origin_instance_key_b64: {e}"))
+                        })
+                    })
+                    .transpose()?;
+                let frame = EffectStreamFrame {
+                    intent_hash: p.intent_hash,
+                    adapter_id: p.adapter_id,
+                    origin_module_id: p.origin_module_id,
+                    origin_instance_key,
+                    effect_kind: p.effect_kind,
+                    emitted_at_seq: p.emitted_at_seq,
+                    seq: p.seq,
+                    kind: p.kind,
+                    payload_cbor: payload,
+                    payload_ref: p.payload_ref,
+                    signature: vec![],
+                };
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::StreamFrameInject { frame, resp: tx })
                     .await;
                 let inner = rx
                     .await
@@ -905,6 +942,22 @@ struct InjectReceiptPayload {
     intent_hash: [u8; 32],
     adapter_id: String,
     payload_b64: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InjectStreamFramePayload {
+    intent_hash: [u8; 32],
+    adapter_id: String,
+    origin_module_id: String,
+    #[serde(default)]
+    origin_instance_key_b64: Option<String>,
+    effect_kind: String,
+    emitted_at_seq: u64,
+    seq: u64,
+    kind: String,
+    payload_b64: String,
+    #[serde(default)]
+    payload_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

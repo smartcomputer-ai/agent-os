@@ -38,6 +38,7 @@ pub enum JournalKind {
     DomainEvent,
     EffectIntent,
     EffectReceipt,
+    StreamFrame,
     CapDecision,
     Manifest,
     Snapshot,
@@ -58,6 +59,7 @@ pub enum JournalRecord {
     DomainEvent(DomainEventRecord),
     EffectIntent(EffectIntentRecord),
     EffectReceipt(EffectReceiptRecord),
+    StreamFrame(StreamFrameRecord),
     CapDecision(CapDecisionRecord),
     PolicyDecision(PolicyDecisionRecord),
     Manifest(ManifestRecord),
@@ -75,6 +77,7 @@ impl JournalRecord {
             JournalRecord::DomainEvent(_) => JournalKind::DomainEvent,
             JournalRecord::EffectIntent(_) => JournalKind::EffectIntent,
             JournalRecord::EffectReceipt(_) => JournalKind::EffectReceipt,
+            JournalRecord::StreamFrame(_) => JournalKind::StreamFrame,
             JournalRecord::CapDecision(_) => JournalKind::CapDecision,
             JournalRecord::PolicyDecision(_) => JournalKind::PolicyDecision,
             JournalRecord::Manifest(_) => JournalKind::Manifest,
@@ -179,6 +182,39 @@ pub struct EffectReceiptRecord {
     pub payload_cbor: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_cents: Option<u64>,
+    #[serde(with = "serde_bytes")]
+    pub signature: Vec<u8>,
+    #[serde(default)]
+    pub now_ns: u64,
+    #[serde(default)]
+    pub logical_now_ns: u64,
+    #[serde(default)]
+    pub journal_height: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
+    pub entropy: Vec<u8>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub manifest_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StreamFrameRecord {
+    pub intent_hash: [u8; 32],
+    pub adapter_id: String,
+    pub origin_module_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub origin_instance_key: Option<Vec<u8>>,
+    pub effect_kind: String,
+    pub emitted_at_seq: u64,
+    pub seq: u64,
+    pub frame_kind: String,
+    #[serde(with = "serde_bytes")]
+    pub payload_cbor: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_ref: Option<String>,
     #[serde(with = "serde_bytes")]
     pub signature: Vec<u8>,
     #[serde(default)]

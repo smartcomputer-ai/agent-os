@@ -31,9 +31,9 @@ use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
     AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, DomainEventRecord, EffectIntentRecord,
-    EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry,
-    JournalKind, JournalRecord, JournalSeq, ManifestRecord, OwnedJournalEntry, ProposedRecord,
-    ShadowReportRecord, SnapshotRecord,
+    EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry, JournalKind,
+    JournalRecord, JournalSeq, ManifestRecord, OwnedJournalEntry, ProposedRecord,
+    ShadowReportRecord, SnapshotRecord, StreamFrameRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
 use crate::pure::PureRegistry;
@@ -180,6 +180,7 @@ pub(crate) struct WorkflowInflightIntentMeta {
     pub effect_kind: String,
     pub params_hash: Option<String>,
     pub emitted_at_seq: u64,
+    pub last_stream_seq: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -587,6 +588,7 @@ impl<S: Store + 'static> Kernel<S> {
                 effect_kind: effect_kind.to_string(),
                 params_hash: Some(Hash::of_bytes(params_cbor).to_hex()),
                 emitted_at_seq,
+                last_stream_seq: 0,
             },
         );
         entry.last_processed_event_seq = emitted_at_seq;
@@ -605,6 +607,37 @@ impl<S: Store + 'static> Kernel<S> {
         };
         entry.inflight_intents.remove(&intent_hash);
         refresh_workflow_status(entry);
+    }
+
+    pub(crate) fn workflow_stream_cursor(
+        &self,
+        module_id: &str,
+        instance_key: Option<&[u8]>,
+        intent_hash: [u8; 32],
+    ) -> Option<u64> {
+        let instance_id = workflow_instance_id(module_id, instance_key);
+        self.workflow_instances
+            .get(&instance_id)
+            .and_then(|entry| entry.inflight_intents.get(&intent_hash))
+            .map(|meta| meta.last_stream_seq)
+    }
+
+    pub(crate) fn advance_workflow_stream_cursor(
+        &mut self,
+        module_id: &str,
+        instance_key: Option<&[u8]>,
+        intent_hash: [u8; 32],
+        seq: u64,
+    ) -> bool {
+        let instance_id = workflow_instance_id(module_id, instance_key);
+        let Some(entry) = self.workflow_instances.get_mut(&instance_id) else {
+            return false;
+        };
+        let Some(meta) = entry.inflight_intents.get_mut(&intent_hash) else {
+            return false;
+        };
+        meta.last_stream_seq = seq;
+        true
     }
 
     pub fn reducer_state(&self, reducer: &str) -> Option<Vec<u8>> {
@@ -926,6 +959,7 @@ impl<S: Store + 'static> Kernel<S> {
                         effect_kind: meta.effect_kind.clone(),
                         params_hash: meta.params_hash.clone(),
                         emitted_at_seq: meta.emitted_at_seq,
+                        last_stream_seq: meta.last_stream_seq,
                     })
                     .collect(),
                 status: match state.status {
@@ -1089,6 +1123,35 @@ impl<S: Store + 'static> Kernel<S> {
             payload_cbor: receipt.payload_cbor.clone(),
             cost_cents: receipt.cost_cents,
             signature: receipt.signature.clone(),
+            now_ns: stamp.now_ns,
+            logical_now_ns: stamp.logical_now_ns,
+            journal_height: stamp.journal_height,
+            entropy: stamp.entropy.clone(),
+            manifest_hash: stamp.manifest_hash.clone(),
+        });
+        self.append_record(record)
+    }
+
+    fn record_stream_frame(
+        &mut self,
+        frame: &aos_effects::EffectStreamFrame,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
+        if self.suppress_journal {
+            return Ok(());
+        }
+        let record = JournalRecord::StreamFrame(StreamFrameRecord {
+            intent_hash: frame.intent_hash,
+            adapter_id: frame.adapter_id.clone(),
+            origin_module_id: frame.origin_module_id.clone(),
+            origin_instance_key: frame.origin_instance_key.clone(),
+            effect_kind: frame.effect_kind.clone(),
+            emitted_at_seq: frame.emitted_at_seq,
+            seq: frame.seq,
+            frame_kind: frame.kind.clone(),
+            payload_cbor: frame.payload_cbor.clone(),
+            payload_ref: frame.payload_ref.clone(),
+            signature: frame.signature.clone(),
             now_ns: stamp.now_ns,
             logical_now_ns: stamp.logical_now_ns,
             journal_height: stamp.journal_height,

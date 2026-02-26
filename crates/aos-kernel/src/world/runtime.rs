@@ -37,6 +37,15 @@ impl<S: Store + 'static> Kernel<S> {
         self.handle_receipt_with_ingress(receipt, stamp)
     }
 
+    pub fn handle_stream_frame(
+        &mut self,
+        frame: aos_effects::EffectStreamFrame,
+    ) -> Result<(), KernelError> {
+        let journal_height = self.journal.next_seq();
+        let stamp = self.sample_ingress(journal_height)?;
+        self.handle_stream_frame_with_ingress(frame, stamp)
+    }
+
     pub(super) fn handle_receipt_with_ingress(
         &mut self,
         receipt: aos_effects::EffectReceipt,
@@ -113,6 +122,85 @@ impl<S: Store + 'static> Kernel<S> {
         )))
     }
 
+    pub(super) fn handle_stream_frame_with_ingress(
+        &mut self,
+        frame: aos_effects::EffectStreamFrame,
+        stamp: IngressStamp,
+    ) -> Result<(), KernelError> {
+        Self::validate_entropy(&stamp.entropy)?;
+
+        let Some(context) = self.pending_reducer_receipts.get(&frame.intent_hash).cloned() else {
+            self.record_workflow_stream_drop(
+                &frame,
+                "stream.unknown_intent",
+                "no in-flight intent context for frame",
+            )?;
+            return Ok(());
+        };
+
+        if frame.origin_module_id != context.origin_module_id
+            || frame.origin_instance_key != context.origin_instance_key
+            || frame.effect_kind != context.effect_kind
+            || frame.emitted_at_seq != context.emitted_at_seq
+        {
+            self.record_workflow_stream_drop(
+                &frame,
+                "stream.identity_mismatch",
+                "frame identity does not match recorded in-flight intent",
+            )?;
+            return Ok(());
+        }
+
+        let last_seq = self
+            .workflow_stream_cursor(
+                &context.origin_module_id,
+                context.origin_instance_key.as_deref(),
+                frame.intent_hash,
+            )
+            .unwrap_or_else(|| {
+                self.record_workflow_inflight_intent(
+                    &context.origin_module_id,
+                    context.origin_instance_key.as_deref(),
+                    frame.intent_hash,
+                    &context.effect_kind,
+                    &context.params_cbor,
+                    context.emitted_at_seq,
+                );
+                0
+            });
+
+        if frame.seq <= last_seq {
+            self.record_workflow_stream_drop(
+                &frame,
+                "stream.non_monotonic",
+                "frame seq is duplicate or out-of-order",
+            )?;
+            return Ok(());
+        }
+
+        if frame.seq > last_seq.saturating_add(1) {
+            self.record_workflow_stream_gap(&frame, last_seq.saturating_add(1))?;
+        }
+
+        self.record_stream_frame(&frame, &stamp)?;
+        self.record_decisions()?;
+        self.deliver_stream_frame_to_workflow_instance(&context, &frame, &stamp)?;
+        let advanced = self.advance_workflow_stream_cursor(
+            &context.origin_module_id,
+            context.origin_instance_key.as_deref(),
+            frame.intent_hash,
+            frame.seq,
+        );
+        if !advanced {
+            self.record_workflow_stream_drop(
+                &frame,
+                "stream.cursor_unavailable",
+                "stream cursor missing for in-flight intent",
+            )?;
+        }
+        Ok(())
+    }
+
     fn normalize_receipt_payload_for_effect(
         &self,
         mut receipt: aos_effects::EffectReceipt,
@@ -187,6 +275,42 @@ impl<S: Store + 'static> Kernel<S> {
         event.key = context.origin_instance_key.clone();
         self.reducer_queue.push_back(ReducerEvent {
             reducer: reducer_name.clone(),
+            event,
+            stamp: stamp.clone(),
+        });
+        Ok(())
+    }
+
+    fn deliver_stream_frame_to_workflow_instance(
+        &mut self,
+        context: &ReducerEffectContext,
+        frame: &aos_effects::EffectStreamFrame,
+        stamp: &IngressStamp,
+    ) -> Result<(), KernelError> {
+        let reducer_name = context.origin_module_id.clone();
+        let (reducer_event_schema_name, reducer_event_schema) =
+            self.resolve_workflow_event_schema(&reducer_name)?;
+
+        let stream_event = crate::receipts::build_workflow_stream_frame_event(context, frame)?;
+        let stream_value: CborValue = serde_cbor::from_slice(&stream_event.value)
+            .map_err(|err| KernelError::ReceiptDecode(err.to_string()))?;
+        let normalized = try_normalize_receipt_payload(
+            reducer_event_schema,
+            &self.schema_index,
+            stream_value,
+            crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA,
+        )
+        .map_err(|err| {
+            KernelError::Manifest(format!(
+                "stream frame payload for '{reducer_name}' does not match event schema '{}': {err}",
+                reducer_event_schema_name
+            ))
+        })?;
+
+        let mut event = DomainEvent::new(reducer_event_schema_name, normalized.bytes);
+        event.key = context.origin_instance_key.clone();
+        self.reducer_queue.push_back(ReducerEvent {
+            reducer: reducer_name,
             event,
             stamp: stamp.clone(),
         });
@@ -398,6 +522,54 @@ impl<S: Store + 'static> Kernel<S> {
         }))
     }
 
+    fn record_workflow_stream_gap(
+        &mut self,
+        frame: &aos_effects::EffectStreamFrame,
+        expected_seq: u64,
+    ) -> Result<(), KernelError> {
+        let payload = WorkflowStreamGapRecord {
+            origin_module_id: frame.origin_module_id.clone(),
+            origin_instance_key: frame.origin_instance_key.clone(),
+            intent_id: format_intent_hash(&frame.intent_hash),
+            effect_kind: frame.effect_kind.clone(),
+            adapter_id: frame.adapter_id.clone(),
+            expected_seq,
+            observed_seq: frame.seq,
+        };
+        let data =
+            serde_cbor::to_vec(&payload).map_err(|err| KernelError::Journal(err.to_string()))?;
+        self.append_record(JournalRecord::Custom(crate::journal::CustomRecord {
+            tag: "workflow.stream_gap".to_string(),
+            data,
+        }))
+    }
+
+    fn record_workflow_stream_drop(
+        &mut self,
+        frame: &aos_effects::EffectStreamFrame,
+        reason_code: &str,
+        reason_message: &str,
+    ) -> Result<(), KernelError> {
+        let payload = WorkflowStreamDropRecord {
+            origin_module_id: frame.origin_module_id.clone(),
+            origin_instance_key: frame.origin_instance_key.clone(),
+            intent_id: format_intent_hash(&frame.intent_hash),
+            effect_kind: frame.effect_kind.clone(),
+            adapter_id: frame.adapter_id.clone(),
+            emitted_at_seq: frame.emitted_at_seq,
+            seq: frame.seq,
+            kind: frame.kind.clone(),
+            reason_code: reason_code.to_string(),
+            reason_message: reason_message.to_string(),
+        };
+        let data =
+            serde_cbor::to_vec(&payload).map_err(|err| KernelError::Journal(err.to_string()))?;
+        self.append_record(JournalRecord::Custom(crate::journal::CustomRecord {
+            tag: "workflow.stream_drop".to_string(),
+            data,
+        }))
+    }
+
     fn remember_receipt(&mut self, hash: [u8; 32]) {
         if self.recent_receipt_index.contains(&hash) {
             return;
@@ -472,6 +644,41 @@ struct WorkflowReceiptFaultRecord {
     dropped_pending_receipts: u64,
 }
 
+#[derive(Serialize)]
+struct WorkflowStreamGapRecord {
+    origin_module_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    origin_instance_key: Option<Vec<u8>>,
+    intent_id: String,
+    effect_kind: String,
+    adapter_id: String,
+    expected_seq: u64,
+    observed_seq: u64,
+}
+
+#[derive(Serialize)]
+struct WorkflowStreamDropRecord {
+    origin_module_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    origin_instance_key: Option<Vec<u8>>,
+    intent_id: String,
+    effect_kind: String,
+    adapter_id: String,
+    emitted_at_seq: u64,
+    seq: u64,
+    kind: String,
+    reason_code: String,
+    reason_message: String,
+}
+
 mod serde_bytes_opt {
     use serde::{Deserialize, Deserializer, Serializer};
     use serde_bytes::{ByteBuf, Bytes};
@@ -491,5 +698,148 @@ mod serde_bytes_opt {
         D: Deserializer<'de>,
     {
         Option::<ByteBuf>::deserialize(deserializer).map(|opt| opt.map(|buf| buf.into_vec()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::journal::JournalKind;
+    use crate::journal::mem::MemJournal;
+    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef};
+    use aos_effects::EffectStreamFrame;
+    use aos_store::MemStore;
+    use std::sync::Arc;
+
+    fn install_stream_module(kernel: &mut Kernel<MemStore>, module_name: &str) {
+        let module = aos_air_types::DefModule {
+            name: module_name.into(),
+            module_kind: ModuleKind::Workflow,
+            wasm_hash: HashRef::new(format!("sha256:{}", "1".repeat(64))).unwrap(),
+            key_schema: None,
+            abi: ModuleAbi {
+                reducer: Some(ReducerAbi {
+                    state: SchemaRef::new("sys/PlanError@1").unwrap(),
+                    event: SchemaRef::new(crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA).unwrap(),
+                    context: None,
+                    annotations: None,
+                    effects_emitted: vec![],
+                    cap_slots: Default::default(),
+                }),
+                pure: None,
+            },
+        };
+        kernel.module_defs.insert(module_name.into(), module);
+    }
+
+    fn kernel_with_stream_context(
+        module_name: &str,
+        intent_hash: [u8; 32],
+        emitted_at_seq: u64,
+    ) -> Kernel<MemStore> {
+        let store = Arc::new(MemStore::default());
+        let journal = Box::new(MemJournal::new());
+        let mut kernel = crate::world::test_support::kernel_with_store_and_journal(store, journal);
+        install_stream_module(&mut kernel, module_name);
+        let context = ReducerEffectContext::new(
+            module_name.into(),
+            None,
+            "http.request".into(),
+            vec![1, 2, 3],
+            intent_hash,
+            emitted_at_seq,
+            None,
+        );
+        kernel
+            .pending_reducer_receipts
+            .insert(intent_hash, context.clone());
+        kernel.record_workflow_inflight_intent(
+            module_name,
+            None,
+            intent_hash,
+            &context.effect_kind,
+            &context.params_cbor,
+            emitted_at_seq,
+        );
+        kernel
+    }
+
+    #[test]
+    fn stream_frame_routes_and_advances_cursor() {
+        let intent_hash = [7u8; 32];
+        let mut kernel = kernel_with_stream_context("com.acme/Workflow@1", intent_hash, 11);
+        let frame = EffectStreamFrame {
+            intent_hash,
+            adapter_id: "adapter.stream".into(),
+            origin_module_id: "com.acme/Workflow@1".into(),
+            origin_instance_key: None,
+            effect_kind: "http.request".into(),
+            emitted_at_seq: 11,
+            seq: 1,
+            kind: "progress".into(),
+            payload_cbor: vec![0xA1],
+            payload_ref: None,
+            signature: vec![],
+        };
+        kernel.handle_stream_frame(frame.clone()).expect("accept stream");
+        assert_eq!(kernel.reducer_queue.len(), 1);
+        let instances = kernel.workflow_instances_snapshot();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 1);
+        let entries = kernel.dump_journal().expect("journal");
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.kind == JournalKind::StreamFrame),
+            "expected stream frame record in journal"
+        );
+
+        kernel.reducer_queue.clear();
+        kernel
+            .handle_stream_frame(frame)
+            .expect("duplicate frame should be dropped");
+        assert!(
+            kernel.reducer_queue.is_empty(),
+            "duplicate frame must not enqueue reducer event"
+        );
+        let instances = kernel.workflow_instances_snapshot();
+        assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 1);
+    }
+
+    #[test]
+    fn stream_frame_gap_is_accepted_and_logged() {
+        let intent_hash = [8u8; 32];
+        let mut kernel = kernel_with_stream_context("com.acme/Workflow@1", intent_hash, 12);
+        let frame = EffectStreamFrame {
+            intent_hash,
+            adapter_id: "adapter.stream".into(),
+            origin_module_id: "com.acme/Workflow@1".into(),
+            origin_instance_key: None,
+            effect_kind: "http.request".into(),
+            emitted_at_seq: 12,
+            seq: 3,
+            kind: "progress".into(),
+            payload_cbor: vec![0xA2],
+            payload_ref: None,
+            signature: vec![],
+        };
+        kernel.handle_stream_frame(frame).expect("accept stream gap");
+        let entries = kernel.dump_journal().expect("journal");
+        let mut has_gap = false;
+        for entry in entries {
+            if entry.kind != JournalKind::Custom {
+                continue;
+            }
+            let record: crate::journal::JournalRecord = serde_cbor::from_slice(&entry.payload)
+                .expect("decode custom record");
+            if let crate::journal::JournalRecord::Custom(custom) = record
+                && custom.tag == "workflow.stream_gap"
+            {
+                has_gap = true;
+            }
+        }
+        assert!(has_gap, "expected gap diagnostic record");
+        let instances = kernel.workflow_instances_snapshot();
+        assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 3);
     }
 }

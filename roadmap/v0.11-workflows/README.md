@@ -20,7 +20,7 @@ Roadmap slice for removing plans and moving orchestration into code workflows.
 - [x] P4 complete
 - [ ] P5 in progress (core fixtures/specs/hardening complete; deferred Agent SDK fixtures + remaining legacy archival cleanup)
 - [ ] P6 optional (not enabled in current baseline)
-- [ ] P7 optional (not enabled in current baseline)
+- [x] P7 optional complete (Option A++ baseline implemented)
 
 ## Sequence
 

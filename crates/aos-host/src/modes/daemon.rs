@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
-use aos_effects::{EffectIntent, EffectReceipt};
+use aos_effects::{EffectIntent, EffectReceipt, EffectStreamFrame};
 use aos_kernel::StateReader;
 use aos_store::Store;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -83,6 +83,10 @@ pub enum ControlMsg {
     },
     ReceiptInject {
         receipt: EffectReceipt,
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    StreamFrameInject {
+        frame: EffectStreamFrame,
         resp: oneshot::Sender<Result<(), HostError>>,
     },
     ManifestGet {
@@ -361,6 +365,18 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 tracing::debug!("Injecting receipt");
                 let res = (|| -> Result<(), HostError> {
                     self.host.kernel_mut().handle_receipt(receipt)?;
+                    Ok(())
+                })();
+                let res = match res {
+                    Ok(_) => self.run_daemon_cycle().await.map(|_| ()),
+                    Err(e) => Err(e),
+                };
+                let _ = resp.send(res);
+            }
+            ControlMsg::StreamFrameInject { frame, resp } => {
+                tracing::debug!("Injecting stream frame");
+                let res = (|| -> Result<(), HostError> {
+                    self.host.kernel_mut().handle_stream_frame(frame)?;
                     Ok(())
                 })();
                 let res = match res {
@@ -656,6 +672,7 @@ fn journal_kind_name(kind: aos_kernel::journal::JournalKind) -> &'static str {
         JournalKind::DomainEvent => "domain_event",
         JournalKind::EffectIntent => "effect_intent",
         JournalKind::EffectReceipt => "effect_receipt",
+        JournalKind::StreamFrame => "stream_frame",
         JournalKind::CapDecision => "cap_decision",
         JournalKind::Manifest => "manifest",
         JournalKind::Snapshot => "snapshot",

@@ -127,6 +127,7 @@ pub fn trace_get<S: Store + 'static>(
     let workflow_instances = kernel.workflow_instances_snapshot();
     let pending_reducer_receipts = kernel.pending_reducer_receipts_snapshot();
     let queued_effects = kernel.queued_effects_snapshot();
+    let journal_head = kernel.journal_head();
 
     let inflight_workflow_intents = workflow_instances
         .iter()
@@ -206,6 +207,8 @@ pub fn trace_get<S: Store + 'static>(
                             "origin_module_id": intent.origin_module_id,
                             "origin_instance_key_b64": intent.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
                             "emitted_at_seq": intent.emitted_at_seq,
+                            "last_stream_seq": intent.last_stream_seq,
+                            "age_events": journal_head.saturating_sub(intent.emitted_at_seq),
                         })
                     }).collect::<Vec<_>>(),
                 })
@@ -220,6 +223,8 @@ pub fn trace_get<S: Store + 'static>(
                         "origin_instance_key_b64": intent.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
                         "effect_kind": intent.effect_kind,
                         "emitted_at_seq": intent.emitted_at_seq,
+                        "last_stream_seq": intent.last_stream_seq,
+                        "age_events": journal_head.saturating_sub(intent.emitted_at_seq),
                     })
                 })
             }).collect::<Vec<_>>(),
@@ -244,6 +249,19 @@ pub fn trace_get<S: Store + 'static>(
                 "inflight_workflow_intents": inflight_workflow_intents,
                 "pending_reducer_receipts": pending_reducer_receipts_count,
                 "queued_effects": queued_effects_count,
+                "open_streaming_intents": kernel.workflow_instances_snapshot().into_iter().flat_map(|instance| {
+                    let instance_id = instance.instance_id.clone();
+                    instance.inflight_intents.into_iter().map(move |intent| {
+                        json!({
+                            "instance_id": instance_id,
+                            "intent_hash": hash_bytes_hex(&intent.intent_id),
+                            "effect_kind": intent.effect_kind,
+                            "emitted_at_seq": intent.emitted_at_seq,
+                            "last_stream_seq": intent.last_stream_seq,
+                            "age_events": journal_head.saturating_sub(intent.emitted_at_seq),
+                        })
+                    })
+                }).collect::<Vec<_>>(),
             },
         },
         "terminal_state": terminal_state,
@@ -260,6 +278,7 @@ pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<
     let mut receipt_ok = 0u64;
     let mut receipt_error = 0u64;
     let mut receipt_timeout = 0u64;
+    let mut stream_frames = 0u64;
     let mut policy_allow = 0u64;
     let mut policy_deny = 0u64;
     let mut cap_allow = 0u64;
@@ -279,6 +298,7 @@ pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<
                 ReceiptStatus::Error => receipt_error += 1,
                 ReceiptStatus::Timeout => receipt_timeout += 1,
             },
+            JournalRecord::StreamFrame(_) => stream_frames += 1,
             JournalRecord::PolicyDecision(decision) => match decision.decision {
                 PolicyDecisionOutcome::Allow => policy_allow += 1,
                 PolicyDecisionOutcome::Deny => policy_deny += 1,
@@ -324,6 +344,7 @@ pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<
                 "origin_instance_key_b64": intent.origin_instance_key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
                 "effect_kind": intent.effect_kind,
                 "emitted_at_seq": intent.emitted_at_seq,
+                "last_stream_seq": intent.last_stream_seq,
             }));
         }
     }
@@ -336,7 +357,8 @@ pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<
                     "ok": receipt_ok,
                     "error": receipt_error,
                     "timeout": receipt_timeout,
-                }
+                },
+                "stream_frames": stream_frames,
             },
             "policy_decisions": {
                 "allow": policy_allow,
@@ -650,6 +672,7 @@ fn journal_kind_name(kind: JournalKind) -> &'static str {
         JournalKind::DomainEvent => "domain_event",
         JournalKind::EffectIntent => "effect_intent",
         JournalKind::EffectReceipt => "effect_receipt",
+        JournalKind::StreamFrame => "stream_frame",
         JournalKind::CapDecision => "cap_decision",
         JournalKind::Manifest => "manifest",
         JournalKind::Snapshot => "snapshot",

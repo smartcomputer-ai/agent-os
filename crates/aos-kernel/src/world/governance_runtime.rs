@@ -430,6 +430,7 @@ mod tests {
                 effect_kind: "sys/http.request@1".into(),
                 params_hash: None,
                 emitted_at_seq: 0,
+                last_stream_seq: 0,
             },
         );
         kernel.workflow_instances.insert(

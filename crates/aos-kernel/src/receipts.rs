@@ -2,13 +2,14 @@ use aos_cbor::Hash;
 use aos_effects::builtins::{
     BlobGetParams, BlobGetReceipt, BlobPutParams, BlobPutReceipt, TimerSetParams, TimerSetReceipt,
 };
-use aos_effects::{EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectReceipt, EffectStreamFrame, ReceiptStatus};
 use aos_wasm_abi::DomainEvent;
 use serde::Serialize;
 
 use crate::error::KernelError;
 
 pub const SYS_EFFECT_RECEIPT_ENVELOPE_SCHEMA: &str = "sys/EffectReceiptEnvelope@1";
+pub const SYS_EFFECT_STREAM_FRAME_SCHEMA: &str = "sys/EffectStreamFrame@1";
 pub const SYS_EFFECT_RECEIPT_REJECTED_SCHEMA: &str = "sys/EffectReceiptRejected@1";
 const SYS_TIMER_FIRED_SCHEMA: &str = "sys/TimerFired@1";
 const SYS_BLOB_PUT_RESULT_SCHEMA: &str = "sys/BlobPutResult@1";
@@ -68,6 +69,31 @@ struct WorkflowReceiptEnvelope {
     adapter_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     cost_cents: Option<u64>,
+    #[serde(with = "serde_bytes")]
+    signature: Vec<u8>,
+}
+
+#[derive(Serialize)]
+struct WorkflowStreamFrameEnvelope {
+    origin_module_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    origin_instance_key: Option<Vec<u8>>,
+    intent_id: String,
+    effect_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    params_hash: Option<String>,
+    emitted_at_seq: u64,
+    seq: u64,
+    kind: String,
+    #[serde(with = "serde_bytes")]
+    payload: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    payload_ref: Option<String>,
+    adapter_id: String,
     #[serde(with = "serde_bytes")]
     signature: Vec<u8>,
 }
@@ -165,6 +191,27 @@ pub fn build_workflow_receipt_rejected_event(
         emitted_at_seq: ctx.emitted_at_seq,
     };
     encode_event(SYS_EFFECT_RECEIPT_REJECTED_SCHEMA, payload)
+}
+
+pub fn build_workflow_stream_frame_event(
+    ctx: &ReducerEffectContext,
+    frame: &EffectStreamFrame,
+) -> Result<DomainEvent, KernelError> {
+    let payload = WorkflowStreamFrameEnvelope {
+        origin_module_id: ctx.origin_module_id.clone(),
+        origin_instance_key: ctx.origin_instance_key.clone(),
+        intent_id: hash_to_hex(&ctx.intent_id),
+        effect_kind: ctx.effect_kind.clone(),
+        params_hash: Some(Hash::of_bytes(&ctx.params_cbor).to_hex()),
+        emitted_at_seq: ctx.emitted_at_seq,
+        seq: frame.seq,
+        kind: frame.kind.clone(),
+        payload: frame.payload_cbor.clone(),
+        payload_ref: frame.payload_ref.clone(),
+        adapter_id: frame.adapter_id.clone(),
+        signature: frame.signature.clone(),
+    };
+    encode_event(SYS_EFFECT_STREAM_FRAME_SCHEMA, payload)
 }
 
 /// Optional compatibility path for typed timer/blob receipt envelopes.
@@ -286,7 +333,7 @@ mod serde_bytes_opt {
 mod tests {
     use super::*;
     use aos_air_types::HashRef;
-    use aos_effects::EffectReceipt;
+    use aos_effects::{EffectReceipt, EffectStreamFrame};
     use serde::Deserialize;
 
     fn fake_hash(byte: u8) -> HashRef {
@@ -411,6 +458,60 @@ mod tests {
         assert_eq!(decoded.emitted_at_seq, 42);
         assert!(decoded.params_hash.is_some());
         assert!(!decoded.payload_hash.is_empty());
+    }
+
+    #[test]
+    fn workflow_stream_frame_event_is_structured() {
+        let mut ctx = base_context(aos_effects::EffectKind::HTTP_REQUEST);
+        ctx.params_cbor = vec![1, 2, 3];
+        let frame = EffectStreamFrame {
+            intent_hash: [7u8; 32],
+            adapter_id: "adapter.test".into(),
+            origin_module_id: "com.acme/Workflow@1".into(),
+            origin_instance_key: Some(b"order-123".to_vec()),
+            effect_kind: aos_effects::EffectKind::HTTP_REQUEST.into(),
+            emitted_at_seq: 42,
+            seq: 3,
+            kind: "progress.token".into(),
+            payload_cbor: vec![8, 9],
+            payload_ref: None,
+            signature: vec![0xAA],
+        };
+        let event = build_workflow_stream_frame_event(&ctx, &frame).expect("stream frame event");
+        assert_eq!(event.schema, SYS_EFFECT_STREAM_FRAME_SCHEMA);
+
+        #[derive(Deserialize)]
+        struct Payload {
+            origin_module_id: String,
+            #[serde(default, with = "super::serde_bytes_opt")]
+            origin_instance_key: Option<Vec<u8>>,
+            intent_id: String,
+            effect_kind: String,
+            params_hash: Option<String>,
+            emitted_at_seq: u64,
+            seq: u64,
+            kind: String,
+            #[serde(with = "serde_bytes")]
+            payload: Vec<u8>,
+            payload_ref: Option<String>,
+            adapter_id: String,
+            #[serde(with = "serde_bytes")]
+            signature: Vec<u8>,
+        }
+
+        let decoded: Payload = serde_cbor::from_slice(&event.value).unwrap();
+        assert_eq!(decoded.origin_module_id, "com.acme/Workflow@1");
+        assert_eq!(decoded.origin_instance_key, Some(b"order-123".to_vec()));
+        assert_eq!(decoded.intent_id, hash_to_hex(&[7u8; 32]));
+        assert_eq!(decoded.effect_kind, aos_effects::EffectKind::HTTP_REQUEST);
+        assert_eq!(decoded.emitted_at_seq, 42);
+        assert_eq!(decoded.seq, 3);
+        assert_eq!(decoded.kind, "progress.token");
+        assert_eq!(decoded.payload, vec![8, 9]);
+        assert_eq!(decoded.payload_ref, None);
+        assert_eq!(decoded.adapter_id, "adapter.test");
+        assert_eq!(decoded.signature, vec![0xAA]);
+        assert!(decoded.params_hash.is_some());
     }
 
     #[test]

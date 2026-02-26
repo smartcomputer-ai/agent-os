@@ -209,6 +209,8 @@ pub struct WorkflowInflightIntentSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub params_hash: Option<String>,
     pub emitted_at_seq: u64,
+    #[serde(default)]
+    pub last_stream_seq: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -310,6 +312,7 @@ mod tests {
                     effect_kind: "http.request".into(),
                     params_hash: None,
                     emitted_at_seq: 7,
+                    last_stream_seq: 4,
                 }],
                 status: WorkflowStatusSnapshot::Waiting,
                 last_processed_event_seq: 7,

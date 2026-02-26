@@ -43,6 +43,7 @@ impl<S: Store + 'static> Kernel<S> {
                         effect_kind: meta.effect_kind.clone(),
                         params_hash: meta.params_hash.clone(),
                         emitted_at_seq: meta.emitted_at_seq,
+                        last_stream_seq: meta.last_stream_seq,
                     })
                     .collect(),
                 status: match state.status {
@@ -217,6 +218,35 @@ impl<S: Store + 'static> Kernel<S> {
                     signature: record.signature,
                 };
                 self.handle_receipt_with_ingress(receipt, stamp)?;
+                self.tick_until_idle()?;
+            }
+            JournalRecord::StreamFrame(record) => {
+                self.sync_logical_from_record(record.logical_now_ns);
+                let stamp = IngressStamp {
+                    now_ns: record.now_ns,
+                    logical_now_ns: record.logical_now_ns,
+                    entropy: record.entropy,
+                    journal_height: record.journal_height,
+                    manifest_hash: if record.manifest_hash.is_empty() {
+                        self.manifest_hash.to_hex()
+                    } else {
+                        record.manifest_hash
+                    },
+                };
+                let frame = aos_effects::EffectStreamFrame {
+                    intent_hash: record.intent_hash,
+                    adapter_id: record.adapter_id,
+                    origin_module_id: record.origin_module_id,
+                    origin_instance_key: record.origin_instance_key,
+                    effect_kind: record.effect_kind,
+                    emitted_at_seq: record.emitted_at_seq,
+                    seq: record.seq,
+                    kind: record.frame_kind,
+                    payload_cbor: record.payload_cbor,
+                    payload_ref: record.payload_ref,
+                    signature: record.signature,
+                };
+                self.handle_stream_frame_with_ingress(frame, stamp)?;
                 self.tick_until_idle()?;
             }
             JournalRecord::CapDecision(_) => {
@@ -433,6 +463,7 @@ impl<S: Store + 'static> Kernel<S> {
                                 effect_kind: intent.effect_kind,
                                 params_hash: intent.params_hash,
                                 emitted_at_seq: intent.emitted_at_seq,
+                                last_stream_seq: intent.last_stream_seq,
                             },
                         )
                     })
@@ -554,6 +585,9 @@ fn decode_tail_record(kind: JournalKind, payload: &[u8]) -> Result<JournalRecord
         JournalKind::EffectReceipt => serde_cbor::from_slice(payload)
             .map(JournalRecord::EffectReceipt)
             .map_err(err),
+        JournalKind::StreamFrame => serde_cbor::from_slice(payload)
+            .map(JournalRecord::StreamFrame)
+            .map_err(err),
         JournalKind::CapDecision => serde_cbor::from_slice(payload)
             .map(JournalRecord::CapDecision)
             .map_err(err),
@@ -593,10 +627,33 @@ mod tests {
         append_record, empty_manifest, event_record, kernel_with_store_and_journal,
         loaded_manifest_with_schema, minimal_kernel_non_keyed, write_manifest,
     };
+    use aos_air_types::{HashRef, ModuleAbi, ModuleKind, ReducerAbi, SchemaRef};
+    use aos_effects::EffectStreamFrame;
     use aos_store::MemStore;
     use serde_json::json;
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    fn install_stream_module(kernel: &mut Kernel<MemStore>, module_name: &str) {
+        let module = aos_air_types::DefModule {
+            name: module_name.into(),
+            module_kind: ModuleKind::Workflow,
+            wasm_hash: HashRef::new(format!("sha256:{}", "1".repeat(64))).unwrap(),
+            key_schema: None,
+            abi: ModuleAbi {
+                reducer: Some(ReducerAbi {
+                    state: SchemaRef::new("sys/PlanError@1").unwrap(),
+                    event: SchemaRef::new(crate::receipts::SYS_EFFECT_STREAM_FRAME_SCHEMA).unwrap(),
+                    context: None,
+                    annotations: None,
+                    effects_emitted: vec![],
+                    cap_slots: Default::default(),
+                }),
+                pure: None,
+            },
+        };
+        kernel.module_defs.insert(module_name.into(), module);
+    }
 
     #[test]
     fn replay_applies_manifest_records_in_order() {
@@ -835,6 +892,7 @@ mod tests {
                             .into(),
                     ),
                     emitted_at_seq: 7,
+                    last_stream_seq: 3,
                 }],
                 status: WorkflowStatusSnapshot::Waiting,
                 last_processed_event_seq: 7,
@@ -858,6 +916,94 @@ mod tests {
         assert_eq!(instances[0].status, WorkflowStatusSnapshot::Waiting);
         assert_eq!(instances[0].inflight_intents.len(), 1);
         assert_eq!(instances[0].inflight_intents[0].intent_id, [9u8; 32]);
+        assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 3);
+    }
+
+    #[test]
+    fn snapshot_restores_stream_cursor_acceptance_behavior() {
+        let store = Arc::new(MemStore::default());
+        let journal = Box::new(MemJournal::new());
+        let mut kernel = kernel_with_store_and_journal(store.clone(), journal);
+        install_stream_module(&mut kernel, "com.acme/Workflow@1");
+
+        let intent_hash = [4u8; 32];
+        let context = ReducerEffectContext::new(
+            "com.acme/Workflow@1".into(),
+            None,
+            "http.request".into(),
+            vec![1, 2, 3],
+            intent_hash,
+            5,
+            None,
+        );
+        let mut snapshot = KernelSnapshot::new(
+            1,
+            vec![],
+            vec![],
+            vec![],
+            vec![ReducerReceiptSnapshot::from_context(intent_hash, &context)],
+            vec![WorkflowInstanceSnapshot {
+                instance_id: "com.acme/Workflow@1::".into(),
+                state_bytes: vec![0xAA],
+                inflight_intents: vec![WorkflowInflightIntentSnapshot {
+                    intent_id: intent_hash,
+                    origin_module_id: "com.acme/Workflow@1".into(),
+                    origin_instance_key: None,
+                    effect_kind: "http.request".into(),
+                    params_hash: Some(Hash::of_bytes(&context.params_cbor).to_hex()),
+                    emitted_at_seq: 5,
+                    last_stream_seq: 2,
+                }],
+                status: WorkflowStatusSnapshot::Waiting,
+                last_processed_event_seq: 5,
+                module_version: None,
+            }],
+            0,
+            Some(*kernel.manifest_hash().as_bytes()),
+        );
+        snapshot.set_root_completeness(SnapshotRootCompleteness {
+            manifest_hash: Some(kernel.manifest_hash().as_bytes().to_vec()),
+            ..SnapshotRootCompleteness::default()
+        });
+        kernel.apply_snapshot(snapshot).expect("apply snapshot");
+
+        let duplicate = EffectStreamFrame {
+            intent_hash,
+            adapter_id: "adapter.stream".into(),
+            origin_module_id: "com.acme/Workflow@1".into(),
+            origin_instance_key: None,
+            effect_kind: "http.request".into(),
+            emitted_at_seq: 5,
+            seq: 2,
+            kind: "progress".into(),
+            payload_cbor: vec![1],
+            payload_ref: None,
+            signature: vec![],
+        };
+        kernel
+            .handle_stream_frame(duplicate)
+            .expect("duplicate stream frame should be dropped");
+        assert!(kernel.reducer_queue.is_empty());
+
+        let next = EffectStreamFrame {
+            intent_hash,
+            adapter_id: "adapter.stream".into(),
+            origin_module_id: "com.acme/Workflow@1".into(),
+            origin_instance_key: None,
+            effect_kind: "http.request".into(),
+            emitted_at_seq: 5,
+            seq: 3,
+            kind: "progress".into(),
+            payload_cbor: vec![2],
+            payload_ref: None,
+            signature: vec![],
+        };
+        kernel
+            .handle_stream_frame(next)
+            .expect("next stream frame should be accepted");
+        assert_eq!(kernel.reducer_queue.len(), 1);
+        let instances = kernel.workflow_instances_snapshot();
+        assert_eq!(instances[0].inflight_intents[0].last_stream_seq, 3);
     }
 
     #[test]
