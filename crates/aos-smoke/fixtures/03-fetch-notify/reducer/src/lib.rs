@@ -6,7 +6,9 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
-use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, aos_reducer, aos_variant};
+use aos_wasm_sdk::{
+    EffectReceiptEnvelope, ReduceError, Reducer, ReducerCtx, aos_reducer, aos_variant,
+};
 use serde::{Deserialize, Serialize};
 
 const HTTP_REQUEST_EFFECT: &str = "http.request";
@@ -39,24 +41,6 @@ impl Default for FetchPc {
 struct StartEvent {
     url: String,
     method: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct EffectReceiptEnvelope {
-    origin_module_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_bytes_opt")]
-    origin_instance_key: Option<Vec<u8>>,
-    intent_id: String,
-    effect_kind: String,
-    params_hash: Option<String>,
-    #[serde(with = "serde_bytes")]
-    receipt_payload: Vec<u8>,
-    status: String,
-    emitted_at_seq: u64,
-    adapter_id: String,
-    cost_cents: Option<u64>,
-    #[serde(with = "serde_bytes")]
-    signature: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,7 +135,8 @@ fn handle_receipt(
         return Ok(());
     }
 
-    let receipt: HttpRequestReceipt = serde_cbor::from_slice(&envelope.receipt_payload)
+    let receipt: HttpRequestReceipt = envelope
+        .decode_receipt_payload()
         .map_err(|_| ReduceError::new("invalid http.request receipt payload"))?;
 
     ctx.state.pending_request = None;
@@ -159,29 +144,6 @@ fn handle_receipt(
     ctx.state.last_status = Some(receipt.status as i64);
     ctx.state.last_body_ref = receipt.body_ref;
     Ok(())
-}
-
-mod serde_bytes_opt {
-    use alloc::vec::Vec;
-    use serde::{Deserialize, Deserializer, Serializer};
-    use serde_bytes::{ByteBuf, Bytes};
-
-    pub fn serialize<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match value {
-            Some(bytes) => serializer.serialize_some(Bytes::new(bytes)),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Option::<ByteBuf>::deserialize(deserializer).map(|opt| opt.map(|buf| buf.into_vec()))
-    }
 }
 
 #[cfg(test)]

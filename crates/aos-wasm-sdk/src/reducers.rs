@@ -328,6 +328,52 @@ pub struct HashRef {
     pub digest: Vec<u8>,
 }
 
+/// Generic workflow receipt envelope delivered to reducers for external effects.
+///
+/// The `receipt_payload` field contains the canonical CBOR payload validated against
+/// the effect's declared `receipt_schema` in the kernel.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct EffectReceiptEnvelope {
+    pub origin_module_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub origin_instance_key: Option<Vec<u8>>,
+    pub intent_id: String,
+    pub effect_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params_hash: Option<String>,
+    #[serde(with = "serde_bytes")]
+    pub receipt_payload: Vec<u8>,
+    pub status: String,
+    pub emitted_at_seq: u64,
+    pub adapter_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_cents: Option<u64>,
+    #[serde(with = "serde_bytes")]
+    pub signature: Vec<u8>,
+}
+
+impl EffectReceiptEnvelope {
+    /// Decode the embedded receipt payload into a typed struct.
+    pub fn decode_receipt_payload<T: DeserializeOwned>(&self) -> Result<T, serde_cbor::Error> {
+        const SELF_DESCRIBE_TAG: &[u8] = &[0xd9, 0xd9, 0xf7];
+        match serde_cbor::from_slice(&self.receipt_payload) {
+            Ok(value) => Ok(value),
+            Err(err) => {
+                if self.receipt_payload.starts_with(SELF_DESCRIBE_TAG) {
+                    return serde_cbor::from_slice(
+                        &self.receipt_payload[SELF_DESCRIBE_TAG.len()..],
+                    );
+                }
+                Err(err)
+            }
+        }
+    }
+}
+
 const EFFECT_TIMER_SET: &str = "timer.set";
 const EFFECT_BLOB_PUT: &str = "blob.put";
 const EFFECT_BLOB_GET: &str = "blob.get";
@@ -426,6 +472,29 @@ impl core::fmt::Display for StepError {
             StepError::EffectPayload(err) => write!(f, "effect payload encode failed: {err}"),
             StepError::Reduce(msg) => write!(f, "reduce error: {msg}"),
         }
+    }
+}
+
+mod serde_bytes_opt {
+    use alloc::vec::Vec;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use serde_bytes::{ByteBuf, Bytes};
+
+    pub fn serialize<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(bytes) => serializer.serialize_some(Bytes::new(bytes)),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<ByteBuf>::deserialize(deserializer).map(|opt| opt.map(|buf| buf.into_vec()))
     }
 }
 
@@ -727,5 +796,32 @@ mod tests {
         let ann_bytes = decoded.ann.expect("ann");
         let ann: AnnPayload = serde_cbor::from_slice(&ann_bytes).unwrap();
         assert_eq!(ann.message, "hi");
+    }
+
+    #[test]
+    fn effect_receipt_envelope_decodes_payload() {
+        #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+        struct DummyReceipt {
+            status: i32,
+        }
+
+        let payload = serde_cbor::to_vec(&DummyReceipt { status: 200 }).unwrap();
+        let envelope = EffectReceiptEnvelope {
+            origin_module_id: "com.acme/Workflow@1".into(),
+            origin_instance_key: Some(b"key-1".to_vec()),
+            intent_id:
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            effect_kind: "http.request".into(),
+            params_hash: None,
+            receipt_payload: payload,
+            status: "ok".into(),
+            emitted_at_seq: 42,
+            adapter_id: "http.mock".into(),
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        };
+
+        let decoded: DummyReceipt = envelope.decode_receipt_payload().unwrap();
+        assert_eq!(decoded, DummyReceipt { status: 200 });
     }
 }
