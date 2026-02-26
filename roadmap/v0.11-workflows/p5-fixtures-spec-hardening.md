@@ -33,7 +33,7 @@ Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 - [x] `02-blob-echo`: remove legacy manifest keys/vocabulary and reducer-origin policy aliases, keep behavior identical.
 - [x] `03-fetch-notify`: replace `defplan` assets with workflow-module orchestration; keep reducer as intent/result owner.
 - [x] `04-aggregator`: replace plan orchestration with workflow module; preserve aggregation behavior.
-- [ ] `05-chain-comp`: replace charge/reserve/notify/refund plan chain with workflow compensation chain.
+- [x] `05-chain-comp`: replace charge/reserve/notify/refund plan chain with workflow compensation chain.
 - [ ] `06-safe-upgrade`: rewrite `air.v1`/`air.v2` to workflow modules; preserve upgrade-while-waiting semantics.
 - [ ] `07-llm-summarizer`: replace summarize plan with workflow module orchestration.
 - [ ] `08-retry-backoff`: rebuild retries/timeouts on workflow runtime and receipt/event model.

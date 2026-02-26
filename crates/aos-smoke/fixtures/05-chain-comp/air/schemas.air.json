@@ -76,117 +76,11 @@
   },
   {
     "$kind": "defschema",
-    "name": "demo/ChainChargeCompleted@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "status": { "int": {} },
-        "body_preview": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/ChainReserveCompleted@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "status": { "int": {} },
-        "body_preview": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/ChainReserveFailed@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "status": { "int": {} },
-        "body_preview": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/ChainNotifyCompleted@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "status": { "int": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/ChainRefundCompleted@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "status": { "int": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "demo/ChainEvent@1",
     "type": {
       "variant": {
         "Start": { "ref": "demo/ChainStart@1" },
-        "ChargeCompleted": { "ref": "demo/ChainChargeCompleted@1" },
-        "ReserveCompleted": { "ref": "demo/ChainReserveCompleted@1" },
-        "ReserveFailed": { "ref": "demo/ChainReserveFailed@1" },
-        "NotifyCompleted": { "ref": "demo/ChainNotifyCompleted@1" },
-        "RefundCompleted": { "ref": "demo/ChainRefundCompleted@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/ChargeRequested@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "order_id": { "text": {} },
-        "amount_cents": { "nat": {} },
-        "customer_id": { "text": {} },
-        "target": { "ref": "demo/ChainHttpTarget@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/ReserveRequested@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "order_id": { "text": {} },
-        "sku": { "text": {} },
-        "target": { "ref": "demo/ChainHttpTarget@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/NotifyRequested@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "order_id": { "text": {} },
-        "status_text": { "text": {} },
-        "target": { "ref": "demo/ChainHttpTarget@1" }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/RefundRequested@1",
-    "type": {
-      "record": {
-        "request_id": { "nat": {} },
-        "order_id": { "text": {} },
-        "amount_cents": { "nat": {} },
-        "target": { "ref": "demo/ChainHttpTarget@1" }
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
       }
     }
   }

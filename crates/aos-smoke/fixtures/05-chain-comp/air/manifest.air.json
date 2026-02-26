@@ -1,5 +1,6 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     {
       "name": "demo/ChainPhase@1"
@@ -17,52 +18,10 @@
       "name": "demo/ChainStart@1"
     },
     {
-      "name": "demo/ChainChargeCompleted@1"
-    },
-    {
-      "name": "demo/ChainReserveCompleted@1"
-    },
-    {
-      "name": "demo/ChainReserveFailed@1"
-    },
-    {
-      "name": "demo/ChainNotifyCompleted@1"
-    },
-    {
-      "name": "demo/ChainRefundCompleted@1"
-    },
-    {
       "name": "demo/ChainEvent@1"
     },
     {
-      "name": "demo/ChargeRequested@1"
-    },
-    {
-      "name": "demo/ReserveRequested@1"
-    },
-    {
-      "name": "demo/NotifyRequested@1"
-    },
-    {
-      "name": "demo/RefundRequested@1"
-    },
-    {
-      "name": "sys/BlobPutParams@1"
-    },
-    {
-      "name": "sys/BlobPutReceipt@1"
-    },
-    {
-      "name": "sys/BlobGetParams@1"
-    },
-    {
-      "name": "sys/BlobGetReceipt@1"
-    },
-    {
-      "name": "sys/BlobPutResult@1"
-    },
-    {
-      "name": "sys/BlobGetResult@1"
+      "name": "sys/EffectReceiptEnvelope@1"
     },
     {
       "name": "sys/HttpRequestParams@1"
@@ -74,20 +33,9 @@
   "modules": [
     {
       "name": "demo/ChainComp@1"
-    }
-  ],
-  "plans": [
-    {
-      "name": "demo/charge_plan@1"
     },
     {
-      "name": "demo/reserve_plan@1"
-    },
-    {
-      "name": "demo/notify_plan@1"
-    },
-    {
-      "name": "demo/refund_plan@1"
+      "name": "sys/CapEnforceHttpOut@1"
     }
   ],
   "caps": [
@@ -131,46 +79,16 @@
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/ChainEvent@1",
-        "reducer": "demo/ChainComp@1"
+        "module": "demo/ChainComp@1"
       }
-    ],
-    "inboxes": []
+    ]
   },
-  "triggers": [
-    {
-      "event": "demo/ChargeRequested@1",
-      "plan": "demo/charge_plan@1",
-      "correlate_by": "request_id"
-    },
-    {
-      "event": "demo/ReserveRequested@1",
-      "plan": "demo/reserve_plan@1",
-      "correlate_by": "request_id"
-    },
-    {
-      "event": "demo/NotifyRequested@1",
-      "plan": "demo/notify_plan@1",
-      "correlate_by": "request_id"
-    },
-    {
-      "event": "demo/RefundRequested@1",
-      "plan": "demo/refund_plan@1",
-      "correlate_by": "request_id"
-    }
-  ],
-  "air_version": "1",
   "effects": [
     {
       "name": "sys/http.request@1"
-    },
-    {
-      "name": "sys/blob.put@1"
-    },
-    {
-      "name": "sys/blob.get@1"
     }
   ]
 }

@@ -10,6 +10,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 aos-wasm-sdk = { path = "../../../../aos-wasm-sdk" }
-indexmap = "2"
 serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
+sha2 = { version = "0.10", default-features = false }

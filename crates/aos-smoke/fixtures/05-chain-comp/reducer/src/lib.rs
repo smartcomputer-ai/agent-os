@@ -3,19 +3,14 @@
 
 extern crate alloc;
 
-use alloc::{
-    format,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
+use alloc::{collections::BTreeMap, format, string::String};
+use aos_wasm_sdk::{
+    EffectReceiptEnvelope, ReduceError, Reducer, ReducerCtx, aos_reducer, aos_variant,
 };
-use aos_wasm_sdk::{aos_reducer, aos_variant, ReduceError, Reducer, ReducerCtx};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-const CHARGE_REQUEST_SCHEMA: &str = "demo/ChargeRequested@1";
-const RESERVE_REQUEST_SCHEMA: &str = "demo/ReserveRequested@1";
-const NOTIFY_REQUEST_SCHEMA: &str = "demo/NotifyRequested@1";
-const REFUND_REQUEST_SCHEMA: &str = "demo/RefundRequested@1";
+const HTTP_REQUEST_EFFECT: &str = "http.request";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ChainState {
@@ -81,63 +76,40 @@ aos_variant! {
             notify: ChainHttpTarget,
             refund: ChainHttpTarget,
         },
-        ChargeCompleted {
-            request_id: u64,
-            status: i64,
-            body_preview: String,
-        },
-        ReserveCompleted {
-            request_id: u64,
-            status: i64,
-            body_preview: String,
-        },
-        ReserveFailed {
-            request_id: u64,
-            status: i64,
-            body_preview: String,
-        },
-        NotifyCompleted {
-            request_id: u64,
-            status: i64,
-        },
-        RefundCompleted {
-            request_id: u64,
-            status: i64,
-        },
+        Receipt(EffectReceiptEnvelope),
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ChargeRequest {
-    request_id: u64,
-    order_id: String,
-    amount_cents: u64,
-    customer_id: String,
-    target: ChainHttpTarget,
+struct HttpRequestParams {
+    method: String,
+    url: String,
+    headers: BTreeMap<String, String>,
+    body_ref: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ReserveRequest {
-    request_id: u64,
-    order_id: String,
-    sku: String,
-    target: ChainHttpTarget,
+struct RequestTimings {
+    start_ns: u64,
+    end_ns: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct NotifyRequest {
-    request_id: u64,
-    order_id: String,
-    status_text: String,
-    target: ChainHttpTarget,
+struct HttpRequestReceipt {
+    status: i32,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    body_ref: Option<String>,
+    timings: RequestTimings,
+    adapter_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RefundRequest {
-    request_id: u64,
-    order_id: String,
-    amount_cents: u64,
-    target: ChainHttpTarget,
+#[derive(Debug, Clone, Copy)]
+enum SagaStep {
+    Charge,
+    Reserve,
+    Notify,
+    Refund,
 }
 
 aos_reducer!(ChainCompSm);
@@ -175,28 +147,8 @@ impl Reducer for ChainCompSm {
                 reserve,
                 notify,
                 refund,
-            ),
-            ChainEvent::ChargeCompleted {
-                request_id,
-                status,
-                body_preview,
-            } => handle_charge_completed(ctx, request_id, status, body_preview),
-            ChainEvent::ReserveCompleted {
-                request_id,
-                status,
-                body_preview,
-            } => handle_reserve_completed(ctx, request_id, status, body_preview),
-            ChainEvent::ReserveFailed {
-                request_id,
-                status,
-                body_preview,
-            } => handle_reserve_failed(ctx, request_id, status, body_preview),
-            ChainEvent::NotifyCompleted { request_id, status } => {
-                handle_notify_completed(ctx, request_id, status)
-            }
-            ChainEvent::RefundCompleted { request_id, status } => {
-                handle_refund_completed(ctx, request_id, status)
-            }
+            )?,
+            ChainEvent::Receipt(envelope) => handle_receipt(ctx, envelope)?,
         }
         Ok(())
     }
@@ -212,10 +164,10 @@ fn handle_start(
     reserve: ChainHttpTarget,
     notify: ChainHttpTarget,
     refund: ChainHttpTarget,
-) {
+) -> Result<(), ReduceError> {
     match ctx.state.phase {
         ChainPhase::Idle | ChainPhase::Completed | ChainPhase::Refunded => {}
-        _ => return,
+        _ => return Ok(()),
     }
     let request_id = ctx.state.next_request_id;
     ctx.state.next_request_id = ctx.state.next_request_id.saturating_add(1);
@@ -236,150 +188,136 @@ fn handle_start(
         notify_target: notify,
         refund_target: refund,
     });
-    emit_charge_intent(ctx);
+    emit_for_step(ctx, SagaStep::Charge)
 }
 
-fn handle_charge_completed(
+fn handle_receipt(
     ctx: &mut ReducerCtx<ChainState, ()>,
-    request_id: u64,
-    status: i64,
-    body_preview: String,
-) {
-    let Some(saga) = ctx.state.current_saga.as_mut() else {
-        return;
-    };
-    if saga.request_id != request_id {
-        return;
+    envelope: EffectReceiptEnvelope,
+) -> Result<(), ReduceError> {
+    if envelope.effect_kind != HTTP_REQUEST_EFFECT {
+        return Ok(());
     }
-    saga.charge_status = Some(status);
-    saga.last_error = None;
-    ctx.state.phase = ChainPhase::Reserving;
-    emit_reserve_intent(ctx, &body_preview);
+
+    let Some(step) = step_for_phase(&ctx.state.phase) else {
+        return Ok(());
+    };
+
+    let expected_hash = {
+        let Some(saga) = ctx.state.current_saga.as_ref() else {
+            return Ok(());
+        };
+        hash_request_params(&params_for_step(saga, step))?
+    };
+
+    if envelope.params_hash.as_deref() != Some(expected_hash.as_str()) {
+        return Ok(());
+    }
+
+    let receipt: HttpRequestReceipt = envelope
+        .decode_receipt_payload()
+        .map_err(|_| ReduceError::new("invalid http.request receipt payload"))?;
+
+    let mut next_emit: Option<SagaStep> = None;
+    {
+        let Some(saga) = ctx.state.current_saga.as_mut() else {
+            return Ok(());
+        };
+        match step {
+            SagaStep::Charge => {
+                saga.charge_status = Some(receipt.status as i64);
+                saga.last_error = None;
+                ctx.state.phase = ChainPhase::Reserving;
+                next_emit = Some(SagaStep::Reserve);
+            }
+            SagaStep::Reserve => {
+                saga.reserve_status = Some(receipt.status as i64);
+                if receipt.status < 400 {
+                    saga.last_error = None;
+                    ctx.state.phase = ChainPhase::Notifying;
+                    next_emit = Some(SagaStep::Notify);
+                } else {
+                    saga.last_error = Some(reserve_failure_message(&receipt));
+                    ctx.state.phase = ChainPhase::Refunding;
+                    next_emit = Some(SagaStep::Refund);
+                }
+            }
+            SagaStep::Notify => {
+                saga.notify_status = Some(receipt.status as i64);
+                saga.last_error = None;
+                ctx.state.phase = ChainPhase::Completed;
+            }
+            SagaStep::Refund => {
+                saga.refund_status = Some(receipt.status as i64);
+                ctx.state.phase = ChainPhase::Refunded;
+            }
+        }
+    }
+
+    if let Some(next_step) = next_emit {
+        emit_for_step(ctx, next_step)?;
+    }
+
+    Ok(())
 }
 
-fn handle_reserve_completed(
-    ctx: &mut ReducerCtx<ChainState, ()>,
-    request_id: u64,
-    status: i64,
-    body_preview: String,
-) {
-    let Some(saga) = ctx.state.current_saga.as_mut() else {
-        return;
-    };
-    if saga.request_id != request_id {
-        return;
-    }
-    saga.reserve_status = Some(status);
-    saga.last_error = None;
-    ctx.state.phase = ChainPhase::Notifying;
-    emit_notify_intent(ctx, format!("reserved: {body_preview}"));
-}
-
-fn handle_reserve_failed(
-    ctx: &mut ReducerCtx<ChainState, ()>,
-    request_id: u64,
-    status: i64,
-    body_preview: String,
-) {
-    let Some(saga) = ctx.state.current_saga.as_mut() else {
-        return;
-    };
-    if saga.request_id != request_id {
-        return;
-    }
-    saga.reserve_status = Some(status);
-    saga.last_error = Some(body_preview);
-    ctx.state.phase = ChainPhase::Refunding;
-    emit_refund_intent(ctx);
-}
-
-fn handle_notify_completed(ctx: &mut ReducerCtx<ChainState, ()>, request_id: u64, status: i64) {
-    let Some(saga) = ctx.state.current_saga.as_mut() else {
-        return;
-    };
-    if saga.request_id != request_id {
-        return;
-    }
-    saga.notify_status = Some(status);
-    ctx.state.phase = ChainPhase::Completed;
-}
-
-fn handle_refund_completed(ctx: &mut ReducerCtx<ChainState, ()>, request_id: u64, status: i64) {
-    let Some(saga) = ctx.state.current_saga.as_mut() else {
-        return;
-    };
-    if saga.request_id != request_id {
-        return;
-    }
-    saga.refund_status = Some(status);
-    ctx.state.phase = ChainPhase::Refunded;
-}
-
-fn emit_charge_intent(ctx: &mut ReducerCtx<ChainState, ()>) {
+fn emit_for_step(ctx: &mut ReducerCtx<ChainState, ()>, step: SagaStep) -> Result<(), ReduceError> {
     let Some(saga) = ctx.state.current_saga.as_ref() else {
-        return;
+        return Ok(());
     };
-    let payload = ChargeRequest {
-        request_id: saga.request_id,
-        order_id: saga.order_id.clone(),
-        amount_cents: saga.amount_cents,
-        customer_id: saga.customer_id.clone(),
-        target: saga.charge_target.clone(),
-    };
-    let key = saga.request_id.to_be_bytes();
-    ctx.intent(CHARGE_REQUEST_SCHEMA)
-        .key_bytes(&key)
-        .payload(&payload)
-        .send();
+    let params = params_for_step(saga, step);
+    ctx.effects()
+        .emit_raw(HTTP_REQUEST_EFFECT, &params, Some("default"));
+    Ok(())
 }
 
-fn emit_reserve_intent(ctx: &mut ReducerCtx<ChainState, ()>, body_preview: &str) {
-    let Some(saga) = ctx.state.current_saga.as_ref() else {
-        return;
+fn params_for_step(saga: &SagaState, step: SagaStep) -> HttpRequestParams {
+    let target = match step {
+        SagaStep::Charge => &saga.charge_target,
+        SagaStep::Reserve => &saga.reserve_target,
+        SagaStep::Notify => &saga.notify_target,
+        SagaStep::Refund => &saga.refund_target,
     };
-    let payload = ReserveRequest {
-        request_id: saga.request_id,
-        order_id: saga.order_id.clone(),
-        sku: saga.reserve_sku.clone(),
-        target: saga.reserve_target.clone(),
-    };
-    let key = saga.request_id.to_be_bytes();
-    ctx.intent(RESERVE_REQUEST_SCHEMA)
-        .key_bytes(&key)
-        .payload(&payload)
-        .send();
+    HttpRequestParams {
+        method: target.method.clone(),
+        url: target.url.clone(),
+        headers: BTreeMap::new(),
+        body_ref: None,
+    }
 }
 
-fn emit_notify_intent(ctx: &mut ReducerCtx<ChainState, ()>, body_preview: String) {
-    let Some(saga) = ctx.state.current_saga.as_ref() else {
-        return;
-    };
-    let payload = NotifyRequest {
-        request_id: saga.request_id,
-        order_id: saga.order_id.clone(),
-        status_text: body_preview,
-        target: saga.notify_target.clone(),
-    };
-    let key = saga.request_id.to_be_bytes();
-    ctx.intent(NOTIFY_REQUEST_SCHEMA)
-        .key_bytes(&key)
-        .payload(&payload)
-        .send();
+fn step_for_phase(phase: &ChainPhase) -> Option<SagaStep> {
+    match phase {
+        ChainPhase::Charging => Some(SagaStep::Charge),
+        ChainPhase::Reserving => Some(SagaStep::Reserve),
+        ChainPhase::Notifying => Some(SagaStep::Notify),
+        ChainPhase::Refunding => Some(SagaStep::Refund),
+        _ => None,
+    }
 }
 
-fn emit_refund_intent(ctx: &mut ReducerCtx<ChainState, ()>) {
-    let Some(saga) = ctx.state.current_saga.as_ref() else {
-        return;
-    };
-    let payload = RefundRequest {
-        request_id: saga.request_id,
-        order_id: saga.order_id.clone(),
-        amount_cents: saga.amount_cents,
-        target: saga.refund_target.clone(),
-    };
-    let key = saga.request_id.to_be_bytes();
-    ctx.intent(REFUND_REQUEST_SCHEMA)
-        .key_bytes(&key)
-        .payload(&payload)
-        .send();
+fn reserve_failure_message(receipt: &HttpRequestReceipt) -> String {
+    match receipt.body_ref.as_ref() {
+        Some(body_ref) => format!("reserve failed: status={} body_ref={body_ref}", receipt.status),
+        None => format!("reserve failed: status={}", receipt.status),
+    }
+}
+
+fn hash_request_params(params: &HttpRequestParams) -> Result<String, ReduceError> {
+    let bytes = serde_cbor::to_vec(params)
+        .map_err(|_| ReduceError::new("failed to encode http.request params"))?;
+    let digest = Sha256::digest(&bytes);
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        hex.push(nibble_to_hex((byte >> 4) & 0x0f));
+        hex.push(nibble_to_hex(byte & 0x0f));
+    }
+    Ok(format!("sha256:{hex}"))
+}
+
+fn nibble_to_hex(nibble: u8) -> char {
+    match nibble {
+        0..=9 => (b'0' + nibble) as char,
+        _ => (b'a' + (nibble - 10)) as char,
+    }
 }
