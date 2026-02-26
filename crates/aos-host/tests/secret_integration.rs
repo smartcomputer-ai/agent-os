@@ -3,15 +3,15 @@ use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 
 use aos_air_types::catalog::EffectCatalog;
-use aos_air_types::{CURRENT_AIR_VERSION, Manifest, SecretDecl, SecretEntry, SecretPolicy};
+use aos_air_types::{Manifest, SecretDecl, SecretEntry, SecretPolicy, CURRENT_AIR_VERSION};
 use aos_cbor::Hash;
 use aos_effects::builtins::LlmGenerateParams;
 use aos_host::util::env_secret_resolver_from_manifest;
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::secret::{
-    MapSecretResolver, SecretCatalog, enforce_secret_policy, inject_secrets_in_params,
-    normalize_secret_variants,
+    enforce_secret_policy, inject_secrets_in_params, normalize_secret_variants, MapSecretResolver,
+    SecretCatalog,
 };
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_store::MemStore;

@@ -1053,7 +1053,7 @@ fn build_loaded_manifest_with_http_enforcer(
     {
         modules.push(allow_http_enforcer(store));
     }
-    fixtures::build_loaded_manifest(vec![], vec![], modules, routing)
+    fixtures::build_loaded_manifest(modules, routing)
 }
 
 fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
@@ -1204,8 +1204,6 @@ fn timer_receipt_workflow_manifest(store: &Arc<TestStore>) -> aos_kernel::manife
         cap_slots: Default::default(),
     });
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
         vec![workflow],
         vec![fixtures::routing_event(
             "com.acme/TimerWorkflowEvent@1",

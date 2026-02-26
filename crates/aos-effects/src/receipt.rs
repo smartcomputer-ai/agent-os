@@ -17,7 +17,9 @@ pub struct EffectReceipt {
 
 impl EffectReceipt {
     pub fn payload<T: DeserializeOwned>(&self) -> Result<T, ReceiptDecodeError> {
-        serde_cbor::from_slice(&self.payload_cbor).map_err(ReceiptDecodeError::Payload)
+        let value: serde_cbor::Value =
+            serde_cbor::from_slice(&self.payload_cbor).map_err(ReceiptDecodeError::Payload)?;
+        serde_cbor::value::from_value(value).map_err(ReceiptDecodeError::Payload)
     }
 }
 
@@ -58,5 +60,35 @@ mod tests {
         };
         let decoded: DummyReceipt = receipt.payload().unwrap();
         assert_eq!(decoded, DummyReceipt { ok: true });
+    }
+
+    #[test]
+    fn payload_option_none_round_trip_with_canonical_null() {
+        let payload = aos_cbor::to_canonical_cbor(&Option::<DummyReceipt>::None).unwrap();
+        let receipt = EffectReceipt {
+            intent_hash: [2u8; 32],
+            adapter_id: "adapter.workspace".into(),
+            status: ReceiptStatus::Ok,
+            payload_cbor: payload,
+            cost_cents: Some(0),
+            signature: vec![7; 64],
+        };
+        let decoded: Option<DummyReceipt> = receipt.payload().unwrap();
+        assert_eq!(decoded, None);
+    }
+
+    #[test]
+    fn payload_struct_still_fails_for_null() {
+        let payload = aos_cbor::to_canonical_cbor(&Option::<DummyReceipt>::None).unwrap();
+        let receipt = EffectReceipt {
+            intent_hash: [3u8; 32],
+            adapter_id: "adapter.workspace".into(),
+            status: ReceiptStatus::Ok,
+            payload_cbor: payload,
+            cost_cents: Some(0),
+            signature: vec![8; 64],
+        };
+        let err = receipt.payload::<DummyReceipt>().unwrap_err();
+        assert!(matches!(err, ReceiptDecodeError::Payload(_)));
     }
 }

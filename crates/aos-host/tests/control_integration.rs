@@ -81,10 +81,7 @@ async fn control_channel_round_trip() {
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let mut manifest = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
-        vec![reducer, session_reducer],
+    let mut manifest = fixtures::build_loaded_manifest(vec![reducer, session_reducer],
         vec![
             fixtures::routing_event(START_SCHEMA, "com.acme/Echo@1"),
             fixtures::routing_event(SESSION_EVENT_SCHEMA, "com.acme/SessionEventEcho@1"),
@@ -517,7 +514,7 @@ async fn control_channel_errors() {
     }
 
     let store: Arc<TestStore> = fixtures::new_mem_store();
-    let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![], vec![]);
+    let manifest = fixtures::build_loaded_manifest(vec![], vec![]);
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
     let host = WorldHost::from_kernel(kernel, store.clone(), HostConfig::default());
@@ -593,7 +590,7 @@ async fn control_channel_put_blob() {
     }
 
     let store: Arc<TestStore> = fixtures::new_mem_store();
-    let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![], vec![]);
+    let manifest = fixtures::build_loaded_manifest(vec![], vec![]);
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
     let host = WorldHost::from_kernel(kernel, store.clone(), HostConfig::default());

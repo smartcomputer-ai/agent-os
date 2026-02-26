@@ -380,8 +380,6 @@ async fn testhost_with_fixtures_build_loaded_manifest() {
 
     // Build manifest using fixtures helper
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![],       // no plans
-        vec![],       // no triggers
         vec![module], // one reducer
         vec![fixtures::routing_event("test/Event@1", "test/Reducer@1")],
     );
@@ -498,10 +496,7 @@ async fn testhost_timer_effect_flow() {
     });
 
     // Build manifest with routing
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
-        vec![module],
+    let mut loaded = fixtures::build_loaded_manifest(vec![module],
         vec![fixtures::routing_event(
             "test/TimerEvent@1",
             "test/TimerReducer@1",
@@ -586,10 +581,7 @@ async fn testhost_run_cycle_batch_with_timer_effect() {
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
-        vec![module],
+    let mut loaded = fixtures::build_loaded_manifest(vec![module],
         vec![fixtures::routing_event(
             "test/TimerEvent@1",
             "test/TimerReducer@1",
@@ -648,10 +640,7 @@ async fn testhost_run_cycle_with_timers_schedules_and_fires() {
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
-        vec![module],
+    let mut loaded = fixtures::build_loaded_manifest(vec![module],
         vec![fixtures::routing_event(
             "test/TimerEvent@1",
             "test/TimerReducer@1",

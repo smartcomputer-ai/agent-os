@@ -404,8 +404,6 @@ fn workflow_resume_manifest(
     });
 
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
         vec![workflow],
         vec![fixtures::routing_event(
             "com.acme/WorkflowResumeEvent@1",
@@ -625,7 +623,7 @@ fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedM
         cap_slots: Default::default(),
     });
     let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![

@@ -50,7 +50,7 @@ async fn keyed_reducer_integration_flow() {
             key_field: Some("id".into()),
         }];
 
-        let mut manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+        let mut manifest = fixtures::build_loaded_manifest(vec![reducer], routing);
         fixtures::insert_test_schemas(
             &mut manifest,
             vec![

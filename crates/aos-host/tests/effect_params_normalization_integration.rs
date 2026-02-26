@@ -14,8 +14,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use aos_air_types::{
-    DefSchema, EffectKind, ReducerAbi, TypeExpr, TypeRef, TypeVariant, builtins,
-    catalog::EffectCatalog, plan_literals::SchemaIndex,
+    builtins, catalog::EffectCatalog, plan_literals::SchemaIndex, DefSchema, EffectKind,
+    ReducerAbi, TypeExpr, TypeRef, TypeVariant,
 };
 
 /// Plan-origin effects with semantically identical params but different CBOR shapes
@@ -230,12 +230,7 @@ fn reducer_params_round_trip_journal_replay() {
         fixtures::START_SCHEMA,
         &reducer.name,
     )];
-    let mut manifest = fixtures::build_loaded_manifest(
-        vec![],
-        vec![fixtures::start_trigger("com.acme/Plan@1")],
-        vec![reducer],
-        routing.clone(),
-    );
+    let mut manifest = fixtures::build_loaded_manifest(vec![reducer], routing.clone());
     fixtures::insert_test_schemas(
         &mut manifest,
         vec![
@@ -284,8 +279,6 @@ fn reducer_params_round_trip_journal_replay() {
         store.clone(),
         {
             let mut replay_manifest = fixtures::build_loaded_manifest(
-                vec![],
-                vec![fixtures::start_trigger("com.acme/Plan@1")],
                 {
                     let mut reducer = fixtures::stub_reducer_module(
                         &store,

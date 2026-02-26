@@ -87,10 +87,7 @@ fn build_timer_manifest(store: &Arc<FsStore>) -> aos_kernel::LoadedManifest {
         effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
         cap_slots: Default::default(),
     });
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
-        vec![module],
+    let mut loaded = fixtures::build_loaded_manifest(vec![module],
         vec![fixtures::routing_event(
             "demo/TimerEvent@1",
             "demo/TimerReducer@1",

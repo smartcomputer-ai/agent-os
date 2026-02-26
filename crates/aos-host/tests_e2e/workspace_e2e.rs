@@ -203,7 +203,7 @@ fn build_workspace_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Loa
         module: reducer.name.clone(),
         key_field: Some("workspace".into()),
     }];
-    fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing)
+    fixtures::build_loaded_manifest(vec![reducer], routing)
 }
 
 fn commit_event(workspace: &str, root_hash: &str, expected_head: Option<u64>) -> Vec<u8> {

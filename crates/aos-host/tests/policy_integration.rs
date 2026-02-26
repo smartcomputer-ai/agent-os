@@ -6,7 +6,7 @@ use aos_effects::builtins::HttpRequestParams;
 use aos_kernel::cap_enforcer::CapCheckOutput;
 use aos_kernel::error::KernelError;
 use aos_wasm_abi::{PureOutput, ReducerEffect, ReducerOutput};
-use helpers::fixtures::{self, TestStore, TestWorld, zero_hash};
+use helpers::fixtures::{self, zero_hash, TestStore, TestWorld};
 use indexmap::IndexMap;
 
 mod helpers;
@@ -82,12 +82,8 @@ fn build_http_workflow_manifest(
         fixtures::START_SCHEMA,
         reducer_name,
     )];
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
-        vec![reducer, allow_http_enforcer(store)],
-        routing,
-    );
+    let mut loaded =
+        fixtures::build_loaded_manifest(vec![reducer, allow_http_enforcer(store)], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![
@@ -123,7 +119,7 @@ fn build_introspect_workflow_manifest(
         fixtures::START_SCHEMA,
         reducer_name,
     )];
-    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![

@@ -607,8 +607,6 @@ fn no_plan_workflow_manifest_impl(
     });
 
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
         vec![workflow, result],
         vec![
             fixtures::routing_event("com.acme/WorkflowEvent@1", "com.acme/Workflow@1"),

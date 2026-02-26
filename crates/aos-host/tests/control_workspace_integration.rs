@@ -62,7 +62,7 @@ async fn control_workspace_internal_effects() {
         module: "sys/Workspace@1".to_string(),
         key_field: Some("workspace".into()),
     }];
-    let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    let manifest = fixtures::build_loaded_manifest(vec![reducer], routing);
 
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();

@@ -26,7 +26,7 @@ Status checklist for this section:
 - [x] Define fixture-by-fixture rewrite plan and target assertions.
 - [x] Defer Agent SDK fixtures (`20/21/22`) until Agent SDK refresh lands.
 - [ ] Implement all smoke fixture rewrites.
-- [ ] Implement all integration suite rewrites.
+- [x] Implement all integration suite rewrites.
 
 Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 - [x] `00-counter`: remove legacy manifest keys/vocabulary (`plans`, `triggers`, old routing/policy aliases), keep behavior identical.
@@ -53,8 +53,8 @@ Integration suite rewrite checklist:
 - [x] `crates/aos-host/tests/snapshot_integration.rs`: migrate snapshot/replay assertions to workflow in-flight state semantics.
 - [x] `crates/aos-host/tests/governance_effects_integration.rs` (replaces `governance_plan_integration.rs`): governance propose/shadow/approve/apply exercised via workflow-origin effects (no plan APIs).
 - [x] `crates/aos-host/tests/governance_integration.rs`: removed plan patch/apply assertions and kept workflow-manifest governance checks only.
-- [ ] `crates/aos-host/tests/fixtures.rs`: replace plan-oriented fixtures/helpers with workflow-oriented fixtures/helpers.
-- [ ] `crates/aos-host/tests/helpers.rs`: replace plan-oriented helpers and names with workflow-oriented helpers.
+- [x] `crates/aos-host/tests/fixtures.rs`: replace plan-oriented fixtures/helpers with workflow-oriented fixtures/helpers.
+- [x] `crates/aos-host/tests/helpers.rs`: replace plan-oriented helpers and names with workflow-oriented helpers.
 
 Required coverage outcomes from rewritten fixtures/suites:
 - [ ] external I/O orchestration.
@@ -193,6 +193,19 @@ Implementation log (completed 2026-02-26):
   - verification:
     - `cargo test -p aos-host --features e2e-tests --test journal_integration --test snapshot_integration -q`
     - `cargo test -p aos-host --features e2e-tests --test world_integration --test workflow_runtime_integration --test journal_integration --test snapshot_integration -q`
+- [x] Completed workflow-only fixtures/helpers migration and integration fallout cleanup.
+  - `crates/aos-host/tests/fixtures.rs`: removed legacy plan helper surface (`build_loaded_manifest` now module/routing only; plan trigger helpers removed; workflow-first comments and signatures).
+  - `crates/aos-host/tests/helpers.rs`: removed plan-era helper types/imports and kept workflow-native helper surface only.
+  - `crates/aos-host/tests_e2e/cap_enforcer_e2e.rs`: rewritten to workflow reducer-based enforcement scenarios (no plan APIs).
+  - verification:
+    - `cargo test -p aos-host --features e2e-tests -q`
+- [x] Fixed canonical receipt decoding for optional payloads represented as CBOR `null` (required for schema-conformant `option` receipts like `workspace.read_ref` when missing).
+  - `crates/aos-effects/src/receipt.rs`: decode through CBOR value conversion path so `Option<T>` payloads decode deterministically from canonical payloads.
+  - `crates/aos-host/tests_e2e/workspace_e2e.rs`: `workspace_tree_effects_roundtrip` now passes end-to-end under canonical receipt semantics.
+  - verification:
+    - `cargo test -p aos-effects -q`
+    - `cargo test -p aos-host --features e2e-tests workspace_tree_effects_roundtrip -- --nocapture`
+    - `cargo test -p aos-host --features e2e-tests -q`
 
 ### 4) Dead code and roadmap cleanup
 

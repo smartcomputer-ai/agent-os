@@ -4,20 +4,20 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use aos_air_types::{
-    AirNode, CapEnforcer, CapGrant, DefSchema, EmptyObject, HashRef, ManifestDefaults, NamedRef,
-    TypeExpr, TypePrimitive, TypePrimitiveText, builtins, catalog::EffectCatalog,
-    plan_literals::SchemaIndex,
+    builtins, catalog::EffectCatalog, plan_literals::SchemaIndex, AirNode, CapEnforcer, CapGrant,
+    DefSchema, EmptyObject, HashRef, ManifestDefaults, NamedRef, TypeExpr, TypePrimitive,
+    TypePrimitiveText,
 };
-use aos_cbor::{Hash, to_canonical_cbor};
+use aos_cbor::{to_canonical_cbor, Hash};
 use aos_effects::ReceiptStatus;
-use aos_kernel::Consistency;
-use aos_kernel::StateReader;
 use aos_kernel::capability::CapabilityResolver;
 use aos_kernel::effects::{EffectManager, EffectParamPreprocessor};
 use aos_kernel::error::KernelError;
 use aos_kernel::governance::ProposalState;
 use aos_kernel::governance_effects::GovernanceParamPreprocessor;
 use aos_kernel::policy::AllowAllPolicy;
+use aos_kernel::Consistency;
+use aos_kernel::StateReader;
 use aos_store::Store;
 use aos_wasm_abi::ReducerEffect;
 use serde::Deserialize;
@@ -74,7 +74,10 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
     let shadow_intent = effect_manager.enqueue_reducer_effect_with_grant(
         "com.acme/Simple@1",
         &grant,
-        &ReducerEffect::new("governance.shadow", shadow_params_cbor(propose.proposal_id)?),
+        &ReducerEffect::new(
+            "governance.shadow",
+            shadow_params_cbor(propose.proposal_id)?,
+        ),
     )?;
     let shadow_receipt = world
         .kernel
@@ -92,7 +95,10 @@ fn governance_effects_apply_patch_doc_from_workflow_origin() -> Result<(), Kerne
     let approve_intent = effect_manager.enqueue_reducer_effect_with_grant(
         "com.acme/Simple@1",
         &grant,
-        &ReducerEffect::new("governance.approve", approve_params_cbor(propose.proposal_id)?),
+        &ReducerEffect::new(
+            "governance.approve",
+            approve_params_cbor(propose.proposal_id)?,
+        ),
     )?;
     let approve_receipt = world
         .kernel

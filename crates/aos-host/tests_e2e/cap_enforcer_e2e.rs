@@ -10,21 +10,45 @@
 mod helpers;
 
 use aos_air_types::{
-    CapEnforcer, CapGrant, CapType, DefCap, DefPlan, EffectKind as AirEffectKind, EmptyObject,
-    ExprOrValue, NamedRef, PlanBindEffect, PlanEdge, PlanStep, PlanStepEmitEffect, PlanStepEnd,
-    PlanStepKind, TypeExpr, TypeList, TypeOption, TypePrimitive, TypePrimitiveNat,
-    TypePrimitiveText, TypeRecord, TypeSet, ValueList, ValueLiteral, ValueMap, ValueNull,
-    ValueRecord, ValueSet, ValueText,
+    CapEnforcer, CapGrant, CapType, DefCap, EffectKind as AirEffectKind, EmptyObject, NamedRef,
+    ReducerAbi, TypeExpr, TypeList, TypeOption, TypePrimitive, TypePrimitiveNat, TypePrimitiveText,
+    TypeRecord, TypeSet, ValueList, ValueLiteral, ValueRecord, ValueSet, ValueText,
 };
+use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs};
+use aos_wasm_abi::{ReducerEffect, ReducerOutput};
 use helpers::fixtures::{self, TestWorld};
 use indexmap::IndexMap;
 
 #[test]
-#[ignore = "P2: plan-trigger runtime retired; replace with workflow-module enforcer fixtures"]
 fn http_enforcer_module_denies_host() {
     let store = fixtures::new_mem_store();
-    let plan_name = "com.acme/HttpPlan@1".to_string();
-    let plan = http_plan(&plan_name, "cap_http", "https://denied.example/path");
+    let reducer_name = "com.acme/HttpWorkflow@1";
+
+    let output = ReducerOutput {
+        state: None,
+        domain_events: vec![],
+        effects: vec![ReducerEffect::with_cap_slot(
+            aos_effects::EffectKind::HTTP_REQUEST,
+            serde_cbor::to_vec(&HttpRequestParams {
+                method: "GET".into(),
+                url: "https://denied.example/path".into(),
+                headers: IndexMap::new(),
+                body_ref: None,
+            })
+            .unwrap(),
+            "http",
+        )],
+        ann: None,
+    };
+    let mut reducer = fixtures::stub_reducer_module(&store, reducer_name, &output);
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/HttpState@1"),
+        event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        cap_slots: Default::default(),
+    });
 
     let enforcer = fixtures::pure_module_from_target(
         &store,
@@ -35,10 +59,8 @@ fn http_enforcer_module_denies_host() {
     );
 
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![plan],
-        vec![fixtures::start_trigger(&plan_name)],
-        vec![enforcer],
-        vec![],
+        vec![reducer, enforcer],
+        vec![fixtures::routing_event(fixtures::START_SCHEMA, reducer_name)],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -47,13 +69,9 @@ fn http_enforcer_module_denies_host() {
                 fixtures::START_SCHEMA,
                 vec![("id", helpers::text_type())],
             ),
-            helpers::def_text_record_schema(
-                "com.acme/HttpPlanIn@1",
-                vec![("id", helpers::text_type())],
-            ),
+            helpers::def_text_record_schema("com.acme/HttpState@1", vec![]),
         ],
     );
-
     if let Some(defaults) = loaded.manifest.defaults.as_mut() {
         for grant in &mut defaults.cap_grants {
             if grant.name == "cap_http" {
@@ -62,13 +80,17 @@ fn http_enforcer_module_denies_host() {
         }
     }
     loaded.caps.insert("sys/http.out@1".into(), http_defcap());
+    loaded
+        .manifest
+        .module_bindings
+        .get_mut(reducer_name)
+        .expect("module binding")
+        .slots
+        .insert("http".into(), "cap_http".into());
 
     let mut world = TestWorld::with_store(store, loaded).expect("world");
     world
-        .submit_event_result(
-            fixtures::START_SCHEMA,
-            &serde_json::json!({ "id": "start" }),
-        )
+        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "start" }))
         .expect("submit start event");
     let err = world.kernel.tick().expect_err("expected denial");
     assert!(
@@ -85,11 +107,48 @@ fn http_enforcer_module_denies_host() {
 }
 
 #[test]
-#[ignore = "P2: plan-trigger runtime retired; replace with workflow-module enforcer fixtures"]
 fn llm_enforcer_module_denies_model() {
     let store = fixtures::new_mem_store();
-    let plan_name = "com.acme/LlmPlan@1".to_string();
-    let plan = llm_plan(&plan_name, "cap_llm", "openai", "gpt-5.2", 10);
+    let reducer_name = "com.acme/LlmWorkflow@1";
+
+    let output = ReducerOutput {
+        state: None,
+        domain_events: vec![],
+        effects: vec![ReducerEffect::with_cap_slot(
+            aos_effects::EffectKind::LLM_GENERATE,
+            serde_cbor::to_vec(&LlmGenerateParams {
+                correlation_id: None,
+                provider: "openai".into(),
+                model: "gpt-5.2".into(),
+                message_refs: vec![fixtures::fake_hash(0x22)],
+                runtime: LlmRuntimeArgs {
+                    temperature: Some("0.4".into()),
+                    top_p: None,
+                    max_tokens: Some(10),
+                    tool_refs: None,
+                    tool_choice: None,
+                    reasoning_effort: None,
+                    stop_sequences: None,
+                    metadata: None,
+                    provider_options_ref: None,
+                    response_format_ref: None,
+                },
+                api_key: None,
+            })
+            .unwrap(),
+            "llm",
+        )],
+        ann: None,
+    };
+    let mut reducer = fixtures::stub_reducer_module(&store, reducer_name, &output);
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/LlmState@1"),
+        event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::LLM_GENERATE.into()],
+        cap_slots: Default::default(),
+    });
 
     let enforcer = fixtures::pure_module_from_target(
         &store,
@@ -100,10 +159,8 @@ fn llm_enforcer_module_denies_model() {
     );
 
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![plan],
-        vec![fixtures::start_trigger(&plan_name)],
-        vec![enforcer],
-        vec![],
+        vec![reducer, enforcer],
+        vec![fixtures::routing_event(fixtures::START_SCHEMA, reducer_name)],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -112,13 +169,9 @@ fn llm_enforcer_module_denies_model() {
                 fixtures::START_SCHEMA,
                 vec![("id", helpers::text_type())],
             ),
-            helpers::def_text_record_schema(
-                "com.acme/LlmPlanIn@1",
-                vec![("id", helpers::text_type())],
-            ),
+            helpers::def_text_record_schema("com.acme/LlmState@1", vec![]),
         ],
     );
-
     if let Some(defaults) = loaded.manifest.defaults.as_mut() {
         defaults.cap_grants.push(CapGrant {
             name: "cap_llm".into(),
@@ -132,13 +185,17 @@ fn llm_enforcer_module_denies_model() {
         hash: fixtures::zero_hash(),
     });
     loaded.caps.insert("sys/llm.basic@1".into(), llm_defcap());
+    loaded
+        .manifest
+        .module_bindings
+        .get_mut(reducer_name)
+        .expect("module binding")
+        .slots
+        .insert("llm".into(), "cap_llm".into());
 
     let mut world = TestWorld::with_store(store, loaded).expect("world");
     world
-        .submit_event_result(
-            fixtures::START_SCHEMA,
-            &serde_json::json!({ "id": "start" }),
-        )
+        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "start" }))
         .expect("submit start event");
     let err = world.kernel.tick().expect_err("expected denial");
     assert!(
@@ -155,11 +212,33 @@ fn llm_enforcer_module_denies_model() {
 }
 
 #[test]
-#[ignore = "P2: plan-trigger runtime retired; replace with workflow-module enforcer fixtures"]
 fn workspace_enforcer_module_denies_workspace() {
     let store = fixtures::new_mem_store();
-    let plan_name = "com.acme/WorkspacePlan@1".to_string();
-    let plan = workspace_resolve_plan(&plan_name, "cap_workspace", "alpha");
+    let reducer_name = "com.acme/WorkspaceWorkflow@1";
+
+    let output = ReducerOutput {
+        state: None,
+        domain_events: vec![],
+        effects: vec![ReducerEffect::with_cap_slot(
+            aos_effects::EffectKind::WORKSPACE_RESOLVE,
+            serde_cbor::to_vec(&serde_json::json!({
+                "workspace": "alpha",
+                "version": null
+            }))
+            .unwrap(),
+            "workspace",
+        )],
+        ann: None,
+    };
+    let mut reducer = fixtures::stub_reducer_module(&store, reducer_name, &output);
+    reducer.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/WorkspaceState@1"),
+        event: fixtures::schema(fixtures::START_SCHEMA),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::WORKSPACE_RESOLVE.into()],
+        cap_slots: Default::default(),
+    });
 
     let enforcer = fixtures::pure_module_from_target(
         &store,
@@ -170,10 +249,8 @@ fn workspace_enforcer_module_denies_workspace() {
     );
 
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![plan],
-        vec![fixtures::start_trigger(&plan_name)],
-        vec![enforcer],
-        vec![],
+        vec![reducer, enforcer],
+        vec![fixtures::routing_event(fixtures::START_SCHEMA, reducer_name)],
     );
     fixtures::insert_test_schemas(
         &mut loaded,
@@ -182,13 +259,9 @@ fn workspace_enforcer_module_denies_workspace() {
                 fixtures::START_SCHEMA,
                 vec![("id", helpers::text_type())],
             ),
-            helpers::def_text_record_schema(
-                "com.acme/WorkspacePlanIn@1",
-                vec![("id", helpers::text_type())],
-            ),
+            helpers::def_text_record_schema("com.acme/WorkspaceState@1", vec![]),
         ],
     );
-
     if let Some(defaults) = loaded.manifest.defaults.as_mut() {
         defaults.cap_grants.push(CapGrant {
             name: "cap_workspace".into(),
@@ -204,13 +277,17 @@ fn workspace_enforcer_module_denies_workspace() {
     loaded
         .caps
         .insert("sys/workspace@1".into(), workspace_defcap());
+    loaded
+        .manifest
+        .module_bindings
+        .get_mut(reducer_name)
+        .expect("module binding")
+        .slots
+        .insert("workspace".into(), "cap_workspace".into());
 
     let mut world = TestWorld::with_store(store, loaded).expect("world");
     world
-        .submit_event_result(
-            fixtures::START_SCHEMA,
-            &serde_json::json!({ "id": "start" }),
-        )
+        .submit_event_result(fixtures::START_SCHEMA, &serde_json::json!({ "id": "start" }))
         .expect("submit start event");
     let err = world.kernel.tick().expect_err("expected denial");
     assert!(
@@ -389,249 +466,4 @@ fn opt_nat() -> TypeExpr {
             nat: EmptyObject {},
         }))),
     })
-}
-
-fn http_plan(plan_name: &str, cap: &str, url: &str) -> DefPlan {
-    DefPlan {
-        name: plan_name.to_string(),
-        input: fixtures::schema("com.acme/HttpPlanIn@1"),
-        output: None,
-        locals: IndexMap::new(),
-        steps: vec![
-            PlanStep {
-                id: "emit".into(),
-                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: AirEffectKind::http_request(),
-                    params: http_params_literal(url),
-                    cap: cap.to_string(),
-                    idempotency_key: None,
-                    bind: PlanBindEffect {
-                        effect_id_as: "req".into(),
-                    },
-                }),
-            },
-            PlanStep {
-                id: "end".into(),
-                kind: PlanStepKind::End(PlanStepEnd { result: None }),
-            },
-        ],
-        edges: vec![PlanEdge {
-            from: "emit".into(),
-            to: "end".into(),
-            when: None,
-        }],
-        required_caps: vec![cap.to_string()],
-        allowed_effects: vec![AirEffectKind::http_request()],
-        invariants: vec![],
-    }
-}
-
-fn workspace_resolve_plan(plan_name: &str, cap: &str, workspace: &str) -> DefPlan {
-    DefPlan {
-        name: plan_name.to_string(),
-        input: fixtures::schema("com.acme/WorkspacePlanIn@1"),
-        output: None,
-        locals: IndexMap::new(),
-        steps: vec![
-            PlanStep {
-                id: "emit".into(),
-                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: AirEffectKind::workspace_resolve(),
-                    params: workspace_resolve_params_literal(workspace),
-                    cap: cap.to_string(),
-                    idempotency_key: None,
-                    bind: PlanBindEffect {
-                        effect_id_as: "req".into(),
-                    },
-                }),
-            },
-            PlanStep {
-                id: "end".into(),
-                kind: PlanStepKind::End(PlanStepEnd { result: None }),
-            },
-        ],
-        edges: vec![PlanEdge {
-            from: "emit".into(),
-            to: "end".into(),
-            when: None,
-        }],
-        required_caps: vec![cap.to_string()],
-        allowed_effects: vec![AirEffectKind::workspace_resolve()],
-        invariants: vec![],
-    }
-}
-
-fn llm_plan(plan_name: &str, cap: &str, provider: &str, model: &str, max_tokens: u64) -> DefPlan {
-    DefPlan {
-        name: plan_name.to_string(),
-        input: fixtures::schema("com.acme/LlmPlanIn@1"),
-        output: None,
-        locals: IndexMap::new(),
-        steps: vec![
-            PlanStep {
-                id: "emit".into(),
-                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: AirEffectKind::llm_generate(),
-                    params: llm_params_literal(provider, model, max_tokens),
-                    cap: cap.to_string(),
-                    idempotency_key: None,
-                    bind: PlanBindEffect {
-                        effect_id_as: "req".into(),
-                    },
-                }),
-            },
-            PlanStep {
-                id: "end".into(),
-                kind: PlanStepKind::End(PlanStepEnd { result: None }),
-            },
-        ],
-        edges: vec![PlanEdge {
-            from: "emit".into(),
-            to: "end".into(),
-            when: None,
-        }],
-        required_caps: vec![cap.to_string()],
-        allowed_effects: vec![AirEffectKind::llm_generate()],
-        invariants: vec![],
-    }
-}
-
-fn http_params_literal(url: &str) -> ExprOrValue {
-    ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
-        record: IndexMap::from([
-            (
-                "method".into(),
-                ValueLiteral::Text(ValueText { text: "GET".into() }),
-            ),
-            (
-                "url".into(),
-                ValueLiteral::Text(ValueText { text: url.into() }),
-            ),
-            (
-                "headers".into(),
-                ValueLiteral::Map(ValueMap { map: vec![] }),
-            ),
-            (
-                "body_ref".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-        ]),
-    }))
-}
-
-fn workspace_resolve_params_literal(workspace: &str) -> ExprOrValue {
-    ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
-        record: IndexMap::from([
-            (
-                "workspace".into(),
-                ValueLiteral::Text(ValueText {
-                    text: workspace.to_string(),
-                }),
-            ),
-            (
-                "version".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-        ]),
-    }))
-}
-
-fn llm_params_literal(provider: &str, model: &str, max_tokens: u64) -> ExprOrValue {
-    let runtime = ValueLiteral::Record(ValueRecord {
-        record: IndexMap::from([
-            (
-                "temperature".into(),
-                ValueLiteral::Dec128(aos_air_types::ValueDec128 {
-                    dec128: "0.4".into(),
-                }),
-            ),
-            (
-                "top_p".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-            (
-                "max_tokens".into(),
-                ValueLiteral::Nat(aos_air_types::ValueNat { nat: max_tokens }),
-            ),
-            (
-                "tool_refs".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-            (
-                "tool_choice".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-            (
-                "reasoning_effort".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-            (
-                "stop_sequences".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-            (
-                "metadata".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-            (
-                "provider_options_ref".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-            (
-                "response_format_ref".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-        ]),
-    });
-    ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
-        record: IndexMap::from([
-            (
-                "provider".into(),
-                ValueLiteral::Text(ValueText {
-                    text: provider.to_string(),
-                }),
-            ),
-            (
-                "model".into(),
-                ValueLiteral::Text(ValueText {
-                    text: model.to_string(),
-                }),
-            ),
-            (
-                "message_refs".into(),
-                ValueLiteral::List(aos_air_types::ValueList {
-                    list: vec![ValueLiteral::Hash(aos_air_types::ValueHash {
-                        hash: fixtures::fake_hash(0x11),
-                    })],
-                }),
-            ),
-            ("runtime".into(), runtime),
-            (
-                "api_key".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-        ]),
-    }))
 }

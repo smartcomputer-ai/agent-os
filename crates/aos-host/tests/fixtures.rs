@@ -10,12 +10,10 @@ use std::sync::Arc;
 
 use aos_air_exec::{Value as ExprValue, ValueKey as ExprValueKey};
 use aos_air_types::{
-    CapGrant, CapType, DefCap, DefEffect, DefModule, DefPlan, DefSchema, EffectKind, EmptyObject,
-    Expr, ExprConst, ExprOrValue, ExprRef, HashRef, Manifest, ManifestDefaults, ModuleAbi,
-    ModuleBinding, ModuleKind, Name, NamedRef, OriginScope, PlanBind, PlanBindEffect,
-    PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepKind, Routing, RoutingEvent, SchemaRef,
-    Trigger, TypeExpr, TypeOption, TypePrimitive, TypePrimitiveText, TypeRecord, ValueLiteral,
-    ValueRecord, ValueText, catalog::EffectCatalog,
+    catalog::EffectCatalog, CapGrant, CapType, DefCap, DefEffect, DefModule, DefSchema,
+    EmptyObject, HashRef, Manifest, ManifestDefaults, ModuleAbi, ModuleBinding, ModuleKind, Name,
+    NamedRef, OriginScope, Routing, RoutingEvent, SchemaRef, TypeExpr, TypeOption, TypePrimitive,
+    TypePrimitiveText, TypeRecord, ValueLiteral, ValueRecord,
 };
 use aos_cbor::Hash;
 use aos_kernel::manifest::LoadedManifest;
@@ -29,48 +27,15 @@ use wat::parse_str;
 /// In-memory store alias used across fixtures.
 pub type TestStore = MemStore;
 
-/// Standard start schema used for triggering plans in tests.
+/// Standard start schema used for triggering workflows in tests.
 pub const START_SCHEMA: &str = "com.acme/Start@1";
 
 /// Built-in timer fired schema.
 pub const SYS_TIMER_FIRED: &str = "sys/TimerFired@1";
 
-/// Returns a schema reference for reuse in manifests and plans.
+/// Returns a schema reference for reuse in manifests and workflow fixtures.
 pub fn schema(name: &str) -> SchemaRef {
     SchemaRef::new(name).unwrap()
-}
-
-/// Builds a plan expression that yields a text literal.
-pub fn text_expr(value: &str) -> Expr {
-    Expr::Const(ExprConst::Text {
-        text: value.to_string(),
-    })
-}
-
-/// Builds a plan expression that yields a boolean literal.
-pub fn bool_expr(value: bool) -> Expr {
-    Expr::Const(ExprConst::Bool { bool: value })
-}
-
-/// References a previously bound plan variable (e.g., `@var:req`).
-pub fn var_expr(name: &str) -> Expr {
-    Expr::Ref(ExprRef {
-        reference: format!("@var:{name}"),
-    })
-}
-
-/// References a field on the plan input (e.g., `@plan.input.order_id`).
-pub fn plan_input_expr(field: &str) -> Expr {
-    Expr::Ref(ExprRef {
-        reference: format!("@plan.input.{field}"),
-    })
-}
-
-/// Convenience helper for synthesizing a record literal for plan inputs/events.
-pub fn plan_input_record(fields: Vec<(&str, ExprValue)>) -> ExprValue {
-    ExprValue::Record(IndexMap::from_iter(
-        fields.into_iter().map(|(k, v)| (k.to_string(), v)),
-    ))
 }
 
 /// Build a canonical start event payload matching the common Start schema
@@ -79,29 +44,7 @@ pub fn start_event(id: &str) -> serde_json::Value {
     serde_json::json!({ "id": id })
 }
 
-/// Trigger helper that wires the standard `START_SCHEMA` to the provided plan.
-pub fn start_trigger(plan: &str) -> Trigger {
-    Trigger {
-        event: schema(START_SCHEMA),
-        plan: plan.to_string(),
-        correlate_by: None,
-        when: None,
-        input_expr: None,
-    }
-}
-
-/// Trigger helper for the built-in timer receipt schema.
-pub fn timer_trigger(plan: &str) -> Trigger {
-    Trigger {
-        event: schema(SYS_TIMER_FIRED),
-        plan: plan.to_string(),
-        correlate_by: None,
-        when: None,
-        input_expr: None,
-    }
-}
-
-/// Returns the zero hash helper used as a placeholder for plan references.
+/// Returns the zero hash helper used as a placeholder for manifest references.
 pub fn zero_hash() -> HashRef {
     HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000").unwrap()
 }
@@ -149,10 +92,8 @@ pub fn insert_test_schemas(loaded: &mut LoadedManifest, schemas: Vec<DefSchema>)
     }
 }
 
-/// Builds a `LoadedManifest` from already-parsed plan and module definitions.
+/// Builds a `LoadedManifest` from workflow/pure modules and routing subscriptions.
 pub fn build_loaded_manifest(
-    _plans: Vec<DefPlan>,
-    _triggers: Vec<Trigger>,
     mut modules: Vec<DefModule>,
     routing_events: Vec<RoutingEvent>,
 ) -> LoadedManifest {
@@ -222,53 +163,6 @@ pub fn build_loaded_manifest(
     };
     ensure_placeholder_schemas(&mut loaded);
     loaded
-}
-
-/// Emit+await plan steps for `introspect.manifest`.
-///
-/// - `consistency`: e.g., "head", "exact:5", "at_least:10"
-/// - `cap_slot`: capability binding slot (usually "query_cap")
-/// - `bind_prefix`: prefix for effect handle/receipt vars (e.g., "manifest")
-pub fn introspect_manifest_steps(
-    consistency: &str,
-    cap_slot: &str,
-    bind_prefix: &str,
-) -> Vec<aos_air_types::PlanStep> {
-    let emit_id = format!("{bind_prefix}_emit");
-    let await_id = format!("{bind_prefix}_await");
-    let effect_var = format!("{bind_prefix}_req");
-    let receipt_var = format!("{bind_prefix}_receipt");
-
-    vec![
-        aos_air_types::PlanStep {
-            id: emit_id,
-            kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                kind: EffectKind::introspect_manifest(),
-                params: ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
-                    record: IndexMap::from([(
-                        "consistency".into(),
-                        ValueLiteral::Text(ValueText {
-                            text: consistency.to_string(),
-                        }),
-                    )]),
-                })),
-                cap: cap_slot.into(),
-                idempotency_key: None,
-                bind: PlanBindEffect {
-                    effect_id_as: effect_var.clone(),
-                },
-            }),
-        },
-        aos_air_types::PlanStep {
-            id: await_id,
-            kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
-                for_expr: Expr::Ref(ExprRef {
-                    reference: format!("@{effect_var}"),
-                }),
-                bind: PlanBind { var: receipt_var },
-            }),
-        },
-    ]
 }
 
 /// Populates the manifest with default capability grants and module slot bindings so reducers
@@ -853,7 +747,7 @@ pub fn effect_params_text(intent: &aos_effects::EffectIntent) -> String {
 // ---------------------------------------------------------------------------
 
 use aos_effects::EffectIntent;
-use aos_kernel::{Kernel, error::KernelError, journal::Journal, journal::mem::MemJournal};
+use aos_kernel::{error::KernelError, journal::mem::MemJournal, journal::Journal, Kernel};
 use serde::Serialize;
 
 /// Wrapper around `Kernel<MemStore>` plus the underlying store for low-level integration tests.

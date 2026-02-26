@@ -1,6 +1,6 @@
 mod helpers;
 use aos_air_types::{
-    DefSchema, ReducerAbi, plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name,
+    plan_literals::SchemaIndex, value_normalize::normalize_cbor_by_name, DefSchema, ReducerAbi,
 };
 use aos_kernel::{Consistency, StateReader};
 use aos_wasm_abi::ReducerOutput;
@@ -41,7 +41,7 @@ fn test_world_with_state(payload: &[u8]) -> fixtures::TestWorld {
         fixtures::START_SCHEMA,
         &module.name,
     )];
-    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![module], routing);
+    let mut loaded = fixtures::build_loaded_manifest(vec![module], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![
@@ -87,7 +87,7 @@ fn test_world_keyed(payload: &[u8], key_field: &str) -> fixtures::TestWorld {
         key_field: Some(key_field.to_string()),
     }];
 
-    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![

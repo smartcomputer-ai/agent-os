@@ -34,7 +34,7 @@ fn world_with_state(bytes: &[u8]) -> helpers::fixtures::TestWorld {
         fixtures::START_SCHEMA,
         &reducer.name,
     )];
-    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    let mut loaded = fixtures::build_loaded_manifest(vec![reducer], routing);
     fixtures::insert_test_schemas(
         &mut loaded,
         vec![

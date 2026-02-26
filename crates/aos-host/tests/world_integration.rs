@@ -76,8 +76,6 @@ fn raised_events_are_routed_to_reducers() {
     });
 
     let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
         vec![emitter, consumer],
         vec![
             fixtures::routing_event(START_SCHEMA, "com.acme/RaisedEmitter@1"),
