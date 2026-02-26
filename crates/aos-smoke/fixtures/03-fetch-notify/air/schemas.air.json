@@ -19,7 +19,7 @@
         "next_request_id": { "nat": {} },
         "pending_request": { "option": { "nat": {} } },
         "last_status": { "option": { "int": {} } },
-        "last_body_preview": { "option": { "text": {} } }
+        "last_body_ref": { "option": { "hash": {} } }
       }
     }
   },

@@ -8,7 +8,6 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, aos_reducer, aos_variant};
 use serde::{Deserialize, Serialize};
-use serde_cbor::Value as CborValue;
 
 const HTTP_REQUEST_EFFECT: &str = "http.request";
 
@@ -18,7 +17,7 @@ struct FetchState {
     next_request_id: u64,
     pending_request: Option<u64>,
     last_status: Option<i64>,
-    last_body_preview: Option<String>,
+    last_body_ref: Option<String>,
 }
 
 aos_variant! {
@@ -45,16 +44,19 @@ struct StartEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EffectReceiptEnvelope {
     origin_module_id: String,
-    origin_instance_key: Option<serde_bytes::ByteBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_bytes_opt")]
+    origin_instance_key: Option<Vec<u8>>,
     intent_id: String,
     effect_kind: String,
     params_hash: Option<String>,
-    receipt_payload: serde_bytes::ByteBuf,
+    #[serde(with = "serde_bytes")]
+    receipt_payload: Vec<u8>,
     status: String,
     emitted_at_seq: u64,
     adapter_id: String,
     cost_cents: Option<u64>,
-    signature: serde_bytes::ByteBuf,
+    #[serde(with = "serde_bytes")]
+    signature: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,10 +67,28 @@ struct HttpRequestParams {
     body_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-struct HttpRequestReceiptPayload {
-    status: i64,
-    body_preview: Option<String>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RequestTimings {
+    start_ns: u64,
+    end_ns: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HttpRequestReceipt {
+    status: i32,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    body_ref: Option<String>,
+    timings: RequestTimings,
+    adapter_id: String,
+}
+
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum FetchEvent {
+        Start(StartEvent),
+        Receipt(EffectReceiptEnvelope)
+    }
 }
 
 aos_reducer!(FetchNotifySm);
@@ -78,7 +98,7 @@ struct FetchNotifySm;
 
 impl Reducer for FetchNotifySm {
     type State = FetchState;
-    type Event = CborValue;
+    type Event = FetchEvent;
     type Ann = ();
 
     fn reduce(
@@ -86,21 +106,9 @@ impl Reducer for FetchNotifySm {
         event: Self::Event,
         ctx: &mut ReducerCtx<Self::State, ()>,
     ) -> Result<(), ReduceError> {
-        let Some((tag, payload)) = decode_tagged_event(event) else {
-            return Ok(());
-        };
-        match tag.as_str() {
-            "Start" | "start" => {
-                let start: StartEvent = serde_cbor::value::from_value(payload)
-                    .map_err(|_| ReduceError::new("invalid Start payload"))?;
-                handle_start(ctx, start.url, start.method)?;
-            }
-            "Receipt" | "receipt" => {
-                let envelope: EffectReceiptEnvelope = serde_cbor::value::from_value(payload)
-                    .map_err(|_| ReduceError::new("invalid Receipt payload"))?;
-                handle_receipt(ctx, envelope)?;
-            }
-            _ => {}
+        match event {
+            FetchEvent::Start(start) => handle_start(ctx, start.url, start.method)?,
+            FetchEvent::Receipt(envelope) => handle_receipt(ctx, envelope)?,
         }
         Ok(())
     }
@@ -119,7 +127,7 @@ fn handle_start(
     ctx.state.pending_request = Some(request_id);
     ctx.state.pc = FetchPc::Fetching;
     ctx.state.last_status = None;
-    ctx.state.last_body_preview = None;
+    ctx.state.last_body_ref = None;
 
     let params = HttpRequestParams {
         method,
@@ -142,101 +150,38 @@ fn handle_receipt(
     if envelope.effect_kind != HTTP_REQUEST_EFFECT {
         return Ok(());
     }
-    let receipt = decode_http_receipt_payload(&envelope.receipt_payload).unwrap_or(
-        HttpRequestReceiptPayload {
-            status: 0,
-            body_preview: None,
-        },
-    );
+
+    let receipt: HttpRequestReceipt = serde_cbor::from_slice(&envelope.receipt_payload)
+        .map_err(|_| ReduceError::new("invalid http.request receipt payload"))?;
+
     ctx.state.pending_request = None;
     ctx.state.pc = FetchPc::Done;
-    ctx.state.last_status = Some(receipt.status);
-    ctx.state.last_body_preview = receipt.body_preview;
+    ctx.state.last_status = Some(receipt.status as i64);
+    ctx.state.last_body_ref = receipt.body_ref;
     Ok(())
 }
 
-fn decode_http_receipt_payload(payload: &[u8]) -> Result<HttpRequestReceiptPayload, ReduceError> {
-    let value: CborValue =
-        serde_cbor::from_slice(payload).map_err(|_| ReduceError::new("invalid http.request receipt payload"))?;
-    let status = extract_status(&value).ok_or(ReduceError::new("missing http status"))?;
-    let body_preview = extract_body_preview(&value);
-    Ok(HttpRequestReceiptPayload {
-        status,
-        body_preview,
-    })
-}
+mod serde_bytes_opt {
+    use alloc::vec::Vec;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use serde_bytes::{ByteBuf, Bytes};
 
-fn root_record(value: &CborValue) -> Option<&BTreeMap<CborValue, CborValue>> {
-    let CborValue::Map(map) = value else {
-        return None;
-    };
-    if let Some(record) = map.get(&CborValue::Text("Record".into())) {
-        let CborValue::Map(record_map) = record else {
-            return None;
-        };
-        return Some(record_map);
-    }
-    Some(map)
-}
-
-fn map_get_text<'a>(
-    map: &'a BTreeMap<CborValue, CborValue>,
-    key: &str,
-) -> Option<&'a CborValue> {
-    map.get(&CborValue::Text(key.into()))
-}
-
-fn decode_value_int(value: &CborValue) -> Option<i64> {
-    match value {
-        CborValue::Integer(i) => i64::try_from(*i).ok(),
-        CborValue::Map(map) => {
-            let wrapped = map_get_text(map, "Int").or_else(|| map_get_text(map, "Nat"))?;
-            match wrapped {
-                CborValue::Integer(i) => i64::try_from(*i).ok(),
-                _ => None,
-            }
+    pub fn serialize<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(bytes) => serializer.serialize_some(Bytes::new(bytes)),
+            None => serializer.serialize_none(),
         }
-        _ => None,
     }
-}
 
-fn decode_value_text(value: &CborValue) -> Option<String> {
-    match value {
-        CborValue::Text(text) => Some(text.clone()),
-        CborValue::Map(map) => {
-            let wrapped = map_get_text(map, "Text")?;
-            match wrapped {
-                CborValue::Text(text) => Some(text.clone()),
-                _ => None,
-            }
-        }
-        _ => None,
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Option::<ByteBuf>::deserialize(deserializer).map(|opt| opt.map(|buf| buf.into_vec()))
     }
-}
-
-fn extract_status(value: &CborValue) -> Option<i64> {
-    let root = root_record(value)?;
-    let status_value = map_get_text(root, "status")?;
-    decode_value_int(status_value)
-}
-
-fn extract_body_preview(value: &CborValue) -> Option<String> {
-    let root = root_record(value)?;
-    let preview = map_get_text(root, "body_preview")?;
-    decode_value_text(preview)
-}
-
-fn decode_tagged_event(value: CborValue) -> Option<(String, CborValue)> {
-    let CborValue::Map(map) = value else {
-        return None;
-    };
-    let tag = map_get_text(&map, "$tag")?;
-    let tag = decode_value_text(tag)?;
-    let payload = map
-        .get(&CborValue::Text("$value".into()))
-        .cloned()
-        .unwrap_or(CborValue::Null);
-    Some((tag, payload))
 }
 
 #[cfg(test)]
@@ -244,7 +189,6 @@ mod tests {
     use super::*;
     use aos_wasm_abi::{ABI_VERSION, DomainEvent, ReducerContext, ReducerInput, ReducerOutput};
     use aos_wasm_sdk::step_bytes;
-    use alloc::string::ToString;
     use alloc::vec;
 
     fn context_bytes() -> Vec<u8> {
@@ -264,100 +208,62 @@ mod tests {
         serde_cbor::to_vec(&ctx).expect("context bytes")
     }
 
-    fn step_with(state: Option<Vec<u8>>, event: CborValue) -> Result<ReducerOutput, String> {
+    fn step_with(state: Option<Vec<u8>>, event: &FetchEvent) -> ReducerOutput {
         let input = ReducerInput {
             version: ABI_VERSION,
             state,
             event: DomainEvent::new(
                 "demo/FetchNotifyEvent@1",
-                serde_cbor::to_vec(&event).expect("event bytes"),
+                serde_cbor::to_vec(event).expect("event bytes"),
             ),
             ctx: Some(context_bytes()),
         };
         let input_bytes = input.encode().expect("encode input");
-        let output_bytes = step_bytes::<FetchNotifySm>(&input_bytes).map_err(|e| e.to_string())?;
-        ReducerOutput::decode(&output_bytes).map_err(|e| e.to_string())
-    }
-
-    fn tagged(tag: &str, payload: CborValue) -> CborValue {
-        CborValue::Map(BTreeMap::from([
-            (CborValue::Text("$tag".into()), CborValue::Text(tag.into())),
-            (CborValue::Text("$value".into()), payload),
-        ]))
+        let output_bytes = step_bytes::<FetchNotifySm>(&input_bytes).expect("step");
+        ReducerOutput::decode(&output_bytes).expect("decode output")
     }
 
     #[test]
     fn start_then_receipt_round_trip() {
-        let start_payload = CborValue::Map(BTreeMap::from([
-            (
-                CborValue::Text("url".into()),
-                CborValue::Text("https://example.com/data.json".into()),
-            ),
-            (
-                CborValue::Text("method".into()),
-                CborValue::Text("GET".into()),
-            ),
-        ]));
-        let start_output = step_with(None, tagged("Start", start_payload)).expect("start step");
-        assert_eq!(start_output.effects.len(), 1);
-        let state_after_start = start_output.state.expect("state after start");
+        let start = FetchEvent::Start(StartEvent {
+            url: "https://example.com/data.json".into(),
+            method: "GET".into(),
+        });
+        let start_out = step_with(None, &start);
+        assert_eq!(start_out.effects.len(), 1);
+        let state_after_start = start_out.state.expect("state");
 
-        let receipt_payload = serde_cbor::to_vec(&CborValue::Map(BTreeMap::from([
-            (
-                CborValue::Text("status".into()),
-                CborValue::Integer(200.into()),
+        let receipt_payload = HttpRequestReceipt {
+            status: 200,
+            headers: BTreeMap::new(),
+            body_ref: Some(
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
             ),
-            (
-                CborValue::Text("body_preview".into()),
-                CborValue::Text("{\"ok\":true}".into()),
-            ),
-        ])))
-        .expect("receipt payload");
-        let receipt_envelope = CborValue::Map(BTreeMap::from([
-            (
-                CborValue::Text("origin_module_id".into()),
-                CborValue::Text("demo/FetchNotify@1".into()),
-            ),
-            (CborValue::Text("origin_instance_key".into()), CborValue::Null),
-            (
-                CborValue::Text("intent_id".into()),
-                CborValue::Text(
-                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-                ),
-            ),
-            (
-                CborValue::Text("effect_kind".into()),
-                CborValue::Text("http.request".into()),
-            ),
-            (CborValue::Text("params_hash".into()), CborValue::Null),
-            (
-                CborValue::Text("receipt_payload".into()),
-                CborValue::Bytes(receipt_payload),
-            ),
-            (CborValue::Text("status".into()), CborValue::Text("ok".into())),
-            (
-                CborValue::Text("emitted_at_seq".into()),
-                CborValue::Integer(1.into()),
-            ),
-            (
-                CborValue::Text("adapter_id".into()),
-                CborValue::Text("http.mock".into()),
-            ),
-            (CborValue::Text("cost_cents".into()), CborValue::Null),
-            (
-                CborValue::Text("signature".into()),
-                CborValue::Bytes(vec![0; 64]),
-            ),
-        ]));
-        let receipt_output = step_with(
-            Some(state_after_start),
-            tagged("Receipt", receipt_envelope),
-        )
-        .expect("receipt step");
-        let state_bytes = receipt_output.state.expect("state after receipt");
+            timings: RequestTimings {
+                start_ns: 10,
+                end_ns: 20,
+            },
+            adapter_id: "http.mock".into(),
+        };
+        let receipt = FetchEvent::Receipt(EffectReceiptEnvelope {
+            origin_module_id: "demo/FetchNotify@1".into(),
+            origin_instance_key: None,
+            intent_id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                .into(),
+            effect_kind: "http.request".into(),
+            params_hash: None,
+            receipt_payload: serde_cbor::to_vec(&receipt_payload).expect("payload"),
+            status: "ok".into(),
+            emitted_at_seq: 1,
+            adapter_id: "http.mock".into(),
+            cost_cents: Some(0),
+            signature: vec![0; 64],
+        });
+        let receipt_out = step_with(Some(state_after_start), &receipt);
+        let state_bytes = receipt_out.state.expect("state after receipt");
         let state: FetchState = serde_cbor::from_slice(&state_bytes).expect("decode state");
         assert!(matches!(state.pc, FetchPc::Done));
         assert_eq!(state.last_status, Some(200));
-        assert_eq!(state.last_body_preview.as_deref(), Some("{\"ok\":true}"));
+        assert!(state.last_body_ref.is_some());
     }
 }

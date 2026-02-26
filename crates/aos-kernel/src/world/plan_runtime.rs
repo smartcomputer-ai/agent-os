@@ -288,6 +288,7 @@ impl<S: Store + 'static> Kernel<S> {
         }
 
         if let Some(context) = self.pending_reducer_receipts.remove(&receipt.intent_hash) {
+            let receipt = self.normalize_receipt_payload_for_effect(receipt, &context)?;
             self.record_effect_receipt(&receipt, &stamp)?;
             self.record_decisions()?;
             self.deliver_receipt_to_workflow_instance(context, &receipt, &stamp)?;
@@ -306,6 +307,32 @@ impl<S: Store + 'static> Kernel<S> {
         Err(KernelError::UnknownReceipt(format_intent_hash(
             &receipt.intent_hash,
         )))
+    }
+
+    fn normalize_receipt_payload_for_effect(
+        &self,
+        mut receipt: aos_effects::EffectReceipt,
+        context: &ReducerEffectContext,
+    ) -> Result<aos_effects::EffectReceipt, KernelError> {
+        let receipt_schema = self
+            .effect_defs
+            .values()
+            .find(|def| def.kind.as_str() == context.effect_kind)
+            .map(|def| def.receipt_schema.as_str().to_string())
+            .ok_or_else(|| KernelError::UnsupportedEffectKind(context.effect_kind.clone()))?;
+        let normalized = normalize_cbor_by_name(
+            &self.schema_index,
+            &receipt_schema,
+            &receipt.payload_cbor,
+        )
+        .map_err(|err| {
+            KernelError::ReceiptDecode(format!(
+                "receipt payload for '{}' failed schema '{}': {err}",
+                context.effect_kind, receipt_schema
+            ))
+        })?;
+        receipt.payload_cbor = normalized.bytes;
+        Ok(receipt)
     }
 
     fn deliver_receipt_to_workflow_instance(

@@ -8,10 +8,13 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use aos_air_exec::{Value as ExprValue, ValueKey};
+use aos_air_exec::Value as ExprValue;
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effects::builtins::{HeaderMap, HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs};
+use aos_effects::builtins::{
+    HeaderMap, HttpRequestParams, HttpRequestReceipt, LlmGenerateParams, LlmRuntimeArgs,
+    RequestTimings,
+};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::Store;
@@ -111,7 +114,8 @@ impl MockHttpHarness {
         ctx: HttpRequestContext,
         response: MockHttpResponse,
     ) -> Result<()> {
-        self.respond_with_body(kernel, None::<&S>, ctx, response)
+        let store = kernel.store();
+        self.respond_with_body(kernel, Some(store.as_ref()), ctx, response)
     }
 
     /// Respond to an HTTP request, optionally storing the body in a store.
@@ -122,13 +126,13 @@ impl MockHttpHarness {
         ctx: HttpRequestContext,
         response: MockHttpResponse,
     ) -> Result<()> {
-        let receipt_value =
-            build_http_receipt_value(response.status, &response.headers, response.body, store)?;
+        let receipt_payload =
+            build_http_receipt_payload(response.status, &response.headers, response.body, store)?;
         let receipt = EffectReceipt {
             intent_hash: ctx.intent.intent_hash,
             adapter_id: MOCK_HTTP_ADAPTER_ID.into(),
             status: ReceiptStatus::Ok,
-            payload_cbor: serde_cbor::to_vec(&receipt_value)?,
+            payload_cbor: serde_cbor::to_vec(&receipt_payload)?,
             cost_cents: Some(0),
             signature: vec![0; 64],
         };
@@ -144,39 +148,30 @@ impl Default for MockHttpHarness {
     }
 }
 
-fn build_http_receipt_value(
+fn build_http_receipt_payload(
     status: i64,
     headers: &HeaderMap,
     body: String,
     store: Option<&impl Store>,
-) -> Result<ExprValue> {
-    let mut record = indexmap::IndexMap::new();
-    record.insert("status".into(), ExprValue::Int(status));
-    record.insert("headers".into(), headers_to_value(&redact_headers(headers)));
-    record.insert("body_preview".into(), ExprValue::Text(body.clone()));
-    if let Some(store) = store {
+) -> Result<HttpRequestReceipt> {
+    let body_ref = if let Some(store) = store {
         let hash = store
             .put_blob(body.as_bytes())
             .context("store http response body")?;
-        record.insert("body_ref".into(), ExprValue::Text(hash.to_hex()));
-    }
-    let mut timings = indexmap::IndexMap::new();
-    timings.insert("start_ns".into(), ExprValue::Nat(10));
-    timings.insert("end_ns".into(), ExprValue::Nat(20));
-    record.insert("timings".into(), ExprValue::Record(timings));
-    record.insert(
-        "adapter_id".into(),
-        ExprValue::Text(MOCK_HTTP_ADAPTER_ID.into()),
-    );
-    Ok(ExprValue::Record(record))
-}
-
-fn headers_to_value(headers: &HeaderMap) -> ExprValue {
-    let mut map = aos_air_exec::ValueMap::new();
-    for (key, value) in headers {
-        map.insert(ValueKey::Text(key.clone()), ExprValue::Text(value.clone()));
-    }
-    ExprValue::Map(map)
+        Some(HashRef::new(hash.to_hex()).context("hash http response body")?)
+    } else {
+        None
+    };
+    Ok(HttpRequestReceipt {
+        status: status as i32,
+        headers: redact_headers(headers),
+        body_ref,
+        timings: RequestTimings {
+            start_ns: 10,
+            end_ns: 20,
+        },
+        adapter_id: MOCK_HTTP_ADAPTER_ID.into(),
+    })
 }
 
 fn redact_headers(headers: &HeaderMap) -> HeaderMap {

@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use anyhow::{Result, anyhow};
+use aos_cbor::Hash;
+use aos_store::Store;
 use aos_wasm_sdk::aos_variant;
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +25,7 @@ struct FetchStateView {
     next_request_id: u64,
     pending_request: Option<u64>,
     last_status: Option<i64>,
-    last_body_preview: Option<String>,
+    last_body_ref: Option<String>,
 }
 
 aos_variant! {
@@ -77,9 +79,15 @@ pub fn run(example_root: &Path) -> Result<()> {
     )?;
 
     let state: FetchStateView = host.read_state()?;
+    let body_preview = state
+        .last_body_ref
+        .as_deref()
+        .and_then(|hash_ref| Hash::from_hex_str(hash_ref).ok())
+        .and_then(|hash| host.store().get_blob(hash).ok())
+        .and_then(|bytes| String::from_utf8(bytes).ok());
     println!(
-        "   completed: pc={:?} status={:?} preview={:?}",
-        state.pc, state.last_status, state.last_body_preview
+        "   completed: pc={:?} status={:?} body_ref={:?} preview={:?}",
+        state.pc, state.last_status, state.last_body_ref, body_preview
     );
 
     host.finish()?.verify_replay()?;
