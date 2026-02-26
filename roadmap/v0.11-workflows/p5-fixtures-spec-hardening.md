@@ -37,7 +37,7 @@ Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 - [x] `06-safe-upgrade`: rewrite `air.v1`/`air.v2` to workflow modules; preserve upgrade-while-waiting semantics.
 - [x] `07-llm-summarizer`: replace summarize plan with workflow module orchestration.
 - [x] `08-retry-backoff`: rebuild retries/timeouts on workflow runtime and receipt/event model.
-- [ ] `09-workspaces`: replace workspace plan orchestration with workflow-module-first wiring.
+- [x] `09-workspaces`: replace workspace plan orchestration with workflow-module-first wiring.
 - [ ] `10-trace-failure-classification`: convert trace fixtures from plan modules to workflow modules.
 - [ ] `11-plan-runtime-hardening`: replace with workflow-runtime-hardening fixture set and outputs.
 - [ ] `20-agent-session`: remove remaining legacy manifest vocabulary; keep behavior unchanged.
@@ -141,6 +141,11 @@ Implementation log (completed 2026-02-26):
   - `crates/aos-smoke/fixtures/08-retry-backoff/air/*`
   - `crates/aos-smoke/fixtures/08-retry-backoff/reducer/src/lib.rs`
   - `crates/aos-smoke/src/retry_backoff.rs`
+- [x] Rewrote `09-workspaces` to workflow-native orchestration with direct workspace effects (`resolve -> [empty_root] -> write -> list -> diff`) and deterministic per-workspace commit emission.
+  - `crates/aos-smoke/fixtures/09-workspaces/air/*` (removed legacy `workspace_plan.air.json`; workflow subscriptions/policy/module wiring only)
+  - `crates/aos-smoke/fixtures/09-workspaces/reducer/src/lib.rs`
+  - `crates/aos-smoke/src/workspaces.rs`
+  - verification: `cargo test --manifest-path crates/aos-smoke/fixtures/09-workspaces/reducer/Cargo.toml -q`, `cargo run -p aos-smoke -- workspaces`
 
 ### 4) Dead code and roadmap cleanup
 

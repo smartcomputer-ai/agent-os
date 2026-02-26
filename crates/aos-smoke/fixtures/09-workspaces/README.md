@@ -1,12 +1,13 @@
 # 09-workspaces
 
-Demonstrates workspace effects via a plan with capability enforcement. Seeds one or two
-workspaces (alpha, beta), writes files, lists and diffs the tree, and emits commit events.
+Demonstrates workspace internal effects via a workflow module with capability enforcement.
+Seeds one or two workspaces (`alpha`, `beta`), writes files, lists and diffs the tree,
+and emits `sys/WorkspaceCommit@1` events.
 
-Plan flow:
+Workflow flow:
 ```mermaid
 flowchart TD
-  A[WorkspaceSeed event] --> B[workspace.resolve]
+  A[Workspace Start event] --> B[workspace.resolve]
   B --> C{exists?}
   C -->|yes| D[use resolved root]
   C -->|no| E[workspace.empty_root]
@@ -14,21 +15,17 @@ flowchart TD
   E --> F
   F --> G[write README.txt]
   G --> H[write data.json]
-  H --> I[workspace.list - subtree]
-  I --> J[read README ref/bytes]
-  J --> K[update README.txt]
-  K --> L[workspace.diff]
-  L --> M[raise Seeded event]
-  M --> N[reducer updates state + emits WorkspaceCommit]
+  H --> I[workspace.list]
+  I --> J[update README.txt]
+  J --> K[workspace.diff]
+  K --> L[update reducer state]
+  L --> M[emit WorkspaceCommit]
 ```
 
 Run:
 - `cargo run -p aos-smoke -- workspaces`
 - `AOS_WORLD=crates/aos-smoke/fixtures/09-workspaces aos ws ls`
 
-Note:
-- The plan writes a per-workspace marker file under `seed/` before other writes so effect intents
-  remain unique when seeding multiple workspaces in the same world. The reducer also treats
-  identical `Seeded` events as idempotent to keep replay deterministic.
-- Each `emit_effect` sets `idempotency_key` via `hash({workspace, step})` so retries are stable
-  and intent hashes stay unique across parallel workspace seeds.
+Notes:
+- The workflow processes one workspace at a time to keep receipt correlation deterministic.
+- Writes include a per-workspace marker (`seed/<workspace>.txt`) to keep seeded trees distinct.

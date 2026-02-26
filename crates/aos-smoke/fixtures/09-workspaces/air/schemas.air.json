@@ -13,6 +13,22 @@
   },
   {
     "$kind": "defschema",
+    "name": "demo/WorkspaceStep@1",
+    "type": {
+      "variant": {
+        "Resolving": { "unit": {} },
+        "CreatingEmptyRoot": { "unit": {} },
+        "WritingMarker": { "unit": {} },
+        "WritingReadme": { "unit": {} },
+        "WritingData": { "unit": {} },
+        "Listing": { "unit": {} },
+        "WritingReadmeUpdate": { "unit": {} },
+        "Diffing": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "demo/WorkspaceState@1",
     "type": {
       "record": {
@@ -21,7 +37,15 @@
             "key": { "text": {} },
             "value": { "ref": "demo/WorkspaceSummary@1" }
           }
-        }
+        },
+        "pending_workspaces": { "list": { "text": {} } },
+        "active_workspace": { "option": { "text": {} } },
+        "active_owner": { "option": { "text": {} } },
+        "active_step": { "option": { "ref": "demo/WorkspaceStep@1" } },
+        "active_expected_head": { "option": { "nat": {} } },
+        "active_base_root": { "option": { "hash": {} } },
+        "active_current_root": { "option": { "hash": {} } },
+        "active_entry_count": { "option": { "nat": {} } }
       }
     }
   },
@@ -37,35 +61,11 @@
   },
   {
     "$kind": "defschema",
-    "name": "demo/WorkspaceSeed@1",
-    "type": {
-      "record": {
-        "workspace": { "text": {} },
-        "owner": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
-    "name": "demo/WorkspaceSeeded@1",
-    "type": {
-      "record": {
-        "workspace": { "text": {} },
-        "expected_head": { "option": { "nat": {} } },
-        "root_hash": { "hash": {} },
-        "entry_count": { "nat": {} },
-        "diff_count": { "nat": {} },
-        "owner": { "text": {} }
-      }
-    }
-  },
-  {
-    "$kind": "defschema",
     "name": "demo/WorkspaceEvent@1",
     "type": {
       "variant": {
         "Start": { "ref": "demo/WorkspaceStart@1" },
-        "Seeded": { "ref": "demo/WorkspaceSeeded@1" }
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
       }
     }
   }
