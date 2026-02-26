@@ -1,94 +1,185 @@
 # Workflows
 
-This document is the single workflow guide for AgentOS. It merges the old reducer-focused and workflow-pattern docs into one conceptual model with a small set of examples.
+This is the canonical workflow model for AgentOS after v0.11 plan removal.
+It consolidates the old reducer + workflow-pattern guidance and captures the key decisions from `roadmap/v0.11-workflows/`.
 
-## 1) What A Workflow Is
+## 1) Scope
 
-A workflow is a deterministic state machine implemented as a WASM module with `module_kind: "workflow"` (reducer ABI).
+Workflow orchestration is code-defined and event-driven:
+- `defmodule` with `module_kind: "workflow"` is the orchestration/state-machine unit.
+- `pure` modules are deterministic compute helpers and do not emit effects.
+- Manifest startup wiring is `routing.subscriptions` (no active trigger-to-plan model).
 
-Core properties:
-- Owns domain state and business invariants.
-- Advances only through events.
-- Emits explicit effects (capability + policy gated).
-- Continues from normalized receipt events.
-- Replays byte-identically from journal + receipts.
+v0.11 is a hard break:
+- no backward compatibility with plan-era runtime behavior is required
+- old `defplan`/`triggers` semantics are not part of the active model
 
-There is no separate plan/trigger authoring model in active workflow runtime semantics.
+## 2) Responsibility Split
 
-## 2) Runtime Mental Model
-
-One event enters a workflow module at a time:
-
-1. Kernel routes a normalized event (`routing.subscriptions`).
-2. Workflow `step` runs deterministically against current state.
-3. Workflow returns:
-- next state
-- zero or more domain events
-- zero or more effect intents
-4. Effects are authorized (capability constraints + policy).
-5. Adapter receipts are normalized and re-enter as events (typically `sys/EffectReceiptEnvelope@1`; optional `sys/EffectReceiptRejected@1` for malformed payload handling).
-
-State changes only through event handling.
-
-## 3) Contract Surface
-
-Workflow modules declare:
-- `abi.reducer.state`: state schema
-- `abi.reducer.event`: event schema
-- `abi.reducer.effects_emitted`: effect kind allowlist
-- `abi.reducer.cap_slots`: abstract slots -> cap types
-
-Manifest provides:
-- `routing.subscriptions`: event schema -> workflow module
-- `module_bindings`: module slots -> concrete cap grants
-
-Policy evaluates each effect intent with origin metadata (`workflow|system|governance`) and defaults to deny when no rule matches.
-
-## 4) Design Boundaries
-
-Keep inside workflow module:
-- business rules
-- state transitions
+Workflow modules own:
+- domain state
+- business invariants
+- transition logic
 - retry/compensation policy decisions
-- idempotency fences
 
-Keep outside workflow module:
-- non-deterministic execution (adapters)
-- authorization decisions (cap enforcer + policy)
-- transport/integration concerns (HTTP providers, LLM vendors, etc.)
+Kernel + effect manager own:
+- deterministic stepping
+- capability checks
+- policy checks
+- effect queueing and receipt ingestion
 
-## 5) Core Patterns
+Adapters own:
+- side-effect execution
+- signed receipt production
 
-### Pattern A: Single-Module Stateful Workflow
+## 3) v0.11 Key Decisions (Normative)
 
-Use one workflow module to manage full domain lifecycle with explicit states.
+### 3.1 Authority and effect emission
 
-Good for:
-- strong invariants
-- retry/compensation logic tied to domain state
-- long-running flows
+1. Only workflow modules may originate module-emitted effects.
+2. `pure` modules cannot emit effects.
+3. Workflow modules must declare `abi.reducer.effects_emitted`.
+4. Kernel rejects undeclared effect kinds before capability/policy evaluation.
+5. Multiple effects per step are allowed; deterministic kernel output limits apply.
 
-### Pattern B: Event Choreography Across Modules
+### 3.2 Deterministic canonicalization
 
-Split by bounded context. One module emits domain events, others subscribe.
+1. Event payloads are schema-validated and canonicalized on ingress.
+2. Effect params are schema-validated and canonicalized before intent hashing/enqueue.
+3. Receipt payloads are schema-validated/canonicalized before continuation delivery.
+4. Journal + snapshot persist canonical CBOR forms used for replay.
+5. Runtime decode fallbacks for non-canonical event/receipt payload shapes are not part of the active contract.
 
-Good for:
-- team/service boundaries
-- independent versioning
-- simpler module responsibilities
+### 3.3 Continuation routing contract
 
-### Pattern C: Timer + Receipt Driven Continuations
+1. Receipt continuation routing is keyed by recorded origin identity:
+- `origin_module_id`
+- `origin_instance_key`
+- `intent_id`/intent hash identity
+2. Intent identity preimage includes origin instance identity to avoid ambiguous concurrent wakeups.
+3. Continuation routing is manifest-independent.
+4. `routing.subscriptions` is for domain-event ingress only.
 
-Use `timer.set` plus receipt events for timeouts/backoff and async checkpoints.
+### 3.4 Receipt envelope contract
 
-Good for:
-- retries with delay
-- human-in-loop deadlines
-- long-running orchestration
+Settled effects produce a generic workflow receipt envelope (schema family includes `sys/EffectReceiptEnvelope@1`) with at least:
+- origin module identity
+- origin instance key (if keyed)
+- intent identity
+- effect kind
+- receipt payload bytes
+- receipt status
+- emitted sequence metadata
 
-## 6) Minimal Example
+Legacy typed timer/blob receipt shapes may still appear as compatibility helpers, but generic envelope semantics are primary.
 
-### Workflow state machine (conceptual Rust)
+### 3.5 Receipt fault handling
+
+If receipt payload decoding/normalization fails:
+1. The failing intent is settled (removed from pending).
+2. If workflow event schema supports `sys/EffectReceiptRejected@1`, kernel emits it.
+3. If not supported, kernel marks the workflow instance failed and drops remaining pending receipts for that instance (fault isolation, no global clogging).
+
+### 3.6 Persisted workflow instance model
+
+Kernel persists workflow instance runtime state (conceptually including):
+- state bytes
+- inflight intent set/map
+- lifecycle status: `running|waiting|completed|failed`
+- last processed sequence marker
+- module version/hash metadata (for diagnostics)
+
+Replay must restore this state deterministically.
+
+### 3.7 Apply safety (strict quiescence)
+
+Manifest apply is blocked when any of the following hold:
+1. non-terminal workflow instances exist
+2. any workflow has inflight intents
+3. effect queue/scheduler still has pending work
+
+No implicit abandonment/clearing of in-flight workflow state during apply.
+
+### 3.8 Governance and shadow semantics
+
+Shadow/governance reporting is bounded to observed execution horizon:
+- observed effects so far
+- pending workflow receipts/intents
+- workflow instance statuses
+- module effect allowlists
+- relevant state/ledger deltas
+
+No guarantee of complete static future-effect prediction for unexecuted branches.
+
+### 3.9 Vocabulary cutover
+
+Active authority and policy origin vocabulary is:
+- `workflow`
+- `system`
+- `governance`
+
+Legacy plan-era naming may remain only as compatibility labels in some journals/traces.
+
+### 3.10 Observability/control cutover
+
+1. Active governance/shadow summaries do not rely on plan-runtime fields (`plan_results`, `pending_plan_receipts`).
+2. Active control/trace surfaces are workflow-first (`trace-summary`, workflow waiting/continuation diagnostics).
+3. If legacy plan records appear in historical journals, they are treated as legacy compatibility artifacts only.
+
+### 3.11 Runtime cutover
+
+1. No active plan scheduling/ticking path is part of workflow execution.
+2. Manifest apply/quiescence decisions are based on workflow instances, inflight intents, and queue/scheduler pending work.
+3. Continuation correctness must remain deterministic under concurrent keyed workflow instances.
+
+## 4) Runtime Flow
+
+1. Domain event is appended and canonicalized.
+2. Router evaluates `routing.subscriptions` and delivers to matching workflow modules.
+3. Workflow `step` runs deterministically with current state + event.
+4. Workflow returns new state, domain events, and effect intents.
+5. Kernel enforces `effects_emitted` allowlist, then caps and policy.
+6. Adapters execute allowed intents and return signed receipts.
+7. Kernel canonicalizes receipt payload and routes continuation to recorded origin instance.
+
+## 5) Workflow Module Contract
+
+Workflow modules declare reducer ABI fields:
+- `state`: state schema
+- `event`: event schema
+- `context` (optional)
+- `effects_emitted` (required for effecting modules)
+- `cap_slots` (optional slot -> cap type)
+
+Manifest binds slots via `module_bindings`.
+
+## 6) Routing Contract
+
+`routing.subscriptions` maps event schema -> module:
+- required fields are `event`, `module`; `key_field` is used for keyed module delivery
+- deterministic evaluation order is manifest order
+- matching subscriptions fan out in order
+- legacy `routing.events` / `reducer` aliases may be accepted by loaders during migration, but canonical manifests use `subscriptions` + `module`
+
+Continuation delivery from receipts does not use this routing table.
+
+## 7) Conceptual Patterns
+
+### Pattern A: Single workflow state machine
+
+Best when business transitions, retries, and compensations are tightly coupled.
+
+### Pattern B: Multi-module choreography
+
+Best when contexts/teams are split; modules communicate through domain events.
+
+### Pattern C: Timer + receipt driven progression
+
+Best for deadlines, backoff, and long-running lifecycle checkpoints.
+
+## 8) Minimal Examples
+
+### 8.1 Workflow transition sketch (Rust, conceptual)
 
 ```rust
 enum Pc { Idle, AwaitingCharge, Done, Failed }
@@ -99,20 +190,24 @@ match (state.pc, event) {
         state.pc = Pc::AwaitingCharge;
         effects.push(emit("payment.charge", params, Some("payments")));
     }
-    (Pc::AwaitingCharge, Event::EffectReceiptEnvelope { status, receipt_payload, .. }) => {
-        if status == "ok" { state.pc = Pc::Done; } else { state.pc = Pc::Failed; }
+    (Pc::AwaitingCharge, Event::EffectReceiptEnvelope { status, .. }) => {
+        state.pc = if status == "ok" { Pc::Done } else { Pc::Failed };
     }
     _ => {}
 }
 ```
 
-### Routing + bindings (manifest excerpt)
+### 8.2 Manifest routing + binding sketch
 
 ```json
 {
   "routing": {
     "subscriptions": [
-      { "event": "com.acme/OrderEvent@1", "module": "com.acme/order_workflow@1" }
+      {
+        "event": "com.acme/OrderEvent@1",
+        "module": "com.acme/order_workflow@1",
+        "key_field": "order_id"
+      }
     ]
   },
   "module_bindings": {
@@ -123,33 +218,25 @@ match (state.pc, event) {
 }
 ```
 
-## 7) Reliability Rules
+## 9) Reliability Checklist
 
-- Always include stable correlation fields in domain events and effect params.
-- Attach explicit idempotency keys for externally visible effects.
-- Treat receipt payloads as schema-validated inputs, never ad-hoc blobs.
-- Use terminal states + fences to prevent duplicate downstream intents.
-- Model retries in state (attempt counters, backoff schedule, max attempts).
+1. Include stable correlation fields in events/effect params.
+2. Use explicit idempotency keys for externally visible effects.
+3. Treat all continuation payloads as schema-bound inputs.
+4. Keep terminal states and duplicate fences in module state.
+5. Model retries with explicit attempt/backoff state.
 
-## 8) Anti-Patterns
+## 10) Testing Checklist
 
-- Business decisions in adapters or policy rules.
-- Hidden side effects outside `effects` output.
-- Coupling modules through direct calls instead of events.
-- Unbounded retries without terminal failure state.
-- Skipping replay tests for multi-step workflows.
+1. Transition tests: `(state,event)->(state,events,effects)`.
+2. Receipt progression tests for `ok/error/timeout/fault` paths.
+3. Replay-or-die snapshot equivalence tests.
+4. Concurrency tests: no cross-delivery between keyed instances.
+5. Apply-safety tests: strict-quiescence block/unblock behavior.
 
-## 9) Testing Guidance
+## 11) Migration Notes (Plan-Era -> Workflow Runtime)
 
-Minimum coverage:
-- transition unit tests: `(state, event) -> (state, events, effects)`
-- receipt progression tests (ok/error/timeout)
-- replay-or-die tests from genesis journal to byte-identical snapshot
-- schema compatibility tests for state/event upgrades
-
-## 10) Migration Notes (Plan-Era -> Workflow Runtime)
-
-- `defplan` and manifest `triggers` are legacy compatibility concepts.
-- Active runtime entry is event routing via `routing.subscriptions`.
-- Move orchestration into workflow module typestate and receipt handling.
-- Keep policy/capability governance unchanged: explicit grants, explicit decisions, explicit receipts.
+1. Plan runtime execution surfaces are removed from the active model; `defplan` and `triggers` are legacy-only concepts.
+2. Orchestration logic moves into workflow module typestate + receipt handling.
+3. Governance/cap/policy boundaries remain mandatory.
+4. Transitional loader aliases can be tolerated at ingest, but canonical serialized manifests and active docs use workflow-era names.
