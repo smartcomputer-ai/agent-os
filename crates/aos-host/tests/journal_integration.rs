@@ -10,7 +10,7 @@ use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord, PolicyDecisionOutcome};
 use aos_kernel::snapshot::WorkflowStatusSnapshot;
-use helpers::fixtures::{self, START_SCHEMA, TestWorld};
+use helpers::fixtures::{self, TestWorld, START_SCHEMA};
 use serde_cbor;
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
@@ -319,6 +319,94 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
 }
 
 #[test]
+fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
+    let store = fixtures::new_mem_store();
+    let mut world =
+        TestWorld::with_store(store.clone(), no_plan_workflow_manifest(&store)).unwrap();
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("replay-once")
+    });
+    world
+        .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
+        .expect("submit workflow start");
+    world.tick_n(1).unwrap();
+
+    let effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 2);
+    let timer_intent = effects
+        .iter()
+        .find(|intent| intent.kind.as_str() == aos_effects::EffectKind::TIMER_SET)
+        .expect("timer.set intent");
+
+    let receipt = EffectReceipt {
+        intent_hash: timer_intent.intent_hash,
+        adapter_id: "adapter.timer".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
+            delivered_at_ns: 77,
+            key: Some("wf".into()),
+        })
+        .unwrap(),
+        cost_cents: None,
+        signature: vec![],
+    };
+    world.kernel.handle_receipt(receipt).unwrap();
+    world.kernel.tick_until_idle().unwrap();
+
+    let journal_entries = world.kernel.dump_journal().unwrap();
+    let journal_len_before = journal_entries.len();
+    assert_eq!(
+        world.kernel.reducer_state("com.acme/WorkflowResult@1"),
+        Some(vec![0xFA])
+    );
+    let done_event_count_before = journal_entries
+        .iter()
+        .filter_map(
+            |entry| match serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok()? {
+                JournalRecord::DomainEvent(event) if event.schema == "com.acme/WorkflowDone@1" => {
+                    Some(())
+                }
+                _ => None,
+            },
+        )
+        .count();
+    assert_eq!(done_event_count_before, 1);
+
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        no_plan_workflow_manifest(&store),
+        Box::new(MemJournal::from_entries(&journal_entries)),
+    )
+    .unwrap();
+    replay_world.kernel.tick_until_idle().unwrap();
+    let replay_entries = replay_world.kernel.dump_journal().unwrap();
+    assert_eq!(
+        replay_entries.len(),
+        journal_len_before,
+        "journal replay must not append duplicate receipt-spawned records"
+    );
+    assert_eq!(
+        replay_world
+            .kernel
+            .reducer_state("com.acme/WorkflowResult@1"),
+        Some(vec![0xFA])
+    );
+    let done_event_count_after = replay_entries
+        .iter()
+        .filter_map(
+            |entry| match serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok()? {
+                JournalRecord::DomainEvent(event) if event.schema == "com.acme/WorkflowDone@1" => {
+                    Some(())
+                }
+                _ => None,
+            },
+        )
+        .count();
+    assert_eq!(done_event_count_after, 1);
+}
+
+#[test]
 fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending() {
     let store = fixtures::new_mem_store();
     let manifest = no_plan_workflow_manifest(&store);
@@ -435,11 +523,9 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
 
     let pending_after_rejected = world.kernel.pending_reducer_receipts_snapshot();
     assert_eq!(pending_after_rejected.len(), 1);
-    assert!(
-        pending_after_rejected
-            .iter()
-            .any(|entry| entry.intent_hash == timer_intent.intent_hash)
-    );
+    assert!(pending_after_rejected
+        .iter()
+        .any(|entry| entry.intent_hash == timer_intent.intent_hash));
 
     let timer_receipt = EffectReceipt {
         intent_hash: timer_intent.intent_hash,

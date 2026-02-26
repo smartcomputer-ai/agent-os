@@ -48,7 +48,7 @@ Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 - [x] Update `crates/aos-smoke/src` runners to remove plan-era naming/artifacts (`plan-summary`, `PlanEnded` assumptions, etc.).
 
 Integration suite rewrite checklist:
-- [ ] `crates/aos-host/tests/world_integration.rs`: replace ignored plan-runtime tests with workflow-runtime equivalents.
+- [x] `crates/aos-host/tests/world_integration.rs`: replace ignored plan-runtime tests with workflow-runtime equivalents.
 - [ ] `crates/aos-host/tests/journal_integration.rs`: migrate journal assertions from plan records to workflow records/state.
 - [ ] `crates/aos-host/tests/snapshot_integration.rs`: migrate snapshot/replay assertions to workflow in-flight state semantics.
 - [x] `crates/aos-host/tests/governance_effects_integration.rs` (replaces `governance_plan_integration.rs`): governance propose/shadow/approve/apply exercised via workflow-origin effects (no plan APIs).
@@ -179,6 +179,13 @@ Implementation log (completed 2026-02-26):
   - verification:
     - `cargo test -p aos-host --test workflow_runtime_integration --features e2e-tests -q`
     - `cargo test -p aos-host --test world_integration --features e2e-tests -q`
+- [x] `world_integration.rs` migration batch 2 completed: migrated remaining workflow-relevant plan-era tests and removed all ignored plan-runtime cases from `world_integration.rs`.
+  - migrated to `crates/aos-host/tests/workflow_runtime_integration.rs`: `plan_waits_for_receipt_and_event_before_progressing`, `plan_event_wakeup_only_resumes_matching_schema`, `correlated_await_event_prevents_cross_talk_between_instances`
+  - migrated to `crates/aos-host/tests/journal_integration.rs`: `replay_does_not_double_apply_receipt_spawned_domain_events`
+  - migrated to `crates/aos-host/tests/snapshot_integration.rs`: `subplan_receipt_wait_survives_restart_and_resumes_parent`
+  - rewrote in-place (workflow-native): `raised_events_are_routed_to_reducers`
+  - verification:
+    - `cargo test -p aos-host --features e2e-tests --test world_integration --test workflow_runtime_integration --test journal_integration --test snapshot_integration -q`
 
 ### 4) Dead code and roadmap cleanup
 

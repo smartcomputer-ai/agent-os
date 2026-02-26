@@ -12,9 +12,10 @@ use aos_effects::builtins::{
 };
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::error::KernelError;
+use aos_kernel::snapshot::WorkflowStatusSnapshot;
 use aos_store::Store;
 use aos_wasm_abi::{DomainEvent, ReducerEffect, ReducerOutput};
-use helpers::fixtures::{self, START_SCHEMA, TestStore, TestWorld, fake_hash};
+use helpers::fixtures::{self, effect_params_text, fake_hash, TestStore, TestWorld, START_SCHEMA};
 use indexmap::IndexMap;
 use wat::parse_str;
 
@@ -24,7 +25,8 @@ use helpers::{def_text_record_schema, insert_test_schemas, text_type};
 #[test]
 fn workflow_orchestration_completes_after_receipt() {
     let store = fixtures::new_mem_store();
-    let mut world = TestWorld::with_store(store.clone(), workflow_receipt_manifest(&store)).unwrap();
+    let mut world =
+        TestWorld::with_store(store.clone(), workflow_receipt_manifest(&store)).unwrap();
 
     let start_event = serde_json::json!({
         "$tag": "Start",
@@ -502,6 +504,526 @@ fn blob_get_receipt_routes_event_to_handler() {
     );
 }
 
+#[test]
+fn workflow_receipt_and_event_progression_emit_followups_in_order() {
+    let store = fixtures::new_mem_store();
+
+    let start_output = ReducerOutput {
+        state: Some(vec![0x10]),
+        domain_events: vec![],
+        effects: vec![ReducerEffect::with_cap_slot(
+            aos_effects::EffectKind::HTTP_REQUEST,
+            serde_cbor::to_vec(&HttpRequestParams {
+                method: "GET".into(),
+                url: "https://example.com/first".into(),
+                headers: IndexMap::new(),
+                body_ref: None,
+            })
+            .unwrap(),
+            "http",
+        )],
+        ann: None,
+    };
+    let receipt_output = ReducerOutput {
+        state: Some(vec![0x11]),
+        domain_events: vec![],
+        effects: vec![ReducerEffect::with_cap_slot(
+            aos_effects::EffectKind::HTTP_REQUEST,
+            serde_cbor::to_vec(&HttpRequestParams {
+                method: "GET".into(),
+                url: "https://example.com/after-receipt".into(),
+                headers: IndexMap::new(),
+                body_ref: None,
+            })
+            .unwrap(),
+            "http",
+        )],
+        ann: None,
+    };
+    let mut staged = sequenced_reducer_module(
+        &store,
+        "com.acme/StagedWorkflow@1",
+        &start_output,
+        &receipt_output,
+    );
+    staged.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/StagedState@1"),
+        event: fixtures::schema("com.acme/StagedWorkflowEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        cap_slots: Default::default(),
+    });
+
+    let mut pulse = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/PulseWorkflow@1",
+        &ReducerOutput {
+            state: Some(vec![0x12]),
+            domain_events: vec![],
+            effects: vec![ReducerEffect::with_cap_slot(
+                aos_effects::EffectKind::HTTP_REQUEST,
+                serde_cbor::to_vec(&HttpRequestParams {
+                    method: "GET".into(),
+                    url: "https://example.com/after-event".into(),
+                    headers: IndexMap::new(),
+                    body_ref: None,
+                })
+                .unwrap(),
+                "http",
+            )],
+            ann: None,
+        },
+    );
+    pulse.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/PulseState@1"),
+        event: fixtures::schema("com.acme/PulseNext@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        cap_slots: Default::default(),
+    });
+
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
+        vec![staged, pulse],
+        vec![
+            fixtures::routing_event(
+                "com.acme/StagedWorkflowEvent@1",
+                "com.acme/StagedWorkflow@1",
+            ),
+            fixtures::routing_event("com.acme/PulseNext@1", "com.acme/PulseWorkflow@1"),
+        ],
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/StagedWorkflowEvent@1".into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(START_SCHEMA),
+                            }),
+                        ),
+                        (
+                            "Receipt".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema("sys/EffectReceiptEnvelope@1"),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/PulseNext@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/StagedState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/PulseState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        ],
+    );
+    for module in ["com.acme/StagedWorkflow@1", "com.acme/PulseWorkflow@1"] {
+        loaded
+            .manifest
+            .module_bindings
+            .get_mut(module)
+            .expect("module binding")
+            .slots
+            .insert("http".into(), "cap_http".into());
+    }
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("staged"),
+    });
+    world
+        .submit_event_result("com.acme/StagedWorkflowEvent@1", &start_event)
+        .expect("submit start");
+    world.tick_n(1).unwrap();
+
+    let mut effects = world.drain_effects().expect("drain first");
+    assert_eq!(effects.len(), 1);
+    let first = effects.remove(0);
+    assert_eq!(
+        effect_params_text(&first),
+        "https://example.com/first".to_string()
+    );
+
+    let receipt = EffectReceipt {
+        intent_hash: first.intent_hash,
+        adapter_id: "adapter.http".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&HttpRequestReceipt {
+            status: 200,
+            headers: IndexMap::new(),
+            body_ref: None,
+            timings: RequestTimings {
+                start_ns: 1,
+                end_ns: 2,
+            },
+            adapter_id: "adapter.http".into(),
+        })
+        .unwrap(),
+        cost_cents: None,
+        signature: vec![],
+    };
+    world.kernel.handle_receipt(receipt).unwrap();
+    world.tick_n(1).unwrap();
+
+    let mut effects = world.drain_effects().expect("drain second");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(
+        effect_params_text(&effects.remove(0)),
+        "https://example.com/after-receipt".to_string()
+    );
+
+    world
+        .submit_event_result("com.acme/PulseNext@1", &serde_json::json!({}))
+        .expect("submit pulse");
+    world.tick_n(1).unwrap();
+
+    let mut effects = world.drain_effects().expect("drain third");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(
+        effect_params_text(&effects.remove(0)),
+        "https://example.com/after-event".to_string()
+    );
+}
+
+#[test]
+fn workflow_event_routing_only_matches_subscribed_schema() {
+    let store = fixtures::new_mem_store();
+
+    let mut ready = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/ReadyWorkflow@1",
+        &ReducerOutput {
+            state: Some(vec![0x21]),
+            domain_events: vec![],
+            effects: vec![ReducerEffect::with_cap_slot(
+                aos_effects::EffectKind::HTTP_REQUEST,
+                serde_cbor::to_vec(&HttpRequestParams {
+                    method: "GET".into(),
+                    url: "https://example.com/ready".into(),
+                    headers: IndexMap::new(),
+                    body_ref: None,
+                })
+                .unwrap(),
+                "http",
+            )],
+            ann: None,
+        },
+    );
+    ready.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/ReadyState@1"),
+        event: fixtures::schema("com.acme/Ready@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        cap_slots: Default::default(),
+    });
+
+    let mut other = fixtures::stub_reducer_module(
+        &store,
+        "com.acme/OtherWorkflow@1",
+        &ReducerOutput {
+            state: Some(vec![0x22]),
+            domain_events: vec![],
+            effects: vec![ReducerEffect::with_cap_slot(
+                aos_effects::EffectKind::HTTP_REQUEST,
+                serde_cbor::to_vec(&HttpRequestParams {
+                    method: "GET".into(),
+                    url: "https://example.com/other".into(),
+                    headers: IndexMap::new(),
+                    body_ref: None,
+                })
+                .unwrap(),
+                "http",
+            )],
+            ann: None,
+        },
+    );
+    other.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/OtherState@1"),
+        event: fixtures::schema("com.acme/Other@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        cap_slots: Default::default(),
+    });
+
+    let mut loaded = build_loaded_manifest_with_http_enforcer(
+        &store,
+        vec![ready, other],
+        vec![
+            fixtures::routing_event("com.acme/Ready@1", "com.acme/ReadyWorkflow@1"),
+            fixtures::routing_event("com.acme/Other@1", "com.acme/OtherWorkflow@1"),
+        ],
+    );
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            DefSchema {
+                name: "com.acme/Ready@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/Other@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/ReadyState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/OtherState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        ],
+    );
+    for module in ["com.acme/ReadyWorkflow@1", "com.acme/OtherWorkflow@1"] {
+        loaded
+            .manifest
+            .module_bindings
+            .get_mut(module)
+            .expect("module binding")
+            .slots
+            .insert("http".into(), "cap_http".into());
+    }
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    world
+        .submit_event_result("com.acme/Ready@1", &serde_json::json!({}))
+        .expect("submit ready");
+    world.tick_n(1).unwrap();
+    let mut effects = world.drain_effects().expect("drain ready");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(
+        effect_params_text(&effects.remove(0)),
+        "https://example.com/ready".to_string()
+    );
+
+    world
+        .submit_event_result("com.acme/Other@1", &serde_json::json!({}))
+        .expect("submit other");
+    world.tick_n(1).unwrap();
+    let mut effects = world.drain_effects().expect("drain other");
+    assert_eq!(effects.len(), 1);
+    assert_eq!(
+        effect_params_text(&effects.remove(0)),
+        "https://example.com/other".to_string()
+    );
+}
+
+#[test]
+fn keyed_workflow_receipt_routing_is_instance_isolated() {
+    let store = fixtures::new_mem_store();
+
+    let start_output = ReducerOutput {
+        state: Some(vec![0x31]),
+        domain_events: vec![],
+        effects: vec![ReducerEffect::with_cap_slot(
+            aos_effects::EffectKind::HTTP_REQUEST,
+            serde_cbor::to_vec(&HttpRequestParams {
+                method: "GET".into(),
+                url: "https://example.com/keyed".into(),
+                headers: IndexMap::new(),
+                body_ref: None,
+            })
+            .unwrap(),
+            "http",
+        )],
+        ann: None,
+    };
+    let receipt_output = ReducerOutput {
+        state: Some(vec![0x32]),
+        domain_events: vec![],
+        effects: vec![],
+        ann: None,
+    };
+    let mut keyed = sequenced_reducer_module(
+        &store,
+        "com.acme/KeyedWorkflow@1",
+        &start_output,
+        &receipt_output,
+    );
+    keyed.key_schema = Some(fixtures::schema("com.acme/WorkflowKey@1"));
+    keyed.abi.reducer = Some(ReducerAbi {
+        state: fixtures::schema("com.acme/KeyedState@1"),
+        event: fixtures::schema("com.acme/KeyedWorkflowEvent@1"),
+        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::HTTP_REQUEST.into()],
+        cap_slots: Default::default(),
+    });
+
+    let mut keyed_route =
+        fixtures::routing_event("com.acme/KeyedWorkflowEvent@1", "com.acme/KeyedWorkflow@1");
+    keyed_route.key_field = Some("$value.id".into());
+
+    let mut loaded =
+        build_loaded_manifest_with_http_enforcer(&store, vec![keyed], vec![keyed_route]);
+    insert_test_schemas(
+        &mut loaded,
+        vec![
+            def_text_record_schema(START_SCHEMA, vec![("id", text_type())]),
+            DefSchema {
+                name: "com.acme/WorkflowKey@1".into(),
+                ty: text_type(),
+            },
+            DefSchema {
+                name: "com.acme/KeyedWorkflowEvent@1".into(),
+                ty: TypeExpr::Variant(TypeVariant {
+                    variant: IndexMap::from([
+                        (
+                            "Start".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema(START_SCHEMA),
+                            }),
+                        ),
+                        (
+                            "Receipt".into(),
+                            TypeExpr::Ref(TypeRef {
+                                reference: fixtures::schema("sys/EffectReceiptEnvelope@1"),
+                            }),
+                        ),
+                    ]),
+                }),
+            },
+            DefSchema {
+                name: "com.acme/KeyedState@1".into(),
+                ty: TypeExpr::Record(TypeRecord {
+                    record: IndexMap::new(),
+                }),
+            },
+        ],
+    );
+    loaded
+        .manifest
+        .module_bindings
+        .get_mut("com.acme/KeyedWorkflow@1")
+        .expect("module binding")
+        .slots
+        .insert("http".into(), "cap_http".into());
+
+    let mut world = TestWorld::with_store(store, loaded).unwrap();
+    for id in ["a", "b"] {
+        let event = serde_json::json!({
+            "$tag": "Start",
+            "$value": fixtures::start_event(id),
+        });
+        world
+            .submit_event_result("com.acme/KeyedWorkflowEvent@1", &event)
+            .expect("submit keyed start");
+    }
+    world.kernel.tick_until_idle().unwrap();
+
+    let effects = world.drain_effects().expect("drain effects");
+    assert_eq!(effects.len(), 2);
+
+    let pending = world.kernel.pending_reducer_receipts_snapshot();
+    assert_eq!(pending.len(), 2);
+    let keys_by_hash: std::collections::HashMap<[u8; 32], String> = pending
+        .iter()
+        .map(|entry| {
+            let key_bytes = entry
+                .origin_instance_key
+                .as_ref()
+                .expect("keyed instance should have key");
+            let key: String = serde_cbor::from_slice(key_bytes).expect("decode key");
+            (entry.intent_hash, key)
+        })
+        .collect();
+
+    let b_hash = keys_by_hash
+        .iter()
+        .find_map(|(hash, key)| if key == "b" { Some(*hash) } else { None })
+        .expect("missing b hash");
+
+    let receipt = EffectReceipt {
+        intent_hash: b_hash,
+        adapter_id: "adapter.http".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&HttpRequestReceipt {
+            status: 200,
+            headers: IndexMap::new(),
+            body_ref: None,
+            timings: RequestTimings {
+                start_ns: 10,
+                end_ns: 12,
+            },
+            adapter_id: "adapter.http".into(),
+        })
+        .unwrap(),
+        cost_cents: None,
+        signature: vec![],
+    };
+    world.kernel.handle_receipt(receipt).unwrap();
+    world.kernel.tick_until_idle().unwrap();
+
+    let remaining = world.kernel.pending_reducer_receipts_snapshot();
+    assert_eq!(remaining.len(), 1);
+    let remaining_key: String = serde_cbor::from_slice(
+        remaining[0]
+            .origin_instance_key
+            .as_ref()
+            .expect("remaining keyed pending intent should keep key"),
+    )
+    .expect("decode remaining key");
+    assert_eq!(remaining_key, "a");
+
+    let instances: Vec<_> = world
+        .kernel
+        .workflow_instances_snapshot()
+        .into_iter()
+        .filter(|instance| {
+            instance
+                .instance_id
+                .starts_with("com.acme/KeyedWorkflow@1::")
+        })
+        .collect();
+    assert_eq!(instances.len(), 2);
+    assert_eq!(
+        instances
+            .iter()
+            .filter(|instance| instance.status == WorkflowStatusSnapshot::Waiting)
+            .count(),
+        1
+    );
+    assert_eq!(
+        instances
+            .iter()
+            .filter(|instance| instance.inflight_intents.is_empty())
+            .count(),
+        1
+    );
+}
+
 fn allow_http_enforcer(store: &Arc<TestStore>) -> DefModule {
     let allow_output = aos_kernel::cap_enforcer::CapCheckOutput {
         constraints_ok: true,
@@ -637,7 +1159,11 @@ fn workflow_receipt_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::Lo
             },
         ],
     );
-    if let Some(binding) = loaded.manifest.module_bindings.get_mut("com.acme/Workflow@1") {
+    if let Some(binding) = loaded
+        .manifest
+        .module_bindings
+        .get_mut("com.acme/Workflow@1")
+    {
         binding.slots.insert("http".into(), "cap_http".into());
     }
     loaded
