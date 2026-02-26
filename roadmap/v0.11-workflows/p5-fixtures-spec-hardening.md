@@ -133,7 +133,7 @@ Implementation log (completed 2026-02-26):
   - `crates/aos-smoke/fixtures/06-safe-upgrade/reducer/*`
   - `crates/aos-smoke/fixtures/06-safe-upgrade/reducer-v2/*`
   - `crates/aos-smoke/src/safe_upgrade.rs`
-- [x] Adjusted strict-quiescence apply gate to block on actual in-flight runtime work (inflight workflow intents / pending workflow receipts / queued effects / scheduler) so apply succeeds once waiting work is settled.
+- [x] Adjusted strict-quiescence apply gate to block on actual in-flight runtime work (inflight workflow intents / pending workflow receipts / queued effects / reducer queue) so apply succeeds once waiting work is settled.
   - `crates/aos-kernel/src/world/governance_runtime.rs`
 - [x] Migrated `07-llm-summarizer` from `summarize_plan` to workflow-native orchestration (`Start + Receipt(sys/EffectReceiptEnvelope@1)`), with direct `http.request -> llm.generate` emission in reducer/workflow.
   - `crates/aos-smoke/fixtures/07-llm-summarizer/air/*`
@@ -256,12 +256,28 @@ Implementation log (completed 2026-02-26):
     - `cargo test -p aos-host diagnose_trace_prefers_policy_denied -q`
 - [x] Updated v0.11 roadmap index status to reflect completed phases and remaining deferred/optional scope.
   - `roadmap/v0.11-workflows/README.md`
+- [x] Removed archived kernel plan runtime compatibility structures from active build/runtime path.
+  - removed archived runtime/orchestration files:
+    - `crates/aos-kernel/src/world/plan_runtime.rs`
+    - `crates/aos-kernel/src/plan/*`
+    - `crates/aos-kernel/src/scheduler.rs`
+  - active runtime cutover:
+    - added workflow-only runtime module `crates/aos-kernel/src/world/runtime.rs` (`tick`, `tick_until_idle`, effect drain/queue restore, receipt ingestion/settlement/fault handling)
+    - removed plan-state fields from `Kernel` and manifest assembly (`plan_registry`, plan instances/triggers/results caches, plan cap handles)
+    - removed plan snapshot payload from `KernelSnapshot` and snapshot replay/apply logic
+    - removed scheduler plan-id/path remnants (`push_plan`, `alloc_plan_id`, `next_plan_id`)
+    - updated kernel/host tests that depended on removed plan wait counters to workflow-instance counters
+  - verification:
+    - `cargo check -p aos-kernel -p aos-host -q`
+    - `cargo test -p aos-kernel snapshot_roundtrip_preserves_workflow_instances -q`
+    - `cargo test -p aos-kernel unsafe_baseline_promotion_fails_receipt_horizon_precondition -q`
+    - `cargo test -p aos-host --test demiurge_introspect_manifest_e2e --features e2e-tests --no-run -q`
 
 ### 4) Dead code and roadmap cleanup
 
 Status checklist for this section:
 - [x] Remove inactive host-side legacy plan summary/aggregation code from active control trace path.
-- [ ] Remove remaining archived plan runtime/kernel compatibility structures that are no longer needed for supported worlds.
+- [x] Remove remaining archived plan runtime/kernel compatibility structures that are no longer needed for supported worlds.
 - [x] Update roadmap indexes/READMEs to mark completion and superseded docs.
 
 ## Out of Scope

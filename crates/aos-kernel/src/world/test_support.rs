@@ -1,8 +1,9 @@
 use super::*;
 use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
 use aos_air_types::{
-    CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, ReducerAbi, Routing,
-    RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord,
+    CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, ReducerAbi,
+    Routing, RoutingEvent, SchemaRef, TypeExpr, TypePrimitive, TypePrimitiveText, TypeRecord,
+    catalog::EffectCatalog,
 };
 use aos_store::MemStore;
 use indexmap::IndexMap;

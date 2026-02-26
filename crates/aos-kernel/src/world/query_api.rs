@@ -222,11 +222,6 @@ mod tests {
             vec![],
             vec![],
             0,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            0,
             Some(*manifest_hash.as_bytes()),
         );
         snapshot.set_root_completeness(SnapshotRootCompleteness {

@@ -98,7 +98,7 @@ fn analyze_trace(
     let mut cap_denied = false;
     let mut has_receipt_error = false;
     let mut has_receipt_timeout = false;
-    let mut has_plan_error = false;
+    let mut has_workflow_error = false;
     for entry in entries.into_iter().filter(|entry| entry.seq >= root_seq) {
         let record: JournalRecord =
             serde_cbor::from_slice(&entry.payload).context("decode trace window record")?;
@@ -122,26 +122,34 @@ fn analyze_trace(
                 aos_effects::ReceiptStatus::Timeout => has_receipt_timeout = true,
                 aos_effects::ReceiptStatus::Ok => {}
             },
-            JournalRecord::PlanEnded(ended) => {
-                if matches!(ended.status, aos_kernel::journal::PlanEndStatus::Error) {
-                    has_plan_error = true;
+            JournalRecord::Custom(custom) => {
+                if custom.tag == "workflow_error" {
+                    has_workflow_error = true;
                 }
             }
             _ => {}
         }
     }
 
-    let waiting_receipt_count = kernel.pending_plan_receipts().len()
-        + kernel.pending_reducer_receipts_snapshot().len()
+    let workflow_instances = kernel.workflow_instances_snapshot();
+    let waiting_receipt_count = kernel.pending_reducer_receipts_snapshot().len()
         + kernel.queued_effects_snapshot().len()
-        + kernel
-            .debug_plan_waits()
+        + workflow_instances
             .iter()
-            .map(|(_, waits)| waits.len())
+            .map(|instance| instance.inflight_intents.len())
             .sum::<usize>();
-    let waiting_event_count = kernel.debug_plan_waiting_events().len();
+    let waiting_event_count = workflow_instances
+        .iter()
+        .filter(|instance| {
+            !matches!(
+                instance.status,
+                aos_kernel::snapshot::WorkflowStatusSnapshot::Completed
+                    | aos_kernel::snapshot::WorkflowStatusSnapshot::Failed
+            )
+        })
+        .count();
 
-    let terminal_state = if has_receipt_error || has_receipt_timeout || has_plan_error {
+    let terminal_state = if has_receipt_error || has_receipt_timeout || has_workflow_error {
         "failed"
     } else if waiting_receipt_count > 0 {
         "waiting_receipt"
@@ -161,7 +169,7 @@ fn analyze_trace(
         cap_denied,
         has_receipt_error,
         has_receipt_timeout,
-        has_plan_error,
+        has_plan_error: has_workflow_error,
     })
 }
 

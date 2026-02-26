@@ -89,7 +89,7 @@ pub enum KernelError {
     #[error("proposal {0} already applied")]
     ProposalAlreadyApplied(u64),
     #[error(
-        "manifest apply blocked: in-flight runtime state exists (plans={plan_instances}, waiting_events={waiting_events}, pending_plan_receipts={pending_plan_receipts}, pending_reducer_receipts={pending_reducer_receipts}, queued_effects={queued_effects}, scheduler_pending={scheduler_pending})"
+        "manifest apply blocked: in-flight runtime state exists (plans={plan_instances}, waiting_events={waiting_events}, pending_plan_receipts={pending_plan_receipts}, pending_reducer_receipts={pending_reducer_receipts}, queued_effects={queued_effects}, reducer_queue_pending={reducer_queue_pending})"
     )]
     ManifestApplyBlockedInFlight {
         plan_instances: usize,
@@ -97,7 +97,7 @@ pub enum KernelError {
         pending_plan_receipts: usize,
         pending_reducer_receipts: usize,
         queued_effects: usize,
-        scheduler_pending: bool,
+        reducer_queue_pending: bool,
     },
     #[error("shadow patch hash mismatch: expected {expected}, got {actual}")]
     ShadowPatchMismatch { expected: String, actual: String },

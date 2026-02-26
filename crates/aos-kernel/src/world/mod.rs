@@ -5,14 +5,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use aos_air_exec::{Value as ExprValue, ValueKey};
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Expr, ExprOrValue,
-    HashRef, Manifest, Name, NamedRef, PlanStepKind, SecretDecl, SecretEntry, TypeExpr,
-    TypePrimitive, builtins,
-    catalog::EffectCatalog,
-    plan_literals::{SchemaIndex, normalize_plan_literals},
-    value_normalize::{normalize_cbor_by_name, normalize_value_with_schema},
+    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
+    SecretEntry, TypeExpr, TypePrimitive, builtins, plan_literals::SchemaIndex,
+    value_normalize::normalize_cbor_by_name,
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt};
@@ -35,28 +31,24 @@ use crate::journal::fs::FsJournal;
 use crate::journal::mem::MemJournal;
 use crate::journal::{
     AppliedRecord, ApprovalDecisionRecord, ApprovedRecord, DomainEventRecord, EffectIntentRecord,
-    EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry, JournalKind,
-    JournalRecord, JournalSeq, ManifestRecord, OwnedJournalEntry, PlanEndStatus, PlanEndedRecord,
-    PlanResultRecord, PlanStartedRecord, ProposedRecord, ShadowReportRecord, SnapshotRecord,
+    EffectReceiptRecord, GovernanceRecord, IntentOriginRecord, Journal, JournalEntry,
+    JournalKind, JournalRecord, JournalSeq, ManifestRecord, OwnedJournalEntry, ProposedRecord,
+    ShadowReportRecord, SnapshotRecord,
 };
 use crate::manifest::{LoadedManifest, ManifestLoader};
-use crate::plan::{PlanCompletionValue, PlanInstance, PlanRegistry, ReducerSchema};
-use crate::policy::{AllowAllPolicy, RulePolicy};
 use crate::pure::PureRegistry;
 use crate::query::{Consistency, ReadMeta, StateRead, StateReader};
 use crate::receipts::ReducerEffectContext;
 use crate::reducer::ReducerRegistry;
-use crate::scheduler::{Scheduler, Task};
 use crate::schema_value::cbor_to_expr_value;
 use crate::secret::{PlaceholderSecretResolver, SharedSecretResolver};
 use crate::shadow::{
     DeltaKind, LedgerDelta, LedgerKind, ShadowConfig, ShadowExecutor, ShadowHarness, ShadowSummary,
 };
 use crate::snapshot::{
-    EffectIntentSnapshot, KernelSnapshot, PendingPlanReceiptSnapshot, PlanCompletionSnapshot,
-    PlanResultSnapshot, ReducerReceiptSnapshot, ReducerStateEntry, SnapshotRootCompleteness,
-    WorkflowInflightIntentSnapshot, WorkflowInstanceSnapshot, WorkflowStatusSnapshot,
-    receipts_to_vecdeque,
+    EffectIntentSnapshot, KernelSnapshot, ReducerReceiptSnapshot, ReducerStateEntry,
+    SnapshotRootCompleteness, WorkflowInflightIntentSnapshot, WorkflowInstanceSnapshot,
+    WorkflowStatusSnapshot, receipts_to_vecdeque,
 };
 use std::sync::Mutex;
 
@@ -64,7 +56,7 @@ mod bootstrap;
 mod event_flow;
 pub(crate) mod governance_runtime;
 mod manifest_runtime;
-mod plan_runtime;
+mod runtime;
 mod query_api;
 mod snapshot_replay;
 #[cfg(test)]
@@ -73,8 +65,6 @@ pub(crate) mod test_support;
 pub use crate::governance_utils::canonicalize_patch;
 
 const RECENT_RECEIPT_CACHE: usize = 512;
-const RECENT_PLAN_RESULT_CACHE: usize = 256;
-const RECENT_PLAN_COMPLETION_CACHE: usize = 1024;
 const CELL_CACHE_SIZE: usize = 128;
 const MONO_KEY: &[u8] = b"";
 const ENTROPY_LEN: usize = 64;
@@ -141,7 +131,6 @@ pub struct Kernel<S: Store> {
     manifest_hash: Hash,
     secrets: Vec<SecretDecl>,
     module_defs: HashMap<Name, aos_air_types::DefModule>,
-    plan_defs: HashMap<Name, DefPlan>,
     cap_defs: HashMap<Name, DefCap>,
     effect_defs: HashMap<Name, DefEffect>,
     policy_defs: HashMap<Name, DefPolicy>,
@@ -149,23 +138,13 @@ pub struct Kernel<S: Store> {
     reducers: ReducerRegistry<S>,
     pures: Arc<Mutex<PureRegistry<S>>>,
     router: HashMap<String, Vec<RouteBinding>>,
-    plan_registry: PlanRegistry,
     schema_index: Arc<SchemaIndex>,
     reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
-    plan_cap_handles: HashMap<Name, Arc<HashMap<String, CapGrantResolution>>>,
     module_cap_bindings: HashMap<Name, HashMap<String, CapGrantResolution>>,
-    plan_instances: HashMap<u64, PlanInstance>,
-    plan_triggers: HashMap<String, Vec<PlanTriggerBinding>>,
-    waiting_events: HashMap<String, Vec<u64>>,
-    plan_wait_watchers: HashMap<u64, Vec<PlanWaitWatcher>>,
-    completed_plan_outcomes: HashMap<u64, PlanCompletionOutcome>,
-    completed_plan_order: VecDeque<u64>,
-    pending_receipts: HashMap<[u8; 32], PendingPlanReceiptInfo>,
     pending_reducer_receipts: HashMap<[u8; 32], ReducerEffectContext>,
     recent_receipts: VecDeque<[u8; 32]>,
     recent_receipt_index: HashSet<[u8; 32]>,
-    plan_results: VecDeque<PlanResultEntry>,
-    scheduler: Scheduler,
+    reducer_queue: VecDeque<ReducerEvent>,
     effect_manager: EffectManager,
     clock: KernelClock,
     reducer_state: HashMap<Name, ReducerState>,
@@ -184,30 +163,6 @@ pub struct Kernel<S: Store> {
     last_snapshot_hash: Option<Hash>,
     pinned_roots: Vec<Hash>,
     workspace_roots: Vec<Hash>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PlanResultEntry {
-    pub plan_name: String,
-    pub plan_id: u64,
-    pub output_schema: String,
-    pub value_cbor: Vec<u8>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct PendingPlanReceiptInfo {
-    plan_id: u64,
-    effect_kind: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct PlanWaitWatcher {
-    parent_plan_id: u64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct PlanCompletionOutcome {
-    await_value: PlanCompletionValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -307,11 +262,10 @@ fn normalize_def_kind(input: &str) -> Option<&'static str> {
 }
 
 #[derive(Clone, Debug)]
-struct PlanTriggerBinding {
-    plan: String,
-    correlate_by: Option<String>,
-    when: Option<Expr>,
-    input_expr: Option<ExprOrValue>,
+pub(super) struct ReducerSchema {
+    pub event_schema_name: String,
+    pub event_schema: TypeExpr,
+    pub key_schema: Option<TypeExpr>,
 }
 
 #[derive(Clone, Debug)]
@@ -400,53 +354,6 @@ impl CellCache {
     fn promote(&mut self, key: &[u8]) {
         self.order.retain(|k| k.as_slice() != key);
         self.order.push_back(key.to_vec());
-    }
-}
-
-impl PlanResultEntry {
-    fn new(plan_name: String, plan_id: u64, output_schema: String, value_cbor: Vec<u8>) -> Self {
-        Self {
-            plan_name,
-            plan_id,
-            output_schema,
-            value_cbor,
-        }
-    }
-
-    fn to_record(&self) -> PlanResultRecord {
-        PlanResultRecord {
-            plan_name: self.plan_name.clone(),
-            plan_id: self.plan_id,
-            output_schema: self.output_schema.clone(),
-            value_cbor: self.value_cbor.clone(),
-        }
-    }
-
-    fn to_snapshot(&self) -> PlanResultSnapshot {
-        PlanResultSnapshot {
-            plan_name: self.plan_name.clone(),
-            plan_id: self.plan_id,
-            output_schema: self.output_schema.clone(),
-            value_cbor: self.value_cbor.clone(),
-        }
-    }
-
-    fn from_record(record: PlanResultRecord) -> Self {
-        Self::new(
-            record.plan_name,
-            record.plan_id,
-            record.output_schema,
-            record.value_cbor,
-        )
-    }
-
-    fn from_snapshot(snapshot: PlanResultSnapshot) -> Self {
-        Self::new(
-            snapshot.plan_name,
-            snapshot.plan_id,
-            snapshot.output_schema,
-            snapshot.value_cbor,
-        )
     }
 }
 
@@ -1033,51 +940,12 @@ impl<S: Store + 'static> Kernel<S> {
             .collect()
     }
 
-    pub fn pending_plan_receipts(&self) -> Vec<(u64, [u8; 32])> {
-        self.pending_receipts
-            .iter()
-            .map(|(hash, entry)| (entry.plan_id, *hash))
-            .collect()
-    }
-
-    pub fn has_plan_instance(&self, id: u64) -> bool {
-        self.plan_instances.contains_key(&id)
-    }
-
-    pub fn debug_plan_waits(&self) -> Vec<(u64, Vec<[u8; 32]>)> {
-        self.plan_instances
-            .iter()
-            .map(|(id, instance)| (*id, instance.pending_receipt_hashes()))
-            .collect()
-    }
-
-    pub fn debug_plan_waiting_events(&self) -> Vec<(u64, String)> {
-        self.plan_instances
-            .iter()
-            .filter_map(|(id, instance)| {
-                instance
-                    .waiting_event_schema()
-                    .map(|schema| (*id, schema.to_string()))
-            })
-            .collect()
-    }
-
-    pub fn plan_name_for_instance(&self, id: u64) -> Option<&str> {
-        self.plan_instances
-            .get(&id)
-            .map(|instance| instance.plan.name.as_str())
-    }
-
     pub fn dump_journal(&self) -> Result<Vec<OwnedJournalEntry>, KernelError> {
         Ok(self.journal.load_from(0)?)
     }
 
     pub fn governance(&self) -> &GovernanceManager {
         &self.governance
-    }
-
-    pub fn recent_plan_results(&self) -> Vec<PlanResultEntry> {
-        self.plan_results.iter().cloned().collect()
     }
 
     fn sample_ingress(&mut self, journal_height: u64) -> Result<IngressStamp, KernelError> {
@@ -1380,44 +1248,6 @@ fn ensure_secret_resolver(
         return Ok(Some(Arc::new(PlaceholderSecretResolver)));
     }
     Err(KernelError::SecretResolverMissing)
-}
-
-fn determine_correlation_value(
-    binding: &PlanTriggerBinding,
-    input: &ExprValue,
-    event_key: Option<&Vec<u8>>,
-) -> Option<(Vec<u8>, ExprValue)> {
-    if let Some(field) = &binding.correlate_by {
-        if let Some(value) = extract_correlation_value(input, field) {
-            let bytes = encode_correlation_bytes(&value);
-            return Some((bytes, value));
-        }
-    }
-    event_key.map(|key| (key.clone(), ExprValue::Bytes(key.clone())))
-}
-
-fn extract_correlation_value(value: &ExprValue, path: &str) -> Option<ExprValue> {
-    let mut current = value;
-    for segment in path.split('.') {
-        if segment.is_empty() {
-            continue;
-        }
-        current = match current {
-            ExprValue::Record(map) => map.get(segment)?,
-            ExprValue::Map(map) => map.get(&ValueKey::Text(segment.to_string()))?,
-            _ => return None,
-        };
-    }
-    Some(current.clone())
-}
-
-fn encode_correlation_bytes(value: &ExprValue) -> Vec<u8> {
-    match value {
-        ExprValue::Text(text) => text.as_bytes().to_vec(),
-        ExprValue::Nat(n) => n.to_be_bytes().to_vec(),
-        ExprValue::Int(i) => i.to_be_bytes().to_vec(),
-        other => serde_cbor::to_vec(other).unwrap_or_default(),
-    }
 }
 
 fn format_intent_hash(hash: &[u8; 32]) -> String {

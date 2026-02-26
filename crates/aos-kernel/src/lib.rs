@@ -13,13 +13,11 @@ pub mod internal_effects;
 pub mod journal;
 pub mod manifest;
 pub mod patch_doc;
-pub mod plan;
 pub mod policy;
 pub mod pure;
 pub mod query;
 pub mod receipts;
 pub mod reducer;
-pub mod scheduler;
 pub mod schema_value;
 pub mod secret;
 pub mod shadow;
@@ -39,6 +37,6 @@ pub use secret::{
 };
 pub use shadow::{ShadowConfig, ShadowExecutor, ShadowSummary};
 pub use world::{
-    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, PlanResultEntry, TailEntry,
-    TailIntent, TailReceipt, TailScan,
+    DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, TailEntry, TailIntent,
+    TailReceipt, TailScan,
 };

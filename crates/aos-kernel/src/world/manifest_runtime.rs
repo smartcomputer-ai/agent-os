@@ -11,18 +11,14 @@ use aos_store::Store;
 use crate::capability::{CapGrantResolution, CapabilityResolver};
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
-use crate::plan::{PlanRegistry, ReducerSchema};
 use crate::policy::{AllowAllPolicy, PolicyGate, RulePolicy};
 
-use super::{EventWrap, PlanTriggerBinding, RouteBinding};
+use super::{EventWrap, ReducerSchema, RouteBinding};
 
 pub(super) struct RuntimeAssembly {
     pub schema_index: Arc<SchemaIndex>,
     pub reducer_schemas: Arc<HashMap<Name, ReducerSchema>>,
     pub router: HashMap<String, Vec<RouteBinding>>,
-    pub plan_registry: PlanRegistry,
-    pub plan_triggers: HashMap<String, Vec<PlanTriggerBinding>>,
-    pub plan_cap_handles: HashMap<Name, Arc<HashMap<String, CapGrantResolution>>>,
     pub module_cap_bindings: HashMap<Name, HashMap<String, CapGrantResolution>>,
     pub capability_resolver: CapabilityResolver,
     pub policy_gate: Box<dyn PolicyGate>,
@@ -39,8 +35,6 @@ pub(super) fn assemble_runtime<S: Store>(
         schema_index.as_ref(),
     )?);
     let router = build_router(&loaded.manifest, reducer_schemas.as_ref())?;
-    let plan_registry = PlanRegistry::default();
-    let plan_triggers = HashMap::new();
     let effect_catalog = Arc::new(loaded.effect_catalog.clone());
     let capability_resolver = CapabilityResolver::from_manifest(
         &loaded.manifest,
@@ -48,7 +42,6 @@ pub(super) fn assemble_runtime<S: Store>(
         schema_index.as_ref(),
         effect_catalog.clone(),
     )?;
-    let plan_cap_handles = HashMap::new();
     let module_cap_bindings = resolve_module_cap_bindings(&loaded.manifest, &capability_resolver)?;
     let policy_gate = build_policy_gate(&loaded.manifest, &loaded.policies)?;
 
@@ -56,9 +49,6 @@ pub(super) fn assemble_runtime<S: Store>(
         schema_index,
         reducer_schemas,
         router,
-        plan_registry,
-        plan_triggers,
-        plan_cap_handles,
         module_cap_bindings,
         capability_resolver,
         policy_gate,

@@ -1,4 +1,5 @@
 use super::*;
+use aos_air_types::value_normalize::normalize_value_with_schema;
 use serde::Serialize;
 
 impl<S: Store + 'static> Kernel<S> {
@@ -82,7 +83,7 @@ impl<S: Store + 'static> Kernel<S> {
         self.mark_replay_generated_domain_event(&event_for_plans)?;
         self.record_domain_event(&event_for_plans, &stamp)?;
         for ev in routed {
-            self.scheduler.push_reducer(ev);
+            self.reducer_queue.push_back(ev);
         }
         Ok(())
     }
@@ -619,8 +620,9 @@ mod tests {
         minimal_kernel_with_router, minimal_kernel_with_router_non_keyed, schema_event_record,
     };
     use aos_air_types::{
-        CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, ReducerAbi, Routing,
-        RoutingEvent, SchemaRef, TypePrimitive, TypePrimitiveHash, TypePrimitiveText,
+        CURRENT_AIR_VERSION, DefSchema, HashRef, ModuleAbi, ModuleKind, NamedRef, ReducerAbi,
+        Routing, RoutingEvent, SchemaRef, TypePrimitive, TypePrimitiveHash, TypePrimitiveText,
+        catalog::EffectCatalog,
     };
     use aos_cbor::Hash;
     use aos_wasm_abi::ReducerEffect;

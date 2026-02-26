@@ -128,16 +128,16 @@ pub fn run(example_root: &Path) -> Result<()> {
             pending_plan_receipts,
             pending_reducer_receipts,
             queued_effects,
-            scheduler_pending,
+            reducer_queue_pending,
         }) => {
             println!(
-                "   apply blocked (strict-quiescence): workflows={} waiting={} pending_plan_receipts={} pending_workflow_receipts={} queued_effects={} scheduler_pending={}",
+                "   apply blocked (strict-quiescence): workflows={} waiting={} pending_plan_receipts={} pending_workflow_receipts={} queued_effects={} reducer_queue_pending={}",
                 plan_instances,
                 waiting_events,
                 pending_plan_receipts,
                 pending_reducer_receipts,
                 queued_effects,
-                scheduler_pending
+                reducer_queue_pending
             );
         }
         Err(other) => return Err(anyhow!("expected strict-quiescence block, got: {other}")),

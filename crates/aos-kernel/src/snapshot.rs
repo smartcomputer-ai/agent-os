@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use serde_bytes;
 
 use crate::journal::JournalSeq;
-use crate::plan::{PlanCompletionValue, PlanInstanceSnapshot};
 use crate::receipts::ReducerEffectContext;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,19 +12,10 @@ pub struct KernelSnapshot {
     reducer_state: Vec<ReducerStateEntry>,
     reducer_index_roots: Vec<(String, [u8; 32])>,
     recent_receipts: Vec<[u8; 32]>,
-    plan_instances: Vec<PlanInstanceSnapshot>,
-    pending_plan_receipts: Vec<PendingPlanReceiptSnapshot>,
-    waiting_events: Vec<(String, Vec<u64>)>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    plan_wait_watchers: Vec<(u64, Vec<u64>)>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    completed_plan_outcomes: Vec<PlanCompletionSnapshot>,
-    next_plan_id: u64,
     queued_effects: Vec<EffectIntentSnapshot>,
     pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     workflow_instances: Vec<WorkflowInstanceSnapshot>,
-    plan_results: Vec<PlanResultSnapshot>,
     height: JournalSeq,
     #[serde(default)]
     logical_now_ns: u64,
@@ -45,14 +35,9 @@ impl KernelSnapshot {
         height: JournalSeq,
         reducer_state: Vec<ReducerStateEntry>,
         recent_receipts: Vec<[u8; 32]>,
-        plan_instances: Vec<PlanInstanceSnapshot>,
-        pending_plan_receipts: Vec<PendingPlanReceiptSnapshot>,
-        waiting_events: Vec<(String, Vec<u64>)>,
-        next_plan_id: u64,
         queued_effects: Vec<EffectIntentSnapshot>,
         pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
         workflow_instances: Vec<WorkflowInstanceSnapshot>,
-        plan_results: Vec<PlanResultSnapshot>,
         logical_now_ns: u64,
         manifest_hash: Option<[u8; 32]>,
     ) -> Self {
@@ -60,16 +45,9 @@ impl KernelSnapshot {
             reducer_state,
             reducer_index_roots: Vec::new(),
             recent_receipts,
-            plan_instances,
-            pending_plan_receipts,
-            waiting_events,
-            plan_wait_watchers: Vec::new(),
-            completed_plan_outcomes: Vec::new(),
-            next_plan_id,
             queued_effects,
             pending_reducer_receipts,
             workflow_instances,
-            plan_results,
             height,
             logical_now_ns,
             manifest_hash: manifest_hash.map(|h| h.to_vec()),
@@ -97,38 +75,6 @@ impl KernelSnapshot {
         self.height
     }
 
-    pub fn plan_instances(&self) -> &[PlanInstanceSnapshot] {
-        &self.plan_instances
-    }
-
-    pub fn pending_plan_receipts(&self) -> &[PendingPlanReceiptSnapshot] {
-        &self.pending_plan_receipts
-    }
-
-    pub fn waiting_events(&self) -> &[(String, Vec<u64>)] {
-        &self.waiting_events
-    }
-
-    pub fn plan_wait_watchers(&self) -> &[(u64, Vec<u64>)] {
-        &self.plan_wait_watchers
-    }
-
-    pub fn set_plan_wait_watchers(&mut self, watchers: Vec<(u64, Vec<u64>)>) {
-        self.plan_wait_watchers = watchers;
-    }
-
-    pub fn completed_plan_outcomes(&self) -> &[PlanCompletionSnapshot] {
-        &self.completed_plan_outcomes
-    }
-
-    pub fn set_completed_plan_outcomes(&mut self, outcomes: Vec<PlanCompletionSnapshot>) {
-        self.completed_plan_outcomes = outcomes;
-    }
-
-    pub fn next_plan_id(&self) -> u64 {
-        self.next_plan_id
-    }
-
     pub fn queued_effects(&self) -> &[EffectIntentSnapshot] {
         &self.queued_effects
     }
@@ -139,10 +85,6 @@ impl KernelSnapshot {
 
     pub fn workflow_instances(&self) -> &[WorkflowInstanceSnapshot] {
         &self.workflow_instances
-    }
-
-    pub fn plan_results(&self) -> &[PlanResultSnapshot] {
-        &self.plan_results
     }
 
     pub fn logical_now_ns(&self) -> u64 {
@@ -224,19 +166,6 @@ impl EffectIntentSnapshot {
             intent_hash: self.intent_hash,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingPlanReceiptSnapshot {
-    pub plan_id: u64,
-    pub intent_hash: [u8; 32],
-    pub effect_kind: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanCompletionSnapshot {
-    pub plan_id: u64,
-    pub value: PlanCompletionValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -322,15 +251,6 @@ impl ReducerReceiptSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanResultSnapshot {
-    pub plan_name: String,
-    pub plan_id: u64,
-    pub output_schema: String,
-    #[serde(with = "serde_bytes")]
-    pub value_cbor: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReducerStateEntry {
     pub reducer: String,
     #[serde(
@@ -371,54 +291,39 @@ mod serde_bytes_opt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_air_exec::Value as ExprValue;
 
     #[test]
-    fn snapshot_roundtrip_preserves_plan_wait_watchers_and_outcomes() {
-        let mut snapshot = KernelSnapshot::new(
+    fn snapshot_roundtrip_preserves_workflow_instances() {
+        let snapshot = KernelSnapshot::new(
             7,
             vec![],
             vec![],
             vec![],
             vec![],
-            vec![],
-            9,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
+            vec![WorkflowInstanceSnapshot {
+                instance_id: "com.acme/Workflow@1::".into(),
+                state_bytes: vec![1, 2, 3],
+                inflight_intents: vec![WorkflowInflightIntentSnapshot {
+                    intent_id: [9u8; 32],
+                    origin_module_id: "com.acme/Workflow@1".into(),
+                    origin_instance_key: None,
+                    effect_kind: "http.request".into(),
+                    params_hash: None,
+                    emitted_at_seq: 7,
+                }],
+                status: WorkflowStatusSnapshot::Waiting,
+                last_processed_event_seq: 7,
+                module_version: Some("sha256:abc".into()),
+            }],
             123,
             None,
         );
-        snapshot.set_plan_wait_watchers(vec![(42, vec![100, 101]), (43, vec![102])]);
-        snapshot.set_completed_plan_outcomes(vec![
-            PlanCompletionSnapshot {
-                plan_id: 100,
-                value: ExprValue::Text("ok".into()),
-            },
-            PlanCompletionSnapshot {
-                plan_id: 101,
-                value: ExprValue::List(vec![ExprValue::Nat(1), ExprValue::Nat(2)]),
-            },
-        ]);
 
         let bytes = serde_cbor::to_vec(&snapshot).expect("encode snapshot");
         let decoded: KernelSnapshot = serde_cbor::from_slice(&bytes).expect("decode snapshot");
 
-        assert_eq!(
-            decoded.plan_wait_watchers(),
-            &[(42, vec![100, 101]), (43, vec![102])]
-        );
-        assert_eq!(decoded.completed_plan_outcomes().len(), 2);
-        assert_eq!(decoded.completed_plan_outcomes()[0].plan_id, 100);
-        assert_eq!(
-            decoded.completed_plan_outcomes()[0].value,
-            ExprValue::Text("ok".into())
-        );
-        assert_eq!(decoded.completed_plan_outcomes()[1].plan_id, 101);
-        assert_eq!(
-            decoded.completed_plan_outcomes()[1].value,
-            ExprValue::List(vec![ExprValue::Nat(1), ExprValue::Nat(2)])
-        );
+        assert_eq!(decoded.workflow_instances().len(), 1);
+        assert_eq!(decoded.workflow_instances()[0].instance_id, "com.acme/Workflow@1::");
+        assert_eq!(decoded.workflow_instances()[0].inflight_intents.len(), 1);
     }
 }

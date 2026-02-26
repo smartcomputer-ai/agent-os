@@ -205,13 +205,13 @@ impl<S: Store + 'static> Kernel<S> {
             .sum::<usize>();
         let pending_reducer_receipts = self.pending_reducer_receipts.len();
         let queued_effects = self.effect_manager.queued().len();
-        let scheduler_pending = !self.scheduler.is_empty();
+        let reducer_queue_pending = !self.reducer_queue.is_empty();
 
         if workflows_with_inflight == 0
             && inflight_workflow_intents == 0
             && pending_reducer_receipts == 0
             && queued_effects == 0
-            && !scheduler_pending
+            && !reducer_queue_pending
         {
             return Ok(());
         }
@@ -222,7 +222,7 @@ impl<S: Store + 'static> Kernel<S> {
             pending_plan_receipts: 0,
             pending_reducer_receipts,
             queued_effects,
-            scheduler_pending,
+            reducer_queue_pending,
         })
     }
 
@@ -239,23 +239,16 @@ impl<S: Store + 'static> Kernel<S> {
         self.manifest_hash = Hash::of_bytes(&manifest_bytes);
         self.secrets = loaded.secrets;
         self.module_defs = loaded.modules;
-        self.plan_defs = HashMap::new();
         self.cap_defs = loaded.caps;
         self.effect_defs = loaded.effects;
         self.policy_defs = loaded.policies;
         self.schema_defs = loaded.schemas;
-        self.plan_registry = runtime.plan_registry;
         self.router = runtime.router;
-        self.plan_triggers = runtime.plan_triggers;
 
-        self.plan_instances.clear();
-        self.waiting_events.clear();
-        self.pending_receipts.clear();
         self.pending_reducer_receipts.clear();
         self.workflow_instances.clear();
         self.recent_receipts.clear();
         self.recent_receipt_index.clear();
-        self.plan_results.clear();
 
         self.schema_index = runtime.schema_index.clone();
         self.reducer_schemas = runtime.reducer_schemas;
@@ -285,7 +278,6 @@ impl<S: Store + 'static> Kernel<S> {
             secret_catalog,
             self.secret_resolver.clone(),
         );
-        self.plan_cap_handles = runtime.plan_cap_handles;
         self.module_cap_bindings = runtime.module_cap_bindings;
         if record_manifest {
             self.record_manifest()?;
@@ -484,14 +476,14 @@ mod tests {
                 pending_plan_receipts,
                 pending_reducer_receipts,
                 queued_effects,
-                scheduler_pending,
+                reducer_queue_pending,
             } => {
                 assert_eq!(plan_instances, 1);
                 assert_eq!(waiting_events, 1);
                 assert_eq!(pending_plan_receipts, 0);
                 assert_eq!(pending_reducer_receipts, 1);
                 assert_eq!(queued_effects, 1);
-                assert!(!scheduler_pending);
+                assert!(!reducer_queue_pending);
             }
             other => panic!("unexpected error: {other}"),
         }

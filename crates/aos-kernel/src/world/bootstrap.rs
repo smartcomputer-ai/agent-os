@@ -18,7 +18,6 @@ impl<S: Store + 'static> Kernel<S> {
         let mut loaded = loaded;
         let secret_resolver = select_secret_resolver(!loaded.secrets.is_empty(), &config)?;
         let runtime = manifest_runtime::assemble_runtime(store.as_ref(), &loaded)?;
-        let plan_defs = HashMap::new();
         let cap_defs = loaded.caps.clone();
         let effect_defs = loaded.effects.clone();
         let policy_defs = loaded.policies.clone();
@@ -48,31 +47,20 @@ impl<S: Store + 'static> Kernel<S> {
             manifest: loaded.manifest.clone(),
             manifest_hash,
             module_defs: loaded.modules,
-            plan_defs,
             cap_defs,
             effect_defs,
             policy_defs,
             schema_defs,
             schema_index: runtime.schema_index.clone(),
             reducer_schemas: runtime.reducer_schemas.clone(),
-            plan_cap_handles: runtime.plan_cap_handles,
             module_cap_bindings: runtime.module_cap_bindings,
             reducers: ReducerRegistry::new(store.clone(), config.module_cache_dir.clone())?,
             pures,
             router: runtime.router,
-            plan_registry: runtime.plan_registry,
-            plan_instances: HashMap::new(),
-            plan_triggers: runtime.plan_triggers,
-            waiting_events: HashMap::new(),
-            plan_wait_watchers: HashMap::new(),
-            completed_plan_outcomes: HashMap::new(),
-            completed_plan_order: VecDeque::new(),
-            pending_receipts: HashMap::new(),
             pending_reducer_receipts: HashMap::new(),
             recent_receipts: VecDeque::new(),
             recent_receipt_index: HashSet::new(),
-            plan_results: VecDeque::new(),
-            scheduler: Scheduler::default(),
+            reducer_queue: VecDeque::new(),
             effect_manager: EffectManager::new(
                 runtime.capability_resolver,
                 runtime.policy_gate,
@@ -136,7 +124,7 @@ mod tests {
     use super::*;
     use crate::journal::mem::MemJournal;
     use crate::world::test_support::empty_manifest;
-    use aos_air_types::{SecretDecl, SecretEntry};
+    use aos_air_types::{SecretDecl, SecretEntry, catalog::EffectCatalog};
     use aos_store::MemStore;
     use std::collections::HashMap;
 

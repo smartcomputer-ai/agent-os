@@ -3,58 +3,14 @@ use super::*;
 impl<S: Store + 'static> Kernel<S> {
     pub fn create_snapshot(&mut self) -> Result<(), KernelError> {
         self.tick_until_idle()?;
-        if !self.scheduler.is_empty() {
+        if !self.reducer_queue.is_empty() {
             return Err(KernelError::SnapshotUnavailable(
-                "scheduler must be idle before snapshot".into(),
+                "reducer queue must be idle before snapshot".into(),
             ));
         }
         let height = self.journal.next_seq();
         let reducer_state: Vec<ReducerStateEntry> = Vec::new();
         let recent_receipts: Vec<[u8; 32]> = self.recent_receipts.iter().cloned().collect();
-        let plan_instances = self
-            .plan_instances
-            .values()
-            .map(|instance| instance.snapshot())
-            .collect();
-        let pending_plan_receipts = self
-            .pending_receipts
-            .iter()
-            .map(|(hash, entry)| PendingPlanReceiptSnapshot {
-                plan_id: entry.plan_id,
-                intent_hash: *hash,
-                effect_kind: entry.effect_kind.clone(),
-            })
-            .collect();
-        let waiting_events = self
-            .waiting_events
-            .iter()
-            .map(|(schema, ids)| (schema.clone(), ids.clone()))
-            .collect();
-        let plan_wait_watchers = self
-            .plan_wait_watchers
-            .iter()
-            .map(|(child, watchers)| {
-                (
-                    *child,
-                    watchers
-                        .iter()
-                        .map(|w| w.parent_plan_id)
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect::<Vec<_>>();
-        let completed_plan_outcomes = self
-            .completed_plan_order
-            .iter()
-            .filter_map(|plan_id| {
-                self.completed_plan_outcomes
-                    .get(plan_id)
-                    .map(|outcome| PlanCompletionSnapshot {
-                        plan_id: *plan_id,
-                        value: outcome.await_value.clone(),
-                    })
-            })
-            .collect::<Vec<_>>();
         let queued_effects = self
             .effect_manager
             .queued()
@@ -99,30 +55,18 @@ impl<S: Store + 'static> Kernel<S> {
                 module_version: state.module_version.clone(),
             })
             .collect();
-        let plan_results: Vec<PlanResultSnapshot> = self
-            .plan_results
-            .iter()
-            .map(|entry| entry.to_snapshot())
-            .collect();
         let logical_now_ns = self.effect_manager.logical_now_ns();
         let mut snapshot = KernelSnapshot::new(
             height,
             reducer_state,
             recent_receipts,
-            plan_instances,
-            pending_plan_receipts,
-            waiting_events,
-            self.scheduler.next_plan_id(),
             queued_effects,
             pending_reducer_receipts,
             workflow_instances,
-            plan_results,
             logical_now_ns,
             Some(*self.manifest_hash.as_bytes()),
         );
         snapshot.set_reducer_index_roots(reducer_index_roots);
-        snapshot.set_plan_wait_watchers(plan_wait_watchers);
-        snapshot.set_completed_plan_outcomes(completed_plan_outcomes);
         let root_completeness = SnapshotRootCompleteness {
             manifest_hash: Some(self.manifest_hash.as_bytes().to_vec()),
             reducer_state_roots: snapshot
@@ -296,12 +240,6 @@ impl<S: Store + 'static> Kernel<S> {
             JournalRecord::Governance(record) => {
                 self.governance.apply_record(&record);
             }
-            JournalRecord::PlanResult(record) => {
-                self.restore_plan_result(record);
-            }
-            JournalRecord::PlanEnded(_) => {
-                // No runtime side effects to restore; plan instances are not replayed from journal.
-            }
             _ => {}
         }
         Ok(())
@@ -357,7 +295,7 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn receipt_horizon_height_for_baseline(&self, height: JournalSeq) -> Option<JournalSeq> {
-        if self.pending_receipts.is_empty() && self.pending_reducer_receipts.is_empty() {
+        if self.pending_reducer_receipts.is_empty() && self.workflow_instances.is_empty() {
             Some(height)
         } else {
             None
@@ -468,51 +406,6 @@ impl<S: Store + 'static> Kernel<S> {
         self.recent_receipts = deque;
         self.recent_receipt_index = set;
 
-        self.plan_instances.clear();
-        for inst_snapshot in snapshot.plan_instances().iter().cloned() {
-            let plan = self
-                .plan_registry
-                .get(&inst_snapshot.name)
-                .ok_or_else(|| {
-                    KernelError::SnapshotUnavailable(format!(
-                        "plan '{}' missing while applying snapshot",
-                        inst_snapshot.name
-                    ))
-                })?
-                .clone();
-            let cap_handles = self
-                .plan_cap_handles
-                .get(&inst_snapshot.name)
-                .ok_or_else(|| {
-                    KernelError::SnapshotUnavailable(format!(
-                        "plan '{}' missing cap bindings while applying snapshot",
-                        inst_snapshot.name
-                    ))
-                })?
-                .clone();
-            let instance = PlanInstance::from_snapshot(
-                inst_snapshot,
-                plan,
-                self.schema_index.clone(),
-                cap_handles,
-            );
-            self.plan_instances.insert(instance.id, instance);
-        }
-
-        self.pending_receipts = snapshot
-            .pending_plan_receipts()
-            .iter()
-            .cloned()
-            .map(|snap| {
-                (
-                    snap.intent_hash,
-                    PendingPlanReceiptInfo {
-                        plan_id: snap.plan_id,
-                        effect_kind: snap.effect_kind,
-                    },
-                )
-            })
-            .collect();
         self.pending_reducer_receipts = snapshot
             .pending_reducer_receipts()
             .iter()
@@ -558,32 +451,6 @@ impl<S: Store + 'static> Kernel<S> {
                 )
             })
             .collect();
-        self.waiting_events = snapshot.waiting_events().iter().cloned().collect();
-        self.plan_wait_watchers = snapshot
-            .plan_wait_watchers()
-            .iter()
-            .map(|(child, parents)| {
-                (
-                    *child,
-                    parents
-                        .iter()
-                        .copied()
-                        .map(|parent_plan_id| PlanWaitWatcher { parent_plan_id })
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect();
-        self.completed_plan_outcomes.clear();
-        self.completed_plan_order.clear();
-        for entry in snapshot.completed_plan_outcomes().iter().cloned() {
-            self.completed_plan_order.push_back(entry.plan_id);
-            self.completed_plan_outcomes.insert(
-                entry.plan_id,
-                PlanCompletionOutcome {
-                    await_value: entry.value,
-                },
-            );
-        }
 
         self.effect_manager.restore_queue(
             snapshot
@@ -598,19 +465,9 @@ impl<S: Store + 'static> Kernel<S> {
         self.clock
             .sync_logical_min(self.effect_manager.logical_now_ns());
 
-        self.plan_results.clear();
-        for result_snapshot in snapshot.plan_results().iter().cloned() {
-            self.push_plan_result_entry(PlanResultEntry::from_snapshot(result_snapshot));
-        }
-
-        self.scheduler.clear();
-        self.scheduler.set_next_plan_id(snapshot.next_plan_id());
+        self.reducer_queue.clear();
 
         Ok(())
-    }
-
-    fn restore_plan_result(&mut self, record: PlanResultRecord) {
-        self.push_plan_result_entry(PlanResultEntry::from_record(record));
     }
 
     /// Return snapshot record (hash + manifest hash) for an exact height, if known.
@@ -727,6 +584,7 @@ fn decode_tail_record(kind: JournalKind, payload: &[u8]) -> Result<JournalRecord
 mod tests {
     use super::*;
     use crate::journal::{JournalEntry, JournalKind, mem::MemJournal};
+    use crate::receipts::ReducerEffectContext;
     use crate::world::test_support::{
         append_record, empty_manifest, event_record, kernel_with_store_and_journal,
         loaded_manifest_with_schema, minimal_kernel_non_keyed, write_manifest,
@@ -796,11 +654,6 @@ mod tests {
         let mut snapshot = KernelSnapshot::new(
             snapshot_height,
             vec![],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            0,
             vec![],
             vec![],
             vec![],
@@ -883,12 +736,17 @@ mod tests {
             .expect("initial baseline")
             .height;
 
-        kernel.pending_receipts.insert(
+        kernel.pending_reducer_receipts.insert(
             [9u8; 32],
-            PendingPlanReceiptInfo {
-                plan_id: 42,
-                effect_kind: "http.request".into(),
-            },
+            ReducerEffectContext::new(
+                "com.acme/Workflow@1".into(),
+                None,
+                "http.request".into(),
+                vec![],
+                [9u8; 32],
+                0,
+                None,
+            ),
         );
         kernel.create_snapshot().expect("snapshot still written");
 
@@ -912,11 +770,6 @@ mod tests {
         let snapshot = KernelSnapshot::new(
             1,
             vec![],
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            0,
             vec![],
             vec![],
             vec![],
@@ -965,10 +818,6 @@ mod tests {
             vec![],
             vec![],
             vec![],
-            vec![],
-            0,
-            vec![],
-            vec![],
             vec![WorkflowInstanceSnapshot {
                 instance_id: "com.acme/Workflow@1::".into(),
                 state_bytes: vec![1, 2, 3],
@@ -990,7 +839,6 @@ mod tests {
                         .into(),
                 ),
             }],
-            vec![],
             0,
             Some(*kernel.manifest_hash().as_bytes()),
         );
