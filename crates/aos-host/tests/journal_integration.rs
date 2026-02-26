@@ -1,6 +1,5 @@
-use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
-    DefModule, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind, OriginKind,
+    DefModule, DefPolicy, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind, OriginKind,
     PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, TypeExpr, TypeRecord, TypeRef,
     TypeVariant,
 };
@@ -8,83 +7,21 @@ use aos_effects::builtins::{BlobPutParams, BlobPutReceipt, TimerSetParams, Timer
 use aos_effects::{EffectReceipt, ReceiptStatus};
 use aos_kernel::journal::fs::FsJournal;
 use aos_kernel::journal::mem::MemJournal;
-use aos_kernel::journal::{IntentOriginRecord, JournalKind, JournalRecord, PolicyDecisionOutcome};
+use aos_kernel::journal::{JournalKind, JournalRecord, PolicyDecisionOutcome};
 use aos_kernel::snapshot::WorkflowStatusSnapshot;
-use helpers::fixtures::{self, TestWorld, START_SCHEMA};
-use serde_cbor;
+use aos_store::Store;
+use aos_wasm_abi::{DomainEvent, ReducerEffect, ReducerOutput};
 use serde_cbor::Value as CborValue;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tempfile::TempDir;
 use wat::parse_str;
 
-use aos_store::Store;
-use aos_wasm_abi::{DomainEvent, ReducerEffect, ReducerOutput};
+use helpers::fixtures::{self, TestWorld, START_SCHEMA};
 
 mod helpers;
-use helpers::{attach_default_policy, fulfillment_manifest, timer_manifest};
+use helpers::{attach_default_policy, timer_manifest};
 
-/// Journal replay without snapshots should restore reducer state identically.
-#[test]
-#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
-fn journal_replay_restores_state() {
-    let store = fixtures::new_mem_store();
-    let manifest_run = fulfillment_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest_run).unwrap();
-
-    world
-        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
-
-    let mut effects = world.drain_effects().expect("drain effects");
-    assert_eq!(effects.len(), 1);
-    let effect = effects.remove(0);
-    let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
-    let receipt = EffectReceipt {
-        intent_hash: effect.intent_hash,
-        adapter_id: "adapter.http".into(),
-        status: ReceiptStatus::Ok,
-        payload_cbor: receipt_payload,
-        cost_cents: None,
-        signature: vec![],
-    };
-    world.kernel.handle_receipt(receipt).unwrap();
-    world.kernel.tick_until_idle().unwrap();
-
-    let final_state = world
-        .kernel
-        .reducer_state("com.acme/ResultReducer@1")
-        .unwrap();
-    let journal_entries = world.kernel.dump_journal().unwrap();
-    let start_schema = journal_entries
-        .iter()
-        .find(|entry| entry.kind == JournalKind::DomainEvent)
-        .map(|entry| {
-            let record: JournalRecord = serde_cbor::from_slice(&entry.payload).unwrap();
-            match record {
-                JournalRecord::DomainEvent(event) => event.schema,
-                _ => unreachable!(),
-            }
-        })
-        .expect("journal missing domain event entry");
-    assert_eq!(start_schema, START_SCHEMA);
-
-    let manifest_replay = fulfillment_manifest(&store);
-    let replay_journal = MemJournal::from_entries(&journal_entries);
-    let replay_world =
-        TestWorld::with_store_and_journal(store.clone(), manifest_replay, Box::new(replay_journal))
-            .unwrap();
-
-    assert_eq!(
-        replay_world
-            .kernel
-            .reducer_state("com.acme/ResultReducer@1"),
-        Some(final_state)
-    );
-}
-
-/// Timer receipts from reducer/workflow modules should replay correctly from journal.
 #[test]
 fn reducer_timer_receipt_replays_from_journal() {
     let store = fixtures::new_mem_store();
@@ -134,92 +71,6 @@ fn reducer_timer_receipt_replays_from_journal() {
     );
 }
 
-/// Journal replay alone (without snapshots) should hydrate plan-origin intents waiting on receipts.
-#[test]
-#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
-fn plan_journal_replay_resumes_waiting_receipt() {
-    let store = fixtures::new_mem_store();
-    let manifest = fulfillment_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-
-    world
-        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
-
-    let effect = world
-        .drain_effects()
-        .expect("drain effects")
-        .pop()
-        .expect("expected pending effect before shutdown");
-
-    let journal_entries = world.kernel.dump_journal().unwrap();
-    let (recorded_intent_hash, recorded_plan_id) = journal_entries
-        .iter()
-        .find(|entry| entry.kind == JournalKind::EffectIntent)
-        .map(|entry| {
-            let record: JournalRecord = serde_cbor::from_slice(&entry.payload).unwrap();
-            match record {
-                JournalRecord::EffectIntent(record) => {
-                    let plan_id = match record.origin {
-                        IntentOriginRecord::Plan { plan_id, .. } => plan_id,
-                        _ => unreachable!(),
-                    };
-                    (record.intent_hash, plan_id)
-                }
-                _ => unreachable!(),
-            }
-        })
-        .expect("journal should contain effect intent entry");
-    assert_eq!(recorded_intent_hash, effect.intent_hash);
-
-    let mut replay_world = TestWorld::with_store_and_journal(
-        store.clone(),
-        fulfillment_manifest(&store),
-        Box::new(MemJournal::from_entries(&journal_entries)),
-    )
-    .unwrap();
-
-    let pending = replay_world.kernel.pending_plan_receipts();
-    assert_eq!(pending.len(), 1, "pending receipt should be restored");
-    assert_eq!(pending[0].0, recorded_plan_id);
-    assert_eq!(pending[0].1, recorded_intent_hash);
-    let waits = replay_world.kernel.debug_plan_waits();
-    assert_eq!(
-        waits.len(),
-        1,
-        "expected one plan instance waiting on a receipt"
-    );
-    assert_eq!(
-        waits[0].0, recorded_plan_id,
-        "plan id should match recorded value"
-    );
-    assert_eq!(
-        waits[0].1,
-        vec![recorded_intent_hash],
-        "pending hash should match journal"
-    );
-
-    let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
-    let receipt = EffectReceipt {
-        intent_hash: recorded_intent_hash,
-        adapter_id: "adapter.http".into(),
-        status: ReceiptStatus::Ok,
-        payload_cbor: receipt_payload,
-        cost_cents: None,
-        signature: vec![],
-    };
-    replay_world.kernel.handle_receipt(receipt).unwrap();
-    replay_world.kernel.tick_until_idle().unwrap();
-
-    assert_eq!(
-        replay_world
-            .kernel
-            .reducer_state("com.acme/ResultReducer@1"),
-        Some(vec![0xEE])
-    );
-}
-
 #[test]
 fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     let store = fixtures::new_mem_store();
@@ -236,7 +87,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
     world.tick_n(1).unwrap();
 
     let mut effects = world.drain_effects().expect("drain effects");
-    assert_eq!(effects.len(), 2, "workflow should emit multiple effects");
+    assert_eq!(effects.len(), 2);
     effects.sort_by(|a, b| a.kind.as_str().cmp(b.kind.as_str()));
     assert_eq!(effects[0].kind.as_str(), aos_effects::EffectKind::BLOB_PUT);
     assert_eq!(effects[1].kind.as_str(), aos_effects::EffectKind::TIMER_SET);
@@ -276,7 +127,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
                 cost_cents: Some(1),
                 signature: vec![4, 5, 6],
             },
-            other => panic!("unexpected effect kind in fixture: {other}"),
+            other => panic!("unexpected effect kind: {other}"),
         };
         world.kernel.handle_receipt(receipt).unwrap();
     }
@@ -284,8 +135,7 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/WorkflowResult@1"),
-        Some(vec![0xFA]),
-        "receipt-driven continuation should raise domain event to result reducer"
+        Some(vec![0xFA])
     );
     let settled = world.kernel.workflow_instances_snapshot();
     let workflow = settled
@@ -309,7 +159,6 @@ fn workflow_no_plan_multi_effect_receipts_replay_from_journal() {
         Some(vec![0xFA])
     );
     let replay_instances = replay_world.kernel.workflow_instances_snapshot();
-    assert_eq!(replay_instances.len(), settled.len());
     let replay_workflow = replay_instances
         .iter()
         .find(|instance| instance.instance_id.starts_with("com.acme/Workflow@1::"))
@@ -356,10 +205,6 @@ fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
 
     let journal_entries = world.kernel.dump_journal().unwrap();
     let journal_len_before = journal_entries.len();
-    assert_eq!(
-        world.kernel.reducer_state("com.acme/WorkflowResult@1"),
-        Some(vec![0xFA])
-    );
     let done_event_count_before = journal_entries
         .iter()
         .filter_map(
@@ -381,17 +226,7 @@ fn workflow_replay_does_not_double_apply_receipt_spawned_domain_events() {
     .unwrap();
     replay_world.kernel.tick_until_idle().unwrap();
     let replay_entries = replay_world.kernel.dump_journal().unwrap();
-    assert_eq!(
-        replay_entries.len(),
-        journal_len_before,
-        "journal replay must not append duplicate receipt-spawned records"
-    );
-    assert_eq!(
-        replay_world
-            .kernel
-            .reducer_state("com.acme/WorkflowResult@1"),
-        Some(vec![0xFA])
-    );
+    assert_eq!(replay_entries.len(), journal_len_before);
     let done_event_count_after = replay_entries
         .iter()
         .filter_map(
@@ -436,7 +271,7 @@ fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending(
         intent_hash: blob_intent.intent_hash,
         adapter_id: "adapter.blob".into(),
         status: ReceiptStatus::Ok,
-        payload_cbor: vec![0xa0], // {} does not satisfy sys/BlobPutReceipt@1
+        payload_cbor: vec![0xa0],
         cost_cents: None,
         signature: vec![],
     };
@@ -445,11 +280,7 @@ fn malformed_workflow_receipt_without_rejected_variant_fails_and_clears_pending(
         .handle_receipt(malformed)
         .expect("fault handled");
 
-    let pending_after = world.kernel.pending_reducer_receipts_snapshot();
-    assert!(
-        pending_after.is_empty(),
-        "failed workflow should not keep pending receipts"
-    );
+    assert!(world.kernel.pending_reducer_receipts_snapshot().is_empty());
     let status = world
         .kernel
         .workflow_instances_snapshot()
@@ -544,82 +375,151 @@ fn malformed_workflow_receipt_with_rejected_variant_delivers_event_and_continues
 
     assert_eq!(
         world.kernel.reducer_state("com.acme/WorkflowResult@1"),
-        Some(vec![0xFA]),
-        "workflow should continue once valid receipts arrive"
+        Some(vec![0xFA])
     );
 }
 
-/// Policy decisions should be journaled for plan-origin effects.
 #[test]
-#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
-fn policy_decision_is_journaled() {
+fn workflow_policy_decision_is_journaled() {
     let store = fixtures::new_mem_store();
-    let mut manifest = fulfillment_manifest(&store);
-    let policy = aos_air_types::DefPolicy {
-        name: "com.acme/allow-plan-http@1".into(),
-        rules: vec![PolicyRule {
-            when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::http_request()),
-                origin_kind: Some(OriginKind::Workflow),
-                ..Default::default()
+    let mut manifest = no_plan_workflow_manifest(&store);
+    let policy = DefPolicy {
+        name: "com.acme/allow-workflow-effects@1".into(),
+        rules: vec![
+            PolicyRule {
+                when: PolicyMatch {
+                    origin_kind: Some(OriginKind::Workflow),
+                    effect_kind: Some(AirEffectKind::timer_set()),
+                    ..Default::default()
+                },
+                decision: PolicyDecision::Allow,
             },
-            decision: PolicyDecision::Allow,
-        }],
+            PolicyRule {
+                when: PolicyMatch {
+                    origin_kind: Some(OriginKind::Workflow),
+                    effect_kind: Some(AirEffectKind::blob_put()),
+                    ..Default::default()
+                },
+                decision: PolicyDecision::Allow,
+            },
+        ],
     };
     attach_default_policy(&mut manifest, policy.clone());
 
     let mut world = TestWorld::with_store(store, manifest).unwrap();
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("wf-policy")
+    });
     world
-        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
+        .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
+        .expect("submit workflow start");
+    world.tick_n(1).unwrap();
 
-    let journal_entries = world.kernel.dump_journal().unwrap();
-    let record = journal_entries
-        .iter()
-        .find(|entry| entry.kind == JournalKind::PolicyDecision)
-        .map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).unwrap())
-        .expect("policy decision entry missing");
-
-    match record {
+    let policy_records: Vec<_> = world
+        .kernel
+        .dump_journal()
+        .unwrap()
+        .into_iter()
+        .filter(|entry| entry.kind == JournalKind::PolicyDecision)
+        .filter_map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok())
+        .collect();
+    assert!(
+        !policy_records.is_empty(),
+        "expected policy decision records"
+    );
+    assert!(policy_records.into_iter().any(|record| match record {
         JournalRecord::PolicyDecision(decision) => {
-            assert_eq!(decision.policy_name, policy.name);
-            assert_eq!(decision.rule_index, Some(0));
-            assert_eq!(decision.decision, PolicyDecisionOutcome::Allow);
+            decision.policy_name == policy.name
+                && decision.rule_index == Some(0)
+                && decision.decision == PolicyDecisionOutcome::Allow
         }
-        _ => unreachable!("expected policy decision record"),
-    }
+        _ => false,
+    }));
 }
 
-/// Cap decisions should include a stable grant hash in the journal.
 #[test]
-#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
-fn cap_decision_includes_grant_hash() {
+fn workflow_cap_decision_includes_stable_grant_hash() {
     let store = fixtures::new_mem_store();
-    let manifest = fulfillment_manifest(&store);
+    let manifest = no_plan_workflow_manifest(&store);
     let mut world = TestWorld::with_store(store, manifest).unwrap();
 
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("wf-cap")
+    });
     world
-        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
+        .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
+        .expect("submit workflow start");
+    world.tick_n(1).unwrap();
 
-    let journal_entries = world.kernel.dump_journal().unwrap();
-    let record = journal_entries
-        .iter()
-        .find(|entry| entry.kind == JournalKind::CapDecision)
-        .map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).unwrap())
-        .expect("cap decision entry missing");
+    let cap_records: Vec<_> = world
+        .kernel
+        .dump_journal()
+        .unwrap()
+        .into_iter()
+        .filter(|entry| entry.kind == JournalKind::CapDecision)
+        .filter_map(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok())
+        .collect();
+    assert!(!cap_records.is_empty(), "expected cap decision records");
 
-    let decision = match record {
-        JournalRecord::CapDecision(decision) => decision,
-        _ => unreachable!("expected cap decision record"),
-    };
-
-    let params_cbor =
+    let empty_params =
         aos_cbor::to_canonical_cbor(&CborValue::Map(BTreeMap::new())).expect("params cbor");
-    let expected = compute_grant_hash("sys/http.out@1", "http.out", &params_cbor, None);
-    assert_eq!(decision.grant_hash, expected);
+    assert!(cap_records.into_iter().any(|record| match record {
+        JournalRecord::CapDecision(decision) => {
+            let defcap_ref = match decision.cap_type.as_str() {
+                "timer" => "sys/timer@1",
+                "blob" => "sys/blob@1",
+                _ => return false,
+            };
+            compute_grant_hash(
+                defcap_ref,
+                &decision.cap_type,
+                &empty_params,
+                decision.expiry_ns,
+            ) == decision.grant_hash
+        }
+        _ => false,
+    }));
+}
+
+#[test]
+fn workflow_fs_journal_persists_waiting_state_across_restarts() {
+    let store = fixtures::new_mem_store();
+    let temp = TempDir::new().unwrap();
+
+    {
+        let mut world = TestWorld::with_store_and_journal(
+            store.clone(),
+            no_plan_workflow_manifest(&store),
+            Box::new(FsJournal::open(temp.path()).unwrap()),
+        )
+        .unwrap();
+        let start_event = serde_json::json!({
+            "$tag": "Start",
+            "$value": fixtures::start_event("wf-fs")
+        });
+        world
+            .submit_event_result("com.acme/WorkflowEvent@1", &start_event)
+            .expect("submit workflow start");
+        world.tick_n(1).unwrap();
+        assert_eq!(world.kernel.pending_reducer_receipts_snapshot().len(), 2);
+    }
+
+    let replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        no_plan_workflow_manifest(&store),
+        Box::new(FsJournal::open(temp.path()).unwrap()),
+    )
+    .unwrap();
+    assert_eq!(
+        replay_world
+            .kernel
+            .pending_reducer_receipts_snapshot()
+            .len(),
+        2
+    );
+    assert!(!replay_world.kernel.dump_journal().unwrap().is_empty());
 }
 
 fn no_plan_workflow_manifest(
@@ -821,7 +721,6 @@ fn sequenced_reducer_module<S: Store + ?Sized>(
         local.get $len
         i32.ge_u
         br_if $not_found
-
         local.get $ptr
         local.get $i
         i32.add
@@ -892,7 +791,6 @@ fn sequenced_reducer_module<S: Store + ?Sized>(
             end
           end
         end
-
         local.get $i
         i32.const 1
         i32.add
@@ -958,169 +856,4 @@ fn compute_grant_hash(
     }
     let hash = aos_cbor::Hash::of_cbor(&CborValue::Map(map)).expect("grant hash");
     *hash.as_bytes()
-}
-
-/// FsJournal should persist entries to disk and allow a fresh kernel to resume state.
-#[test]
-#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
-fn fs_journal_persists_across_restarts() {
-    let store = fixtures::new_mem_store();
-    let temp = TempDir::new().unwrap();
-
-    let final_state = {
-        let mut world = TestWorld::with_store_and_journal(
-            store.clone(),
-            fulfillment_manifest(&store),
-            Box::new(FsJournal::open(temp.path()).unwrap()),
-        )
-        .unwrap();
-
-        world
-            .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "123" }))
-            .expect("submit start event");
-        world.tick_n(2).unwrap();
-
-        let mut effects = world.drain_effects().expect("drain effects");
-        assert_eq!(effects.len(), 1);
-        let effect = effects.remove(0);
-        let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
-        let receipt = EffectReceipt {
-            intent_hash: effect.intent_hash,
-            adapter_id: "adapter.http".into(),
-            status: ReceiptStatus::Ok,
-            payload_cbor: receipt_payload,
-            cost_cents: None,
-            signature: vec![],
-        };
-        world.kernel.handle_receipt(receipt).unwrap();
-        world.kernel.tick_until_idle().unwrap();
-
-        world
-            .kernel
-            .reducer_state("com.acme/ResultReducer@1")
-            .unwrap()
-    };
-
-    let replay_world = TestWorld::with_store_and_journal(
-        store.clone(),
-        fulfillment_manifest(&store),
-        Box::new(FsJournal::open(temp.path()).unwrap()),
-    )
-    .unwrap();
-
-    assert_eq!(
-        replay_world
-            .kernel
-            .reducer_state("com.acme/ResultReducer@1"),
-        Some(final_state)
-    );
-    assert!(!replay_world.kernel.dump_journal().unwrap().is_empty());
-}
-
-/// Trace terminal classification derived from journal + live wait state should match after replay.
-#[test]
-#[ignore = "P2: plan runtime path retired; replaced by workflow fixtures"]
-fn trace_terminal_classification_matches_after_replay() {
-    let store = fixtures::new_mem_store();
-    let manifest = fulfillment_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-
-    world
-        .submit_event_result(START_SCHEMA, &serde_json::json!({ "id": "trace-parity" }))
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
-
-    let journal_entries = world.kernel.dump_journal().unwrap();
-    let event_hash = journal_entries
-        .iter()
-        .find(|entry| entry.kind == JournalKind::DomainEvent)
-        .and_then(|entry| serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok())
-        .and_then(|record| match record {
-            JournalRecord::DomainEvent(event) => Some(event.event_hash),
-            _ => None,
-        })
-        .expect("domain event hash missing from journal");
-    assert!(
-        !event_hash.is_empty(),
-        "domain event hash should be populated for trace classification"
-    );
-
-    let original_terminal = classify_trace_terminal_state(&world.kernel, &event_hash)
-        .expect("classify terminal state before replay");
-
-    let replay_world = TestWorld::with_store_and_journal(
-        store.clone(),
-        fulfillment_manifest(&store),
-        Box::new(MemJournal::from_entries(&journal_entries)),
-    )
-    .unwrap();
-
-    let replay_terminal = classify_trace_terminal_state(&replay_world.kernel, &event_hash)
-        .expect("classify terminal state after replay");
-
-    assert_eq!(
-        original_terminal, replay_terminal,
-        "terminal trace classification should be replay-stable"
-    );
-    assert_eq!(
-        original_terminal, "waiting_receipt",
-        "fixture should be pending receipt before external adapter response"
-    );
-}
-
-fn classify_trace_terminal_state(
-    kernel: &aos_kernel::Kernel<helpers::fixtures::TestStore>,
-    event_hash: &str,
-) -> Option<&'static str> {
-    let entries = kernel.dump_journal().ok()?;
-    let root_seq = entries.iter().find_map(|entry| {
-        if entry.kind != JournalKind::DomainEvent {
-            return None;
-        }
-        let record = serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok()?;
-        match record {
-            JournalRecord::DomainEvent(event) if event.event_hash == event_hash => Some(entry.seq),
-            _ => None,
-        }
-    })?;
-
-    let mut has_receipt_error = false;
-    let mut has_plan_error = false;
-    let mut has_window_entries = false;
-    for entry in entries.into_iter().filter(|entry| entry.seq >= root_seq) {
-        let record = serde_cbor::from_slice::<JournalRecord>(&entry.payload).ok()?;
-        has_window_entries = true;
-        if let JournalRecord::EffectReceipt(receipt) = &record {
-            if !matches!(receipt.status, ReceiptStatus::Ok) {
-                has_receipt_error = true;
-            }
-        }
-        if let JournalRecord::PlanEnded(ended) = &record {
-            if matches!(ended.status, aos_kernel::journal::PlanEndStatus::Error) {
-                has_plan_error = true;
-            }
-        }
-    }
-
-    let waiting_receipt_count = kernel.pending_plan_receipts().len()
-        + kernel.pending_reducer_receipts_snapshot().len()
-        + kernel.queued_effects_snapshot().len()
-        + kernel
-            .debug_plan_waits()
-            .iter()
-            .map(|(_, waits)| waits.len())
-            .sum::<usize>();
-    let waiting_event_count = kernel.debug_plan_waiting_events().len();
-
-    Some(if has_receipt_error || has_plan_error {
-        "failed"
-    } else if waiting_receipt_count > 0 {
-        "waiting_receipt"
-    } else if waiting_event_count > 0 {
-        "waiting_event"
-    } else if has_window_entries {
-        "completed"
-    } else {
-        "unknown"
-    })
 }

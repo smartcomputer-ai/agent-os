@@ -49,8 +49,8 @@ Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 
 Integration suite rewrite checklist:
 - [x] `crates/aos-host/tests/world_integration.rs`: replace ignored plan-runtime tests with workflow-runtime equivalents.
-- [ ] `crates/aos-host/tests/journal_integration.rs`: migrate journal assertions from plan records to workflow records/state.
-- [ ] `crates/aos-host/tests/snapshot_integration.rs`: migrate snapshot/replay assertions to workflow in-flight state semantics.
+- [x] `crates/aos-host/tests/journal_integration.rs`: migrate journal assertions from plan records to workflow records/state.
+- [x] `crates/aos-host/tests/snapshot_integration.rs`: migrate snapshot/replay assertions to workflow in-flight state semantics.
 - [x] `crates/aos-host/tests/governance_effects_integration.rs` (replaces `governance_plan_integration.rs`): governance propose/shadow/approve/apply exercised via workflow-origin effects (no plan APIs).
 - [x] `crates/aos-host/tests/governance_integration.rs`: removed plan patch/apply assertions and kept workflow-manifest governance checks only.
 - [ ] `crates/aos-host/tests/fixtures.rs`: replace plan-oriented fixtures/helpers with workflow-oriented fixtures/helpers.
@@ -185,6 +185,13 @@ Implementation log (completed 2026-02-26):
   - migrated to `crates/aos-host/tests/snapshot_integration.rs`: `subplan_receipt_wait_survives_restart_and_resumes_parent`
   - rewrote in-place (workflow-native): `raised_events_are_routed_to_reducers`
   - verification:
+    - `cargo test -p aos-host --features e2e-tests --test world_integration --test workflow_runtime_integration --test journal_integration --test snapshot_integration -q`
+- [x] `journal_integration.rs` + `snapshot_integration.rs` workflow cutover cleanup completed:
+  - removed all remaining ignored plan-runtime fixtures from both files and replaced with workflow-native replay/snapshot coverage.
+  - `journal_integration.rs`: active workflow coverage now includes receipt replay idempotency, malformed-receipt settlement modes, workflow-origin policy/cap decision journaling, and fs-journal waiting-state restoration.
+  - `snapshot_integration.rs`: active workflow coverage now includes in-flight queue persistence, receipt-wait restart continuation, cap-decision snapshot replay, and workflow-manifest replay-authority checks.
+  - verification:
+    - `cargo test -p aos-host --features e2e-tests --test journal_integration --test snapshot_integration -q`
     - `cargo test -p aos-host --features e2e-tests --test world_integration --test workflow_runtime_integration --test journal_integration --test snapshot_integration -q`
 
 ### 4) Dead code and roadmap cleanup

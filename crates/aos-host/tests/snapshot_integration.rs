@@ -1,4 +1,3 @@
-use aos_air_exec::Value as ExprValue;
 use aos_air_types::{
     DefModule, DefPolicy, DefSchema, EffectKind as AirEffectKind, HashRef, ModuleAbi, ModuleKind,
     OriginKind, PolicyDecision, PolicyMatch, PolicyRule, ReducerAbi, TypeExpr, TypeRecord, TypeRef,
@@ -12,24 +11,21 @@ use aos_kernel::journal::JournalKind;
 use aos_kernel::Kernel;
 use aos_store::{FsStore, Store};
 use aos_wasm_abi::{ReducerEffect, ReducerOutput};
-use helpers::fixtures::{self, TestWorld, START_SCHEMA};
-use serde_cbor;
 use std::sync::Arc;
 use tempfile::TempDir;
 use wat::parse_str;
 
-mod helpers;
-use helpers::{
-    attach_default_policy, await_event_manifest, fulfillment_manifest, simple_state_manifest,
-    timer_manifest,
-};
+use helpers::fixtures::{self, TestWorld, START_SCHEMA};
 
-fn deny_plan_http_policy() -> DefPolicy {
+mod helpers;
+use helpers::{attach_default_policy, simple_state_manifest, timer_manifest};
+
+fn deny_workflow_timer_policy() -> DefPolicy {
     DefPolicy {
-        name: "com.acme/deny-plan-http@1".into(),
+        name: "com.acme/deny-workflow-timer@1".into(),
         rules: vec![PolicyRule {
             when: PolicyMatch {
-                effect_kind: Some(AirEffectKind::http_request()),
+                effect_kind: Some(AirEffectKind::timer_set()),
                 origin_kind: Some(OriginKind::Workflow),
                 ..Default::default()
             },
@@ -38,145 +34,6 @@ fn deny_plan_http_policy() -> DefPolicy {
     }
 }
 
-/// Plan execution should resume correctly after snapshot when awaiting a receipt.
-#[test]
-#[ignore = "P2: plan-runtime snapshot path retired; replace with workflow-native fixture"]
-fn plan_snapshot_resumes_after_receipt() {
-    let store = fixtures::new_mem_store();
-    let manifest = fulfillment_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-
-    let input = fixtures::start_event("123");
-    world
-        .submit_event_result(START_SCHEMA, &input)
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
-
-    let effect = world
-        .drain_effects()
-        .expect("drain effects")
-        .pop()
-        .expect("expected effect before snapshot");
-
-    world.kernel.create_snapshot().unwrap();
-    let journal_entries = world.kernel.dump_journal().unwrap();
-
-    let mut replay_world = TestWorld::with_store_and_journal(
-        store.clone(),
-        fulfillment_manifest(&store),
-        Box::new(MemJournal::from_entries(&journal_entries)),
-    )
-    .unwrap();
-
-    let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
-    let receipt = EffectReceipt {
-        intent_hash: effect.intent_hash,
-        adapter_id: "adapter.http".into(),
-        status: ReceiptStatus::Ok,
-        payload_cbor: receipt_payload,
-        cost_cents: None,
-        signature: vec![],
-    };
-    replay_world.kernel.handle_receipt(receipt).unwrap();
-    replay_world.kernel.tick_until_idle().unwrap();
-
-    assert_eq!(
-        replay_world
-            .kernel
-            .reducer_state("com.acme/ResultReducer@1"),
-        Some(vec![0xEE])
-    );
-}
-
-/// Effect intents should persist in the queue across snapshot/restore.
-#[test]
-#[ignore = "P2: plan-runtime snapshot path retired; replace with workflow-native fixture"]
-fn plan_snapshot_preserves_effect_queue() {
-    let store = fixtures::new_mem_store();
-    let manifest = fulfillment_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-
-    let input = fixtures::start_event("123");
-    world
-        .submit_event_result(START_SCHEMA, &input)
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
-
-    world.kernel.create_snapshot().unwrap();
-    let entries = world.kernel.dump_journal().unwrap();
-
-    let mut replay_world = TestWorld::with_store_and_journal(
-        store.clone(),
-        fulfillment_manifest(&store),
-        Box::new(MemJournal::from_entries(&entries)),
-    )
-    .unwrap();
-
-    let mut intents = replay_world.drain_effects().expect("drain effects");
-    assert_eq!(
-        intents.len(),
-        1,
-        "effect queue should persist across snapshot"
-    );
-    let effect = intents.remove(0);
-
-    let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
-    let receipt = EffectReceipt {
-        intent_hash: effect.intent_hash,
-        adapter_id: "adapter.http".into(),
-        status: ReceiptStatus::Ok,
-        payload_cbor: receipt_payload,
-        cost_cents: None,
-        signature: vec![],
-    };
-    replay_world.kernel.handle_receipt(receipt).unwrap();
-    replay_world.kernel.tick_until_idle().unwrap();
-
-    assert_eq!(
-        replay_world
-            .kernel
-            .reducer_state("com.acme/ResultReducer@1"),
-        Some(vec![0xEE])
-    );
-}
-
-/// Plan awaiting domain event should resume correctly after snapshot.
-#[test]
-#[ignore = "P2: plan-runtime snapshot path retired; replace with workflow-native fixture"]
-fn plan_snapshot_resumes_after_event() {
-    let store = fixtures::new_mem_store();
-    let manifest = await_event_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-
-    let input = fixtures::start_event("evt");
-    world
-        .submit_event_result(START_SCHEMA, &input)
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
-    world.tick_n(2).unwrap();
-
-    world.kernel.create_snapshot().unwrap();
-    let entries = world.kernel.dump_journal().unwrap();
-
-    let mut replay_world = TestWorld::with_store_and_journal(
-        store.clone(),
-        await_event_manifest(&store),
-        Box::new(MemJournal::from_entries(&entries)),
-    )
-    .unwrap();
-
-    replay_world
-        .submit_event_result("com.acme/EmitUnblock@1", &serde_json::json!({}))
-        .expect("submit unblock event");
-    replay_world.kernel.tick_until_idle().unwrap();
-
-    assert_eq!(
-        replay_world.kernel.reducer_state("com.acme/EventResult@1"),
-        Some(vec![0xAB])
-    );
-}
-
-/// Reducer-emitted timer effects should resume correctly on receipt after snapshot.
 #[test]
 fn reducer_timer_snapshot_resumes_on_receipt() {
     let store = fixtures::new_mem_store();
@@ -223,6 +80,35 @@ fn reducer_timer_snapshot_resumes_on_receipt() {
         replay_world.kernel.reducer_state("com.acme/TimerEmitter@1"),
         Some(vec![0x01])
     );
+}
+
+#[test]
+fn workflow_snapshot_preserves_effect_queue() {
+    let store = fixtures::new_mem_store();
+    let manifest = workflow_resume_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("queue")
+    });
+    world
+        .submit_event_result("com.acme/WorkflowResumeEvent@1", &start_event)
+        .expect("submit start event");
+    world.tick_n(1).unwrap();
+
+    world.kernel.create_snapshot().unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        workflow_resume_manifest(&store),
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+    let intents = replay_world.drain_effects().expect("drain effects");
+    assert_eq!(intents.len(), 1);
+    assert_eq!(intents[0].kind.as_str(), aos_effects::EffectKind::TIMER_SET);
 }
 
 #[test]
@@ -288,18 +174,20 @@ fn workflow_receipt_wait_survives_restart_and_resumes_continuation() {
     );
 }
 
-/// Cap decisions should be preserved in journals across snapshot/replay cycles.
 #[test]
-#[ignore = "P2: plan-runtime snapshot fixture retired; replace with workflow-native cap policy coverage"]
-fn cap_decisions_survive_snapshot_replay() {
+fn workflow_cap_decisions_survive_snapshot_replay() {
     let store = fixtures::new_mem_store();
-    let manifest = fulfillment_manifest(&store);
+    let manifest = workflow_resume_manifest(&store);
     let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
 
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("cap")
+    });
     world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("123"))
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
+        .submit_event_result("com.acme/WorkflowResumeEvent@1", &start_event)
+        .expect("submit start");
+    world.tick_n(1).unwrap();
 
     world.kernel.create_snapshot().unwrap();
     let entries = world.kernel.dump_journal().unwrap();
@@ -312,16 +200,15 @@ fn cap_decisions_survive_snapshot_replay() {
 
     let mut replay_world = TestWorld::with_store_and_journal(
         store.clone(),
-        fulfillment_manifest(&store),
+        workflow_resume_manifest(&store),
         Box::new(MemJournal::from_entries(&entries)),
     )
     .unwrap();
-
     let intents = replay_world.drain_effects().expect("drain effects");
-    assert_eq!(intents.len(), 1, "effect queue should survive replay");
+    assert_eq!(intents.len(), 1);
+    assert_eq!(intents[0].kind.as_str(), aos_effects::EffectKind::TIMER_SET);
 }
 
-/// Simple snapshot/restore without any in-flight effects should restore reducer state.
 #[test]
 fn snapshot_replay_restores_state() {
     let store = fixtures::new_mem_store();
@@ -350,7 +237,6 @@ fn snapshot_replay_restores_state() {
     );
 }
 
-/// Snapshot blobs persisted via FsStore plus FsJournal should restore after a fresh process.
 #[test]
 fn fs_store_and_journal_restore_snapshot() {
     let store_dir = TempDir::new().unwrap();
@@ -380,6 +266,91 @@ fn fs_store_and_journal_restore_snapshot() {
     assert_eq!(
         kernel_replay.reducer_state("com.acme/SimpleFs@1"),
         Some(vec![0xAA])
+    );
+}
+
+#[test]
+fn snapshot_creation_quiesces_runtime() {
+    let store = fixtures::new_mem_store();
+    let manifest = simple_state_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    world
+        .submit_event_result(START_SCHEMA, &fixtures::start_event("quiesce"))
+        .expect("submit start event");
+    world.kernel.create_snapshot().unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+
+    let replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        simple_state_manifest(&store),
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+
+    assert_eq!(
+        replay_world.kernel.reducer_state("com.acme/Simple@1"),
+        Some(vec![0xAA])
+    );
+}
+
+#[test]
+fn workflow_manifest_records_override_supplied_policy() {
+    let store = fixtures::new_mem_store();
+    let manifest = workflow_resume_manifest(&store);
+    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
+
+    let start_event = serde_json::json!({
+        "$tag": "Start",
+        "$value": fixtures::start_event("policy")
+    });
+    world
+        .submit_event_result("com.acme/WorkflowResumeEvent@1", &start_event)
+        .expect("submit start event");
+    world.tick_n(1).unwrap();
+
+    world.kernel.create_snapshot().unwrap();
+    let entries = world.kernel.dump_journal().unwrap();
+
+    let mut denying_manifest = workflow_resume_manifest(&store);
+    attach_default_policy(&mut denying_manifest, deny_workflow_timer_policy());
+
+    let mut replay_world = TestWorld::with_store_and_journal(
+        store.clone(),
+        denying_manifest,
+        Box::new(MemJournal::from_entries(&entries)),
+    )
+    .unwrap();
+
+    let mut intents = replay_world.drain_effects().expect("drain effects");
+    assert_eq!(
+        intents.len(),
+        1,
+        "restored queued intent should bypass replay-time policy reevaluation"
+    );
+    let effect = intents.remove(0);
+    assert_eq!(effect.kind.as_str(), aos_effects::EffectKind::TIMER_SET);
+
+    let receipt = EffectReceipt {
+        intent_hash: effect.intent_hash,
+        adapter_id: "adapter.timer".into(),
+        status: ReceiptStatus::Ok,
+        payload_cbor: serde_cbor::to_vec(&TimerSetReceipt {
+            delivered_at_ns: 23,
+            key: Some("resume".into()),
+        })
+        .unwrap(),
+        cost_cents: None,
+        signature: vec![],
+    };
+    replay_world.kernel.handle_receipt(receipt).unwrap();
+    replay_world.kernel.tick_until_idle().unwrap();
+
+    let mut followups = replay_world.drain_effects().expect("drain followups");
+    assert_eq!(followups.len(), 1);
+    assert_eq!(
+        followups.remove(0).kind.as_str(),
+        aos_effects::EffectKind::BLOB_PUT
     );
 }
 
@@ -526,7 +497,6 @@ fn sequenced_reducer_module<S: Store + ?Sized>(
         local.get $len
         i32.ge_u
         br_if $not_found
-
         local.get $ptr
         local.get $i
         i32.add
@@ -597,7 +567,6 @@ fn sequenced_reducer_module<S: Store + ?Sized>(
             end
           end
         end
-
         local.get $i
         i32.const 1
         i32.add
@@ -668,92 +637,4 @@ fn fs_persistent_manifest(store: &Arc<FsStore>) -> aos_kernel::manifest::LoadedM
         ],
     );
     loaded
-}
-
-/// Snapshot creation should automatically drain pending scheduler work before persisting state.
-#[test]
-fn snapshot_creation_quiesces_runtime() {
-    let store = fixtures::new_mem_store();
-    let manifest = simple_state_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-
-    world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("quiesce"))
-        .expect("submit start event");
-    // No manual ticks before snapshot; create_snapshot should quiesce the runtime.
-    world.kernel.create_snapshot().unwrap();
-    let entries = world.kernel.dump_journal().unwrap();
-
-    let replay_world = TestWorld::with_store_and_journal(
-        store.clone(),
-        simple_state_manifest(&store),
-        Box::new(MemJournal::from_entries(&entries)),
-    )
-    .unwrap();
-
-    assert_eq!(
-        replay_world.kernel.reducer_state("com.acme/Simple@1"),
-        Some(vec![0xAA])
-    );
-}
-
-/// Manifest records in the journal override the supplied manifest on replay.
-#[test]
-#[ignore = "P2: plan-runtime snapshot fixture retired; replace with workflow-native manifest replay coverage"]
-fn manifest_records_override_supplied_policy() {
-    let store = fixtures::new_mem_store();
-    let manifest = fulfillment_manifest(&store);
-    let mut world = TestWorld::with_store(store.clone(), manifest).unwrap();
-
-    let input = serde_json::json!({ "id": "first" });
-    world
-        .submit_event_result(START_SCHEMA, &input)
-        .expect("submit start event");
-    world.tick_n(2).unwrap();
-
-    world.kernel.create_snapshot().unwrap();
-    let entries = world.kernel.dump_journal().unwrap();
-
-    let mut denying_manifest = fulfillment_manifest(&store);
-    attach_default_policy(&mut denying_manifest, deny_plan_http_policy());
-
-    let mut replay_world = TestWorld::with_store_and_journal(
-        store.clone(),
-        denying_manifest,
-        Box::new(MemJournal::from_entries(&entries)),
-    )
-    .unwrap();
-
-    let mut intents = replay_world.drain_effects().expect("drain effects");
-    assert_eq!(
-        intents.len(),
-        1,
-        "restored intent queue should bypass policy re-check"
-    );
-    let effect = intents.remove(0);
-
-    let receipt_payload = serde_cbor::to_vec(&ExprValue::Text("done".into())).unwrap();
-    let receipt = EffectReceipt {
-        intent_hash: effect.intent_hash,
-        adapter_id: "adapter.http".into(),
-        status: ReceiptStatus::Ok,
-        payload_cbor: receipt_payload,
-        cost_cents: None,
-        signature: vec![],
-    };
-    replay_world.kernel.handle_receipt(receipt).unwrap();
-    replay_world.kernel.tick_until_idle().unwrap();
-
-    assert_eq!(
-        replay_world
-            .kernel
-            .reducer_state("com.acme/ResultReducer@1"),
-        Some(vec![0xEE])
-    );
-
-    // New plan attempts are still allowed because the journal manifest is authoritative.
-    replay_world
-        .submit_event_result(START_SCHEMA, &fixtures::start_event("blocked"))
-        .expect("submit blocked start event");
-    replay_world.kernel.tick_until_idle().unwrap();
 }
