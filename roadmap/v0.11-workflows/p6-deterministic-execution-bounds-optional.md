@@ -1,7 +1,7 @@
 # P6 (Optional): Deterministic Execution Bounding (Fuel-Based Compute Limits)
 
 **Priority**: P3 (optional hardening)  
-**Status**: Proposed  
+**Status**: Deferred  
 **Depends on**: `roadmap/v0.11-workflows/p1-module-workflow-foundation.md`
 
 ## Goal
@@ -82,4 +82,3 @@ This is a kernel invariant-level requirement, not optional runtime polish.
 2. No wall-clock time limit influences state transitions or fault decisions.
 3. Fuel exhaustion produces deterministic journaled faults (`FuelExceeded`) and traceable diagnostics.
 4. Replay from genesis reproduces identical fuel-fault behavior and snapshots.
-

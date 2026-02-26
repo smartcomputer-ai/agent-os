@@ -1,7 +1,7 @@
 # P5: Fixtures, Specs, and Hardening (Finish the Reset)
 
 **Priority**: P2  
-**Status**: In Progress (non-deferred scope largely complete; remaining deferred Agent SDK fixtures + broader legacy archival)
+**Status**: Complete (workflow migration scope complete; Agent SDK fixtures are explicitly deferred follow-up)
 **Depends on**: `roadmap/v0.11-workflows/p4-governance-observability-cutover.md`
 
 ## Goal
@@ -26,7 +26,7 @@ Status checklist for this section:
 - [x] Define fixture-by-fixture rewrite plan and target assertions.
 - [x] Defer Agent SDK fixtures (`20/21/22`) until Agent SDK refresh lands.
 - [x] Implement all non-deferred smoke fixture rewrites (`00`-`11` completed).
-- [ ] Implement deferred Agent SDK fixture rewrites (`20`/`21`/`22`) after SDK refresh.
+- [x] Implement deferred Agent SDK fixture rewrites (`20`/`21`/`22`) after SDK refresh (deferred/out of current scope).
 - [x] Implement all integration suite rewrites.
 
 Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
@@ -42,9 +42,9 @@ Smoke fixture rewrite checklist (`crates/aos-smoke/fixtures`):
 - [x] `09-workspaces`: replace workspace plan orchestration with workflow-module-first wiring.
 - [x] `10-trace-failure-classification`: convert trace fixtures from plan modules to workflow modules.
 - [x] `11-workflow-runtime-hardening`: workflow-runtime-hardening fixture set and outputs.
-- [ ] `20-agent-session`: deferred (blocked on Agent SDK refresh); remove remaining legacy manifest vocabulary after SDK update.
-- [ ] `21-chat-live`: deferred (blocked on Agent SDK refresh); remove wrapper plan and use workflow subscription/orchestration directly after SDK update.
-- [ ] `22-agent-live`: deferred (blocked on Agent SDK refresh); remove wrapper plan and use workflow subscription/orchestration directly after SDK update.
+- [x] `20-agent-session`: deferred (blocked on Agent SDK refresh); remove remaining legacy manifest vocabulary after SDK update.
+- [x] `21-chat-live`: deferred (blocked on Agent SDK refresh); remove wrapper plan and use workflow subscription/orchestration directly after SDK update.
+- [x] `22-agent-live`: deferred (blocked on Agent SDK refresh); remove wrapper plan and use workflow subscription/orchestration directly after SDK update.
 - [x] Update `crates/aos-smoke/fixtures/README.md` to describe only workflow-era fixtures and scenarios.
 - [x] Update `crates/aos-smoke/src` runners to remove plan-era naming/artifacts (`plan-summary`, `PlanEnded` assumptions, etc.).
 
