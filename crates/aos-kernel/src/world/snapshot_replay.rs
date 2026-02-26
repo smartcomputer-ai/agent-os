@@ -295,7 +295,11 @@ impl<S: Store + 'static> Kernel<S> {
     }
 
     fn receipt_horizon_height_for_baseline(&self, height: JournalSeq) -> Option<JournalSeq> {
-        if self.pending_reducer_receipts.is_empty() && self.workflow_instances.is_empty() {
+        let has_inflight_workflow_intents = self
+            .workflow_instances
+            .values()
+            .any(|instance| !instance.inflight_intents.is_empty());
+        if self.pending_reducer_receipts.is_empty() && !has_inflight_workflow_intents {
             Some(height)
         } else {
             None

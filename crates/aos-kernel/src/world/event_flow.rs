@@ -415,7 +415,7 @@ impl<S: Store + 'static> Kernel<S> {
         match output.state {
             Some(state) => {
                 let state_hash = self.store.put_blob(&state)?;
-                let last_active_ns = self.journal.next_seq() as u64;
+                let last_active_ns = emitted_at_seq;
                 let meta = CellMeta {
                     key_hash: *key_hash.as_bytes(),
                     key_bytes: key_bytes.clone(),
