@@ -1,190 +1,217 @@
 # P1: Effect Runtime Contract and Gap Analysis (as implemented)
 
 **Priority**: P1  
-**Status**: Proposed  
-**Date**: 2026-02-22
+**Status**: Proposed (refreshed baseline)  
+**Date**: 2026-02-27
 
 ## Goal
 
-Document exactly how effect definitions and adapter dispatch work today, clarify
-what `manifest.effects` currently controls, and identify the minimal changes
-needed before introducing a pluggable adapter model.
+Document the current effect contract in the workflow-era runtime, then define
+the minimum P1 changes needed before adapter-route pluggability (`P2`/`P3`).
 
-This is a "truth first" doc: no new abstractions until the current contract is
-explicit.
+This document is intentionally "truth first": code reality before new design.
 
 ## Why this exists
 
-The current implementation has a split control surface:
+The current control surface is still split:
 
-1. Effect kinds and schemas are world data (`defeffect` + manifest refs).
-2. Adapter execution is mostly host wiring (default registry in `aos-host`).
+1. Effect type/cap/schema definitions are world data (`defeffect` + `manifest.effects` refs).
+2. External execution is host wiring (`aos-host` adapter registry).
 3. Internal effects are kernel-handled (`workspace.*`, `introspect.*`, `governance.*`).
 
-The split is valid, but it creates confusion about where world requirements are
-declared versus where host capabilities are provided.
+That split is valid, but today there is still no governed world-level adapter
+route contract.
 
 ## Current Behavior (Code Reality)
 
-## 1) `manifest.effects` is loaded and used
+## 1) `manifest.effects` is required by schema and loaded into catalog nodes
 
-Manifest loading resolves `manifest.effects` as `NodeKind::Effect` and inserts
-matching `defeffect` nodes (built-in or custom) into the catalog:
+Manifest schema requires `effects`, and the model includes `effects: Vec<NamedRef>`:
 
-- `crates/aos-store/src/manifest.rs:87`
-- `crates/aos-store/src/manifest.rs:183`
+- `spec/schemas/manifest.schema.json:21`
+- `spec/schemas/manifest.schema.json:101`
+- `crates/aos-air-types/src/model.rs:655`
 
-Authoring manifests may omit hashes; loader fills canonical hashes:
+Store manifest loading resolves `manifest.effects` as `NodeKind::Effect`; built-ins
+are only loaded when referenced:
 
-- `crates/aos-host/src/manifest_loader.rs:294`
-- `crates/aos-host/src/manifest_loader.rs:328`
-- `crates/aos-host/src/manifest_loader.rs:391`
+- `crates/aos-store/src/manifest.rs:82`
+- `crates/aos-store/src/manifest.rs:176`
 
-## 2) Loaded manifest builds an effect catalog from loaded effect defs
+AIR JSON asset loading patches canonical effect hashes into manifest refs:
 
-Kernel `LoadedManifest.effect_catalog` is built from loaded `defeffect` nodes:
+- `crates/aos-host/src/manifest_loader.rs:277`
 
-- `crates/aos-kernel/src/manifest.rs:80`
+## 2) Effect catalog is built from loaded `defeffect` nodes only
 
-This catalog is then used at runtime for:
+Both kernel and host asset loader build `EffectCatalog` from loaded effect defs:
 
-1. Origin scope checks (`reducer`/`plan`).
-2. Param normalization schema lookup.
-3. Capability type matching.
+- `crates/aos-kernel/src/manifest.rs:73`
+- `crates/aos-host/src/manifest_loader.rs:461`
 
-References:
+At enqueue time, effect params are normalized via catalog/schema lookup and cap
+type is read from the same catalog:
 
-- `crates/aos-kernel/src/effects.rs:225`
-- `crates/aos-kernel/src/effects.rs:248`
-- `crates/aos-kernel/src/effects.rs:267`
-- `crates/aos-kernel/src/capability.rs:94`
+- `crates/aos-kernel/src/effects.rs:236`
+- `crates/aos-kernel/src/effects.rs:255`
+- `crates/aos-effects/src/normalize.rs:22`
 
-## 3) Plan emit-effect literals depend on effect catalog membership
+If kind is missing from the catalog, enqueue fails (`unknown effect params schema`
+or `UnsupportedEffectKind`), i.e. this is runtime, not manifest-open, failure.
 
-Plan normalization resolves `emit_effect.kind` -> params schema through
-`EffectCatalog`. Missing kind in that catalog fails normalization:
-
-- `crates/aos-air-types/src/plan_literals.rs:67`
-
-Practical consequence: world manifests must include refs for effect defs used by
-plans/reducers, even for built-ins.
-
-## 4) Validator currently also includes built-ins globally
+## 3) Validator still treats built-ins as globally known kinds
 
 `validate_manifest` builds `known_effect_kinds` from:
 
-1. all built-in effects, and
+1. built-in effects, plus
 2. loaded manifest effect defs.
 
 References:
 
-- `crates/aos-air-types/src/validate.rs:614`
-- `crates/aos-air-types/src/validate.rs:618`
+- `crates/aos-air-types/src/validate.rs:88`
+- `crates/aos-air-types/src/validate.rs:92`
 
-This is broader than `effect_catalog`-driven plan normalization and is one
-reason people perceive built-ins as "auto-available."
+This set is used to validate module `abi.workflow.effects_emitted` and
+policy `when.effect_kind`:
 
-## 5) `agent-live` fixture does define `effects`
+- `crates/aos-air-types/src/validate.rs:301`
+- `crates/aos-air-types/src/validate.rs:339`
 
-`22-agent-live` includes workspace effect refs:
+So validator semantics are broader than the runtime catalog assembled from
+`manifest.effects`.
 
-- `crates/aos-smoke/fixtures/22-agent-live/air/manifest.air.json:90`
+## 4) Workflow emission authority is enforced at runtime
 
-The same fixture's live LLM call is executed directly by harness code, not by
-world plan dispatch:
+Workflow output processing enforces:
 
-- `crates/aos-smoke/src/agent_live.rs:448`
-
-That is why `llm.generate` is not part of that fixture's world-level effect use.
-
-## 6) Adapter dispatch today is host registry wiring
-
-`WorldHost::run_cycle` partitions:
-
-1. internal intents (`kernel.handle_internal_intent`),
-2. timer scheduling path,
-3. external intents -> adapter registry.
+1. emitted kind must be in module `abi.workflow.effects_emitted`,
+2. cap slot binding (or unique default grant) must resolve,
+3. effect enqueue then runs canonicalization + cap/policy checks.
 
 References:
 
-- `crates/aos-host/src/host.rs:365`
-- `crates/aos-host/src/host.rs:382`
-- `crates/aos-host/src/host.rs:407`
+- `crates/aos-kernel/src/world/event_flow.rs:391`
+- `crates/aos-kernel/src/world/event_flow.rs:466`
+- `crates/aos-kernel/src/world/event_flow.rs:483`
+- `crates/aos-kernel/src/effects.rs:236`
 
-Default registry wiring is currently hardcoded by kind + feature flags:
+## 5) Adapter dispatch is still kind-keyed host registry wiring
 
-- `crates/aos-host/src/host.rs:518`
+`WorldHost::run_cycle` partitions internal vs timer vs external intents, then
+dispatches external intents through `AdapterRegistry`:
 
-Missing adapter yields `adapter.missing` error receipt:
+- `crates/aos-host/src/host.rs:369`
+- `crates/aos-host/src/host.rs:386`
+- `crates/aos-host/src/host.rs:400`
+- `crates/aos-host/src/host.rs:411`
 
-- `crates/aos-host/src/adapters/registry.rs:69`
+Registry lookup is by effect `kind`; missing adapter returns `adapter.missing`
+error receipt:
 
-Internal effect kinds are explicit in kernel:
+- `crates/aos-host/src/adapters/registry.rs:47`
+- `crates/aos-host/src/adapters/registry.rs:71`
+
+Default adapter wiring remains hardcoded + feature-flag driven:
+
+- `crates/aos-host/src/host.rs:522`
+- `crates/aos-host/src/host.rs:526`
+
+## 6) Internal effect kinds are explicitly kernel-handled
+
+Internal effect list is explicit in kernel and bypasses external adapters:
 
 - `crates/aos-kernel/src/internal_effects/mod.rs:16`
+- `crates/aos-kernel/src/internal_effects/mod.rs:90`
 
-## 7) Custom adapter registration already exists (programmatic)
+Current internal set includes `introspect.*`, `workspace.*`, and `governance.*`.
 
-The host exposes mutable adapter registry access and testhost registration:
+## 7) Programmatic pluggability exists, governed routing does not
 
-- `crates/aos-host/src/host.rs:286`
-- `crates/aos-host/src/testhost.rs:206`
+Host/testhost support programmatic adapter registration:
 
-So pluggability exists at process wiring level, but not yet as governed
-manifest/runtime configuration.
+- `crates/aos-host/src/host.rs:287`
+- `crates/aos-host/src/testhost.rs:208`
+
+But there is no manifest-level `effect_bindings` field in AIR schema/model yet:
+
+- `spec/schemas/manifest.schema.json:6`
+- `crates/aos-air-types/src/model.rs:650`
+
+## 8) No startup compatibility preflight for required external kinds
+
+`WorldHost::open`/`open_dir` load manifest, build kernel, build default registry,
+and return host; there is no fail-fast compatibility check for required external
+effect routes:
+
+- `crates/aos-host/src/host.rs:75`
+- `crates/aos-host/src/host.rs:139`
+- `crates/aos-host/src/host.rs:160`
+- `crates/aos-host/src/host.rs:258`
+
+Result: missing routes surface late as runtime `adapter.missing` receipts.
+
+## 9) `agent-live` still includes direct harness-side live LLM execution
+
+Fixture manifest includes explicit effect refs:
+
+- `crates/aos-smoke/fixtures/22-agent-live/air/manifest.air.json:112`
+
+The smoke harness also constructs and executes `llm.generate` intents directly
+through adapter code:
+
+- `crates/aos-smoke/src/agent_live.rs:447`
+- `crates/aos-smoke/src/agent_live.rs:489`
+
+This can obscure "world dispatch path vs harness path" when debugging adapters.
 
 ## Spec Intent and Mismatch Notes
 
-AIR prose says:
+Spec intent remains:
 
-1. `manifest.effects` is authoritative for world effect catalog.
-2. list every effect used by the world.
-3. future adapter binding should be manifest-level (`effect_bindings`) and
-   separate from `defeffect`.
+1. effect catalog is data-driven from `defeffect` + `manifest.effects`,
+2. built-ins should be listed in world manifests when used,
+3. adapter binding should live at manifest level (`effect_bindings`), not in `defeffect`.
 
 References:
 
-- `spec/03-air.md:144`
-- `spec/03-air.md:263`
+- `spec/03-air.md:262`
 - `spec/03-air.md:522`
 - `spec/03-air.md:525`
 
-Manifest schema already requires an `effects` array:
+Main mismatches now:
 
-- `spec/schemas/manifest.schema.json:25`
-- `spec/schemas/manifest.schema.json:121`
+1. Validator accepts built-in kinds globally, but runtime catalog only includes
+   defs that were actually loaded via `manifest.effects`.
+2. Adapter-route availability is not checked at startup.
+3. `origin_scope` exists in type model, but is not currently enforced in
+   enqueue/dispatch paths.
 
-Main mismatch to resolve in this slice:
+## Decision for v0.12 P1
 
-1. Built-ins are globally known in validator.
-2. Adapter availability is discovered late (runtime missing adapter receipt),
-   not as a startup compatibility check.
-
-## Decision for v0.10.3
-
-1. Keep current hardwired defaults for immediate compatibility.
-2. Add fail-fast startup checks for external effect availability.
-3. Preserve kernel as the deterministic boundary (intent/receipt/journal).
-4. Keep adapter binding metadata out of `defeffect`; use manifest-level binding
-   in P2.
+1. Keep kernel determinism and receipt boundary unchanged.
+2. Keep current default adapter registry behavior for compatibility.
+3. Add fail-fast host preflight for required external effect availability.
+4. Keep adapter route metadata out of `defeffect`; land it as manifest-level
+   data in P2.
+5. Update docs/diagnostics terminology to workflow modules (not plans/reducers).
 
 ## P1 Deliverables
 
-1. Runtime/docs contract for "what goes in `manifest.effects`":
-   every effect def used by plans/reducers in that world.
-2. Host preflight check:
-   - enumerate non-internal effect kinds reachable from plan/reducer emits,
-   - ensure adapter route exists for each,
-   - fail world open if required kind has no route.
-3. Diagnostics:
-   - include kind, plan/reducer origins, and proposed adapter ids in error.
+1. Clear contract for `manifest.effects`: every effect definition that can be
+   emitted or referenced by this world at runtime.
+2. Host preflight check at world open:
+   - enumerate non-internal externally dispatched effect kinds,
+   - verify route availability for each required kind,
+   - fail open with actionable diagnostics.
+3. Diagnostics include effect kind, workflow origin(s), and expected route id
+   (or fallback route policy).
 4. Conformance tests:
-   - fixture with missing adapter fails at startup,
-   - fixture with all routes opens and runs.
+   - missing required external route fails startup,
+   - complete route set opens and runs,
+   - validator/runtime catalog mismatch cases are explicitly covered.
 
 ## Non-Goals
 
 1. No kernel execution semantics change.
-2. No receipt model changes.
-3. No dynamic plugin loading contract yet.
-
+2. No receipt model change.
+3. No dynamic plugin loading contract in P1.
