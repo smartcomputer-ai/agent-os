@@ -115,7 +115,6 @@ pub struct ResolvedAirImport {
 pub struct ResolvedAirSources {
     pub air_dir: PathBuf,
     pub import_dirs: Vec<PathBuf>,
-    pub imports: Vec<ResolvedAirImport>,
     pub warnings: Vec<String>,
 }
 
@@ -175,7 +174,6 @@ fn resolve_air_sources_with_mode(
 
     let mut metadata_cache: HashMap<PathBuf, CargoMetadata> = HashMap::new();
     let mut import_dirs = Vec::new();
-    let mut imports = Vec::new();
     let mut warnings = Vec::new();
 
     if let Some(air) = &config.air {
@@ -194,14 +192,12 @@ fn resolve_air_sources_with_mode(
                 &mut warnings,
             )?;
             import_dirs.push(resolved.root.clone());
-            imports.push(resolved);
         }
     }
 
     Ok(ResolvedAirSources {
         air_dir,
         import_dirs,
-        imports,
         warnings,
     })
 }

@@ -5,73 +5,33 @@
     "rules": [
       {
         "when": {
-          "effect_kind": "workspace.resolve",
-          "origin_kind": "plan",
-          "origin_name": "aos.agent/core_prompt_sync_from_workspace@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.read_ref",
-          "origin_kind": "plan",
-          "origin_name": "aos.agent/core_prompt_sync_from_workspace@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.read_bytes",
-          "origin_kind": "plan",
-          "origin_name": "aos.agent/core_prompt_sync_from_workspace@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.resolve",
-          "origin_kind": "plan",
-          "origin_name": "aos.agent/core_tool_catalog_sync_from_workspace@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.read_ref",
-          "origin_kind": "plan",
-          "origin_name": "aos.agent/core_tool_catalog_sync_from_workspace@1"
-        },
-        "decision": "allow"
-      },
-      {
-        "when": {
-          "effect_kind": "workspace.read_bytes",
-          "origin_kind": "plan",
-          "origin_name": "aos.agent/core_tool_catalog_sync_from_workspace@1"
+          "effect_kind": "llm.generate",
+          "origin_kind": "workflow",
+          "origin_name": "demiurge/Demiurge@1"
         },
         "decision": "allow"
       },
       {
         "when": {
           "effect_kind": "introspect.manifest",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/tool_execute_from_request@1"
+          "origin_kind": "workflow",
+          "origin_name": "demiurge/Demiurge@1"
         },
         "decision": "allow"
       },
       {
         "when": {
           "effect_kind": "workspace.resolve",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/tool_execute_from_request@1"
+          "origin_kind": "workflow",
+          "origin_name": "demiurge/Demiurge@1"
         },
         "decision": "allow"
       },
       {
         "when": {
           "effect_kind": "workspace.read_bytes",
-          "origin_kind": "plan",
-          "origin_name": "demiurge/tool_execute_from_request@1"
+          "origin_kind": "workflow",
+          "origin_name": "demiurge/Demiurge@1"
         },
         "decision": "allow"
       },

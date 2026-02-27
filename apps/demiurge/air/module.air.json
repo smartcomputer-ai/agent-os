@@ -2,12 +2,22 @@
   "$kind": "defmodule",
   "name": "demiurge/Demiurge@1",
   "module_kind": "workflow",
+  "key_schema": "aos.agent/SessionId@1",
   "abi": {
     "workflow": {
-      "state": "aos.agent/SessionState@1",
-      "event": "aos.agent/SessionEvent@1",
-      "effects_emitted": [],
-      "cap_slots": {}
+      "state": "demiurge/State@1",
+      "event": "demiurge/WorkflowEvent@1",
+      "effects_emitted": [
+        "llm.generate",
+        "introspect.manifest",
+        "workspace.resolve",
+        "workspace.read_bytes"
+      ],
+      "cap_slots": {
+        "llm": "llm.basic",
+        "query": "query",
+        "workspace": "workspace"
+      }
     }
   }
 }

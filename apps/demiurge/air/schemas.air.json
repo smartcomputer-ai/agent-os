@@ -25,15 +25,64 @@
     "type": {
       "record": {
         "session_id": { "ref": "aos.agent/SessionId@1" },
-        "run_id": { "option": { "ref": "aos.agent/RunId@1" } },
-        "turn_id": { "option": { "ref": "aos.agent/TurnId@1" } },
-        "step_id": { "option": { "ref": "aos.agent/StepId@1" } },
-        "session_epoch": { "nat": {} },
-        "step_epoch": { "nat": {} },
+        "observed_at_ns": { "time": {} },
         "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
         "call_id": { "text": {} },
         "finalize_batch": { "bool": {} },
         "params": { "ref": "demiurge/ToolCallParams@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/PendingToolStage@1",
+    "type": {
+      "variant": {
+        "AwaitIntrospectManifest": { "unit": {} },
+        "AwaitWorkspaceResolve": {
+          "record": {
+            "path": { "text": {} }
+          }
+        },
+        "AwaitWorkspaceReadBytes": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/PendingToolCall@1",
+    "type": {
+      "record": {
+        "tool_batch_id": { "ref": "aos.agent/ToolBatchId@1" },
+        "call_id": { "text": {} },
+        "finalize_batch": { "bool": {} },
+        "stage": { "ref": "demiurge/PendingToolStage@1" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/State@1",
+    "type": {
+      "record": {
+        "session": { "ref": "aos.agent/SessionState@1" },
+        "pending_tool_call": {
+          "option": { "ref": "demiurge/PendingToolCall@1" }
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demiurge/WorkflowEvent@1",
+    "type": {
+      "variant": {
+        "Ingress": { "ref": "aos.agent/SessionIngress@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" },
+        "ReceiptRejected": { "ref": "sys/EffectReceiptRejected@1" },
+        "StreamFrame": { "ref": "sys/EffectStreamFrame@1" },
+        "ToolCallRequested": { "ref": "demiurge/ToolCallRequested@1" },
+        "Noop": { "ref": "aos.agent/SessionNoop@1" }
       }
     }
   }

@@ -1,34 +1,37 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     { "name": "aos.agent/SessionId@1" },
     { "name": "aos.agent/RunId@1" },
-    { "name": "aos.agent/TurnId@1" },
-    { "name": "aos.agent/StepId@1" },
     { "name": "aos.agent/ToolBatchId@1" },
     { "name": "aos.agent/ToolCallStatus@1" },
     { "name": "aos.agent/ActiveToolBatch@1" },
-    { "name": "aos.agent/RunLease@1" },
     { "name": "aos.agent/ReasoningEffort@1" },
     { "name": "aos.agent/WorkspaceBinding@1" },
     { "name": "aos.agent/WorkspaceApplyMode@1" },
     { "name": "aos.agent/WorkspaceSnapshot@1" },
-    { "name": "aos.agent/WorkspaceSyncRequested@1" },
-    { "name": "aos.agent/WorkspaceSyncUnchanged@1" },
     { "name": "aos.agent/WorkspaceSnapshotReady@1" },
-    { "name": "aos.agent/WorkspaceSyncFailed@1" },
-    { "name": "aos.agent/WorkspaceApplyRequested@1" },
     { "name": "aos.agent/SessionConfig@1" },
     { "name": "aos.agent/RunConfig@1" },
     { "name": "aos.agent/SessionLifecycle@1" },
     { "name": "aos.agent/HostCommand@1" },
     { "name": "aos.agent/LlmToolCall@1" },
     { "name": "aos.agent/LlmToolCallList@1" },
-    { "name": "aos.agent/SessionEventKind@1" },
+    { "name": "aos.agent/SessionIngressKind@1" },
+    { "name": "aos.agent/SessionIngress@1" },
+    { "name": "aos.agent/PendingIntent@1" },
     { "name": "aos.agent/SessionState@1" },
-    { "name": "aos.agent/SessionEvent@1" },
+    { "name": "aos.agent/SessionNoop@1" },
+    { "name": "sys/EffectReceiptEnvelope@1" },
+    { "name": "sys/EffectReceiptRejected@1" },
+    { "name": "sys/EffectStreamFrame@1" },
     { "name": "demiurge/ToolCallParams@1" },
     { "name": "demiurge/ToolCallRequested@1" },
+    { "name": "demiurge/PendingToolStage@1" },
+    { "name": "demiurge/PendingToolCall@1" },
+    { "name": "demiurge/State@1" },
+    { "name": "demiurge/WorkflowEvent@1" },
     { "name": "sys/WorkspaceName@1" },
     { "name": "sys/WorkspaceHistory@1" },
     { "name": "sys/WorkspaceCommitMeta@1" },
@@ -46,16 +49,14 @@
   "modules": [
     { "name": "demiurge/Demiurge@1" },
     { "name": "sys/Workspace@1" },
-    { "name": "sys/CapEnforceWorkspace@1" }
+    { "name": "sys/CapEnforceWorkspace@1" },
+    { "name": "sys/CapEnforceLlmBasic@1" }
   ],
-  "plans": [
-    { "name": "aos.agent/core_prompt_sync_from_workspace@1" },
-    { "name": "aos.agent/core_tool_catalog_sync_from_workspace@1" },
-    { "name": "aos.agent/core_workspace_sync@1" },
-    { "name": "demiurge/session_workspace_sync_wrapper@1" },
-    { "name": "demiurge/tool_execute_from_request@1" }
+  "caps": [
+    { "name": "sys/query@1" },
+    { "name": "sys/workspace@1" },
+    { "name": "sys/llm.basic@1" }
   ],
-  "caps": [{ "name": "sys/query@1" }, { "name": "sys/workspace@1" }],
   "policies": [{ "name": "demiurge/session_policy@1" }],
   "defaults": {
     "policy": "demiurge/session_policy@1",
@@ -80,39 +81,60 @@
             }
           }
         }
+      },
+      {
+        "name": "llm",
+        "cap": "sys/llm.basic@1",
+        "params": {
+          "record": {
+            "models": {
+              "set": [
+                { "text": "gpt-5.2" },
+                { "text": "gpt-5-mini" },
+                { "text": "gpt-5.2-codex" },
+                { "text": "claude-sonnet-4-5" },
+                { "text": "gpt-mock" }
+              ]
+            },
+            "max_tokens": { "nat": 4096 }
+          }
+        }
       }
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
-        "event": "aos.agent/SessionEvent@1",
-        "workflow": "demiurge/Demiurge@1"
+        "event": "aos.agent/SessionIngress@1",
+        "module": "demiurge/Demiurge@1",
+        "key_field": "session_id"
+      },
+      {
+        "event": "demiurge/ToolCallRequested@1",
+        "module": "demiurge/Demiurge@1",
+        "key_field": "session_id"
       },
       {
         "event": "sys/WorkspaceCommit@1",
-        "workflow": "sys/Workspace@1",
+        "module": "sys/Workspace@1",
         "key_field": "workspace"
       }
     ],
     "inboxes": []
   },
-  "triggers": [
-    {
-      "event": "aos.agent/SessionEvent@1",
-      "plan": "demiurge/session_workspace_sync_wrapper@1"
-    },
-    {
-      "event": "demiurge/ToolCallRequested@1",
-      "plan": "demiurge/tool_execute_from_request@1",
-      "correlate_by": "call_id"
+  "module_bindings": {
+    "demiurge/Demiurge@1": {
+      "slots": {
+        "llm": "llm",
+        "query": "cap_query",
+        "workspace": "cap_workspace"
+      }
     }
-  ],
+  },
   "effects": [
+    { "name": "sys/llm.generate@1" },
     { "name": "sys/workspace.resolve@1" },
-    { "name": "sys/workspace.read_ref@1" },
     { "name": "sys/workspace.read_bytes@1" },
     { "name": "sys/introspect.manifest@1" }
-  ],
-  "air_version": "1"
+  ]
 }

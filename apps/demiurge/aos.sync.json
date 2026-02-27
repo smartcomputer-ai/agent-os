@@ -14,7 +14,7 @@
           "version": "0.1.0",
           "manifest_path": "../../Cargo.toml",
           "air_dir": "air",
-          "defs_hash": "sha256:8d6a71b099dfc418fb8da96811b483f7e4e33acad95feef77684de14917a0af9"
+          "defs_hash": "sha256:ba281870769798dfeef8e666850b19cd56c755e529bd9faad849af3fdc48f1e9"
         }
       }
     ]
