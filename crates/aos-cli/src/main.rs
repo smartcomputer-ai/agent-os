@@ -22,6 +22,7 @@ use commands::state::StateArgs;
 use commands::trace::TraceArgs;
 use commands::trace_diagnose::TraceDiagnoseArgs;
 use commands::trace_find::TraceFindArgs;
+use commands::trace_summary::TraceSummaryArgs;
 use commands::ui::UiArgs;
 use commands::workspace::WorkspaceArgs;
 use opts::{WorldOpts, resolve_world};
@@ -60,7 +61,7 @@ enum Command {
     #[command(subcommand)]
     Event(EventCommand),
 
-    /// Query reducer state
+    /// Query workflow state
     #[command(subcommand)]
     State(StateCommand),
 
@@ -76,6 +77,9 @@ enum Command {
 
     /// Diagnose a trace root into likely cause + next hint
     TraceDiagnose(TraceDiagnoseArgs),
+
+    /// Summarize workflow runtime and receipt signals
+    TraceSummary(TraceSummaryArgs),
 
     /// Display active manifest
     #[command(subcommand)]
@@ -109,9 +113,9 @@ enum EventCommand {
 
 #[derive(Subcommand, Debug)]
 enum StateCommand {
-    /// Get reducer state
+    /// Get workflow state
     Get(StateArgs),
-    /// List keys (cells) for a keyed reducer
+    /// List keys (cells) for a keyed workflow
     Ls(CellsArgs),
 }
 
@@ -178,6 +182,9 @@ async fn main() -> Result<()> {
         Command::TraceFind(args) => commands::trace_find::cmd_trace_find(opts, &args).await,
         Command::TraceDiagnose(args) => {
             commands::trace_diagnose::cmd_trace_diagnose(opts, &args).await
+        }
+        Command::TraceSummary(args) => {
+            commands::trace_summary::cmd_trace_summary(opts, &args).await
         }
         Command::Snapshot(cmd) => match cmd {
             SnapshotCommand::Create => commands::snapshot::cmd_snapshot(opts).await,

@@ -1,4 +1,4 @@
-//! CLI utility functions for reducer compilation and kernel configuration.
+//! CLI utility functions for workflow compilation and kernel configuration.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,7 +21,7 @@ use jsonschema::JSONSchema;
 use serde_json::Value;
 use walkdir::WalkDir;
 
-pub struct CompiledReducer {
+pub struct CompiledWorkflow {
     pub hash: HashRef,
     pub cache_hit: bool,
 }
@@ -69,31 +69,31 @@ pub fn latest_manifest_hash_from_journal(store_root: &Path) -> Result<Option<Has
     Ok(Some(hash))
 }
 
-/// Compile a reducer crate to WASM and store the blob.
-pub fn compile_reducer(
-    reducer_dir: &Path,
+/// Compile a workflow crate to WASM and store the blob.
+pub fn compile_workflow(
+    workflow_dir: &Path,
     store_root: &Path,
     store: &FsStore,
     force_build: bool,
-) -> Result<CompiledReducer> {
+) -> Result<CompiledWorkflow> {
     let cache_dir = store_root.join(".aos/cache/modules");
     fs::create_dir_all(&cache_dir).context("create module cache directory")?;
 
-    let utf_path = Utf8PathBuf::from_path_buf(reducer_dir.to_path_buf())
-        .map_err(|p| anyhow!("reducer path is not UTF-8: {}", p.display()))?;
+    let utf_path = Utf8PathBuf::from_path_buf(workflow_dir.to_path_buf())
+        .map_err(|p| anyhow!("workflow path is not UTF-8: {}", p.display()))?;
 
     let mut request = BuildRequest::new(utf_path);
     request.cache_dir = Some(cache_dir);
     request.use_cache = !force_build;
     request.config.release = false;
 
-    let artifact = Builder::compile(request).context("compile reducer")?;
+    let artifact = Builder::compile(request).context("compile workflow")?;
     let hash = store
         .put_blob(&artifact.wasm_bytes)
         .context("store wasm blob")?;
     let hash_ref = HashRef::new(hash.to_hex()).context("create hash ref")?;
     let cache_hit = artifact.build_log.as_deref() == Some("cache hit");
-    Ok(CompiledReducer {
+    Ok(CompiledWorkflow {
         hash: hash_ref,
         cache_hit,
     })
@@ -104,7 +104,7 @@ pub fn compile_reducer(
 /// Resolution order:
 /// 1) Known system modules from workspace build artifacts (fallback: sys-module cache)
 /// 2) `modules/` directory in the world root (content-addressed wasm files)
-/// 3) Compiled reducer hash (if provided) when exactly one non-sys placeholder remains
+/// 3) Compiled workflow hash (if provided) when exactly one non-sys placeholder remains
 ///
 /// If `specific_module` is provided, that module is patched with the compiled hash
 /// (and must currently be a placeholder).
@@ -120,7 +120,7 @@ pub fn resolve_placeholder_modules(
 
     if let Some(target) = specific_module {
         let Some(hash) = compiled_hash else {
-            anyhow::bail!("--module requires a compiled reducer; no reducer/ found");
+            anyhow::bail!("--module requires a compiled workflow; no workflow/ found");
         };
         let mut found = false;
         for (name, module) in loaded.modules.iter_mut() {
@@ -192,7 +192,7 @@ pub fn resolve_placeholder_modules(
         );
         msg.push_str("  - build system modules with `cargo build -p aos-sys --target wasm32-unknown-unknown`\n");
         if compiled_hash.is_none() {
-            msg.push_str("  - or provide a reducer/ to compile local modules\n");
+            msg.push_str("  - or provide a workflow/ to compile local modules\n");
         }
         anyhow::bail!(msg);
     }

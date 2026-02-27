@@ -1,9 +1,9 @@
-//! Key encoding helpers using reducer key_schema.
+//! Key encoding helpers using workflow key_schema.
 
 use anyhow::{Context, Result, anyhow, bail};
 use aos_air_types::{
     DefSchema,
-    plan_literals::SchemaIndex,
+    schema_index::SchemaIndex,
     value_normalize::{ValueNormalizeError, normalize_value_with_schema},
 };
 use aos_kernel::LoadedManifest;
@@ -23,15 +23,15 @@ pub struct KeyOverrides {
     pub b64: Option<String>,
 }
 
-/// Encode key bytes for a reducer using its key_schema and user overrides.
-pub fn encode_key_for_reducer(
+/// Encode key bytes for a workflow using its key_schema and user overrides.
+pub fn encode_key_for_workflow(
     dirs: &ResolvedDirs,
-    reducer: &str,
+    workflow: &str,
     overrides: &KeyOverrides,
 ) -> Result<Vec<u8>> {
     let loaded = load_manifest_for_keys(dirs)?;
     let cbor_value = resolve_key_value(overrides)?;
-    encode_key_value_for_reducer(&loaded, reducer, cbor_value)
+    encode_key_value_for_workflow(&loaded, workflow, cbor_value)
 }
 
 fn schema_index(schemas: &HashMap<aos_air_types::Name, DefSchema>) -> SchemaIndex {
@@ -52,15 +52,15 @@ fn load_manifest_for_keys(dirs: &ResolvedDirs) -> Result<LoadedManifest> {
         .context("load manifest for key encoding")
 }
 
-fn encode_key_value_for_reducer(
+fn encode_key_value_for_workflow(
     loaded: &LoadedManifest,
-    reducer: &str,
+    workflow: &str,
     cbor_value: CborValue,
 ) -> Result<Vec<u8>> {
     let module = loaded
         .modules
-        .get(reducer)
-        .ok_or_else(|| anyhow!("reducer '{}' not found in manifest", reducer))?;
+        .get(workflow)
+        .ok_or_else(|| anyhow!("workflow '{}' not found in manifest", workflow))?;
     let key_schema = module.key_schema.as_ref().map(|s| s.as_str().to_string());
 
     let schemas = schema_index(&loaded.schemas);
@@ -96,7 +96,7 @@ fn resolve_key_value(overrides: &KeyOverrides) -> Result<CborValue> {
     if let Some(utf8) = &overrides.utf8 {
         return json_to_cbor(JsonValue::String(utf8.clone()));
     }
-    bail!("key is required for keyed reducer but no --key/--key-json/--key-hex/--key-b64 provided")
+    bail!("key is required for keyed workflow but no --key/--key-json/--key-hex/--key-b64 provided")
 }
 
 fn overrides_present(overrides: &KeyOverrides) -> bool {
@@ -119,7 +119,7 @@ pub fn derive_event_key(
 ) -> Result<Option<Vec<u8>>> {
     let loaded = load_manifest_for_keys(dirs)?;
     let route = loaded.manifest.routing.as_ref().and_then(|r| {
-        r.events
+        r.subscriptions
             .iter()
             .find(|evt| evt.event.as_str() == event_schema)
     });
@@ -138,15 +138,15 @@ pub fn derive_event_key(
         return Ok(None);
     };
 
-    let reducer = route.reducer.as_str();
+    let workflow = route.module.as_str();
     // If the route isn't keyed, we don't derive.
     let key_field = match &route.key_field {
         Some(field) => field,
         None => {
             if overrides_present(overrides) {
                 bail!(
-                    "reducer '{}' is not keyed; --key overrides are not allowed",
-                    reducer
+                    "workflow '{}' is not keyed; --key overrides are not allowed",
+                    workflow
                 );
             }
             return Ok(None);
@@ -162,7 +162,7 @@ pub fn derive_event_key(
         json_to_cbor(extracted.clone())?
     };
 
-    let key_bytes = encode_key_value_for_reducer(&loaded, reducer, cbor_value)?;
+    let key_bytes = encode_key_value_for_workflow(&loaded, workflow, cbor_value)?;
     Ok(Some(key_bytes))
 }
 
@@ -296,7 +296,7 @@ mod tests {
         let dirs = ResolvedDirs {
             world: world.to_path_buf(),
             air_dir,
-            reducer_dir: world.join("reducer"),
+            workflow_dir: world.join("workflow"),
             store_root: store_root.clone(),
             control_socket: store_root.join("control.sock"),
         };
@@ -318,13 +318,13 @@ mod tests {
     { "name": "com.acme/EventPayload@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
     { "name": "com.acme/Event@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" }
   ],
-  "modules": [ { "name": "com.acme/Reducer@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" } ],
+  "modules": [ { "name": "com.acme/Workflow@1", "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" } ],
   "plans": [],
   "effects": [],
   "caps": [],
   "policies": [],
   "secrets": [],
-  "routing": { "events": [], "inboxes": [] },
+  "routing": { "subscriptions": [], "inboxes": [] },
   "triggers": [],
   "defaults": null
 }"#,
@@ -373,14 +373,14 @@ mod tests {
     {{ "name":"com.acme/EventPayload@1", "hash":"{zero}" }},
     {{ "name":"com.acme/Event@1", "hash":"{zero}" }}
   ],
-  "modules": [ {{ "name":"com.acme/Reducer@1", "hash":"{zero}" }} ],
+  "modules": [ {{ "name":"com.acme/Workflow@1", "hash":"{zero}" }} ],
   "plans": [],
   "effects": [],
   "caps": [],
   "policies": [],
   "secrets": [],
   "routing": {{
-    "events": [ {{ "event":"com.acme/Event@1", "reducer":"com.acme/Reducer@1", "key_field":"$value.id" }} ],
+    "subscriptions": [ {{ "event":"com.acme/Event@1", "module":"com.acme/Workflow@1", "key_field":"$value.id" }} ],
     "inboxes": []
   }},
   "triggers": [],
@@ -406,12 +406,12 @@ mod tests {
             r#"[
   {{
     "$kind":"defmodule",
-    "name":"com.acme/Reducer@1",
-    "module_kind":"reducer",
+    "name":"com.acme/Workflow@1",
+    "module_kind":"workflow",
     "wasm_hash":"{zero}",
     "key_schema":"com.acme/Key@1",
     "abi": {{
-      "reducer": {{
+      "workflow": {{
         "state":"com.acme/State@1",
         "event":"com.acme/Event@1",
         "effects_emitted": [],

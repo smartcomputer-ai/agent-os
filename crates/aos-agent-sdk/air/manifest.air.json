@@ -1,0 +1,50 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    { "name": "aos.agent/SessionId@1" },
+    { "name": "aos.agent/RunId@1" },
+    { "name": "aos.agent/ToolBatchId@1" },
+    { "name": "aos.agent/ToolCallStatus@1" },
+    { "name": "aos.agent/ActiveToolBatch@1" },
+    { "name": "aos.agent/ReasoningEffort@1" },
+    { "name": "aos.agent/WorkspaceBinding@1" },
+    { "name": "aos.agent/WorkspaceApplyMode@1" },
+    { "name": "aos.agent/WorkspaceSnapshot@1" },
+    { "name": "aos.agent/WorkspaceSnapshotReady@1" },
+    { "name": "aos.agent/SessionConfig@1" },
+    { "name": "aos.agent/RunConfig@1" },
+    { "name": "aos.agent/SessionLifecycle@1" },
+    { "name": "aos.agent/HostCommand@1" },
+    { "name": "aos.agent/LlmToolCall@1" },
+    { "name": "aos.agent/LlmToolCallList@1" },
+    { "name": "aos.agent/SessionIngressKind@1" },
+    { "name": "aos.agent/SessionIngress@1" },
+    { "name": "aos.agent/PendingIntent@1" },
+    { "name": "aos.agent/SessionState@1" },
+    { "name": "aos.agent/SessionNoop@1" },
+    { "name": "aos.agent/SessionWorkflowEvent@1" },
+    { "name": "sys/EffectReceiptEnvelope@1" },
+    { "name": "sys/EffectReceiptRejected@1" },
+    { "name": "sys/EffectStreamFrame@1" }
+  ],
+  "modules": [
+    { "name": "aos.agent/SessionWorkflow@1" },
+    { "name": "aos.agent/SessionEventEcho@1" }
+  ],
+  "caps": [],
+  "policies": [],
+  "effects": [
+    { "name": "sys/llm.generate@1" }
+  ],
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "aos.agent/SessionIngress@1",
+        "module": "aos.agent/SessionWorkflow@1",
+        "key_field": "session_id"
+      }
+    ],
+    "inboxes": []
+  }
+}

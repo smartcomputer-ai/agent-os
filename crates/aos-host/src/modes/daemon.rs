@@ -13,11 +13,9 @@ use std::time::Duration;
 
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
-use aos_effects::{EffectIntent, EffectReceipt};
+use aos_effects::{EffectIntent, EffectReceipt, EffectStreamFrame};
 use aos_kernel::StateReader;
 use aos_store::Store;
-use base64::Engine as _;
-use serde_json::json;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
@@ -76,12 +74,19 @@ pub enum ControlMsg {
         window_limit: Option<u64>,
         resp: oneshot::Sender<Result<serde_json::Value, HostError>>,
     },
+    TraceSummary {
+        resp: oneshot::Sender<Result<serde_json::Value, HostError>>,
+    },
     EventSend {
         event: ExternalEvent,
         resp: oneshot::Sender<Result<(), HostError>>,
     },
     ReceiptInject {
         receipt: EffectReceipt,
+        resp: oneshot::Sender<Result<(), HostError>>,
+    },
+    StreamFrameInject {
+        frame: EffectStreamFrame,
         resp: oneshot::Sender<Result<(), HostError>>,
     },
     ManifestGet {
@@ -98,13 +103,13 @@ pub enum ControlMsg {
         resp: oneshot::Sender<Result<Vec<aos_kernel::DefListing>, HostError>>,
     },
     StateGet {
-        reducer: String,
+        workflow: String,
         key: Option<Vec<u8>>,
         consistency: String,
         resp: oneshot::Sender<Result<Option<(aos_kernel::ReadMeta, Option<Vec<u8>>)>, HostError>>,
     },
     StateList {
-        reducer: String,
+        workflow: String,
         resp: oneshot::Sender<Result<Vec<CellMeta>, HostError>>,
     },
     PutBlob {
@@ -197,7 +202,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
             http_server,
         };
 
-        // Automatically rehydrate timers from pending reducer receipts so callers
+        // Automatically rehydrate timers from pending workflow receipts so callers
         // can't forget to restore timers after a restart.
         daemon.rehydrate_timers();
         daemon
@@ -212,7 +217,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
             tracing::debug!("Timer scheduler already populated; skipping rehydrate");
             return;
         }
-        let pending = self.host.kernel().pending_reducer_receipts_snapshot();
+        let pending = self.host.kernel().pending_workflow_receipts_snapshot();
         self.timer_scheduler.rehydrate_from_pending(&pending);
         let count = self.timer_scheduler.len();
         if count > 0 {
@@ -312,8 +317,8 @@ impl<S: Store + 'static> WorldDaemon<S> {
 
     /// Run cycles in daemon mode until quiescent (no more pending effects).
     ///
-    /// A single cycle may apply receipts whose reducer handlers emit new
-    /// effects (e.g. a blob.get receipt triggers a reducer that emits
+    /// A single cycle may apply receipts whose workflow handlers emit new
+    /// effects (e.g. a blob.get receipt triggers a workflow that emits
     /// blob.put).  Without re-cycling, those effects would sit in the queue
     /// until the next external event, causing the system to appear stuck.
     async fn run_daemon_cycle(&mut self) -> Result<(), HostError> {
@@ -368,13 +373,25 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 };
                 let _ = resp.send(res);
             }
+            ControlMsg::StreamFrameInject { frame, resp } => {
+                tracing::debug!("Injecting stream frame");
+                let res = (|| -> Result<(), HostError> {
+                    self.host.kernel_mut().handle_stream_frame(frame)?;
+                    Ok(())
+                })();
+                let res = match res {
+                    Ok(_) => self.run_daemon_cycle().await.map(|_| ()),
+                    Err(e) => Err(e),
+                };
+                let _ = resp.send(res);
+            }
             ControlMsg::Snapshot { resp } => {
                 tracing::info!("Creating snapshot (by request)");
                 let res = self.host.snapshot();
                 let _ = resp.send(res);
             }
             ControlMsg::StateGet {
-                reducer,
+                workflow,
                 key,
                 consistency,
                 resp,
@@ -382,7 +399,7 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let consistency = parse_consistency(&self.host, &consistency);
                 let result = self
                     .host
-                    .query_state(&reducer, key.as_deref(), consistency)
+                    .query_state(&workflow, key.as_deref(), consistency)
                     .map(|read| (read.meta, read.value));
                 let _ = resp.send(Ok(result));
             }
@@ -398,8 +415,8 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 let res = self.host.list_defs(kinds.as_deref(), prefix.as_deref());
                 let _ = resp.send(res);
             }
-            ControlMsg::StateList { reducer, resp } => {
-                let res = self.host.list_cells(&reducer);
+            ControlMsg::StateList { workflow, resp } => {
+                let res = self.host.list_cells(&workflow);
                 let _ = resp.send(res);
             }
             ControlMsg::BlobGet { hash_hex, resp } => {
@@ -476,211 +493,20 @@ impl<S: Store + 'static> WorldDaemon<S> {
                 window_limit,
                 resp,
             } => {
-                let res = (|| -> Result<serde_json::Value, HostError> {
-                    let entries = self.host.kernel().dump_journal()?;
-                    let mut root_seq: Option<u64> = None;
-                    let mut root_domain: Option<aos_kernel::journal::DomainEventRecord> = None;
-
-                    if let Some(hash) = event_hash.clone() {
-                        for entry in &entries {
-                            if entry.kind != aos_kernel::journal::JournalKind::DomainEvent {
-                                continue;
-                            }
-                            let Ok(record) = serde_cbor::from_slice::<aos_kernel::journal::JournalRecord>(
-                                &entry.payload,
-                            ) else {
-                                continue;
-                            };
-                            let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record else {
-                                continue;
-                            };
-                            if domain.event_hash == hash {
-                                root_seq = Some(entry.seq);
-                                root_domain = Some(domain);
-                                break;
-                            }
-                        }
-                    } else if let (Some(schema), Some(correlate_by), Some(correlate_value)) =
-                        (schema.clone(), correlate_by.clone(), correlate_value.clone())
-                    {
-                        for entry in entries.iter().rev() {
-                            if entry.kind != aos_kernel::journal::JournalKind::DomainEvent {
-                                continue;
-                            }
-                            let Ok(record) = serde_cbor::from_slice::<aos_kernel::journal::JournalRecord>(
-                                &entry.payload,
-                            ) else {
-                                continue;
-                            };
-                            let aos_kernel::journal::JournalRecord::DomainEvent(domain) = record else {
-                                continue;
-                            };
-                            if domain.schema != schema {
-                                continue;
-                            }
-                            let Ok(value_json) =
-                                serde_cbor::from_slice::<serde_json::Value>(&domain.value)
-                            else {
-                                continue;
-                            };
-                            let Some(found) = json_path_get(&value_json, &correlate_by) else {
-                                continue;
-                            };
-                            if found == &correlate_value {
-                                root_seq = Some(entry.seq);
-                                root_domain = Some(domain);
-                                break;
-                            }
-                        }
-                    }
-
-                    let root_domain = root_domain.ok_or_else(|| {
-                        if let Some(hash) = event_hash.clone() {
-                            HostError::External(format!("trace root event_hash '{}' not found", hash))
-                        } else {
-                            HostError::External("trace root event not found for correlation query".into())
-                        }
-                    })?;
-                    let root_seq = root_seq.ok_or_else(|| {
-                        HostError::External("trace root sequence missing".into())
-                    })?;
-                    let root_record_json = serde_json::to_value(&root_domain).map_err(|e| {
-                        HostError::External(format!("encode root event record: {e}"))
-                    })?;
-
-                    let limit = window_limit.unwrap_or(400) as usize;
-                    let mut window = Vec::new();
-                    let mut has_receipt_error = false;
-                    let mut has_plan_error = false;
-                    for entry in entries
-                        .into_iter()
-                        .filter(|entry| entry.seq >= root_seq)
-                        .take(limit)
-                    {
-                        let record: aos_kernel::journal::JournalRecord =
-                            serde_cbor::from_slice(&entry.payload).map_err(|e| {
-                                HostError::External(format!("decode journal record: {e}"))
-                            })?;
-                        if let aos_kernel::journal::JournalRecord::EffectReceipt(receipt) = &record
-                        {
-                            if !matches!(receipt.status, aos_effects::ReceiptStatus::Ok) {
-                                has_receipt_error = true;
-                            }
-                        }
-                        if let aos_kernel::journal::JournalRecord::PlanEnded(ended) = &record {
-                            if matches!(ended.status, aos_kernel::journal::PlanEndStatus::Error) {
-                                has_plan_error = true;
-                            }
-                        }
-                        window.push(crate::control::JournalTailEntry {
-                            kind: journal_kind_name(entry.kind).to_string(),
-                            seq: entry.seq,
-                            record: serde_json::to_value(record).map_err(|e| {
-                                HostError::External(format!("encode journal record: {e}"))
-                            })?,
-                        });
-                    }
-
-                    let pending_plan_receipts = self.host.kernel().pending_plan_receipts();
-                    let plan_wait_receipts = self.host.kernel().debug_plan_waits();
-                    let plan_wait_events = self.host.kernel().debug_plan_waiting_events();
-                    let pending_reducer_receipts =
-                        self.host.kernel().pending_reducer_receipts_snapshot();
-                    let queued_effects = self.host.kernel().queued_effects_snapshot();
-
-                    let waiting_receipt_count = pending_plan_receipts.len()
-                        + pending_reducer_receipts.len()
-                        + queued_effects.len()
-                        + plan_wait_receipts
-                            .iter()
-                            .map(|(_, waits)| waits.len())
-                            .sum::<usize>();
-                    let waiting_event_count = plan_wait_events.len();
-
-                    let terminal_state = if has_receipt_error || has_plan_error {
-                        "failed"
-                    } else if waiting_receipt_count > 0 {
-                        "waiting_receipt"
-                    } else if waiting_event_count > 0 {
-                        "waiting_event"
-                    } else if window.is_empty() {
-                        "unknown"
-                    } else {
-                        "completed"
-                    };
-
-                    let meta = self.host.kernel().get_journal_head();
-                    let root_value_json =
-                        serde_cbor::from_slice::<serde_json::Value>(&root_domain.value).ok();
-                    Ok(json!({
-                        "query": {
-                            "event_hash": event_hash,
-                            "schema": schema,
-                            "correlate_by": correlate_by,
-                            "value": correlate_value,
-                            "window_limit": window_limit.unwrap_or(400),
-                        },
-                        "root": {
-                            "schema": root_domain.schema,
-                            "event_hash": root_domain.event_hash,
-                            "seq": root_seq,
-                            "key_b64": root_domain.key.as_ref().map(|k| base64::prelude::BASE64_STANDARD.encode(k)),
-                            "value": root_value_json,
-                        },
-                        "root_event": {
-                            "seq": root_seq,
-                            "record": root_record_json,
-                        },
-                        "journal_window": {
-                            "from_seq": root_seq,
-                            "to_seq": window.last().map(|e| e.seq).unwrap_or(root_seq),
-                            "entries": window,
-                        },
-                        "live_wait": {
-                            "pending_plan_receipts": pending_plan_receipts.into_iter().map(|(plan_id, intent_hash)| {
-                                json!({
-                                    "plan_id": plan_id,
-                                    "plan_name": self.host.kernel().plan_name_for_instance(plan_id),
-                                    "intent_hash": hash_bytes_hex(&intent_hash),
-                                })
-                            }).collect::<Vec<_>>(),
-                            "plan_waiting_receipts": plan_wait_receipts.into_iter().map(|(plan_id, waits)| {
-                                json!({
-                                    "plan_id": plan_id,
-                                    "plan_name": self.host.kernel().plan_name_for_instance(plan_id),
-                                    "intent_hashes": waits.into_iter().map(|h| hash_bytes_hex(&h)).collect::<Vec<_>>(),
-                                })
-                            }).collect::<Vec<_>>(),
-                            "plan_waiting_events": plan_wait_events.into_iter().map(|(plan_id, schema)| {
-                                json!({
-                                    "plan_id": plan_id,
-                                    "plan_name": self.host.kernel().plan_name_for_instance(plan_id),
-                                    "event_schema": schema,
-                                })
-                            }).collect::<Vec<_>>(),
-                            "pending_reducer_receipts": pending_reducer_receipts.into_iter().map(|pending| {
-                                json!({
-                                    "intent_hash": hash_bytes_hex(&pending.intent_hash),
-                                    "reducer": pending.reducer,
-                                    "effect_kind": pending.effect_kind,
-                                })
-                            }).collect::<Vec<_>>(),
-                            "queued_effects": queued_effects.into_iter().map(|queued| {
-                                json!({
-                                    "intent_hash": hash_bytes_hex(&queued.intent_hash),
-                                    "kind": queued.kind,
-                                    "cap_name": queued.cap_name,
-                                })
-                            }).collect::<Vec<_>>(),
-                        },
-                        "terminal_state": terminal_state,
-                        "meta": {
-                            "journal_height": meta.journal_height,
-                            "manifest_hash": meta.manifest_hash.to_hex(),
-                            "snapshot_hash": meta.snapshot_hash.map(|h| h.to_hex()),
-                        },
-                    }))
-                })();
+                let res = crate::trace::trace_get(
+                    self.host.kernel(),
+                    crate::trace::TraceQuery {
+                        event_hash,
+                        schema,
+                        correlate_by,
+                        correlate_value,
+                        window_limit,
+                    },
+                );
+                let _ = resp.send(res);
+            }
+            ControlMsg::TraceSummary { resp } => {
+                let res = crate::trace::workflow_trace_summary(self.host.kernel());
                 let _ = resp.send(res);
             }
             ControlMsg::PutBlob { data, resp } => {
@@ -846,13 +672,15 @@ fn journal_kind_name(kind: aos_kernel::journal::JournalKind) -> &'static str {
         JournalKind::DomainEvent => "domain_event",
         JournalKind::EffectIntent => "effect_intent",
         JournalKind::EffectReceipt => "effect_receipt",
+        JournalKind::StreamFrame => "stream_frame",
         JournalKind::CapDecision => "cap_decision",
         JournalKind::Manifest => "manifest",
         JournalKind::Snapshot => "snapshot",
         JournalKind::PolicyDecision => "policy_decision",
         JournalKind::Governance => "governance",
-        JournalKind::PlanResult => "plan_result",
-        JournalKind::PlanEnded => "plan_ended",
+        JournalKind::PlanStarted => "legacy_plan_started",
+        JournalKind::PlanResult => "legacy_plan_result",
+        JournalKind::PlanEnded => "legacy_plan_ended",
         JournalKind::Custom => "custom",
     }
 }
@@ -872,56 +700,4 @@ fn journal_kind_matches_filter(
             || (normalized == "receipt" && name == "effect_receipt")
             || (normalized == "event" && name == "domain_event")
     })
-}
-
-fn json_path_get<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
-    let normalized = path.trim();
-    // Support both "$value.foo" and "$.value.foo" forms while preserving
-    // literal "$..." field names used by AIR union envelopes (for example "$value").
-    let normalized = if let Some(rest) = normalized.strip_prefix("$.") {
-        rest
-    } else {
-        normalized
-    };
-    if normalized.is_empty() {
-        return Some(value);
-    }
-
-    let mut current = value;
-    for segment in normalized.split('.') {
-        if segment.is_empty() {
-            continue;
-        }
-        let obj = current.as_object()?;
-        current = obj.get(segment)?;
-    }
-    Some(current)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::json_path_get;
-    use serde_json::json;
-
-    #[test]
-    fn json_path_get_supports_air_union_fields() {
-        let value = json!({
-            "$tag": "UserMessage",
-            "$value": { "request_id": 2 }
-        });
-        assert_eq!(
-            json_path_get(&value, "$value.request_id"),
-            Some(&json!(2))
-        );
-        assert_eq!(
-            json_path_get(&value, "$.value.request_id"),
-            None
-        );
-    }
-}
-
-fn hash_bytes_hex(hash: &[u8; 32]) -> String {
-    aos_cbor::Hash::from_bytes(hash)
-        .map(|h| h.to_hex())
-        .unwrap_or_else(|_| hex::encode(hash))
 }

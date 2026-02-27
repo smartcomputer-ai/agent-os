@@ -198,11 +198,18 @@ mod tests {
         assert!(names.contains(&"sys/TimerSetReceipt@1"));
         assert!(names.contains(&"sys/TimerFired@1"));
         assert!(names.contains(&"sys/BlobPutParams@1"));
+        assert!(names.contains(&"sys/BlobEdge@1"));
         assert!(names.contains(&"sys/BlobPutReceipt@1"));
         assert!(names.contains(&"sys/BlobPutResult@1"));
         assert!(names.contains(&"sys/BlobGetParams@1"));
         assert!(names.contains(&"sys/BlobGetReceipt@1"));
         assert!(names.contains(&"sys/BlobGetResult@1"));
+        assert!(names.contains(&"sys/EffectReceiptEnvelope@1"));
+        assert!(names.contains(&"sys/EffectStreamFrame@1"));
+        assert!(names.contains(&"sys/EffectReceiptRejected@1"));
+        // Plan composition
+        assert!(names.contains(&"sys/PlanHandle@1"));
+        assert!(names.contains(&"sys/PlanError@1"));
         // HTTP/LLM
         assert!(names.contains(&"sys/HttpRequestParams@1"));
         assert!(names.contains(&"sys/HttpRequestReceipt@1"));
@@ -270,8 +277,8 @@ mod tests {
         assert!(names.contains(&"sys/ReadMeta@1"));
         assert!(names.contains(&"sys/IntrospectManifestParams@1"));
         assert!(names.contains(&"sys/IntrospectManifestReceipt@1"));
-        assert!(names.contains(&"sys/IntrospectReducerStateParams@1"));
-        assert!(names.contains(&"sys/IntrospectReducerStateReceipt@1"));
+        assert!(names.contains(&"sys/IntrospectWorkflowStateParams@1"));
+        assert!(names.contains(&"sys/IntrospectWorkflowStateReceipt@1"));
         assert!(names.contains(&"sys/IntrospectJournalHeadParams@1"));
         assert!(names.contains(&"sys/IntrospectJournalHeadReceipt@1"));
         assert!(names.contains(&"sys/IntrospectListCellsParams@1"));

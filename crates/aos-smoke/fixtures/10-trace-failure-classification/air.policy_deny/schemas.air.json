@@ -1,0 +1,46 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/FetchNotifyPc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Fetching": { "unit": {} },
+        "Done": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/FetchNotifyState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/FetchNotifyPc@1" },
+        "next_request_id": { "nat": {} },
+        "pending_request": { "option": { "nat": {} } },
+        "last_status": { "option": { "int": {} } },
+        "last_body_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/FetchNotifyStart@1",
+    "type": {
+      "record": {
+        "url": { "text": {} },
+        "method": { "text": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/FetchNotifyEvent@1",
+    "type": {
+      "variant": {
+        "Start": { "ref": "demo/FetchNotifyStart@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
+      }
+    }
+  }
+]

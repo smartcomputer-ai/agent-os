@@ -38,11 +38,13 @@ pub enum JournalKind {
     DomainEvent,
     EffectIntent,
     EffectReceipt,
+    StreamFrame,
     CapDecision,
     Manifest,
     Snapshot,
     PolicyDecision,
     Governance,
+    PlanStarted,
     PlanResult,
     PlanEnded,
     Custom,
@@ -57,11 +59,13 @@ pub enum JournalRecord {
     DomainEvent(DomainEventRecord),
     EffectIntent(EffectIntentRecord),
     EffectReceipt(EffectReceiptRecord),
+    StreamFrame(StreamFrameRecord),
     CapDecision(CapDecisionRecord),
     PolicyDecision(PolicyDecisionRecord),
     Manifest(ManifestRecord),
     Snapshot(SnapshotRecord),
     Governance(GovernanceRecord),
+    PlanStarted(PlanStartedRecord),
     PlanResult(PlanResultRecord),
     PlanEnded(PlanEndedRecord),
     Custom(CustomRecord),
@@ -73,11 +77,13 @@ impl JournalRecord {
             JournalRecord::DomainEvent(_) => JournalKind::DomainEvent,
             JournalRecord::EffectIntent(_) => JournalKind::EffectIntent,
             JournalRecord::EffectReceipt(_) => JournalKind::EffectReceipt,
+            JournalRecord::StreamFrame(_) => JournalKind::StreamFrame,
             JournalRecord::CapDecision(_) => JournalKind::CapDecision,
             JournalRecord::PolicyDecision(_) => JournalKind::PolicyDecision,
             JournalRecord::Manifest(_) => JournalKind::Manifest,
             JournalRecord::Snapshot(_) => JournalKind::Snapshot,
             JournalRecord::Governance(_) => JournalKind::Governance,
+            JournalRecord::PlanStarted(_) => JournalKind::PlanStarted,
             JournalRecord::PlanResult(_) => JournalKind::PlanResult,
             JournalRecord::PlanEnded(_) => JournalKind::PlanEnded,
             JournalRecord::Custom(_) => JournalKind::Custom,
@@ -99,6 +105,15 @@ pub struct PlanEndedRecord {
     pub status: PlanEndStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanStartedRecord {
+    pub plan_name: String,
+    pub plan_id: u64,
+    pub input_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_instance_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -141,8 +156,21 @@ pub struct EffectIntentRecord {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "origin_kind")]
 pub enum IntentOriginRecord {
-    Reducer { name: String },
-    Plan { name: String, plan_id: u64 },
+    Workflow {
+        name: String,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "serde_bytes_opt"
+        )]
+        instance_key: Option<Vec<u8>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        emitted_at_seq: Option<u64>,
+    },
+    Plan {
+        name: String,
+        plan_id: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -154,6 +182,39 @@ pub struct EffectReceiptRecord {
     pub payload_cbor: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_cents: Option<u64>,
+    #[serde(with = "serde_bytes")]
+    pub signature: Vec<u8>,
+    #[serde(default)]
+    pub now_ns: u64,
+    #[serde(default)]
+    pub logical_now_ns: u64,
+    #[serde(default)]
+    pub journal_height: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "serde_bytes")]
+    pub entropy: Vec<u8>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub manifest_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StreamFrameRecord {
+    pub intent_hash: [u8; 32],
+    pub adapter_id: String,
+    pub origin_module_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub origin_instance_key: Option<Vec<u8>>,
+    pub effect_kind: String,
+    pub emitted_at_seq: u64,
+    pub seq: u64,
+    pub frame_kind: String,
+    #[serde(with = "serde_bytes")]
+    pub payload_cbor: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_ref: Option<String>,
     #[serde(with = "serde_bytes")]
     pub signature: Vec<u8>,
     #[serde(default)]
@@ -241,6 +302,12 @@ pub struct SnapshotRecord {
     pub snapshot_ref: String,
     /// Logical height the snapshot represents (number of events applied).
     pub height: JournalSeq,
+    /// Logical runtime time captured in this baseline snapshot.
+    #[serde(default)]
+    pub logical_time_ns: u64,
+    /// Optional safety fence for receipts included in baseline state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_horizon_height: Option<JournalSeq>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_hash: Option<String>,
 }
@@ -273,9 +340,11 @@ pub struct ShadowReportRecord {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects_predicted: Vec<crate::shadow::PredictedEffect>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_receipts: Vec<crate::shadow::PendingPlanReceipt>,
+    pub pending_workflow_receipts: Vec<crate::shadow::PendingWorkflowReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub plan_results: Vec<crate::shadow::PlanResultPreview>,
+    pub workflow_instances: Vec<crate::shadow::WorkflowInstancePreview>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub module_effect_allowlists: Vec<crate::shadow::ModuleEffectAllowlist>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ledger_deltas: Vec<crate::shadow::LedgerDelta>,
 }

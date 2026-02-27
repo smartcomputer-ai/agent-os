@@ -1,0 +1,95 @@
+use std::path::Path;
+
+use anyhow::{Result, anyhow};
+use aos_cbor::Hash;
+use aos_store::Store;
+use aos_wasm_sdk::aos_variant;
+use serde::{Deserialize, Serialize};
+
+use crate::example_host::{ExampleHost, HarnessConfig};
+use aos_host::adapters::mock::{MockHttpHarness, MockHttpResponse};
+
+const WORKFLOW_NAME: &str = "demo/FetchNotify@1";
+const EVENT_SCHEMA: &str = "demo/FetchNotifyEvent@1";
+const MODULE_PATH: &str = "crates/aos-smoke/fixtures/03-fetch-notify/workflow";
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum FetchEventEnvelope {
+        Start { url: String, method: String },
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FetchStateView {
+    pc: FetchPcView,
+    next_request_id: u64,
+    pending_request: Option<u64>,
+    last_status: Option<i64>,
+    last_body_ref: Option<String>,
+}
+
+aos_variant! {
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    enum FetchPcView {
+        Idle,
+        Fetching,
+        Done,
+    }
+}
+
+pub fn run(example_root: &Path) -> Result<()> {
+    let mut host = ExampleHost::prepare(HarnessConfig {
+        example_root,
+        assets_root: None,
+        workflow_name: WORKFLOW_NAME,
+        event_schema: EVENT_SCHEMA,
+        module_crate: MODULE_PATH,
+    })?;
+
+    println!("→ Fetch & Notify demo");
+    let start_event = FetchEventEnvelope::Start {
+        url: "https://example.com/data.json".into(),
+        method: "GET".into(),
+    };
+    let FetchEventEnvelope::Start { url, method } = &start_event;
+    println!("     start fetch → url={url} method={method}");
+    host.send_event(&start_event)?;
+
+    let mut http = MockHttpHarness::new();
+    let requests = http.collect_requests(host.kernel_mut())?;
+    if requests.len() != 1 {
+        return Err(anyhow!(
+            "fetch-notify demo expected a single http request, got {}",
+            requests.len()
+        ));
+    }
+    let request = requests.into_iter().next().expect("one request");
+    println!(
+        "     http.request {} {}",
+        request.params.method, request.params.url
+    );
+    let body = format!(
+        "{{\"url\":\"{}\",\"method\":\"{}\",\"demo\":true}}",
+        request.params.url, request.params.method
+    );
+    http.respond_with(
+        host.kernel_mut(),
+        request,
+        MockHttpResponse::json(200, body),
+    )?;
+
+    let state: FetchStateView = host.read_state()?;
+    let body_preview = state
+        .last_body_ref
+        .as_deref()
+        .and_then(|hash_ref| Hash::from_hex_str(hash_ref).ok())
+        .and_then(|hash| host.store().get_blob(hash).ok())
+        .and_then(|bytes| String::from_utf8(bytes).ok());
+    println!(
+        "   completed: pc={:?} status={:?} body_ref={:?} preview={:?}",
+        state.pc, state.last_status, state.last_body_ref, body_preview
+    );
+
+    host.finish()?.verify_replay()?;
+    Ok(())
+}

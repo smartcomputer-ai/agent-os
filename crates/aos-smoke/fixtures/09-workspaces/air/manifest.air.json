@@ -1,0 +1,89 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    { "name": "demo/WorkspaceSummary@1" },
+    { "name": "demo/WorkspaceStep@1" },
+    { "name": "demo/WorkspaceState@1" },
+    { "name": "demo/WorkspaceStart@1" },
+    { "name": "demo/WorkspaceEvent@1" },
+    { "name": "sys/EffectReceiptEnvelope@1" },
+    { "name": "sys/WorkspaceCommitMeta@1" },
+    { "name": "sys/WorkspaceCommit@1" },
+    { "name": "sys/WorkspaceRef@1" },
+    { "name": "sys/WorkspaceResolveParams@1" },
+    { "name": "sys/WorkspaceResolveReceipt@1" },
+    { "name": "sys/WorkspaceEmptyRootParams@1" },
+    { "name": "sys/WorkspaceEmptyRootReceipt@1" },
+    { "name": "sys/WorkspaceListParams@1" },
+    { "name": "sys/WorkspaceListEntry@1" },
+    { "name": "sys/WorkspaceListReceipt@1" },
+    { "name": "sys/WorkspaceWriteBytesParams@1" },
+    { "name": "sys/WorkspaceWriteBytesReceipt@1" },
+    { "name": "sys/WorkspaceDiffParams@1" },
+    { "name": "sys/WorkspaceDiffChange@1" },
+    { "name": "sys/WorkspaceDiffReceipt@1" },
+    { "name": "sys/HttpPublishRule@1" },
+    { "name": "sys/HttpPublishRegistry@1" },
+    { "name": "sys/HttpPublishSet@1" }
+  ],
+  "modules": [
+    { "name": "demo/WorkspaceDemo@1" },
+    { "name": "sys/Workspace@1" },
+    { "name": "sys/CapEnforceWorkspace@1" },
+    { "name": "sys/HttpPublish@1" }
+  ],
+  "caps": [
+    { "name": "demo/workspace_cap@1" }
+  ],
+  "policies": [
+    { "name": "demo/workspace-policy@1" }
+  ],
+  "defaults": {
+    "policy": "demo/workspace-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_workspace",
+        "cap": "demo/workspace_cap@1",
+        "params": {
+          "record": {
+            "workspaces": {
+              "list": [
+                { "text": "alpha" },
+                { "text": "beta" }
+              ]
+            },
+            "path_prefixes": { "null": {} },
+            "ops": {
+              "set": [
+                { "text": "resolve" },
+                { "text": "list" },
+                { "text": "read" },
+                { "text": "write" },
+                { "text": "diff" }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      { "event": "demo/WorkspaceEvent@1", "module": "demo/WorkspaceDemo@1" },
+      {
+        "event": "sys/WorkspaceCommit@1",
+        "module": "sys/Workspace@1",
+        "key_field": "workspace"
+      },
+      { "event": "sys/HttpPublishSet@1", "module": "sys/HttpPublish@1" }
+    ]
+  },
+  "effects": [
+    { "name": "sys/workspace.resolve@1" },
+    { "name": "sys/workspace.empty_root@1" },
+    { "name": "sys/workspace.write_bytes@1" },
+    { "name": "sys/workspace.list@1" },
+    { "name": "sys/workspace.diff@1" }
+  ]
+}

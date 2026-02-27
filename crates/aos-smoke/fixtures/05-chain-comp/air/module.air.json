@@ -1,0 +1,17 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/ChainComp@1",
+    "module_kind": "workflow",
+    "abi": {
+      "workflow": {
+        "state": "demo/ChainState@1",
+        "event": "demo/ChainEvent@1",
+        "effects_emitted": ["http.request"],
+        "cap_slots": {
+          "default": "http.out"
+        }
+      }
+    }
+  }
+]

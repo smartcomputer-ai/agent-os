@@ -88,20 +88,31 @@ fn llm_generate_params_literal_matches_builtin_schema() {
         ("provider", text("openai")),
         ("model", text("gpt-5.2")),
         (
-            "temperature",
-            ValueLiteral::Dec128(crate::ValueDec128 {
-                dec128: "0.2".into(),
-            }),
-        ),
-        ("max_tokens", nat(256)),
-        (
             "message_refs",
             list(vec![hash(
                 "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )]),
         ),
-        ("tool_refs", null()),
-        ("tool_choice", null()),
+        (
+            "runtime",
+            record(vec![
+                (
+                    "temperature",
+                    ValueLiteral::Dec128(crate::ValueDec128 {
+                        dec128: "0.2".into(),
+                    }),
+                ),
+                ("top_p", null()),
+                ("max_tokens", nat(256)),
+                ("tool_refs", null()),
+                ("tool_choice", null()),
+                ("reasoning_effort", null()),
+                ("stop_sequences", null()),
+                ("metadata", null()),
+                ("provider_options_ref", null()),
+                ("response_format_ref", null()),
+            ]),
+        ),
         ("api_key", null()),
     ]);
     validate_value_literal(&literal, &schema.schema.ty).expect("literal matches schema");
@@ -115,10 +126,23 @@ fn llm_generate_receipt_literal_matches_builtin_schema() {
             "output_ref",
             hash("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
         ),
+        ("raw_output_ref", null()),
         (
             "token_usage",
-            record(vec![("prompt", nat(128)), ("completion", nat(64))]),
+            record(vec![
+                ("prompt", nat(128)),
+                ("completion", nat(64)),
+                ("total", nat(192)),
+            ]),
         ),
+        (
+            "finish_reason",
+            record(vec![("reason", text("stop")), ("raw", null())]),
+        ),
+        ("provider_response_id", null()),
+        ("usage_details", null()),
+        ("warnings_ref", null()),
+        ("rate_limit_ref", null()),
         ("cost_cents", nat(42)),
         ("provider_id", text("openai")),
     ]);
@@ -133,7 +157,16 @@ fn llm_generate_receipt_requires_token_usage_fields() {
             "output_ref",
             hash("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
         ),
+        ("raw_output_ref", null()),
+        ("provider_response_id", null()),
+        (
+            "finish_reason",
+            record(vec![("reason", text("stop")), ("raw", null())]),
+        ),
         ("token_usage", record(vec![("prompt", nat(1))])),
+        ("usage_details", null()),
+        ("warnings_ref", null()),
+        ("rate_limit_ref", null()),
         ("cost_cents", nat(0)),
         ("provider_id", text("openai")),
     ]);

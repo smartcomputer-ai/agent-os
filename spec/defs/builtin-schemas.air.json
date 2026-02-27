@@ -25,7 +25,7 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "workflow": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
@@ -38,7 +38,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/ReducerContext@1",
+    "name": "sys/WorkflowContext@1",
     "type": {
       "record": {
         "now_ns": { "nat": {} },
@@ -47,7 +47,7 @@
         "entropy": { "bytes": {} },
         "event_hash": { "hash": {} },
         "manifest_hash": { "hash": {} },
-        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "workflow": { "text": {}, "$comment": "Name-formatted string" },
         "key": { "option": { "bytes": {} } },
         "cell_mode": { "bool": {} }
       }
@@ -65,14 +65,45 @@
       }
     }
   },
+  {
+    "$kind": "defschema",
+    "name": "sys/PlanHandle@1",
+    "type": {
+      "record": {
+        "instance_id": { "nat": {} },
+        "plan": { "text": {}, "$comment": "Name-formatted string" }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/PlanError@1",
+    "type": {
+      "record": {
+        "code": { "text": {} },
+        "message": { "text": {} }
+      }
+    }
+  },
 
   {
     "$kind": "defschema",
     "name": "sys/BlobPutParams@1",
     "type": {
       "record": {
+        "bytes": { "bytes": {} },
+        "blob_ref": { "option": { "hash": {} } },
+        "refs": { "option": { "list": { "hash": {} } } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/BlobEdge@1",
+    "type": {
+      "record": {
         "blob_ref": { "hash": {} },
-        "bytes": { "bytes": {} }
+        "refs": { "list": { "hash": {} } }
       }
     }
   },
@@ -82,6 +113,7 @@
     "type": {
       "record": {
         "blob_ref": { "hash": {} },
+        "edge_ref": { "hash": {} },
         "size": { "nat": {} }
       }
     }
@@ -112,7 +144,7 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "workflow": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
@@ -129,7 +161,7 @@
     "type": {
       "record": {
         "intent_hash": { "hash": {} },
-        "reducer": { "text": {}, "$comment": "Name-formatted string" },
+        "workflow": { "text": {}, "$comment": "Name-formatted string" },
         "effect_kind": { "text": {} },
         "adapter_id": { "text": {} },
         "status": { "text": {} },
@@ -137,6 +169,65 @@
         "receipt": { "ref": "sys/BlobGetReceipt@1" },
         "cost_cents": { "option": { "nat": {} } },
         "signature": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/EffectReceiptEnvelope@1",
+    "type": {
+      "record": {
+        "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
+        "origin_instance_key": { "option": { "bytes": {} } },
+        "intent_id": { "hash": {} },
+        "effect_kind": { "text": {} },
+        "params_hash": { "option": { "hash": {} } },
+        "receipt_payload": { "bytes": {} },
+        "status": { "text": {} },
+        "emitted_at_seq": { "nat": {} },
+        "adapter_id": { "text": {} },
+        "cost_cents": { "option": { "nat": {} } },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/EffectStreamFrame@1",
+    "type": {
+      "record": {
+        "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
+        "origin_instance_key": { "option": { "bytes": {} } },
+        "intent_id": { "hash": {} },
+        "effect_kind": { "text": {} },
+        "params_hash": { "option": { "hash": {} } },
+        "emitted_at_seq": { "nat": {} },
+        "seq": { "nat": {} },
+        "kind": { "text": {} },
+        "payload": { "bytes": {} },
+        "payload_ref": { "option": { "hash": {} } },
+        "adapter_id": { "text": {} },
+        "signature": { "bytes": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/EffectReceiptRejected@1",
+    "type": {
+      "record": {
+        "origin_module_id": { "text": {}, "$comment": "Name-formatted string" },
+        "origin_instance_key": { "option": { "bytes": {} } },
+        "intent_id": { "hash": {} },
+        "effect_kind": { "text": {} },
+        "params_hash": { "option": { "hash": {} } },
+        "adapter_id": { "text": {} },
+        "status": { "text": {} },
+        "error_code": { "text": {} },
+        "error_message": { "text": {} },
+        "payload_hash": { "hash": {} },
+        "payload_size": { "nat": {} },
+        "emitted_at_seq": { "nat": {} }
       }
     }
   },
@@ -200,16 +291,87 @@
   },
   {
     "$kind": "defschema",
+    "name": "sys/LlmRuntimeArgs@1",
+    "type": {
+      "record": {
+        "temperature": { "option": { "dec128": {} } },
+        "top_p": { "option": { "dec128": {} } },
+        "max_tokens": { "option": { "nat": {} } },
+        "tool_refs": { "option": { "list": { "hash": {} } } },
+        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "reasoning_effort": { "option": { "text": {} } },
+        "stop_sequences": { "option": { "list": { "text": {} } } },
+        "metadata": {
+          "option": {
+            "map": {
+              "key": { "text": {} },
+              "value": { "text": {} }
+            }
+          }
+        },
+        "provider_options_ref": { "option": { "hash": {} } },
+        "response_format_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmToolCall@1",
+    "type": {
+      "record": {
+        "call_id": { "text": {} },
+        "tool_name": { "text": {} },
+        "arguments_ref": { "hash": {} },
+        "provider_call_id": { "option": { "text": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmToolCallList@1",
+    "type": { "list": { "ref": "sys/LlmToolCall@1" } }
+  },
+  {
+    "$kind": "defschema",
+    "name": "sys/LlmOutputEnvelope@1",
+    "type": {
+      "record": {
+        "assistant_text": { "option": { "text": {} } },
+        "tool_calls_ref": { "option": { "hash": {} } },
+        "reasoning_ref": { "option": { "hash": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
     "name": "sys/LlmGenerateParams@1",
     "type": {
       "record": {
+        "correlation_id": { "option": { "text": {} } },
         "provider": { "text": {} },
         "model": { "text": {} },
-        "temperature": { "dec128": {} },
-        "max_tokens": { "nat": {} },
         "message_refs": { "list": { "hash": {} } },
-        "tool_refs": { "option": { "list": { "hash": {} } } },
-        "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+        "runtime": {
+          "record": {
+            "temperature": { "option": { "dec128": {} } },
+            "top_p": { "option": { "dec128": {} } },
+            "max_tokens": { "option": { "nat": {} } },
+            "tool_refs": { "option": { "list": { "hash": {} } } },
+            "tool_choice": { "option": { "ref": "sys/LlmToolChoice@1" } },
+            "reasoning_effort": { "option": { "text": {} } },
+            "stop_sequences": { "option": { "list": { "text": {} } } },
+            "metadata": {
+              "option": {
+                "map": {
+                  "key": { "text": {} },
+                  "value": { "text": {} }
+                }
+              }
+            },
+            "provider_options_ref": { "option": { "hash": {} } },
+            "response_format_ref": { "option": { "hash": {} } }
+          }
+        },
         "api_key": { "option": { "ref": "sys/TextOrSecretRef@1" } }
       }
     }
@@ -220,13 +382,33 @@
     "type": {
       "record": {
         "output_ref": { "hash": {} },
+        "raw_output_ref": { "option": { "hash": {} } },
+        "provider_response_id": { "option": { "text": {} } },
+        "finish_reason": {
+          "record": {
+            "reason": { "text": {} },
+            "raw": { "option": { "text": {} } }
+          }
+        },
         "token_usage": {
           "record": {
             "prompt": { "nat": {} },
-            "completion": { "nat": {} }
+            "completion": { "nat": {} },
+            "total": { "option": { "nat": {} } }
           }
         },
-        "cost_cents": { "nat": {} },
+        "usage_details": {
+          "option": {
+            "record": {
+              "reasoning_tokens": { "option": { "nat": {} } },
+              "cache_read_tokens": { "option": { "nat": {} } },
+              "cache_write_tokens": { "option": { "nat": {} } }
+            }
+          }
+        },
+        "warnings_ref": { "option": { "hash": {} } },
+        "rate_limit_ref": { "option": { "hash": {} } },
+        "cost_cents": { "option": { "nat": {} } },
         "provider_id": { "text": {} }
       }
     }
@@ -445,21 +627,34 @@
             }
           }
         },
-        "pending_receipts": {
+        "pending_workflow_receipts": {
           "list": {
             "record": {
-              "plan_id": { "nat": {} },
-              "plan": { "option": { "text": {} } },
-              "intent_hash": { "hash": {} }
+              "instance_id": { "text": {} },
+              "origin_module_id": { "text": {} },
+              "origin_instance_key_b64": { "option": { "text": {} } },
+              "intent_hash": { "hash": {} },
+              "effect_kind": { "text": {} },
+              "emitted_at_seq": { "nat": {} }
             }
           }
         },
-        "plan_results": {
+        "workflow_instances": {
           "list": {
             "record": {
-              "plan": { "text": {} },
-              "plan_id": { "nat": {} },
-              "output_schema": { "text": {} }
+              "instance_id": { "text": {} },
+              "status": { "text": {} },
+              "last_processed_event_seq": { "nat": {} },
+              "module_version": { "option": { "text": {} } },
+              "inflight_intents": { "nat": {} }
+            }
+          }
+        },
+        "module_effect_allowlists": {
+          "list": {
+            "record": {
+              "module": { "text": {} },
+              "effects_emitted": { "list": { "text": {} } }
             }
           }
         },
@@ -980,10 +1175,10 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/IntrospectReducerStateParams@1",
+    "name": "sys/IntrospectWorkflowStateParams@1",
     "type": {
       "record": {
-        "reducer": { "text": {} },
+        "workflow": { "text": {} },
         "key": { "option": { "bytes": {} } },
         "consistency": { "text": {}, "$comment": "head | exact:<height> | at_least:<height>" }
       }
@@ -991,7 +1186,7 @@
   },
   {
     "$kind": "defschema",
-    "name": "sys/IntrospectReducerStateReceipt@1",
+    "name": "sys/IntrospectWorkflowStateReceipt@1",
     "type": {
       "record": {
         "state": { "option": { "bytes": {} } },
@@ -1018,7 +1213,7 @@
     "name": "sys/IntrospectListCellsParams@1",
     "type": {
       "record": {
-        "reducer": { "text": {} }
+        "workflow": { "text": {} }
       }
     }
   },

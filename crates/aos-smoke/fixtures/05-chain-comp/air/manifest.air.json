@@ -1,0 +1,94 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    {
+      "name": "demo/ChainPhase@1"
+    },
+    {
+      "name": "demo/ChainHttpTarget@1"
+    },
+    {
+      "name": "demo/ChainSagaState@1"
+    },
+    {
+      "name": "demo/ChainState@1"
+    },
+    {
+      "name": "demo/ChainStart@1"
+    },
+    {
+      "name": "demo/ChainEvent@1"
+    },
+    {
+      "name": "sys/EffectReceiptEnvelope@1"
+    },
+    {
+      "name": "sys/HttpRequestParams@1"
+    },
+    {
+      "name": "sys/HttpRequestReceipt@1"
+    }
+  ],
+  "modules": [
+    {
+      "name": "demo/ChainComp@1"
+    },
+    {
+      "name": "sys/CapEnforceHttpOut@1"
+    }
+  ],
+  "caps": [
+    {
+      "name": "demo/http_chain_cap@1"
+    }
+  ],
+  "policies": [
+    {
+      "name": "demo/http-chain-policy@1"
+    }
+  ],
+  "defaults": {
+    "policy": "demo/http-chain-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_http_chain",
+        "cap": "demo/http_chain_cap@1",
+        "params": {
+          "record": {
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "methods": {
+              "set": [
+                {
+                  "text": "POST"
+                },
+                {
+                  "text": "PUT"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/ChainEvent@1",
+        "module": "demo/ChainComp@1"
+      }
+    ]
+  },
+  "effects": [
+    {
+      "name": "sys/http.request@1"
+    }
+  ]
+}

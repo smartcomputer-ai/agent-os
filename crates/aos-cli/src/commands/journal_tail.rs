@@ -15,7 +15,8 @@ use super::try_control_client;
 
 #[derive(Args, Debug)]
 pub struct JournalTailArgs {
-    /// Sequence to start from (inclusive)
+    /// Journal cursor sequence. Resume by passing the last processed seq.
+    /// For initial reads, use 0.
     #[arg(long, default_value_t = 0)]
     pub from: u64,
 
@@ -125,10 +126,10 @@ fn summarize_record(kind: &str, record: &Value) -> String {
             let decision = find_str(record, "decision").unwrap_or("?");
             format!("intent={intent} decision={decision}")
         }
-        "plan_ended" => {
-            let plan = find_str(record, "plan_id").unwrap_or("?");
+        "legacy_plan_ended" => {
+            let flow = find_str(record, "plan_id").unwrap_or("?");
             let status = find_str(record, "status").unwrap_or("?");
-            format!("plan_id={plan} status={status}")
+            format!("legacy_flow_id={flow} status={status}")
         }
         _ => String::new(),
     }

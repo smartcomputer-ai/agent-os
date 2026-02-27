@@ -1,0 +1,56 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/StartWork@1",
+    "type": {
+      "record": {
+        "req_id": { "text": {} },
+        "payload": { "text": {} },
+        "max_attempts": { "nat": {} },
+        "base_delay_ms": { "nat": {} },
+        "now_ns": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/RetryPc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Requesting": { "unit": {} },
+        "Backoff": { "unit": {} },
+        "Done": { "unit": {} },
+        "Failed": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/RetryState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/RetryPc@1" },
+        "attempt": { "nat": {} },
+        "max_attempts": { "nat": {} },
+        "base_delay_ms": { "nat": {} },
+        "anchor_ns": { "nat": {} },
+        "payload": { "text": {} },
+        "req_id": { "text": {} },
+        "pending_request": { "bool": {} },
+        "last_status": { "option": { "int": {} } },
+        "timers_scheduled": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/RetryEvent@1",
+    "type": {
+      "variant": {
+        "Start": { "ref": "demo/StartWork@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
+      }
+    }
+  }
+]

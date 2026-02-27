@@ -1,341 +1,30 @@
 //! Shared test helpers for integration tests.
 //!
-//! These helpers build test manifests and utilities used across multiple integration test files.
-//! Note: Each integration test compiles this module separately, so some functions may appear
-//! unused in certain test contexts but are used by others.
+//! These helpers are workflow-era only (no plan fixtures).
 
 #![allow(dead_code)]
 
 use aos_air_types::{
-    DefPlan, DefPolicy, DefSchema, EffectKind, EmptyObject, Expr, ExprConst, ExprOrValue,
-    ExprRecord, ManifestDefaults, NamedRef, PlanBind, PlanBindEffect, PlanEdge, PlanStep,
-    PlanStepAwaitEvent, PlanStepAwaitReceipt, PlanStepEmitEffect, PlanStepEnd, PlanStepKind,
-    PlanStepRaiseEvent, ReducerAbi, TypeExpr, TypePrimitive, TypePrimitiveInt, TypePrimitiveText,
-    TypeRecord, TypeRef, TypeVariant, ValueLiteral, ValueMap, ValueNull, ValueRecord, ValueText,
+    DefPolicy, DefSchema, EmptyObject, ManifestDefaults, NamedRef, WorkflowAbi, TypeExpr,
+    TypePrimitive, TypePrimitiveInt, TypePrimitiveText, TypeRecord, TypeRef, TypeVariant,
 };
 use aos_effects::builtins::TimerSetParams;
-use aos_kernel::cap_enforcer::CapCheckOutput;
-#[path = "../src/fixtures/mod.rs"]
+#[path = "fixtures.rs"]
 pub mod fixtures;
 
-/// Compatibility wrapper for decoding ReadMeta via serde_json/serde_cbor in tests.
-/// Mirrors aos_kernel::ReadMeta but uses hex strings for hashes.
-#[derive(Debug, serde::Deserialize)]
-pub struct ReadMetaCompat {
-    pub journal_height: u64,
-    #[serde(default)]
-    pub snapshot_hash: Option<String>,
-    pub manifest_hash: String,
-}
-
-use aos_wasm_abi::{PureOutput, ReducerEffect, ReducerOutput};
-use fixtures::{START_SCHEMA, TestStore, zero_hash};
+use aos_wasm_abi::{WorkflowEffect, WorkflowOutput};
+use fixtures::{zero_hash, TestStore, START_SCHEMA};
 use indexmap::IndexMap;
 use std::sync::Arc;
 
-/// Builds a test manifest with a plan that emits an HTTP effect, awaits its receipt,
-/// and raises an event to a result reducer.
-pub fn fulfillment_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let mut result_module = fixtures::stub_reducer_module(
-        store,
-        "com.acme/ResultReducer@1",
-        &ReducerOutput {
-            state: Some(vec![0xEE]),
-            domain_events: vec![],
-            effects: vec![],
-            ann: None,
-        },
-    );
-    let result_state_schema = fixtures::schema("com.acme/ResultState@1");
-    let result_event_schema = fixtures::schema("com.acme/ResultEvent@1");
-    result_module.abi.reducer = Some(ReducerAbi {
-        state: result_state_schema.clone(),
-        event: result_event_schema.clone(),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
-        annotations: None,
-        effects_emitted: vec![],
-        cap_slots: IndexMap::new(),
-    });
-
-    let allow_output = CapCheckOutput {
-        constraints_ok: true,
-        deny: None,
-    };
-    let output_bytes = serde_cbor::to_vec(&allow_output).expect("encode cap output");
-    let pure_output = PureOutput {
-        output: output_bytes,
-    };
-    let enforcer = fixtures::stub_pure_module(
-        store,
-        "sys/CapEnforceHttpOut@1",
-        &pure_output,
-        "sys/CapCheckInput@1",
-        "sys/CapCheckOutput@1",
-    );
-
-    let plan_name = "com.acme/Fulfill@1".to_string();
-    let plan = DefPlan {
-        name: plan_name.clone(),
-        input: fixtures::schema("com.acme/PlanIn@1"),
-        output: None,
-        locals: IndexMap::new(),
-        steps: vec![
-            PlanStep {
-                id: "emit".into(),
-                kind: PlanStepKind::EmitEffect(PlanStepEmitEffect {
-                    kind: EffectKind::http_request(),
-                    params: http_params_literal("https://example.com"),
-                    cap: "cap_http".into(),
-                    idempotency_key: None,
-                    bind: PlanBindEffect {
-                        effect_id_as: "req".into(),
-                    },
-                }),
-            },
-            PlanStep {
-                id: "await".into(),
-                kind: PlanStepKind::AwaitReceipt(PlanStepAwaitReceipt {
-                    for_expr: fixtures::var_expr("req"),
-                    bind: PlanBind { var: "resp".into() },
-                }),
-            },
-            PlanStep {
-                id: "raise".into(),
-                kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                    event: result_event_schema.clone(),
-                    value: Expr::Record(ExprRecord {
-                        record: IndexMap::from([(
-                            "value".into(),
-                            Expr::Const(ExprConst::Int { int: 9 }),
-                        )]),
-                    })
-                    .into(),
-                }),
-            },
-            PlanStep {
-                id: "end".into(),
-                kind: PlanStepKind::End(PlanStepEnd { result: None }),
-            },
-        ],
-        edges: vec![
-            PlanEdge {
-                from: "emit".into(),
-                to: "await".into(),
-                when: None,
-            },
-            PlanEdge {
-                from: "await".into(),
-                to: "raise".into(),
-                when: None,
-            },
-            PlanEdge {
-                from: "raise".into(),
-                to: "end".into(),
-                when: None,
-            },
-        ],
-        required_caps: vec!["cap_http".into()],
-        allowed_effects: vec![EffectKind::http_request()],
-        invariants: vec![],
-    };
-
-    let routing = vec![fixtures::routing_event(
-        result_event_schema.as_str(),
-        &result_module.name,
-    )];
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![plan],
-        vec![fixtures::start_trigger(&plan_name)],
-        vec![result_module, enforcer],
-        routing,
-    );
-
-    insert_test_schemas(
-        &mut loaded,
-        vec![
-            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
-            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
-            DefSchema {
-                name: "com.acme/ResultEvent@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([("value".into(), int_type())]),
-                }),
-            },
-            DefSchema {
-                name: "com.acme/ResultState@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        ],
-    );
-
-    loaded
-}
-
-fn http_params_literal(url: &str) -> ExprOrValue {
-    ExprOrValue::Literal(ValueLiteral::Record(ValueRecord {
-        record: indexmap::IndexMap::from([
-            (
-                "method".into(),
-                ValueLiteral::Text(ValueText { text: "GET".into() }),
-            ),
-            (
-                "url".into(),
-                ValueLiteral::Text(ValueText { text: url.into() }),
-            ),
-            (
-                "headers".into(),
-                ValueLiteral::Map(ValueMap { map: vec![] }),
-            ),
-            (
-                "body_ref".into(),
-                ValueLiteral::Null(ValueNull {
-                    null: EmptyObject::default(),
-                }),
-            ),
-        ]),
-    }))
-}
-
-/// Builds a test manifest with a plan that awaits a domain event before proceeding.
-pub fn await_event_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let mut result_module = fixtures::stub_reducer_module(
-        store,
-        "com.acme/EventResult@1",
-        &ReducerOutput {
-            state: Some(vec![0xAB]),
-            domain_events: vec![],
-            effects: vec![],
-            ann: None,
-        },
-    );
-    let result_state_schema = fixtures::schema("com.acme/EventResultState@1");
-    let result_event_schema = fixtures::schema("com.acme/EventDone@1");
-    result_module.abi.reducer = Some(ReducerAbi {
-        state: result_state_schema.clone(),
-        event: result_event_schema.clone(),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
-        annotations: None,
-        effects_emitted: vec![],
-        cap_slots: IndexMap::new(),
-    });
-    let unblock_event = aos_wasm_abi::DomainEvent::new(
-        "com.acme/Unblock@1".to_string(),
-        serde_cbor::to_vec(&serde_json::json!({})).expect("encode unblock"),
-    );
-    let mut unblock_emitter = fixtures::stub_event_emitting_reducer(
-        store,
-        "com.acme/UnblockEmitter@1",
-        vec![unblock_event],
-    );
-    unblock_emitter.abi.reducer = Some(ReducerAbi {
-        state: fixtures::schema("com.acme/UnblockEmitterState@1"),
-        event: fixtures::schema("com.acme/EmitUnblock@1"),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
-        annotations: None,
-        effects_emitted: vec![],
-        cap_slots: IndexMap::new(),
-    });
-
-    let plan_name = "com.acme/WaitForEvent@1".to_string();
-    let plan = DefPlan {
-        name: plan_name.clone(),
-        input: fixtures::schema("com.acme/PlanIn@1"),
-        output: None,
-        locals: IndexMap::new(),
-        steps: vec![
-            PlanStep {
-                id: "await".into(),
-                kind: PlanStepKind::AwaitEvent(PlanStepAwaitEvent {
-                    event: fixtures::schema("com.acme/Unblock@1"),
-                    where_clause: None,
-                    bind: PlanBind { var: "evt".into() },
-                }),
-            },
-            PlanStep {
-                id: "raise".into(),
-                kind: PlanStepKind::RaiseEvent(PlanStepRaiseEvent {
-                    event: result_event_schema.clone(),
-                    value: Expr::Record(ExprRecord {
-                        record: IndexMap::from([(
-                            "value".into(),
-                            Expr::Const(ExprConst::Int { int: 5 }),
-                        )]),
-                    })
-                    .into(),
-                }),
-            },
-            PlanStep {
-                id: "end".into(),
-                kind: PlanStepKind::End(PlanStepEnd { result: None }),
-            },
-        ],
-        edges: vec![
-            PlanEdge {
-                from: "await".into(),
-                to: "raise".into(),
-                when: None,
-            },
-            PlanEdge {
-                from: "raise".into(),
-                to: "end".into(),
-                when: None,
-            },
-        ],
-        required_caps: vec![],
-        allowed_effects: vec![],
-        invariants: vec![],
-    };
-
-    let routing = vec![
-        fixtures::routing_event(result_event_schema.as_str(), &result_module.name),
-        fixtures::routing_event("com.acme/EmitUnblock@1", &unblock_emitter.name),
-    ];
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![plan],
-        vec![fixtures::start_trigger(&plan_name)],
-        vec![result_module, unblock_emitter],
-        routing,
-    );
-    insert_test_schemas(
-        &mut loaded,
-        vec![
-            def_text_record_schema(fixtures::START_SCHEMA, vec![("id", text_type())]),
-            def_text_record_schema("com.acme/PlanIn@1", vec![("id", text_type())]),
-            def_text_record_schema("com.acme/EmitUnblock@1", vec![]),
-            def_text_record_schema("com.acme/Unblock@1", vec![]),
-            DefSchema {
-                name: "com.acme/EventDone@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::from([("value".into(), int_type())]),
-                }),
-            },
-            DefSchema {
-                name: "com.acme/EventResultState@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-            DefSchema {
-                name: "com.acme/UnblockEmitterState@1".into(),
-                ty: TypeExpr::Record(TypeRecord {
-                    record: IndexMap::new(),
-                }),
-            },
-        ],
-    );
-    loaded
-}
-
-/// Builds a test manifest with a reducer that emits a timer effect and another reducer
+/// Builds a test manifest with a workflow that emits a timer effect and another workflow
 /// that handles the timer receipt event.
 pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let timer_output = ReducerOutput {
+    let timer_output = WorkflowOutput {
         state: Some(vec![0x01]),
         domain_events: vec![],
-        effects: vec![ReducerEffect::new(
-            "timer.set",
+        effects: vec![WorkflowEffect::new(
+            aos_effects::EffectKind::TIMER_SET,
             serde_cbor::to_vec(&TimerSetParams {
                 deliver_at_ns: 5,
                 key: Some("retry".into()),
@@ -345,45 +34,39 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
         ann: None,
     };
     let mut timer_emitter =
-        fixtures::stub_reducer_module(store, "com.acme/TimerEmitter@1", &timer_output);
+        fixtures::stub_workflow_module(store, "com.acme/TimerEmitter@1", &timer_output);
 
-    let handler_output = ReducerOutput {
+    let handler_output = WorkflowOutput {
         state: Some(vec![0xCC]),
         domain_events: vec![],
         effects: vec![],
         ann: None,
     };
     let mut timer_handler =
-        fixtures::stub_reducer_module(store, "com.acme/TimerHandler@1", &handler_output);
+        fixtures::stub_workflow_module(store, "com.acme/TimerHandler@1", &handler_output);
 
     let timer_event_schema = "com.acme/TimerEvent@1";
     let routing = vec![
         fixtures::routing_event(fixtures::START_SCHEMA, &timer_emitter.name),
         fixtures::routing_event(fixtures::SYS_TIMER_FIRED, &timer_handler.name),
     ];
-    // Provide minimal reducer ABI so routing succeeds.
-    timer_emitter.abi.reducer = Some(ReducerAbi {
+    timer_emitter.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(timer_event_schema),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
+        annotations: None,
+        effects_emitted: vec![aos_effects::EffectKind::TIMER_SET.into()],
+        cap_slots: Default::default(),
+    });
+    timer_handler.abi.workflow = Some(WorkflowAbi {
+        state: fixtures::schema(START_SCHEMA),
+        event: fixtures::schema(timer_event_schema),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    timer_handler.abi.reducer = Some(ReducerAbi {
-        state: fixtures::schema(START_SCHEMA),
-        event: fixtures::schema(timer_event_schema),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
-        annotations: None,
-        effects_emitted: vec![],
-        cap_slots: Default::default(),
-    });
-    let mut loaded = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
-        vec![timer_emitter, timer_handler],
-        routing,
-    );
+    let mut loaded = fixtures::build_loaded_manifest(vec![timer_emitter, timer_handler], routing);
     insert_test_schemas(
         &mut loaded,
         vec![
@@ -412,28 +95,28 @@ pub fn timer_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedMan
     loaded
 }
 
-/// Builds a simple manifest with a single reducer that sets deterministic state when invoked.
+/// Builds a simple manifest with a single workflow that sets deterministic state when invoked.
 pub fn simple_state_manifest(store: &Arc<TestStore>) -> aos_kernel::manifest::LoadedManifest {
-    let mut reducer = fixtures::stub_reducer_module(
+    let mut workflow = fixtures::stub_workflow_module(
         store,
         "com.acme/Simple@1",
-        &ReducerOutput {
+        &WorkflowOutput {
             state: Some(vec![0xAA]),
             domain_events: vec![],
             effects: vec![],
             ann: None,
         },
     );
-    reducer.abi.reducer = Some(ReducerAbi {
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema("com.acme/SimpleState@1"),
         event: fixtures::schema(START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let routing = vec![fixtures::routing_event(START_SCHEMA, &reducer.name)];
-    let mut loaded = fixtures::build_loaded_manifest(vec![], vec![], vec![reducer], routing);
+    let routing = vec![fixtures::routing_event(START_SCHEMA, &workflow.name)];
+    let mut loaded = fixtures::build_loaded_manifest(vec![workflow], routing);
     insert_test_schemas(
         &mut loaded,
         vec![

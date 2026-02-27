@@ -5,21 +5,17 @@ use serde::{Deserialize, Serialize};
 use serde_bytes;
 
 use crate::journal::JournalSeq;
-use crate::plan::PlanInstanceSnapshot;
-use crate::receipts::ReducerEffectContext;
+use crate::receipts::WorkflowEffectContext;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelSnapshot {
-    reducer_state: Vec<ReducerStateEntry>,
-    reducer_index_roots: Vec<(String, [u8; 32])>,
+    workflow_state: Vec<WorkflowStateEntry>,
+    workflow_index_roots: Vec<(String, [u8; 32])>,
     recent_receipts: Vec<[u8; 32]>,
-    plan_instances: Vec<PlanInstanceSnapshot>,
-    pending_plan_receipts: Vec<PendingPlanReceiptSnapshot>,
-    waiting_events: Vec<(String, Vec<u64>)>,
-    next_plan_id: u64,
     queued_effects: Vec<EffectIntentSnapshot>,
-    pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
-    plan_results: Vec<PlanResultSnapshot>,
+    pending_workflow_receipts: Vec<WorkflowReceiptSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    workflow_instances: Vec<WorkflowInstanceSnapshot>,
     height: JournalSeq,
     #[serde(default)]
     logical_now_ns: u64,
@@ -29,51 +25,46 @@ pub struct KernelSnapshot {
         with = "serde_bytes_opt"
     )]
     manifest_hash: Option<Vec<u8>>, // CBOR-encoded hash bytes (sha256)
+    #[serde(default)]
+    root_completeness: SnapshotRootCompleteness,
 }
 
 impl KernelSnapshot {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         height: JournalSeq,
-        reducer_state: Vec<ReducerStateEntry>,
+        workflow_state: Vec<WorkflowStateEntry>,
         recent_receipts: Vec<[u8; 32]>,
-        plan_instances: Vec<PlanInstanceSnapshot>,
-        pending_plan_receipts: Vec<PendingPlanReceiptSnapshot>,
-        waiting_events: Vec<(String, Vec<u64>)>,
-        next_plan_id: u64,
         queued_effects: Vec<EffectIntentSnapshot>,
-        pending_reducer_receipts: Vec<ReducerReceiptSnapshot>,
-        plan_results: Vec<PlanResultSnapshot>,
+        pending_workflow_receipts: Vec<WorkflowReceiptSnapshot>,
+        workflow_instances: Vec<WorkflowInstanceSnapshot>,
         logical_now_ns: u64,
         manifest_hash: Option<[u8; 32]>,
     ) -> Self {
         Self {
-            reducer_state,
-            reducer_index_roots: Vec::new(),
+            workflow_state,
+            workflow_index_roots: Vec::new(),
             recent_receipts,
-            plan_instances,
-            pending_plan_receipts,
-            waiting_events,
-            next_plan_id,
             queued_effects,
-            pending_reducer_receipts,
-            plan_results,
+            pending_workflow_receipts,
+            workflow_instances,
             height,
             logical_now_ns,
             manifest_hash: manifest_hash.map(|h| h.to_vec()),
+            root_completeness: SnapshotRootCompleteness::default(),
         }
     }
 
-    pub fn reducer_state_entries(&self) -> &[ReducerStateEntry] {
-        &self.reducer_state
+    pub fn workflow_state_entries(&self) -> &[WorkflowStateEntry] {
+        &self.workflow_state
     }
 
-    pub fn reducer_index_roots(&self) -> &[(String, [u8; 32])] {
-        &self.reducer_index_roots
+    pub fn workflow_index_roots(&self) -> &[(String, [u8; 32])] {
+        &self.workflow_index_roots
     }
 
-    pub fn set_reducer_index_roots(&mut self, roots: Vec<(String, [u8; 32])>) {
-        self.reducer_index_roots = roots;
+    pub fn set_workflow_index_roots(&mut self, roots: Vec<(String, [u8; 32])>) {
+        self.workflow_index_roots = roots;
     }
 
     pub fn recent_receipts(&self) -> &[[u8; 32]] {
@@ -84,32 +75,16 @@ impl KernelSnapshot {
         self.height
     }
 
-    pub fn plan_instances(&self) -> &[PlanInstanceSnapshot] {
-        &self.plan_instances
-    }
-
-    pub fn pending_plan_receipts(&self) -> &[PendingPlanReceiptSnapshot] {
-        &self.pending_plan_receipts
-    }
-
-    pub fn waiting_events(&self) -> &[(String, Vec<u64>)] {
-        &self.waiting_events
-    }
-
-    pub fn next_plan_id(&self) -> u64 {
-        self.next_plan_id
-    }
-
     pub fn queued_effects(&self) -> &[EffectIntentSnapshot] {
         &self.queued_effects
     }
 
-    pub fn pending_reducer_receipts(&self) -> &[ReducerReceiptSnapshot] {
-        &self.pending_reducer_receipts
+    pub fn pending_workflow_receipts(&self) -> &[WorkflowReceiptSnapshot] {
+        &self.pending_workflow_receipts
     }
 
-    pub fn plan_results(&self) -> &[PlanResultSnapshot] {
-        &self.plan_results
+    pub fn workflow_instances(&self) -> &[WorkflowInstanceSnapshot] {
+        &self.workflow_instances
     }
 
     pub fn logical_now_ns(&self) -> u64 {
@@ -119,6 +94,32 @@ impl KernelSnapshot {
     pub fn manifest_hash(&self) -> Option<&[u8]> {
         self.manifest_hash.as_deref()
     }
+
+    pub fn set_root_completeness(&mut self, roots: SnapshotRootCompleteness) {
+        self.root_completeness = roots;
+    }
+
+    pub fn root_completeness(&self) -> &SnapshotRootCompleteness {
+        &self.root_completeness
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SnapshotRootCompleteness {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub manifest_hash: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflow_state_roots: Vec<[u8; 32]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cell_index_roots: Vec<[u8; 32]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_roots: Vec<[u8; 32]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pinned_roots: Vec<[u8; 32]>,
 }
 
 pub fn receipts_to_vecdeque(
@@ -168,55 +169,92 @@ impl EffectIntentSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PendingPlanReceiptSnapshot {
-    pub plan_id: u64,
+pub struct WorkflowReceiptSnapshot {
     pub intent_hash: [u8; 32],
-    pub effect_kind: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReducerReceiptSnapshot {
-    pub intent_hash: [u8; 32],
-    pub reducer: String,
+    pub origin_module_id: String,
     pub effect_kind: String,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         with = "serde_bytes_opt"
     )]
-    pub key: Option<Vec<u8>>,
+    pub origin_instance_key: Option<Vec<u8>>,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
+    #[serde(default)]
+    pub emitted_at_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_version: Option<String>,
 }
 
-impl ReducerReceiptSnapshot {
-    pub fn from_context(intent_hash: [u8; 32], ctx: &ReducerEffectContext) -> Self {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WorkflowStatusSnapshot {
+    Running,
+    Waiting,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkflowInflightIntentSnapshot {
+    pub intent_id: [u8; 32],
+    pub origin_module_id: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "serde_bytes_opt"
+    )]
+    pub origin_instance_key: Option<Vec<u8>>,
+    pub effect_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params_hash: Option<String>,
+    pub emitted_at_seq: u64,
+    #[serde(default)]
+    pub last_stream_seq: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkflowInstanceSnapshot {
+    pub instance_id: String,
+    #[serde(with = "serde_bytes")]
+    pub state_bytes: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inflight_intents: Vec<WorkflowInflightIntentSnapshot>,
+    pub status: WorkflowStatusSnapshot,
+    pub last_processed_event_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_version: Option<String>,
+}
+
+impl WorkflowReceiptSnapshot {
+    pub fn from_context(intent_hash: [u8; 32], ctx: &WorkflowEffectContext) -> Self {
         Self {
             intent_hash,
-            reducer: ctx.reducer.clone(),
+            origin_module_id: ctx.origin_module_id.clone(),
             effect_kind: ctx.effect_kind.clone(),
-            key: ctx.key.clone(),
+            origin_instance_key: ctx.origin_instance_key.clone(),
             params_cbor: ctx.params_cbor.clone(),
+            emitted_at_seq: ctx.emitted_at_seq,
+            module_version: ctx.module_version.clone(),
         }
     }
 
-    pub fn into_context(self) -> ReducerEffectContext {
-        ReducerEffectContext::new(self.reducer, self.effect_kind, self.params_cbor, self.key)
+    pub fn into_context(self) -> WorkflowEffectContext {
+        WorkflowEffectContext::new(
+            self.origin_module_id,
+            self.origin_instance_key,
+            self.effect_kind,
+            self.params_cbor,
+            self.intent_hash,
+            self.emitted_at_seq,
+            self.module_version,
+        )
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanResultSnapshot {
-    pub plan_name: String,
-    pub plan_id: u64,
-    pub output_schema: String,
-    #[serde(with = "serde_bytes")]
-    pub value_cbor: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReducerStateEntry {
-    pub reducer: String,
+pub struct WorkflowStateEntry {
+    pub workflow: String,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -249,5 +287,46 @@ mod serde_bytes_opt {
         D: Deserializer<'de>,
     {
         Option::<ByteBuf>::deserialize(deserializer).map(|opt| opt.map(|buf| buf.into_vec()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_roundtrip_preserves_workflow_instances() {
+        let snapshot = KernelSnapshot::new(
+            7,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![WorkflowInstanceSnapshot {
+                instance_id: "com.acme/Workflow@1::".into(),
+                state_bytes: vec![1, 2, 3],
+                inflight_intents: vec![WorkflowInflightIntentSnapshot {
+                    intent_id: [9u8; 32],
+                    origin_module_id: "com.acme/Workflow@1".into(),
+                    origin_instance_key: None,
+                    effect_kind: "http.request".into(),
+                    params_hash: None,
+                    emitted_at_seq: 7,
+                    last_stream_seq: 4,
+                }],
+                status: WorkflowStatusSnapshot::Waiting,
+                last_processed_event_seq: 7,
+                module_version: Some("sha256:abc".into()),
+            }],
+            123,
+            None,
+        );
+
+        let bytes = serde_cbor::to_vec(&snapshot).expect("encode snapshot");
+        let decoded: KernelSnapshot = serde_cbor::from_slice(&bytes).expect("decode snapshot");
+
+        assert_eq!(decoded.workflow_instances().len(), 1);
+        assert_eq!(decoded.workflow_instances()[0].instance_id, "com.acme/Workflow@1::");
+        assert_eq!(decoded.workflow_instances()[0].inflight_intents.len(), 1);
     }
 }

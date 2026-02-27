@@ -10,5 +10,5 @@ pub mod http;
 #[cfg(feature = "adapter-llm")]
 pub mod llm;
 
-#[cfg(any(feature = "test-fixtures", test))]
+#[cfg(any(feature = "e2e-tests", test))]
 pub mod mock;

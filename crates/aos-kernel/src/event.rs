@@ -3,7 +3,7 @@ use aos_wasm_abi::DomainEvent;
 /// High-level kernel events processed by the deterministic stepper.
 #[derive(Debug, Clone)]
 pub enum KernelEvent {
-    Reducer(ReducerEvent),
+    Workflow(WorkflowEvent),
 }
 
 #[derive(Debug, Clone)]
@@ -16,8 +16,8 @@ pub struct IngressStamp {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReducerEvent {
-    pub reducer: String,
+pub struct WorkflowEvent {
+    pub workflow: String,
     pub event: DomainEvent,
     pub stamp: IngressStamp,
 }

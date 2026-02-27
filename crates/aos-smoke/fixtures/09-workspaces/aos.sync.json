@@ -1,0 +1,23 @@
+{
+  "air": {
+    "dir": "air"
+  },
+  "build": {
+    "workflow_dir": "workflow"
+  },
+  "modules": {
+    "pull": false
+  },
+  "version": 1,
+  "workspaces": [
+    {
+      "dir": "workflow",
+      "ignore": [
+        "target/",
+        ".git/",
+        ".aos/"
+      ],
+      "ref": "workflow"
+    }
+  ]
+}

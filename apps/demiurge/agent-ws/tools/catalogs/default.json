@@ -1,0 +1,31 @@
+{
+  "tools": [
+    {
+      "name": "introspect_manifest",
+      "description": "Fetch the current manifest bytes for this world.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "consistency": {
+            "type": "string",
+            "description": "Consistency mode: head | exact:<height> | at_least:<height>."
+          }
+        }
+      }
+    },
+    {
+      "name": "workspace_read_bytes",
+      "description": "Read a file from a workspace by path and return its bytes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspace": { "type": "string" },
+          "version": { "type": "integer" },
+          "path": { "type": "string" }
+        },
+        "required": ["workspace", "path"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

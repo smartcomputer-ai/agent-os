@@ -115,7 +115,8 @@ pub async fn cmd_trace_find(opts: &WorldOpts, args: &TraceFindArgs) -> Result<()
             continue;
         };
 
-        if let (Some(path), Some(expected)) = (args.correlate_by.as_deref(), compare_value.as_ref()) {
+        if let (Some(path), Some(expected)) = (args.correlate_by.as_deref(), compare_value.as_ref())
+        {
             let Some(actual) = json_path_get(&value_json, path) else {
                 continue;
             };
@@ -209,13 +210,7 @@ mod tests {
             "$tag": "UserMessage",
             "$value": { "request_id": 2 }
         });
-        assert_eq!(
-            json_path_get(&value, "$value.request_id"),
-            Some(&json!(2))
-        );
-        assert_eq!(
-            json_path_get(&value, "$.value.request_id"),
-            None
-        );
+        assert_eq!(json_path_get(&value, "$value.request_id"), Some(&json!(2)));
+        assert_eq!(json_path_get(&value, "$.value.request_id"), None);
     }
 }

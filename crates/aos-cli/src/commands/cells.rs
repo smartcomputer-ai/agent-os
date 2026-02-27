@@ -1,4 +1,4 @@
-//! `aos world cells` command: list keyed reducer cells via CellIndex.
+//! `aos world cells` command: list keyed workflow cells via CellIndex.
 
 use anyhow::Result;
 use aos_cbor::Hash;
@@ -14,8 +14,8 @@ use super::{create_host, prepare_world, try_control_client};
 
 #[derive(Args, Debug)]
 pub struct CellsArgs {
-    /// Reducer name (keyed)
-    pub reducer_name: String,
+    /// Workflow name (keyed)
+    pub workflow_name: String,
 
     /// Output raw JSON without formatting
     #[arg(long)]
@@ -36,10 +36,10 @@ pub async fn cmd_cells(opts: &WorldOpts, args: &CellsArgs) -> Result<()> {
 
     let cells = if let Some(mut client) = try_control_client(&dirs).await {
         let (_meta, entries) = client
-            .list_cells_decoded("cli-list-cells", &args.reducer_name)
+            .list_cells_decoded("cli-list-cells", &args.workflow_name)
             .await?;
         if entries.is_empty() {
-            println!("(no cells for reducer '{}')", args.reducer_name);
+            println!("(no cells for workflow '{}')", args.workflow_name);
             return Ok(());
         }
         entries
@@ -58,11 +58,11 @@ pub async fn cmd_cells(opts: &WorldOpts, args: &CellsArgs) -> Result<()> {
         load_world_env(&dirs.world)?;
         let (store, loaded) = prepare_world(&dirs, opts)?;
         let host = create_host(store, loaded, &dirs, opts)?;
-        let metas = host.list_cells(&args.reducer_name)?;
+        let metas = host.list_cells(&args.workflow_name)?;
         metas.into_iter().map(meta_to_entry).collect()
     };
 
-    render_cells(&cells, args.raw, &args.reducer_name);
+    render_cells(&cells, args.raw, &args.workflow_name);
     Ok(())
 }
 
@@ -128,9 +128,9 @@ fn display_key(bytes: &[u8]) -> String {
     format!("0x{}", hex::encode(bytes))
 }
 
-fn render_cells(cells: &[CellEntry], raw: bool, reducer: &str) {
+fn render_cells(cells: &[CellEntry], raw: bool, workflow: &str) {
     if cells.is_empty() {
-        println!("(no cells for reducer '{}')", reducer);
+        println!("(no cells for workflow '{}')", workflow);
         return;
     }
 
@@ -140,7 +140,7 @@ fn render_cells(cells: &[CellEntry], raw: bool, reducer: &str) {
         return;
     }
 
-    println!("Cells for '{}':", reducer);
+    println!("Cells for '{}':", workflow);
     for c in cells {
         println!(
             "- key: {} (b64: {}), state: {}, size: {} bytes, last_active_ns: {}",

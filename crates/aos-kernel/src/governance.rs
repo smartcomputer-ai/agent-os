@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::error::KernelError;
 use crate::manifest::LoadedManifest;
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
-    SecretDecl, SecretEntry, SecretPolicy, builtins, catalog::EffectCatalog,
+    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
+    SecretEntry, SecretPolicy, builtins, catalog::EffectCatalog,
 };
 use aos_cbor::Hash;
 use aos_store::Store;
@@ -88,8 +88,9 @@ impl GovernanceManager {
                     proposal.shadow_summary = Some(ShadowSummary {
                         manifest_hash: shadow.manifest_hash.clone(),
                         predicted_effects: shadow.effects_predicted.clone(),
-                        pending_receipts: shadow.pending_receipts.clone(),
-                        plan_results: shadow.plan_results.clone(),
+                        pending_workflow_receipts: shadow.pending_workflow_receipts.clone(),
+                        workflow_instances: shadow.workflow_instances.clone(),
+                        module_effect_allowlists: shadow.module_effect_allowlists.clone(),
                         ledger_deltas: shadow.ledger_deltas.clone(),
                     });
                 }
@@ -144,7 +145,6 @@ impl ManifestPatch {
     pub fn to_loaded_manifest<S: Store>(&self, store: &S) -> Result<LoadedManifest, KernelError> {
         let manifest = self.manifest.clone();
         let mut modules: HashMap<Name, DefModule> = HashMap::new();
-        let mut plans: HashMap<Name, DefPlan> = HashMap::new();
         let mut effects: HashMap<Name, DefEffect> = HashMap::new();
         let mut caps: HashMap<Name, DefCap> = HashMap::new();
         let mut policies: HashMap<Name, DefPolicy> = HashMap::new();
@@ -155,9 +155,6 @@ impl ManifestPatch {
             match node {
                 AirNode::Defmodule(m) => {
                     modules.insert(m.name.clone(), m.clone());
-                }
-                AirNode::Defplan(p) => {
-                    plans.insert(p.name.clone(), p.clone());
                 }
                 AirNode::Defcap(c) => {
                     caps.insert(c.name.clone(), c.clone());
@@ -172,7 +169,7 @@ impl ManifestPatch {
                     schemas.insert(s.name.clone(), s.clone());
                 }
                 AirNode::Defsecret(s) => {
-                    let (alias, version) = parse_secret_name(&s.name);
+                    let (alias, version) = parse_secret_name(&s.name)?;
                     secrets.push(SecretDecl {
                         alias,
                         version,
@@ -180,9 +177,8 @@ impl ManifestPatch {
                         expected_digest: s.expected_digest.clone(),
                         policy: Some(SecretPolicy {
                             allowed_caps: s.allowed_caps.clone(),
-                            allowed_plans: s.allowed_plans.clone(),
                         })
-                        .filter(|p| !p.allowed_caps.is_empty() || !p.allowed_plans.is_empty()),
+                        .filter(|p| !p.allowed_caps.is_empty()),
                     });
                 }
                 AirNode::Manifest(_) => {}
@@ -260,15 +256,6 @@ impl ManifestPatch {
                 }
             },
         )?;
-        load_defs_from_manifest(store, &manifest.plans, &mut plans, "defplan", |node| {
-            if let AirNode::Defplan(plan) = node {
-                Ok(plan)
-            } else {
-                Err(KernelError::Manifest(
-                    "manifest plan ref did not point to defplan".into(),
-                ))
-            }
-        })?;
         load_defs_from_manifest(
             store,
             &manifest.effects,
@@ -319,7 +306,7 @@ impl ManifestPatch {
                         .map_err(|err| KernelError::Manifest(format!("load secret: {err}")))?;
                     match node {
                         AirNode::Defsecret(secret) => {
-                            let (alias, version) = parse_secret_name(&secret.name);
+                            let (alias, version) = parse_secret_name(&secret.name)?;
                             secrets.push(SecretDecl {
                                 alias,
                                 version,
@@ -327,11 +314,8 @@ impl ManifestPatch {
                                 expected_digest: secret.expected_digest.clone(),
                                 policy: Some(SecretPolicy {
                                     allowed_caps: secret.allowed_caps.clone(),
-                                    allowed_plans: secret.allowed_plans.clone(),
                                 })
-                                .filter(|p| {
-                                    !p.allowed_caps.is_empty() || !p.allowed_plans.is_empty()
-                                }),
+                                .filter(|p| !p.allowed_caps.is_empty()),
                             });
                         }
                         _ => {
@@ -354,7 +338,6 @@ impl ManifestPatch {
             manifest,
             secrets,
             modules,
-            plans,
             effects,
             caps,
             policies,
@@ -396,16 +379,31 @@ fn load_defs_from_manifest<T>(
     Ok(())
 }
 
-fn parse_secret_name(name: &str) -> (String, u64) {
+fn parse_secret_name(name: &str) -> Result<(String, u64), KernelError> {
     let mut parts = name.rsplitn(2, '@');
-    let version_part = parts
-        .next()
-        .and_then(|p| p.parse::<u64>().ok())
-        .filter(|v| *v >= 1)
-        .expect("defsecret name must end with @<version>=1");
+    let version_raw = parts.next().ok_or_else(|| {
+        KernelError::Manifest(format!(
+            "invalid defsecret name '{name}': missing version segment"
+        ))
+    })?;
+    let version_part = version_raw.parse::<u64>().map_err(|_| {
+        KernelError::Manifest(format!(
+            "invalid defsecret name '{name}': version must be a positive integer"
+        ))
+    })?;
+    if version_part == 0 {
+        return Err(KernelError::Manifest(format!(
+            "invalid defsecret name '{name}': version must be >= 1"
+        )));
+    }
     let alias = parts
         .next()
+        .filter(|alias| !alias.is_empty())
         .map(str::to_string)
-        .expect("defsecret name must include alias");
-    (alias, version_part)
+        .ok_or_else(|| {
+            KernelError::Manifest(format!(
+                "invalid defsecret name '{name}': missing alias prefix"
+            ))
+        })?;
+    Ok((alias, version_part))
 }

@@ -1,0 +1,13 @@
+{
+  "$kind": "defmodule",
+  "name": "demo/LiveChat@1",
+  "module_kind": "workflow",
+  "abi": {
+    "workflow": {
+      "state": "demo/LiveState@1",
+      "event": "demo/LiveEvent@1",
+      "effects_emitted": ["llm.generate"],
+      "cap_slots": {}
+    }
+  }
+}

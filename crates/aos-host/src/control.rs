@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use aos_cbor::Hash;
-use aos_effects::{EffectKind, EffectReceipt, IntentBuilder, ReceiptStatus};
+use aos_effects::{EffectKind, EffectReceipt, EffectStreamFrame, IntentBuilder, ReceiptStatus};
 use aos_kernel::DefListing;
 use aos_kernel::governance::{ManifestPatch, Proposal, ProposalState};
 use aos_kernel::journal::ApprovalDecisionRecord;
@@ -348,6 +348,14 @@ pub(crate) async fn handle_request(
                     .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
                 inner.map_err(ControlError::host)
             }
+            "trace-summary" => {
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx.send(ControlMsg::TraceSummary { resp: tx }).await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)
+            }
             "event-send" => {
                 let schema = req
                     .payload
@@ -408,6 +416,43 @@ pub(crate) async fn handle_request(
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
                     .send(ControlMsg::ReceiptInject { receipt, resp: tx })
+                    .await;
+                let inner = rx
+                    .await
+                    .map_err(|e| ControlError::host(HostError::External(e.to_string())))?;
+                inner.map_err(ControlError::host)?;
+                Ok(serde_json::json!({}))
+            }
+            "stream-frame-inject" => {
+                let p: InjectStreamFramePayload = serde_json::from_value(req.payload.clone())
+                    .map_err(|e| ControlError::decode(format!("{e}")))?;
+                let payload = BASE64_STANDARD
+                    .decode(p.payload_b64)
+                    .map_err(|e| ControlError::decode(format!("invalid base64: {e}")))?;
+                let origin_instance_key = p
+                    .origin_instance_key_b64
+                    .map(|b64| {
+                        BASE64_STANDARD.decode(&b64).map_err(|e| {
+                            ControlError::decode(format!("invalid origin_instance_key_b64: {e}"))
+                        })
+                    })
+                    .transpose()?;
+                let frame = EffectStreamFrame {
+                    intent_hash: p.intent_hash,
+                    adapter_id: p.adapter_id,
+                    origin_module_id: p.origin_module_id,
+                    origin_instance_key,
+                    effect_kind: p.effect_kind,
+                    emitted_at_seq: p.emitted_at_seq,
+                    seq: p.seq,
+                    kind: p.kind,
+                    payload_cbor: payload,
+                    payload_ref: p.payload_ref,
+                    signature: vec![],
+                };
+                let (tx, rx) = oneshot::channel();
+                let _ = control_tx
+                    .send(ControlMsg::StreamFrameInject { frame, resp: tx })
                     .await;
                 let inner = rx
                     .await
@@ -489,12 +534,12 @@ pub(crate) async fn handle_request(
                 }))
             }
             "state-get" => {
-                let reducer = req
+                let workflow = req
                     .payload
-                    .get("reducer")
+                    .get("workflow")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
+                    .ok_or_else(|| ControlError::invalid_request("missing workflow"))?;
                 let key = req
                     .payload
                     .get("key_b64")
@@ -508,7 +553,7 @@ pub(crate) async fn handle_request(
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
                     .send(ControlMsg::StateGet {
-                        reducer,
+                        workflow,
                         key,
                         consistency: consistency.to_string(),
                         resp: tx,
@@ -532,15 +577,15 @@ pub(crate) async fn handle_request(
                 }
             }
             "state-list" => {
-                let reducer = req
+                let workflow = req
                     .payload
-                    .get("reducer")
+                    .get("workflow")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
-                    .ok_or_else(|| ControlError::invalid_request("missing reducer"))?;
+                    .ok_or_else(|| ControlError::invalid_request("missing workflow"))?;
                 let (tx, rx) = oneshot::channel();
                 let _ = control_tx
-                    .send(ControlMsg::StateList { reducer, resp: tx })
+                    .send(ControlMsg::StateList { workflow, resp: tx })
                     .await;
                 let inner = rx
                     .await
@@ -628,9 +673,34 @@ pub(crate) async fn handle_request(
             "workspace-read-bytes" => {
                 let params: WorkspaceReadBytesParams = serde_json::from_value(req.payload.clone())
                     .map_err(|e| ControlError::decode(format!("{e}")))?;
-                let bytes: Vec<u8> =
+                let payload: serde_cbor::Value =
                     internal_effect(control_tx, EffectKind::workspace_read_bytes(), &params)
                         .await?;
+                let bytes = match payload {
+                    serde_cbor::Value::Bytes(bytes) => bytes,
+                    serde_cbor::Value::Array(items) => {
+                        let mut bytes = Vec::with_capacity(items.len());
+                        for item in items {
+                            let serde_cbor::Value::Integer(v) = item else {
+                                return Err(ControlError::decode(
+                                    "workspace-read-bytes returned non-byte item",
+                                ));
+                            };
+                            let byte = u8::try_from(v).map_err(|_| {
+                                ControlError::decode(
+                                    "workspace-read-bytes returned out-of-range byte value",
+                                )
+                            })?;
+                            bytes.push(byte);
+                        }
+                        bytes
+                    }
+                    _ => {
+                        return Err(ControlError::decode(
+                            "workspace-read-bytes returned unexpected payload shape",
+                        ));
+                    }
+                };
                 Ok(serde_json::json!({
                     "data_b64": BASE64_STANDARD.encode(bytes)
                 }))
@@ -872,6 +942,22 @@ struct InjectReceiptPayload {
     intent_hash: [u8; 32],
     adapter_id: String,
     payload_b64: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InjectStreamFramePayload {
+    intent_hash: [u8; 32],
+    adapter_id: String,
+    origin_module_id: String,
+    #[serde(default)]
+    origin_instance_key_b64: Option<String>,
+    effect_kind: String,
+    emitted_at_seq: u64,
+    seq: u64,
+    kind: String,
+    payload_b64: String,
+    #[serde(default)]
+    payload_ref: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1223,6 +1309,8 @@ fn meta_to_json(meta: &ReadMeta) -> serde_json::Value {
         "journal_height": meta.journal_height,
         "snapshot_hash": meta.snapshot_hash.map(|h| h.to_hex()),
         "manifest_hash": meta.manifest_hash.to_hex(),
+        "active_baseline_height": meta.active_baseline_height,
+        "active_baseline_receipt_horizon_height": meta.active_baseline_receipt_horizon_height,
     })
 }
 
@@ -1384,11 +1472,11 @@ impl ControlClient {
     pub async fn query_state(
         &mut self,
         id: impl Into<String>,
-        reducer: &str,
+        workflow: &str,
         key: Option<&[u8]>,
         consistency: Option<&str>,
     ) -> std::io::Result<ResponseEnvelope> {
-        let mut payload = serde_json::json!({ "reducer": reducer });
+        let mut payload = serde_json::json!({ "workflow": workflow });
         if let Some(key) = key {
             payload["key_b64"] = serde_json::json!(BASE64_STANDARD.encode(key));
         }
@@ -1408,13 +1496,13 @@ impl ControlClient {
     pub async fn list_cells(
         &mut self,
         id: impl Into<String>,
-        reducer: &str,
+        workflow: &str,
     ) -> std::io::Result<ResponseEnvelope> {
         let env = RequestEnvelope {
             v: PROTOCOL_VERSION,
             id: id.into(),
             cmd: "state-list".into(),
-            payload: serde_json::json!({ "reducer": reducer }),
+            payload: serde_json::json!({ "workflow": workflow }),
         };
         self.request(&env).await
     }
@@ -1494,15 +1582,15 @@ impl ControlClient {
         Ok((meta, bytes))
     }
 
-    /// Query reducer state with meta.
+    /// Query workflow state with meta.
     pub async fn query_state_decoded(
         &mut self,
         id: impl Into<String>,
-        reducer: &str,
+        workflow: &str,
         key: Option<&[u8]>,
         consistency: Option<&str>,
     ) -> std::io::Result<(ReadMeta, Option<Vec<u8>>)> {
-        let resp = self.query_state(id, reducer, key, consistency).await?;
+        let resp = self.query_state(id, workflow, key, consistency).await?;
         if !resp.ok {
             return Err(io_err(format!(
                 "state-get failed: {:?}",
@@ -1529,13 +1617,13 @@ impl ControlClient {
         Ok((meta, state))
     }
 
-    /// List cells (keyed reducers) with meta.
+    /// List cells (keyed workflows) with meta.
     pub async fn list_cells_decoded(
         &mut self,
         id: impl Into<String>,
-        reducer: &str,
+        workflow: &str,
     ) -> std::io::Result<(ReadMeta, Vec<ClientCellEntry>)> {
-        let resp = self.list_cells(id, reducer).await?;
+        let resp = self.list_cells(id, workflow).await?;
         if !resp.ok {
             return Err(io_err(format!(
                 "state-list failed: {:?}",
@@ -1705,10 +1793,16 @@ fn parse_meta(val: &serde_json::Value) -> std::io::Result<ReadMeta> {
         .and_then(|s| {
             Hash::from_hex_str(s).map_err(|e| io_err(format!("manifest_hash decode: {e}")))
         })?;
+    let active_baseline_height = val.get("active_baseline_height").and_then(|v| v.as_u64());
+    let active_baseline_receipt_horizon_height = val
+        .get("active_baseline_receipt_horizon_height")
+        .and_then(|v| v.as_u64());
     Ok(ReadMeta {
         journal_height,
         snapshot_hash,
         manifest_hash,
+        active_baseline_height,
+        active_baseline_receipt_horizon_height,
     })
 }
 

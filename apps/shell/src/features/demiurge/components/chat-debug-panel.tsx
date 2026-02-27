@@ -29,9 +29,8 @@ function findString(node: unknown, key: string): string | undefined {
 
 function getTraceEventHash(entries: unknown[]): string | undefined {
   const prioritySchemas = [
-    "demiurge/ChatRequest@1",
+    "aos.agent/SessionIngress@1",
     "demiurge/ToolCallRequested@1",
-    "demiurge/ChatEvent@1",
   ];
   for (const schema of prioritySchemas) {
     for (let i = entries.length - 1; i >= 0; i -= 1) {
@@ -91,10 +90,15 @@ export function ChatDebugPanel() {
     (traceQuery.data?.journal_window as Record<string, unknown> | undefined)?.entries,
   );
   const liveWait = (traceQuery.data?.live_wait as Record<string, unknown> | undefined) ?? {};
-  const pendingPlanReceipts = asArray(liveWait.pending_plan_receipts).length;
-  const waitingEvents = asArray(liveWait.waiting_events).length;
-  const pendingReducerReceipts = asArray(liveWait.pending_reducer_receipts).length;
+  const pendingWorkflowReceipts = asArray(liveWait.pending_workflow_receipts).length;
   const queuedEffects = asArray(liveWait.queued_effects).length;
+  const waitingWorkflowInstances = asArray(liveWait.workflow_instances).filter((instance) => {
+    if (!instance || typeof instance !== "object") {
+      return false;
+    }
+    const status = (instance as Record<string, unknown>).status;
+    return status === "running" || status === "waiting";
+  }).length;
 
   return (
     <div className="max-w-4xl mx-auto mt-2 mb-3">
@@ -130,8 +134,8 @@ export function ChatDebugPanel() {
                 {(root.key_b64 as string | undefined) ?? "-"}
               </div>
               <div>
-                waits plan_receipts={pendingPlanReceipts} waiting_events={waitingEvents}{" "}
-                reducer_receipts={pendingReducerReceipts} queued_effects={queuedEffects}
+                waits workflow_receipts={pendingWorkflowReceipts} queued_effects=
+                {queuedEffects} workflow_instances={waitingWorkflowInstances}
               </div>
               <div className="max-h-48 overflow-auto rounded border bg-muted/30 p-2 font-mono">
                 {journalEntries.slice(-30).map((raw, idx) => {

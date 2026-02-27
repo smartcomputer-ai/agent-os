@@ -17,17 +17,9 @@ pub struct EffectReceipt {
 
 impl EffectReceipt {
     pub fn payload<T: DeserializeOwned>(&self) -> Result<T, ReceiptDecodeError> {
-        const SELF_DESCRIBE_TAG: &[u8] = &[0xd9, 0xd9, 0xf7];
-        match serde_cbor::from_slice(&self.payload_cbor) {
-            Ok(value) => Ok(value),
-            Err(err) => {
-                if self.payload_cbor.starts_with(SELF_DESCRIBE_TAG) {
-                    return serde_cbor::from_slice(&self.payload_cbor[SELF_DESCRIBE_TAG.len()..])
-                        .map_err(ReceiptDecodeError::Payload);
-                }
-                Err(ReceiptDecodeError::Payload(err))
-            }
-        }
+        let value: serde_cbor::Value =
+            serde_cbor::from_slice(&self.payload_cbor).map_err(ReceiptDecodeError::Payload)?;
+        serde_cbor::value::from_value(value).map_err(ReceiptDecodeError::Payload)
     }
 }
 
@@ -68,5 +60,35 @@ mod tests {
         };
         let decoded: DummyReceipt = receipt.payload().unwrap();
         assert_eq!(decoded, DummyReceipt { ok: true });
+    }
+
+    #[test]
+    fn payload_option_none_round_trip_with_canonical_null() {
+        let payload = aos_cbor::to_canonical_cbor(&Option::<DummyReceipt>::None).unwrap();
+        let receipt = EffectReceipt {
+            intent_hash: [2u8; 32],
+            adapter_id: "adapter.workspace".into(),
+            status: ReceiptStatus::Ok,
+            payload_cbor: payload,
+            cost_cents: Some(0),
+            signature: vec![7; 64],
+        };
+        let decoded: Option<DummyReceipt> = receipt.payload().unwrap();
+        assert_eq!(decoded, None);
+    }
+
+    #[test]
+    fn payload_struct_still_fails_for_null() {
+        let payload = aos_cbor::to_canonical_cbor(&Option::<DummyReceipt>::None).unwrap();
+        let receipt = EffectReceipt {
+            intent_hash: [3u8; 32],
+            adapter_id: "adapter.workspace".into(),
+            status: ReceiptStatus::Ok,
+            payload_cbor: payload,
+            cost_cents: Some(0),
+            signature: vec![8; 64],
+        };
+        let err = receipt.payload::<DummyReceipt>().unwrap_err();
+        assert!(matches!(err, ReceiptDecodeError::Payload(_)));
     }
 }

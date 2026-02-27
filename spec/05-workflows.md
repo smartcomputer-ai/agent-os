@@ -1,964 +1,242 @@
-# Workflow Patterns and Coordination
+# Workflows
 
-This document describes how to coordinate complex workflows in AgentOS using the primitives from AIR v1. It bridges the gap between "here are the building blocks" (spec/03-air.md, spec/04-reducers.md) and "here's how to build real systems."
+This is the canonical workflow model for AgentOS after v0.11 plan removal.
+It consolidates the old reducer + workflow-pattern guidance and captures the key decisions from `roadmap/v0.11-workflows/`.
 
-## Goals and Scope
+## 1) Scope
 
-- Show how reducers and plans coordinate for common workflow patterns
-- Provide decision guidance for choosing patterns
-- Document complex scenarios: compensations, fan-out/join, timeouts, retries, human approvals
-- Establish best practices and anti-patterns
+Workflow orchestration is code-defined and event-driven:
+- `defmodule` with `module_kind: "workflow"` is the orchestration/state-machine unit.
+- `pure` modules are deterministic compute helpers and do not emit effects.
+- Manifest startup wiring is `routing.subscriptions` (no active trigger-to-plan model).
 
-This is v1 guidance. Future versions may add higher-level orchestration primitives.
+v0.11 is a hard break:
+- no backward compatibility with plan-era runtime behavior is required
+- old `defplan`/`triggers` semantics are not part of the active model
 
-## Coordination Primitives
+## 2) Responsibility Split
 
-AIR v1 provides four coordination mechanisms:
+Workflow modules own:
+- domain state
+- business invariants
+- transition logic
+- retry/compensation policy decisions
 
-### 1. Plan → Bus (raise_event)
+Kernel + effect manager own:
+- deterministic stepping
+- capability checks
+- policy checks
+- effect queueing and receipt ingestion
 
-Plans can publish bus events that are routed to reducers.
+Adapters own:
+- side-effect execution
+- signed receipt production
 
-```json
-{
-  "op": "raise_event",
-  "event": "com.acme/OrderEvent@1",
-  "value": {
-    "record": {
-      "order_id": {"ref": "@plan.input.order_id"},
-      "success": {"ref": "@var:charge_rcpt.ok"},
-      "txn_id": {"ref": "@var:charge_rcpt.txn_id"}
-    }
-  }
-}
-```
+## 3) v0.11 Key Decisions (Normative)
 
-**Semantics**: Kernel serializes the event, appends to journal, and routing delivers it to reducers on the next tick. The `event` field supplies the payload schema; authors only provide the `value`.
+### 3.1 Authority and effect emission
 
-### 2. Reducer → Plan (manifest triggers)
+1. Only workflow modules may originate module-emitted effects.
+2. `pure` modules cannot emit effects.
+3. Workflow modules must declare `abi.workflow.effects_emitted`.
+4. Kernel rejects undeclared effect kinds before capability/policy evaluation.
+5. Multiple effects per step are allowed; deterministic kernel output limits apply.
 
-Reducers emit DomainIntent events; manifest triggers start plans.
+### 3.2 Deterministic canonicalization
 
-Reducer:
+1. Event payloads are schema-validated and canonicalized on ingress.
+2. Effect params are schema-validated and canonicalized before intent hashing/enqueue.
+3. Receipt payloads are schema-validated/canonicalized before continuation delivery.
+4. Journal + snapshot persist canonical CBOR forms used for replay.
+5. Runtime decode fallbacks for non-canonical event/receipt payload shapes are not part of the active contract.
+
+### 3.3 Continuation routing contract
+
+1. Receipt continuation routing is keyed by recorded origin identity:
+- `origin_module_id`
+- `origin_instance_key`
+- `intent_id`/intent hash identity
+2. Intent identity preimage includes origin instance identity to avoid ambiguous concurrent wakeups.
+3. Continuation routing is manifest-independent.
+4. `routing.subscriptions` is for domain-event ingress only.
+
+### 3.4 Receipt envelope contract
+
+Settled effects produce a generic workflow receipt envelope (schema family includes `sys/EffectReceiptEnvelope@1`) with at least:
+- origin module identity
+- origin instance key (if keyed)
+- intent identity
+- effect kind
+- receipt payload bytes
+- receipt status
+- emitted sequence metadata
+
+Legacy typed timer/blob receipt shapes may still appear as compatibility helpers, but generic envelope semantics are primary.
+
+### 3.5 Receipt fault handling
+
+If receipt payload decoding/normalization fails:
+1. The failing intent is settled (removed from pending).
+2. If workflow event schema supports `sys/EffectReceiptRejected@1`, kernel emits it.
+3. If not supported, kernel marks the workflow instance failed and drops remaining pending receipts for that instance (fault isolation, no global clogging).
+
+### 3.6 Persisted workflow instance model
+
+Kernel persists workflow instance runtime state (conceptually including):
+- state bytes
+- inflight intent set/map
+- lifecycle status: `running|waiting|completed|failed`
+- last processed sequence marker
+- module version/hash metadata (for diagnostics)
+
+Replay must restore this state deterministically.
+
+### 3.7 Apply safety (strict quiescence)
+
+Manifest apply is blocked when any of the following hold:
+1. non-terminal workflow instances exist
+2. any workflow has inflight intents
+3. effect queue/scheduler still has pending work
+
+No implicit abandonment/clearing of in-flight workflow state during apply.
+
+### 3.8 Governance and shadow semantics
+
+Shadow/governance reporting is bounded to observed execution horizon:
+- observed effects so far
+- pending workflow receipts/intents
+- workflow instance statuses
+- module effect allowlists
+- relevant state/ledger deltas
+
+No guarantee of complete static future-effect prediction for unexecuted branches.
+
+### 3.9 Vocabulary cutover
+
+Active authority and policy origin vocabulary is:
+- `workflow`
+- `system`
+- `governance`
+
+Legacy plan-era naming may remain only as compatibility labels in some journals/traces.
+
+### 3.10 Observability/control cutover
+
+1. Active governance/shadow summaries do not rely on plan-runtime fields (`plan_results`, `pending_plan_receipts`).
+2. Active control/trace surfaces are workflow-first (`trace-summary`, workflow waiting/continuation diagnostics).
+3. If legacy plan records appear in historical journals, they are treated as legacy compatibility artifacts only.
+
+### 3.11 Runtime cutover
+
+1. No active plan scheduling/ticking path is part of workflow execution.
+2. Manifest apply/quiescence decisions are based on workflow instances, inflight intents, and queue/scheduler pending work.
+3. Continuation correctness must remain deterministic under concurrent keyed workflow instances.
+
+## 4) Runtime Flow
+
+1. Domain event is appended and canonicalized.
+2. Router evaluates `routing.subscriptions` and delivers to matching workflow modules.
+3. Workflow `step` runs deterministically with current state + event.
+4. Workflow returns new state, domain events, and effect intents.
+5. Kernel enforces `effects_emitted` allowlist, then caps and policy.
+6. Adapters execute allowed intents and return signed receipts.
+7. Kernel canonicalizes receipt payload and routes continuation to recorded origin instance.
+
+## 5) Workflow Module Contract
+
+Workflow modules declare reducer ABI fields:
+- `state`: state schema
+- `event`: event schema
+- `context` (optional)
+- `effects_emitted` (required for effecting modules)
+- `cap_slots` (optional slot -> cap type)
+
+Manifest binds slots via `module_bindings`.
+
+## 6) Routing Contract
+
+`routing.subscriptions` maps event schema -> module:
+- required fields are `event`, `module`; `key_field` is used for keyed module delivery
+- deterministic evaluation order is manifest order
+- matching subscriptions fan out in order
+- legacy `routing.events` / `reducer` aliases may be accepted by loaders during migration, but canonical manifests use `subscriptions` + `module`
+
+Continuation delivery from receipts does not use this routing table.
+
+## 7) Conceptual Patterns
+
+### Pattern A: Single workflow state machine
+
+Best when business transitions, retries, and compensations are tightly coupled.
+
+### Pattern B: Multi-module choreography
+
+Best when contexts/teams are split; modules communicate through domain events.
+
+### Pattern C: Timer + receipt driven progression
+
+Best for deadlines, backoff, and long-running lifecycle checkpoints.
+
+## 8) Minimal Examples
+
+### 8.1 Workflow transition sketch (Rust, conceptual)
+
 ```rust
-domain_events.push(DomainEvent {
-    schema: "com.acme/ChargeRequested@1".into(),
-    value: cbor!({"order_id": order_id, "amount_cents": amount})
-});
-```
+enum Pc { Idle, AwaitingCharge, Done, Failed }
 
-Manifest:
-```json
-{
-  "triggers": [
-    {
-      "event": "com.acme/ChargeRequested@1",
-      "plan": "com.acme/charge_plan@1",
-      "correlate_by": "order_id"
+match (state.pc, event) {
+    (Pc::Idle, Event::OrderCreated { order_id, amount_cents }) => {
+        state.order_id = order_id;
+        state.pc = Pc::AwaitingCharge;
+        effects.push(emit("payment.charge", params, Some("payments")));
     }
-  ]
+    (Pc::AwaitingCharge, Event::EffectReceiptEnvelope { status, .. }) => {
+        state.pc = if status == "ok" { Pc::Done } else { Pc::Failed };
+    }
+    _ => {}
 }
 ```
 
-**Semantics**: When a matching event is appended, kernel starts a new plan instance with the event as input.
-
-### 3. Plan → Plan (await_event)
-
-Plans can wait for domain events (from other plans or reducers) without ending and restarting.
+### 8.2 Manifest routing + binding sketch
 
 ```json
 {
-  "op": "await_event",
-  "event": "com.acme/WorkCompleted@1",
-  "where": {
-    "op": "eq",
-    "args": [
-      {"ref": "@event.request_id"},
-      {"ref": "@var:correlation_id"}
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "com.acme/OrderEvent@1",
+        "module": "com.acme/order_workflow@1",
+        "key_field": "order_id"
+      }
     ]
   },
-  "bind": {"as": "work_result"}
-}
-```
-
-**Semantics** (v1): future-only; first match wakes this plan instance; broadcast (events are not consumed); predicate evaluates with `@event` plus any locals/steps. When the trigger specified `correlate_by`, the kernel injects `@var:correlation_id`—use it in `where` so concurrent runs do not cross-match.
-
-**Why keep it**: This lets one plan carry its locals/invariants across multiple domain events (e.g., pause for approval, wait for async work) without reconstituting state in reducers or spawning new plans. Use multi-plan choreography when phases are loosely coupled or owned by different services; otherwise `await_event` keeps the audit trail within a single plan id.
-
-**When to use**: You want a single plan instance to span multiple external events (e.g., wait for human approval, chained plan→plan rendezvous) while keeping locals/invariants intact. If phases are loosely coupled or owned by different teams, prefer multiple plans triggered by events instead.
-
-### 4. Conditional Flow (edges with guards)
-
-Plan edges can have boolean predicates.
-
-```json
-{
-  "edges": [
-    {
-      "from": "charge",
-      "to": "reserve",
-      "when": {
-        "op": "eq",
-        "args": [{"ref": "@var:charge_rcpt.status"}, {"text": "ok"}]
-      }
-    },
-    {
-      "from": "charge",
-      "to": "compensate_refund",
-      "when": {
-        "op": "ne",
-        "args": [{"ref": "@var:charge_rcpt.status"}, {"text": "ok"}]
-      }
+  "module_bindings": {
+    "com.acme/order_workflow@1": {
+      "slots": { "payments": "cap_payments" }
     }
-  ]
-}
-```
-
-**Semantics**: Step becomes ready only if all predecessors are done AND guard evaluates to true.
-
-## Four Main Patterns
-
-### Pattern 1: Single-Plan Orchestration (Plan-Driven)
-
-**Description**: One plan orchestrates the entire workflow, coordinating multiple effects and raising result events to reducers for state tracking.
-
-**When to use**:
-- Flow is deterministic with clear steps
-- No complex business decisions mid-flight
-- Want full preflight visibility (shadow-run shows entire flow)
-- Need centralized governance/approval
-
-**Structure**:
-```
-User action → Reducer validates & emits intent
-  ↓
-Trigger starts Plan
-  ↓
-Plan internally:
-  1. emit_effect A
-  2. await_receipt A
-  3. conditional branch on A result
-  4. emit_effect B
-  5. await_receipt B
-  6. raise_event FinalResult (published)
-  ↓
-Reducer updates state to terminal
-```
-
-**Example**: Order fulfillment
-
-Reducer emits `ProcessOrderIntent`:
-```rust
-(Pc::Idle, Event::OrderCreated { order_id, amount_cents }) => {
-    s.order_id = order_id.clone();
-    s.pc = Pc::Processing;
-    domain_events.push(DomainEvent {
-        schema: "com.acme/ProcessOrderIntent@1".into(),
-        value: cbor!({"order_id": order_id, "amount_cents": amount_cents})
-    });
-}
-```
-
-Plan `fulfillment_plan@1`:
-```json
-{
-  "$kind": "defplan",
-  "name": "com.acme/fulfillment_plan@1",
-  "input": "com.acme/ProcessOrderIntent@1",
-  "steps": [
-    {"id": "charge", "op": "emit_effect", "kind": "payment.charge", "params": {...}, "cap": "payment_cap", "bind": {"effect_id_as": "charge_id"}},
-    {"id": "wait_charge", "op": "await_receipt", "for": {"ref": "@var:charge_id"}, "bind": {"as": "charge_rcpt"}},
-    {"id": "reserve", "op": "emit_effect", "kind": "inventory.reserve", "params": {...}, "cap": "inventory_cap", "bind": {"effect_id_as": "reserve_id"}},
-    {"id": "wait_reserve", "op": "await_receipt", "for": {"ref": "@var:reserve_id"}, "bind": {"as": "reserve_rcpt"}},
-    {"id": "notify", "op": "emit_effect", "kind": "email.send", "params": {...}, "cap": "mailer_cap", "bind": {"effect_id_as": "email_id"}},
-    {"id": "wait_notify", "op": "await_receipt", "for": {"ref": "@var:email_id"}, "bind": {"as": "email_rcpt"}},
-    {"id": "raise_result", "op": "raise_event", "event": "com.acme/OrderEvent@1", "value": {"record": {"order_id": {"ref": "@plan.input.order_id"}}}},
-    {"id": "done", "op": "end"}
-  ],
-  "edges": [
-    {"from": "charge", "to": "wait_charge"},
-    {"from": "wait_charge", "to": "reserve", "when": {"op": "eq", "args": [{"ref": "@var:charge_rcpt.status"}, {"text": "ok"}]}},
-    {"from": "reserve", "to": "wait_reserve"},
-    {"from": "wait_reserve", "to": "notify", "when": {"op": "eq", "args": [{"ref": "@var:reserve_rcpt.status"}, {"text": "ok"}]}},
-    {"from": "notify", "to": "wait_notify"},
-    {"from": "wait_notify", "to": "raise_result"},
-    {"from": "raise_result", "to": "done"}
-  ]
-}
-```
-
-**Pros**:
-- Shadow-run shows entire flow up front
-- Governance reviews all effects together (approvals)
-- Clear audit trail in single plan instance
-- Easy to add compensations as conditional branches
-
-**Cons**:
-- Plan becomes complex for very long flows
-- Business logic bleeds into plan structure
-- Harder to reuse sub-flows across plans
-
----
-
-### Pattern 2: Multi-Plan Choreography (Event-Driven)
-
-**Description**: Multiple small plans coordinate via events. Each plan is triggered by a domain event, performs its work, and raises the next event.
-
-**When to use**:
-- Loosely coupled phases
-- Different teams own different plans
-- Want independent plan evolution/versioning
-- Clear service boundaries
-
-**Structure**:
-```
-Event A → Plan 1 → emits Event B
-Event B → Plan 2 → emits Event C
-Event C → Plan 3 → emits Event D (terminal)
-```
-
-**Example**: Multi-service order processing
-
-```
-OrderPlaced event → charge_plan
-  charge_plan: payment.charge → raise PaymentCompleted
-
-PaymentCompleted event → reserve_plan
-  reserve_plan: inventory.reserve → raise ReservationCompleted
-
-ReservationCompleted event → notify_plan
-  notify_plan: email.send → raise OrderCompleted
-```
-
-Manifest:
-```json
-{
-  "triggers": [
-    {"event": "com.acme/OrderPlaced@1", "plan": "com.acme/charge_plan@1", "correlate_by": "order_id"},
-    {"event": "com.acme/PaymentCompleted@1", "plan": "com.acme/reserve_plan@1", "correlate_by": "order_id"},
-    {"event": "com.acme/ReservationCompleted@1", "plan": "com.acme/notify_plan@1", "correlate_by": "order_id"}
-  ]
-}
-```
-
-Each plan is small:
-```json
-{
-  "$kind": "defplan",
-  "name": "com.acme/charge_plan@1",
-  "input": "com.acme/OrderPlaced@1",
-  "steps": [
-    {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
-    {"id": "wait", "op": "await_receipt", ...},
-    {"id": "notify", "op": "raise_event", "event": "com.acme/ChargeCompleted@1", "value": {...}},
-    {"id": "done", "op": "end"}
-  ]
-}
-```
-
-**Pros**:
-- Plans stay small and focused
-- Easy to swap/upgrade individual plans
-- Natural service boundaries
-- Each plan can have independent policies/caps
-
-**Cons**:
-- No single view of end-to-end flow
-- Shadow-run only sees next plan, not full saga
-- Compensation requires separate trigger chain
-- Harder to reason about overall state
-- Correlation keys critical (must thread through events)
-
----
-
-### Pattern 3: Reducer-Driven Steps (Reducer as State Machine)
-
-**Description**: Reducer owns the workflow state machine. Each transition emits an intent; triggered plans are thin effect wrappers.
-
-**When to use**:
-- Complex business rules determine next steps
-- Need shared saga patterns across reducers
-- Want testable, versioned business logic
-- Compensations involve business decisions
-
-**Structure**:
-```
-Event X → Reducer (validates, decides next step)
-  → emits Intent A
-  → pc = AwaitingA
-
-Trigger: simple_plan_A (1 effect → 1 result)
-
-Event: Result A → Reducer (pc = AwaitingA)
-  → validates result
-  → emits Intent B (or Compensation Intent if A failed)
-  → pc = AwaitingB or Compensating
-```
-
-**Example**: Order saga with reducer-driven compensation
-
-Reducer `OrderSM`:
-```rust
-#[derive(Serialize, Deserialize)]
-pub enum Pc {
-    Idle,
-    AwaitingPayment,
-    AwaitingReservation,
-    Compensating,
-    Done,
-    Failed
-}
-
-fn step_impl(input: StepInput<OrderState, Event>) -> StepOutput<OrderState, Value> {
-    let mut s = input.state;
-    let mut domain_events = Vec::new();
-
-    match (&mut s.pc, input.event) {
-        (Pc::Idle, Event::OrderCreated { order_id, amount_cents, items }) => {
-            s.order_id = order_id.clone();
-            s.amount_cents = amount_cents;
-            s.items = items;
-            s.pc = Pc::AwaitingPayment;
-            domain_events.push(DomainEvent {
-                schema: "com.acme/ChargeRequested@1".into(),
-                value: cbor!({"order_id": order_id, "amount_cents": amount_cents})
-            });
-        }
-
-        (Pc::AwaitingPayment, Event::ChargeResult { success, txn_id }) => {
-            if success {
-                s.payment_txn = Some(txn_id);
-                s.pc = Pc::AwaitingReservation;
-                domain_events.push(DomainEvent {
-                    schema: "com.acme/ReserveRequested@1".into(),
-                    value: cbor!({"order_id": s.order_id, "items": s.items})
-                });
-            } else {
-                s.pc = Pc::Failed;
-                s.last_error = Some("Payment failed".into());
-            }
-        }
-
-        (Pc::AwaitingReservation, Event::ReserveResult { success, hold_id }) => {
-            if success {
-                s.reservation_hold = Some(hold_id);
-                s.pc = Pc::Done;
-            } else {
-                // Business rule: refund payment if reservation fails
-                s.pc = Pc::Compensating;
-                domain_events.push(DomainEvent {
-                    schema: "com.acme/RefundRequested@1".into(),
-                    value: cbor!({"order_id": s.order_id, "txn_id": s.payment_txn.unwrap()})
-                });
-            }
-        }
-
-        (Pc::Compensating, Event::RefundResult { success }) => {
-            if success {
-                s.pc = Pc::Failed;
-                s.last_error = Some("Reservation failed, payment refunded".into());
-            } else {
-                s.pc = Pc::Failed;
-                s.last_error = Some("Reservation failed, refund also failed".into());
-            }
-        }
-
-        _ => {} // ignore unmatched events (idempotency)
-    }
-
-    StepOutput { state: s, effects: vec![], domain_events, ann: None }
-}
-```
-
-Plans are thin wrappers (one per intent type):
-```json
-{
-  "$kind": "defplan",
-  "name": "com.acme/charge_wrapper@1",
-  "input": "com.acme/ChargeRequested@1",
-  "steps": [
-    {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
-    {"id": "wait", "op": "await_receipt", ...},
-    {"id": "result", "op": "raise_event", "event": "com.acme/OrderEvent@1", "value": {"record": {"success": {"ref": "@var:rcpt.ok"}, ...}}},
-    {"id": "done", "op": "end"}
-  ]
-}
-```
-
-**Pros**:
-- Business logic in reducers (testable, versioned, replay)
-- Plans are thin, reusable effect wrappers
-- Reducer implements complex typestate machines
-- Easy to share saga patterns via `aos-saga` helpers
-- Compensations use same reducer logic
-
-**Cons**:
-- Shadow-run can't predict full flow (only sees next intent)
-- Governance sees effects one at a time
-- More reducer complexity (must manage continuations)
-- Correlation keys critical
-
----
-
-### Pattern 4: Hybrid (Plan Orchestrates, Reducer Tracks)
-
-**Description**: Plan orchestrates effects, but raises intermediate events to reducer for canonical state tracking and business logic hooks.
-
-**When to use**:
-- Want both auditability (plan) and business logic (reducer)
-- High-value workflows needing governance AND flexibility
-- Need to inspect/query state mid-workflow
-
-**Structure**:
-```
-Event: Intent → Reducer validates → emits ProcessIntent
-  ↓
-Trigger: orchestration_plan
-  Plan:
-    1. emit effect A
-    2. await_receipt A
-    3. raise_event A_Completed (published)
-    4. emit effect B
-    5. await_receipt B
-    6. raise_event B_Completed (published)
-    7. raise_event FinalCompleted (published)
-  ↓
-Reducer tracks: Pending → A_Done → B_Done → Done
-```
-
-**Example**: Payment with tracking
-
-Reducer:
-```rust
-(Pc::Pending, Event::ProcessPaymentIntent { order_id, amount }) => {
-    s.order_id = order_id;
-    s.amount = amount;
-    s.pc = Pc::Processing;
-    domain_events.push(DomainEvent {
-        schema: "com.acme/PaymentOrchestrationRequested@1".into(),
-        value: cbor!({"order_id": order_id, "amount": amount})
-    });
-}
-
-(Pc::Processing, Event::ChargeCompleted { success, txn_id }) => {
-    if success {
-        s.txn_id = Some(txn_id);
-        s.pc = Pc::AwaitingConfirmation;
-    } else {
-        s.pc = Pc::Failed;
-    }
-}
-
-(Pc::AwaitingConfirmation, Event::ConfirmationCompleted { confirmed }) => {
-    s.pc = if confirmed { Pc::Done } else { Pc::Compensating };
-}
-```
-
-Plan:
-```json
-{
-  "steps": [
-    {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
-    {"id": "wait_charge", "op": "await_receipt", ...},
-    {"id": "notify_charge", "op": "raise_event", "event": "PaymentEvent@1", "value": {...}},
-    {"id": "confirm", "op": "emit_effect", "kind": "payment.confirm", ...},
-    {"id": "wait_confirm", "op": "await_receipt", ...},
-    {"id": "notify_confirm", "op": "raise_event", "event": "PaymentEvent@1", "value": {...}},
-    {"id": "done", "op": "end"}
-  ]
-}
-```
-
-**Pros**:
-- Plan shows full orchestration (governance/shadow/audit)
-- Reducer maintains canonical state (queryable)
-- Clear separation: plan = how, reducer = what happened
-- Can add business logic hooks without changing plan
-
-**Cons**:
-- More events to define/maintain
-- Potential for plan/reducer state drift
-- Extra coordination overhead
-- More complex to reason about
-
-## Complex Scenarios
-
-### Runtime Enforcement & Visibility
-
-The runtime now enforces the schema boundaries described in spec/03-air.md at execution time:
-
-- `raise_event` values are canonicalized against the declared event schema, and invalid payloads are rejected before journaling.
-- `await_receipt` and `await_event` references are validated when the manifest is loaded, so orchestration bugs (missing handles, typos in predicates) fail fast.
-- `end` step results are canonicalized against `plan.output`. When a plan returns a value, the kernel appends a `PlanResult` journal record capturing `{plan_name, plan_id, output_schema, value_cbor}` and caches recent results for operators/CLI tooling.
-
-**Operational impact**: governance reviewers and on-call engineers can now rely on the journal alone to answer “what did this plan produce?” without replaying expressions. Shadow runs also surface the same canonical outputs, making approval diffs clearer. If your workflow depends on downstream automation, use the recorded `PlanResult` entries instead of parsing reducer events.
-
-### Compensations (Saga Pattern)
-
-Three approaches:
-
-#### A. Plan-Based Compensation (Conditional Branches)
-
-Use edge guards to route failures to compensation steps.
-
-```json
-{
-  "steps": [
-    {"id": "charge", "op": "emit_effect", "kind": "payment.charge", ...},
-    {"id": "wait_charge", "op": "await_receipt", ...},
-    {"id": "reserve", "op": "emit_effect", "kind": "inventory.reserve", ...},
-    {"id": "wait_reserve", "op": "await_receipt", ...},
-    {"id": "refund", "op": "emit_effect", "kind": "payment.refund", "params": {"txn_id": {"ref": "@var:charge_rcpt.txn_id"}}, ...},
-    {"id": "done_ok", "op": "end", "result": {"text": "success"}},
-    {"id": "done_fail", "op": "end", "result": {"text": "compensated"}}
-  ],
-  "edges": [
-    {"from": "charge", "to": "wait_charge"},
-    {"from": "wait_charge", "to": "reserve", "when": {"ref": "@var:charge_rcpt.ok"}},
-    {"from": "wait_charge", "to": "done_fail", "when": {"op": "not", "args": [{"ref": "@var:charge_rcpt.ok"}]}},
-    {"from": "reserve", "to": "wait_reserve"},
-    {"from": "wait_reserve", "to": "done_ok", "when": {"ref": "@var:reserve_rcpt.ok"}},
-    {"from": "wait_reserve", "to": "refund", "when": {"op": "not", "args": [{"ref": "@var:reserve_rcpt.ok"}]}},
-    {"from": "refund", "to": "done_fail"}
-  ]
-}
-```
-
-**Use when**: Compensation logic is simple (no business rules)
-
-#### B. Reducer-Based Compensation (Intent Emission)
-
-Reducer detects failure and emits compensation intent.
-
-```rust
-(Pc::AwaitingReservation, Event::ReserveResult { success: false, .. }) => {
-    s.pc = Pc::Compensating;
-    domain_events.push(DomainEvent {
-        schema: "RefundRequested@1".into(),
-        value: cbor!({"txn_id": s.payment_txn.unwrap()})
-    });
-}
-```
-
-**Use when**: Compensation requires business logic (e.g., partial refunds, customer tier logic)
-
-#### C. Hybrid (Plan Guards + Reducer Tracking)
-
-Plan handles compensation flow, reducer tracks compensating state.
-
-```json
-// In plan
-{"from": "wait_reserve", "to": "notify_compensation", "when": "failure"},
-{"id": "notify_compensation", "op": "raise_event", "event": "com.acme/CompensationStarted@1", "value": {}},
-{"from": "notify_compensation", "to": "refund"}
-```
-
-```rust
-// In reducer
-(Pc::AwaitingReservation, Event::CompensationStarted {}) => {
-    s.pc = Pc::Compensating;
-    // Could emit compensating notifications, update metrics, etc.
-}
-```
-
-### Parallel Effects (Fan-Out / Join)
-
-Plans support this naturally via DAG (no edges = parallel).
-
-```json
-{
-  "steps": [
-    {"id": "fetch_feed1", "op": "emit_effect", "kind": "http.request", "params": {"url": "feed1"}, ...},
-    {"id": "fetch_feed2", "op": "emit_effect", "kind": "http.request", "params": {"url": "feed2"}, ...},
-    {"id": "fetch_feed3", "op": "emit_effect", "kind": "http.request", "params": {"url": "feed3"}, ...},
-    {"id": "wait1", "op": "await_receipt", "for": {"ref": "@var:feed1_id"}, ...},
-    {"id": "wait2", "op": "await_receipt", "for": {"ref": "@var:feed2_id"}, ...},
-    {"id": "wait3", "op": "await_receipt", "for": {"ref": "@var:feed3_id"}, ...},
-    {"id": "merge", "op": "assign", "expr": {"op": "concat", "args": [...]}, ...},
-    {"id": "done", "op": "end"}
-  ],
-  "edges": [
-    // No edges between fetch_feed1/2/3 → parallel execution
-    {"from": "fetch_feed1", "to": "wait1"},
-    {"from": "fetch_feed2", "to": "wait2"},
-    {"from": "fetch_feed3", "to": "wait3"},
-    // Join: merge depends on all waits
-    {"from": "wait1", "to": "merge"},
-    {"from": "wait2", "to": "merge"},
-    {"from": "wait3", "to": "merge"},
-    {"from": "merge", "to": "done"}
-  ]
-}
-```
-
-Deterministic scheduler executes all ready steps (fetch_feed1/2/3 have no predecessors, so all fire in first tick).
-
-### Timeouts and Deadlines
-
-Use `timer.set` to implement timeouts.
-
-#### From Reducer (Micro-Effect)
-
-```rust
-(Pc::AwaitingApproval, Event::ApprovalRequested { deadline_ns, request_id }) => {
-    s.approval_deadline = deadline_ns;
-    effects.push(EffectIntent {
-        kind: "timer.set".into(),
-        params: cbor!({"deliver_at_ns": deadline_ns, "key": request_id}),
-        cap_slot: Some("timer")
-    });
-    s.pc = Pc::AwaitingApprovalOrTimeout;
-}
-
-(Pc::AwaitingApprovalOrTimeout, Event::TimerFired { key }) => {
-    // Timeout! Cancel or compensate
-    s.pc = Pc::TimedOut;
-    domain_events.push(DomainEvent {
-        schema: "ApprovalTimedOut@1".into(),
-        value: cbor!({"request_id": key})
-    });
-}
-
-(Pc::AwaitingApprovalOrTimeout, Event::ApprovalGranted { .. }) => {
-    s.pc = Pc::Approved;
-    // Could emit "cancel timer" intent, or just ignore duplicate timer receipt
-}
-```
-
-#### From Plan (Parallel Timer Branch)
-
-```json
-{
-  "steps": [
-    {"id": "request", "op": "emit_effect", "kind": "approval.request", ...},
-    {"id": "start_timer", "op": "emit_effect", "kind": "timer.set", "params": {"deliver_at_ns": "..."}, ...},
-    {"id": "wait_approval", "op": "await_event", "event": "ApprovalGranted@1", ...},
-    {"id": "wait_timer", "op": "await_receipt", "for": {"ref": "@var:timer_id"}, ...},
-    {"id": "success", "op": "end", "result": {"text": "approved"}},
-    {"id": "timeout", "op": "end", "result": {"text": "timed_out"}}
-  ],
-  "edges": [
-    {"from": "request", "to": "start_timer"},
-    {"from": "start_timer", "to": "wait_approval"},
-    {"from": "start_timer", "to": "wait_timer"},
-    // Whichever completes first "wins"
-    {"from": "wait_approval", "to": "success"},
-    {"from": "wait_timer", "to": "timeout"}
-  ]
-}
-```
-
-Note: v1 plans don't have explicit "await_first" or cancellation, so both branches remain pending. Implement cancellation in v1.1 or handle idempotently (ignore timer receipt after approval).
-
-### Retries and Backoff
-
-Three approaches:
-
-#### A. Adapter-Level Retries (Transparent)
-
-Adapters handle retries transparently using idempotency keys. Not visible to reducers/plans.
-
-**Use when**: Network transients, no business logic needed
-
-#### B. Reducer-Driven Retries
-
-Reducer tracks retry count and re-emits intent with backoff.
-
-```rust
-#[derive(Serialize, Deserialize)]
-pub struct State {
-    pub pc: Pc,
-    pub retry_count: u32,
-    pub max_retries: u32,
-    pub backoff_ns: u64,
-}
-
-(Pc::AwaitingCharge, Event::ChargeResult { success: false, retriable: true }) => {
-    if s.retry_count < s.max_retries {
-        s.retry_count += 1;
-        let delay = s.backoff_ns * (2_u64.pow(s.retry_count)); // exponential backoff
-        effects.push(EffectIntent {
-            kind: "timer.set".into(),
-            params: cbor!({"deliver_at_ns": now() + delay, "key": s.order_id}),
-            cap_slot: Some("timer")
-        });
-        s.pc = Pc::BackingOff;
-    } else {
-        s.pc = Pc::Failed;
-        s.last_error = Some("Max retries exceeded".into());
-    }
-}
-
-(Pc::BackingOff, Event::TimerFired { .. }) => {
-    s.pc = Pc::AwaitingCharge;
-    domain_events.push(DomainEvent {
-        schema: "ChargeRequested@1".into(),
-        value: cbor!({"order_id": s.order_id, "amount": s.amount, "attempt": s.retry_count})
-    });
-}
-```
-
-**Use when**: Need business logic for retry decisions, exponential backoff, max attempts
-
-#### C. Plan-Based Retries (v1 Limited)
-
-Plans can't loop, so retries require explicit unrolled steps or external retry orchestrator.
-
-Unrolled example (ugly, not recommended):
-```json
-{
-  "steps": [
-    {"id": "try1", "op": "emit_effect", ...},
-    {"id": "wait1", "op": "await_receipt", ...},
-    {"id": "try2", "op": "emit_effect", ...},
-    {"id": "wait2", "op": "await_receipt", ...},
-    {"id": "try3", "op": "emit_effect", ...},
-    {"id": "wait3", "op": "await_receipt", ...},
-    {"id": "success", "op": "end"},
-    {"id": "fail", "op": "end"}
-  ],
-  "edges": [
-    {"from": "try1", "to": "wait1"},
-    {"from": "wait1", "to": "success", "when": "ok"},
-    {"from": "wait1", "to": "try2", "when": "error"},
-    {"from": "try2", "to": "wait2"},
-    {"from": "wait2", "to": "success", "when": "ok"},
-    {"from": "wait2", "to": "try3", "when": "error"},
-    {"from": "try3", "to": "wait3"},
-    {"from": "wait3", "to": "success", "when": "ok"},
-    {"from": "wait3", "to": "fail", "when": "error"}
-  ]
-}
-```
-
-**Recommendation**: Use reducer-driven retries for v1; consider adding plan-level retry primitives in v1.1.
-
-### Human Approvals
-
-v1 policy gate can return `RequireApproval`, but execution path is incomplete. For full implementation:
-
-```
-Plan: emit_effect llm.generate (expensive)
-  ↓
-Policy: decide() → RequireApproval
-  ↓
-Kernel: writes ApprovalRequired to journal, suspends plan
-  ↓
-External system: human/AI reviews, grants approval (or denies)
-  ↓
-Kernel: writes ApprovalGranted, resumes plan
-  ↓
-Plan continues with effect
-```
-
-**v1 workaround**: Model approval as an effect + await:
-
-```json
-{
-  "steps": [
-    {"id": "request_approval", "op": "emit_effect", "kind": "approval.request", "params": {"reason": "expensive LLM call"}, ...},
-    {"id": "wait_approval", "op": "await_receipt", ...},
-    {"id": "proceed", "op": "emit_effect", "kind": "llm.generate", ...}
-  ],
-  "edges": [
-    {"from": "request_approval", "to": "wait_approval"},
-    {"from": "wait_approval", "to": "proceed", "when": {"ref": "@var:approval_rcpt.approved"}}
-  ]
-}
-```
-
-Approval adapter queues task for humans; receipt arrives when approved/denied.
-
-### Long-Running Workflows (Days/Weeks)
-
-Use reducers + timer.set for long-running state.
-
-```rust
-(Pc::Idle, Event::CampaignScheduled { start_ns, end_ns, actions }) => {
-    s.campaign_start = start_ns;
-    s.campaign_end = end_ns;
-    s.actions = actions;
-    effects.push(EffectIntent {
-        kind: "timer.set".into(),
-        params: cbor!({"deliver_at_ns": start_ns}),
-        cap_slot: Some("timer")
-    });
-    s.pc = Pc::AwaitingStart;
-}
-
-(Pc::AwaitingStart, Event::TimerFired { .. }) => {
-    s.pc = Pc::Running;
-    // Execute first action, schedule next timer, etc.
-}
-```
-
-Reducers persist state; kernel ensures deterministic replay.
-
-## Adding New Effect Kinds (when extending the catalog)
-
-Effect kinds and capability types are open strings. To introduce a new kind:
-- Create or register an adapter that knows how to execute it and return a signed receipt, and map the kind to a capability type.
-- Add canonical param/receipt schemas (for first-class/built-in kinds, place them in `spec/defs/builtin-schemas.air.json`). Adapter-scoped kinds can ship their own schemas alongside the adapter.
-- Define a `defcap` for the capability type that enforces host/model/etc. constraints; bind grants in manifests and list the new kind in `allowed_effects` where used.
-- Update policy to allow/deny the new kind explicitly; default-deny will block unknown names until policy and capability wiring exist.
-- Add tests or shadow scenarios that exercise the new kind to ensure params/receipts canonicalize and replay correctly.
-
-## Decision Matrix
-
-| Scenario | Recommended Pattern | Why |
-|----------|---------------------|-----|
-| Simple deterministic flow (payment → email) | Single-plan | Preflight visibility, centralized governance |
-| Service boundaries (different teams) | Multi-plan choreography | Independent evolution, loose coupling |
-| Complex business rules mid-flow | Reducer-driven | Business logic in testable reducers |
-| Need both audit trail and flexibility | Hybrid | Best of both: plan audit + reducer logic |
-| Compensations with business rules | Reducer-driven | Reducer decides compensation strategy |
-| Compensations without business rules | Plan conditional branches | Simpler, all in plan DAG |
-| Parallel independent effects | Single-plan with DAG | Natural parallelism in plan scheduler |
-| Human-in-the-loop | Single-plan + approval effect (v1 workaround) | Choke point at emit_effect |
-| Long-running (days/weeks) | Reducer-driven + timer.set | Reducer persists state across long pauses |
-| Retries with backoff | Reducer-driven | Exponential backoff logic in reducer |
-| High-volume, low-value workflows | Multi-plan choreography | Decentralized, scalable |
-| High-value, governance-heavy workflows | Single-plan or Hybrid | Centralized approval/audit |
-
-## Anti-Patterns
-
-### 1. Orchestrating Network Effects in Reducers
-
-**Bad**:
-```rust
-// DON'T DO THIS
-effects.push(EffectIntent { kind: "http.request".into(), ... });
-effects.push(EffectIntent { kind: "llm.generate".into(), ... });
-```
-
-**Why**: Violates architectural boundary; bypasses governance; can't shadow-run; policy can't gate properly.
-
-**Fix**: Emit DomainIntent, let plan handle effects.
-
-### 2. Business Logic in Plans
-
-**Bad**:
-```json
-{
-  "id": "decide",
-  "op": "assign",
-  "expr": {
-    "op": "if",
-    "args": [
-      {"op": "and", "args": [
-        {"op": "gt", "args": [{"ref": "@var:amount"}, 1000]},
-        {"op": "eq", "args": [{"ref": "@var:user_tier"}, "premium"]}
-      ]},
-      {"text": "discount_10"},
-      {"text": "no_discount"}
-    ]
   }
 }
 ```
 
-**Why**: Business rules belong in reducers (versioned, testable, replay). Plans should orchestrate, not decide.
+## 9) Reliability Checklist
 
-**Fix**: Let reducer emit intent with business decision already made.
+1. Include stable correlation fields in events/effect params.
+2. Use explicit idempotency keys for externally visible effects.
+3. Treat all continuation payloads as schema-bound inputs.
+4. Keep terminal states and duplicate fences in module state.
+5. Model retries with explicit attempt/backoff state.
 
-### 3. Missing Correlation Keys
+## 10) Testing Checklist
 
-**Bad**:
-```rust
-// Reducer emits intent without correlation id
-domain_events.push(DomainEvent {
-    schema: "ChargeRequested@1".into(),
-    value: cbor!({"amount": 100})  // Missing order_id!
-});
-```
+1. Transition tests: `(state,event)->(state,events,effects)`.
+2. Receipt progression tests for `ok/error/timeout/fault` paths.
+3. Replay-or-die snapshot equivalence tests.
+4. Concurrency tests: no cross-delivery between keyed instances.
+5. Apply-safety tests: strict-quiescence block/unblock behavior.
 
-**Why**: Plan raises result event, but which reducer instance should receive it? Kernel can't route without key.
+## 11) Migration Notes (Plan-Era -> Workflow Runtime)
 
-**Fix**: Always include correlation key (order_id, user_id, request_id) in intents and configure `correlate_by` in triggers.
-
-### 4. Unbounded Retries in Reducers
-
-**Bad**:
-```rust
-(Pc::Failed, Event::ChargeResult { success: false, .. }) => {
-    // Retry forever!
-    domain_events.push(DomainEvent { schema: "ChargeRequested@1".into(), ... });
-}
-```
-
-**Why**: Infinite loops burn resources, prevent terminal states.
-
-**Fix**: Track retry count, set max attempts, use exponential backoff, move to terminal failure state.
-
-### 5. Cross-Reducer Calls
-
-**Bad**:
-```rust
-// Trying to "call" another reducer
-effects.push(EffectIntent { kind: "reducer.invoke".into(), ... }); // No such effect!
-```
-
-**Why**: Reducers don't invoke each other; events are the only communication mechanism.
-
-**Fix**: Emit domain event; kernel routes to other reducer via manifest.routing.
-
-### 6. Ignoring Idempotency
-
-**Bad**:
-```rust
-(Pc::AwaitingPayment, Event::ChargeResult { success, txn_id }) => {
-    // No fence! If this event is replayed, we'll emit duplicate ReserveRequested
-    s.pc = Pc::AwaitingReservation;
-    domain_events.push(DomainEvent { schema: "ReserveRequested@1".into(), ... });
-}
-```
-
-**Why**: Events may be replayed (e.g., during recovery). Duplicate intents = duplicate charges.
-
-**Fix**: Use fences:
-```rust
-(Pc::AwaitingPayment, Event::ChargeResult { success, txn_id }) => {
-    if !s.fences.payment_done {
-        s.fences.payment_done = true;
-        s.payment_txn = Some(txn_id);
-        s.pc = Pc::AwaitingReservation;
-        domain_events.push(...);
-    }
-}
-```
-
-### 7. Plan Timeouts Without Cancellation
-
-**Bad**:
-```json
-// Start timer and wait for approval in parallel, but both branches complete
-{"from": "start_timer", "to": "wait_approval"},
-{"from": "start_timer", "to": "wait_timer"},
-{"from": "wait_approval", "to": "success"},
-{"from": "wait_timer", "to": "timeout"}
-```
-
-**Why**: If approval arrives first, plan goes to "success", but timer still fires later. No cancellation in v1.
-
-**Fix**: Handle idempotently (ignore timer receipt if already approved), or wait for v1.1 cancellation primitive.
-
-## Future Enhancements (v1.1+)
-
-- **Plan-level retries**: `emit_effect_with_retry(max_attempts, backoff_policy)`
-- **Cancellation**: Explicit `cancel_effect` step to stop outstanding effects/timers
-- **Approval gates**: First-class `require_approval` step that suspends and journals approval requests
-- **Sub-plans**: `invoke_plan` step to call reusable sub-graphs
-- **Dynamic parallelism**: `for_each` step to fan-out over lists
-- **Await-first**: `await_any` to proceed when any of N effects completes
-- **Versioned transitions**: Explicit handling of in-flight workflows during plan upgrades
-
-## Conclusion
-
-AIR v1 provides four coordination primitives that support a wide range of workflow patterns. Choose patterns based on:
-- **Governance needs**: Single-plan for tight control
-- **Business logic complexity**: Reducer-driven for complex rules
-- **Service boundaries**: Multi-plan for loose coupling
-- **Auditability + flexibility**: Hybrid for both
-
-Start simple (single-plan), migrate to reducer-driven as business logic grows. Avoid anti-patterns (network effects in reducers, business logic in plans, missing correlation keys). Use fences and idempotency keys everywhere.
-
-The architecture deliberately keeps plans non-Turing complete to maintain preflight analyzability and governance. For complex orchestration, use reducers; for simple effect choreography, use plans.
+1. Plan runtime execution surfaces are removed from the active model; `defplan` and `triggers` are legacy-only concepts.
+2. Orchestration logic moves into workflow module typestate + receipt handling.
+3. Governance/cap/policy boundaries remain mandatory.
+4. Transitional loader aliases can be tolerated at ingest, but canonical serialized manifests and active docs use workflow-era names.

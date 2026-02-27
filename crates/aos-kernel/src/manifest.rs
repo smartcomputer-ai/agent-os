@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use aos_air_types::{
-    AirNode, DefCap, DefEffect, DefModule, DefPlan, DefPolicy, DefSchema, Manifest, Name,
-    SecretDecl, catalog::EffectCatalog, validate_manifest,
+    AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
+    catalog::EffectCatalog, validate_manifest,
 };
 use aos_cbor::Hash;
 use aos_cbor::to_canonical_cbor;
@@ -14,7 +14,6 @@ pub struct LoadedManifest {
     pub manifest: Manifest,
     pub secrets: Vec<SecretDecl>,
     pub modules: HashMap<Name, DefModule>,
-    pub plans: HashMap<Name, DefPlan>,
     pub effects: HashMap<Name, DefEffect>,
     pub caps: HashMap<Name, DefCap>,
     pub policies: HashMap<Name, DefPolicy>,
@@ -44,7 +43,6 @@ impl ManifestLoader {
 
     fn from_catalog(catalog: Catalog) -> Result<LoadedManifest, KernelError> {
         let mut modules = HashMap::new();
-        let mut plans = HashMap::new();
         let mut effects = HashMap::new();
         let mut caps = HashMap::new();
         let mut policies = HashMap::new();
@@ -53,9 +51,6 @@ impl ManifestLoader {
             match entry.node {
                 AirNode::Defmodule(module) => {
                     modules.insert(name, module);
-                }
-                AirNode::Defplan(plan) => {
-                    plans.insert(name, plan);
                 }
                 AirNode::Defcap(cap) => {
                     caps.insert(name, cap);
@@ -73,16 +68,13 @@ impl ManifestLoader {
             }
         }
         let manifest = catalog.manifest;
-        validate_manifest(
-            &manifest, &modules, &schemas, &plans, &effects, &caps, &policies,
-        )
-        .map_err(|e| KernelError::ManifestValidation(e.to_string()))?;
+        validate_manifest(&manifest, &modules, &schemas, &effects, &caps, &policies)
+            .map_err(|e| KernelError::ManifestValidation(e.to_string()))?;
         let effect_catalog = EffectCatalog::from_defs(effects.values().cloned());
         Ok(LoadedManifest {
             manifest,
             secrets: catalog.resolved_secrets,
             modules,
-            plans,
             effects,
             caps,
             policies,

@@ -39,8 +39,8 @@ export const queryKeys = {
     ] as const,
   manifest: (params?: ManifestQuery) => ["manifest", params ?? {}] as const,
   stateGet: (path: StateGetPath, query?: StateGetQuery) =>
-    ["state_get", path.reducer, query ?? {}] as const,
-  stateCells: (path: StateCellsPath) => ["state_cells", path.reducer] as const,
+    ["state_get", path.workflow, query ?? {}] as const,
+  stateCells: (path: StateCellsPath) => ["state_cells", path.workflow] as const,
   workspaceAnnotationsGet: (params?: WorkspaceAnnotationsGetQuery) =>
     ["workspace_annotations_get", params ?? {}] as const,
   workspaceList: (params?: WorkspaceListQuery) =>
@@ -55,4 +55,5 @@ export const queryKeys = {
     ["state_get", "demiurge/Demiurge@1", { key: chatId }] as const,
   chatList: () =>
     ["state_cells", "demiurge/Demiurge@1"] as const,
+  chatTranscript: (chatId: string) => ["chat_transcript", chatId] as const,
 };

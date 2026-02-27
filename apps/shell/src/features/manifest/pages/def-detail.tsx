@@ -1,4 +1,4 @@
-import { useParams, Navigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,11 +29,6 @@ import { Braces, Copy, Hash, Info } from "lucide-react";
 
 export function DefDetailPage() {
   const { kind, name } = useParams();
-
-  // Redirect plans to the plan detail page
-  if (kind === "plan" && name) {
-    return <Navigate to={`/manifest/plans/${encodeURIComponent(name)}`} replace />;
-  }
 
   if (!kind || !name) {
     return (
@@ -202,13 +197,13 @@ function ModuleSummary({ def }: { def: ModuleDef }) {
           <CopyableHash hash={def.wasm_hash} truncate={20} />
         </SummaryRow>
       )}
-      {def.abi?.reducer && (
+      {def.abi?.workflow && (
         <>
           <SummaryRow label="State schema">
-            <span className="font-mono text-xs">{def.abi.reducer.state}</span>
+            <span className="font-mono text-xs">{def.abi.workflow.state}</span>
           </SummaryRow>
           <SummaryRow label="Event schema">
-            <span className="font-mono text-xs">{def.abi.reducer.event}</span>
+            <span className="font-mono text-xs">{def.abi.workflow.event}</span>
           </SummaryRow>
         </>
       )}
@@ -307,7 +302,7 @@ function getKindDescription(kind: string): string {
     case "schema":
       return "Type definition for values in the system.";
     case "module":
-      return "WASM reducer or pure function with ABI.";
+      return "WASM workflow or pure function with ABI.";
     case "effect":
       return "External action definition.";
     case "cap":

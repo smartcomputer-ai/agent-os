@@ -55,7 +55,8 @@ impl<S: Store> HttpAdapter<S> {
             intent_hash: intent.intent_hash,
             adapter_id: "host.http".into(),
             status: ReceiptStatus::Error,
-            payload_cbor: serde_cbor::to_vec(&receipt).unwrap_or_default(),
+            payload_cbor: serde_cbor::to_vec(&receipt)
+                .expect("encode host.http error receipt payload"),
             cost_cents: None,
             signature: vec![0; 64], // TODO: real signing
         }
@@ -84,7 +85,8 @@ impl<S: Store> HttpAdapter<S> {
             intent_hash: intent.intent_hash,
             adapter_id: "host.http".into(),
             status: ReceiptStatus::Timeout,
-            payload_cbor: serde_cbor::to_vec(&receipt_payload).unwrap_or_default(),
+            payload_cbor: serde_cbor::to_vec(&receipt_payload)
+                .expect("encode host.http timeout receipt payload"),
             cost_cents: None,
             signature: vec![0; 64],
         }

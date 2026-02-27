@@ -15,7 +15,7 @@ const FEATURES: FeatureTile[] = [
   {
     to: "/manifest",
     label: "Manifest",
-    description: "Modules, plans, routing, defs",
+    description: "Modules, routing, effects, defs",
     icon: Compass,
   },
   {

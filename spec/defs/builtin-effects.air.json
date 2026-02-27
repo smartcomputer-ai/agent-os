@@ -6,7 +6,7 @@
     "params_schema": "sys/HttpRequestParams@1",
     "receipt_schema": "sys/HttpRequestReceipt@1",
     "cap_type": "http.out",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -24,7 +24,7 @@
     "params_schema": "sys/BlobGetParams@1",
     "receipt_schema": "sys/BlobGetReceipt@1",
     "cap_type": "blob",
-    "origin_scope": "reducer"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -33,7 +33,7 @@
     "params_schema": "sys/TimerSetParams@1",
     "receipt_schema": "sys/TimerSetReceipt@1",
     "cap_type": "timer",
-    "origin_scope": "reducer"
+    "origin_scope": "both"
   },
 
   {
@@ -43,7 +43,7 @@
     "params_schema": "sys/LlmGenerateParams@1",
     "receipt_schema": "sys/LlmGenerateReceipt@1",
     "cap_type": "llm.basic",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
 
   {
@@ -53,7 +53,7 @@
     "params_schema": "sys/VaultPutParams@1",
     "receipt_schema": "sys/VaultPutReceipt@1",
     "cap_type": "secret",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -62,7 +62,7 @@
     "params_schema": "sys/VaultRotateParams@1",
     "receipt_schema": "sys/VaultRotateReceipt@1",
     "cap_type": "secret",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
 
   {
@@ -72,7 +72,7 @@
     "params_schema": "sys/GovProposeParams@1",
     "receipt_schema": "sys/GovProposeReceipt@1",
     "cap_type": "governance",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -81,7 +81,7 @@
     "params_schema": "sys/GovShadowParams@1",
     "receipt_schema": "sys/GovShadowReceipt@1",
     "cap_type": "governance",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -90,7 +90,7 @@
     "params_schema": "sys/GovApproveParams@1",
     "receipt_schema": "sys/GovApproveReceipt@1",
     "cap_type": "governance",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -99,7 +99,7 @@
     "params_schema": "sys/GovApplyParams@1",
     "receipt_schema": "sys/GovApplyReceipt@1",
     "cap_type": "governance",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -108,7 +108,7 @@
     "params_schema": "sys/WorkspaceResolveParams@1",
     "receipt_schema": "sys/WorkspaceResolveReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -117,7 +117,7 @@
     "params_schema": "sys/WorkspaceEmptyRootParams@1",
     "receipt_schema": "sys/WorkspaceEmptyRootReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -126,7 +126,7 @@
     "params_schema": "sys/WorkspaceListParams@1",
     "receipt_schema": "sys/WorkspaceListReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -135,7 +135,7 @@
     "params_schema": "sys/WorkspaceReadRefParams@1",
     "receipt_schema": "sys/WorkspaceReadRefReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -144,7 +144,7 @@
     "params_schema": "sys/WorkspaceReadBytesParams@1",
     "receipt_schema": "sys/WorkspaceReadBytesReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -153,7 +153,7 @@
     "params_schema": "sys/WorkspaceWriteBytesParams@1",
     "receipt_schema": "sys/WorkspaceWriteBytesReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -162,7 +162,7 @@
     "params_schema": "sys/WorkspaceRemoveParams@1",
     "receipt_schema": "sys/WorkspaceRemoveReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -171,7 +171,7 @@
     "params_schema": "sys/WorkspaceDiffParams@1",
     "receipt_schema": "sys/WorkspaceDiffReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -180,7 +180,7 @@
     "params_schema": "sys/WorkspaceAnnotationsGetParams@1",
     "receipt_schema": "sys/WorkspaceAnnotationsGetReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -189,7 +189,7 @@
     "params_schema": "sys/WorkspaceAnnotationsSetParams@1",
     "receipt_schema": "sys/WorkspaceAnnotationsSetReceipt@1",
     "cap_type": "workspace",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
 
   {
@@ -199,16 +199,16 @@
     "params_schema": "sys/IntrospectManifestParams@1",
     "receipt_schema": "sys/IntrospectManifestReceipt@1",
     "cap_type": "query",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
-    "name": "sys/introspect.reducer_state@1",
-    "kind": "introspect.reducer_state",
-    "params_schema": "sys/IntrospectReducerStateParams@1",
-    "receipt_schema": "sys/IntrospectReducerStateReceipt@1",
+    "name": "sys/introspect.workflow_state@1",
+    "kind": "introspect.workflow_state",
+    "params_schema": "sys/IntrospectWorkflowStateParams@1",
+    "receipt_schema": "sys/IntrospectWorkflowStateReceipt@1",
     "cap_type": "query",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -217,7 +217,7 @@
     "params_schema": "sys/IntrospectJournalHeadParams@1",
     "receipt_schema": "sys/IntrospectJournalHeadReceipt@1",
     "cap_type": "query",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   },
   {
     "$kind": "defeffect",
@@ -226,6 +226,6 @@
     "params_schema": "sys/IntrospectListCellsParams@1",
     "receipt_schema": "sys/IntrospectListCellsReceipt@1",
     "cap_type": "query",
-    "origin_scope": "plan"
+    "origin_scope": "both"
   }
 ]

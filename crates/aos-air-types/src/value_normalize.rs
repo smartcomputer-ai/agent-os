@@ -4,7 +4,7 @@ use aos_cbor::to_canonical_cbor;
 use serde_cbor::Value as CborValue;
 use thiserror::Error;
 
-use crate::{TypeExpr, TypeMapKey, TypePrimitive, plan_literals::SchemaIndex};
+use crate::{TypeExpr, TypeMapKey, TypePrimitive, schema_index::SchemaIndex};
 
 #[derive(Debug, Error)]
 pub enum ValueNormalizeError {

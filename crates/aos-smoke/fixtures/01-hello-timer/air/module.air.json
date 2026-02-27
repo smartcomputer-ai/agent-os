@@ -1,0 +1,17 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/TimerSM@1",
+    "module_kind": "workflow",
+    "abi": {
+      "workflow": {
+        "state": "demo/TimerState@1",
+        "event": "demo/TimerEvent@1",
+        "effects_emitted": ["timer.set"],
+        "cap_slots": {
+          "default": "timer"
+        }
+      }
+    }
+  }
+]

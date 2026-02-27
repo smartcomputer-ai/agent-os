@@ -1,0 +1,42 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/SafeUpgradePc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Fetching": { "unit": {} },
+        "Completed": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/SafeUpgradeState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/SafeUpgradePc@1" },
+        "next_request_id": { "nat": {} },
+        "pending_request": { "option": { "nat": {} } },
+        "primary_status": { "option": { "int": {} } },
+        "follow_status": { "option": { "int": {} } },
+        "requests_observed": { "nat": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/SafeUpgradeStart@1",
+    "type": { "record": { "url": { "text": {} } } }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/SafeUpgradeEvent@1",
+    "type": {
+      "variant": {
+        "Start": { "ref": "demo/SafeUpgradeStart@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
+      }
+    }
+  }
+]

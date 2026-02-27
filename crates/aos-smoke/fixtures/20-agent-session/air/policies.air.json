@@ -1,0 +1,20 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/session-llm-policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "llm.generate",
+          "origin_kind": "workflow",
+          "origin_name": "aos.agent/SessionWorkflow@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {},
+        "decision": "deny"
+      }
+    ]
+  }
+]

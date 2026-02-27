@@ -1,0 +1,97 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    {
+      "name": "demo/StartWork@1"
+    },
+    {
+      "name": "demo/RetryPc@1"
+    },
+    {
+      "name": "demo/RetryState@1"
+    },
+    {
+      "name": "demo/RetryEvent@1"
+    },
+    {
+      "name": "sys/EffectReceiptEnvelope@1"
+    },
+    {
+      "name": "sys/TimerSetParams@1"
+    },
+    {
+      "name": "sys/TimerSetReceipt@1"
+    },
+    {
+      "name": "sys/HttpRequestParams@1"
+    },
+    {
+      "name": "sys/HttpRequestReceipt@1"
+    }
+  ],
+  "modules": [
+    {
+      "name": "demo/RetrySM@1"
+    },
+    {
+      "name": "sys/CapEnforceHttpOut@1"
+    }
+  ],
+  "effects": [
+    {
+      "name": "sys/http.request@1"
+    },
+    {
+      "name": "sys/timer.set@1"
+    }
+  ],
+  "caps": [],
+  "policies": [
+    {
+      "name": "demo/default_policy@1"
+    }
+  ],
+  "defaults": {
+    "policy": "demo/default_policy@1",
+    "cap_grants": [
+      {
+        "name": "timer_grant",
+        "cap": "sys/timer@1",
+        "params": {
+          "record": {}
+        }
+      },
+      {
+        "name": "http_grant",
+        "cap": "sys/http.out@1",
+        "params": {
+          "record": {
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "methods": {
+              "set": [
+                {
+                  "text": "POST"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/RetryEvent@1",
+        "module": "demo/RetrySM@1"
+      }
+    ]
+  }
+}

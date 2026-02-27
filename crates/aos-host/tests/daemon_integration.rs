@@ -17,11 +17,11 @@ mod helpers;
 
 use helpers::timer_manifest;
 
-/// Ensure a reducer-emitted `timer.set` is scheduled, fired by the daemon,
-/// and routed to the handler reducer.
+/// Ensure a workflow-emitted `timer.set` is scheduled, fired by the daemon,
+/// and routed back to the origin workflow module.
 #[tokio::test]
 async fn daemon_fires_timer_and_routes_event() {
-    // Build in-memory world with timer-emitting reducer + handler.
+    // Build in-memory world with timer-emitting workflow + handler.
     let store: Arc<TestStore> = fixtures::new_mem_store();
     let manifest = timer_manifest(&store);
     let kernel =
@@ -35,7 +35,7 @@ async fn daemon_fires_timer_and_routes_event() {
     let mut daemon = WorldDaemon::new(host, control_rx, shutdown_rx, None, None);
     let handle = tokio::spawn(async move { (daemon.run().await, daemon) });
 
-    // Kick off the reducer that emits timer.set.
+    // Kick off the workflow that emits timer.set.
     let start_value = serde_cbor::to_vec(&serde_json::json!({
         "id": "t1"
     }))
@@ -63,10 +63,10 @@ async fn daemon_fires_timer_and_routes_event() {
     let (result, daemon) = handle.await.unwrap();
     result.unwrap();
 
-    // Timer handler should have been invoked, setting its stub state to 0xCC.
+    // The origin workflow/workflow should continue on receipt delivery.
     let state = daemon
         .host()
         .kernel()
-        .reducer_state("com.acme/TimerHandler@1");
-    assert_eq!(state, Some(vec![0xCC]));
+        .workflow_state("com.acme/TimerEmitter@1");
+    assert_eq!(state, Some(vec![0x01]));
 }

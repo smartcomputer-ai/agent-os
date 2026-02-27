@@ -7,13 +7,11 @@ pub mod host;
 pub mod http;
 pub mod manifest_loader;
 pub mod modes;
+pub mod trace;
 pub mod util;
 pub mod world_io;
 
 pub mod testhost;
-
-#[cfg(any(feature = "test-fixtures", test))]
-pub mod fixtures;
 
 pub use adapters::timer::TimerScheduler;
 pub use control::{ControlClient, ControlServer, RequestEnvelope, ResponseEnvelope};

@@ -1,218 +1,73 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
-    {
-      "name": "demiurge/ChatRole@1"
-    },
-    {
-      "name": "demiurge/ChatId@1"
-    },
-    {
-      "name": "demiurge/TokenUsage@1"
-    },
-    {
-      "name": "demiurge/ChatMessage@1"
-    },
-    {
-      "name": "demiurge/ChatState@1"
-    },
-    {
-      "name": "demiurge/PendingOutput@1"
-    },
-    {
-      "name": "demiurge/PendingToolOutput@1"
-    },
-    {
-      "name": "demiurge/PendingToolMessage@1"
-    },
-    {
-      "name": "demiurge/PendingChatRequest@1"
-    },
-    {
-      "name": "demiurge/ChatCreated@1"
-    },
-    {
-      "name": "demiurge/UserMessage@1"
-    },
-    {
-      "name": "demiurge/ChatRequest@1"
-    },
-    {
-      "name": "demiurge/ToolCall@1"
-    },
-    {
-      "name": "demiurge/ToolRegistryScanRequested@1"
-    },
-    {
-      "name": "demiurge/ToolRegistrySnapshot@1"
-    },
-    {
-      "name": "demiurge/ToolRegistryUnchanged@1"
-    },
-    {
-      "name": "demiurge/ToolError@1"
-    },
-    {
-      "name": "demiurge/ToolCallParams@1"
-    },
-    {
-      "name": "demiurge/ChatResult@1"
-    },
-    {
-      "name": "demiurge/ToolCallRequested@1"
-    },
-    {
-      "name": "demiurge/ToolResult@1"
-    },
-    {
-      "name": "demiurge/ChatEvent@1"
-    },
-    {
-      "name": "sys/BlobGetParams@1"
-    },
-    {
-      "name": "sys/BlobPutParams@1"
-    },
-    {
-      "name": "sys/WorkspaceName@1"
-    },
-    {
-      "name": "sys/WorkspaceCommitMeta@1"
-    },
-    {
-      "name": "sys/WorkspaceCommit@1"
-    },
-    {
-      "name": "sys/WorkspaceHistory@1"
-    },
-    {
-      "name": "sys/BlobGetReceipt@1"
-    },
-    {
-      "name": "sys/BlobPutReceipt@1"
-    },
-    {
-      "name": "sys/BlobGetResult@1"
-    },
-    {
-      "name": "sys/BlobPutResult@1"
-    },
-    {
-      "name": "sys/LlmToolChoice@1"
-    },
-    {
-      "name": "sys/LlmGenerateParams@1"
-    },
-    {
-      "name": "sys/LlmGenerateReceipt@1"
-    },
-    {
-      "name": "sys/WorkspaceResolveParams@1"
-    },
-    {
-      "name": "sys/WorkspaceResolveReceipt@1"
-    },
-    {
-      "name": "sys/WorkspaceReadBytesParams@1"
-    },
-    {
-      "name": "sys/WorkspaceReadBytesReceipt@1"
-    },
-    {
-      "name": "sys/WorkspaceListParams@1"
-    },
-    {
-      "name": "sys/WorkspaceListEntry@1"
-    },
-    {
-      "name": "sys/WorkspaceListReceipt@1"
-    },
-    {
-      "name": "sys/IntrospectManifestParams@1"
-    },
-    {
-      "name": "sys/IntrospectManifestReceipt@1"
-    },
-    {
-      "name": "sys/SecretRef@1"
-    },
-    {
-      "name": "sys/TextOrSecretRef@1"
-    },
-    {
-      "name": "sys/BytesOrSecretRef@1"
-    }
+    { "name": "aos.agent/SessionId@1" },
+    { "name": "aos.agent/RunId@1" },
+    { "name": "aos.agent/ToolBatchId@1" },
+    { "name": "aos.agent/ToolCallStatus@1" },
+    { "name": "aos.agent/ActiveToolBatch@1" },
+    { "name": "aos.agent/ReasoningEffort@1" },
+    { "name": "aos.agent/WorkspaceBinding@1" },
+    { "name": "aos.agent/WorkspaceApplyMode@1" },
+    { "name": "aos.agent/WorkspaceSnapshot@1" },
+    { "name": "aos.agent/WorkspaceSnapshotReady@1" },
+    { "name": "aos.agent/SessionConfig@1" },
+    { "name": "aos.agent/RunConfig@1" },
+    { "name": "aos.agent/SessionLifecycle@1" },
+    { "name": "aos.agent/HostCommand@1" },
+    { "name": "aos.agent/LlmToolCall@1" },
+    { "name": "aos.agent/LlmToolCallList@1" },
+    { "name": "aos.agent/SessionIngressKind@1" },
+    { "name": "aos.agent/SessionIngress@1" },
+    { "name": "aos.agent/PendingIntent@1" },
+    { "name": "aos.agent/SessionState@1" },
+    { "name": "aos.agent/SessionNoop@1" },
+    { "name": "sys/SecretRef@1" },
+    { "name": "sys/TextOrSecretRef@1" },
+    { "name": "sys/BytesOrSecretRef@1" },
+    { "name": "sys/EffectReceiptEnvelope@1" },
+    { "name": "sys/EffectReceiptRejected@1" },
+    { "name": "sys/EffectStreamFrame@1" },
+    { "name": "demiurge/ToolCallParams@1" },
+    { "name": "demiurge/ToolCallRequested@1" },
+    { "name": "demiurge/PendingToolStage@1" },
+    { "name": "demiurge/PendingToolCall@1" },
+    { "name": "demiurge/State@1" },
+    { "name": "demiurge/WorkflowEvent@1" },
+    { "name": "sys/WorkspaceName@1" },
+    { "name": "sys/WorkspaceHistory@1" },
+    { "name": "sys/WorkspaceCommitMeta@1" },
+    { "name": "sys/WorkspaceCommit@1" },
+    { "name": "sys/WorkspaceResolveParams@1" },
+    { "name": "sys/WorkspaceResolveReceipt@1" },
+    { "name": "sys/WorkspaceReadRefParams@1" },
+    { "name": "sys/WorkspaceRefEntry@1" },
+    { "name": "sys/WorkspaceReadRefReceipt@1" },
+    { "name": "sys/WorkspaceReadBytesParams@1" },
+    { "name": "sys/WorkspaceReadBytesReceipt@1" },
+    { "name": "sys/IntrospectManifestParams@1" },
+    { "name": "sys/IntrospectManifestReceipt@1" }
   ],
   "modules": [
-    {
-      "name": "demiurge/Demiurge@1"
-    },
-    {
-      "name": "sys/CapEnforceLlmBasic@1"
-    },
-    {
-      "name": "sys/CapEnforceWorkspace@1"
-    },
-    {
-      "name": "sys/Workspace@1"
-    }
-  ],
-  "plans": [
-    {
-      "name": "demiurge/chat_plan@1"
-    },
-    {
-      "name": "demiurge/tool_plan@1"
-    },
-    {
-      "name": "demiurge/tool_registry_plan@1"
-    }
+    { "name": "demiurge/Demiurge@1" },
+    { "name": "sys/Workspace@1" },
+    { "name": "sys/CapEnforceWorkspace@1" },
+    { "name": "sys/CapEnforceLlmBasic@1" }
   ],
   "caps": [
-    {
-      "name": "demiurge/llm_basic@1"
-    },
-    {
-      "name": "demiurge/blob@1"
-    },
-    {
-      "name": "sys/query@1"
-    },
-    {
-      "name": "sys/workspace@1"
-    }
+    { "name": "sys/query@1" },
+    { "name": "sys/workspace@1" },
+    { "name": "sys/llm.basic@1" }
   ],
-  "policies": [
-    {
-      "name": "demiurge/llm_policy@1"
-    }
-  ],
+  "policies": [{ "name": "demiurge/session_policy@1" }],
   "secrets": [
-    {
-      "name": "llm/api@1"
-    }
+    { "name": "llm/openai_api@1" },
+    { "name": "llm/anthropic_api@1" }
   ],
   "defaults": {
-    "policy": "demiurge/llm_policy@1",
+    "policy": "demiurge/session_policy@1",
     "cap_grants": [
-      {
-        "name": "cap_llm",
-        "cap": "demiurge/llm_basic@1",
-        "params": {
-          "record": {
-            "models": {
-              "set": [
-                {
-                  "text": "gpt-5.2"
-                }
-              ]
-            },
-            "max_tokens": {
-              "nat": 2048
-            }
-          }
-        }
-      },
       {
         "name": "cap_query",
         "cap": "sys/query@1",
@@ -226,106 +81,67 @@
         "params": {
           "record": {
             "workspaces": {
-              "list": [
-                {
-                  "text": "demiurge"
-                }
-              ]
+              "list": [{ "text": "demiurge" }]
             },
             "ops": {
-              "set": [
-                {
-                  "text": "resolve"
-                },
-                {
-                  "text": "list"
-                },
-                {
-                  "text": "read"
-                }
-              ]
+              "set": [{ "text": "resolve" }, { "text": "read" }]
             }
           }
         }
       },
       {
-        "name": "blob_grant",
-        "cap": "demiurge/blob@1",
+        "name": "llm",
+        "cap": "sys/llm.basic@1",
         "params": {
-          "record": {}
+          "record": {
+            "models": {
+              "set": [
+                { "text": "gpt-5.2" },
+                { "text": "gpt-5-mini" },
+                { "text": "gpt-5.2-codex" },
+                { "text": "claude-sonnet-4-5" },
+                { "text": "gpt-mock" }
+              ]
+            },
+            "max_tokens": { "nat": 4096 }
+          }
         }
       }
     ]
   },
-  "module_bindings": {
-    "demiurge/Demiurge@1": {
-      "slots": {
-        "blob": "blob_grant"
-      }
-    }
-  },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
-        "event": "demiurge/ChatEvent@1",
-        "reducer": "demiurge/Demiurge@1",
-        "key_field": "$value.chat_id"
+        "event": "aos.agent/SessionIngress@1",
+        "module": "demiurge/Demiurge@1",
+        "key_field": "session_id"
       },
       {
-        "event": "sys/BlobGetResult@1",
-        "reducer": "demiurge/Demiurge@1"
-      },
-      {
-        "event": "sys/BlobPutResult@1",
-        "reducer": "demiurge/Demiurge@1"
+        "event": "demiurge/ToolCallRequested@1",
+        "module": "demiurge/Demiurge@1",
+        "key_field": "session_id"
       },
       {
         "event": "sys/WorkspaceCommit@1",
-        "reducer": "sys/Workspace@1",
+        "module": "sys/Workspace@1",
         "key_field": "workspace"
       }
     ],
     "inboxes": []
   },
-  "triggers": [
-    {
-      "event": "demiurge/ChatRequest@1",
-      "plan": "demiurge/chat_plan@1",
-      "correlate_by": "request_id"
-    },
-    {
-      "event": "demiurge/ToolCallRequested@1",
-      "plan": "demiurge/tool_plan@1",
-      "correlate_by": "request_id"
-    },
-    {
-      "event": "demiurge/ToolRegistryScanRequested@1",
-      "plan": "demiurge/tool_registry_plan@1",
-      "correlate_by": "request_id"
+  "module_bindings": {
+    "demiurge/Demiurge@1": {
+      "slots": {
+        "llm": "llm",
+        "query": "cap_query",
+        "workspace": "cap_workspace"
+      }
     }
-  ],
-  "air_version": "1",
+  },
   "effects": [
-    {
-      "name": "sys/llm.generate@1"
-    },
-    {
-      "name": "sys/blob.get@1"
-    },
-    {
-      "name": "sys/blob.put@1"
-    },
-    {
-      "name": "sys/workspace.resolve@1"
-    },
-    {
-      "name": "sys/workspace.list@1"
-    },
-    {
-      "name": "sys/workspace.read_bytes@1"
-    },
-    {
-      "name": "sys/introspect.manifest@1"
-    }
+    { "name": "sys/llm.generate@1" },
+    { "name": "sys/workspace.resolve@1" },
+    { "name": "sys/workspace.read_bytes@1" },
+    { "name": "sys/introspect.manifest@1" }
   ]
 }

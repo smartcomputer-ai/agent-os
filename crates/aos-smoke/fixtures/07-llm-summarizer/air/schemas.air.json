@@ -1,0 +1,44 @@
+[
+  {
+    "$kind": "defschema",
+    "name": "demo/LlmSummarizerPc@1",
+    "type": {
+      "variant": {
+        "Idle": { "unit": {} },
+        "Fetching": { "unit": {} },
+        "Summarizing": { "unit": {} },
+        "Done": { "unit": {} }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/LlmSummarizerState@1",
+    "type": {
+      "record": {
+        "pc": { "ref": "demo/LlmSummarizerPc@1" },
+        "next_request_id": { "nat": {} },
+        "pending_request": { "option": { "nat": {} } },
+        "last_summary": { "option": { "text": {} } },
+        "last_tokens_prompt": { "option": { "nat": {} } },
+        "last_tokens_completion": { "option": { "nat": {} } },
+        "last_cost_millis": { "option": { "nat": {} } }
+      }
+    }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/LlmSummarizerStart@1",
+    "type": { "record": { "url": { "text": {} } } }
+  },
+  {
+    "$kind": "defschema",
+    "name": "demo/LlmSummarizerEvent@1",
+    "type": {
+      "variant": {
+        "Start": { "ref": "demo/LlmSummarizerStart@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
+      }
+    }
+  }
+]

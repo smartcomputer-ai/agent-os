@@ -1,0 +1,29 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "aos.agent/SessionWorkflow@1",
+    "module_kind": "workflow",
+    "key_schema": "aos.agent/SessionId@1",
+    "abi": {
+      "workflow": {
+        "state": "aos.agent/SessionState@1",
+        "event": "aos.agent/SessionWorkflowEvent@1",
+        "effects_emitted": ["llm.generate"],
+        "cap_slots": {
+          "llm": "llm.basic"
+        }
+      }
+    }
+  },
+  {
+    "$kind": "defmodule",
+    "name": "aos.agent/SessionEventEcho@1",
+    "module_kind": "pure",
+    "abi": {
+      "pure": {
+        "input": "aos.agent/SessionWorkflowEvent@1",
+        "output": "aos.agent/SessionWorkflowEvent@1"
+      }
+    }
+  }
+]

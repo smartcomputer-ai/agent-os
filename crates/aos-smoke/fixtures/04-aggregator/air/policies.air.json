@@ -1,0 +1,17 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/http-aggregate-policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "http.request",
+          "origin_kind": "workflow",
+          "origin_name": "demo/Aggregator@1"
+        },
+        "decision": "allow"
+      },
+      { "when": {}, "decision": "deny" }
+    ]
+  }
+]

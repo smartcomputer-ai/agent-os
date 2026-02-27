@@ -1,0 +1,17 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/FetchNotify@1",
+    "module_kind": "workflow",
+    "abi": {
+      "workflow": {
+        "state": "demo/FetchNotifyState@1",
+        "event": "demo/FetchNotifyEvent@1",
+        "effects_emitted": ["http.request"],
+        "cap_slots": {
+          "default": "http.out"
+        }
+      }
+    }
+  }
+]

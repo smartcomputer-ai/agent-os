@@ -23,7 +23,6 @@
           { "$ref": "#/$defs/set_defaults" },
           { "$ref": "#/$defs/set_routing_events" },
           { "$ref": "#/$defs/set_routing_inboxes" },
-          { "$ref": "#/$defs/set_triggers" },
           { "$ref": "#/$defs/set_module_bindings" },
           { "$ref": "#/$defs/set_secrets" }
         ]
@@ -35,7 +34,7 @@
 
   "$defs": {
     "node_json": {
-      "description": "Authoring form of any AIR node (defschema, defmodule, defplan, defeffect, defcap, defpolicy, defsecret). Structural validation happens in the loader; patch schema only checks presence and basic typing.",
+      "description": "Authoring form of any AIR node (defschema, defmodule, defeffect, defcap, defpolicy, defsecret). Structural validation happens in the loader; patch schema only checks presence and basic typing.",
       "type": "object",
       "minProperties": 1
     },
@@ -169,21 +168,21 @@
           "type": "object",
           "properties": {
             "pre_hash": { "$ref": "common.schema.json#/$defs/Hash" },
-            "events": {
+            "subscriptions": {
               "type": "array",
               "items": {
                 "type": "object",
                 "properties": {
                   "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-                  "reducer": { "$ref": "common.schema.json#/$defs/Name" },
+                  "module": { "$ref": "common.schema.json#/$defs/Name" },
                   "key_field": { "type": "string" }
                 },
-                "required": ["event","reducer"],
+                "required": ["event","module"],
                 "additionalProperties": false
               }
             }
           },
-          "required": ["pre_hash","events"],
+          "required": ["pre_hash","subscriptions"],
           "additionalProperties": false
         }
       },
@@ -204,9 +203,9 @@
                 "type": "object",
                 "properties": {
                   "source": { "type": "string" },
-                  "reducer": { "$ref": "common.schema.json#/$defs/Name" }
+                  "workflow": { "$ref": "common.schema.json#/$defs/Name" }
                 },
-                "required": ["source","reducer"],
+                "required": ["source","workflow"],
                 "additionalProperties": false
               }
             }
@@ -216,35 +215,6 @@
         }
       },
       "required": ["set_routing_inboxes"],
-      "additionalProperties": false
-    },
-
-    "set_triggers": {
-      "type": "object",
-      "properties": {
-        "set_triggers": {
-          "type": "object",
-          "properties": {
-            "pre_hash": { "$ref": "common.schema.json#/$defs/Hash" },
-            "triggers": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-                  "plan": { "$ref": "common.schema.json#/$defs/Name" },
-                  "correlate_by": { "type": "string" }
-                },
-                "required": ["event","plan"],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": ["pre_hash","triggers"],
-          "additionalProperties": false
-        }
-      },
-      "required": ["set_triggers"],
       "additionalProperties": false
     },
 
@@ -317,10 +287,6 @@
                           "allowed_caps": {
                             "type": "array",
                             "items": { "$ref": "common.schema.json#/$defs/CapGrantName" }
-                          },
-                          "allowed_plans": {
-                            "type": "array",
-                            "items": { "$ref": "common.schema.json#/$defs/Name" }
                           }
                         },
                         "additionalProperties": false

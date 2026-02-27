@@ -1,0 +1,91 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    {
+      "name": "demo/AggregatorPc@1"
+    },
+    {
+      "name": "demo/AggregatorState@1"
+    },
+    {
+      "name": "demo/AggregatorStart@1"
+    },
+    {
+      "name": "demo/AggregatorEvent@1"
+    },
+    {
+      "name": "demo/AggregationTarget@1"
+    },
+    {
+      "name": "demo/AggregateResponse@1"
+    },
+    {
+      "name": "sys/EffectReceiptEnvelope@1"
+    },
+    {
+      "name": "sys/HttpRequestParams@1"
+    },
+    {
+      "name": "sys/HttpRequestReceipt@1"
+    }
+  ],
+  "modules": [
+    {
+      "name": "demo/Aggregator@1"
+    },
+    {
+      "name": "sys/CapEnforceHttpOut@1"
+    }
+  ],
+  "effects": [
+    {
+      "name": "sys/http.request@1"
+    }
+  ],
+  "caps": [
+    {
+      "name": "demo/http_aggregate_cap@1"
+    }
+  ],
+  "policies": [
+    {
+      "name": "demo/http-aggregate-policy@1"
+    }
+  ],
+  "defaults": {
+    "policy": "demo/http-aggregate-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_http_aggregate",
+        "cap": "demo/http_aggregate_cap@1",
+        "params": {
+          "record": {
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "methods": {
+              "set": [
+                {
+                  "text": "GET"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/AggregatorEvent@1",
+        "module": "demo/Aggregator@1"
+      }
+    ]
+  }
+}

@@ -145,14 +145,14 @@ export function stateGet(
   path: StateGetPath,
   query?: StateGetQuery,
 ): Promise<StateGetResponse> {
-  return apiRequestJson("get", "/api/state/{reducer}", {
+  return apiRequestJson("get", "/api/state/{workflow}", {
     pathParams: path,
     query,
   });
 }
 
 export function stateCells(path: StateCellsPath): Promise<StateCellsResponse> {
-  return apiRequestJson("get", "/api/state/{reducer}/cells", {
+  return apiRequestJson("get", "/api/state/{workflow}/cells", {
     pathParams: path,
   });
 }

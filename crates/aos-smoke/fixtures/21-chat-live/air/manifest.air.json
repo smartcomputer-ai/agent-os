@@ -1,0 +1,66 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    { "name": "demo/RunOutput@1" },
+    { "name": "demo/RunRequested@1" },
+    { "name": "demo/RunResult@1" },
+    { "name": "demo/LiveEvent@1" },
+    { "name": "demo/LiveState@1" },
+    { "name": "sys/EffectReceiptEnvelope@1" },
+    { "name": "sys/LlmGenerateParams@1" },
+    { "name": "sys/LlmGenerateReceipt@1" },
+    { "name": "sys/LlmToolChoice@1" },
+    { "name": "sys/SecretRef@1" },
+    { "name": "sys/TextOrSecretRef@1" },
+    { "name": "sys/BytesOrSecretRef@1" }
+  ],
+  "modules": [
+    { "name": "demo/LiveChat@1" },
+    { "name": "sys/CapEnforceLlmBasic@1" }
+  ],
+  "caps": [
+    { "name": "demo/live_llm_basic@1" }
+  ],
+  "policies": [
+    { "name": "demo/live-llm-policy@1" }
+  ],
+  "secrets": [
+    { "name": "llm/openai_api@1" },
+    { "name": "llm/anthropic_api@1" }
+  ],
+  "defaults": {
+    "policy": "demo/live-llm-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_llm",
+        "cap": "demo/live_llm_basic@1",
+        "params": {
+          "record": {
+            "models": {
+              "set": [
+                { "text": "gpt-5.2" },
+                { "text": "gpt-5-mini" },
+                { "text": "gpt-5.2-codex" },
+                { "text": "claude-sonnet-4-5" }
+              ]
+            },
+            "max_tokens": { "nat": 500000 }
+          }
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/LiveEvent@1",
+        "module": "demo/LiveChat@1"
+      }
+    ],
+    "inboxes": []
+  },
+  "effects": [
+    { "name": "sys/llm.generate@1" }
+  ]
+}

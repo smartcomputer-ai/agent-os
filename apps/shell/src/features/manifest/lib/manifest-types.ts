@@ -9,30 +9,23 @@ export interface NamedRef {
   hash?: string;
 }
 
-/** Event routing rule: event schema → reducer module */
-export interface RoutingEvent {
+/** Routing subscription: event schema → workflow module */
+export interface RoutingSubscription {
   event: string;
-  reducer: string;
+  module: string;
   key_field?: string;
 }
 
-/** Inbox routing: external source → reducer */
+/** Inbox routing: external source → workflow */
 export interface RoutingInbox {
   source: string;
-  reducer: string;
+  workflow: string;
 }
 
 /** Routing configuration */
 export interface Routing {
-  events: RoutingEvent[];
+  subscriptions: RoutingSubscription[];
   inboxes: RoutingInbox[];
-}
-
-/** Plan trigger: event → plan with optional correlation */
-export interface Trigger {
-  event: string;
-  plan: string;
-  correlate_by?: string;
 }
 
 /** Capability grant with instantiated params */
@@ -61,7 +54,6 @@ export interface Manifest {
   // Definition catalogs
   schemas: NamedRef[];
   modules: NamedRef[];
-  plans: NamedRef[];
   effects: NamedRef[];
   caps: NamedRef[];
   policies: NamedRef[];
@@ -73,15 +65,14 @@ export interface Manifest {
 
   // Event flow
   routing?: Routing;
-  triggers?: Trigger[];
 }
 
 // ============================================
 // Enriched types (with fetched def details)
 // ============================================
 
-/** Module ABI for reducers */
-export interface ReducerAbi {
+/** Module ABI for workflows */
+export interface WorkflowAbi {
   state: string;
   event: string;
   context?: string;
@@ -101,43 +92,13 @@ export interface PureAbi {
 export interface ModuleDef {
   $kind: "defmodule";
   name: string;
-  module_kind: "reducer" | "pure";
+  module_kind: "workflow" | "pure";
   wasm_hash?: string;
   key_schema?: string;
   abi: {
-    reducer?: ReducerAbi;
+    workflow?: WorkflowAbi;
     pure?: PureAbi;
   };
-}
-
-/** Plan step (simplified) */
-export interface PlanStep {
-  id: string;
-  op: "emit_effect" | "await_receipt" | "raise_event" | "await_event" | "assign" | "end";
-  kind?: string;
-  event?: string;
-  cap?: string;
-}
-
-/** Plan edge */
-export interface PlanEdge {
-  from: string;
-  to: string;
-  when?: unknown;
-}
-
-/** Plan definition */
-export interface PlanDef {
-  $kind: "defplan";
-  name: string;
-  input: string;
-  output?: string;
-  locals?: Record<string, string>;
-  steps: PlanStep[];
-  edges: PlanEdge[];
-  required_caps?: string[];
-  allowed_effects?: string[];
-  invariants?: unknown[];
 }
 
 // ============================================
@@ -161,22 +122,13 @@ export function getNameWithoutVersion(name: string): string {
   return atIndex > 0 ? name.slice(0, atIndex) : name;
 }
 
-/** Build a map of triggers by plan name for quick lookup */
-export function buildTriggersByPlan(triggers: Trigger[]): Map<string, Trigger> {
-  const map = new Map<string, Trigger>();
-  for (const trigger of triggers) {
-    map.set(trigger.plan, trigger);
-  }
-  return map;
-}
-
-/** Build a map of routing by reducer name */
-export function buildRoutingByReducer(routing: Routing): Map<string, RoutingEvent[]> {
-  const map = new Map<string, RoutingEvent[]>();
-  for (const event of routing.events) {
-    const existing = map.get(event.reducer) || [];
-    existing.push(event);
-    map.set(event.reducer, existing);
+/** Build a map of subscriptions by module name */
+export function buildSubscriptionsByModule(routing: Routing): Map<string, RoutingSubscription[]> {
+  const map = new Map<string, RoutingSubscription[]>();
+  for (const sub of routing.subscriptions) {
+    const existing = map.get(sub.module) || [];
+    existing.push(sub);
+    map.set(sub.module, existing);
   }
   return map;
 }

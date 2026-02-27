@@ -8,7 +8,6 @@ pub mod effects;
 pub mod manifest;
 pub mod modules;
 pub mod patch;
-pub mod plans;
 pub mod policies;
 pub mod schemas;
 
