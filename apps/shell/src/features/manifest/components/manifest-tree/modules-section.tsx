@@ -13,13 +13,13 @@ interface ModulesSectionProps {
 export function ModulesSection({ modules, routing }: ModulesSectionProps) {
   const navigate = useNavigate();
 
-  // Build routing lookup: workflow name → events routed to it
-  const routingByWorkflow = new Map<string, string[]>();
-  if (routing?.events) {
-    for (const r of routing.events) {
-      const existing = routingByWorkflow.get(r.workflow) || [];
-      existing.push(r.event);
-      routingByWorkflow.set(r.workflow, existing);
+  // Build routing lookup: module name → events routed to it
+  const routingByModule = new Map<string, string[]>();
+  if (routing?.subscriptions) {
+    for (const sub of routing.subscriptions) {
+      const existing = routingByModule.get(sub.module) || [];
+      existing.push(sub.event);
+      routingByModule.set(sub.module, existing);
     }
   }
 
@@ -50,7 +50,7 @@ export function ModulesSection({ modules, routing }: ModulesSectionProps) {
         <ModuleNode
           key={mod.name}
           name={mod.name}
-          routedEvents={routingByWorkflow.get(mod.name) || []}
+          routedEvents={routingByModule.get(mod.name) || []}
           onDefClick={handleDefClick}
         />
       ))}

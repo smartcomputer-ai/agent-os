@@ -23,6 +23,9 @@
     { "name": "aos.agent/PendingIntent@1" },
     { "name": "aos.agent/SessionState@1" },
     { "name": "aos.agent/SessionNoop@1" },
+    { "name": "sys/SecretRef@1" },
+    { "name": "sys/TextOrSecretRef@1" },
+    { "name": "sys/BytesOrSecretRef@1" },
     { "name": "sys/EffectReceiptEnvelope@1" },
     { "name": "sys/EffectReceiptRejected@1" },
     { "name": "sys/EffectStreamFrame@1" },
@@ -58,6 +61,10 @@
     { "name": "sys/llm.basic@1" }
   ],
   "policies": [{ "name": "demiurge/session_policy@1" }],
+  "secrets": [
+    { "name": "llm/openai_api@1" },
+    { "name": "llm/anthropic_api@1" }
+  ],
   "defaults": {
     "policy": "demiurge/session_policy@1",
     "cap_grants": [

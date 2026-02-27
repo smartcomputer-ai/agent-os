@@ -6,7 +6,6 @@
 export type ApiDefKind =
   | "defschema"
   | "defmodule"
-  | "defplan"
   | "defeffect"
   | "defcap"
   | "defpolicy";
@@ -15,7 +14,6 @@ export type ApiDefKind =
 export type DefKind =
   | "schema"
   | "module"
-  | "plan"
   | "effect"
   | "cap"
   | "policy";
@@ -24,7 +22,6 @@ export type DefKind =
 export const API_DEF_KINDS: ApiDefKind[] = [
   "defschema",
   "defmodule",
-  "defplan",
   "defeffect",
   "defcap",
   "defpolicy",
@@ -34,7 +31,6 @@ export const API_DEF_KINDS: ApiDefKind[] = [
 export const DEF_KINDS: DefKind[] = [
   "schema",
   "module",
-  "plan",
   "effect",
   "cap",
   "policy",
@@ -62,36 +58,12 @@ export const KIND_STYLES: Record<string, string> = {
   defschema: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
   module: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
   defmodule: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
-  plan: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
-  defplan: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
   effect: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20",
   defeffect: "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20",
   cap: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20",
   defcap: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20",
   policy: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
   defpolicy: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
-};
-
-/** Plan step operations */
-export type PlanStepOp =
-  | "raise_event"
-  | "emit_effect"
-  | "await_receipt"
-  | "await_event"
-  | "assign"
-  | "end";
-
-export const STEP_OP_STYLES: Record<PlanStepOp, string> = {
-  raise_event:
-    "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  emit_effect:
-    "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
-  await_receipt:
-    "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
-  await_event:
-    "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
-  assign: "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20",
-  end: "bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border-zinc-500/20",
 };
 
 /** Base interface for all defs */
@@ -129,41 +101,6 @@ export interface ModuleDef extends BaseDef {
   };
 }
 
-/** Plan step */
-export interface PlanStep {
-  id: string;
-  op: PlanStepOp;
-  kind?: string;
-  event?: string;
-  params?: unknown;
-  cap?: string;
-  bind?: unknown;
-  for?: unknown;
-  expr?: unknown;
-  var?: string;
-  value?: unknown;
-}
-
-/** Plan edge */
-export interface PlanEdge {
-  from: string;
-  to: string;
-  when?: unknown;
-}
-
-/** Plan definition */
-export interface PlanDef extends BaseDef {
-  $kind: "defplan";
-  input: string;
-  output?: string;
-  locals?: Record<string, string>;
-  steps: PlanStep[];
-  edges: PlanEdge[];
-  required_caps?: string[];
-  allowed_effects?: string[];
-  invariants?: unknown[];
-}
-
 /** Effect definition */
 export interface EffectDef extends BaseDef {
   $kind: "defeffect";
@@ -171,7 +108,7 @@ export interface EffectDef extends BaseDef {
   params_schema: string;
   receipt_schema: string;
   cap_type: string;
-  origin_scope?: "workflow" | "plan" | "both";
+  origin_scope?: "workflow";
 }
 
 /** Capability definition */
@@ -190,7 +127,7 @@ export interface PolicyRule {
     effect_kind?: string;
     cap_name?: string;
     cap_type?: string;
-    origin_kind?: "plan" | "workflow";
+    origin_kind?: "workflow" | "system" | "governance";
     origin_name?: string;
   };
   decision: "allow" | "deny";
@@ -205,20 +142,9 @@ export interface PolicyDef extends BaseDef {
 export type AnyDef =
   | SchemaDef
   | ModuleDef
-  | PlanDef
   | EffectDef
   | CapDef
   | PolicyDef;
-
-/** Type guard for plan def */
-export function isPlanDef(def: unknown): def is PlanDef {
-  return (
-    typeof def === "object" &&
-    def !== null &&
-    "$kind" in def &&
-    (def as BaseDef).$kind === "defplan"
-  );
-}
 
 /** Type guard for module def */
 export function isModuleDef(def: unknown): def is ModuleDef {
@@ -274,7 +200,6 @@ export function isPolicyDef(def: unknown): def is PolicyDef {
 export const API_KIND_TO_DEF_KIND: Record<string, string> = {
   schema: "defschema",
   module: "defmodule",
-  plan: "defplan",
   effect: "defeffect",
   cap: "defcap",
   policy: "defpolicy",
@@ -284,13 +209,11 @@ export const API_KIND_TO_DEF_KIND: Record<string, string> = {
 export const DEF_KIND_LABELS: Record<string, string> = {
   defschema: "Schema",
   defmodule: "Module",
-  defplan: "Plan",
   defeffect: "Effect",
   defcap: "Capability",
   defpolicy: "Policy",
   schema: "Schema",
   module: "Module",
-  plan: "Plan",
   effect: "Effect",
   cap: "Capability",
   policy: "Policy",

@@ -1,4 +1,4 @@
-import { useParams, Navigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,11 +29,6 @@ import { Braces, Copy, Hash, Info } from "lucide-react";
 
 export function DefDetailPage() {
   const { kind, name } = useParams();
-
-  // Redirect plans to the plan detail page
-  if (kind === "plan" && name) {
-    return <Navigate to={`/manifest/plans/${encodeURIComponent(name)}`} replace />;
-  }
 
   if (!kind || !name) {
     return (

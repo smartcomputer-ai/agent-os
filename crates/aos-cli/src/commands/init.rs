@@ -39,8 +39,8 @@ pub struct InitArgs {
     pub sync_force: bool,
 
     /// Start from scratch by deleting <store>/.aos before initializing
-    #[arg(long)]
-    pub fresh: bool,
+    #[arg(long, alias = "fresh")]
+    pub reset: bool,
 }
 
 pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
@@ -50,6 +50,14 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
     let store_root = resolve_opt_path(&world_root, opts.store.as_deref(), "");
     let modules_dir = world_root.join("modules");
     let store_dir = store_root.join(".aos");
+
+    if store_dir.exists() && !args.reset {
+        anyhow::bail!(
+            "world already initialized at '{}' (found '{}'); rerun with '--reset' to reinitialize",
+            world_root.display(),
+            store_dir.display()
+        );
+    }
 
     let any_scoped =
         args.dirs || args.manifest || args.manifest_force || args.sync || args.sync_force;
@@ -82,7 +90,7 @@ pub fn cmd_init(opts: &WorldOpts, args: &InitArgs) -> Result<()> {
         workflow_root_status
     };
     let modules_status = init_dir(&modules_dir, do_modules_dir)?;
-    let store_was_reset = if args.fresh {
+    let store_was_reset = if args.reset {
         reset_store_dir(&store_dir)?
     } else {
         false

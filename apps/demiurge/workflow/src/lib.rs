@@ -5,7 +5,8 @@ extern crate alloc;
 
 use aos_agent_sdk::{
     EffectReceiptRejected, EffectStreamFrameEnvelope, SessionEffectCommand, SessionId, SessionIngress,
-    SessionIngressKind, SessionReduceError, SessionRuntimeLimits, SessionState,
+    SessionIngressKind, SessionReduceError, SessionRuntimeLimits, SessionState, SysLlmGenerateParams,
+    SysLlmRuntimeArgs,
     SessionWorkflowEvent, ToolBatchId, ToolCallStatus, apply_session_workflow_event_with_catalog_and_limits,
 };
 use aos_wasm_sdk::{EffectReceiptEnvelope, ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
@@ -27,6 +28,34 @@ const KNOWN_MODELS: &[&str] = &[
 const RUNTIME_LIMITS: SessionRuntimeLimits = SessionRuntimeLimits {
     max_pending_intents: Some(64),
 };
+
+const OPENAI_SECRET_ALIAS: &str = "llm/openai_api";
+const ANTHROPIC_SECRET_ALIAS: &str = "llm/anthropic_api";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct SecretRef {
+    alias: String,
+    version: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "$tag", content = "$value")]
+enum TextOrSecretRef {
+    #[serde(rename = "literal")]
+    Literal(String),
+    #[serde(rename = "secret")]
+    Secret(SecretRef),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct LlmGenerateParamsWithSecret {
+    correlation_id: Option<String>,
+    provider: String,
+    model: String,
+    message_refs: Vec<String>,
+    runtime: SysLlmRuntimeArgs,
+    api_key: Option<TextOrSecretRef>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct DemiurgeState {
@@ -184,10 +213,45 @@ fn emit_session_effects(ctx: &mut WorkflowCtx<DemiurgeState, Value>, effects: Ve
         match effect {
             SessionEffectCommand::LlmGenerate {
                 params, cap_slot, ..
-            } => ctx
-                .effects()
-                .emit_raw("llm.generate", &params, cap_slot.as_deref()),
+            } => {
+                let params = llm_params_with_secret(params);
+                ctx.effects()
+                    .emit_raw("llm.generate", &params, cap_slot.as_deref())
+            }
         }
+    }
+}
+
+fn llm_params_with_secret(params: SysLlmGenerateParams) -> LlmGenerateParamsWithSecret {
+    let api_key = params
+        .api_key
+        .map(TextOrSecretRef::Literal)
+        .or_else(|| {
+            llm_provider_secret_alias(&params.provider).map(|alias| {
+                TextOrSecretRef::Secret(SecretRef {
+                    alias: alias.into(),
+                    version: 1,
+                })
+            })
+        });
+
+    LlmGenerateParamsWithSecret {
+        correlation_id: params.correlation_id,
+        provider: params.provider,
+        model: params.model,
+        message_refs: params.message_refs,
+        runtime: params.runtime,
+        api_key,
+    }
+}
+
+fn llm_provider_secret_alias(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai-responses" | "openai-chat" | "openai-compatible" | "openai" => {
+            Some(OPENAI_SECRET_ALIAS)
+        }
+        "anthropic" => Some(ANTHROPIC_SECRET_ALIAS),
+        _ => None,
     }
 }
 
@@ -465,5 +529,62 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
             ReduceError::new("workspace tool catalog bytes missing for validation")
         }
         SessionReduceError::TooManyPendingIntents => ReduceError::new("too many pending intents"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::string::ToString;
+    use alloc::vec;
+
+    fn make_params(provider: &str, api_key: Option<&str>) -> SysLlmGenerateParams {
+        SysLlmGenerateParams {
+            correlation_id: Some("run-1".into()),
+            provider: provider.into(),
+            model: "gpt-5.2".into(),
+            message_refs: vec!["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into()],
+            runtime: SysLlmRuntimeArgs::default(),
+            api_key: api_key.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn openai_provider_maps_to_secret_ref() {
+        let mapped = llm_params_with_secret(make_params("openai-responses", None));
+        assert_eq!(
+            mapped.api_key,
+            Some(TextOrSecretRef::Secret(SecretRef {
+                alias: OPENAI_SECRET_ALIAS.into(),
+                version: 1,
+            }))
+        );
+    }
+
+    #[test]
+    fn anthropic_provider_maps_to_secret_ref() {
+        let mapped = llm_params_with_secret(make_params("anthropic", None));
+        assert_eq!(
+            mapped.api_key,
+            Some(TextOrSecretRef::Secret(SecretRef {
+                alias: ANTHROPIC_SECRET_ALIAS.into(),
+                version: 1,
+            }))
+        );
+    }
+
+    #[test]
+    fn explicit_api_key_literal_is_preserved() {
+        let mapped = llm_params_with_secret(make_params("openai-responses", Some("literal-key")));
+        assert_eq!(
+            mapped.api_key,
+            Some(TextOrSecretRef::Literal("literal-key".into()))
+        );
+    }
+
+    #[test]
+    fn provider_without_mapping_emits_no_secret_ref() {
+        let mapped = llm_params_with_secret(make_params("mock", None));
+        assert_eq!(mapped.api_key, None);
     }
 }
