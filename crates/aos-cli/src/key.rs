@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use aos_air_types::{
     DefSchema,
-    plan_literals::SchemaIndex,
+    schema_index::SchemaIndex,
     value_normalize::{ValueNormalizeError, normalize_value_with_schema},
 };
 use aos_kernel::LoadedManifest;

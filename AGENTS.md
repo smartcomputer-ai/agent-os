@@ -97,6 +97,8 @@ Crates keep deterministic core small and effectful code at the edges:
 - Replay-or-die: run once, journal, replay from genesis, assert byte-identical snapshots.
 - Async tests: prefer `#[tokio::test(flavor = "current_thread")]` when determinism matters.
 - `aos-host` integration tests often require `--features e2e-tests`.
+- When asked how many lines of code, use `cloc $(git ls-files)`
+
 
 ## Examples Ladder
 

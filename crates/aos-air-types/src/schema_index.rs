@@ -37,24 +37,6 @@ pub enum PlanLiteralError {
     InvalidJson(String),
 }
 
-// Transitional no-op normalizers retained for legacy plan runtime call sites.
-pub fn normalize_plan_literals(
-    _plan: &mut crate::DefPlan,
-    _schemas: &SchemaIndex,
-    _effects: &crate::catalog::EffectCatalog,
-) -> Result<(), PlanLiteralError> {
-    Ok(())
-}
-
-pub fn normalize_plan_literals_with_plan_inputs(
-    _plan: &mut crate::DefPlan,
-    _schemas: &SchemaIndex,
-    _effects: &crate::catalog::EffectCatalog,
-    _plan_input_schemas: &HashMap<String, String>,
-) -> Result<(), PlanLiteralError> {
-    Ok(())
-}
-
 pub fn validate_literal(
     literal: &ValueLiteral,
     schema: &TypeExpr,

@@ -23,7 +23,7 @@ use crate::journal::{
 use crate::policy::{PolicyDecisionDetail, PolicyGate};
 use crate::secret::{SecretResolver, normalize_secret_variants};
 use aos_air_types::catalog::EffectCatalog;
-use aos_air_types::plan_literals::SchemaIndex;
+use aos_air_types::schema_index::SchemaIndex;
 
 #[derive(Default)]
 pub struct EffectQueue {
@@ -813,7 +813,7 @@ fn allowlist_contains(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_air_types::{CapType, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex};
+    use aos_air_types::{CapType, builtins, catalog::EffectCatalog, schema_index::SchemaIndex};
     use aos_effects::builtins::{
         BlobPutParams, HeaderMap, HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs,
     };

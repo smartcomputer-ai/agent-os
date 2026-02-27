@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use aos_air_types::{
     AirNode, DefCap, DefModule, DefPolicy, HashRef, Manifest, Name, NamedRef, TypeExpr,
-    TypePrimitive, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex,
+    TypePrimitive, builtins, catalog::EffectCatalog, schema_index::SchemaIndex,
 };
 use aos_cbor::Hash;
 use aos_store::Store;

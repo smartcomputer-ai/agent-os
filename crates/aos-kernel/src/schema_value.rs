@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use aos_air_exec::{Value as ExprValue, ValueKey};
-use aos_air_types::plan_literals::SchemaIndex;
+use aos_air_types::schema_index::SchemaIndex;
 use aos_air_types::{HashRef, TypeExpr, TypeMapKey, TypePrimitive};
 use serde_cbor::Value as CborValue;
 

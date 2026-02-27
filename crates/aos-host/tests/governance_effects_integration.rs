@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use aos_air_types::{
-    builtins, catalog::EffectCatalog, plan_literals::SchemaIndex, AirNode, CapEnforcer, CapGrant,
+    builtins, catalog::EffectCatalog, schema_index::SchemaIndex, AirNode, CapEnforcer, CapGrant,
     DefSchema, EmptyObject, HashRef, ManifestDefaults, NamedRef, TypeExpr, TypePrimitive,
     TypePrimitiveText,
 };

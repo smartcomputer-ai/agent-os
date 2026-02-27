@@ -2,16 +2,14 @@
 
 pub mod builtins;
 pub mod catalog;
-mod legacy_plan;
 mod model;
-pub mod plan_literals;
+pub mod schema_index;
 mod refs;
 pub mod schemas;
 pub mod typecheck;
 pub mod validate;
 pub mod value_normalize;
 
-pub use legacy_plan::*;
 pub use model::*;
 pub use refs::{HashRef, RefError, SchemaRef};
 pub use typecheck::{ValueTypeError, validate_value_literal};

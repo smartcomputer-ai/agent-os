@@ -7,7 +7,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use aos_air_types::{
     AirNode, DefCap, DefEffect, DefModule, DefPolicy, DefSchema, Manifest, Name, SecretDecl,
-    SecretEntry, TypeExpr, TypePrimitive, builtins, plan_literals::SchemaIndex,
+    SecretEntry, TypeExpr, TypePrimitive, builtins, schema_index::SchemaIndex,
     value_normalize::normalize_cbor_by_name,
 };
 use aos_cbor::{Hash, Hash as DigestHash, to_canonical_cbor};

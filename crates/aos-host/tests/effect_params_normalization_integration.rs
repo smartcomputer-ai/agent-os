@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use aos_air_types::{
-    builtins, catalog::EffectCatalog, plan_literals::SchemaIndex, DefSchema, EffectKind,
+    builtins, catalog::EffectCatalog, schema_index::SchemaIndex, DefSchema, EffectKind,
     WorkflowAbi, TypeExpr, TypeRef, TypeVariant,
 };
 

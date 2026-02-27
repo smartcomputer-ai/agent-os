@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use aos_air_types::{AirNode, HashRef, NamedRef, TypeExpr, builtins, plan_literals::SchemaIndex};
+use aos_air_types::{AirNode, HashRef, NamedRef, TypeExpr, builtins, schema_index::SchemaIndex};
 use aos_cbor::Hash;
 use aos_store::Store;
 

@@ -1,5 +1,5 @@
 use aos_air_types::catalog::EffectCatalog;
-use aos_air_types::plan_literals::SchemaIndex;
+use aos_air_types::schema_index::SchemaIndex;
 use aos_air_types::value_normalize::{ValueNormalizeError, normalize_cbor_by_name};
 use thiserror::Error;
 
