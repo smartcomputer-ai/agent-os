@@ -12,12 +12,15 @@ use crate::example_host::{ExampleHost, HarnessConfig};
 const WORKFLOW_NAME: &str = "demo/AgentSessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionWorkflowEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/20-agent-session/workflow";
+const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
 const SESSION_ID: &str = "11111111-1111-1111-1111-111111111111";
 
 pub fn run(example_root: &Path) -> Result<()> {
     assert_run_request_validation(example_root)?;
 
-    let mut host = ExampleHost::prepare_with_host_config(
+    let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
+    let import_roots = vec![sdk_air_root];
+    let mut host = ExampleHost::prepare_with_imports_and_host_config(
         HarnessConfig {
             example_root,
             assets_root: None,
@@ -25,10 +28,11 @@ pub fn run(example_root: &Path) -> Result<()> {
             event_schema: EVENT_SCHEMA,
             module_crate: MODULE_CRATE,
         },
-        HostConfig {
+        &import_roots,
+        Some(HostConfig {
             llm: None,
             ..HostConfig::default()
-        },
+        }),
     )?;
 
     println!("→ Agent Session demo");
@@ -149,7 +153,9 @@ pub fn run(example_root: &Path) -> Result<()> {
 }
 
 fn assert_run_request_validation(example_root: &Path) -> Result<()> {
-    let mut host = ExampleHost::prepare_with_host_config(
+    let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
+    let import_roots = vec![sdk_air_root];
+    let mut host = ExampleHost::prepare_with_imports_and_host_config(
         HarnessConfig {
             example_root,
             assets_root: None,
@@ -157,10 +163,11 @@ fn assert_run_request_validation(example_root: &Path) -> Result<()> {
             event_schema: EVENT_SCHEMA,
             module_crate: MODULE_CRATE,
         },
-        HostConfig {
+        &import_roots,
+        Some(HostConfig {
             llm: None,
             ..HostConfig::default()
-        },
+        }),
     )?;
 
     host.send_event(&run_requested_event_with_config(1, "openai", "gpt-5.2"))?;

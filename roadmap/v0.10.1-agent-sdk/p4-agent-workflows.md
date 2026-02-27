@@ -42,9 +42,9 @@ Completed this pass:
    - `cargo run -p aos-smoke -- agent-live` passes,
    - `cargo run -p aos-smoke -- all-agent` passes,
    - `cargo run -p aos-smoke -- all` passes.
-8. SDK schema ownership restored for `22-agent-live`:
-   - removed fixture-local `air/schemas.air.json` duplication,
-   - runner now loads `crates/aos-agent-sdk/air` as an AIR import root,
+8. SDK schema ownership restored for `20-agent-session` and `22-agent-live`:
+   - removed fixture-local `air/schemas.air.json` duplication in both fixtures,
+   - runners now load `crates/aos-agent-sdk/air` as an AIR import root,
    - `aos.agent/SessionNoop@1` published in SDK AIR schemas/manifest for validator-compatible `Noop` variants.
 
 ## Workflow Model Review (Spec-Constrained)
