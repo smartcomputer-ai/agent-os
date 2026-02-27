@@ -42,13 +42,34 @@
   "modules": [
     { "name": "demo/AgentLiveSessionWorkflow@1" },
     { "name": "sys/Workspace@1" },
-    { "name": "sys/CapEnforceWorkspace@1" }
+    { "name": "sys/CapEnforceWorkspace@1" },
+    { "name": "sys/CapEnforceLlmBasic@1" }
   ],
-  "caps": [{ "name": "demo/agent_live_workspace_cap@1" }],
+  "caps": [
+    { "name": "demo/agent_live_llm_basic@1" },
+    { "name": "demo/agent_live_workspace_cap@1" }
+  ],
   "policies": [{ "name": "demo/agent-live-workspace-policy@1" }],
   "defaults": {
     "policy": "demo/agent-live-workspace-policy@1",
     "cap_grants": [
+      {
+        "name": "llm",
+        "cap": "demo/agent_live_llm_basic@1",
+        "params": {
+          "record": {
+            "models": {
+              "set": [
+                { "text": "gpt-5.2" },
+                { "text": "gpt-5-mini" },
+                { "text": "gpt-5.2-codex" },
+                { "text": "claude-sonnet-4-5" }
+              ]
+            },
+            "max_tokens": { "nat": 4096 }
+          }
+        }
+      },
       {
         "name": "cap_workspace",
         "cap": "demo/agent_live_workspace_cap@1",
@@ -80,7 +101,15 @@
     ],
     "inboxes": []
   },
+  "module_bindings": {
+    "demo/AgentLiveSessionWorkflow@1": {
+      "slots": {
+        "llm": "llm"
+      }
+    }
+  },
   "effects": [
+    { "name": "sys/llm.generate@1" },
     { "name": "sys/workspace.resolve@1" },
     { "name": "sys/workspace.read_ref@1" },
     { "name": "sys/workspace.read_bytes@1" }

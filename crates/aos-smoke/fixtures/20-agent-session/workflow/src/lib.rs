@@ -2,7 +2,8 @@
 #![no_std]
 
 use aos_agent_sdk::{
-    SessionReduceError, SessionRuntimeLimits, SessionState, SessionWorkflowEvent,
+    SessionEffectCommand, SessionReduceError, SessionRuntimeLimits, SessionState,
+    SessionWorkflowEvent,
     apply_session_event_with_catalog_and_limits,
 };
 use aos_wasm_sdk::{ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
@@ -28,7 +29,7 @@ impl Workflow for AgentSessionWorkflow {
         event: Self::Event,
         ctx: &mut WorkflowCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
-        let _ = apply_session_event_with_catalog_and_limits(
+        let out = apply_session_event_with_catalog_and_limits(
             &mut ctx.state,
             &event,
             KNOWN_PROVIDERS,
@@ -36,6 +37,14 @@ impl Workflow for AgentSessionWorkflow {
             RUNTIME_LIMITS,
         )
         .map_err(map_reduce_error)?;
+
+        for effect in out.effects {
+            match effect {
+                SessionEffectCommand::LlmGenerate {
+                    params, ..
+                } => ctx.effects().emit_raw("llm.generate", &params, Some("llm")),
+            }
+        }
         Ok(())
     }
 }

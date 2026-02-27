@@ -1,13 +1,13 @@
 [
   {
     "$kind": "defpolicy",
-    "name": "demo/agent-live-workspace-policy@1",
+    "name": "demo/session-llm-policy@1",
     "rules": [
       {
         "when": {
           "effect_kind": "llm.generate",
           "origin_kind": "workflow",
-          "origin_name": "demo/AgentLiveSessionWorkflow@1"
+          "origin_name": "demo/AgentSessionWorkflow@1"
         },
         "decision": "allow"
       },

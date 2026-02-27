@@ -29,11 +29,39 @@
     { "name": "sys/EffectStreamFrame@1" }
   ],
   "modules": [
-    { "name": "demo/AgentSessionWorkflow@1" }
+    { "name": "demo/AgentSessionWorkflow@1" },
+    { "name": "sys/CapEnforceLlmBasic@1" }
   ],
-  "caps": [],
-  "policies": [],
-  "effects": [],
+  "caps": [
+    { "name": "demo/session_llm_basic@1" }
+  ],
+  "policies": [
+    { "name": "demo/session-llm-policy@1" }
+  ],
+  "defaults": {
+    "policy": "demo/session-llm-policy@1",
+    "cap_grants": [
+      {
+        "name": "llm",
+        "cap": "demo/session_llm_basic@1",
+        "params": {
+          "record": {
+            "models": {
+              "set": [
+                { "text": "gpt-5.2" },
+                { "text": "claude-sonnet-4-5" },
+                { "text": "gpt-4o-mini" }
+              ]
+            },
+            "max_tokens": { "nat": 4096 }
+          }
+        }
+      }
+    ]
+  },
+  "effects": [
+    { "name": "sys/llm.generate@1" }
+  ],
   "routing": {
     "subscriptions": [
       {
@@ -42,5 +70,12 @@
       }
     ],
     "inboxes": []
+  },
+  "module_bindings": {
+    "demo/AgentSessionWorkflow@1": {
+      "slots": {
+        "llm": "llm"
+      }
+    }
   }
 }

@@ -6,8 +6,8 @@
     "workflow": {
       "state": "aos.agent/SessionState@1",
       "event": "aos.agent/SessionWorkflowEvent@1",
-      "effects_emitted": [],
-      "cap_slots": {}
+      "effects_emitted": ["llm.generate"],
+      "cap_slots": { "llm": "llm.basic" }
     }
   }
 }

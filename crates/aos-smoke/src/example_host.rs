@@ -46,10 +46,25 @@ pub struct ExampleHost {
 
 impl ExampleHost {
     pub fn prepare(cfg: HarnessConfig<'_>) -> Result<Self> {
-        Self::prepare_with_imports(cfg, &[])
+        Self::prepare_with_imports_and_host_config(cfg, &[], None)
     }
 
     pub fn prepare_with_imports(cfg: HarnessConfig<'_>, import_roots: &[PathBuf]) -> Result<Self> {
+        Self::prepare_with_imports_and_host_config(cfg, import_roots, None)
+    }
+
+    pub fn prepare_with_host_config(
+        cfg: HarnessConfig<'_>,
+        host_config: HostConfig,
+    ) -> Result<Self> {
+        Self::prepare_with_imports_and_host_config(cfg, &[], Some(host_config))
+    }
+
+    pub fn prepare_with_imports_and_host_config(
+        cfg: HarnessConfig<'_>,
+        import_roots: &[PathBuf],
+        host_config_override: Option<HostConfig>,
+    ) -> Result<Self> {
         reset_journal(cfg.example_root)?;
         let wasm_bytes = util::compile_workflow(cfg.module_crate)?;
 
@@ -90,7 +105,7 @@ impl ExampleHost {
             &mut sys_module_cache,
         )?;
 
-        let host_config = HostConfig::default();
+        let host_config = host_config_override.unwrap_or_default();
         let kernel_config = util::kernel_config(cfg.example_root)?;
         let world_host = WorldHost::from_loaded_manifest(
             store.clone(),

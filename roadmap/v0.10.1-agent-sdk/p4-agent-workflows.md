@@ -32,7 +32,11 @@ Completed this pass:
 5. `22-agent-live` workspace sync path moved to host/system orchestration:
    - runner now emits `WorkspaceSnapshotReady` ingress with validated prompt/tool bytes,
    - no plan wrapper in runtime path.
-6. Verification status:
+6. `20/22` wrappers now run full reducer-output emission path:
+   - wrappers emit reducer-produced `llm.generate` effects,
+   - manifests now include explicit `module_bindings` for `llm` slot capability resolution,
+   - fixture hosts for `20/22` pin internal workflow dispatch to stub LLM adapters (`HostConfig { llm: None }`) so reducer emission remains deterministic while live tool traversal logic in `22` remains runner-driven.
+7. Verification status:
    - `cargo run -p aos-smoke -- agent-session` passes,
    - `cargo run -p aos-smoke -- chat-live` passes,
    - `cargo run -p aos-smoke -- agent-live` passes,
@@ -40,8 +44,7 @@ Completed this pass:
 
 Still open:
 
-1. Align `20/22` fixture workflow wrappers to full reducer-output emission path once their runners are moved fully receipt-driven (currently wrappers consume reducer output for compatibility with existing harness flow).
-2. Complete fixture/docs polish sweep for any remaining plan-era wording outside manifests (README/roadmap cleanup).
+1. Complete fixture/docs polish sweep for any remaining plan-era wording outside manifests (README/roadmap cleanup).
 
 ## Workflow Model Review (Spec-Constrained)
 

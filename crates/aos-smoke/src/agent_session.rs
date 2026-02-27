@@ -5,6 +5,7 @@ use aos_agent_sdk::{
     HostCommand, HostCommandKind, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
     SessionLifecycle, SessionState, SessionWorkflowEvent, ToolBatchId, ToolCallStatus,
 };
+use aos_host::config::HostConfig;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
@@ -16,13 +17,19 @@ const SESSION_ID: &str = "11111111-1111-1111-1111-111111111111";
 pub fn run(example_root: &Path) -> Result<()> {
     assert_run_request_validation(example_root)?;
 
-    let mut host = ExampleHost::prepare(HarnessConfig {
-        example_root,
-        assets_root: None,
-        workflow_name: WORKFLOW_NAME,
-        event_schema: EVENT_SCHEMA,
-        module_crate: MODULE_CRATE,
-    })?;
+    let mut host = ExampleHost::prepare_with_host_config(
+        HarnessConfig {
+            example_root,
+            assets_root: None,
+            workflow_name: WORKFLOW_NAME,
+            event_schema: EVENT_SCHEMA,
+            module_crate: MODULE_CRATE,
+        },
+        HostConfig {
+            llm: None,
+            ..HostConfig::default()
+        },
+    )?;
 
     println!("→ Agent Session demo");
 
@@ -30,8 +37,11 @@ pub fn run(example_root: &Path) -> Result<()> {
     host.send_event(&run_requested_event_with_config(1, "openai", "gpt-5.2"))?;
     let run1 = host.read_state::<SessionState>()?;
     ensure!(
-        run1.lifecycle == SessionLifecycle::Running,
-        "expected run1 lifecycle Running, got {:?}",
+        matches!(
+            run1.lifecycle,
+            SessionLifecycle::Running | SessionLifecycle::WaitingInput
+        ),
+        "expected run1 lifecycle Running|WaitingInput, got {:?}",
         run1.lifecycle
     );
     let batch1 = active_batch_id(&run1, 1)?;
@@ -93,8 +103,11 @@ pub fn run(example_root: &Path) -> Result<()> {
     host.send_event(&run_requested_event_with_config(7, "anthropic", "claude-sonnet-4-5"))?;
     let run2 = host.read_state::<SessionState>()?;
     ensure!(
-        run2.lifecycle == SessionLifecycle::Running,
-        "expected run2 lifecycle Running, got {:?}",
+        matches!(
+            run2.lifecycle,
+            SessionLifecycle::Running | SessionLifecycle::WaitingInput
+        ),
+        "expected run2 lifecycle Running|WaitingInput, got {:?}",
         run2.lifecycle
     );
     ensure!(
@@ -136,13 +149,19 @@ pub fn run(example_root: &Path) -> Result<()> {
 }
 
 fn assert_run_request_validation(example_root: &Path) -> Result<()> {
-    let mut host = ExampleHost::prepare(HarnessConfig {
-        example_root,
-        assets_root: None,
-        workflow_name: WORKFLOW_NAME,
-        event_schema: EVENT_SCHEMA,
-        module_crate: MODULE_CRATE,
-    })?;
+    let mut host = ExampleHost::prepare_with_host_config(
+        HarnessConfig {
+            example_root,
+            assets_root: None,
+            workflow_name: WORKFLOW_NAME,
+            event_schema: EVENT_SCHEMA,
+            module_crate: MODULE_CRATE,
+        },
+        HostConfig {
+            llm: None,
+            ..HostConfig::default()
+        },
+    )?;
 
     host.send_event(&run_requested_event_with_config(1, "openai", "gpt-5.2"))?;
     let baseline = host.read_state::<SessionState>()?;

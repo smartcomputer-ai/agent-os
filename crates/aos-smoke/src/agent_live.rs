@@ -15,7 +15,7 @@ use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnve
 use aos_effects::{EffectIntent, EffectKind, ReceiptStatus};
 use aos_host::adapters::llm::LlmAdapter;
 use aos_host::adapters::traits::AsyncEffectAdapter;
-use aos_host::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
+use aos_host::config::{HostConfig, LlmAdapterConfig, LlmApiKind, ProviderConfig};
 use aos_store::Store;
 use aos_sys::{WorkspaceCommit, WorkspaceCommitMeta, WorkspaceEntry, WorkspaceTree};
 use clap::ValueEnum;
@@ -90,13 +90,17 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let provider = resolve_provider(provider, model_override)?;
     let fixture_root = crate::workspace_root().join(FIXTURE_ROOT);
     let assets_root = fixture_root.join("air");
-    let mut host = ExampleHost::prepare(
+    let mut host = ExampleHost::prepare_with_host_config(
         HarnessConfig {
             example_root: &fixture_root,
             assets_root: Some(&assets_root),
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
             module_crate: MODULE_CRATE,
+        },
+        HostConfig {
+            llm: None,
+            ..HostConfig::default()
         },
     )?;
 
