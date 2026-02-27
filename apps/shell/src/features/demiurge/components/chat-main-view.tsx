@@ -3,11 +3,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
 import { ChatMessage } from "./chat-message";
 import { MessageInput } from "./message-input";
-import type { ChatState, ChatSettings } from "../types";
+import { lifecycleTag } from "../lib/message-utils";
+import type { ChatMessage as ChatMessageType, ChatSettings, SessionState } from "../types";
 
 interface ChatMainViewProps {
   chatId: string | null;
-  chatState?: ChatState;
+  sessionState?: SessionState;
+  messages: ChatMessageType[];
   isLoading: boolean;
   error?: Error | null;
   settings: ChatSettings;
@@ -15,7 +17,8 @@ interface ChatMainViewProps {
 
 export function ChatMainView({
   chatId,
-  chatState,
+  sessionState,
+  messages,
   isLoading,
   error,
   settings,
@@ -27,7 +30,7 @@ export function ChatMainView({
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [chatState?.messages]);
+  }, [messages]);
 
   // No chat selected - show welcome with floating input
   if (!chatId) {
@@ -46,7 +49,7 @@ export function ChatMainView({
             <CardContent className="p-6">
               <MessageInput
                 chatId=""
-                lastRequestId={0}
+                messages={[]}
                 settings={settings}
                 variant="floating"
                 disabled={true}
@@ -87,28 +90,28 @@ export function ChatMainView({
   }
 
   // Chat loaded - show messages + input
+  const lifecycle = lifecycleTag(sessionState?.lifecycle);
   const hasAssistantPending =
-    chatState &&
-    chatState.messages.length > 0 &&
-    chatState.messages[chatState.messages.length - 1].role.$tag === "User";
+    lifecycle === "Running" ||
+    lifecycle === "Cancelling" ||
+    (sessionState?.in_flight_effects ?? 0) > 0;
 
   return (
     <div className="h-full w-full relative">
       {/* Messages - Full viewport height */}
       <div className="absolute inset-0">
         <ScrollArea ref={scrollRef} className="h-full w-full px-4 pb-10">
-          {chatState?.messages.length === 0 ? (
+          {messages.length === 0 ? (
             <div className="text-center text-muted-foreground py-12">
               No messages yet. Start the conversation below.
             </div>
           ) : (
             <div className="space-y-3 max-w-4xl mx-auto mt-28 mb-24">
-              {chatState?.messages.map((message, index) => (
+              {messages.map((message, index) => (
                 <ChatMessage
-                  key={`${message.request_id}-${message.role.$tag}-${message.message_ref ?? "inline"}-${index}`}
-                  chatId={chatId}
+                  key={`${message.id}-${index}`}
                   message={message}
-                  isLatest={index === chatState.messages.length - 1}
+                  isLatest={index === messages.length - 1}
                 />
               ))}
               {hasAssistantPending && (
@@ -133,7 +136,7 @@ export function ChatMainView({
         <div className="max-w-4xl mx-auto pointer-events-auto">
           <MessageInput
             chatId={chatId}
-            lastRequestId={chatState?.last_request_id ?? 0}
+            messages={messages}
             settings={settings}
             variant="fixed"
             disabled={hasAssistantPending}

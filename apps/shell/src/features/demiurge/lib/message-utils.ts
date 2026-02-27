@@ -1,35 +1,35 @@
-import type { MessageBlob } from "../types";
+import type { ChatMessage, SessionLifecycle } from "../types";
 
-export function createMessageBlob(
-  text: string,
-  role: "user" | "assistant",
-): MessageBlob {
-  return {
-    role,
-    content: [{ type: "text", text }],
-  };
+export function encodeJsonBlob(value: unknown): ArrayBuffer {
+  return new TextEncoder().encode(JSON.stringify(value)).buffer;
 }
 
-export function encodeMessageBlob(blob: MessageBlob): ArrayBuffer {
-  const json = JSON.stringify(blob);
-  return new TextEncoder().encode(json).buffer;
+export function buildRunHistoryPayload(
+  messages: ChatMessage[],
+  nextUserText: string,
+): Array<Record<string, unknown>> {
+  const history = messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .map((message) => ({
+      role: message.role,
+      content: message.text,
+    }));
+
+  history.push({
+    role: "user",
+    content: nextUserText,
+  });
+
+  return history;
 }
 
-export function generateChatId(): string {
-  return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+export function generateSessionId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `session-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function formatTimestamp(ms: number | null): string {
-  if (!ms) return "Unknown";
-  const date = new Date(ms);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
+export function lifecycleTag(lifecycle: SessionLifecycle | undefined): string {
+  return lifecycle?.$tag ?? "Idle";
 }

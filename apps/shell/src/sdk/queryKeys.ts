@@ -55,4 +55,5 @@ export const queryKeys = {
     ["state_get", "demiurge/Demiurge@1", { key: chatId }] as const,
   chatList: () =>
     ["state_cells", "demiurge/Demiurge@1"] as const,
+  chatTranscript: (chatId: string) => ["chat_transcript", chatId] as const,
 };
