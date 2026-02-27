@@ -67,7 +67,29 @@ impl ExampleHost {
     ) -> Result<Self> {
         reset_journal(cfg.example_root)?;
         let wasm_bytes = util::compile_workflow(cfg.module_crate)?;
+        Self::prepare_with_wasm_bytes(cfg, import_roots, host_config_override, wasm_bytes)
+    }
 
+    pub fn prepare_with_imports_host_config_and_module_bin(
+        cfg: HarnessConfig<'_>,
+        import_roots: &[PathBuf],
+        host_config_override: Option<HostConfig>,
+        package: &str,
+        bin: &str,
+    ) -> Result<Self> {
+        reset_journal(cfg.example_root)?;
+        let cache_dir = cfg.example_root.join(".aos").join("cache").join("modules");
+        let wasm_bytes = util::compile_wasm_bin(crate::workspace_root(), package, bin, &cache_dir)
+            .with_context(|| format!("compile {package} --bin {bin} for workflow patch"))?;
+        Self::prepare_with_wasm_bytes(cfg, import_roots, host_config_override, wasm_bytes)
+    }
+
+    fn prepare_with_wasm_bytes(
+        cfg: HarnessConfig<'_>,
+        import_roots: &[PathBuf],
+        host_config_override: Option<HostConfig>,
+        wasm_bytes: Vec<u8>,
+    ) -> Result<Self> {
         let store = Arc::new(FsStore::open(cfg.example_root).context("open FsStore")?);
         let wasm_hash = store
             .put_blob(&wasm_bytes)
@@ -168,9 +190,31 @@ impl ExampleHost {
     }
 
     pub fn read_state<T: DeserializeOwned>(&self) -> Result<T> {
-        self.host
-            .state(&self.workflow_name)
-            .context("read workflow state")
+        if let Ok(state) = self.host.state(&self.workflow_name) {
+            return Ok(state);
+        }
+        self.read_single_keyed_state()
+    }
+
+    pub fn single_keyed_cell_key(&self) -> Result<Vec<u8>> {
+        let root = self
+            .host
+            .kernel()
+            .workflow_index_root(&self.workflow_name)
+            .ok_or_else(|| anyhow!("missing keyed index for workflow '{}'", self.workflow_name))?;
+        let index = CellIndex::new(self.store.as_ref());
+        let mut iter = index.iter(root);
+        let first = iter
+            .next()
+            .transpose()?
+            .ok_or_else(|| anyhow!("missing keyed state for workflow '{}'", self.workflow_name))?;
+        if iter.next().transpose()?.is_some() {
+            anyhow::bail!(
+                "workflow '{}' has multiple keyed cells; expected exactly one",
+                self.workflow_name
+            );
+        }
+        Ok(first.key_bytes)
     }
 
     pub fn kernel_mut(&mut self) -> &mut Kernel<FsStore> {
@@ -229,6 +273,18 @@ impl ExampleHost {
             keyed_workflow: keyed_workflow.map(str::to_string),
             keyed_states,
         })
+    }
+}
+
+impl ExampleHost {
+    fn read_single_keyed_state<T: DeserializeOwned>(&self) -> Result<T> {
+        let key = self.single_keyed_cell_key()?;
+        let bytes = self
+            .host
+            .kernel()
+            .workflow_state_bytes(&self.workflow_name, Some(&key))?
+            .ok_or_else(|| anyhow!("missing keyed state for workflow '{}'", self.workflow_name))?;
+        serde_cbor::from_slice(&bytes).context("decode keyed workflow state")
     }
 }
 

@@ -7,7 +7,7 @@
         "when": {
           "effect_kind": "llm.generate",
           "origin_kind": "workflow",
-          "origin_name": "demo/AgentLiveSessionWorkflow@1"
+          "origin_name": "aos.agent/SessionWorkflow@1"
         },
         "decision": "allow"
       },

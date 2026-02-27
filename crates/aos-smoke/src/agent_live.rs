@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent_sdk::{
     LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionId, SessionIngress,
-    SessionIngressKind, SessionState, SessionWorkflowEvent, ToolBatchId, ToolCallStatus,
+    SessionIngressKind, SessionState, ToolBatchId, ToolCallStatus,
     WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
     materialize_llm_generate_params_with_workspace,
 };
@@ -25,11 +25,12 @@ use walkdir::WalkDir;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const WORKFLOW_NAME: &str = "demo/AgentLiveSessionWorkflow@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionWorkflowEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/22-agent-live/workflow";
+const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
+const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
 const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
+const SDK_WASM_PACKAGE: &str = "aos-agent-sdk";
+const SDK_WASM_BIN: &str = "session_workflow";
 const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 const AGENT_WORKSPACE_NAME: &str = "agent-live";
 const AGENT_WORKSPACE_DIR: &str = "agent-ws";
@@ -93,19 +94,21 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let assets_root = fixture_root.join("air");
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
     let import_roots = vec![sdk_air_root];
-    let mut host = ExampleHost::prepare_with_imports_and_host_config(
+    let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root: &fixture_root,
             assets_root: Some(&assets_root),
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
-            module_crate: MODULE_CRATE,
+            module_crate: "",
         },
         &import_roots,
         Some(HostConfig {
             llm: None,
             ..HostConfig::default()
         }),
+        SDK_WASM_PACKAGE,
+        SDK_WASM_BIN,
     )?;
 
     let adapter = make_adapter(host.store(), &provider);
@@ -410,7 +413,9 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
         "expected active run cleared after completion"
     );
 
-    host.finish()?.verify_replay()?;
+    let key = host.single_keyed_cell_key()?;
+    host.finish_with_keyed_samples(Some(WORKFLOW_NAME), &[key])?
+        .verify_replay()?;
 
     println!(
         "   sdk agent live smoke: OK (tool_rounds={} tool_calls={})",
@@ -426,11 +431,11 @@ fn send_session_event(
     kind: SessionIngressKind,
 ) -> Result<()> {
     *clock = clock.saturating_add(1);
-    let event = SessionWorkflowEvent::Ingress(SessionIngress {
+    let event = SessionIngress {
         session_id: SessionId(SESSION_ID.into()),
         observed_at_ns: *clock,
         ingress: kind,
-    });
+    };
     host.send_event(&event)
 }
 

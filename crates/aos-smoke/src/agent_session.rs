@@ -3,16 +3,17 @@ use std::path::Path;
 use anyhow::{Result, anyhow, ensure};
 use aos_agent_sdk::{
     HostCommand, HostCommandKind, SessionConfig, SessionId, SessionIngress, SessionIngressKind,
-    SessionLifecycle, SessionState, SessionWorkflowEvent, ToolBatchId, ToolCallStatus,
+    SessionLifecycle, SessionState, ToolBatchId, ToolCallStatus,
 };
 use aos_host::config::HostConfig;
 
 use crate::example_host::{ExampleHost, HarnessConfig};
 
-const WORKFLOW_NAME: &str = "demo/AgentSessionWorkflow@1";
-const EVENT_SCHEMA: &str = "aos.agent/SessionWorkflowEvent@1";
-const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/20-agent-session/workflow";
+const WORKFLOW_NAME: &str = "aos.agent/SessionWorkflow@1";
+const EVENT_SCHEMA: &str = "aos.agent/SessionIngress@1";
 const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
+const SDK_WASM_PACKAGE: &str = "aos-agent-sdk";
+const SDK_WASM_BIN: &str = "session_workflow";
 const SESSION_ID: &str = "11111111-1111-1111-1111-111111111111";
 
 pub fn run(example_root: &Path) -> Result<()> {
@@ -20,19 +21,21 @@ pub fn run(example_root: &Path) -> Result<()> {
 
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
     let import_roots = vec![sdk_air_root];
-    let mut host = ExampleHost::prepare_with_imports_and_host_config(
+    let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root,
             assets_root: None,
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
-            module_crate: MODULE_CRATE,
+            module_crate: "",
         },
         &import_roots,
         Some(HostConfig {
             llm: None,
             ..HostConfig::default()
         }),
+        SDK_WASM_PACKAGE,
+        SDK_WASM_BIN,
     )?;
 
     println!("→ Agent Session demo");
@@ -148,26 +151,30 @@ pub fn run(example_root: &Path) -> Result<()> {
         state.lifecycle, state.next_run_seq, state.updated_at
     );
 
-    host.finish()?.verify_replay()?;
+    let key = host.single_keyed_cell_key()?;
+    host.finish_with_keyed_samples(Some(WORKFLOW_NAME), &[key])?
+        .verify_replay()?;
     Ok(())
 }
 
 fn assert_run_request_validation(example_root: &Path) -> Result<()> {
     let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
     let import_roots = vec![sdk_air_root];
-    let mut host = ExampleHost::prepare_with_imports_and_host_config(
+    let mut host = ExampleHost::prepare_with_imports_host_config_and_module_bin(
         HarnessConfig {
             example_root,
             assets_root: None,
             workflow_name: WORKFLOW_NAME,
             event_schema: EVENT_SCHEMA,
-            module_crate: MODULE_CRATE,
+            module_crate: "",
         },
         &import_roots,
         Some(HostConfig {
             llm: None,
             ..HostConfig::default()
         }),
+        SDK_WASM_PACKAGE,
+        SDK_WASM_BIN,
     )?;
 
     host.send_event(&run_requested_event_with_config(1, "openai", "gpt-5.2"))?;
@@ -201,7 +208,7 @@ fn run_requested_event_with_config(
     observed_at_ns: u64,
     provider: &str,
     model: &str,
-) -> SessionWorkflowEvent {
+) -> SessionIngress {
     session_event(
         observed_at_ns,
         SessionIngressKind::RunRequested {
@@ -221,12 +228,12 @@ fn run_requested_event_with_config(
     )
 }
 
-fn session_event(observed_at_ns: u64, ingress: SessionIngressKind) -> SessionWorkflowEvent {
-    SessionWorkflowEvent::Ingress(SessionIngress {
+fn session_event(observed_at_ns: u64, ingress: SessionIngressKind) -> SessionIngress {
+    SessionIngress {
         session_id: SessionId(SESSION_ID.into()),
         observed_at_ns,
         ingress,
-    })
+    }
 }
 
 fn active_batch_id(state: &SessionState, batch_seq: u64) -> Result<ToolBatchId> {

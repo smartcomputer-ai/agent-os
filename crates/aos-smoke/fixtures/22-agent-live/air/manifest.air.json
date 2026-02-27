@@ -40,7 +40,7 @@
     { "name": "sys/WorkspaceReadBytesReceipt@1" }
   ],
   "modules": [
-    { "name": "demo/AgentLiveSessionWorkflow@1" },
+    { "name": "aos.agent/SessionWorkflow@1" },
     { "name": "sys/Workspace@1" },
     { "name": "sys/CapEnforceWorkspace@1" },
     { "name": "sys/CapEnforceLlmBasic@1" }
@@ -90,8 +90,9 @@
   "routing": {
     "subscriptions": [
       {
-        "event": "aos.agent/SessionWorkflowEvent@1",
-        "module": "demo/AgentLiveSessionWorkflow@1"
+        "event": "aos.agent/SessionIngress@1",
+        "module": "aos.agent/SessionWorkflow@1",
+        "key_field": "session_id"
       },
       {
         "event": "sys/WorkspaceCommit@1",
@@ -102,7 +103,7 @@
     "inboxes": []
   },
   "module_bindings": {
-    "demo/AgentLiveSessionWorkflow@1": {
+    "aos.agent/SessionWorkflow@1": {
       "slots": {
         "llm": "llm"
       }

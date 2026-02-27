@@ -29,7 +29,7 @@
     { "name": "sys/EffectStreamFrame@1" }
   ],
   "modules": [
-    { "name": "demo/AgentSessionWorkflow@1" },
+    { "name": "aos.agent/SessionWorkflow@1" },
     { "name": "sys/CapEnforceLlmBasic@1" }
   ],
   "caps": [
@@ -65,14 +65,15 @@
   "routing": {
     "subscriptions": [
       {
-        "event": "aos.agent/SessionWorkflowEvent@1",
-        "module": "demo/AgentSessionWorkflow@1"
+        "event": "aos.agent/SessionIngress@1",
+        "module": "aos.agent/SessionWorkflow@1",
+        "key_field": "session_id"
       }
     ],
     "inboxes": []
   },
   "module_bindings": {
-    "demo/AgentSessionWorkflow@1": {
+    "aos.agent/SessionWorkflow@1": {
       "slots": {
         "llm": "llm"
       }

@@ -45,6 +45,8 @@ Completed this pass:
 8. SDK schema ownership restored for `20-agent-session` and `22-agent-live`:
    - removed fixture-local `air/schemas.air.json` duplication in both fixtures,
    - runners now load `crates/aos-agent-sdk/air` as an AIR import root,
+   - fixture manifests route directly to keyed SDK module `aos.agent/SessionWorkflow@1` with `key_field`,
+   - fixture runners compile/load `aos-agent-sdk` bin `session_workflow` as workflow wasm for both fixtures,
    - `aos.agent/SessionNoop@1` published in SDK AIR schemas/manifest for validator-compatible `Noop` variants.
 
 ## Workflow Model Review (Spec-Constrained)
