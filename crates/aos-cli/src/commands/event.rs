@@ -22,7 +22,7 @@ pub struct EventArgs {
     /// Event value: JSON literal, @file, or @- for stdin
     pub value: String,
 
-    /// Key for keyed reducers (UTF-8)
+    /// Key for keyed workflows (UTF-8)
     #[arg(long)]
     pub key: Option<String>,
 

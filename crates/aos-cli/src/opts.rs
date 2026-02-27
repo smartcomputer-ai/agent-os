@@ -47,9 +47,9 @@ pub struct WorldOpts {
     #[arg(long, global = true, env = "AOS_AIR")]
     pub air: Option<PathBuf>,
 
-    /// Reducer crate directory (env: AOS_REDUCER, default: <world>/reducer)
-    #[arg(long = "reducer-dir", global = true, env = "AOS_REDUCER")]
-    pub reducer: Option<PathBuf>,
+    /// Workflow crate directory (env: AOS_WORKFLOW, default: <world>/workflow)
+    #[arg(long = "workflow-dir", global = true, env = "AOS_WORKFLOW")]
+    pub workflow: Option<PathBuf>,
 
     /// Store/journal directory (env: AOS_STORE, default: <world>)
     #[arg(long, global = true, env = "AOS_STORE")]
@@ -59,7 +59,7 @@ pub struct WorldOpts {
     #[arg(long, global = true)]
     pub module: Option<String>,
 
-    /// Force reducer recompilation
+    /// Force workflow recompilation
     #[arg(long, global = true)]
     pub force_build: bool,
 
@@ -87,8 +87,8 @@ pub struct ResolvedDirs {
     pub world: PathBuf,
     /// AIR assets directory.
     pub air_dir: PathBuf,
-    /// Reducer crate directory.
-    pub reducer_dir: PathBuf,
+    /// Workflow crate directory.
+    pub workflow_dir: PathBuf,
     /// Store root directory (contains .aos/).
     pub store_root: PathBuf,
     /// Control socket path.
@@ -133,11 +133,11 @@ pub fn resolve_dirs(opts: &WorldOpts) -> Result<ResolvedDirs> {
         .map(|p| if p.is_relative() { world.join(p) } else { p })
         .unwrap_or_else(|| world.join("air"));
 
-    let reducer_dir = opts
-        .reducer
+    let workflow_dir = opts
+        .workflow
         .clone()
         .map(|p| if p.is_relative() { world.join(p) } else { p })
-        .unwrap_or_else(|| world.join("reducer"));
+        .unwrap_or_else(|| world.join("workflow"));
 
     let store_root = opts
         .store
@@ -159,7 +159,7 @@ pub fn resolve_dirs(opts: &WorldOpts) -> Result<ResolvedDirs> {
     Ok(ResolvedDirs {
         world,
         air_dir,
-        reducer_dir,
+        workflow_dir,
         store_root,
         control_socket,
     })

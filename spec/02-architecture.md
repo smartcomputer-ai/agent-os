@@ -3,29 +3,29 @@
 This section describes the runtime components of AgentOS and how they work together. It focuses on the kernel, storage, execution, effects, and governance loops. AIR (the control‑plane IR) is referenced where it interfaces with the runtime; its forms and semantics are detailed in the next section.
 
 AgentOS operates in two conceptually distinct modes:
-- **runtime**: business as usual; reducers react to events, plans orchestrate effects, receipts flow back
+- **runtime**: business as usual; workflow modules react to events, orchestrate effects, and continue from receipts
 - **design time**: self‑modification—the system proposes, rehearses, and applies changes to its own control plane
 
 These are not separate runtimes. Under the hood, there is one unified system: the same kernel, journal, event processing, and blob storage handle both modes. Design-time changes (proposals, shadow runs, approvals) and runtime operations (domain events, effects, receipts) all flow through the same event log and deterministic stepper. This unification is possible because AIR represents the control plane as data and is stored like any other state. The constitutional loop (propose → shadow → approve → apply) is simply the governed pathway for modifying that control-plane data, after which it becomes active runtime behavior.
 
 ## Runtime Model
 
-One world is the unit of computation and ownership. Each world runs a single‑threaded deterministic stepper over an append‑only event journal with periodic snapshots. All control‑plane changes—modules, plans, schemas, policies, capabilities—are expressed as AIR patches and validated by the kernel before use.
+One world is the unit of computation and ownership. Each world runs a single‑threaded deterministic stepper over an append‑only event journal with periodic snapshots. All control‑plane changes—modules, effects, schemas, policies, capabilities—are expressed as AIR patches and validated by the kernel before use.
 
 Application logic runs inside sandboxed WASM modules (reducers and pure components). External I/O happens through explicit effects executed by adapters; every effect yields a signed receipt that is appended to the journal and used for replay. The kernel also stamps each ingress with deterministic time/entropy and journals those values; modules can opt in to receiving that call context as explicit input. This separation between pure computation and effectful I/O is what enables deterministic replay: the same journal and receipts always produce the same state.
 
 ## Components (High Level)
 
-- Kernel (Stepper): deterministic event processor, applies journal entries, enforces policy, and drives plans.
+- Kernel (Stepper): deterministic event processor, applies journal entries, enforces policy, and drives workflow modules.
 - Kernel Clock: samples wall-clock + monotonic time at ingress and records deterministic timestamps.
-- Journal: append‑only log of all events (proposals, approvals, plan application, effect intents, receipts, snapshots).
+- Journal: append‑only log of all events (proposals, approvals, manifest application, effect intents, receipts, snapshots).
 - Snapshotter: materializes state at intervals for fast restore; replay from journal remains authoritative.
 - Store (CAS): content‑addressed object store for AIR nodes, WASM modules, blobs, receipts, and snapshots.
 - Workspace Registry: built-in `sys/Workspace@1` reducer and CAS-backed tree nodes for versioned source/artifact trees; exposed via internal `workspace.*` effects (cap-gated).
 - AIR Loader/Validator: loads the manifest, validates forms, resolves references, and exposes a typed view to the kernel.
-- Plan Engine: executes AIR plans deterministically (evaluates guards, emits effects, raises/awaits events), supports shadow runs.
-- Capability Resolver: scoped capability grants (type, scope, expiry) bound to plans and reducers.
-- Policy Gate: declarative allow/deny/require‑approval rules over effects and plans.
+- Workflow Runtime: tracks in-flight workflow module effects and receipt continuations deterministically, including shadow runs.
+- Capability Resolver: scoped capability grants (type, scope, expiry) bound to module origins.
+- Policy Gate: declarative allow/deny rules over effects and origin metadata.
 - WASM Runtime: deterministic sandbox (Wasmtime profile) for reducers and pure components.
 - Effect Manager: queues effect intents, dispatches to adapters, ingests receipts, enforces idempotency.
 - Adapters: host‑side executors for effect kinds (HTTP, Blob/FS, Timer, LLM ship in v1; custom adapters can register additional kinds/cap types) with signing.
@@ -44,7 +44,7 @@ The kernel handles several categories of events. The first four are **design-tim
 
 **Design-time events (dual-keyed):**
 - **Proposed** {proposal_id, patch_hash, author, manifest_base, description?}
-- **ShadowReport** {proposal_id, patch_hash, manifest_hash, effects_predicted, pending_receipts?, plan_results?, ledger_deltas?}
+- **ShadowReport** {proposal_id, patch_hash, manifest_hash, effects_predicted, pending_workflow_receipts?, workflow_instances?, module_effect_allowlists?, ledger_deltas?}
 - **Approved** {proposal_id, patch_hash, approver, decision:"approve"|"reject"}
 - **Applied** {proposal_id, patch_hash, manifest_hash_new}
 - **Manifest** {manifest_hash} (appended whenever the active manifest changes; replay uses these to swap manifests in-order)
@@ -53,7 +53,7 @@ The kernel handles several categories of events. The first four are **design-tim
 - **EffectQueued** {intent_hash, kind, params_ref, cap_ref}
 - **ReceiptAppended** {intent_hash, receipt_ref, status}
 - **PolicyDecisionRecorded** {subject, decision, rationale_ref}
-- **SnapshotCreated** {height, snapshot_ref}
+- **SnapshotCreated** {height, snapshot_ref, logical_time_ns, receipt_horizon_height?, manifest_hash?}
 
 ### Ordering and Fences
 
@@ -69,7 +69,7 @@ Manifest updates are also recorded as `Manifest` journal entries. These are appe
 
 ### Snapshots
 
-Snapshots persist control‑plane AIR state (manifest hash + content), reducer state bytes (canonical CBOR by declared schema), and pinned blob roots. They are created periodically or on demand. Restore operations replay from the last snapshot to head, using the journal as the authoritative source; any later `Manifest` entries swap manifests during replay.
+Snapshots persist control‑plane AIR state (manifest hash + content), reducer state bytes (canonical CBOR by declared schema), keyed reducer `cell_index_root` values, optional workspace roots, and optional pinned roots. Worlds maintain an **active baseline** snapshot record; restore loads that baseline and replays journal tail entries with `height >= baseline.height`. Baseline promotion is gated by receipt-horizon preconditions (`receipt_horizon_height`), and snapshots missing required root-completeness metadata are rejected.
 
 ### Content‑Addressed Store (CAS)
 
@@ -79,46 +79,45 @@ Nodes (AIR terms, receipts) and blobs (WASM modules, large payloads) are address
 
 ### AIR Manifest
 
-The manifest is read-only at runtime and serves as the authoritative catalog of defmodule, defplan, defschema, defcap, and defpolicy objects. Built-in catalogs provide `sys/*` schemas/effects/caps/modules; external manifests may reference `sys/*` entries but may not define them. Updates occur only via approved Proposed → Applied events.
+The manifest is read-only at runtime and serves as the authoritative catalog of defmodule, defeffect, defschema, defcap, and defpolicy objects. Built-in catalogs provide `sys/*` schemas/effects/caps/modules; external manifests may reference `sys/*` entries but may not define them. Updates occur only via approved Proposed → Applied events.
 
 ### AIR Loader/Validator
 
 Authoring ergonomics and determinism meet here. The loader accepts either JSON lens described in the AIR spec—concise schema-directed “sugar” JSON or the tagged canonical overlay used by tools/agents—and canonicalizes both to typed values before anything touches the kernel. Built-in catalogs are merged for `sys/*` schemas/effects/caps/modules; external `sys/*` definitions are rejected. Every value is normalized (set dedupe/order, map ordering, numeric range checks, decimal128, option/variant envelopes) and then encoded as canonical CBOR with the declared schema hash bound in. That canonical form is the only thing the kernel, store, and hash engine ever see.
 
-After canonicalization, the loader validates references, shapes, capability declarations, and plan graphs, then exposes a typed view for the kernel. Tooling hooks (`air fmt`, `air diff`, `air patch`) operate on the same canonical CBOR but can render either lens for humans.
+After canonicalization, the loader validates references, shapes, capability declarations, and routing semantics, then exposes a typed view for the kernel. Tooling hooks (`air fmt`, `air diff`, `air patch`) operate on the same canonical CBOR but can render either lens for humans.
 
 ### Capabilities (Constraints-Only)
 
-Capabilities are passed to plans and modules by grant name; no ambient authority exists. At enqueue time the kernel enforces parameter constraints (hosts, models, max_tokens ceilings) via deterministic **cap enforcer modules** (defaulting to `sys/CapAllowAll@1` when a defcap omits one) and checks expiry against `logical_now_ns`. Budgets and ledger accounting are deferred to a future milestone.
+Capabilities are passed to modules and system origins by grant name; no ambient authority exists. At enqueue time the kernel enforces parameter constraints (hosts, models, max_tokens ceilings) via deterministic **cap enforcer modules** (defaulting to `sys/CapAllowAll@1` when a defcap omits one) and checks expiry against `logical_now_ns`. Budgets and ledger accounting are deferred to a future milestone.
 
 ### Policy Gate (v1)
 
-The policy gate evaluates allow/deny decisions for effects based on origin-aware rules. Origin metadata (origin_kind: plan or reducer, origin_name) is attached to all effect intents. Rule evaluation is first-match-wins; if no rule matches, the default is deny. Decisions are journaled as PolicyDecisionRecorded events.
+The policy gate evaluates allow/deny decisions for effects based on origin-aware rules. Origin metadata (`origin_kind: workflow|system|governance`, `origin_name`) is attached to all effect intents. Rule evaluation is first-match-wins; if no rule matches, the default is deny. Decisions are journaled as PolicyDecisionRecorded events.
 
 Deferred to v1.1+: approvals (require_approval), rate limits (rpm), and identity/principal support.
 
-## Triggers and Events (Runtime)
+## Routing and Events (Runtime)
 
-This section describes **runtime** behavior: how reducers, plans, and effects collaborate to perform domain work.
+This section describes **runtime** behavior: how workflow modules and effects collaborate to perform domain work.
 
-### Triggers
+### Routing Subscriptions
 
-The manifest contains `triggers`: mappings from DomainIntent event schemas to plan names, plus optional `correlate_by` keys. When a reducer emits a DomainIntent event, the kernel appends it to the journal and starts the configured plan with that event as input.
+The manifest contains `routing.subscriptions`: mappings from DomainEvent schemas to workflow modules, with optional `key_field` extraction for keyed reducers. When an event is appended, the router delivers it to subscribed workflow modules deterministically.
 
 ### Communication Pattern
 
-The typical runtime flow between reducers and plans follows six steps:
+The typical runtime flow between workflow modules and effects follows five steps:
 
-1. **Reducer emits DomainIntent** (e.g., `ChargeRequested`) as a domain event.
-2. **Trigger starts plan** with the event as `@plan.input` and records a correlation id if provided.
-3. **Plan emits effects** under capabilities; the kernel checks: (a) capability grant constraints, (b) policy decision (origin-aware). The Effect Manager dispatches if allowed.
-4. **Adapter executes** the effect and appends a signed receipt; the plan's `await_receipt` step resumes with the receipt value.
-5. **Plan raises result** via `raise_event`, publishing a DomainEvent (e.g., `PaymentResult`) to the bus; routing delivers it to reducers, which advance their typestate.
-6. **Optional continuation**: plans may `await_event` for subsequent reducer‑produced events to continue orchestration in one instance. The wait is future-only, first-match-per-waiter, and broadcast (events are not consumed). When a trigger set a `correlate_by` key, `await_event` **must** include a `where` predicate (typically matching that key) to avoid cross-talk between concurrent plan instances.
+1. **Workflow module receives an event** (e.g., `ChargeRequested`) via routing and executes deterministically.
+2. **Workflow module emits effect intents** under capabilities; the kernel checks: (a) capability grant constraints, (b) policy decision (origin-aware). The Effect Manager dispatches if allowed.
+3. **Adapter executes** the effect and appends a signed receipt.
+4. **Kernel delivers receipt progress** by recording the receipt and emitting normalized receipt events (for example `sys/EffectReceiptEnvelope@1`, or `sys/EffectReceiptRejected@1` when payload decoding fails) that route back to subscribed workflow modules.
+5. **Workflow module emits follow-up domain events** (e.g., `PaymentResult`) as state advances; routing fans those events out to downstream subscribers.
 
 ### Governance and Observability
 
-All external I/O crosses `emit_effect` and is policy/capability‑gated; receipts are signed and journaled. State changes occur only via events → reducers; plans never mutate reducer state directly. Correlation keys allow tying receipts and effects to domain entities in the "why graph".
+All external I/O crosses `emit_effect` and is policy/capability‑gated; receipts are signed and journaled. State changes occur only via events → workflow modules; no adapter mutates module state directly. Correlation keys in event payloads and receipt envelopes tie effects to domain entities in the "why graph".
 
 ## Compute Layer
 
@@ -137,17 +136,17 @@ Modules are content‑addressed WASM artifacts registered in the manifest with d
 
 ### Keyed Reducers (Cells)
 
-Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with an optional call context, and for keyed reducers that context includes `key` and `cell_mode`. Routing uses `manifest.routing.events[].key_field`; triggers may set `correlate_by`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and plan runs. See [spec/06-cells.md](06-cells.md) for the full v1.1 behavior and migration notes.
+Version 1.1 adds first‑class "cells": many instances of the same reducer FSM keyed by an id (e.g., order_id). The ABI stays a single `step` export; the kernel passes an envelope with an optional call context, and for keyed reducers that context includes `key` and `cell_mode`. Routing uses `manifest.routing.subscriptions[].key_field`. Per‑cell state is stored via a CAS‑backed `CellIndex` whose **root hash** is kept in world state/snapshots; returning `state=null` deletes the cell. Scheduler round‑robins between ready cells and queued workflow work. See [spec/06-cells.md](06-cells.md) for the full v1.1 behavior and migration notes.
 
 ### Router and Inbox
 
-Deterministic routing hooks trigger reducers or plans based on event kinds and manifest routing tables. Reducers emit effect intents (not side‑effects) which enter the outbox.
+Deterministic routing delivers events to workflow modules based on manifest routing tables. Workflow modules emit effect intents (not side‑effects) which enter the outbox.
 
 ## Effects, Adapters, and Receipts
 
 ### Effect Manager
 
-The Effect Manager maintains an outbox of effect intents; each intent is typed and references a capability handle. **Before hashing/enqueueing**, it decodes effect params CBOR using the effect kind's param schema, canonicalizes to the AIR `$tag/$value` form, and re-encodes; the canonical bytes are stored, hashed, and passed to adapters. Non-conforming params are rejected early. Plans, reducers, and internal tooling all traverse this same normalizer so authoring sugar cannot perturb intent identity or policy decisions. The Effect Manager dispatches to adapters with idempotency keys and deadlines, retrying with backoff for transient failures. The final status is captured in a receipt. `introspect.*` effects are handled by an internal kernel adapter that synthesizes receipts deterministically (no I/O) while still passing through the same intent/receipt journal path.
+The Effect Manager maintains an outbox of effect intents; each intent is typed and references a capability handle. **Before hashing/enqueueing**, it decodes effect params CBOR using the effect kind's param schema, canonicalizes to the AIR `$tag/$value` form, and re-encodes; the canonical bytes are stored, hashed, and passed to adapters. Non-conforming params are rejected early. Workflow modules and internal tooling all traverse this same normalizer so authoring sugar cannot perturb intent identity or policy decisions. The Effect Manager dispatches to adapters with idempotency keys and deadlines, retrying with backoff for transient failures. The final status is captured in a receipt. `introspect.*` effects are handled by an internal kernel adapter that synthesizes receipts deterministically (no I/O) while still passing through the same intent/receipt journal path.
 
 ### Adapters (v1)
 
@@ -156,7 +155,7 @@ Four adapters ship in v1:
 - **HTTP**: `http.request(method, url, headers, body_ref) → receipt(status, headers, body_ref, timings)`
 - **Blob**: `blob.{put,get} → receipt(blob_ref, size)`
 - **Timer**: `timer.set(deliver_at_ns) → receipt(delivered_at_ns)` (logical time)
-- **LLM**: `llm.generate(model, params, message_refs) → receipt(output_ref, token_usage, cost, provider_id)`
+- **LLM**: `llm.generate(model, params, message_refs) → receipt(output_ref, raw_output_ref?, token_usage, cost, provider_id)`
 
 Each adapter signs receipts (ed25519/HMAC) including intent_hash, inputs/outputs hashes, timings, and cost.
 
@@ -166,7 +165,7 @@ Version 1.2 will add **WASM-based adapters**: custom effect implementations that
 
 ### Receipt Handling
 
-ReceiptAppended events advance plans and reducers waiting on effects. During replay, the system consumes recorded receipts to produce identical state without re‑executing effects.
+ReceiptAppended events advance workflow modules waiting on effects. During replay, the system consumes recorded receipts to produce identical state without re‑executing effects.
 
 ## Constitutional Loop (Design Time)
 
@@ -176,7 +175,7 @@ The constitutional loop governs **design-time** changes: how the system proposes
 2. **Shadow**: The kernel clones state and runs a shadow simulation with stubbed receipts; it records **ShadowReport** with predicted effects/costs and diffs (optionally as an opaque summary blob for compatibility).
 3. **Approve/Reject**: Humans or policy record **Approved** with a `decision` (approve/reject) plus approver identity. A rejected proposal cannot be applied.
 4. **Apply**: The kernel commits the new manifest root (**Applied**), recording `manifest_hash_new` alongside the ids for auditability; routing tables and capability bindings update atomically. Apply is only permitted after an approve decision.
-5. **Execute**: Normal event flow resumes; new plans and modules are active under policy; effects produce receipts; audit trails accumulate.
+5. **Execute**: Normal event flow resumes; new modules/policies/caps are active; effects produce receipts; audit trails accumulate.
 
 ### Shadow Runs
 
@@ -251,17 +250,17 @@ Rust helpers for reducers and pure components, plus a test harness for determini
 
 ### Inspectors
 
-Provenance ("why graph") and plan visualizer (text‑first for v1).
+Provenance ("why graph") and workflow trace visualizer (text‑first for v1).
 
 ## Scaling Model
 
 One world equals one thread; scale out by running many worlds. Heavy or parallel work happens in adapters; receipts rejoin the single thread via events. Cross‑world coordination (deferred) can use conventional messaging with capability delegation.
 
-There is are some ideas how we can bring later parallelism into the the plan and reducer runtime. See [spec/06-parallelism.md](06-parallelism.md)
+There is are some ideas how we can bring later parallelism into the workflow/reducer runtime. See [spec/06-parallelism.md](06-parallelism.md)
 
 ## Failure Handling
 
-Adapters retry with exponential backoff; idempotency preserves correctness. Timeouts yield receipts with status=timeout; plans can gate on acceptable statuses. Dead‑letter policies handle intents that exceed retry or cost limits; the audit trail retains the full history. Failures are also propagated back to reducers so they have a chance to recover.
+Adapters retry with exponential backoff; idempotency preserves correctness. Timeouts yield receipts with status=timeout; workflow modules can branch on statuses via receipt events. Dead‑letter policies handle intents that exceed retry or cost limits; the audit trail retains the full history. Failures are also propagated back to workflow modules so they have a chance to recover.
 
 ## Security Posture
 
@@ -271,7 +270,7 @@ The minimal trusted base—kernel, validator, and receipt verification code—is
 
 Here's how all the pieces fit together in a typical **design‑time** change workflow:
 
-1. **Register**: A plan in AIR wires modules and declares allowed effects and required capabilities.
+1. **Register**: A workflow module in AIR declares emitted effects and required capabilities.
 2. **Propose**: A proposal patches the manifest with changes.
 3. **Shadow**: A shadow run quantifies diffs and predicted costs.
 4. **Approve**: Approval grants least‑privilege capabilities based on shadow results.
@@ -279,6 +278,6 @@ Here's how all the pieces fit together in a typical **design‑time** change wor
 6. **Execute**: Execution proceeds; effects produce signed receipts; snapshots capture state.
 7. **Replay**: Replay from journal and receipts reproduces the exact same state.
 
-Once applied, changes become **runtime** behavior: reducers emit domain intents, triggers start plans, plans orchestrate effects under policy and capabilities, adapters produce signed receipts, and results flow back as events. Both modes—design time and runtime—share the same deterministic kernel and journal. The homoiconic control plane (AIR) is what makes this possible: the system can inspect, simulate, and safely modify its own definition using the same event‑sourced substrate it uses for application logic.
+Once applied, changes become **runtime** behavior: workflow modules emit domain events, routing subscriptions deliver them to modules, modules orchestrate effects under policy and capabilities, adapters produce signed receipts, and results flow back as events. Both modes—design time and runtime—share the same deterministic kernel and journal. The homoiconic control plane (AIR) is what makes this possible: the system can inspect, simulate, and safely modify its own definition using the same event‑sourced substrate it uses for application logic.
 
 This architecture yields a substrate where agents can co‑author and safely evolve systems: deterministic at the core, explicit and auditable at the edges, and unified by a small typed control plane.

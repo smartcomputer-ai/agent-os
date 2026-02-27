@@ -1,6 +1,6 @@
 # Control Channel Specification (v1)
 
-Status: **experimental, socket-only**. Governance verbs are live. Stdio framing, CBOR framing, and journal streaming remain deferred. 
+Status: **experimental, socket-only**. Workflow-era governance/trace verbs are live. Stdio framing, CBOR framing, and streaming remain deferred.
 
 ## Goals
 
@@ -55,32 +55,41 @@ Response:
 
 ## Verbs (v1.1 control/introspection)
 
-- `event-send { schema, value_b64 }` → enqueues a DomainEvent and runs one daemon cycle. `value_b64` must be canonical CBOR. Timers still wait for their deadlines.
-- `receipt-inject { intent_hash, adapter_id, payload_b64 }` → injects an effect receipt (CBOR base64 payload).
-- `manifest-get { consistency?: "head"|"exact:<h>"|"at_least:<h>" }` → returns `{ manifest, journal_height, snapshot_hash?, manifest_hash }`.
-- `state-get { reducer, key_b64?, consistency?: "..."} ` → returns `{ state_b64?, meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
-- `state-list { reducer }` → returns `{ cells:[{ key_b64, state_hash, size, last_active_ns }], meta:{ journal_height, snapshot_hash?, manifest_hash } }`.
-- `def-get { name }` → returns `{ def, hash }` where `def` is the manifest entry for that name (`defschema`/`defmodule`/`defplan`/`defcap`/`defeffect`/`defpolicy`) and `hash` is the canonical CBOR hash of that def (`sha256:...`); errors if missing.
-- `def-list { kinds?: ["defschema"|"defmodule"|"defplan"|"defcap"|"defeffect"|"defpolicy"|"schema"|"module"|"plan"|"cap"|"effect"|"policy"], prefix?: "..." }` → returns `{ defs:[{ kind, name, hash, cap_type?, params_schema?, receipt_schema?, plan_steps?, policy_rules? }], meta }` sorted by name (aliases normalized to `$kind`).
-- `journal-head {}` → returns `{ journal_height, snapshot_hash?, manifest_hash }`.
-- `workspace-resolve { workspace, version? }` → returns `{ exists, resolved_version?, head?, root_hash? }`.
-- `workspace-empty-root { workspace }` → returns `{ root_hash }`.
-- `workspace-list { root_hash, path?, scope?, cursor?, limit }` → returns `{ entries:[{ path, kind, hash?, size?, mode? }], next_cursor? }`.
-- `workspace-read-ref { root_hash, path }` → returns `{ kind, hash, size, mode }` or `null` when missing.
-- `workspace-read-bytes { root_hash, path, range? }` → returns `{ data_b64 }`.
-- `workspace-write-bytes { root_hash, path, bytes_b64, mode? }` → returns `{ new_root_hash, blob_hash }`.
-- `workspace-remove { root_hash, path }` → returns `{ new_root_hash }`.
-- `workspace-diff { root_a, root_b, prefix? }` → returns `{ changes:[{ path, kind, old_hash?, new_hash? }] }`.
-- `workspace-annotations-get { root_hash, path? }` → returns `{ annotations?:{ key: hash } }`.
-- `workspace-annotations-set { root_hash, path?, annotations_patch:{ key: hash|null } }` → returns `{ new_root_hash, annotations_hash }`.
-- `blob-put { data_b64 }` → stores blob in CAS; returns `{ hash: "sha256:..." }`.
-- `blob-get { hash }` → returns `{ data_b64 }` (CAS lookup).
-- `snapshot {}` → forces snapshot; `result` is empty object.
-- `shutdown {}` → graceful drain, snapshot, shutdown; server and daemon stop.
-- `gov-propose { patch_b64, description? }` → submits a governance proposal. `patch_b64` is base64 of either (a) `ManifestPatch` CBOR or (b) `PatchDocument` JSON. PatchDocuments are validated against `spec/schemas/patch.schema.json` (with `common.schema.json` embedded) before compilation; ManifestPatch skips schema validation. Returns `{ proposal_id: <u64> }`.
-- `gov-shadow { proposal_id }` → runs shadow for a proposal; returns a JSON `ShadowSummary` `{ manifest_hash, predicted_effects?, pending_receipts?, plan_results?, ledger_deltas? }`.
-- `gov-approve { proposal_id, decision?, approver? }` → records an approval decision. `decision` is `"approve"` (default) or `"reject"`; `approver` defaults to `"control-client"`. Returns `{}`.
-- `gov-apply { proposal_id }` → applies an approved proposal; returns `{}`.
+- `event-send { schema, value_b64, key_b64? }` -> enqueues a DomainEvent and runs one daemon cycle. `value_b64` must be canonical CBOR.
+- `receipt-inject { intent_hash, adapter_id, payload_b64 }` -> injects a receipt payload for an existing intent (`status=ok` path; primarily for tests/debug).
+- `manifest-get { consistency?: "head"|"exact:<h>"|"at_least:<h>" }` -> returns `{ manifest_b64, meta }`.
+- `state-get { reducer, key_b64?, consistency?: "head"|"exact:<h>"|"at_least:<h>" }` -> returns `{ state_b64?, meta }`.
+- `state-list { reducer }` -> returns `{ cells:[{ key_b64, state_hash_hex, size, last_active_ns }], meta }`.
+- `def-get|defs-get { name }` -> returns `{ def, hash }`.
+- `def-list|defs-list { kinds?, prefix? }` -> returns `{ defs:[...], meta }`.
+- `journal-head {}` -> returns `{ meta }`.
+- `journal-list { from?, limit?, kinds? }` -> returns `{ from, to, entries:[{ kind, seq, record }] }`.
+- `trace-get { event_hash }` or `trace-get { schema, correlate_by, value, window_limit? }` -> returns root event, journal window, live wait diagnostics, terminal classification, and meta.
+- `trace-summary {}` -> returns workflow-era totals, continuation snapshots, and strict-quiescence counters.
+- `workspace-resolve { workspace, version? }` -> returns `{ exists, resolved_version?, head?, root_hash? }`.
+- `workspace-empty-root { workspace }` -> returns `{ root_hash }`.
+- `workspace-list { root_hash, path?, scope?, cursor?, limit }` -> returns `{ entries:[{ path, kind, hash?, size?, mode? }], next_cursor? }`.
+- `workspace-read-ref { root_hash, path }` -> returns `{ kind, hash, size, mode }` or `null`.
+- `workspace-read-bytes { root_hash, path }` -> returns `{ data_b64 }`.
+- `workspace-write-bytes { root_hash, path, bytes_b64, mode? }` -> returns `{ new_root_hash, blob_hash }`.
+- `workspace-remove { root_hash, path }` -> returns `{ new_root_hash }`.
+- `workspace-diff { root_a, root_b, prefix? }` -> returns `{ changes:[{ path, kind, old_hash?, new_hash? }] }`.
+- `workspace-annotations-get { root_hash, path? }` -> returns `{ annotations?:{ key: hash } }`.
+- `workspace-annotations-set { root_hash, path?, annotations_patch:{ key: hash|null } }` -> returns `{ new_root_hash, annotations_hash }`.
+- `blob-put { data_b64 }` -> stores blob in CAS; returns `{ hash }` (hex hash string).
+- `blob-get { hash_hex }` -> returns `{ data_b64 }`.
+- `snapshot {}` -> forces snapshot; returns `{}`.
+- `shutdown {}` -> graceful drain, snapshot, shutdown.
+- `gov-propose { patch_b64, description? }` -> submits proposal from ManifestPatch CBOR or PatchDocument JSON; returns `{ proposal_id }`.
+- `gov-shadow { proposal_id }` -> returns bounded workflow-era `ShadowSummary` observations (observed horizon, not full static future prediction).
+- `gov-approve { proposal_id, decision?: "approve"|"reject", approver? }` -> returns `{}`.
+- `gov-apply { proposal_id }` -> applies approved proposal; returns `{}`. Apply may fail with `host_error` when strict-quiescence blockers exist.
+- `gov-apply-direct { patch_b64 }` -> applies patch directly; returns `{ manifest_hash }`.
+- `gov-list { status?: "pending"|"approved"|"applied"|"rejected"|"submitted"|"shadowed"|"all" }` -> returns `{ proposals, meta }`.
+- `gov-get { proposal_id }` -> returns `{ proposal, meta }`.
+
+`meta` shape is:
+- `{ journal_height, snapshot_hash?, manifest_hash, active_baseline_height, active_baseline_receipt_horizon_height? }`
 
 Deferred verbs:
 - Stdio/streaming uploads for `put-blob`.
@@ -107,9 +116,13 @@ Deferred verbs:
 
 - Backward/forward compatibility is gated by the `v` field; unknown versions should be rejected with `invalid_request`.
 - New verbs should be additive; clients must treat unknown methods as recoverable errors.
+- Some payload field names remain legacy for compatibility.
+- `state-get/state-list` still use `reducer` as the module identifier.
+- Trace summaries currently expose `pending_reducer_receipts` counters even in workflow-era runtime output.
+- Journal kind labels for historical plan entries are surfaced as `legacy_plan_started|legacy_plan_result|legacy_plan_ended`.
 
 ## Known Limitations / TODOs
 
 - Stdio framing and CBOR framing not implemented.
 - Streaming blob upload (stdin/file) not implemented; current path is base64 inline.
-- Journal tail/streaming pending.
+- Journal/event streaming pending.

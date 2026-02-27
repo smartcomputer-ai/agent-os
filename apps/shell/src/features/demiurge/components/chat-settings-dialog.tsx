@@ -64,9 +64,10 @@ export function ChatSettingsDialog({
               className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             >
               <option value="gpt-5.2">GPT-5.2</option>
-              <option value="gpt-4o">GPT-4o</option>
-              <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-              <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+              <option value="gpt-5-mini">GPT-5 Mini</option>
+              <option value="gpt-5.2-codex">GPT-5.2 Codex</option>
+              <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+              <option value="gpt-mock">GPT Mock</option>
             </select>
           </div>
 
@@ -81,7 +82,9 @@ export function ChatSettingsDialog({
               className="w-full h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
             >
               <option value="openai-responses">OpenAI (Responses)</option>
-              <option value="openai-chat">OpenAI (Chat)</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="openai-compatible">OpenAI Compatible</option>
+              <option value="mock">Mock</option>
             </select>
           </div>
 

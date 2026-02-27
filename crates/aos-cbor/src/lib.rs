@@ -161,7 +161,7 @@ mod tests {
         let cases = [
             (
                 "spec/schemas/common.schema.json",
-                "sha256:7a3d5eed21ccafe9b2a210f3483700ee4e43f1d92dac0857e106bf904734892d",
+                "sha256:a7057a935d8627b9af238adfbfbea1c838c81a2cc2c95f841ea3f66c04c2942e",
             ),
             (
                 "spec/schemas/defschema.schema.json",
@@ -169,11 +169,11 @@ mod tests {
             ),
             (
                 "spec/schemas/defmodule.schema.json",
-                "sha256:385eb62162445b896c7cae0a9f878bf632da85dd8177b3f678a84b0c7a1078d5",
+                "sha256:5f8d2c71f19d4b7269819feeacb3b63fd4f8b09d6828356e2dcaa7a6cfe51c24",
             ),
             (
                 "spec/schemas/defplan.schema.json",
-                "sha256:86caf331236e164c52ac2f215539d859de4365ab2205049810c3aca230a56316",
+                "sha256:19c37514ac9f6a38c01b3a7bf3b9d792216f0622128693f2bd68ae3206257e8a",
             ),
             (
                 "spec/schemas/defcap.schema.json",
@@ -181,19 +181,19 @@ mod tests {
             ),
             (
                 "spec/schemas/defpolicy.schema.json",
-                "sha256:6c49b5b9fe6023a04559d77b769740a5f2439419e80ea2fe73b2751e6b78a9ff",
+                "sha256:b66f9fa6b17a2d842be1f01f73b996d05d5d79e703efc4e0e575be59086b2cae",
             ),
             (
                 "spec/schemas/manifest.schema.json",
-                "sha256:b78d85f28169cabd097178d5bbacaa8630231d566c3fc69efffbd38091081a03",
+                "sha256:c7b252549814c3bbfc177708c469d63b2cf9fc50a02c797f406691971a867410",
             ),
             (
                 "spec/schemas/defsecret.schema.json",
-                "sha256:2ff01ee39376e4bc37722bf1ceb763d4412f142be325903513dfaaf8e7a729f7",
+                "sha256:c3a9046ab8cf634476f43268b95cb2cdb7f471e185f66646ad6e816c7be6ae0a",
             ),
             (
                 "spec/defs/builtin-schemas.air.json",
-                "sha256:cfa1ba4cfcff82c2aaacf0ce398e6a71cdde5eebedc1e13ea7bdc944f38c3c48",
+                "sha256:089150e04b04527623631f22554d1ba1104a676af783c99bcda434c8a94e5e15",
             ),
         ];
 

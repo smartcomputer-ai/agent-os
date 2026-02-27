@@ -349,7 +349,7 @@ async fn load_registry(state: &HttpState) -> Result<Option<HttpPublishRegistry>,
         state,
         "state-get",
         serde_json::json!({
-            "reducer": "sys/HttpPublish@1",
+            "workflow": "sys/HttpPublish@1",
         }),
     )
     .await

@@ -1,0 +1,23 @@
+[
+  {
+    "$kind": "defmodule",
+    "name": "demo/WorkspaceDemo@1",
+    "module_kind": "workflow",
+    "abi": {
+      "workflow": {
+        "state": "demo/WorkspaceState@1",
+        "event": "demo/WorkspaceEvent@1",
+        "effects_emitted": [
+          "workspace.resolve",
+          "workspace.empty_root",
+          "workspace.write_bytes",
+          "workspace.list",
+          "workspace.diff"
+        ],
+        "cap_slots": {
+          "default": "workspace"
+        }
+      }
+    }
+  }
+]

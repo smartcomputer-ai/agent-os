@@ -37,7 +37,7 @@ Agents deserve better. They need a substrate that is deterministic by default, u
 
 ## The Approach
 
-AgentOS treats each running system as a world: a single‑threaded, replayable event log with periodic snapshots. All changes—code, schemas, policies, capabilities, and plans—are expressed in AIR, a small, typed IR the kernel can validate and execute deterministically. Application logic runs as WASM modules (reducers for state machines, pure components for pure functions). Any interaction with the outside world is an explicit effect, executed by adapters and recorded as a signed receipt. Risky changes are rehearsed in a shadow run before apply.
+AgentOS treats each running system as a world: a single‑threaded, replayable event log with periodic snapshots. All changes—code, schemas, policies, capabilities, and workflow modules—are expressed in AIR, a small, typed IR the kernel can validate and execute deterministically. Application logic runs as WASM modules (workflow modules for state machines, pure components for pure functions). Any interaction with the outside world is an explicit effect, executed by adapters and recorded as a signed receipt. Risky changes are rehearsed in a shadow run before apply.
 
 In short: `propose → shadow → approve → apply → execute → receipt → audit`.
 
@@ -47,7 +47,7 @@ AgentOS is designed around six core principles that enable safe, governed self�
 
 1. **Determinism by default.** Any computation within a world produces the same results when replayed from its log. Time and I/O only enter at the effect layer, where they are captured as receipts. This makes debugging, auditing, and reasoning about behavior tractable.
 
-2. **Homoiconic in spirit.** Everything that defines the world, such as code, schemas, policies, UI, capabilities, is represented as structured data the system can inspect and modify. AIR is a canonical, typed representation for modules, plans, schemas, policies, and capabilities that agents can read and edit programmatically.
+2. **Homoiconic in spirit.** Everything that defines the world, such as code, schemas, policies, UI, capabilities, is represented as structured data the system can inspect and modify. AIR is a canonical, typed representation for modules, schemas, effects, policies, and capabilities that agents can read and edit programmatically.
 
 3. **Capability security.** No ambient authority. All effects are scoped by explicit capability tokens and policy‑gated. Least‑privilege is enforced mechanically, not by convention.
 
@@ -59,7 +59,7 @@ AgentOS is designed around six core principles that enable safe, governed self�
 
 ## What AgentOS Is (and Is Not)
 
-AgentOS **is** a deterministic, event‑sourced kernel with receipts and capabilities. It **is** a unified control plane (AIR) for plans, policies, schemas, modules, and capability grants. And it **is** a safe home for agents to propose, simulate, and apply their own upgrades under policy.
+AgentOS **is** a deterministic, event‑sourced kernel with receipts and capabilities. It **is** a unified control plane (AIR) for modules, effects, policies, schemas, and capability grants. And it **is** a safe home for agents to propose, simulate, and apply their own upgrades under policy.
 
 AgentOS **is not** a general‑purpose programming language, compute lives in your language of choice compiled to WASM. It **is not** a blockchain or consensus layer, nor a replacement for your network stack. And it **is not** a traditional mutable database; state is derived from events, while effects and adapters handle heavy I/O and indexing.
 
@@ -73,20 +73,20 @@ AgentOS **is not** a general‑purpose programming language, compute lives in yo
 
   A world processes one event at a time, which makes reasoning about it straightforward. Horizontal scaling comes from running many worlds. Worlds can be forked, replayed, shadow‑run, rolled back, and exported as snapshots.
 
-- **AIR**: The typed, canonical "blueprint" for a world's control plane. It describes modules, plans, schemas, policies, and capabilities as structured data the kernel can inspect, validate, and simulate. Agents or humans modify AIR by proposing plans (diffs), which can be simulated and then applied, producing new log events and snapshots.
+- **AIR**: The typed, canonical "blueprint" for a world's control plane. It describes modules, effects, schemas, policies, and capabilities as structured data the kernel can inspect, validate, and simulate. Agents or humans modify AIR by proposing patches (diffs), which can be simulated and then applied, producing new log events and snapshots.
 
 - **Modules**: WASM artifacts. **Reducers** are deterministic state machines with a canonical signature: they consume an event and current state, then return new state and a list of effect intents. They cannot access the outside world directly; the host system executes effects if allowed by policy and capability. Pure components perform side‑effect‑free computation.
 
 - **Effects and adapters**: Explicit external actions—sending an email, calling an API, invoking an LLM, storing a blob. Each effect type is declared in the capability catalog and implemented by an external adapter. When an effect executes, the adapter produces a **receipt**—a signed record of what happened (parameters, response hash, timestamp, cost). Receipts are appended as events to the world log, preserving determinism on replay.
 
-- **Workspaces**: Named, versioned trees stored in reducer state for code and artifacts. Plans and tooling use kernel-internal `workspace.*` effects to resolve, list, read, write, diff, and annotate trees deterministically; `aos push`/`aos pull` sync workspaces with the local filesystem.
+- **Workspaces**: Named, versioned trees stored in reducer state for code and artifacts. Workflow modules and tooling use kernel-internal `workspace.*` effects to resolve, list, read, write, diff, and annotate trees deterministically; `aos push`/`aos pull` sync workspaces with the local filesystem.
 
-- **Policy and capabilities**: Declarative rules and scoped tokens that gate effects and plans. Capabilities define what kinds of effects are allowed (HTTP to specific hosts, LLM with model/token constraints, blob storage). Policies evaluate allow/deny decisions based on effect kind, capability, and origin (plan vs reducer). Budget enforcement is deferred to a future milestone.
+- **Policy and capabilities**: Declarative rules and scoped tokens that gate effects. Capabilities define what kinds of effects are allowed (HTTP to specific hosts, LLM with model/token constraints, blob storage). Policies evaluate allow/deny decisions based on effect kind, capability, and origin (`workflow` vs `system` vs `governance`). Budget enforcement is deferred to a future milestone.
 
-- **Agents**: Interact with the world through the same protocol as humans: they read the current AIR and state, generate new code (reducers, plans, or even policies), compile to WASM, draft a plan describing the changes and new module hashes, and submit the plan as a proposal. Agents can live outside the world (simpler) or inside it as privileged modules that can propose but not unilaterally apply plans.
+- **Agents**: Interact with the world through the same protocol as humans: they read the current AIR and state, generate new code (workflow modules, pure modules, or policies), compile to WASM, draft a patch describing the changes and new module hashes, and submit the patch as a proposal. Agents can live outside the world (simpler) or inside it as privileged modules that can propose but not unilaterally apply changes.
 
 ## First Version Scope
 
-The first version ships with a single‑threaded world with an append‑only journal and snapshots. AIR v1 defines five core forms: **defschema**, **defmodule**, **defplan**, **defcap**, and **defpolicy**, along with canonical encoding and typed patches. Deterministic WASM execution powers reducers and **pure modules** (`module_kind: "pure"`). Built-in adapters cover HTTP, blob/FS, timer, LLM, and kernel-resident introspection (`introspect.*`) guarded by the `query` capability. The kernel also ships a workspace registry (`sys/Workspace@1`) with deterministic tree effects (`workspace.*`) that power `aos ws` and `aos push`/`aos pull` syncing via `aos.sync.json`. Each comes with capabilities and signed receipts. Version 1.1 adds first-class Cells (keyed reducers) with per-key state and mailboxes. The constitutional loop and shadow runs protect the apply step, and a provenance "why graph" connects effects to state.
+The first version ships with a single‑threaded world with an append‑only journal and snapshots. AIR v1 defines core forms including **defschema**, **defmodule**, **defeffect**, **defcap**, and **defpolicy**, along with canonical encoding and typed patches. Deterministic WASM execution powers workflow modules and **pure modules** (`module_kind: "pure"`). Built-in adapters cover HTTP, blob/FS, timer, LLM, and kernel-resident introspection (`introspect.*`) guarded by the `query` capability. The kernel also ships a workspace registry (`sys/Workspace@1`) with deterministic tree effects (`workspace.*`) that power `aos ws` and `aos push`/`aos pull` syncing via `aos.sync.json`. Each comes with capabilities and signed receipts. Version 1.1 adds first-class Cells (keyed reducers) with per-key state and mailboxes. The constitutional loop and shadow runs protect the apply step, and a provenance "why graph" connects effects to state.
 
 Migrations, multi‑world fabric, and complex policy engines are deferred to later versions. The architecture leaves clean hooks for them.

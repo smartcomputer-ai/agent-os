@@ -25,8 +25,8 @@ export function WorkspacePage() {
     "src/app/shell-layout.tsx",
     "src/features/workspaces/pages/workspace.tsx",
     "spec/03-air.md",
-    "spec/04-reducers.md",
-    "modules/world/reducer.wasm",
+    "spec/04-workflows.md",
+    "modules/world/workflow.wasm",
   ];
 
   return (
@@ -117,7 +117,7 @@ export function WorkspacePage() {
                     Synced workspace on 2025-01-08.
                   </div>
                   <div className="rounded-md border bg-background/60 px-3 py-2">
-                    Added reducer build artifacts.
+                    Added workflow build artifacts.
                   </div>
                 </div>
               </TabsContent>

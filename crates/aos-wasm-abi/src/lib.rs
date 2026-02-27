@@ -1,14 +1,14 @@
-//! Reducer/pure ABI envelopes shared by the kernel and WASM SDK.
+//! Workflow/pure ABI envelopes shared by the kernel and WASM SDK.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Current ABI version carried in reducer envelopes.
+/// Current ABI version carried in workflow envelopes.
 pub const ABI_VERSION: u8 = 1;
 
-/// Reducer input envelope (kernel → WASM module).
+/// Workflow input envelope (kernel → WASM module).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct ReducerInput {
+pub struct WorkflowInput {
     pub version: u8,
     #[serde(with = "serde_bytes")]
     pub state: Option<Vec<u8>>,
@@ -21,9 +21,9 @@ pub struct ReducerInput {
     pub ctx: Option<Vec<u8>>,
 }
 
-impl ReducerInput {
+impl WorkflowInput {
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiDecodeError> {
-        let input: ReducerInput = serde_cbor::from_slice(bytes)?;
+        let input: WorkflowInput = serde_cbor::from_slice(bytes)?;
         if input.version != ABI_VERSION {
             return Err(AbiDecodeError::UnsupportedVersion {
                 found: input.version,
@@ -37,20 +37,20 @@ impl ReducerInput {
     }
 }
 
-/// Reducer output envelope (WASM module → kernel).
+/// Workflow output envelope (WASM module → kernel).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Default)]
-pub struct ReducerOutput {
+pub struct WorkflowOutput {
     #[serde(with = "serde_bytes")]
     pub state: Option<Vec<u8>>,
     #[serde(default)]
     pub domain_events: Vec<DomainEvent>,
     #[serde(default)]
-    pub effects: Vec<ReducerEffect>,
+    pub effects: Vec<WorkflowEffect>,
     #[serde(default, with = "serde_bytes")]
     pub ann: Option<Vec<u8>>,
 }
 
-impl ReducerOutput {
+impl WorkflowOutput {
     pub fn decode(bytes: &[u8]) -> Result<Self, AbiDecodeError> {
         serde_cbor::from_slice(bytes).map_err(AbiDecodeError::Cbor)
     }
@@ -161,9 +161,9 @@ mod serde_bytes_opt {
     }
 }
 
-/// Contextual metadata provided with every reducer call.
+/// Contextual metadata provided with every workflow call.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ReducerContext {
+pub struct WorkflowContext {
     pub now_ns: u64,
     pub logical_now_ns: u64,
     pub journal_height: u64,
@@ -171,7 +171,7 @@ pub struct ReducerContext {
     pub entropy: Vec<u8>,
     pub event_hash: String,
     pub manifest_hash: String,
-    pub reducer: String,
+    pub workflow: String,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -181,7 +181,7 @@ pub struct ReducerContext {
     pub cell_mode: bool,
 }
 
-impl ReducerContext {
+impl WorkflowContext {
     pub fn decode(bytes: &[u8]) -> Result<Self, serde_cbor::Error> {
         serde_cbor::from_slice(bytes)
     }
@@ -202,9 +202,9 @@ impl PureContext {
     }
 }
 
-/// Micro-effect emitted directly from a reducer (timer/blob, etc.).
+/// Micro-effect emitted directly from a workflow (timer/blob, etc.).
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct ReducerEffect {
+pub struct WorkflowEffect {
     pub kind: String,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
@@ -218,7 +218,7 @@ pub struct ReducerEffect {
     pub idempotency_key: Option<Vec<u8>>,
 }
 
-impl ReducerEffect {
+impl WorkflowEffect {
     pub fn new(kind: impl Into<String>, params_cbor: Vec<u8>) -> Self {
         Self {
             kind: kind.into(),
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn round_trip_input() {
-        let ctx = ReducerContext {
+        let ctx = WorkflowContext {
             now_ns: 10,
             logical_now_ns: 12,
             journal_height: 7,
@@ -271,25 +271,25 @@ mod tests {
                 .into(),
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
-            reducer: "com.acme/Reducer@1".into(),
+            workflow: "com.acme/Workflow@1".into(),
             key: Some(vec![0x01, 0x02]),
             cell_mode: true,
         };
         let ctx_bytes = serde_cbor::to_vec(&ctx).expect("ctx bytes");
-        let input = ReducerInput {
+        let input = WorkflowInput {
             version: ABI_VERSION,
             state: Some(vec![1, 2, 3]),
             event: DomainEvent::new("com.acme/Event@1", vec![0xaa]),
             ctx: Some(ctx_bytes),
         };
         let bytes = input.encode().expect("encode");
-        let decoded = ReducerInput::decode(&bytes).expect("decode");
+        let decoded = WorkflowInput::decode(&bytes).expect("decode");
         assert_eq!(decoded, input);
     }
 
     #[test]
     fn rejects_wrong_version() {
-        let ctx = ReducerContext {
+        let ctx = WorkflowContext {
             now_ns: 10,
             logical_now_ns: 12,
             journal_height: 7,
@@ -298,12 +298,12 @@ mod tests {
                 .into(),
             manifest_hash:
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111".into(),
-            reducer: "com.acme/Reducer@1".into(),
+            workflow: "com.acme/Workflow@1".into(),
             key: None,
             cell_mode: false,
         };
         let ctx_bytes = serde_cbor::to_vec(&ctx).expect("ctx bytes");
-        let mut input = ReducerInput {
+        let mut input = WorkflowInput {
             version: ABI_VERSION,
             state: None,
             event: DomainEvent::new("schema", vec![]),
@@ -311,20 +311,20 @@ mod tests {
         };
         input.version = 99;
         let bytes = serde_cbor::to_vec(&input).unwrap();
-        let err = ReducerInput::decode(&bytes).unwrap_err();
+        let err = WorkflowInput::decode(&bytes).unwrap_err();
         assert!(matches!(err, AbiDecodeError::UnsupportedVersion { .. }));
     }
 
     #[test]
     fn round_trip_output() {
-        let output = ReducerOutput {
+        let output = WorkflowOutput {
             state: None,
             domain_events: vec![DomainEvent::new("schema", vec![1, 2])],
-            effects: vec![ReducerEffect::with_cap_slot("timer.set", vec![9], "timer")],
+            effects: vec![WorkflowEffect::with_cap_slot("timer.set", vec![9], "timer")],
             ann: Some(vec![0, 1]),
         };
         let bytes = output.encode().expect("encode");
-        let decoded = ReducerOutput::decode(&bytes).expect("decode");
+        let decoded = WorkflowOutput::decode(&bytes).expect("decode");
         assert_eq!(decoded, output);
     }
 

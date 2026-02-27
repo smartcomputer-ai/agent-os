@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use aos_air_types::{
     CapEnforcer, CapGrant, CapType, DefCap, Manifest, Name, TypeExpr, TypeList, TypeMap,
     TypeOption, TypePrimitive, TypeRecord, TypeSet, TypeVariant, ValueLiteral, builtins,
-    catalog::EffectCatalog, plan_literals::SchemaIndex, validate_value_literal,
+    catalog::EffectCatalog, schema_index::SchemaIndex, validate_value_literal,
 };
 use aos_cbor::Hash;
 use aos_effects::CapabilityGrant;
@@ -406,7 +406,6 @@ mod tests {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: vec![],
-            plans: vec![],
             effects: vec![],
             caps: vec![],
             policies: vec![],
@@ -422,7 +421,6 @@ mod tests {
             }),
             module_bindings: IndexMap::new(),
             routing: None,
-            triggers: vec![],
         }
     }
 

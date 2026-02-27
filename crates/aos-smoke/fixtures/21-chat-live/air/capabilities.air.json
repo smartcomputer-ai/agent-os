@@ -1,0 +1,14 @@
+[
+  {
+    "$kind": "defcap",
+    "name": "demo/live_llm_basic@1",
+    "cap_type": "llm.basic",
+    "schema": {
+      "record": {
+        "models": { "set": { "text": {} } },
+        "max_tokens": { "option": { "nat": {} } }
+      }
+    },
+    "enforcer": { "module": "sys/CapEnforceLlmBasic@1" }
+  }
+]

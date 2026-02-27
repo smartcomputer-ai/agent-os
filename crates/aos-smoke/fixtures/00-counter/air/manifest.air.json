@@ -1,0 +1,37 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    {
+      "name": "demo/CounterPc@1"
+    },
+    {
+      "name": "demo/CounterState@1"
+    },
+    {
+      "name": "demo/CounterStart@1"
+    },
+    {
+      "name": "demo/CounterTick@1"
+    },
+    {
+      "name": "demo/CounterEvent@1"
+    }
+  ],
+  "modules": [
+    {
+      "name": "demo/CounterSM@1"
+    }
+  ],
+  "effects": [],
+  "caps": [],
+  "policies": [],
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/CounterEvent@1",
+        "module": "demo/CounterSM@1"
+      }
+    ]
+  }
+}

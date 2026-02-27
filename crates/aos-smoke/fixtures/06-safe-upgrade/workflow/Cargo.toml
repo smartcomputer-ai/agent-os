@@ -1,0 +1,14 @@
+[workspace]
+
+[package]
+name = "safe-upgrade-workflow"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+aos-wasm-sdk = { path = "../../../../aos-wasm-sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"

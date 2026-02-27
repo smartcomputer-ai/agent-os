@@ -1,0 +1,58 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    { "name": "demo/FlowRequest@1" },
+    { "name": "demo/FlowState@1" },
+    { "name": "demo/RuntimeHardeningStart@1" },
+    { "name": "demo/ApprovalEvent@1" },
+    { "name": "demo/RuntimeHardeningEvent@1" },
+    { "name": "sys/EffectReceiptEnvelope@1" },
+    { "name": "sys/HttpRequestParams@1" },
+    { "name": "sys/HttpRequestReceipt@1" }
+  ],
+  "modules": [
+    { "name": "demo/FlowTracker@1" },
+    { "name": "sys/CapEnforceHttpOut@1" }
+  ],
+  "caps": [
+    { "name": "demo/http_fetch_cap@1" }
+  ],
+  "policies": [
+    { "name": "demo/runtime-hardening-policy@1" }
+  ],
+  "defaults": {
+    "policy": "demo/runtime-hardening-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_http",
+        "cap": "demo/http_fetch_cap@1",
+        "params": {
+          "record": {
+            "hosts": {
+              "set": [
+                { "text": "example.com" }
+              ]
+            },
+            "methods": {
+              "set": [
+                { "text": "GET" }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/RuntimeHardeningEvent@1",
+        "module": "demo/FlowTracker@1"
+      }
+    ]
+  },
+  "effects": [
+    { "name": "sys/http.request@1" }
+  ]
+}

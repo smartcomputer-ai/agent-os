@@ -1,48 +1,64 @@
-export type ChatRole =
-  | { $tag: "User"; $value?: null }
-  | { $tag: "Assistant"; $value?: null };
+export type ReasoningEffort =
+  | { $tag: "Low"; $value?: null }
+  | { $tag: "Medium"; $value?: null }
+  | { $tag: "High"; $value?: null };
 
-export interface TokenUsage {
-  prompt: number;
-  completion: number;
+export type SessionLifecycle =
+  | { $tag: "Idle"; $value?: null }
+  | { $tag: "Running"; $value?: null }
+  | { $tag: "WaitingInput"; $value?: null }
+  | { $tag: "Paused"; $value?: null }
+  | { $tag: "Cancelling"; $value?: null }
+  | { $tag: "Completed"; $value?: null }
+  | { $tag: "Failed"; $value?: null }
+  | { $tag: "Cancelled"; $value?: null };
+
+export interface WorkspaceBinding {
+  workspace: string;
+  version?: number | null;
 }
 
-export interface ChatMessage {
-  request_id: number;
-  role: ChatRole;
-  text: string | null;
-  message_ref: string | null;
-  token_usage: TokenUsage | null;
-}
-
-export interface ChatState {
-  messages: ChatMessage[];
-  last_request_id: number;
-  title: string | null;
-  created_at_ms: number | null;
-  model?: string | null;
-  provider?: string | null;
-  max_tokens?: number | null;
-  tool_refs?: string[] | null;
-  tool_choice?: LlmToolChoice | null;
-}
-
-export interface ChatCreatedEvent {
-  chat_id: string;
-  title: string;
-  created_at_ms: number;
-}
-
-export interface UserMessageEvent {
-  chat_id: string;
-  request_id: number;
-  text: string;
-  message_ref: string;
-  model: string;
+export interface SessionConfig {
   provider: string;
-  max_tokens: number;
-  tool_refs: string[] | null;
-  tool_choice: LlmToolChoice | null;
+  model: string;
+  reasoning_effort?: ReasoningEffort | null;
+  max_tokens?: number | null;
+  workspace_binding?: WorkspaceBinding | null;
+  default_prompt_pack?: string | null;
+  default_prompt_refs?: string[] | null;
+  default_tool_catalog?: string | null;
+  default_tool_refs?: string[] | null;
+}
+
+export interface SessionState {
+  session_id: string;
+  lifecycle: SessionLifecycle;
+  in_flight_effects: number;
+  created_at: number;
+  updated_at: number;
+  active_run_id?: unknown | null;
+  active_run_config?: SessionConfig | null;
+}
+
+export interface DemiurgeState {
+  session: SessionState;
+  pending_tool_call?: unknown | null;
+}
+
+export type SessionIngressKind =
+  | {
+      $tag: "RunRequested";
+      $value: {
+        input_ref: string;
+        run_overrides: SessionConfig | null;
+      };
+    }
+  | { $tag: "Noop"; $value?: null };
+
+export interface SessionIngress {
+  session_id: string;
+  observed_at_ns: number;
+  ingress: SessionIngressKind;
 }
 
 export interface ChatSettings {
@@ -54,36 +70,23 @@ export interface ChatSettings {
 export const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   model: "gpt-5.2",
   provider: "openai-responses",
-  max_tokens: 1024*16,
+  max_tokens: 4096,
 };
 
-export type LlmToolChoice =
-  | { $tag: "Auto"; $value?: null }
-  | { $tag: "None"; $value?: null }
-  | { $tag: "Required"; $value?: null }
-  | { $tag: "Tool"; $value: { name: string } };
-
-export interface MessageBlob {
-  role: "user" | "assistant" | "system" | "tool";
-  content: ContentPart[];
-  tool_calls?: unknown[];
+export interface ChatTokenUsage {
+  prompt: number;
+  completion: number;
+  total?: number | null;
 }
 
-export type ContentPart = TextPart | ImagePart | AudioPart;
-
-export interface TextPart {
-  type: "text" | "input_text" | "output_text";
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
   text: string;
-}
-
-export interface ImagePart {
-  type: "image";
-  mime: string;
-  bytes_ref: string;
-}
-
-export interface AudioPart {
-  type: "audio";
-  mime: string;
-  bytes_ref: string;
+  observed_at_ns: number;
+  input_ref?: string | null;
+  output_ref?: string | null;
+  tool_calls_ref?: string | null;
+  token_usage?: ChatTokenUsage | null;
+  failed?: boolean;
 }

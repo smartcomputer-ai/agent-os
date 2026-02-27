@@ -8,8 +8,12 @@ use crate::journal::mem::MemJournal;
 use crate::world::{Kernel, KernelConfig};
 use crate::{
     error::KernelError,
-    shadow::{PendingPlanReceipt, PlanResultPreview, PredictedEffect, ShadowConfig, ShadowSummary},
+    shadow::{
+        ModuleEffectAllowlist, PendingWorkflowReceipt, PredictedEffect, ShadowConfig,
+        ShadowSummary, WorkflowInstancePreview,
+    },
 };
+use base64::Engine as _;
 use hex;
 use serde_json::Value as JsonValue;
 
@@ -33,6 +37,23 @@ impl ShadowExecutor {
         }
 
         let loaded = config.patch.to_loaded_manifest(store.as_ref())?;
+        let module_effect_allowlists = loaded
+            .modules
+            .values()
+            .filter_map(|module| {
+                let workflow = module.abi.workflow.as_ref()?;
+                let mut effects = workflow
+                    .effects_emitted
+                    .iter()
+                    .map(|kind| kind.as_str().to_string())
+                    .collect::<Vec<_>>();
+                effects.sort();
+                Some(ModuleEffectAllowlist {
+                    module: module.name.clone(),
+                    effects_emitted: effects,
+                })
+            })
+            .collect::<Vec<_>>();
         let mut kernel = Kernel::from_loaded_manifest_with_config(
             store.clone(),
             loaded,
@@ -45,16 +66,16 @@ impl ShadowExecutor {
 
         if let Some(harness) = &config.harness {
             for (schema, bytes) in &harness.seed_events {
-                kernel.submit_domain_event(schema.clone(), bytes.clone());
+                kernel.submit_domain_event(schema.clone(), bytes.clone())?;
             }
         }
 
         let mut predicted_effects = Vec::new();
-        let mut pending_receipts = Vec::new();
+        let mut pending_workflow_receipts = Vec::new();
 
         loop {
             kernel.tick_until_idle()?;
-            let intents = kernel.drain_effects();
+            let intents = kernel.drain_effects()?;
             if intents.is_empty() {
                 break;
             }
@@ -85,23 +106,36 @@ impl ShadowExecutor {
             }
         }
 
-        for (plan_id, hash) in kernel.pending_plan_receipts() {
-            pending_receipts.push(PendingPlanReceipt {
-                plan_id,
-                plan: kernel
-                    .plan_name_for_instance(plan_id)
-                    .map(ToOwned::to_owned),
-                intent_hash: hex::encode(hash),
-            });
+        let workflow_instances = kernel.workflow_instances_snapshot();
+        for instance in &workflow_instances {
+            for inflight in &instance.inflight_intents {
+                pending_workflow_receipts.push(PendingWorkflowReceipt {
+                    instance_id: instance.instance_id.clone(),
+                    origin_module_id: inflight.origin_module_id.clone(),
+                    origin_instance_key_b64: inflight
+                        .origin_instance_key
+                        .as_ref()
+                        .map(|key| base64::prelude::BASE64_STANDARD.encode(key)),
+                    intent_hash: hex::encode(inflight.intent_id),
+                    effect_kind: inflight.effect_kind.clone(),
+                    emitted_at_seq: inflight.emitted_at_seq,
+                });
+            }
         }
 
-        let plan_results = kernel
-            .recent_plan_results()
+        let workflow_instances = workflow_instances
             .into_iter()
-            .map(|result| PlanResultPreview {
-                plan: result.plan_name,
-                plan_id: result.plan_id,
-                output_schema: result.output_schema,
+            .map(|instance| WorkflowInstancePreview {
+                instance_id: instance.instance_id,
+                status: match instance.status {
+                    crate::snapshot::WorkflowStatusSnapshot::Running => "running".to_string(),
+                    crate::snapshot::WorkflowStatusSnapshot::Waiting => "waiting".to_string(),
+                    crate::snapshot::WorkflowStatusSnapshot::Completed => "completed".to_string(),
+                    crate::snapshot::WorkflowStatusSnapshot::Failed => "failed".to_string(),
+                },
+                last_processed_event_seq: instance.last_processed_event_seq,
+                module_version: instance.module_version,
+                inflight_intents: instance.inflight_intents.len(),
             })
             .collect::<Vec<_>>();
 
@@ -112,8 +146,9 @@ impl ShadowExecutor {
         Ok(ShadowSummary {
             manifest_hash,
             predicted_effects,
-            pending_receipts,
-            plan_results,
+            pending_workflow_receipts,
+            workflow_instances,
+            module_effect_allowlists,
             ledger_deltas: Vec::new(),
         })
     }
@@ -139,7 +174,6 @@ mod tests {
             air_version: aos_air_types::CURRENT_AIR_VERSION.to_string(),
             schemas: vec![],
             modules: vec![],
-            plans: vec![],
             effects: vec![],
             caps: vec![],
             policies: vec![],
@@ -147,7 +181,6 @@ mod tests {
             defaults: None,
             module_bindings: Default::default(),
             routing: None,
-            triggers: vec![],
         }
     }
 

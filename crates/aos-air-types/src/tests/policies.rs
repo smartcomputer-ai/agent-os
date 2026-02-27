@@ -11,7 +11,7 @@ fn parses_policy_rules() {
         "name": "com.acme/policy@1",
         "rules": [
             {
-                "when": {"effect_kind": "http.request", "origin_kind": "plan"},
+                "when": {"effect_kind": "http.request", "origin_kind": "workflow"},
                 "decision": "allow"
             }
         ]
@@ -36,12 +36,12 @@ fn policy_match_serializes_round_trip() {
         effect_kind: Some(crate::EffectKind::http_request()),
         cap_name: None,
         cap_type: Some(crate::CapType::http_out()),
-        origin_kind: Some(crate::OriginKind::Plan),
-        origin_name: Some("com.acme/Plan@1".into()),
+        origin_kind: Some(crate::OriginKind::Workflow),
+        origin_name: Some("com.acme/Workflow@1".into()),
     };
     let json = serde_json::to_value(&r#match).expect("serialize");
     let round_trip: PolicyMatch = serde_json::from_value(json).expect("deserialize");
-    assert_eq!(round_trip.origin_kind, Some(crate::OriginKind::Plan));
+    assert_eq!(round_trip.origin_kind, Some(crate::OriginKind::Workflow));
 }
 
 #[test]
@@ -55,8 +55,8 @@ fn policy_supports_multiple_rules_and_filters() {
                     "effect_kind": "http.request",
                     "cap_name": "cap_http",
                     "cap_type": "http.out",
-                    "origin_kind": "plan",
-                    "origin_name": "com.acme/Plan@1"
+                    "origin_kind": "workflow",
+                    "origin_name": "com.acme/Workflow@1"
                 },
                 "decision": "allow"
             },
@@ -89,5 +89,17 @@ fn rule_without_when_is_rejected_by_schema() {
             &policy_json
         )))
         .is_err()
+    );
+}
+
+#[test]
+fn policy_rejects_legacy_origin_alias_plan() {
+    let legacy = json!({
+        "effect_kind": "http.request",
+        "origin_kind": "plan"
+    });
+    assert!(
+        serde_json::from_value::<PolicyMatch>(legacy).is_err(),
+        "legacy origin_kind=plan alias should be rejected"
     );
 }

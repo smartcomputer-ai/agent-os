@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use aos_air_types::AirNode;
 use aos_cbor::Hash;
 use aos_effects::builtins::TimerSetReceipt;
-use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
+use aos_effects::{EffectIntent, EffectKind, EffectReceipt, EffectStreamFrame, ReceiptStatus};
 use aos_kernel::{
     DefListing, Kernel, KernelBuilder, KernelConfig, KernelHeights, LoadedManifest, ManifestLoader,
     TailIntent, TailScan, cell_index::CellMeta,
@@ -34,6 +34,7 @@ pub enum ExternalEvent {
         key: Option<Vec<u8>>,
     },
     Receipt(EffectReceipt),
+    StreamFrame(EffectStreamFrame),
 }
 
 /// Execution mode for `run_cycle`.
@@ -112,9 +113,14 @@ impl<S: Store + 'static> WorldHost<S> {
             .into_iter()
             .map(|snap| snap.into_intent())
             .collect();
+        let mut seen_intents: HashSet<[u8; 32]> =
+            to_dispatch.iter().map(|i| i.intent_hash).collect();
 
         for TailIntent { record, .. } in tail.intents.iter() {
             if receipts_seen.contains(&record.intent_hash) {
+                continue;
+            }
+            if seen_intents.contains(&record.intent_hash) {
                 continue;
             }
             let intent = EffectIntent::from_raw_params(
@@ -125,6 +131,7 @@ impl<S: Store + 'static> WorldHost<S> {
             )
             .ok();
             if let Some(intent) = intent {
+                seen_intents.insert(intent.intent_hash);
                 to_dispatch.push(intent);
             }
         }
@@ -225,9 +232,14 @@ impl WorldHost<FsStore> {
             .into_iter()
             .map(|snap| snap.into_intent())
             .collect();
+        let mut seen_intents: HashSet<[u8; 32]> =
+            to_dispatch.iter().map(|i| i.intent_hash).collect();
 
         for TailIntent { record, .. } in tail.intents.iter() {
             if receipts_seen.contains(&record.intent_hash) {
+                continue;
+            }
+            if seen_intents.contains(&record.intent_hash) {
                 continue;
             }
             let intent = EffectIntent::from_raw_params(
@@ -238,6 +250,7 @@ impl WorldHost<FsStore> {
             )
             .ok();
             if let Some(intent) = intent {
+                seen_intents.insert(intent.intent_hash);
                 to_dispatch.push(intent);
             }
         }
@@ -288,13 +301,17 @@ impl<S: Store + 'static> WorldHost<S> {
         match evt {
             ExternalEvent::DomainEvent { schema, value, key } => {
                 if let Some(key) = key {
-                    self.kernel.submit_domain_event_with_key(schema, value, key);
+                    self.kernel
+                        .submit_domain_event_with_key(schema, value, key)?;
                 } else {
-                    self.kernel.submit_domain_event(schema, value);
+                    self.kernel.submit_domain_event(schema, value)?;
                 }
             }
             ExternalEvent::Receipt(receipt) => {
                 self.kernel.handle_receipt(receipt)?;
+            }
+            ExternalEvent::StreamFrame(frame) => {
+                self.kernel.handle_stream_frame(frame)?;
             }
         }
         Ok(())
@@ -308,27 +325,27 @@ impl<S: Store + 'static> WorldHost<S> {
         })
     }
 
-    pub fn state(&self, reducer: &str, key: Option<&[u8]>) -> Option<Vec<u8>> {
+    pub fn state(&self, workflow: &str, key: Option<&[u8]>) -> Option<Vec<u8>> {
         self.kernel
-            .reducer_state_bytes(reducer, key)
+            .workflow_state_bytes(workflow, key)
             .unwrap_or(None)
     }
 
-    /// Query reducer state with consistency metadata.
+    /// Query workflow state with consistency metadata.
     pub fn query_state(
         &self,
-        reducer: &str,
+        workflow: &str,
         key: Option<&[u8]>,
         consistency: aos_kernel::Consistency,
     ) -> Option<aos_kernel::StateRead<Option<Vec<u8>>>> {
         self.kernel
-            .get_reducer_state(reducer, key, consistency)
+            .get_workflow_state(workflow, key, consistency)
             .ok()
     }
 
-    /// List all cells for a keyed reducer. Returns empty if reducer is not keyed or has no cells.
-    pub fn list_cells(&self, reducer: &str) -> Result<Vec<CellMeta>, HostError> {
-        self.kernel.list_cells(reducer).map_err(HostError::from)
+    /// List all cells for a keyed workflow. Returns empty if workflow is not keyed or has no cells.
+    pub fn list_cells(&self, workflow: &str) -> Result<Vec<CellMeta>, HostError> {
+        self.kernel.list_cells(workflow).map_err(HostError::from)
     }
 
     pub fn list_defs(
@@ -351,7 +368,7 @@ impl<S: Store + 'static> WorldHost<S> {
 
     pub async fn run_cycle(&mut self, mode: RunMode<'_>) -> Result<CycleOutcome, HostError> {
         let initial = self.drain()?;
-        let intents = self.kernel.drain_effects();
+        let intents = self.kernel.drain_effects()?;
         let effects_dispatched = intents.len();
 
         enum Slot {
@@ -451,10 +468,10 @@ impl<S: Store + 'static> WorldHost<S> {
     /// Fire all due timers by building receipts and calling `handle_receipt`.
     ///
     /// This is the correct way to fire timers in daemon mode. The kernel will:
-    /// 1. Remove context from `pending_reducer_receipts`
+    /// 1. Remove context from `pending_workflow_receipts`
     /// 2. Record receipt in journal
-    /// 3. Build a `sys/TimerFired@1` receipt event via `build_reducer_receipt_event()`
-    /// 4. Route/wrap at dispatch and push reducer event to scheduler
+    /// 3. Build a `sys/TimerFired@1` receipt event via `build_workflow_receipt_event()`
+    /// 4. Route/wrap at dispatch and push workflow event to scheduler
     ///
     /// Uses kernel logical time for scheduling and receipt timestamps.
     ///
@@ -556,7 +573,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn write_minimal_manifest(path: &std::path::Path) {
-        // Minimal manifest: no reducers/plans; just air_version and empty lists.
+        // Minimal manifest: no workflows/plans; just air_version and empty lists.
         let manifest = json!({
             "air_version": "1",
             "schemas": [],
@@ -590,7 +607,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn enqueue_domain_event_and_run() {
+    async fn enqueue_domain_event_surfaces_validation_error() {
         let tmp = TempDir::new().unwrap();
         let manifest_path = tmp.path().join("manifest.cbor");
         write_minimal_manifest(&manifest_path);
@@ -600,13 +617,15 @@ mod tests {
         let kernel_config = KernelConfig::default();
         let mut host = WorldHost::open(store, &manifest_path, host_config, kernel_config).unwrap();
 
-        // Inject a domain event (no reducers, so it should just record and idle)
-        host.enqueue_external(ExternalEvent::DomainEvent {
-            schema: "demo/Event@1".into(),
-            value: to_vec(&json!({"x": 1})).unwrap(),
-            key: None,
-        })
-        .unwrap();
+        // Event schema is not declared in this manifest; enqueue should return an error.
+        let err = host
+            .enqueue_external(ExternalEvent::DomainEvent {
+                schema: "demo/Event@1".into(),
+                value: to_vec(&json!({"x": 1})).unwrap(),
+                key: None,
+            })
+            .expect_err("missing event schema should fail");
+        assert!(matches!(err, HostError::Kernel(_)));
 
         let cycle = host.run_cycle(RunMode::Batch).await.unwrap();
         assert_eq!(cycle.effects_dispatched, 0);
@@ -624,7 +643,7 @@ mod tests {
         let kernel_config = KernelConfig::default();
         let mut host = WorldHost::open(store, &manifest_path, host_config, kernel_config).unwrap();
 
-        // No reducers, but we can still apply a receipt (should be ignored gracefully)
+        // No workflows, but we can still apply a receipt (should be ignored gracefully)
         let fake_receipt = aos_effects::EffectReceipt {
             intent_hash: [9u8; 32],
             adapter_id: "stub.http".into(),

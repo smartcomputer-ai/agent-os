@@ -18,10 +18,6 @@
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
     },
-    "plans": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/NamedRef" }
-    },
     "effects": {
       "type": "array",
       "items": { "$ref": "#/$defs/NamedRef" }
@@ -73,16 +69,16 @@
     "routing": {
       "type": "object",
       "properties": {
-        "events": {
+        "subscriptions": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
               "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-              "reducer": { "$ref": "common.schema.json#/$defs/Name" },
-              "key_field": { "type": "string", "description": "Field in event value that carries the cell key (for keyed reducers)" }
+              "module": { "$ref": "common.schema.json#/$defs/Name" },
+              "key_field": { "type": "string", "description": "Field in event value that carries the cell key (for keyed workflows)" }
             },
-            "required": ["event","reducer"],
+            "required": ["event","module"],
             "additionalProperties": false
           }
         },
@@ -92,31 +88,17 @@
             "type": "object",
             "properties": {
               "source": { "type": "string", "description": "External inbox or adapter channel name (e.g., http.inbox:contact_form)" },
-              "reducer": { "$ref": "common.schema.json#/$defs/Name", "description": "Reducer that will receive messages from this inbox; Name-formatted string" }
+              "workflow": { "$ref": "common.schema.json#/$defs/Name", "description": "Workflow that will receive messages from this inbox; Name-formatted string" }
             },
-            "required": ["source","reducer"],
+            "required": ["source","workflow"],
             "additionalProperties": false
           }
         }
       },
       "additionalProperties": false
     }
-    ,
-    "triggers": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "event": { "$ref": "common.schema.json#/$defs/SchemaRef" },
-          "plan": { "$ref": "common.schema.json#/$defs/Name" },
-          "correlate_by": { "type": "string" }
-        },
-        "required": ["event","plan"],
-        "additionalProperties": false
-      }
-    }
   },
-  "required": ["$kind","air_version","schemas","modules","plans","effects","caps","policies"],
+  "required": ["$kind","air_version","schemas","modules","effects","caps","policies"],
   "additionalProperties": false,
   "$defs": {
     "NamedRef": {

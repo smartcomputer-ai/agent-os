@@ -232,7 +232,7 @@ pub fn collect_secret_refs(params_cbor: &[u8]) -> Result<Vec<(String, u64)>, Sec
     Ok(refs)
 }
 
-/// Enforce per-secret policy (allowed_caps / allowed_plans) against collected secret refs.
+/// Enforce per-secret policy (allowed_caps) against collected secret refs.
 pub fn enforce_secret_policy(
     params_cbor: &[u8],
     catalog: &SecretCatalog,
@@ -253,15 +253,7 @@ pub fn enforce_secret_policy(
                         reason: format!("cap grant '{cap_name}' not allowed"),
                     });
                 }
-                if let EffectSource::Plan { name } = origin {
-                    if !policy.allowed_plans.is_empty() && !policy.allowed_plans.contains(name) {
-                        return Err(crate::error::KernelError::SecretPolicyDenied {
-                            alias: alias.clone(),
-                            version,
-                            reason: format!("plan '{name}' not allowed"),
-                        });
-                    }
-                }
+                let _ = origin;
             }
         }
     }

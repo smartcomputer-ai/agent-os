@@ -5,7 +5,6 @@ import { useHealth, useManifest } from "@/sdk/queries";
 import { Hash, Layers, Loader2, Braces, Compass, Info } from "lucide-react";
 import {
   ModulesSection,
-  PlansSection,
   EventFlowSection,
   DefaultsSection,
   SupportingDefsSection,
@@ -30,7 +29,7 @@ export function ManifestTreePage() {
           Manifest
         </h1>
         <p className="max-w-2xl text-muted-foreground">
-          The manifest defines how modules, plans, and events are wired together
+          The manifest defines how modules, routing, and events are wired together
           in this world.
         </p>
       </header>
@@ -83,7 +82,7 @@ export function ManifestTreePage() {
                     </CardTitle>
                     <CardDescription>
                       {viewMode === "structured"
-                        ? "Modules, plans, and event flow"
+                        ? "Modules, routing, and event flow"
                         : "Full JSON representation"}
                     </CardDescription>
                   </div>
@@ -122,18 +121,9 @@ export function ManifestTreePage() {
 
                     <Separator className="my-3" />
 
-                    {/* Plans */}
-                    <PlansSection
-                      plans={manifest.plans || []}
-                      triggers={manifest.triggers}
-                    />
-
-                    <Separator className="my-3" />
-
                     {/* Event Flow */}
                     <EventFlowSection
                       routing={manifest.routing}
-                      triggers={manifest.triggers}
                     />
 
                     <Separator className="my-3" />
@@ -180,10 +170,6 @@ export function ManifestTreePage() {
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-muted-foreground">Modules</span>
                   <span className="font-mono">{manifest.modules?.length ?? 0}</span>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-muted-foreground">Plans</span>
-                  <span className="font-mono">{manifest.plans?.length ?? 0}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-muted-foreground">Schemas</span>

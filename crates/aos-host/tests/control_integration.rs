@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use aos_air_types::ReducerAbi;
+use aos_air_types::WorkflowAbi;
 use aos_host::control::{ControlClient, ControlServer, RequestEnvelope};
 use aos_host::{WorldHost, config::HostConfig};
 use aos_kernel::Kernel;
 use aos_kernel::journal::JournalRecord;
 use aos_kernel::journal::mem::MemJournal;
-use aos_wasm_abi::ReducerOutput;
+use aos_wasm_abi::WorkflowOutput;
 use base64::prelude::*;
 use serde_json::json;
 use std::os::unix::net::UnixListener;
@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, mpsc};
 mod helpers;
 use helpers::fixtures;
 use helpers::fixtures::{START_SCHEMA, TestStore};
+const SESSION_EVENT_SCHEMA: &str = "aos.agent/SessionEvent@1";
 
 fn control_socket_allowed() -> bool {
     let dir = tempfile::tempdir();
@@ -45,34 +46,62 @@ async fn control_channel_round_trip() {
 
     let store: Arc<TestStore> = fixtures::new_mem_store();
 
-    // Build simple manifest: reducer sets fixed state when invoked.
-    let reducer_output = ReducerOutput {
+    // Build simple manifest: workflows set fixed state when invoked.
+    let workflow_output = WorkflowOutput {
         state: Some(vec![0xAA]),
         domain_events: vec![],
         effects: vec![],
         ann: None,
     };
-    let mut reducer = fixtures::stub_reducer_module(&store, "com.acme/Echo@1", &reducer_output);
-    reducer.abi.reducer = Some(ReducerAbi {
+    let mut workflow = fixtures::stub_workflow_module(&store, "com.acme/Echo@1", &workflow_output);
+    workflow.abi.workflow = Some(WorkflowAbi {
         state: fixtures::schema(START_SCHEMA),
         event: fixtures::schema(START_SCHEMA),
-        context: Some(fixtures::schema("sys/ReducerContext@1")),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
         annotations: None,
         effects_emitted: vec![],
         cap_slots: Default::default(),
     });
-    let mut manifest = fixtures::build_loaded_manifest(
-        vec![],
-        vec![],
-        vec![reducer],
-        vec![fixtures::routing_event(START_SCHEMA, "com.acme/Echo@1")],
+    let session_workflow_output = WorkflowOutput {
+        state: Some(vec![0xAB]),
+        domain_events: vec![],
+        effects: vec![],
+        ann: None,
+    };
+    let mut session_workflow = fixtures::stub_workflow_module(
+        &store,
+        "com.acme/SessionEventEcho@1",
+        &session_workflow_output,
+    );
+    session_workflow.abi.workflow = Some(WorkflowAbi {
+        state: fixtures::schema(SESSION_EVENT_SCHEMA),
+        event: fixtures::schema(SESSION_EVENT_SCHEMA),
+        context: Some(fixtures::schema("sys/WorkflowContext@1")),
+        annotations: None,
+        effects_emitted: vec![],
+        cap_slots: Default::default(),
+    });
+    let mut manifest = fixtures::build_loaded_manifest(vec![workflow, session_workflow],
+        vec![
+            fixtures::routing_event(START_SCHEMA, "com.acme/Echo@1"),
+            fixtures::routing_event(SESSION_EVENT_SCHEMA, "com.acme/SessionEventEcho@1"),
+        ],
     );
     helpers::insert_test_schemas(
         &mut manifest,
-        vec![helpers::def_text_record_schema(
-            START_SCHEMA,
-            vec![("id", helpers::text_type())],
-        )],
+        vec![
+            helpers::def_text_record_schema(START_SCHEMA, vec![("id", helpers::text_type())]),
+            helpers::def_text_record_schema(
+                SESSION_EVENT_SCHEMA,
+                vec![
+                    ("session_id", helpers::text_type()),
+                    ("run_id", helpers::text_type()),
+                    ("turn_id", helpers::text_type()),
+                    ("step_id", helpers::text_type()),
+                    ("event", helpers::text_type()),
+                ],
+            ),
+        ],
     );
 
     let kernel =
@@ -123,6 +152,27 @@ async fn control_channel_round_trip() {
     let resp = client.request(&evt).await.unwrap();
     assert!(resp.ok, "event-send failed: {:?}", resp.error);
 
+    // session lineage event (for correlation/lineage contract coverage)
+    let session_evt = RequestEnvelope {
+        v: 1,
+        id: "1-session".into(),
+        cmd: "event-send".into(),
+        payload: json!({
+            "schema": SESSION_EVENT_SCHEMA,
+            "value_b64": BASE64_STANDARD.encode(
+                serde_cbor::to_vec(&serde_json::json!({
+                    "session_id": "sess-1",
+                    "run_id": "run-1",
+                    "turn_id": "turn-1",
+                    "step_id": "step-1",
+                    "event": "RunStarted"
+                })).unwrap()
+            )
+        }),
+    };
+    let resp = client.request(&session_evt).await.unwrap();
+    assert!(resp.ok, "session event-send failed: {:?}", resp.error);
+
     let journal_all = RequestEnvelope {
         v: 1,
         id: "journal-all".into(),
@@ -131,7 +181,7 @@ async fn control_channel_round_trip() {
     };
     let resp = client.request(&journal_all).await.unwrap();
     assert!(resp.ok, "journal-list failed: {:?}", resp.error);
-    let entries = resp
+    let all_entries = resp
         .result
         .as_ref()
         .and_then(|v| v.get("entries"))
@@ -139,7 +189,7 @@ async fn control_channel_round_trip() {
         .cloned()
         .unwrap_or_default();
     assert!(
-        entries.iter().any(|entry| {
+        all_entries.iter().any(|entry| {
             entry
                 .get("kind")
                 .and_then(|v| v.as_str())
@@ -147,6 +197,18 @@ async fn control_channel_round_trip() {
                 .unwrap_or(false)
         }),
         "journal-list should include domain_event entries"
+    );
+    let all_seqs: Vec<u64> = all_entries
+        .iter()
+        .filter_map(|entry| entry.get("seq").and_then(|v| v.as_u64()))
+        .collect();
+    assert!(
+        all_seqs.len() >= 2,
+        "expected at least two journal entries for pagination test"
+    );
+    assert!(
+        all_seqs.windows(2).all(|w| w[0] < w[1]),
+        "journal-list entries should be strictly ordered by seq"
     );
 
     let journal_filtered = RequestEnvelope {
@@ -174,6 +236,63 @@ async fn control_channel_round_trip() {
                 .unwrap_or(false)
         }),
         "filtered journal-list should only include domain_event entries"
+    );
+
+    let journal_page_1 = RequestEnvelope {
+        v: 1,
+        id: "journal-page-1".into(),
+        cmd: "journal-list".into(),
+        payload: json!({ "from": 0, "limit": 2 }),
+    };
+    let resp = client.request(&journal_page_1).await.unwrap();
+    assert!(resp.ok, "journal-list page 1 failed: {:?}", resp.error);
+    let page_1_entries = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("entries"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !page_1_entries.is_empty(),
+        "expected non-empty first page from journal-list"
+    );
+    let page_1_seqs: Vec<u64> = page_1_entries
+        .iter()
+        .filter_map(|entry| entry.get("seq").and_then(|v| v.as_u64()))
+        .collect();
+    let resume_from = *page_1_seqs.last().expect("page 1 seq cursor");
+
+    let journal_page_2 = RequestEnvelope {
+        v: 1,
+        id: "journal-page-2".into(),
+        cmd: "journal-list".into(),
+        payload: json!({ "from": resume_from, "limit": 100 }),
+    };
+    let resp = client.request(&journal_page_2).await.unwrap();
+    assert!(resp.ok, "journal-list page 2 failed: {:?}", resp.error);
+    let page_2_entries = resp
+        .result
+        .as_ref()
+        .and_then(|v| v.get("entries"))
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let page_2_seqs: Vec<u64> = page_2_entries
+        .iter()
+        .filter_map(|entry| entry.get("seq").and_then(|v| v.as_u64()))
+        .collect();
+    assert!(
+        page_2_seqs.iter().all(|seq| !page_1_seqs.contains(seq)),
+        "resume-from-cursor should not duplicate durable entries"
+    );
+
+    let mut combined = page_1_seqs.clone();
+    combined.extend(page_2_seqs.iter().copied());
+    combined.sort_unstable();
+    assert_eq!(
+        combined, all_seqs,
+        "paginated journal-list should reconstruct full ordered entry sequence"
     );
 
     // trace-get by event hash
@@ -256,13 +375,56 @@ async fn control_channel_round_trip() {
     assert_eq!(trace["query"]["value"], "x");
     assert_eq!(trace["root"]["event_hash"], event_hash);
 
+    // trace-get by session lineage correlation
+    let trace = RequestEnvelope {
+        v: 1,
+        id: "trace-session-correlation".into(),
+        cmd: "trace-get".into(),
+        payload: json!({
+            "schema": SESSION_EVENT_SCHEMA,
+            "correlate_by": "session_id",
+            "value": "sess-1",
+            "window_limit": 64
+        }),
+    };
+    let resp = client.request(&trace).await.unwrap();
+    assert!(
+        resp.ok,
+        "trace-get session correlation failed: {:?}",
+        resp.error
+    );
+    let trace = resp.result.expect("trace session correlation result");
+    assert_eq!(trace["query"]["schema"], SESSION_EVENT_SCHEMA);
+    assert_eq!(trace["query"]["correlate_by"], "session_id");
+    assert_eq!(trace["query"]["value"], "sess-1");
+    let root_value = trace
+        .get("root")
+        .and_then(|v| v.get("value"))
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(root_value["session_id"], "sess-1");
+    assert_eq!(root_value["run_id"], "run-1");
+    assert_eq!(root_value["turn_id"], "turn-1");
+    assert_eq!(root_value["step_id"], "step-1");
+
+    let trace_summary = RequestEnvelope {
+        v: 1,
+        id: "trace-summary".into(),
+        cmd: "trace-summary".into(),
+        payload: json!({}),
+    };
+    let resp = client.request(&trace_summary).await.unwrap();
+    assert!(resp.ok, "trace-summary failed: {:?}", resp.error);
+    let summary = resp.result.expect("trace summary result");
+    assert!(summary.get("totals").is_some());
+
     // journal-list should include domain_event entries
     // state-get
     let query = RequestEnvelope {
         v: 1,
         id: "2".into(),
         cmd: "state-get".into(),
-        payload: json!({ "reducer": "com.acme/Echo@1" }),
+        payload: json!({ "workflow": "com.acme/Echo@1" }),
     };
     let resp = client.request(&query).await.unwrap();
     assert!(resp.ok);
@@ -314,12 +476,12 @@ async fn control_channel_round_trip() {
         "defs-list should include the schema"
     );
 
-    // state-get with key_b64 on a non-keyed reducer should return null (state keyed lookup unsupported)
+    // state-get with key_b64 on a non-keyed workflow should return null (state keyed lookup unsupported)
     let query_key = RequestEnvelope {
         v: 1,
         id: "2b".into(),
         cmd: "state-get".into(),
-        payload: json!({ "reducer": "com.acme/Echo@1", "key_b64": BASE64_STANDARD.encode(b"k1") }),
+        payload: json!({ "workflow": "com.acme/Echo@1", "key_b64": BASE64_STANDARD.encode(b"k1") }),
     };
     let resp = client.request(&query_key).await.unwrap();
     assert!(resp.ok);
@@ -352,7 +514,7 @@ async fn control_channel_errors() {
     }
 
     let store: Arc<TestStore> = fixtures::new_mem_store();
-    let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![], vec![]);
+    let manifest = fixtures::build_loaded_manifest(vec![], vec![]);
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
     let host = WorldHost::from_kernel(kernel, store.clone(), HostConfig::default());
@@ -428,7 +590,7 @@ async fn control_channel_put_blob() {
     }
 
     let store: Arc<TestStore> = fixtures::new_mem_store();
-    let manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![], vec![]);
+    let manifest = fixtures::build_loaded_manifest(vec![], vec![]);
     let kernel =
         Kernel::from_loaded_manifest(store.clone(), manifest, Box::new(MemJournal::new())).unwrap();
     let host = WorldHost::from_kernel(kernel, store.clone(), HostConfig::default());

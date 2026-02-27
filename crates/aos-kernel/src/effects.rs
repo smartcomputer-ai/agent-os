@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use aos_effects::builtins::{HttpRequestParams, LlmGenerateParams};
+use aos_cbor::{Hash, to_canonical_cbor};
+use aos_effects::builtins::{BlobPutParams, HttpRequestParams, LlmGenerateParams};
 use aos_effects::{
     CapabilityGrant, EffectIntent, EffectKind, EffectSource, normalize_effect_params,
 };
-use aos_wasm_abi::{PureContext, ReducerEffect};
+use aos_wasm_abi::{PureContext, WorkflowEffect};
 use serde::de::DeserializeOwned;
 use serde_cbor::Value as CborValue;
 use url::Url;
@@ -22,7 +23,7 @@ use crate::journal::{
 use crate::policy::{PolicyDecisionDetail, PolicyGate};
 use crate::secret::{SecretResolver, normalize_secret_variants};
 use aos_air_types::catalog::EffectCatalog;
-use aos_air_types::plan_literals::SchemaIndex;
+use aos_air_types::schema_index::SchemaIndex;
 
 #[derive(Default)]
 pub struct EffectQueue {
@@ -111,14 +112,14 @@ impl EffectManager {
         }
     }
 
-    pub fn enqueue_reducer_effect(
+    pub fn enqueue_workflow_effect(
         &mut self,
-        reducer_name: &str,
+        workflow_name: &str,
         cap_name: &str,
-        effect: &ReducerEffect,
+        effect: &WorkflowEffect,
     ) -> Result<EffectIntent, KernelError> {
-        let source = EffectSource::Reducer {
-            name: reducer_name.to_string(),
+        let source = EffectSource::Workflow {
+            name: workflow_name.to_string(),
         };
         let runtime_kind = EffectKind::new(effect.kind.clone());
         let idempotency_key = normalize_idempotency_key(effect.idempotency_key.as_deref())?;
@@ -139,14 +140,14 @@ impl EffectManager {
             .unique_grant_for_effect_kind(effect_kind)
     }
 
-    pub fn enqueue_reducer_effect_with_grant(
+    pub fn enqueue_workflow_effect_with_grant(
         &mut self,
-        reducer_name: &str,
+        workflow_name: &str,
         grant: &CapGrantResolution,
-        effect: &ReducerEffect,
+        effect: &WorkflowEffect,
     ) -> Result<EffectIntent, KernelError> {
-        let source = EffectSource::Reducer {
-            name: reducer_name.to_string(),
+        let source = EffectSource::Workflow {
+            name: workflow_name.to_string(),
         };
         let runtime_kind = EffectKind::new(effect.kind.clone());
         let idempotency_key = normalize_idempotency_key(effect.idempotency_key.as_deref())?;
@@ -221,20 +222,13 @@ impl EffectManager {
         idempotency_key: [u8; 32],
         resolved: &CapGrantResolution,
     ) -> Result<EffectIntent, KernelError> {
-        if let EffectSource::Reducer { .. } = &source {
-            let scope = self
-                .effect_catalog
-                .origin_scope(&runtime_kind)
-                .ok_or_else(|| KernelError::UnsupportedEffectKind(runtime_kind.as_str().into()))?;
-            if !scope.allows_reducers() {
-                return Err(KernelError::UnsupportedReducerReceipt(
-                    runtime_kind.as_str().into(),
-                ));
-            }
-        }
-
         let params_cbor = if let Some(preprocessor) = &self.param_preprocessor {
             preprocessor.preprocess(&source, &runtime_kind, params_cbor)?
+        } else {
+            params_cbor
+        };
+        let params_cbor = if runtime_kind.as_str() == aos_effects::EffectKind::BLOB_PUT {
+            normalize_blob_put_params(params_cbor)?
         } else {
             params_cbor
         };
@@ -356,22 +350,22 @@ impl EffectManager {
         }
     }
 
-    pub fn drain(&mut self) -> Vec<EffectIntent> {
+    pub fn drain(&mut self) -> Result<Vec<EffectIntent>, KernelError> {
         let mut intents = self.queue.drain();
         if let (Some(catalog), Some(resolver)) =
             (self.secret_catalog.as_ref(), self.secret_resolver.as_ref())
         {
             for intent in intents.iter_mut() {
-                if let Ok(injected) = crate::secret::inject_secrets_in_params(
+                let injected = crate::secret::inject_secrets_in_params(
                     &intent.params_cbor,
                     catalog,
                     resolver.as_ref(),
-                ) {
-                    intent.params_cbor = injected;
-                }
+                )
+                .map_err(|err| KernelError::SecretResolution(err.to_string()))?;
+                intent.params_cbor = injected;
             }
         }
-        intents
+        Ok(intents)
     }
 
     pub fn has_pending(&self) -> bool {
@@ -475,9 +469,30 @@ impl EffectManager {
     }
 }
 
+fn normalize_blob_put_params(params_cbor: Vec<u8>) -> Result<Vec<u8>, KernelError> {
+    let mut params: BlobPutParams = serde_cbor::from_slice(&params_cbor)
+        .map_err(|err| KernelError::EffectManager(format!("decode blob.put params: {err}")))?;
+    let computed = Hash::of_bytes(&params.bytes);
+    let computed_ref = aos_air_types::HashRef::new(computed.to_hex())
+        .map_err(|err| KernelError::EffectManager(format!("invalid computed blob hash: {err}")))?;
+    if let Some(provided_ref) = params.blob_ref.as_ref() {
+        if provided_ref != &computed_ref {
+            return Err(KernelError::EffectManager(
+                "blob.put blob_ref does not match sha256(bytes)".into(),
+            ));
+        }
+    }
+    if params.refs.is_none() {
+        params.refs = Some(Vec::new());
+    }
+    params.blob_ref = Some(computed_ref);
+    to_canonical_cbor(&params)
+        .map_err(|err| KernelError::EffectManager(format!("encode blob.put params: {err}")))
+}
+
 fn format_effect_origin(source: &EffectSource) -> String {
     match source {
-        EffectSource::Reducer { name } => format!("reducer '{name}'"),
+        EffectSource::Workflow { name } => format!("workflow '{name}'"),
         EffectSource::Plan { name } => format!("plan '{name}'"),
     }
 }
@@ -515,7 +530,13 @@ struct LlmCapParams {
 struct LlmGenerateParamsView {
     provider: String,
     model: String,
-    max_tokens: u64,
+    runtime: LlmRuntimeArgsView,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct LlmRuntimeArgsView {
+    #[serde(default)]
+    max_tokens: Option<u64>,
     #[serde(default)]
     tool_choice: Option<LlmToolChoiceView>,
 }
@@ -578,8 +599,8 @@ fn invoke_enforcer(
     cap_context: Option<&CapContext>,
 ) -> Result<(), CapDenyReason> {
     let origin = match origin {
-        EffectSource::Reducer { name } => CapEffectOrigin {
-            kind: "reducer".into(),
+        EffectSource::Workflow { name } => CapEffectOrigin {
+            kind: "workflow".into(),
             name: name.clone(),
         },
         EffectSource::Plan { name } => CapEffectOrigin {
@@ -737,20 +758,19 @@ fn builtin_llm_enforcer(
             message: format!("model '{}' not allowed", effect_params.model),
         });
     }
-    if let Some(limit) = cap_params.max_tokens {
-        if effect_params.max_tokens > limit {
+    if let (Some(limit), Some(requested)) =
+        (cap_params.max_tokens, effect_params.runtime.max_tokens)
+    {
+        if requested > limit {
             return Err(CapDenyReason {
                 code: "max_tokens_exceeded".into(),
-                message: format!(
-                    "max_tokens {} exceeds cap {limit}",
-                    effect_params.max_tokens
-                ),
+                message: format!("max_tokens {requested} exceeds cap {limit}"),
             });
         }
     }
     if let Some(allowed) = &cap_params.tools_allow {
         if !allowed.is_empty() {
-            if let Some(choice) = &effect_params.tool_choice {
+            if let Some(choice) = &effect_params.runtime.tool_choice {
                 if let LlmToolChoiceView::Tool { name } = choice {
                     if !allowed.iter().any(|t| t == name) {
                         return Err(CapDenyReason {
@@ -793,9 +813,12 @@ fn allowlist_contains(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aos_air_types::{CapType, builtins, catalog::EffectCatalog, plan_literals::SchemaIndex};
-    use aos_effects::builtins::{HeaderMap, HttpRequestParams, LlmGenerateParams};
+    use aos_air_types::{CapType, builtins, catalog::EffectCatalog, schema_index::SchemaIndex};
+    use aos_effects::builtins::{
+        BlobPutParams, HeaderMap, HttpRequestParams, LlmGenerateParams, LlmRuntimeArgs,
+    };
     use aos_effects::{CapabilityGrant, EffectKind};
+    use aos_wasm_abi::WorkflowEffect;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -875,25 +898,34 @@ mod tests {
         let grant = CapabilityGrant::builder(
             "cap_llm",
             "sys/llm.basic@1",
-            &serde_json::json!({ "models": ["gpt-4"], "max_tokens": 50 }),
+            &serde_json::json!({ "models": ["gpt-5.2"], "max_tokens": 50 }),
         )
         .build()
         .expect("grant");
         let mut mgr = effect_manager_with_grants(vec![(grant, CapType::llm_basic())]);
 
         let params = LlmGenerateParams {
+            correlation_id: None,
             provider: "openai".into(),
             model: "gpt-5.2".into(),
-            temperature: "0.5".into(),
-            max_tokens: 50,
             message_refs: vec![
                 aos_air_types::HashRef::new(
                     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 )
                 .expect("hash ref"),
             ],
-            tool_refs: None,
-            tool_choice: None,
+            runtime: LlmRuntimeArgs {
+                temperature: Some("0.5".into()),
+                top_p: None,
+                max_tokens: Some(50),
+                tool_refs: None,
+                tool_choice: None,
+                reasoning_effort: None,
+                stop_sequences: None,
+                metadata: None,
+                provider_options_ref: None,
+                response_format_ref: None,
+            },
             api_key: None,
         };
         let params_cbor = serde_cbor::to_vec(&params).expect("encode params");
@@ -907,18 +939,27 @@ mod tests {
         assert!(res.is_ok(), "enqueue failed: {:?}", res.err());
 
         let over_limit = LlmGenerateParams {
+            correlation_id: None,
             provider: "openai".into(),
             model: "gpt-5.2".into(),
-            temperature: "0.5".into(),
-            max_tokens: 55,
             message_refs: vec![
                 aos_air_types::HashRef::new(
                     "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                 )
                 .expect("hash ref"),
             ],
-            tool_refs: None,
-            tool_choice: None,
+            runtime: LlmRuntimeArgs {
+                temperature: Some("0.5".into()),
+                top_p: None,
+                max_tokens: Some(55),
+                tool_refs: None,
+                tool_choice: None,
+                reasoning_effort: None,
+                stop_sequences: None,
+                metadata: None,
+                provider_options_ref: None,
+                response_format_ref: None,
+            },
             api_key: None,
         };
         let over_cbor = serde_cbor::to_vec(&over_limit).expect("encode params");
@@ -960,5 +1001,86 @@ mod tests {
             )
             .expect_err("expected expiry denial");
         assert!(matches!(err, KernelError::CapabilityDenied { .. }));
+    }
+
+    #[test]
+    fn blob_put_mismatched_ref_is_rejected_deterministically() {
+        let grant = CapabilityGrant::builder("cap_blob", "sys/blob@1", &serde_json::json!({}))
+            .build()
+            .expect("grant");
+        let mut mgr = effect_manager_with_grants(vec![(grant, CapType::blob())]);
+
+        let params = BlobPutParams {
+            bytes: b"hello".to_vec(),
+            blob_ref: Some(
+                aos_air_types::HashRef::new(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                )
+                .expect("hash"),
+            ),
+            refs: None,
+        };
+        let params_cbor = serde_cbor::to_vec(&params).expect("encode params");
+        let err = mgr
+            .enqueue_plan_effect(
+                "plan",
+                &EffectKind::blob_put(),
+                "cap_blob",
+                params_cbor,
+                [0u8; 32],
+            )
+            .expect_err("expected mismatch error");
+        assert!(matches!(err, KernelError::EffectManager(_)));
+        assert!(format!("{err}").contains("blob_ref does not match"));
+    }
+
+    #[test]
+    fn blob_put_omitted_fields_are_normalized_before_hashing() {
+        let grant = CapabilityGrant::builder("cap_blob", "sys/blob@1", &serde_json::json!({}))
+            .build()
+            .expect("grant");
+        let mut mgr = effect_manager_with_grants(vec![(grant, CapType::blob())]);
+        let bytes = b"hello".to_vec();
+        let expected_ref = aos_air_types::HashRef::new(Hash::of_bytes(&bytes).to_hex()).unwrap();
+
+        let params = BlobPutParams {
+            bytes: bytes.clone(),
+            blob_ref: None,
+            refs: None,
+        };
+        let intent = mgr
+            .enqueue_plan_effect(
+                "plan",
+                &EffectKind::blob_put(),
+                "cap_blob",
+                serde_cbor::to_vec(&params).expect("encode params"),
+                [0u8; 32],
+            )
+            .expect("enqueue blob.put");
+        let normalized: BlobPutParams = serde_cbor::from_slice(&intent.params_cbor).unwrap();
+        assert_eq!(normalized.blob_ref, Some(expected_ref));
+        assert_eq!(normalized.refs, Some(vec![]));
+    }
+
+    #[test]
+    fn workflow_origin_can_enqueue_http_when_authorized() {
+        let grant = CapabilityGrant::builder("cap_http", "sys/http.out@1", &serde_json::json!({}))
+            .build()
+            .expect("grant");
+        let mut mgr = effect_manager_with_grants(vec![(grant, CapType::http_out())]);
+        let params = HttpRequestParams {
+            method: "GET".into(),
+            url: "https://example.com/workflow".into(),
+            headers: HeaderMap::new(),
+            body_ref: None,
+        };
+        let effect = WorkflowEffect::new(
+            EffectKind::HTTP_REQUEST,
+            serde_cbor::to_vec(&params).unwrap(),
+        );
+        let intent = mgr
+            .enqueue_workflow_effect("com.acme/Workflow@1", "cap_http", &effect)
+            .expect("enqueue");
+        assert_eq!(intent.kind.as_str(), EffectKind::HTTP_REQUEST);
     }
 }

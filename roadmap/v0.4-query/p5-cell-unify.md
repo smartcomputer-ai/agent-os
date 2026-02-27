@@ -4,7 +4,7 @@
 - Treat every reducer state as a cell stored in CAS so both keyed and non-keyed reducers can be offloaded/evicted uniformly under memory pressure.
 
 ## Status
-- ✅ Implemented in kernel/host: non-keyed reducers now use sentinel cell `MONO_KEY` via `CellIndex`/`CellCache`; monolithic fields removed; snapshots rely on index roots only; tests updated and passing with `--features test-fixtures`.
+- ✅ Implemented in kernel/host: non-keyed reducers now use sentinel cell `MONO_KEY` via `CellIndex`/`CellCache`; monolithic fields removed; snapshots rely on index roots only; tests updated and passing with `--features e2e-tests`.
 
 ## Current behavior (pain)
 - Keyed reducers: per-key state lives in CAS, indexed by `CellIndex`, cached in `CellCache` LRU.

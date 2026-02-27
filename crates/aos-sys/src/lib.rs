@@ -1,6 +1,6 @@
-//! Shared types for system reducers (`sys/*`).
+//! Shared types for system workflows (`sys/*`).
 //!
-//! This crate provides common data structures used by built-in system reducers
+//! This crate provides common data structures used by built-in system workflows
 //! like `sys/Workspace@1`. The types mirror the schemas in
 //! `spec/defs/builtin-schemas.air.json`.
 
@@ -28,7 +28,7 @@ pub struct WorkspaceCommitMeta {
     pub created_at: u64,
 }
 
-/// Reducer state: append-only history of workspace commits (`sys/WorkspaceHistory@1`).
+/// Workflow state: append-only history of workspace commits (`sys/WorkspaceHistory@1`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspaceHistory {
     pub latest: WorkspaceVersion,

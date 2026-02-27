@@ -1,5 +1,3 @@
-#![cfg(feature = "test-fixtures")]
-
 #[path = "helpers.rs"]
 mod helpers;
 
@@ -27,7 +25,7 @@ async fn pure_module_integration_flow() {
         "com.acme/PureOutput@1",
     );
 
-    let mut manifest = fixtures::build_loaded_manifest(vec![], vec![], vec![module], vec![]);
+    let mut manifest = fixtures::build_loaded_manifest(vec![module], vec![]);
     fixtures::insert_test_schemas(
         &mut manifest,
         vec![

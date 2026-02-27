@@ -20,7 +20,6 @@
       "enum": [
         "defschema",
         "defmodule",
-        "defplan",
         "defeffect",
         "defcap",
         "defpolicy",

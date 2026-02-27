@@ -1,0 +1,85 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    {
+      "name": "demo/FetchNotifyPc@1"
+    },
+    {
+      "name": "demo/FetchNotifyState@1"
+    },
+    {
+      "name": "demo/FetchNotifyStart@1"
+    },
+    {
+      "name": "demo/FetchNotifyEvent@1"
+    },
+    {
+      "name": "sys/EffectReceiptEnvelope@1"
+    },
+    {
+      "name": "sys/HttpRequestParams@1"
+    },
+    {
+      "name": "sys/HttpRequestReceipt@1"
+    }
+  ],
+  "modules": [
+    {
+      "name": "demo/FetchNotify@1"
+    },
+    {
+      "name": "sys/CapEnforceHttpOut@1"
+    }
+  ],
+  "effects": [
+    {
+      "name": "sys/http.request@1"
+    }
+  ],
+  "caps": [
+    {
+      "name": "demo/http_fetch_cap@1"
+    }
+  ],
+  "policies": [
+    {
+      "name": "demo/http-policy@1"
+    }
+  ],
+  "defaults": {
+    "policy": "demo/http-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_http_fetch",
+        "cap": "demo/http_fetch_cap@1",
+        "params": {
+          "record": {
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "methods": {
+              "set": [
+                {
+                  "text": "GET"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/FetchNotifyEvent@1",
+        "module": "demo/FetchNotify@1"
+      }
+    ]
+  }
+}

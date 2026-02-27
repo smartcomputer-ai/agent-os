@@ -76,20 +76,11 @@ export function DefsTable({ defs, showKind = true }: DefsTableProps) {
 }
 
 function getDefLink(def: DefListing): string {
-  // Convert API kind (defplan) to display kind (plan) for URL
   const displayKind = toDisplayKind(def.kind);
-
-  // Plans get their own specialized view
-  if (displayKind === "plan") {
-    return `/manifest/plans/${encodeURIComponent(def.name)}`;
-  }
   return `/manifest/defs/${displayKind}/${encodeURIComponent(def.name)}`;
 }
 
 function getDefMeta(def: DefListing): string {
-  if (def.plan_steps != null) {
-    return `${def.plan_steps} step${def.plan_steps === 1 ? "" : "s"}`;
-  }
   if (def.policy_rules != null) {
     return `${def.policy_rules} rule${def.policy_rules === 1 ? "" : "s"}`;
   }

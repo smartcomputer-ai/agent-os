@@ -3,15 +3,15 @@ use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 
 use aos_air_types::catalog::EffectCatalog;
-use aos_air_types::{CURRENT_AIR_VERSION, Manifest, SecretDecl, SecretEntry, SecretPolicy};
+use aos_air_types::{Manifest, SecretDecl, SecretEntry, SecretPolicy, CURRENT_AIR_VERSION};
 use aos_cbor::Hash;
 use aos_effects::builtins::LlmGenerateParams;
 use aos_host::util::env_secret_resolver_from_manifest;
 use aos_kernel::error::KernelError;
 use aos_kernel::journal::mem::MemJournal;
 use aos_kernel::secret::{
-    MapSecretResolver, SecretCatalog, enforce_secret_policy, inject_secrets_in_params,
-    normalize_secret_variants,
+    enforce_secret_policy, inject_secrets_in_params, normalize_secret_variants, MapSecretResolver,
+    SecretCatalog,
 };
 use aos_kernel::{Kernel, KernelConfig, LoadedManifest};
 use aos_store::MemStore;
@@ -104,7 +104,6 @@ fn empty_manifest() -> Manifest {
         air_version: CURRENT_AIR_VERSION.to_string(),
         schemas: vec![],
         modules: vec![],
-        plans: vec![],
         effects: vec![],
         caps: vec![],
         policies: vec![],
@@ -112,7 +111,6 @@ fn empty_manifest() -> Manifest {
         defaults: None,
         module_bindings: IndexMap::new(),
         routing: None,
-        triggers: vec![],
     }
 }
 
@@ -130,7 +128,6 @@ fn loaded_manifest_with_secret(binding_id: &str) -> LoadedManifest {
         manifest,
         secrets: vec![secret],
         modules: HashMap::new(),
-        plans: HashMap::new(),
         effects: HashMap::new(),
         caps: HashMap::new(),
         policies: HashMap::new(),
@@ -241,10 +238,9 @@ fn expected_digest_mismatch_fails() {
 }
 
 #[test]
-fn secret_policy_denies_disallowed_cap_or_plan() {
+fn secret_policy_denies_disallowed_cap() {
     let catalog = catalog_with_secret(Some(SecretPolicy {
         allowed_caps: vec!["allowed_cap".into()],
-        allowed_plans: vec!["allowed_plan".into()],
     }));
     let _resolver = MapSecretResolver::new(HashMap::from([(
         "env:LLM_API_KEY".into(),
@@ -263,8 +259,8 @@ fn secret_policy_denies_disallowed_cap_or_plan() {
     .unwrap_err();
     assert!(matches!(err, KernelError::SecretPolicyDenied { .. }));
 
-    // Plan not allowlisted
-    let err = enforce_secret_policy(
+    // Allowed cap passes regardless of origin identity in post-plan semantics.
+    enforce_secret_policy(
         &cbor,
         &catalog,
         &aos_effects::EffectSource::Plan {
@@ -272,15 +268,13 @@ fn secret_policy_denies_disallowed_cap_or_plan() {
         },
         "allowed_cap",
     )
-    .unwrap_err();
-    assert!(matches!(err, KernelError::SecretPolicyDenied { .. }));
+    .expect("allowed cap should pass");
 }
 
 #[test]
 fn secret_policy_denies_by_cap_only() {
     let catalog = catalog_with_secret(Some(SecretPolicy {
         allowed_caps: vec!["only_cap".into()],
-        allowed_plans: vec![],
     }));
     let cbor = secret_param_cbor("llm/api", 1);
     // Different cap should be denied regardless of plan
@@ -297,13 +291,12 @@ fn secret_policy_denies_by_cap_only() {
 }
 
 #[test]
-fn secret_policy_denies_by_plan_only() {
+fn secret_policy_without_cap_constraints_allows_any_origin() {
     let catalog = catalog_with_secret(Some(SecretPolicy {
         allowed_caps: vec![],
-        allowed_plans: vec!["only_plan".into()],
     }));
     let cbor = secret_param_cbor("llm/api", 1);
-    let err = enforce_secret_policy(
+    enforce_secret_policy(
         &cbor,
         &catalog,
         &aos_effects::EffectSource::Plan {
@@ -311,8 +304,7 @@ fn secret_policy_denies_by_plan_only() {
         },
         "any_cap",
     )
-    .unwrap_err();
-    assert!(matches!(err, KernelError::SecretPolicyDenied { .. }));
+    .expect("empty allowed_caps should not deny by origin");
 }
 
 #[test]
@@ -329,8 +321,10 @@ fn env_resolver_injects_llm_api_key() {
     let mut params = BTreeMap::new();
     params.insert(Value::Text("provider".into()), Value::Text("openai".into()));
     params.insert(Value::Text("model".into()), Value::Text("gpt-5.2".into()));
-    params.insert(Value::Text("temperature".into()), Value::Text("0.7".into()));
-    params.insert(Value::Text("max_tokens".into()), Value::Integer(16));
+    let mut runtime = BTreeMap::new();
+    runtime.insert(Value::Text("temperature".into()), Value::Text("0.7".into()));
+    runtime.insert(Value::Text("max_tokens".into()), Value::Integer(16));
+    params.insert(Value::Text("runtime".into()), Value::Map(runtime));
     params.insert(
         Value::Text("message_refs".into()),
         Value::Array(vec![Value::Text(Hash::of_bytes(b"input").to_hex())]),

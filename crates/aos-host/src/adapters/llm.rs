@@ -2,69 +2,216 @@ use std::sync::Arc;
 
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmToolChoice, TokenUsage};
+use aos_effects::builtins::{
+    LlmFinishReason, LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope, LlmToolCall,
+    LlmToolCallList, LlmToolChoice, LlmUsageDetails, TokenUsage,
+};
 use aos_effects::{EffectIntent, EffectReceipt, ReceiptStatus};
+use aos_llm::{
+    AdapterTimeout, AnthropicAdapter, AnthropicAdapterConfig, ContentPart, Message, OpenAIAdapter,
+    OpenAIAdapterConfig, OpenAICompatibleAdapter, OpenAICompatibleAdapterConfig, ProviderAdapter,
+    Request, ResponseFormat, Role, SDKError, ToolCallData, ToolChoice, ToolDefinition,
+    ToolResultData,
+};
+use aos_store::Store;
 use async_trait::async_trait;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as B64;
-use reqwest::Client;
-use serde::Deserialize;
+use serde_json::Value;
 
 use super::traits::AsyncEffectAdapter;
 use crate::config::{LlmAdapterConfig, LlmApiKind, ProviderConfig};
-use aos_store::Store;
 
-/// LLM adapter that targets OpenAI-compatible chat/completions and responses APIs.
+/// LLM adapter that resolves CAS refs and delegates provider execution to `aos-llm`.
 pub struct LlmAdapter<S: Store> {
-    client: Client,
     store: Arc<S>,
     config: LlmAdapterConfig,
 }
 
 impl<S: Store> LlmAdapter<S> {
     pub fn new(store: Arc<S>, config: LlmAdapterConfig) -> Self {
-        let client = Client::builder().build().expect("build http client");
-        Self {
-            client,
-            store,
-            config,
-        }
+        Self { store, config }
     }
 
     fn provider(&self, name: &str) -> Option<&ProviderConfig> {
         self.config.providers.get(name)
     }
 
-    fn error_receipt(
+    fn failure_receipt(
         &self,
         intent: &EffectIntent,
-        provider: &str,
+        provider_id: &str,
+        status: ReceiptStatus,
         message: impl Into<String>,
     ) -> EffectReceipt {
         let msg = message.into();
         let output_ref = self
-            .store
-            .put_blob(msg.as_bytes())
-            .ok()
-            .and_then(|h| HashRef::new(h.to_hex()).ok())
-            .unwrap_or_else(zero_hashref);
+            .store_text_blob(&msg)
+            .unwrap_or_else(|_| zero_hashref());
+
         let receipt = LlmGenerateReceipt {
             output_ref,
+            raw_output_ref: None,
+            provider_response_id: None,
+            finish_reason: LlmFinishReason {
+                reason: "error".to_string(),
+                raw: None,
+            },
             token_usage: TokenUsage {
                 prompt: 0,
                 completion: 0,
+                total: Some(0),
             },
+            usage_details: None,
+            warnings_ref: None,
+            rate_limit_ref: None,
             cost_cents: None,
-            provider_id: provider.to_string(),
+            provider_id: provider_id.to_string(),
         };
+
         EffectReceipt {
             intent_hash: intent.intent_hash,
-            adapter_id: format!("host.llm.{provider}"),
-            status: ReceiptStatus::Error,
-            payload_cbor: serde_cbor::to_vec(&receipt).unwrap_or_default(),
+            adapter_id: format!("host.llm.{provider_id}"),
+            status,
+            payload_cbor: serde_cbor::to_vec(&receipt)
+                .expect("encode host.llm failure receipt payload"),
             cost_cents: None,
             signature: vec![0; 64],
         }
+    }
+
+    async fn complete_with_provider(
+        &self,
+        provider: &ProviderConfig,
+        api_key: String,
+        request: Request,
+    ) -> Result<aos_llm::Response, SDKError> {
+        match provider.api_kind {
+            LlmApiKind::Responses => {
+                let mut cfg = OpenAIAdapterConfig::new(api_key);
+                cfg.base_url = provider.base_url.clone();
+                cfg.timeout = to_adapter_timeout(provider.timeout);
+                let adapter = OpenAIAdapter::new(cfg)?;
+                adapter.complete(request).await
+            }
+            LlmApiKind::ChatCompletions => {
+                let mut cfg = OpenAICompatibleAdapterConfig::new(api_key, &provider.base_url);
+                cfg.timeout = to_adapter_timeout(provider.timeout);
+                let adapter = OpenAICompatibleAdapter::new(cfg)?;
+                adapter.complete(request).await
+            }
+            LlmApiKind::AnthropicMessages => {
+                let mut cfg = AnthropicAdapterConfig::new(api_key);
+                cfg.base_url = provider.base_url.clone();
+                cfg.timeout = to_adapter_timeout(provider.timeout);
+                let adapter = AnthropicAdapter::new(cfg)?;
+                adapter.complete(request).await
+            }
+        }
+    }
+
+    fn load_messages(&self, refs: &[HashRef]) -> Result<Vec<Message>, String> {
+        let mut messages = Vec::new();
+        for reference in refs {
+            let mut loaded = self.load_message(reference)?;
+            messages.append(&mut loaded);
+        }
+        Ok(messages)
+    }
+
+    fn load_message(&self, reference: &HashRef) -> Result<Vec<Message>, String> {
+        let hash = Hash::from_hex_str(reference.as_str())
+            .map_err(|e| format!("invalid message_ref: {e}"))?;
+        let bytes = self
+            .store
+            .get_blob(hash)
+            .map_err(|e| format!("message_ref not found: {e}"))?;
+
+        if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+            return parse_message_value(value);
+        }
+
+        let text = String::from_utf8(bytes)
+            .map_err(|e| format!("message blob is not utf8 or JSON: {e}"))?;
+        Ok(vec![Message::user(text)])
+    }
+
+    fn load_tools_blobs(
+        &self,
+        references: &[HashRef],
+    ) -> Result<(Vec<ToolDefinition>, Option<ToolChoice>), String> {
+        let mut tools: Vec<ToolDefinition> = Vec::new();
+        let mut tool_choice: Option<ToolChoice> = None;
+
+        for reference in references {
+            let hash = Hash::from_hex_str(reference.as_str())
+                .map_err(|e| format!("invalid tool_ref: {e}"))?;
+            let bytes = self
+                .store
+                .get_blob(hash)
+                .map_err(|e| format!("tool_ref not found: {e}"))?;
+            let value: Value = serde_json::from_slice(&bytes)
+                .map_err(|e| format!("tool_ref invalid JSON: {e}"))?;
+
+            match value {
+                Value::Array(items) => {
+                    for item in items {
+                        tools.push(parse_tool_definition(item)?);
+                    }
+                }
+                Value::Object(map) => {
+                    if let Some(items) = map.get("tools").and_then(Value::as_array) {
+                        for item in items {
+                            tools.push(parse_tool_definition(item.clone())?);
+                        }
+                    } else if map.contains_key("name")
+                        || map.contains_key("function")
+                        || map.contains_key("parameters")
+                        || map.contains_key("input_schema")
+                    {
+                        tools.push(parse_tool_definition(Value::Object(map.clone()))?);
+                    }
+
+                    if let Some(choice) = map.get("tool_choice") {
+                        tool_choice = Some(parse_tool_choice_json(choice.clone())?);
+                    }
+                }
+                _ => return Err("tool_ref must be JSON array or object".to_string()),
+            }
+        }
+
+        Ok((tools, tool_choice))
+    }
+
+    fn load_json_blob(&self, reference: &HashRef, field: &str) -> Result<Value, String> {
+        let hash =
+            Hash::from_hex_str(reference.as_str()).map_err(|e| format!("invalid {field}: {e}"))?;
+        let bytes = self
+            .store
+            .get_blob(hash)
+            .map_err(|e| format!("{field} not found: {e}"))?;
+        serde_json::from_slice::<Value>(&bytes).map_err(|e| format!("{field} invalid JSON: {e}"))
+    }
+
+    fn load_response_format(&self, reference: &HashRef) -> Result<ResponseFormat, String> {
+        let value = self.load_json_blob(reference, "response_format_ref")?;
+        serde_json::from_value::<ResponseFormat>(value)
+            .map_err(|e| format!("response_format_ref invalid shape: {e}"))
+    }
+
+    fn store_json_blob(&self, value: &Value) -> Result<HashRef, String> {
+        let bytes = serde_json::to_vec(value).map_err(|e| format!("encode JSON failed: {e}"))?;
+        self.store_bytes_blob(&bytes)
+    }
+
+    fn store_text_blob(&self, value: &str) -> Result<HashRef, String> {
+        self.store_bytes_blob(value.as_bytes())
+    }
+
+    fn store_bytes_blob(&self, bytes: &[u8]) -> Result<HashRef, String> {
+        let hash = self
+            .store
+            .put_blob(bytes)
+            .map_err(|e| format!("store blob failed: {e}"))?;
+        HashRef::new(hash.to_hex()).map_err(|e| format!("invalid blob hash: {e}"))
     }
 }
 
@@ -85,215 +232,270 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
         };
 
         let provider = match self.provider(&provider_id) {
-            Some(p) => p,
+            Some(provider) => provider,
             None => {
-                return Ok(self.error_receipt(
+                return Ok(self.failure_receipt(
                     intent,
                     &provider_id,
+                    ReceiptStatus::Error,
                     format!("unknown provider {provider_id}"),
                 ));
             }
         };
 
-        // Resolve API key: must come from params (literal or secret-ref resolved upstream).
         let api_key = match params.api_key.clone() {
             Some(key) if !key.is_empty() => key,
-            _ => return Ok(self.error_receipt(intent, &provider_id, "api_key missing")),
+            _ => {
+                return Ok(self.failure_receipt(
+                    intent,
+                    &provider_id,
+                    ReceiptStatus::Error,
+                    "api_key missing",
+                ));
+            }
         };
 
         if params.message_refs.is_empty() {
-            return Ok(self.error_receipt(intent, &provider_id, "message_refs empty"));
-        }
-
-        let messages = match self.load_messages(&params.message_refs, provider.api_kind) {
-            Ok(messages) => messages,
-            Err(err) => return Ok(self.error_receipt(intent, &provider_id, err)),
-        };
-
-        let temperature: f64 = params.temperature.parse().unwrap_or(0.7);
-
-        let (url, mut body) = match provider.api_kind {
-            LlmApiKind::ChatCompletions => {
-                let body = serde_json::json!({
-                    "model": params.model,
-                    "messages": messages,
-                    "max_tokens": params.max_tokens,
-                    "temperature": temperature,
-                });
-                let url = format!(
-                    "{}/chat/completions",
-                    provider.base_url.trim_end_matches('/')
-                );
-                (url, body)
-            }
-            LlmApiKind::Responses => {
-                let body = serde_json::json!({
-                    "model": params.model,
-                    "input": messages,
-                    "max_output_tokens": params.max_tokens,
-                    "temperature": temperature,
-                });
-                let url = format!("{}/responses", provider.base_url.trim_end_matches('/'));
-                (url, body)
-            }
-        };
-
-        if let Some(tool_refs) = params.tool_refs.as_ref() {
-            match self.load_tools_blobs(tool_refs) {
-                Ok((tools, tool_choice_from_blob)) => {
-                    if let Some(tools) = tools {
-                        let tools = if provider.api_kind == LlmApiKind::Responses {
-                            match normalize_responses_tools(&tools) {
-                                Ok(value) => value,
-                                Err(err) => {
-                                    return Ok(self.error_receipt(intent, &provider_id, err));
-                                }
-                            }
-                        } else {
-                            tools
-                        };
-                        body["tools"] = tools;
-                    }
-                    if tool_choice_from_blob.is_some() && params.tool_choice.is_none() {
-                        let choice = if provider.api_kind == LlmApiKind::Responses {
-                            match normalize_responses_tool_choice(tool_choice_from_blob.unwrap()) {
-                                Ok(value) => value,
-                                Err(err) => {
-                                    return Ok(self.error_receipt(intent, &provider_id, err));
-                                }
-                            }
-                        } else {
-                            tool_choice_from_blob.unwrap()
-                        };
-                        body["tool_choice"] = choice;
-                    }
-                }
-                Err(err) => return Ok(self.error_receipt(intent, &provider_id, err)),
-            }
-        }
-
-        if let Some(tool_choice) = params.tool_choice.as_ref() {
-            body["tool_choice"] = if provider.api_kind == LlmApiKind::Responses {
-                tool_choice_json_for_responses(tool_choice)
-            } else {
-                tool_choice_json(tool_choice)
-            };
-        }
-
-        let response = self
-            .client
-            .post(url)
-            .timeout(provider.timeout)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await;
-
-        let response = match response {
-            Ok(r) => r,
-            Err(e) => {
-                return Ok(self.error_receipt(
-                    intent,
-                    &provider_id,
-                    format!("request failed: {e}"),
-                ));
-            }
-        };
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
-            return Ok(self.error_receipt(
+            return Ok(self.failure_receipt(
                 intent,
                 &provider_id,
-                format!("provider error {}: {}", status, text),
+                ReceiptStatus::Error,
+                "message_refs empty",
             ));
         }
 
-        let (output_value, usage) = match provider.api_kind {
-            LlmApiKind::ChatCompletions => {
-                let api_response: OpenAiChatResponse = match response.json().await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return Ok(self.error_receipt(
-                            intent,
-                            &provider_id,
-                            format!("parse error: {e}"),
-                        ));
-                    }
-                };
-                let content = api_response
-                    .choices
-                    .first()
-                    .and_then(|c| c.message.content.clone())
-                    .unwrap_or_default();
-                let output_value = serde_json::json!({
-                    "role": "assistant",
-                    "content": [
-                        { "type": "text", "text": content }
-                    ]
-                });
-                let usage = TokenUsage {
-                    prompt: api_response.usage.prompt_tokens,
-                    completion: api_response.usage.completion_tokens,
-                };
-                (output_value, usage)
-            }
-            LlmApiKind::Responses => {
-                let api_response: serde_json::Value = match response.json().await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        return Ok(self.error_receipt(
-                            intent,
-                            &provider_id,
-                            format!("parse error: {e}"),
-                        ));
-                    }
-                };
-                let usage = extract_responses_usage(&api_response);
-                let output_value = api_response
-                    .get("output")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
-                (output_value, usage)
+        let messages = match self.load_messages(&params.message_refs) {
+            Ok(messages) => messages,
+            Err(err) => {
+                return Ok(self.failure_receipt(intent, &provider_id, ReceiptStatus::Error, err));
             }
         };
 
-        let output_bytes = match serde_json::to_vec(&output_value) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                return Ok(self.error_receipt(
-                    intent,
-                    &provider_id,
-                    format!("encode output message failed: {e}"),
-                ));
-            }
-        };
+        let (tools, tool_choice_from_blob) =
+            if let Some(tool_refs) = params.runtime.tool_refs.as_ref() {
+                match self.load_tools_blobs(tool_refs) {
+                    Ok((tools, choice)) => (Some(tools), choice),
+                    Err(err) => {
+                        return Ok(self.failure_receipt(
+                            intent,
+                            &provider_id,
+                            ReceiptStatus::Error,
+                            err,
+                        ));
+                    }
+                }
+            } else {
+                (None, None)
+            };
 
-        let output_ref = match self.store.put_blob(&output_bytes) {
-            Ok(h) => match HashRef::new(h.to_hex()) {
-                Ok(hr) => hr,
-                Err(e) => {
-                    return Ok(self.error_receipt(
+        let response_format = if let Some(reference) = params.runtime.response_format_ref.as_ref() {
+            match self.load_response_format(reference) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    return Ok(self.failure_receipt(
                         intent,
                         &provider_id,
-                        format!("invalid output hash: {e}"),
+                        ReceiptStatus::Error,
+                        err,
                     ));
                 }
-            },
-            Err(e) => {
-                return Ok(self.error_receipt(
+            }
+        } else {
+            None
+        };
+
+        let provider_options = if let Some(reference) = params.runtime.provider_options_ref.as_ref()
+        {
+            match self.load_json_blob(reference, "provider_options_ref") {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        err,
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        let request = Request {
+            model: params.model.clone(),
+            messages,
+            provider: Some(provider_id.clone()),
+            tools,
+            tool_choice: params
+                .runtime
+                .tool_choice
+                .as_ref()
+                .map(tool_choice_from_params)
+                .or(tool_choice_from_blob),
+            response_format,
+            temperature: params
+                .runtime
+                .temperature
+                .as_ref()
+                .and_then(|v| v.parse::<f64>().ok()),
+            top_p: params
+                .runtime
+                .top_p
+                .as_ref()
+                .and_then(|v| v.parse::<f64>().ok()),
+            max_tokens: params.runtime.max_tokens,
+            stop_sequences: params.runtime.stop_sequences.clone(),
+            reasoning_effort: params.runtime.reasoning_effort.clone(),
+            metadata: params
+                .runtime
+                .metadata
+                .clone()
+                .map(|m| m.into_iter().collect()),
+            provider_options,
+        };
+
+        let response = match self
+            .complete_with_provider(provider, api_key, request)
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                let status = map_error_status(&err);
+                return Ok(self.failure_receipt(
                     intent,
                     &provider_id,
-                    format!("store output failed: {e}"),
+                    status,
+                    format!("provider request failed: {err}"),
                 ));
             }
         };
+
+        let mut normalized_calls: LlmToolCallList = Vec::new();
+        for call in response.tool_calls() {
+            let arguments_ref = match self.store_json_blob(&call.arguments) {
+                Ok(reference) => reference,
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        format!("store tool call arguments failed: {err}"),
+                    ));
+                }
+            };
+            normalized_calls.push(LlmToolCall {
+                call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                arguments_ref,
+                provider_call_id: call.raw_arguments.as_ref().map(|_| call.id.clone()),
+            });
+        }
+
+        let tool_calls_ref = if normalized_calls.is_empty() {
+            None
+        } else {
+            let value = match serde_json::to_value(&normalized_calls) {
+                Ok(value) => value,
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        format!("encode tool_calls failed: {err}"),
+                    ));
+                }
+            };
+            match self.store_json_blob(&value) {
+                Ok(reference) => Some(reference),
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        format!("store tool_calls failed: {err}"),
+                    ));
+                }
+            }
+        };
+
+        let reasoning_ref = if let Some(reasoning) = response.reasoning() {
+            match self.store_text_blob(&reasoning) {
+                Ok(reference) => Some(reference),
+                Err(err) => {
+                    return Ok(self.failure_receipt(
+                        intent,
+                        &provider_id,
+                        ReceiptStatus::Error,
+                        format!("store reasoning failed: {err}"),
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+
+        let envelope = LlmOutputEnvelope {
+            assistant_text: {
+                let text = response.text();
+                if text.is_empty() { None } else { Some(text) }
+            },
+            tool_calls_ref,
+            reasoning_ref,
+        };
+        let output_ref = match serde_json::to_value(&envelope)
+            .map_err(|e| e.to_string())
+            .and_then(|v| self.store_json_blob(&v))
+        {
+            Ok(reference) => reference,
+            Err(err) => {
+                return Ok(self.failure_receipt(
+                    intent,
+                    &provider_id,
+                    ReceiptStatus::Error,
+                    format!("store normalized output failed: {err}"),
+                ));
+            }
+        };
+
+        let raw_output_ref = response
+            .raw
+            .as_ref()
+            .and_then(|raw| self.store_json_blob(raw).ok());
+
+        let warnings_ref = if response.warnings.is_empty() {
+            None
+        } else {
+            serde_json::to_value(&response.warnings)
+                .ok()
+                .and_then(|value| self.store_json_blob(&value).ok())
+        };
+
+        let rate_limit_ref = response
+            .rate_limit
+            .as_ref()
+            .and_then(|rate_limit| serde_json::to_value(rate_limit).ok())
+            .and_then(|value| self.store_json_blob(&value).ok());
 
         let receipt = LlmGenerateReceipt {
             output_ref,
-            token_usage: usage.clone(),
+            raw_output_ref,
+            provider_response_id: Some(response.id.clone()),
+            finish_reason: LlmFinishReason {
+                reason: response.finish_reason.reason.clone(),
+                raw: response.finish_reason.raw.clone(),
+            },
+            token_usage: TokenUsage {
+                prompt: response.usage.input_tokens,
+                completion: response.usage.output_tokens,
+                total: Some(response.usage.total_tokens),
+            },
+            usage_details: Some(LlmUsageDetails {
+                reasoning_tokens: response.usage.reasoning_tokens,
+                cache_read_tokens: response.usage.cache_read_tokens,
+                cache_write_tokens: response.usage.cache_write_tokens,
+            }),
+            warnings_ref,
+            rate_limit_ref,
             cost_cents: None,
             provider_id: provider_id.clone(),
         };
@@ -309,521 +511,375 @@ impl<S: Store + Send + Sync + 'static> AsyncEffectAdapter for LlmAdapter<S> {
     }
 }
 
-impl<S: Store> LlmAdapter<S> {
-    fn load_messages(
-        &self,
-        refs: &[HashRef],
-        api_kind: LlmApiKind,
-    ) -> Result<Vec<serde_json::Value>, String> {
-        let mut messages = Vec::new();
-        for reference in refs {
-            let mut loaded = self.load_message(reference, api_kind)?;
-            messages.append(&mut loaded);
-        }
-        Ok(messages)
+fn to_adapter_timeout(timeout: std::time::Duration) -> AdapterTimeout {
+    let request = timeout.as_secs_f64();
+    if request <= 0.0 {
+        return AdapterTimeout::default();
     }
+    AdapterTimeout {
+        connect: request.min(10.0),
+        request,
+        stream_read: request.min(30.0),
+    }
+}
 
-    fn load_message(
-        &self,
-        reference: &HashRef,
-        api_kind: LlmApiKind,
-    ) -> Result<Vec<serde_json::Value>, String> {
-        let hash = Hash::from_hex_str(reference.as_str())
-            .map_err(|e| format!("invalid message_ref: {e}"))?;
-        let bytes = self
-            .store
-            .get_blob(hash)
-            .map_err(|e| format!("message_ref not found: {e}"))?;
+fn map_error_status(error: &SDKError) -> ReceiptStatus {
+    match error {
+        SDKError::RequestTimeout(_) => ReceiptStatus::Timeout,
+        SDKError::Network(net) if net.info.message.to_lowercase().contains("timed out") => {
+            ReceiptStatus::Timeout
+        }
+        _ => ReceiptStatus::Error,
+    }
+}
 
-        if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-            match value {
-                serde_json::Value::Array(items) => {
-                    let mut messages = Vec::with_capacity(items.len());
-                    for item in items {
-                        if api_kind == LlmApiKind::Responses {
-                            messages
-                                .push(normalize_responses_input_item(item, self.store.as_ref())?);
+fn tool_choice_from_params(choice: &LlmToolChoice) -> ToolChoice {
+    match choice {
+        LlmToolChoice::Auto => ToolChoice {
+            mode: "auto".to_string(),
+            tool_name: None,
+        },
+        LlmToolChoice::NoneChoice => ToolChoice {
+            mode: "none".to_string(),
+            tool_name: None,
+        },
+        LlmToolChoice::Required => ToolChoice {
+            mode: "required".to_string(),
+            tool_name: None,
+        },
+        LlmToolChoice::Tool { name } => ToolChoice {
+            mode: "named".to_string(),
+            tool_name: Some(name.clone()),
+        },
+    }
+}
+
+fn parse_tool_choice_json(value: Value) -> Result<ToolChoice, String> {
+    match value {
+        Value::String(mode) => Ok(ToolChoice {
+            mode,
+            tool_name: None,
+        }),
+        Value::Object(map) => {
+            if let Some(mode) = map.get("mode").and_then(Value::as_str) {
+                let tool_name = map
+                    .get("tool_name")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string());
+                return Ok(ToolChoice {
+                    mode: mode.to_string(),
+                    tool_name,
+                });
+            }
+
+            if let Some(kind) = map.get("type").and_then(Value::as_str) {
+                if kind.eq_ignore_ascii_case("function") {
+                    let tool_name = map
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .or_else(|| {
+                            map.get("function")
+                                .and_then(Value::as_object)
+                                .and_then(|f| f.get("name"))
+                                .and_then(Value::as_str)
+                        })
+                        .map(|name| name.to_string());
+                    return Ok(ToolChoice {
+                        mode: if tool_name.is_some() {
+                            "named".to_string()
                         } else {
-                            messages.push(normalize_message(item, self.store.as_ref(), api_kind)?);
-                        }
-                    }
-                    return Ok(messages);
+                            "required".to_string()
+                        },
+                        tool_name,
+                    });
                 }
-                serde_json::Value::Object(_) => {
-                    return Ok(vec![normalize_message(
-                        value,
-                        self.store.as_ref(),
-                        api_kind,
-                    )?]);
-                }
-                _ => {}
             }
-        }
 
-        let text = String::from_utf8(bytes)
-            .map_err(|e| format!("message blob is not utf8 or JSON: {e}"))?;
-        Ok(vec![serde_json::json!({
-            "role": "user",
-            "content": [ { "type": content_text_type(api_kind, "user"), "text": text } ]
-        })])
-    }
-
-    fn load_tools_blobs(
-        &self,
-        references: &[HashRef],
-    ) -> Result<(Option<serde_json::Value>, Option<serde_json::Value>), String> {
-        let mut merged_tools: Vec<serde_json::Value> = Vec::new();
-        let mut merged_choice: Option<serde_json::Value> = None;
-
-        for reference in references {
-            let hash = Hash::from_hex_str(reference.as_str())
-                .map_err(|e| format!("invalid tool_ref: {e}"))?;
-            let bytes = self
-                .store
-                .get_blob(hash)
-                .map_err(|e| format!("tool_ref not found: {e}"))?;
-            let value: serde_json::Value = serde_json::from_slice(&bytes)
-                .map_err(|e| format!("tool_ref invalid JSON: {e}"))?;
-
-            match value {
-                serde_json::Value::Array(items) => {
-                    for item in items {
-                        merged_tools.push(item);
-                    }
-                }
-                serde_json::Value::Object(map) => {
-                    if let Some(tools) = map.get("tools").and_then(|v| v.as_array()) {
-                        for tool in tools {
-                            merged_tools.push(tool.clone());
-                        }
-                    }
-                    if let Some(choice) = map.get("tool_choice") {
-                        merged_choice = Some(choice.clone());
-                    }
-                }
-                _ => return Err("tool_ref must be JSON array or object".to_string()),
+            if let Some(name) = map.get("name").and_then(Value::as_str) {
+                return Ok(ToolChoice {
+                    mode: "named".to_string(),
+                    tool_name: Some(name.to_string()),
+                });
             }
+
+            Err("tool_choice object must contain mode or function name".to_string())
         }
-
-        let tools_value = if merged_tools.is_empty() {
-            None
-        } else {
-            Some(serde_json::Value::Array(merged_tools))
-        };
-
-        Ok((tools_value, merged_choice))
+        _ => Err("tool_choice must be string or object".to_string()),
     }
 }
 
-fn normalize_message<S: Store>(
-    value: serde_json::Value,
-    store: &S,
-    api_kind: LlmApiKind,
-) -> Result<serde_json::Value, String> {
-    let obj = value
+fn parse_tool_definition(item: Value) -> Result<ToolDefinition, String> {
+    let obj = item
         .as_object()
-        .ok_or_else(|| "message blob must be a JSON object".to_string())?;
-    let role = obj
-        .get("role")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "message missing role".to_string())?;
-    let content = obj
-        .get("content")
-        .ok_or_else(|| "message missing content".to_string())?;
+        .ok_or_else(|| "tool definition must be a JSON object".to_string())?;
 
-    let content = normalize_content(content, store, api_kind, role)?;
-    let mut msg = serde_json::json!({
-        "role": role,
-        "content": content,
-    });
-    if api_kind == LlmApiKind::Responses {
-        msg["type"] = serde_json::Value::String("message".into());
+    if let Some(function) = obj.get("function").and_then(Value::as_object) {
+        let name = function
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "tool function missing name".to_string())?
+            .to_string();
+        let description = function
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let parameters = function
+            .get("parameters")
+            .cloned()
+            .unwrap_or_else(empty_object);
+        return Ok(ToolDefinition {
+            name,
+            description,
+            parameters,
+        });
     }
 
-    if let Some(tool_calls) = obj.get("tool_calls") {
-        msg["tool_calls"] = tool_calls.clone();
-    }
-    if let Some(name) = obj.get("name") {
-        msg["name"] = name.clone();
-    }
-
-    Ok(msg)
-}
-
-fn normalize_responses_input_item<S: Store>(
-    value: serde_json::Value,
-    store: &S,
-) -> Result<serde_json::Value, String> {
-    if let Some(obj) = value.as_object() {
-        if let Some(item_type) = obj.get("type").and_then(|v| v.as_str()) {
-            match item_type {
-                // Keep tool output envelope stable when feeding prior tool results back.
-                "function_call_output" => return Ok(value),
-                // Preserve raw function call items (IDs/args) generated by provider.
-                "function_call" => return Ok(value),
-                // Normalize message records to input-safe content parts.
-                "message" => {
-                    let mut normalized = normalize_message(value, store, LlmApiKind::Responses)?;
-                    rewrite_message_content_types_for_responses_input(&mut normalized);
-                    return Ok(normalized);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    let mut normalized = normalize_message(value, store, LlmApiKind::Responses)?;
-    rewrite_message_content_types_for_responses_input(&mut normalized);
-    Ok(normalized)
-}
-
-fn rewrite_message_content_types_for_responses_input(value: &mut serde_json::Value) {
-    let role = value
-        .get("role")
-        .and_then(|v| v.as_str())
+    let name = obj
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "tool definition missing name".to_string())?
+        .to_string();
+    let description = obj
+        .get("description")
+        .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let Some(content) = value.get_mut("content") else {
-        return;
-    };
-    let Some(parts) = content.as_array_mut() else {
-        return;
-    };
+    let parameters = obj
+        .get("parameters")
+        .or_else(|| obj.get("input_schema"))
+        .cloned()
+        .unwrap_or_else(empty_object);
 
-    for part in parts {
-        let Some(obj) = part.as_object_mut() else {
-            continue;
-        };
-        if obj
-            .get("type")
-            .and_then(|v| v.as_str())
-            .is_some_and(|t| t == "output_text")
-        {
-            // Responses API requires assistant history items to stay as output_text.
-            // Convert only non-assistant messages to input_text.
-            if role != "assistant" {
-                obj.insert(
-                    "type".into(),
-                    serde_json::Value::String("input_text".into()),
-                );
-            }
-        }
-    }
+    Ok(ToolDefinition {
+        name,
+        description,
+        parameters,
+    })
 }
 
-fn normalize_content<S: Store>(
-    value: &serde_json::Value,
-    store: &S,
-    api_kind: LlmApiKind,
-    role: &str,
-) -> Result<serde_json::Value, String> {
+fn parse_message_value(value: Value) -> Result<Vec<Message>, String> {
     match value {
-        serde_json::Value::String(text) => Ok(serde_json::json!([{
-            "type": content_text_type(api_kind, role),
-            "text": text
-        }])),
-        serde_json::Value::Array(items) => {
-            let mut parts = Vec::with_capacity(items.len());
+        Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
             for item in items {
-                parts.push(normalize_part(item, store, api_kind, role)?);
+                out.extend(parse_message_value(item)?);
             }
-            Ok(serde_json::Value::Array(parts))
+            Ok(out)
         }
-        _ => Err("message content must be string or list".to_string()),
+        Value::Object(obj) => {
+            if let Some(item_type) = obj.get("type").and_then(Value::as_str) {
+                match item_type {
+                    "function_call_output" => {
+                        let call_id = obj
+                            .get("call_id")
+                            .or_else(|| obj.get("tool_call_id"))
+                            .and_then(Value::as_str)
+                            .ok_or_else(|| {
+                                "function_call_output missing call_id/tool_call_id".to_string()
+                            })?
+                            .to_string();
+                        let output = obj.get("output").cloned().unwrap_or(Value::Null);
+                        return Ok(vec![Message::tool_result(call_id, output, false)]);
+                    }
+                    "function_call" | "tool_call" => {
+                        let call = parse_tool_call_object(&Value::Object(obj.clone()))?;
+                        return Ok(vec![Message {
+                            role: Role::Assistant,
+                            content: vec![ContentPart::tool_call(call)],
+                            name: None,
+                            tool_call_id: None,
+                        }]);
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(output) = obj.get("output").cloned() {
+                return parse_message_value(output);
+            }
+
+            let role = obj
+                .get("role")
+                .and_then(Value::as_str)
+                .map(parse_role)
+                .unwrap_or(Role::User);
+
+            let mut content = Vec::new();
+            if let Some(raw_content) = obj.get("content") {
+                match raw_content {
+                    Value::String(text) => content.push(ContentPart::text(text.to_string())),
+                    Value::Array(items) => {
+                        for item in items {
+                            if let Some(part) = parse_content_part(item)? {
+                                content.push(part);
+                            }
+                        }
+                    }
+                    Value::Object(_) => {
+                        if let Some(part) = parse_content_part(raw_content)? {
+                            content.push(part);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(tool_calls) = obj.get("tool_calls").and_then(Value::as_array) {
+                for tool_call in tool_calls {
+                    let parsed = parse_tool_call_object(tool_call)?;
+                    content.push(ContentPart::tool_call(parsed));
+                }
+            }
+
+            Ok(vec![Message {
+                role,
+                content,
+                name: obj
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string()),
+                tool_call_id: obj
+                    .get("tool_call_id")
+                    .or_else(|| obj.get("call_id"))
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string()),
+            }])
+        }
+        _ => Err("message blob must be a JSON object or array".to_string()),
     }
 }
 
-fn normalize_part<S: Store>(
-    value: &serde_json::Value,
-    store: &S,
-    api_kind: LlmApiKind,
-    role: &str,
-) -> Result<serde_json::Value, String> {
+fn parse_content_part(value: &Value) -> Result<Option<ContentPart>, String> {
+    match value {
+        Value::String(text) => Ok(Some(ContentPart::text(text.to_string()))),
+        Value::Object(obj) => {
+            let part_type = obj
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("text")
+                .to_lowercase();
+            match part_type.as_str() {
+                "text" | "input_text" | "output_text" => {
+                    if let Some(text) = obj.get("text").and_then(Value::as_str) {
+                        return Ok(Some(ContentPart::text(text.to_string())));
+                    }
+                    Ok(None)
+                }
+                "function_call" | "tool_call" => {
+                    let call = parse_tool_call_object(value)?;
+                    Ok(Some(ContentPart::tool_call(call)))
+                }
+                "function_call_output" | "tool_result" => {
+                    let tool_call_id = obj
+                        .get("call_id")
+                        .or_else(|| obj.get("tool_call_id"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| "tool_result part missing call_id/tool_call_id".to_string())?
+                        .to_string();
+                    let content = obj.get("output").cloned().unwrap_or(Value::Null);
+                    let is_error = obj
+                        .get("is_error")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    Ok(Some(ContentPart::tool_result(ToolResultData {
+                        tool_call_id,
+                        content,
+                        is_error,
+                        image_data: None,
+                        image_media_type: None,
+                    })))
+                }
+                _ => {
+                    if let Some(text) = obj.get("text").and_then(Value::as_str) {
+                        Ok(Some(ContentPart::text(text.to_string())))
+                    } else {
+                        Ok(None)
+                    }
+                }
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+fn parse_tool_call_object(value: &Value) -> Result<ToolCallData, String> {
     let obj = value
         .as_object()
-        .ok_or_else(|| "content part must be an object".to_string())?;
-    let part_type = obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "content part missing type".to_string())?;
+        .ok_or_else(|| "tool call must be a JSON object".to_string())?;
 
-    match part_type {
-        "text" => {
-            let text = obj
-                .get("text")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "text part missing text".to_string())?;
-            Ok(serde_json::json!({
-                "type": content_text_type(api_kind, role),
-                "text": text
-            }))
+    if let Some(function) = obj.get("function").and_then(Value::as_object) {
+        let id = obj
+            .get("id")
+            .or_else(|| obj.get("call_id"))
+            .and_then(Value::as_str)
+            .unwrap_or("call_unknown")
+            .to_string();
+        let name = function
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "tool call function missing name".to_string())?
+            .to_string();
+        let arguments = function
+            .get("arguments")
+            .map(parse_arguments)
+            .unwrap_or_else(empty_object);
+        return Ok(ToolCallData {
+            id,
+            name,
+            arguments,
+            r#type: "function".to_string(),
+        });
+    }
+
+    let id = obj
+        .get("id")
+        .or_else(|| obj.get("call_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("call_unknown")
+        .to_string();
+    let name = obj
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "tool call missing name".to_string())?
+        .to_string();
+    let arguments = obj
+        .get("arguments")
+        .or_else(|| obj.get("arguments_json"))
+        .map(parse_arguments)
+        .unwrap_or_else(empty_object);
+
+    Ok(ToolCallData {
+        id,
+        name,
+        arguments,
+        r#type: "function".to_string(),
+    })
+}
+
+fn parse_arguments(value: &Value) -> Value {
+    match value {
+        Value::String(raw) => {
+            serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.clone()))
         }
-        "input_text" => {
-            let text = obj
-                .get("text")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "input_text part missing text".to_string())?;
-            Ok(serde_json::json!({
-                "type": content_text_type(api_kind, role),
-                "text": text
-            }))
-        }
-        "output_text" => {
-            let text = obj
-                .get("text")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "output_text part missing text".to_string())?;
-            Ok(serde_json::json!({
-                "type": content_text_type(api_kind, role),
-                "text": text
-            }))
-        }
-        "image" => {
-            let mime = obj
-                .get("mime")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "image part missing mime".to_string())?;
-            let bytes_ref = obj
-                .get("bytes_ref")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "image part missing bytes_ref".to_string())?;
-            let hash = Hash::from_hex_str(bytes_ref)
-                .map_err(|e| format!("invalid image bytes_ref: {e}"))?;
-            let bytes = store
-                .get_blob(hash)
-                .map_err(|e| format!("image bytes_ref not found: {e}"))?;
-            let data_url = format!("data:{};base64,{}", mime, B64.encode(bytes));
-            match api_kind {
-                LlmApiKind::Responses => Ok(serde_json::json!({
-                    "type": "input_image",
-                    "image_url": { "url": data_url }
-                })),
-                LlmApiKind::ChatCompletions => Ok(serde_json::json!({
-                    "type": "image_url",
-                    "image_url": { "url": data_url }
-                })),
-            }
-        }
-        "input_image" | "image_url" => {
-            let image_url = obj
-                .get("image_url")
-                .and_then(|v| v.get("url"))
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "image_url part missing url".to_string())?;
-            let target_type = match api_kind {
-                LlmApiKind::Responses => "input_image",
-                LlmApiKind::ChatCompletions => "image_url",
-            };
-            Ok(serde_json::json!({
-                "type": target_type,
-                "image_url": { "url": image_url }
-            }))
-        }
-        "audio" => {
-            let mime = obj
-                .get("mime")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "audio part missing mime".to_string())?;
-            let bytes_ref = obj
-                .get("bytes_ref")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "audio part missing bytes_ref".to_string())?;
-            let hash = Hash::from_hex_str(bytes_ref)
-                .map_err(|e| format!("invalid audio bytes_ref: {e}"))?;
-            let bytes = store
-                .get_blob(hash)
-                .map_err(|e| format!("audio bytes_ref not found: {e}"))?;
-            let format = audio_format_from_mime(mime)
-                .ok_or_else(|| format!("unsupported audio mime '{mime}'"))?;
-            let audio = serde_json::json!({
-                "data": B64.encode(bytes),
-                "format": format
-            });
-            Ok(serde_json::json!({
-                "type": "input_audio",
-                "input_audio": audio
-            }))
-        }
-        "input_audio" => {
-            let input_audio = obj
-                .get("input_audio")
-                .ok_or_else(|| "input_audio part missing input_audio".to_string())?;
-            Ok(serde_json::json!({
-                "type": "input_audio",
-                "input_audio": input_audio
-            }))
-        }
-        other => Err(format!("unsupported content part type '{other}'")),
+        other => other.clone(),
     }
 }
 
-fn audio_format_from_mime(mime: &str) -> Option<&'static str> {
-    match mime {
-        "audio/wav" | "audio/wave" | "audio/x-wav" => Some("wav"),
-        "audio/mpeg" => Some("mp3"),
-        "audio/mp4" => Some("m4a"),
-        "audio/ogg" => Some("ogg"),
-        _ => None,
+fn parse_role(role: &str) -> Role {
+    match role.to_ascii_lowercase().as_str() {
+        "system" => Role::System,
+        "assistant" => Role::Assistant,
+        "tool" => Role::Tool,
+        "developer" => Role::Developer,
+        _ => Role::User,
     }
 }
 
-#[derive(Deserialize)]
-struct OpenAiChatResponse {
-    choices: Vec<Choice>,
-    usage: OpenAiUsage,
-}
-
-#[derive(Deserialize)]
-struct Choice {
-    message: Message,
-}
-
-#[derive(Deserialize)]
-struct Message {
-    content: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct OpenAiUsage {
-    prompt_tokens: u64,
-    completion_tokens: u64,
-    #[serde(rename = "total_tokens")]
-    _total_tokens: u64,
-}
-
-fn extract_responses_usage(value: &serde_json::Value) -> TokenUsage {
-    let prompt = value
-        .get("usage")
-        .and_then(|v| v.get("input_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let completion = value
-        .get("usage")
-        .and_then(|v| v.get("output_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    TokenUsage { prompt, completion }
-}
-
-fn content_text_type(api_kind: LlmApiKind, role: &str) -> &'static str {
-    match api_kind {
-        LlmApiKind::Responses => {
-            if role == "assistant" {
-                "output_text"
-            } else {
-                "input_text"
-            }
-        }
-        LlmApiKind::ChatCompletions => "text",
-    }
-}
-
-fn tool_choice_json(choice: &LlmToolChoice) -> serde_json::Value {
-    match choice {
-        LlmToolChoice::Auto => serde_json::json!("auto"),
-        LlmToolChoice::NoneChoice => serde_json::json!("none"),
-        LlmToolChoice::Required => serde_json::json!("required"),
-        LlmToolChoice::Tool { name } => serde_json::json!({
-            "type": "function",
-            "function": { "name": name }
-        }),
-    }
-}
-
-fn tool_choice_json_for_responses(choice: &LlmToolChoice) -> serde_json::Value {
-    match choice {
-        LlmToolChoice::Auto => serde_json::json!("auto"),
-        LlmToolChoice::NoneChoice => serde_json::json!("none"),
-        LlmToolChoice::Required => serde_json::json!("required"),
-        LlmToolChoice::Tool { name } => serde_json::json!({
-            "type": "function",
-            "name": name
-        }),
-    }
-}
-
-fn normalize_responses_tools(value: &serde_json::Value) -> Result<serde_json::Value, String> {
-    let array = value
-        .as_array()
-        .ok_or_else(|| "tools must be a list".to_string())?;
-    let mut tools = Vec::with_capacity(array.len());
-    for tool in array {
-        let obj = tool
-            .as_object()
-            .ok_or_else(|| "tool must be an object".to_string())?;
-        let tool_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or_default();
-        if tool_type == "function" && obj.contains_key("function") {
-            let function = obj
-                .get("function")
-                .and_then(|v| v.as_object())
-                .ok_or_else(|| "function tool missing function object".to_string())?;
-            let name = function
-                .get("name")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "function tool missing name".to_string())?;
-            let mut out = serde_json::Map::new();
-            out.insert("type".into(), serde_json::Value::String("function".into()));
-            out.insert("name".into(), serde_json::Value::String(name.to_string()));
-            if let Some(desc) = function.get("description") {
-                out.insert("description".into(), desc.clone());
-            }
-            if let Some(params) = function.get("parameters") {
-                out.insert("parameters".into(), params.clone());
-            }
-            if let Some(strict) = function.get("strict") {
-                out.insert("strict".into(), strict.clone());
-            }
-            tools.push(serde_json::Value::Object(out));
-        } else {
-            tools.push(serde_json::Value::Object(obj.clone()));
-        }
-    }
-    Ok(serde_json::Value::Array(tools))
-}
-
-fn normalize_responses_tool_choice(value: serde_json::Value) -> Result<serde_json::Value, String> {
-    if let Some(name) = value
-        .get("function")
-        .and_then(|v| v.get("name"))
-        .and_then(|v| v.as_str())
-    {
-        return Ok(serde_json::json!({
-            "type": "function",
-            "name": name
-        }));
-    }
-    Ok(value)
+fn empty_object() -> Value {
+    Value::Object(Default::default())
 }
 
 fn zero_hashref() -> HashRef {
-    HashRef::new("sha256:0000000000000000000000000000000000000000000000000000000000000000")
-        .expect("static zero hashref")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::rewrite_message_content_types_for_responses_input;
-    use serde_json::json;
-
-    #[test]
-    fn rewrite_keeps_assistant_output_text() {
-        let mut value = json!({
-            "type": "message",
-            "role": "assistant",
-            "content": [{ "type": "output_text", "text": "hello" }]
-        });
-        rewrite_message_content_types_for_responses_input(&mut value);
-        assert_eq!(value["content"][0]["type"], "output_text");
-    }
-
-    #[test]
-    fn rewrite_converts_user_output_text_to_input_text() {
-        let mut value = json!({
-            "type": "message",
-            "role": "user",
-            "content": [{ "type": "output_text", "text": "hello" }]
-        });
-        rewrite_message_content_types_for_responses_input(&mut value);
-        assert_eq!(value["content"][0]["type"], "input_text");
-    }
+    HashRef::new(format!("sha256:{}", "0".repeat(64))).expect("zero hash is valid")
 }

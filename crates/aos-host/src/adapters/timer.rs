@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use aos_effects::EffectIntent;
 use aos_effects::builtins::TimerSetParams;
-use aos_kernel::snapshot::ReducerReceiptSnapshot;
+use aos_kernel::snapshot::WorkflowReceiptSnapshot;
 use tracing::warn;
 
 use crate::error::HostError;
@@ -118,7 +118,7 @@ impl TimerHeap {
 /// 1. Parses `timer.set` intents to extract logical deadline
 /// 2. Stores entries in a min-heap
 /// 3. Provides methods to query next deadline and pop due timers
-/// 4. Can rehydrate from pending reducer receipts on restart
+/// 4. Can rehydrate from pending workflow receipts on restart
 #[derive(Debug, Default)]
 pub struct TimerScheduler {
     heap: TimerHeap,
@@ -168,11 +168,11 @@ impl TimerScheduler {
         due
     }
 
-    /// Rehydrate timers from pending reducer receipt contexts on restart.
+    /// Rehydrate timers from pending workflow receipt contexts on restart.
     ///
     /// This should be called after opening a world to restore any timers
     /// that were pending when the daemon last shut down.
-    pub fn rehydrate_from_pending(&mut self, contexts: &[ReducerReceiptSnapshot]) {
+    pub fn rehydrate_from_pending(&mut self, contexts: &[WorkflowReceiptSnapshot]) {
         for ctx in contexts {
             if ctx.effect_kind == "timer.set" {
                 // Try to decode params to get deadline
@@ -187,7 +187,7 @@ impl TimerScheduler {
                 } else {
                     warn!(
                         intent_hash = ?ctx.intent_hash,
-                        reducer = %ctx.reducer,
+                        workflow = %ctx.origin_module_id,
                         "failed to decode TimerSetParams while rehydrating timer; dropping entry"
                     );
                 }
@@ -309,7 +309,7 @@ mod tests {
     fn scheduler_rehydrate() {
         let mut scheduler = TimerScheduler::new();
 
-        // Simulate pending reducer receipts
+        // Simulate pending workflow receipts
         let params = TimerSetParams {
             deliver_at_ns: 12345,
             key: Some("test-key".into()),
@@ -317,20 +317,24 @@ mod tests {
         let params_cbor = serde_cbor::to_vec(&params).unwrap();
 
         let contexts = vec![
-            ReducerReceiptSnapshot {
+            WorkflowReceiptSnapshot {
                 intent_hash: [1; 32],
-                reducer: "demo/Timer@1".into(),
+                origin_module_id: "demo/Timer@1".into(),
                 effect_kind: "timer.set".into(),
+                origin_instance_key: None,
                 params_cbor: params_cbor.clone(),
-                key: None,
+                emitted_at_seq: 0,
+                module_version: None,
             },
             // Non-timer effect should be ignored
-            ReducerReceiptSnapshot {
+            WorkflowReceiptSnapshot {
                 intent_hash: [2; 32],
-                reducer: "demo/Other@1".into(),
+                origin_module_id: "demo/Other@1".into(),
                 effect_kind: "blob.put".into(),
+                origin_instance_key: None,
                 params_cbor: vec![],
-                key: None,
+                emitted_at_seq: 0,
+                module_version: None,
             },
         ];
 

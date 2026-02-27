@@ -44,6 +44,7 @@ const workspaceQueryPrefixes = [
 ] as const;
 
 const stateQueryPrefixes = [["state_get"], ["state_cells"]] as const;
+const chatQueryPrefixes = [["chat_transcript"]] as const;
 
 const journalQueryPrefixes = [["journal_head"], ["journal_tail"]] as const;
 
@@ -55,6 +56,12 @@ function invalidateWorkspaceQueries(queryClient: QueryClient) {
 
 function invalidateStateQueries(queryClient: QueryClient) {
   for (const key of stateQueryPrefixes) {
+    queryClient.invalidateQueries({ queryKey: key });
+  }
+}
+
+function invalidateChatQueries(queryClient: QueryClient) {
+  for (const key of chatQueryPrefixes) {
     queryClient.invalidateQueries({ queryKey: key });
   }
 }
@@ -111,6 +118,7 @@ export function useEventsPost(
     (queryClient) => {
       invalidateJournalQueries(queryClient);
       invalidateStateQueries(queryClient);
+      invalidateChatQueries(queryClient);
       invalidateManifestQueries(queryClient);
     },
     options,

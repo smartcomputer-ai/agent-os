@@ -5,6 +5,10 @@ const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 export function decodeCborFromBase64<T>(b64: string): T {
   const bytes = base64ToBytes(b64);
+  return decodeCborBytes<T>(bytes);
+}
+
+export function decodeCborBytes<T>(bytes: Uint8Array): T {
   const decoded = cborDecode(stripSelfDescribe(bytes));
   return decoded as T;
 }

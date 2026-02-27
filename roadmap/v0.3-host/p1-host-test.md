@@ -11,7 +11,7 @@
 ### Phase 1: TestHost + Fixtures (DONE)
 - [x] Created `crates/aos-host/src/fixtures/mod.rs` with all fixture helpers
 - [x] Expanded TestHost API: `from_loaded_manifest`, `drain_effects`, `state<T>`, `run_cycle_with_adapters`, `kernel()` escape hatches
-- [x] Added `test-fixtures` feature flag to aos-host
+- [x] Added `e2e-tests` feature flag to aos-host
 - [x] Created 8 integration tests in `crates/aos-host/tests/testhost_integration.rs`:
   - Counter-style manifest building
   - Timer effect flow (emit → drain → inject receipt)
@@ -44,8 +44,8 @@
 
 ### Running Tests
 ```bash
-# aos-host tests (requires test-fixtures feature for integration tests)
-cargo test -p aos-host --features test-fixtures
+# aos-host tests (requires e2e-tests feature for integration tests)
+cargo test -p aos-host --features e2e-tests
 
 # All workspace tests
 cargo test --workspace
@@ -54,7 +54,7 @@ cargo test --workspace
 cargo run -p aos-examples -- all
 ```
 
-Note: `cargo test -p aos-host` without `--features test-fixtures` will fail because integration tests
+Note: `cargo test -p aos-host` without `--features e2e-tests` will fail because integration tests
 depend on the fixtures module which is feature-gated. Use `cargo test --workspace` to run all tests
 with proper feature resolution.
 
@@ -112,7 +112,7 @@ Create `crates/aos-host/src/fixtures/mod.rs` by extracting from `aos-testkit/src
 - Schema/plan/trigger helpers (`schema()`, `start_trigger()`, `text_expr()`, etc.)
 - Capability helpers (`cap_http_grant()`, `timer_defcap()`, etc.)
 
-Feature-gate with `#[cfg(feature = "test-fixtures")]`.
+Feature-gate with `#[cfg(feature = "e2e-tests")]`.
 
 #### 1.2 Expand TestHost API
 

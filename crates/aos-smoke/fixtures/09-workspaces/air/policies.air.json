@@ -1,0 +1,52 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/workspace-policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "workspace.resolve",
+          "origin_kind": "workflow",
+          "origin_name": "demo/WorkspaceDemo@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.empty_root",
+          "origin_kind": "workflow",
+          "origin_name": "demo/WorkspaceDemo@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.write_bytes",
+          "origin_kind": "workflow",
+          "origin_name": "demo/WorkspaceDemo@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.list",
+          "origin_kind": "workflow",
+          "origin_name": "demo/WorkspaceDemo@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "workspace.diff",
+          "origin_kind": "workflow",
+          "origin_name": "demo/WorkspaceDemo@1"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {},
+        "decision": "deny"
+      }
+    ]
+  }
+]

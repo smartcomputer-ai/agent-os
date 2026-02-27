@@ -23,9 +23,9 @@ use super::workspace_sync::{SyncPushOptions, sync_workspace_push};
 use super::{create_host, prepare_world};
 
 const PUBLISH_EVENT: &str = "sys/HttpPublishSet@1";
-const PUBLISH_REDUCER: &str = "sys/HttpPublish@1";
+const PUBLISH_WORKFLOW: &str = "sys/HttpPublish@1";
 const WORKSPACE_EVENT: &str = "sys/WorkspaceCommit@1";
-const WORKSPACE_REDUCER: &str = "sys/Workspace@1";
+const WORKSPACE_WORKFLOW: &str = "sys/Workspace@1";
 const DEFAULT_APP_DIR: &str = "apps/shell";
 const DEFAULT_WORKSPACE: &str = "shell";
 const DEFAULT_ROUTE: &str = "/";
@@ -348,7 +348,7 @@ fn apply_publish_rule(
 }
 
 fn load_publish_registry(host: &aos_host::host::WorldHost<FsStore>) -> Result<HttpPublishRegistry> {
-    let Some(bytes) = host.state(PUBLISH_REDUCER, None) else {
+    let Some(bytes) = host.state(PUBLISH_WORKFLOW, None) else {
         return Ok(HttpPublishRegistry::default());
     };
     let registry: HttpPublishRegistry =
@@ -415,20 +415,20 @@ fn ensure_sys_support(
     let routing = manifest
         .routing
         .get_or_insert_with(|| aos_air_types::Routing {
-            events: Vec::new(),
+            subscriptions: Vec::new(),
             inboxes: Vec::new(),
         });
 
     let mut next_events = Vec::new();
     let mut saw_publish = false;
     let mut saw_workspace = false;
-    for route in &routing.events {
-        if route.event.as_str() == PUBLISH_EVENT && route.reducer == PUBLISH_REDUCER {
+    for route in &routing.subscriptions {
+        if route.event.as_str() == PUBLISH_EVENT && route.module == PUBLISH_WORKFLOW {
             saw_publish = true;
             next_events.push(route.clone());
             continue;
         }
-        if route.event.as_str() == WORKSPACE_EVENT && route.reducer == WORKSPACE_REDUCER {
+        if route.event.as_str() == WORKSPACE_EVENT && route.module == WORKSPACE_WORKFLOW {
             saw_workspace = true;
             if route.key_field.as_deref() != Some("workspace") {
                 let mut fixed = route.clone();
@@ -445,7 +445,7 @@ fn ensure_sys_support(
     if !saw_publish {
         next_events.push(RoutingEvent {
             event: SchemaRef::new(PUBLISH_EVENT)?,
-            reducer: PUBLISH_REDUCER.to_string(),
+            module: PUBLISH_WORKFLOW.to_string(),
             key_field: None,
         });
         changed = true;
@@ -453,13 +453,13 @@ fn ensure_sys_support(
     if !saw_workspace {
         next_events.push(RoutingEvent {
             event: SchemaRef::new(WORKSPACE_EVENT)?,
-            reducer: WORKSPACE_REDUCER.to_string(),
+            module: WORKSPACE_WORKFLOW.to_string(),
             key_field: Some("workspace".to_string()),
         });
         changed = true;
     }
     if changed {
-        routing.events = next_events;
+        routing.subscriptions = next_events;
     }
 
     if !changed {
@@ -490,7 +490,7 @@ fn build_sys_module_node(
 
 fn required_schema_refs() -> Vec<String> {
     vec![
-        "sys/ReducerContext@1".to_string(),
+        "sys/WorkflowContext@1".to_string(),
         "sys/WorkspaceName@1".to_string(),
         "sys/WorkspaceCommitMeta@1".to_string(),
         "sys/WorkspaceHistory@1".to_string(),
@@ -503,5 +503,5 @@ fn required_schema_refs() -> Vec<String> {
 }
 
 fn required_module_refs() -> Vec<String> {
-    vec![WORKSPACE_REDUCER.to_string(), PUBLISH_REDUCER.to_string()]
+    vec![WORKSPACE_WORKFLOW.to_string(), PUBLISH_WORKFLOW.to_string()]
 }

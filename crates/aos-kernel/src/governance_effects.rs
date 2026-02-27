@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use aos_air_types::{HashRef, Manifest, NamedRef, Routing, SecretEntry};
@@ -10,8 +10,8 @@ use serde_cbor::Value as CborValue;
 use crate::effects::EffectParamPreprocessor;
 use crate::error::KernelError;
 use crate::governance::ManifestPatch;
+use crate::governance_utils::{self, NamedRefDiffKind, canonicalize_patch};
 use crate::patch_doc::{PatchDocument, compile_patch_document};
-use crate::world::canonicalize_patch;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct GovProposeParamsRaw {
@@ -117,9 +117,11 @@ pub(crate) struct GovShadowReceipt {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub predicted_effects: Vec<GovPredictedEffect>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_receipts: Vec<GovPendingReceipt>,
+    pub pending_workflow_receipts: Vec<GovPendingWorkflowReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub plan_results: Vec<GovPlanResultPreview>,
+    pub workflow_instances: Vec<GovWorkflowInstancePreview>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub module_effect_allowlists: Vec<GovModuleEffectAllowlist>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ledger_deltas: Vec<GovLedgerDelta>,
 }
@@ -151,18 +153,31 @@ pub(crate) struct GovPredictedEffect {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GovPendingReceipt {
-    pub plan_id: u64,
+pub(crate) struct GovPendingWorkflowReceipt {
+    pub instance_id: String,
+    pub origin_module_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan: Option<String>,
+    pub origin_instance_key_b64: Option<String>,
     pub intent_hash: HashRef,
+    pub effect_kind: String,
+    pub emitted_at_seq: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct GovPlanResultPreview {
-    pub plan: String,
-    pub plan_id: u64,
-    pub output_schema: String,
+pub(crate) struct GovWorkflowInstancePreview {
+    pub instance_id: String,
+    pub status: String,
+    pub last_processed_event_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_version: Option<String>,
+    pub inflight_intents: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GovModuleEffectAllowlist {
+    pub module: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects_emitted: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -565,42 +580,36 @@ fn build_patch_summary(
     let mut def_changes = Vec::new();
     let mut refs_changed = false;
 
-    refs_changed |= diff_named_refs(
+    refs_changed |= push_named_ref_changes(
         "defschema",
         &base_manifest.schemas,
         &patch.manifest.schemas,
         &mut def_changes,
-    )?;
-    refs_changed |= diff_named_refs(
+    );
+    refs_changed |= push_named_ref_changes(
         "defmodule",
         &base_manifest.modules,
         &patch.manifest.modules,
         &mut def_changes,
-    )?;
-    refs_changed |= diff_named_refs(
-        "defplan",
-        &base_manifest.plans,
-        &patch.manifest.plans,
-        &mut def_changes,
-    )?;
-    refs_changed |= diff_named_refs(
+    );
+    refs_changed |= push_named_ref_changes(
         "defeffect",
         &base_manifest.effects,
         &patch.manifest.effects,
         &mut def_changes,
-    )?;
-    refs_changed |= diff_named_refs(
+    );
+    refs_changed |= push_named_ref_changes(
         "defcap",
         &base_manifest.caps,
         &patch.manifest.caps,
         &mut def_changes,
-    )?;
-    refs_changed |= diff_named_refs(
+    );
+    refs_changed |= push_named_ref_changes(
         "defpolicy",
         &base_manifest.policies,
         &patch.manifest.policies,
         &mut def_changes,
-    )?;
+    );
     refs_changed |= diff_secret_refs(
         &base_manifest.secrets,
         &patch.manifest.secrets,
@@ -618,21 +627,18 @@ fn build_patch_summary(
         manifest_sections.insert("defaults".to_string());
     }
     let base_routing = base_manifest.routing.clone().unwrap_or_else(|| Routing {
-        events: Vec::new(),
+        subscriptions: Vec::new(),
         inboxes: Vec::new(),
     });
     let next_routing = patch.manifest.routing.clone().unwrap_or_else(|| Routing {
-        events: Vec::new(),
+        subscriptions: Vec::new(),
         inboxes: Vec::new(),
     });
-    if section_changed(&base_routing.events, &next_routing.events)? {
+    if section_changed(&base_routing.subscriptions, &next_routing.subscriptions)? {
         manifest_sections.insert("routing_events".to_string());
     }
     if section_changed(&base_routing.inboxes, &next_routing.inboxes)? {
         manifest_sections.insert("routing_inboxes".to_string());
-    }
-    if section_changed(&base_manifest.triggers, &patch.manifest.triggers)? {
-        manifest_sections.insert("triggers".to_string());
     }
     if section_changed(
         &base_manifest.module_bindings,
@@ -675,9 +681,6 @@ fn build_patch_summary(
             "routing_inboxes" => {
                 ops.insert("set_routing_inboxes".to_string());
             }
-            "triggers" => {
-                ops.insert("set_triggers".to_string());
-            }
             "module_bindings" => {
                 ops.insert("set_module_bindings".to_string());
             }
@@ -703,58 +706,26 @@ fn build_patch_summary(
     })
 }
 
-fn diff_named_refs(
+fn push_named_ref_changes(
     kind: &str,
     base: &[NamedRef],
     next: &[NamedRef],
     changes: &mut Vec<GovDefChange>,
-) -> Result<bool, KernelError> {
-    let base_map = map_named_refs(base)?;
-    let next_map = map_named_refs(next)?;
+) -> bool {
     let mut changed = false;
-    for (name, hash) in &next_map {
-        match base_map.get(name) {
-            None => {
-                changes.push(GovDefChange {
-                    kind: kind.to_string(),
-                    name: name.clone(),
-                    action: GovChangeAction::Added,
-                });
-                changed = true;
-            }
-            Some(existing) if existing != hash => {
-                changes.push(GovDefChange {
-                    kind: kind.to_string(),
-                    name: name.clone(),
-                    action: GovChangeAction::Changed,
-                });
-                changed = true;
-            }
-            _ => {}
-        }
+    for delta in governance_utils::diff_named_refs(base, next) {
+        changes.push(GovDefChange {
+            kind: kind.to_string(),
+            name: delta.name,
+            action: match delta.change {
+                NamedRefDiffKind::Added => GovChangeAction::Added,
+                NamedRefDiffKind::Removed => GovChangeAction::Removed,
+                NamedRefDiffKind::Changed => GovChangeAction::Changed,
+            },
+        });
+        changed = true;
     }
-    for name in base_map.keys() {
-        if !next_map.contains_key(name) {
-            changes.push(GovDefChange {
-                kind: kind.to_string(),
-                name: name.clone(),
-                action: GovChangeAction::Removed,
-            });
-            changed = true;
-        }
-    }
-    Ok(changed)
-}
-
-fn map_named_refs(refs: &[NamedRef]) -> Result<BTreeMap<String, String>, KernelError> {
-    let mut map = BTreeMap::new();
-    for reference in refs {
-        map.insert(
-            reference.name.as_str().to_string(),
-            reference.hash.as_str().to_string(),
-        );
-    }
-    Ok(map)
+    changed
 }
 
 fn diff_secret_refs(

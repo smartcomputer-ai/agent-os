@@ -61,6 +61,10 @@
         { "$ref": "#/$defs/StepEmitEffect" },
         { "$ref": "#/$defs/StepAwaitReceipt" },
         { "$ref": "#/$defs/StepAwaitEvent" },
+        { "$ref": "#/$defs/StepSpawnPlan" },
+        { "$ref": "#/$defs/StepAwaitPlan" },
+        { "$ref": "#/$defs/StepSpawnForEach" },
+        { "$ref": "#/$defs/StepAwaitPlansAll" },
         { "$ref": "#/$defs/StepAssign" },
         { "$ref": "#/$defs/StepEnd" }
       ]
@@ -165,6 +169,94 @@
             "bind": { "$ref": "#/$defs/BindAs" }
           },
           "required": ["op","expr","bind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepSpawnPlan": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
+            "op": { "const": "spawn_plan" },
+            "plan": { "$ref": "common.schema.json#/$defs/Name" },
+            "input": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
+            "bind": {
+              "type": "object",
+              "properties": {
+                "handle_as": { "$ref": "common.schema.json#/$defs/VarName" }
+              },
+              "required": ["handle_as"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["op","plan","input","bind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepAwaitPlan": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
+            "op": { "const": "await_plan" },
+            "for": { "$ref": "common.schema.json#/$defs/Expr" },
+            "bind": { "$ref": "#/$defs/BindAs" }
+          },
+          "required": ["op","for","bind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepSpawnForEach": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
+            "op": { "const": "spawn_for_each" },
+            "plan": { "$ref": "common.schema.json#/$defs/Name" },
+            "inputs": { "$ref": "common.schema.json#/$defs/ExprOrValue" },
+            "max_fanout": { "type": "integer", "minimum": 0 },
+            "bind": {
+              "type": "object",
+              "properties": {
+                "handles_as": { "$ref": "common.schema.json#/$defs/VarName" }
+              },
+              "required": ["handles_as"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["op","plan","inputs","bind"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepAwaitPlansAll": {
+      "allOf": [
+        { "$ref": "#/$defs/StepBase" },
+        {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "common.schema.json#/$defs/StepId" },
+            "op": { "const": "await_plans_all" },
+            "handles": { "$ref": "common.schema.json#/$defs/Expr" },
+            "bind": {
+              "type": "object",
+              "properties": {
+                "results_as": { "$ref": "common.schema.json#/$defs/VarName" }
+              },
+              "required": ["results_as"],
+              "additionalProperties": false
+            }
+          },
+          "required": ["op","handles","bind"],
           "additionalProperties": false
         }
       ]

@@ -1,0 +1,75 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    {
+      "name": "demo/BlobEchoPc@1"
+    },
+    {
+      "name": "demo/BlobEchoState@1"
+    },
+    {
+      "name": "demo/BlobEchoStart@1"
+    },
+    {
+      "name": "demo/BlobEchoEvent@1"
+    },
+    {
+      "name": "sys/BlobPutParams@1"
+    },
+    {
+      "name": "sys/BlobPutReceipt@1"
+    },
+    {
+      "name": "sys/BlobGetParams@1"
+    },
+    {
+      "name": "sys/BlobGetReceipt@1"
+    },
+    {
+      "name": "sys/BlobPutResult@1"
+    },
+    {
+      "name": "sys/BlobGetResult@1"
+    }
+  ],
+  "modules": [
+    {
+      "name": "demo/BlobEchoSM@1"
+    }
+  ],
+  "effects": [
+    {
+      "name": "sys/blob.put@1"
+    },
+    {
+      "name": "sys/blob.get@1"
+    }
+  ],
+  "caps": [],
+  "policies": [
+    {
+      "name": "demo/blob_policy@1"
+    }
+  ],
+  "defaults": {
+    "policy": "demo/blob_policy@1",
+    "cap_grants": [
+      {
+        "name": "blob_grant",
+        "cap": "sys/blob@1",
+        "params": {
+          "record": {}
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/BlobEchoEvent@1",
+        "module": "demo/BlobEchoSM@1"
+      }
+    ]
+  }
+}

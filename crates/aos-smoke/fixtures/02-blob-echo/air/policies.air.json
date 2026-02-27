@@ -1,0 +1,22 @@
+[
+  {
+    "$kind": "defpolicy",
+    "name": "demo/blob_policy@1",
+    "rules": [
+      {
+        "when": {
+          "effect_kind": "blob.put",
+          "origin_kind": "workflow"
+        },
+        "decision": "allow"
+      },
+      {
+        "when": {
+          "effect_kind": "blob.get",
+          "origin_kind": "workflow"
+        },
+        "decision": "allow"
+      }
+    ]
+  }
+]

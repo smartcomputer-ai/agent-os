@@ -3,7 +3,7 @@
 pub mod builtins;
 pub mod catalog;
 mod model;
-pub mod plan_literals;
+pub mod schema_index;
 mod refs;
 pub mod schemas;
 pub mod typecheck;

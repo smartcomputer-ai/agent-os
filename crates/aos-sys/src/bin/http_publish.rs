@@ -1,4 +1,4 @@
-//! HTTP publish registry reducer (`sys/HttpPublish@1`).
+//! HTTP publish registry workflow (`sys/HttpPublish@1`).
 //!
 //! Stores publish rules by ID for deterministic routing in the host.
 
@@ -8,7 +8,7 @@
 extern crate alloc;
 
 use aos_sys::{HttpPublishRegistry, HttpPublishSet};
-use aos_wasm_sdk::{ReduceError, Reducer, ReducerCtx, Value, aos_reducer};
+use aos_wasm_sdk::{ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
 
 // Required for WASM binary entry point
 #[cfg(target_arch = "wasm32")]
@@ -17,12 +17,12 @@ fn main() {}
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {}
 
-aos_reducer!(HttpPublish);
+aos_workflow!(HttpPublish);
 
 #[derive(Default)]
 struct HttpPublish;
 
-impl Reducer for HttpPublish {
+impl Workflow for HttpPublish {
     type State = HttpPublishRegistry;
     type Event = HttpPublishSet;
     type Ann = Value;
@@ -30,7 +30,7 @@ impl Reducer for HttpPublish {
     fn reduce(
         &mut self,
         event: Self::Event,
-        ctx: &mut ReducerCtx<Self::State, Self::Ann>,
+        ctx: &mut WorkflowCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
         if let Some(rule) = event.rule {
             ctx.state.rules.insert(event.id, rule);

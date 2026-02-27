@@ -5,7 +5,6 @@ use serde_json::Value as JsonValue;
 
 pub type Name = String;
 pub type VarName = String;
-pub type StepId = String;
 pub type CapGrantName = String;
 pub type SecretAlias = String;
 
@@ -134,8 +133,6 @@ pub struct DefSecret {
     pub expected_digest: Option<HashRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_caps: Vec<CapGrantName>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub allowed_plans: Vec<Name>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -421,7 +418,6 @@ pub struct VariantExpr {
 pub enum AirNode {
     Defschema(DefSchema),
     Defmodule(DefModule),
-    Defplan(DefPlan),
     Defcap(DefCap),
     Defpolicy(DefPolicy),
     Defsecret(DefSecret),
@@ -449,20 +445,20 @@ pub struct DefModule {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ModuleKind {
-    Reducer,
+    Workflow,
     Pure,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleAbi {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reducer: Option<ReducerAbi>,
+    pub workflow: Option<WorkflowAbi>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pure: Option<PureAbi>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReducerAbi {
+pub struct WorkflowAbi {
     pub state: SchemaRef,
     pub event: SchemaRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -481,106 +477,6 @@ pub struct PureAbi {
     pub output: SchemaRef,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<SchemaRef>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DefPlan {
-    pub name: Name,
-    pub input: SchemaRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output: Option<SchemaRef>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub locals: IndexMap<VarName, SchemaRef>,
-    pub steps: Vec<PlanStep>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub edges: Vec<PlanEdge>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub required_caps: Vec<CapGrantName>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub allowed_effects: Vec<EffectKind>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub invariants: Vec<Expr>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanEdge {
-    pub from: StepId,
-    pub to: StepId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub when: Option<Expr>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanStep {
-    pub id: StepId,
-    #[serde(flatten)]
-    pub kind: PlanStepKind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum PlanStepKind {
-    RaiseEvent(PlanStepRaiseEvent),
-    EmitEffect(PlanStepEmitEffect),
-    AwaitReceipt(PlanStepAwaitReceipt),
-    AwaitEvent(PlanStepAwaitEvent),
-    Assign(PlanStepAssign),
-    End(PlanStepEnd),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanStepRaiseEvent {
-    pub event: SchemaRef,
-    pub value: ExprOrValue,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanStepEmitEffect {
-    pub kind: EffectKind,
-    pub params: ExprOrValue,
-    pub cap: CapGrantName,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub idempotency_key: Option<ExprOrValue>,
-    pub bind: PlanBindEffect,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanBindEffect {
-    #[serde(rename = "effect_id_as")]
-    pub effect_id_as: VarName,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanStepAwaitReceipt {
-    #[serde(rename = "for")]
-    pub for_expr: Expr,
-    pub bind: PlanBind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanStepAwaitEvent {
-    pub event: SchemaRef,
-    #[serde(rename = "where", default, skip_serializing_if = "Option::is_none")]
-    pub where_clause: Option<Expr>,
-    pub bind: PlanBind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanStepAssign {
-    pub expr: ExprOrValue,
-    pub bind: PlanBind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanStepEnd {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<ExprOrValue>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanBind {
-    #[serde(rename = "as")]
-    pub var: VarName,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -606,7 +502,7 @@ fn default_cap_enforcer() -> CapEnforcer {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum OriginScope {
-    Reducer,
+    Workflow,
     Plan,
     Both,
 }
@@ -616,8 +512,8 @@ impl OriginScope {
         matches!(self, OriginScope::Plan | OriginScope::Both)
     }
 
-    pub fn allows_reducers(self) -> bool {
-        matches!(self, OriginScope::Reducer | OriginScope::Both)
+    pub fn allows_workflows(self) -> bool {
+        matches!(self, OriginScope::Workflow | OriginScope::Both)
     }
 }
 
@@ -743,8 +639,9 @@ pub struct PolicyMatch {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum OriginKind {
-    Plan,
-    Reducer,
+    Workflow,
+    System,
+    Governance,
 }
 
 pub const CURRENT_AIR_VERSION: &str = "1";
@@ -754,7 +651,6 @@ pub struct Manifest {
     pub air_version: String,
     pub schemas: Vec<NamedRef>,
     pub modules: Vec<NamedRef>,
-    pub plans: Vec<NamedRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<NamedRef>,
     pub caps: Vec<NamedRef>,
@@ -767,8 +663,6 @@ pub struct Manifest {
     pub module_bindings: IndexMap<Name, ModuleBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing: Option<Routing>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triggers: Vec<Trigger>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -807,8 +701,6 @@ pub struct SecretDecl {
 pub struct SecretPolicy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_caps: Vec<CapGrantName>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub allowed_plans: Vec<Name>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -819,32 +711,26 @@ pub struct ModuleBinding {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Routing {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub events: Vec<RoutingEvent>,
+    #[serde(default, alias = "events", skip_serializing_if = "Vec::is_empty")]
+    pub subscriptions: Vec<RoutingSubscription>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inboxes: Vec<InboxRoute>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RoutingEvent {
+pub struct RoutingSubscription {
     pub event: SchemaRef,
-    pub reducer: Name,
+    pub module: Name,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_field: Option<String>,
 }
 
+pub type RoutingEvent = RoutingSubscription;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InboxRoute {
     pub source: String,
-    pub reducer: Name,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Trigger {
-    pub event: SchemaRef,
-    pub plan: Name,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub correlate_by: Option<String>,
+    pub workflow: Name,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -869,7 +755,7 @@ impl EffectKind {
     pub const VAULT_PUT: &'static str = "vault.put";
     pub const VAULT_ROTATE: &'static str = "vault.rotate";
     pub const INTROSPECT_MANIFEST: &'static str = "introspect.manifest";
-    pub const INTROSPECT_REDUCER_STATE: &'static str = "introspect.reducer_state";
+    pub const INTROSPECT_WORKFLOW_STATE: &'static str = "introspect.workflow_state";
     pub const INTROSPECT_JOURNAL_HEAD: &'static str = "introspect.journal_head";
     pub const INTROSPECT_LIST_CELLS: &'static str = "introspect.list_cells";
     pub const WORKSPACE_RESOLVE: &'static str = "workspace.resolve";
@@ -923,8 +809,8 @@ impl EffectKind {
         Self::new(Self::INTROSPECT_MANIFEST)
     }
 
-    pub fn introspect_reducer_state() -> Self {
-        Self::new(Self::INTROSPECT_REDUCER_STATE)
+    pub fn introspect_workflow_state() -> Self {
+        Self::new(Self::INTROSPECT_WORKFLOW_STATE)
     }
 
     pub fn introspect_journal_head() -> Self {
@@ -1063,21 +949,6 @@ mod tests {
     }
 
     #[test]
-    fn plan_step_round_trip() {
-        let json_value = json!({
-            "id": "emit",
-            "op": "emit_effect",
-            "kind": "http.request",
-            "params": {"record": {}},
-            "cap": "http_cap",
-            "bind": {"effect_id_as": "req"}
-        });
-        let step: PlanStep = serde_json::from_value(json_value.clone()).expect("deserialize");
-        let back = serde_json::to_value(step).expect("serialize");
-        assert_eq!(json_value, back);
-    }
-
-    #[test]
     fn value_literal_serialization() {
         let mut record = IndexMap::new();
         record.insert(
@@ -1120,23 +991,17 @@ mod tests {
             ],
             "modules": [
                 {
-                    "name": "com.acme/order_reducer@1",
+                    "name": "com.acme/order_workflow@1",
                     "hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-                }
-            ],
-            "plans": [
-                {
-                    "name": "com.acme/order_plan@1",
-                    "hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
                 }
             ],
             "caps": [],
             "policies": [],
             "routing": {
-                "events": [
+                "subscriptions": [
                     {
                         "event": "com.acme/OrderCreated@1",
-                        "reducer": "com.acme/order_reducer@1"
+                        "module": "com.acme/order_workflow@1"
                     }
                 ]
             }

@@ -1,0 +1,15 @@
+[workspace]
+
+[package]
+name = "retry_sm"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+aos-wasm-sdk = { path = "../../../../aos-wasm-sdk" }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+serde_cbor = { version = "0.11", default-features = false, features = ["alloc"] }

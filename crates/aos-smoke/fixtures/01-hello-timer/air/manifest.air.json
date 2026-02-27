@@ -1,0 +1,63 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    {
+      "name": "demo/TimerPc@1"
+    },
+    {
+      "name": "demo/TimerState@1"
+    },
+    {
+      "name": "demo/TimerStart@1"
+    },
+    {
+      "name": "demo/TimerEvent@1"
+    },
+    {
+      "name": "sys/TimerSetParams@1"
+    },
+    {
+      "name": "sys/TimerSetReceipt@1"
+    },
+    {
+      "name": "sys/TimerFired@1"
+    }
+  ],
+  "modules": [
+    {
+      "name": "demo/TimerSM@1"
+    }
+  ],
+  "effects": [
+    {
+      "name": "sys/timer.set@1"
+    }
+  ],
+  "caps": [],
+  "policies": [
+    {
+      "name": "demo/default_policy@1"
+    }
+  ],
+  "defaults": {
+    "policy": "demo/default_policy@1",
+    "cap_grants": [
+      {
+        "name": "timer_grant",
+        "cap": "sys/timer@1",
+        "params": {
+          "record": {}
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/TimerEvent@1",
+        "module": "demo/TimerSM@1"
+      }
+    ]
+  }
+}

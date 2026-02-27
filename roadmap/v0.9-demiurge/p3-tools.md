@@ -3,7 +3,7 @@
 **Priority**: P3  
 **Effort**: Medium  
 **Risk if deferred**: Medium (limits agent usefulness)  
-**Status**: Proposed
+**Status**: Complete
 
 ## Goal
 

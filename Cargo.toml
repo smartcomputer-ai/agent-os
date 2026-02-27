@@ -7,12 +7,14 @@ members = [
   "crates/aos-wasm-abi",
   "crates/aos-wasm",
   "crates/aos-effects",
+  "crates/aos-llm",
+  "crates/aos-agent-sdk",
   "crates/aos-kernel",
   "crates/aos-host",
   "crates/aos-wasm-sdk",
   "crates/aos-cli",
-  "crates/aos-examples",
   "crates/aos-wasm-build",
-  "crates/aos-sys"
+  "crates/aos-sys",
+  "crates/aos-smoke",
 ]
 resolver = "2"

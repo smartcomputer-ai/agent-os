@@ -8,10 +8,13 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use aos_air_exec::{Value as ExprValue, ValueKey};
+use aos_air_exec::Value as ExprValue;
 use aos_air_types::HashRef;
 use aos_cbor::Hash;
-use aos_effects::builtins::{HeaderMap, HttpRequestParams, LlmGenerateParams};
+use aos_effects::builtins::{
+    HeaderMap, HttpRequestParams, HttpRequestReceipt, LlmGenerateParams, LlmRuntimeArgs,
+    RequestTimings,
+};
 use aos_effects::{EffectIntent, EffectKind, EffectReceipt, ReceiptStatus};
 use aos_kernel::Kernel;
 use aos_store::Store;
@@ -84,7 +87,7 @@ impl MockHttpHarness {
     ) -> Result<Vec<HttpRequestContext>> {
         let mut out = Vec::new();
         loop {
-            let intents = kernel.drain_effects();
+            let intents = kernel.drain_effects()?;
             if intents.is_empty() {
                 break;
             }
@@ -111,7 +114,8 @@ impl MockHttpHarness {
         ctx: HttpRequestContext,
         response: MockHttpResponse,
     ) -> Result<()> {
-        self.respond_with_body(kernel, None::<&S>, ctx, response)
+        let store = kernel.store();
+        self.respond_with_body(kernel, Some(store.as_ref()), ctx, response)
     }
 
     /// Respond to an HTTP request, optionally storing the body in a store.
@@ -122,13 +126,13 @@ impl MockHttpHarness {
         ctx: HttpRequestContext,
         response: MockHttpResponse,
     ) -> Result<()> {
-        let receipt_value =
-            build_http_receipt_value(response.status, &response.headers, response.body, store)?;
+        let receipt_payload =
+            build_http_receipt_payload(response.status, &response.headers, response.body, store)?;
         let receipt = EffectReceipt {
             intent_hash: ctx.intent.intent_hash,
             adapter_id: MOCK_HTTP_ADAPTER_ID.into(),
             status: ReceiptStatus::Ok,
-            payload_cbor: serde_cbor::to_vec(&receipt_value)?,
+            payload_cbor: serde_cbor::to_vec(&receipt_payload)?,
             cost_cents: Some(0),
             signature: vec![0; 64],
         };
@@ -144,39 +148,30 @@ impl Default for MockHttpHarness {
     }
 }
 
-fn build_http_receipt_value(
+fn build_http_receipt_payload(
     status: i64,
     headers: &HeaderMap,
     body: String,
     store: Option<&impl Store>,
-) -> Result<ExprValue> {
-    let mut record = indexmap::IndexMap::new();
-    record.insert("status".into(), ExprValue::Int(status));
-    record.insert("headers".into(), headers_to_value(&redact_headers(headers)));
-    record.insert("body_preview".into(), ExprValue::Text(body.clone()));
-    if let Some(store) = store {
+) -> Result<HttpRequestReceipt> {
+    let body_ref = if let Some(store) = store {
         let hash = store
             .put_blob(body.as_bytes())
             .context("store http response body")?;
-        record.insert("body_ref".into(), ExprValue::Text(hash.to_hex()));
-    }
-    let mut timings = indexmap::IndexMap::new();
-    timings.insert("start_ns".into(), ExprValue::Nat(10));
-    timings.insert("end_ns".into(), ExprValue::Nat(20));
-    record.insert("timings".into(), ExprValue::Record(timings));
-    record.insert(
-        "adapter_id".into(),
-        ExprValue::Text(MOCK_HTTP_ADAPTER_ID.into()),
-    );
-    Ok(ExprValue::Record(record))
-}
-
-fn headers_to_value(headers: &HeaderMap) -> ExprValue {
-    let mut map = aos_air_exec::ValueMap::new();
-    for (key, value) in headers {
-        map.insert(ValueKey::Text(key.clone()), ExprValue::Text(value.clone()));
-    }
-    ExprValue::Map(map)
+        Some(HashRef::new(hash.to_hex()).context("hash http response body")?)
+    } else {
+        None
+    };
+    Ok(HttpRequestReceipt {
+        status: status as i32,
+        headers: redact_headers(headers),
+        body_ref,
+        timings: RequestTimings {
+            start_ns: 10,
+            end_ns: 20,
+        },
+        adapter_id: MOCK_HTTP_ADAPTER_ID.into(),
+    })
 }
 
 fn redact_headers(headers: &HeaderMap) -> HeaderMap {
@@ -234,7 +229,7 @@ impl<S: Store + 'static> MockLlmHarness<S> {
     pub fn collect_requests(&mut self, kernel: &mut Kernel<S>) -> Result<Vec<LlmRequestContext>> {
         let mut out = Vec::new();
         loop {
-            let intents = kernel.drain_effects();
+            let intents = kernel.drain_effects()?;
             if intents.is_empty() {
                 break;
             }
@@ -348,11 +343,14 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             None => Err(anyhow!("field '{field}' missing from llm.generate params")),
         }
     };
-    let nat = |field: &str| -> Result<u64> {
+    let opt_text = |field: &str| -> Result<Option<String>> {
         match map.get(&serde_cbor::Value::Text(field.into())) {
-            Some(serde_cbor::Value::Integer(n)) if *n >= 0 => Ok(*n as u64),
-            Some(other) => Err(anyhow!("field '{field}' must be nat, got {:?}", other)),
-            None => Err(anyhow!("field '{field}' missing from llm.generate params")),
+            Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
+            Some(serde_cbor::Value::Null) | None => Ok(None),
+            Some(other) => Err(anyhow!(
+                "field '{field}' must be text or null, got {:?}",
+                other
+            )),
         }
     };
     let message_refs = match map.get(&serde_cbor::Value::Text("message_refs".into())) {
@@ -378,7 +376,39 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
             ));
         }
     };
-    let tool_refs = match map.get(&serde_cbor::Value::Text("tool_refs".into())) {
+    let runtime_map = match map.get(&serde_cbor::Value::Text("runtime".into())) {
+        Some(serde_cbor::Value::Map(m)) => m,
+        Some(other) => {
+            return Err(anyhow!(
+                "field 'runtime' must be record/map, got {:?}",
+                other
+            ));
+        }
+        None => {
+            return Err(anyhow!("field 'runtime' missing from llm.generate params"));
+        }
+    };
+    let runtime_opt_nat = |field: &str| -> Result<Option<u64>> {
+        match runtime_map.get(&serde_cbor::Value::Text(field.into())) {
+            Some(serde_cbor::Value::Integer(n)) if *n >= 0 => Ok(Some(*n as u64)),
+            Some(serde_cbor::Value::Null) | None => Ok(None),
+            Some(other) => Err(anyhow!(
+                "runtime field '{field}' must be nat or null, got {:?}",
+                other
+            )),
+        }
+    };
+    let runtime_opt_text = |field: &str| -> Result<Option<String>> {
+        match runtime_map.get(&serde_cbor::Value::Text(field.into())) {
+            Some(serde_cbor::Value::Text(t)) => Ok(Some(t.clone())),
+            Some(serde_cbor::Value::Null) | None => Ok(None),
+            Some(other) => Err(anyhow!(
+                "runtime field '{field}' must be text or null, got {:?}",
+                other
+            )),
+        }
+    };
+    let tool_refs = match runtime_map.get(&serde_cbor::Value::Text("tool_refs".into())) {
         Some(serde_cbor::Value::Array(items)) => items
             .iter()
             .map(|v| match v {
@@ -400,17 +430,26 @@ fn llm_params_from_cbor(value: serde_cbor::Value) -> Result<LlmGenerateParams> {
     let api_key = decode_api_key(map.get(&serde_cbor::Value::Text("api_key".into())))?;
 
     Ok(LlmGenerateParams {
+        correlation_id: opt_text("correlation_id")?,
         provider: text("provider")?,
         model: text("model")?,
-        temperature: text("temperature")?,
-        max_tokens: nat("max_tokens")?,
         message_refs,
-        tool_refs: if tool_refs.is_empty() {
-            None
-        } else {
-            Some(tool_refs)
+        runtime: LlmRuntimeArgs {
+            temperature: runtime_opt_text("temperature")?,
+            top_p: runtime_opt_text("top_p")?,
+            max_tokens: runtime_opt_nat("max_tokens")?,
+            tool_refs: if tool_refs.is_empty() {
+                None
+            } else {
+                Some(tool_refs)
+            },
+            tool_choice: None,
+            reasoning_effort: runtime_opt_text("reasoning_effort")?,
+            stop_sequences: None,
+            metadata: None,
+            provider_options_ref: None,
+            response_format_ref: None,
         },
-        tool_choice: None,
         api_key,
     })
 }
@@ -472,17 +511,29 @@ fn build_receipt_value(output_ref: &HashRef, summary: &str) -> ExprValue {
     let mut token_usage = indexmap::IndexMap::new();
     token_usage.insert("prompt".into(), ExprValue::Nat(120));
     token_usage.insert("completion".into(), ExprValue::Nat(42));
+    token_usage.insert("total".into(), ExprValue::Nat(162));
+
+    let mut finish_reason = indexmap::IndexMap::new();
+    finish_reason.insert("reason".into(), ExprValue::Text("stop".into()));
+    finish_reason.insert("raw".into(), ExprValue::Null);
 
     let mut record = indexmap::IndexMap::new();
     record.insert(
         "output_ref".into(),
         ExprValue::Text(output_ref.as_str().to_string()),
     );
+    record.insert("raw_output_ref".into(), ExprValue::Null);
+    record.insert("provider_response_id".into(), ExprValue::Null);
+    record.insert("finish_reason".into(), ExprValue::Record(finish_reason));
+    record.insert("token_usage".into(), ExprValue::Record(token_usage.clone()));
+    record.insert("usage_details".into(), ExprValue::Null);
+    record.insert("warnings_ref".into(), ExprValue::Null);
+    record.insert("rate_limit_ref".into(), ExprValue::Null);
+    record.insert("cost_cents".into(), ExprValue::Nat(0));
     record.insert(
         "summary_preview".into(),
         ExprValue::Text(summary.to_string()),
     );
-    record.insert("token_usage".into(), ExprValue::Record(token_usage.clone()));
     record.insert("tokens_prompt".into(), ExprValue::Nat(120));
     record.insert("tokens_completion".into(), ExprValue::Nat(42));
     record.insert("cost_millis".into(), ExprValue::Nat(250));

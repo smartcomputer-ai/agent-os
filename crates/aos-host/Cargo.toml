@@ -8,8 +8,8 @@ edition = "2024"
 # networked dependencies. They are ON by default.
 default = ["adapter-http", "adapter-llm"]
 adapter-http = ["reqwest", "url"]
-adapter-llm = ["reqwest"]
-test-fixtures = ["aos-air-exec", "aos-wasm-abi", "indexmap", "wat", "sha2"]
+adapter-llm = ["aos-llm"]
+e2e-tests = ["aos-air-exec", "aos-wasm-abi", "indexmap", "wat", "sha2"]
 
 [dependencies]
 aos-kernel = { path = "../aos-kernel" }
@@ -18,11 +18,12 @@ aos-cbor = { path = "../aos-cbor" }
 aos-store = { path = "../aos-store" }
 aos-air-types = { path = "../aos-air-types" }
 aos-sys = { path = "../aos-sys" }
+aos-llm = { path = "../aos-llm", optional = true }
 
 walkdir = "2"
 log = "0.4"
 
-# Optional dependencies for test-fixtures feature
+# Optional dependencies for e2e-tests feature
 aos-air-exec = { path = "../aos-air-exec", optional = true }
 aos-wasm-abi = { path = "../aos-wasm-abi", optional = true }
 indexmap = { version = "2", optional = true }
@@ -60,3 +61,20 @@ serde_bytes = "0.11"
 aos-wasm-build = { path = "../aos-wasm-build" }
 camino = "1"
 dotenvy = "0.15"
+
+[[test]]
+name = "demiurge_introspect_manifest_e2e"
+path = "tests_e2e/demiurge_introspect_manifest_e2e.rs"
+
+[[test]]
+name = "cap_enforcer_e2e"
+path = "tests_e2e/cap_enforcer_e2e.rs"
+
+[[test]]
+name = "workspace_e2e"
+path = "tests_e2e/workspace_e2e.rs"
+
+[[test]]
+name = "adapters_llm_live"
+path = "tests_live/adapters_llm_live.rs"
+required-features = ["adapter-llm"]

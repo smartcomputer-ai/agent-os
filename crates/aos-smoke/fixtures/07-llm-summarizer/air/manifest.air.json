@@ -1,0 +1,118 @@
+{
+  "$kind": "manifest",
+  "air_version": "1",
+  "schemas": [
+    {
+      "name": "demo/LlmSummarizerPc@1"
+    },
+    {
+      "name": "demo/LlmSummarizerState@1"
+    },
+    {
+      "name": "demo/LlmSummarizerStart@1"
+    },
+    {
+      "name": "demo/LlmSummarizerEvent@1"
+    },
+    {
+      "name": "sys/EffectReceiptEnvelope@1"
+    },
+    {
+      "name": "sys/HttpRequestParams@1"
+    },
+    {
+      "name": "sys/HttpRequestReceipt@1"
+    },
+    {
+      "name": "sys/LlmGenerateParams@1"
+    },
+    {
+      "name": "sys/LlmGenerateReceipt@1"
+    }
+  ],
+  "modules": [
+    {
+      "name": "demo/LlmSummarizer@1"
+    },
+    {
+      "name": "sys/CapEnforceHttpOut@1"
+    },
+    {
+      "name": "sys/CapEnforceLlmBasic@1"
+    }
+  ],
+  "caps": [
+    {
+      "name": "demo/http_fetch_cap@1"
+    },
+    {
+      "name": "demo/llm_summarize_cap@1"
+    }
+  ],
+  "policies": [
+    {
+      "name": "demo/llm-policy@1"
+    }
+  ],
+  "defaults": {
+    "policy": "demo/llm-policy@1",
+    "cap_grants": [
+      {
+        "name": "cap_http_fetch",
+        "cap": "demo/http_fetch_cap@1",
+        "params": {
+          "record": {
+            "hosts": {
+              "set": [
+                {
+                  "text": "example.com"
+                }
+              ]
+            },
+            "methods": {
+              "set": [
+                {
+                  "text": "GET"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "name": "cap_llm",
+        "cap": "demo/llm_summarize_cap@1",
+        "params": {
+          "record": {
+            "models": {
+              "set": [
+                {
+                  "text": "mock-summarizer"
+                }
+              ]
+            },
+            "max_tokens": {
+              "nat": 2048
+            }
+          }
+        }
+      }
+    ]
+  },
+  "routing": {
+    "subscriptions": [
+      {
+        "event": "demo/LlmSummarizerEvent@1",
+        "module": "demo/LlmSummarizer@1"
+      }
+    ]
+  },
+  "effects": [
+    {
+      "name": "sys/http.request@1"
+    },
+    {
+      "name": "sys/llm.generate@1"
+    }
+  ]
+}

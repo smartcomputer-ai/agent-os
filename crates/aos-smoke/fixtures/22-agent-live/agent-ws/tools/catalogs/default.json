@@ -1,0 +1,16 @@
+{
+  "tools": [
+    {
+      "name": "search_step",
+      "description": "Traverse one hop in the search graph using the current cursor.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cursor": { "type": "string" }
+        },
+        "required": ["cursor"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

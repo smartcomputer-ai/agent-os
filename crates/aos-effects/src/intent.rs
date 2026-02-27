@@ -9,13 +9,13 @@ pub type IdempotencyKey = [u8; 32];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "origin", rename_all = "lowercase")]
 pub enum EffectSource {
-    Reducer { name: String },
+    Workflow { name: String },
     Plan { name: String },
 }
 
 impl EffectSource {
-    pub fn reducer(name: impl Into<String>) -> Self {
-        EffectSource::Reducer { name: name.into() }
+    pub fn workflow(name: impl Into<String>) -> Self {
+        EffectSource::Workflow { name: name.into() }
     }
 
     pub fn plan(name: impl Into<String>) -> Self {
@@ -24,14 +24,14 @@ impl EffectSource {
 
     pub fn origin_kind(&self) -> &'static str {
         match self {
-            EffectSource::Reducer { .. } => "reducer",
+            EffectSource::Workflow { .. } => "workflow",
             EffectSource::Plan { .. } => "plan",
         }
     }
 
     pub fn origin_name(&self) -> &str {
         match self {
-            EffectSource::Reducer { name } | EffectSource::Plan { name } => name,
+            EffectSource::Workflow { name } | EffectSource::Plan { name } => name,
         }
     }
 }

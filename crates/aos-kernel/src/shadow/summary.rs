@@ -6,9 +6,11 @@ pub struct ShadowSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub predicted_effects: Vec<PredictedEffect>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_receipts: Vec<PendingPlanReceipt>,
+    pub pending_workflow_receipts: Vec<PendingWorkflowReceipt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub plan_results: Vec<PlanResultPreview>,
+    pub workflow_instances: Vec<WorkflowInstancePreview>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub module_effect_allowlists: Vec<ModuleEffectAllowlist>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ledger_deltas: Vec<LedgerDelta>,
 }
@@ -23,17 +25,31 @@ pub struct PredictedEffect {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PendingPlanReceipt {
-    pub plan_id: u64,
-    pub plan: Option<String>,
+pub struct PendingWorkflowReceipt {
+    pub instance_id: String,
+    pub origin_module_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_instance_key_b64: Option<String>,
     pub intent_hash: String,
+    pub effect_kind: String,
+    pub emitted_at_seq: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PlanResultPreview {
-    pub plan: String,
-    pub plan_id: u64,
-    pub output_schema: String,
+pub struct WorkflowInstancePreview {
+    pub instance_id: String,
+    pub status: String,
+    pub last_processed_event_seq: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_version: Option<String>,
+    pub inflight_intents: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModuleEffectAllowlist {
+    pub module: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects_emitted: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
