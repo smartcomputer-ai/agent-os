@@ -2,7 +2,7 @@
 #![no_std]
 
 use aos_agent_sdk::{
-    SessionEvent, SessionReduceError, SessionRuntimeLimits, SessionState,
+    SessionReduceError, SessionRuntimeLimits, SessionState, SessionWorkflowEvent,
     apply_session_event_with_catalog_and_limits,
 };
 use aos_wasm_sdk::{ReduceError, Workflow, WorkflowCtx, Value, aos_workflow};
@@ -12,7 +12,7 @@ aos_workflow!(AgentLiveSessionWorkflow);
 const KNOWN_PROVIDERS: &[&str] = &["openai-responses", "anthropic", "openai-compatible"];
 const KNOWN_MODELS: &[&str] = &["gpt-5.2", "gpt-5-mini", "gpt-5.2-codex", "claude-sonnet-4-5"];
 const RUNTIME_LIMITS: SessionRuntimeLimits = SessionRuntimeLimits {
-    max_steps_per_run: Some(64),
+    max_pending_intents: Some(64),
 };
 
 #[derive(Default)]
@@ -20,7 +20,7 @@ struct AgentLiveSessionWorkflow;
 
 impl Workflow for AgentLiveSessionWorkflow {
     type State = SessionState;
-    type Event = SessionEvent;
+    type Event = SessionWorkflowEvent;
     type Ann = Value;
 
     fn reduce(
@@ -28,14 +28,15 @@ impl Workflow for AgentLiveSessionWorkflow {
         event: Self::Event,
         ctx: &mut WorkflowCtx<Self::State, Self::Ann>,
     ) -> Result<(), ReduceError> {
-        apply_session_event_with_catalog_and_limits(
+        let _ = apply_session_event_with_catalog_and_limits(
             &mut ctx.state,
             &event,
             KNOWN_PROVIDERS,
             KNOWN_MODELS,
             RUNTIME_LIMITS,
         )
-        .map_err(map_reduce_error)
+        .map_err(map_reduce_error)?;
+        Ok(())
     }
 }
 
@@ -45,15 +46,11 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
             ReduceError::new("invalid lifecycle transition")
         }
         SessionReduceError::HostCommandRejected => ReduceError::new("host command rejected"),
-        SessionReduceError::StepBoundaryRejected => ReduceError::new("step boundary rejected"),
         SessionReduceError::ToolBatchAlreadyActive => ReduceError::new("tool batch already active"),
         SessionReduceError::ToolBatchNotActive => ReduceError::new("tool batch not active"),
         SessionReduceError::ToolBatchIdMismatch => ReduceError::new("tool batch id mismatch"),
         SessionReduceError::ToolCallUnknown => ReduceError::new("tool call id not expected"),
         SessionReduceError::ToolBatchNotSettled => ReduceError::new("tool batch not settled"),
-        SessionReduceError::MissingRunConfig => ReduceError::new("run config missing"),
-        SessionReduceError::MissingActiveRun => ReduceError::new("active run missing"),
-        SessionReduceError::MissingActiveTurn => ReduceError::new("active turn missing"),
         SessionReduceError::MissingProvider => ReduceError::new("run config provider missing"),
         SessionReduceError::MissingModel => ReduceError::new("run config model missing"),
         SessionReduceError::UnknownProvider => ReduceError::new("run config provider unknown"),
@@ -71,5 +68,6 @@ fn map_reduce_error(err: SessionReduceError) -> ReduceError {
         SessionReduceError::MissingWorkspaceToolCatalogBytes => {
             ReduceError::new("workspace tool catalog bytes missing for validation")
         }
+        SessionReduceError::TooManyPendingIntents => ReduceError::new("too many pending intents"),
     }
 }

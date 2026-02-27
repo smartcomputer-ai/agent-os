@@ -6,8 +6,8 @@
       {
         "when": {
           "effect_kind": "llm.generate",
-          "origin_kind": "plan",
-          "origin_name": "demo/live_chat_plan@1"
+          "origin_kind": "workflow",
+          "origin_name": "demo/LiveChat@1"
         },
         "decision": "allow"
       },

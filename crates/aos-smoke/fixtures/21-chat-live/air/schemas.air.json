@@ -41,7 +41,8 @@
     "type": {
       "variant": {
         "RunRequested": { "ref": "demo/RunRequested@1" },
-        "RunResult": { "ref": "demo/RunResult@1" }
+        "RunResult": { "ref": "demo/RunResult@1" },
+        "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" }
       }
     }
   },

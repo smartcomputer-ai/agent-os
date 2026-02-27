@@ -1,7 +1,7 @@
 # P4: Agent SDK Workflow-Native Reset
 
 **Stage**: P4  
-**Status**: Proposed (2026-02-26)  
+**Status**: In Progress (updated 2026-02-27)  
 **Depends on**: `roadmap/v0.11-workflows` (P1-P4 complete; P5 SDK fixture/doc cleanup still open)
 
 ## Goal
@@ -13,6 +13,35 @@ Breaking changes are intentional:
 1. No compatibility bridge for pre-v0.11 SDK contracts.
 2. No dual-contract period; update existing `aos.agent/*@1` definitions in place.
 3. Replace SDK AIR/runtime surface with workflow-native contracts and fixtures.
+
+## Progress Update (2026-02-27)
+
+Completed this pass:
+
+1. Fixture workflow wrappers for `20-agent-session` and `22-agent-live` were migrated to current SDK API (`SessionWorkflowEvent`, `SessionRuntimeLimits.max_pending_intents`, updated error mapping) and now compile.
+2. Fixture manifests for `20/21/22` were migrated to active routing shape:
+   - `routing.subscriptions` used in place of `routing.events`,
+   - manifest `plans`/`triggers` removed.
+3. Plan assets removed from live fixtures:
+   - deleted `21-chat-live/air/live_chat_plan.air.json`,
+   - deleted `22-agent-live/air/session_workspace_sync_wrapper.air.json`.
+4. `21-chat-live` moved to workflow-native direct orchestration:
+   - workflow now emits `llm.generate` directly and handles `EffectReceiptEnvelope` continuation,
+   - policy updated to `origin_kind: "workflow"` / `origin_name: "demo/LiveChat@1"`,
+   - `defsecret` bindings updated to cap-grant allowlist (`allowed_caps`) and no fixed digest pin.
+5. `22-agent-live` workspace sync path moved to host/system orchestration:
+   - runner now emits `WorkspaceSnapshotReady` ingress with validated prompt/tool bytes,
+   - no plan wrapper in runtime path.
+6. Verification status:
+   - `cargo run -p aos-smoke -- agent-session` passes,
+   - `cargo run -p aos-smoke -- chat-live` passes,
+   - `cargo run -p aos-smoke -- agent-live` passes,
+   - `cargo run -p aos-smoke -- all-agent` passes.
+
+Still open:
+
+1. Align `20/22` fixture workflow wrappers to full reducer-output emission path once their runners are moved fully receipt-driven (currently wrappers consume reducer output for compatibility with existing harness flow).
+2. Complete fixture/docs polish sweep for any remaining plan-era wording outside manifests (README/roadmap cleanup).
 
 ## Workflow Model Review (Spec-Constrained)
 

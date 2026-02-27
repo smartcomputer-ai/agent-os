@@ -1,32 +1,32 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     { "name": "aos.agent/SessionId@1" },
     { "name": "aos.agent/RunId@1" },
-    { "name": "aos.agent/TurnId@1" },
-    { "name": "aos.agent/StepId@1" },
     { "name": "aos.agent/ToolBatchId@1" },
     { "name": "aos.agent/ToolCallStatus@1" },
     { "name": "aos.agent/ActiveToolBatch@1" },
-    { "name": "aos.agent/RunLease@1" },
     { "name": "aos.agent/ReasoningEffort@1" },
     { "name": "aos.agent/WorkspaceBinding@1" },
     { "name": "aos.agent/WorkspaceApplyMode@1" },
     { "name": "aos.agent/WorkspaceSnapshot@1" },
-    { "name": "aos.agent/WorkspaceSyncRequested@1" },
-    { "name": "aos.agent/WorkspaceSyncUnchanged@1" },
     { "name": "aos.agent/WorkspaceSnapshotReady@1" },
-    { "name": "aos.agent/WorkspaceSyncFailed@1" },
-    { "name": "aos.agent/WorkspaceApplyRequested@1" },
     { "name": "aos.agent/SessionConfig@1" },
     { "name": "aos.agent/RunConfig@1" },
     { "name": "aos.agent/SessionLifecycle@1" },
     { "name": "aos.agent/HostCommand@1" },
     { "name": "aos.agent/LlmToolCall@1" },
     { "name": "aos.agent/LlmToolCallList@1" },
-    { "name": "aos.agent/SessionEventKind@1" },
+    { "name": "aos.agent/SessionIngressKind@1" },
+    { "name": "aos.agent/SessionIngress@1" },
+    { "name": "aos.agent/PendingIntent@1" },
     { "name": "aos.agent/SessionState@1" },
-    { "name": "aos.agent/SessionEvent@1" },
+    { "name": "aos.agent/SessionNoop@1" },
+    { "name": "aos.agent/SessionWorkflowEvent@1" },
+    { "name": "sys/EffectReceiptEnvelope@1" },
+    { "name": "sys/EffectReceiptRejected@1" },
+    { "name": "sys/EffectStreamFrame@1" },
     { "name": "sys/WorkspaceName@1" },
     { "name": "sys/WorkspaceHistory@1" },
     { "name": "sys/WorkspaceCommitMeta@1" },
@@ -43,12 +43,6 @@
     { "name": "demo/AgentLiveSessionWorkflow@1" },
     { "name": "sys/Workspace@1" },
     { "name": "sys/CapEnforceWorkspace@1" }
-  ],
-  "plans": [
-    { "name": "aos.agent/core_prompt_sync_from_workspace@1" },
-    { "name": "aos.agent/core_tool_catalog_sync_from_workspace@1" },
-    { "name": "aos.agent/core_workspace_sync@1" },
-    { "name": "demo/session_workspace_sync_wrapper@1" }
   ],
   "caps": [{ "name": "demo/agent_live_workspace_cap@1" }],
   "policies": [{ "name": "demo/agent-live-workspace-policy@1" }],
@@ -73,29 +67,22 @@
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
-        "event": "aos.agent/SessionEvent@1",
-        "workflow": "demo/AgentLiveSessionWorkflow@1"
+        "event": "aos.agent/SessionWorkflowEvent@1",
+        "module": "demo/AgentLiveSessionWorkflow@1"
       },
       {
         "event": "sys/WorkspaceCommit@1",
-        "workflow": "sys/Workspace@1",
+        "module": "sys/Workspace@1",
         "key_field": "workspace"
       }
     ],
     "inboxes": []
   },
-  "triggers": [
-    {
-      "event": "aos.agent/SessionEvent@1",
-      "plan": "demo/session_workspace_sync_wrapper@1"
-    }
-  ],
   "effects": [
     { "name": "sys/workspace.resolve@1" },
     { "name": "sys/workspace.read_ref@1" },
     { "name": "sys/workspace.read_bytes@1" }
-  ],
-  "air_version": "1"
+  ]
 }

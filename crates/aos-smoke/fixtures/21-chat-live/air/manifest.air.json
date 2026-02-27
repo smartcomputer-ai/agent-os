@@ -1,12 +1,13 @@
 {
   "$kind": "manifest",
+  "air_version": "1",
   "schemas": [
     { "name": "demo/RunOutput@1" },
     { "name": "demo/RunRequested@1" },
     { "name": "demo/RunResult@1" },
     { "name": "demo/LiveEvent@1" },
     { "name": "demo/LiveState@1" },
-    { "name": "demo/LiveChatRequest@1" },
+    { "name": "sys/EffectReceiptEnvelope@1" },
     { "name": "sys/LlmGenerateParams@1" },
     { "name": "sys/LlmGenerateReceipt@1" },
     { "name": "sys/LlmToolChoice@1" },
@@ -17,9 +18,6 @@
   "modules": [
     { "name": "demo/LiveChat@1" },
     { "name": "sys/CapEnforceLlmBasic@1" }
-  ],
-  "plans": [
-    { "name": "demo/live_chat_plan@1" }
   ],
   "caps": [
     { "name": "demo/live_llm_basic@1" }
@@ -54,22 +52,14 @@
     ]
   },
   "routing": {
-    "events": [
+    "subscriptions": [
       {
         "event": "demo/LiveEvent@1",
-        "workflow": "demo/LiveChat@1"
+        "module": "demo/LiveChat@1"
       }
     ],
     "inboxes": []
   },
-  "triggers": [
-    {
-      "event": "demo/LiveChatRequest@1",
-      "plan": "demo/live_chat_plan@1",
-      "correlate_by": "request_id"
-    }
-  ],
-  "air_version": "1",
   "effects": [
     { "name": "sys/llm.generate@1" }
   ]

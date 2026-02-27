@@ -7,7 +7,8 @@ use anyhow::{Context, Result, anyhow, ensure};
 use aos_agent_sdk::{
     LlmStepContext, LlmToolCallList, LlmToolChoice, SessionConfig, SessionId, SessionIngress,
     SessionIngressKind, SessionState, SessionWorkflowEvent, ToolBatchId, ToolCallStatus,
-    WorkspaceApplyMode, WorkspaceBinding, materialize_llm_generate_params_with_workspace,
+    WorkspaceApplyMode, WorkspaceBinding, WorkspaceSnapshot, WorkspaceSnapshotReady,
+    materialize_llm_generate_params_with_workspace,
 };
 use aos_cbor::Hash;
 use aos_effects::builtins::{LlmGenerateParams, LlmGenerateReceipt, LlmOutputEnvelope};
@@ -28,7 +29,6 @@ const WORKFLOW_NAME: &str = "demo/AgentLiveSessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionWorkflowEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/22-agent-live/workflow";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
-const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
 const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 const AGENT_WORKSPACE_NAME: &str = "agent-live";
 const AGENT_WORKSPACE_DIR: &str = "agent-ws";
@@ -90,10 +90,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let provider = resolve_provider(provider, model_override)?;
     let fixture_root = crate::workspace_root().join(FIXTURE_ROOT);
     let assets_root = fixture_root.join("air");
-    let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
-    let import_roots = vec![sdk_air_root];
-
-    let mut host = ExampleHost::prepare_with_imports(
+    let mut host = ExampleHost::prepare(
         HarnessConfig {
             example_root: &fixture_root,
             assets_root: Some(&assets_root),
@@ -101,7 +98,6 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             event_schema: EVENT_SCHEMA,
             module_crate: MODULE_CRATE,
         },
-        &import_roots,
     )?;
 
     let adapter = make_adapter(host.store(), &provider);
@@ -115,7 +111,7 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     );
 
     let mut event_clock = 0_u64;
-    seed_workspace_commit(&mut host, &fixture_root.join(AGENT_WORKSPACE_DIR))?;
+    let workspace_root_hash = seed_workspace_commit(&mut host, &fixture_root.join(AGENT_WORKSPACE_DIR))?;
     let workspace_binding = WorkspaceBinding {
         workspace: AGENT_WORKSPACE_NAME.into(),
         version: None,
@@ -129,7 +125,16 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
         },
     )?;
-    drain_internal_effects(&mut host)?;
+    let snapshot_ready = build_workspace_snapshot_ready(
+        &host,
+        &fixture_root.join(AGENT_WORKSPACE_DIR),
+        workspace_root_hash,
+    )?;
+    send_session_event(
+        &mut host,
+        &mut event_clock,
+        SessionIngressKind::WorkspaceSnapshotReady(snapshot_ready),
+    )?;
     let synced_state: SessionState = host.read_state()?;
     ensure!(
         synced_state.pending_workspace_snapshot.is_some(),
@@ -541,33 +546,65 @@ fn store_history_blob(host: &ExampleHost, history: &[Value]) -> Result<String> {
     Ok(hash.to_hex())
 }
 
-fn seed_workspace_commit(host: &mut ExampleHost, workspace_dir: &Path) -> Result<()> {
+fn seed_workspace_commit(host: &mut ExampleHost, workspace_dir: &Path) -> Result<String> {
     let root_hash = build_workspace_root_hash(host.store().as_ref(), workspace_dir)?;
     let commit = WorkspaceCommit {
         workspace: AGENT_WORKSPACE_NAME.into(),
         expected_head: None,
         meta: WorkspaceCommitMeta {
-            root_hash,
+            root_hash: root_hash.clone(),
             owner: "aos-smoke".into(),
             created_at: now_nonce(),
         },
     };
-    host.send_event_as(WORKSPACE_COMMIT_SCHEMA, &commit)
+    host.send_event_as(WORKSPACE_COMMIT_SCHEMA, &commit)?;
+    Ok(root_hash)
 }
 
-fn drain_internal_effects(host: &mut ExampleHost) -> Result<()> {
-    let mut safety = 0usize;
-    loop {
-        if host.kernel_mut().queued_effects_snapshot().is_empty() {
-            return Ok(());
-        }
-        host.run_cycle_batch()?;
-        safety = safety.saturating_add(1);
-        ensure!(
-            safety < 32,
-            "safety trip: workspace sync effects did not drain"
-        );
-    }
+fn build_workspace_snapshot_ready(
+    host: &ExampleHost,
+    workspace_dir: &Path,
+    root_hash: String,
+) -> Result<WorkspaceSnapshotReady> {
+    let index_path = workspace_dir.join("agent.workspace.json");
+    let prompt_pack_path = workspace_dir.join("prompts/packs/default.json");
+    let tool_catalog_path = workspace_dir.join("tools/catalogs/default.json");
+
+    let index_bytes = fs::read(&index_path)
+        .with_context(|| format!("read workspace index {}", index_path.display()))?;
+    let prompt_pack_bytes = fs::read(&prompt_pack_path)
+        .with_context(|| format!("read prompt pack {}", prompt_pack_path.display()))?;
+    let tool_catalog_bytes = fs::read(&tool_catalog_path)
+        .with_context(|| format!("read tool catalog {}", tool_catalog_path.display()))?;
+
+    let store = host.store();
+    let index_ref = store
+        .put_blob(&index_bytes)
+        .context("store workspace index blob")?
+        .to_hex();
+    let prompt_pack_ref = store
+        .put_blob(&prompt_pack_bytes)
+        .context("store workspace prompt pack blob")?
+        .to_hex();
+    let tool_catalog_ref = store
+        .put_blob(&tool_catalog_bytes)
+        .context("store workspace tool catalog blob")?
+        .to_hex();
+
+    Ok(WorkspaceSnapshotReady {
+        snapshot: WorkspaceSnapshot {
+            workspace: AGENT_WORKSPACE_NAME.into(),
+            version: Some(1),
+            root_hash: Some(root_hash),
+            index_ref: Some(index_ref),
+            prompt_pack: Some(DEFAULT_PROMPT_PACK.into()),
+            tool_catalog: Some(DEFAULT_TOOL_CATALOG.into()),
+            prompt_pack_ref: Some(prompt_pack_ref),
+            tool_catalog_ref: Some(tool_catalog_ref),
+        },
+        prompt_pack_bytes: Some(prompt_pack_bytes),
+        tool_catalog_bytes: Some(tool_catalog_bytes),
+    })
 }
 
 #[derive(Default)]
