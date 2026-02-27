@@ -1,7 +1,7 @@
 # P4: Agent SDK Workflow-Native Reset
 
 **Stage**: P4  
-**Status**: In Progress (updated 2026-02-27)  
+**Status**: Complete (2026-02-27)  
 **Depends on**: `roadmap/v0.11-workflows` (P1-P4 complete; P5 SDK fixture/doc cleanup still open)
 
 ## Goal
@@ -14,7 +14,7 @@ Breaking changes are intentional:
 2. No dual-contract period; update existing `aos.agent/*@1` definitions in place.
 3. Replace SDK AIR/runtime surface with workflow-native contracts and fixtures.
 
-## Progress Update (2026-02-27)
+## Completion Update (2026-02-27)
 
 Completed this pass:
 
@@ -40,11 +40,12 @@ Completed this pass:
    - `cargo run -p aos-smoke -- agent-session` passes,
    - `cargo run -p aos-smoke -- chat-live` passes,
    - `cargo run -p aos-smoke -- agent-live` passes,
-   - `cargo run -p aos-smoke -- all-agent` passes.
-
-Still open:
-
-1. Complete fixture/docs polish sweep for any remaining plan-era wording outside manifests (README/roadmap cleanup).
+   - `cargo run -p aos-smoke -- all-agent` passes,
+   - `cargo run -p aos-smoke -- all` passes.
+8. SDK schema ownership restored for `22-agent-live`:
+   - removed fixture-local `air/schemas.air.json` duplication,
+   - runner now loads `crates/aos-agent-sdk/air` as an AIR import root,
+   - `aos.agent/SessionNoop@1` published in SDK AIR schemas/manifest for validator-compatible `Noop` variants.
 
 ## Workflow Model Review (Spec-Constrained)
 
@@ -58,9 +59,9 @@ From `spec/03-air.md`, `spec/05-workflows.md`, and `roadmap/v0.11-workflows/*`, 
 6. Apply safety is strict quiescence (in-flight workflow work blocks apply).
 7. Vocabulary is workflow/system/governance (no plan-era ownership terms in active contracts).
 
-## Current SDK Gaps (Why Refactor Is Required)
+## Original SDK Gaps (Now Resolved)
 
-Today `aos-agent-sdk` and `20+` smoke fixtures still encode plan-era assumptions:
+At proposal time, `aos-agent-sdk` and `20+` smoke fixtures encoded these plan-era assumptions:
 
 1. `crates/aos-agent-sdk/air/plans/*` still exports `defplan`-based workspace orchestration.
 2. `crates/aos-agent-sdk/air/manifest.air.json` and `crates/aos-smoke/fixtures/20-agent-session/air/manifest.air.json` use `routing.events` and plan-era manifest sections.
@@ -184,6 +185,8 @@ This keeps SDK aligned with planless runtime while avoiding new hidden orchestra
 4. `20-agent-session` deterministic conformance and replay parity pass.
 5. `21-chat-live` and `22-agent-live` complete end-to-end with workflow-native wiring.
 6. Quiescence/replay behavior remains deterministic with no cross-delivery between concurrent session instances.
+
+Closure status (2026-02-27): all acceptance criteria satisfied.
 
 ## Execution Order
 

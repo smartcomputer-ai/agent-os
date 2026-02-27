@@ -45,7 +45,7 @@
                 { "text": "claude-sonnet-4-5" }
               ]
             },
-            "max_tokens": { "nat": 4096 }
+            "max_tokens": { "nat": 500000 }
           }
         }
       }

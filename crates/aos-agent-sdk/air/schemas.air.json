@@ -268,7 +268,7 @@
         "RunCancelled": {
           "record": { "reason": { "option": { "text": {} } } }
         },
-        "Noop": { "unit": {} }
+        "Noop": { "ref": "aos.agent/SessionNoop@1" }
       }
     }
   },
@@ -337,8 +337,13 @@
         "Receipt": { "ref": "sys/EffectReceiptEnvelope@1" },
         "ReceiptRejected": { "ref": "sys/EffectReceiptRejected@1" },
         "StreamFrame": { "ref": "sys/EffectStreamFrame@1" },
-        "Noop": { "unit": {} }
+        "Noop": { "ref": "aos.agent/SessionNoop@1" }
       }
     }
+  },
+  {
+    "$kind": "defschema",
+    "name": "aos.agent/SessionNoop@1",
+    "type": { "unit": {} }
   }
 ]

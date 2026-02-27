@@ -22,6 +22,7 @@
     { "name": "aos.agent/SessionIngress@1" },
     { "name": "aos.agent/PendingIntent@1" },
     { "name": "aos.agent/SessionState@1" },
+    { "name": "aos.agent/SessionNoop@1" },
     { "name": "aos.agent/SessionWorkflowEvent@1" },
     { "name": "sys/EffectReceiptEnvelope@1" },
     { "name": "sys/EffectReceiptRejected@1" },

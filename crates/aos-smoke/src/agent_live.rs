@@ -29,6 +29,7 @@ const WORKFLOW_NAME: &str = "demo/AgentLiveSessionWorkflow@1";
 const EVENT_SCHEMA: &str = "aos.agent/SessionWorkflowEvent@1";
 const MODULE_CRATE: &str = "crates/aos-smoke/fixtures/22-agent-live/workflow";
 const FIXTURE_ROOT: &str = "crates/aos-smoke/fixtures/22-agent-live";
+const SDK_AIR_ROOT: &str = "crates/aos-agent-sdk/air";
 const WORKSPACE_COMMIT_SCHEMA: &str = "sys/WorkspaceCommit@1";
 const AGENT_WORKSPACE_NAME: &str = "agent-live";
 const AGENT_WORKSPACE_DIR: &str = "agent-ws";
@@ -90,7 +91,9 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
     let provider = resolve_provider(provider, model_override)?;
     let fixture_root = crate::workspace_root().join(FIXTURE_ROOT);
     let assets_root = fixture_root.join("air");
-    let mut host = ExampleHost::prepare_with_host_config(
+    let sdk_air_root = crate::workspace_root().join(SDK_AIR_ROOT);
+    let import_roots = vec![sdk_air_root];
+    let mut host = ExampleHost::prepare_with_imports_and_host_config(
         HarnessConfig {
             example_root: &fixture_root,
             assets_root: Some(&assets_root),
@@ -98,10 +101,11 @@ pub fn run(provider: LiveProvider, model_override: Option<String>) -> Result<()>
             event_schema: EVENT_SCHEMA,
             module_crate: MODULE_CRATE,
         },
-        HostConfig {
+        &import_roots,
+        Some(HostConfig {
             llm: None,
             ..HostConfig::default()
-        },
+        }),
     )?;
 
     let adapter = make_adapter(host.store(), &provider);
