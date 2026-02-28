@@ -1,7 +1,7 @@
 # P5: Blob Effects CAS-Direct I/O and Journal Ref-Only
 
 **Priority**: P5  
-**Status**: Proposed  
+**Status**: Complete  
 **Date**: 2026-02-28
 
 ## Goal
@@ -141,3 +141,18 @@ Operationally:
 3. Replay hydrates externalized payload bytes from CAS and preserves behavior.
 4. Missing externalized CAS object fails deterministically (`missing_cas_dependency`).
 5. Externalized journal payload refs are explicitly reachable from snapshot+journal for future GC.
+
+## Completion Notes (2026-02-28)
+
+1. `EffectIntentRecord` now carries optional `params_ref/params_size/params_sha256`; `EffectReceiptRecord` now carries optional `payload_ref/payload_size/payload_sha256`.
+2. Writer externalization is enabled for the P5 scope:
+   - `blob.put` intent params are externalized to CAS and journaled by ref.
+   - `blob.get` receipt payload is externalized to CAS and journaled by ref.
+3. Replay is dual-read and deterministic:
+   - if ref metadata is present, replay hydrates from CAS and validates size/hash;
+   - if ref metadata is absent, replay uses inline journal CBOR.
+4. Missing externalized CAS dependencies deterministically hard-fail with `missing_cas_dependency`.
+5. Integration coverage added in `crates/aos-host/tests/blob_journal_externalization_integration.rs`:
+   - verifies `blob.put` intent externalization;
+   - verifies `blob.get` receipt externalization and replay failure when CAS dependency is absent.
+6. Current export/import tooling remains manifest-focused in this repository; explicit runtime journal-tail CAS-closure export is a follow-up when runtime state/journal export is in scope.
