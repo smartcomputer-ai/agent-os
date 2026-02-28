@@ -1,8 +1,8 @@
 # P3: Adapter Pluggability Architecture and Rollout
 
 **Priority**: P3  
-**Status**: Proposed (slimmed)  
-**Date**: 2026-02-27
+**Status**: Complete  
+**Date**: 2026-02-28
 
 ## Goal
 
@@ -90,3 +90,14 @@ Exit criteria:
 2. P2 binding resolution integrated with compatibility fallback.
 3. Existing strict receipt pipeline remains unchanged and replay-safe.
 4. Startup compatibility failures (P1/P2) stay in place.
+
+## Completion Notes (2026-02-28)
+
+1. Host dispatch resolves external effects by manifest `adapter_id` binding first, with compatibility fallback to effect kind route when strict mode is off.
+2. Optional strict routing mode is implemented via host config/env (`strict_effect_bindings`, `AOS_STRICT_EFFECT_BINDINGS`) and fails world-open when any external kind lacks an explicit manifest binding.
+3. Startup preflight diagnostics now produce structured route state:
+   - `world_requires` (`kind -> route`)
+   - `host_provides` (`adapter_id -> adapter kind`)
+   - `compatibility_fallback_kinds`
+4. Operator-facing diagnostics are exposed in `trace-summary` output under `adapter_routes`.
+5. Host profile defaults now include logical vault routes (`vault.put.default`, `vault.rotate.default`) and matching stub adapters are registered for rollout compatibility.

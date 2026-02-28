@@ -25,6 +25,9 @@ pub struct HostConfig {
     pub llm: Option<LlmAdapterConfig>,
     /// Host profile route map: adapter_id -> provider spec.
     pub adapter_routes: HashMap<String, AdapterProviderSpec>,
+    /// Require explicit `manifest.effect_bindings` for all external effect kinds.
+    /// When enabled, legacy kind-based fallback routing is disabled.
+    pub strict_effect_bindings: bool,
 }
 
 impl Default for HostConfig {
@@ -38,6 +41,7 @@ impl Default for HostConfig {
             http_server: HttpServerConfig::default(),
             llm: LlmAdapterConfig::from_env().ok(),
             adapter_routes: default_adapter_routes(),
+            strict_effect_bindings: false,
         }
     }
 }
@@ -59,8 +63,21 @@ impl HostConfig {
         if let Ok(routes) = std::env::var("AOS_ADAPTER_ROUTES") {
             apply_adapter_routes_env(&mut cfg, &routes);
         }
+        if env_truthy("AOS_STRICT_EFFECT_BINDINGS") {
+            cfg.strict_effect_bindings = true;
+        }
         cfg
     }
+}
+
+fn env_truthy(key: &str) -> bool {
+    matches!(
+        std::env::var(key)
+            .ok()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
 }
 
 fn default_adapter_routes() -> HashMap<String, AdapterProviderSpec> {
@@ -93,6 +110,18 @@ fn default_adapter_routes() -> HashMap<String, AdapterProviderSpec> {
         "llm.default".into(),
         AdapterProviderSpec {
             adapter_kind: "llm.generate".into(),
+        },
+    );
+    routes.insert(
+        "vault.put.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "vault.put".into(),
+        },
+    );
+    routes.insert(
+        "vault.rotate.default".into(),
+        AdapterProviderSpec {
+            adapter_kind: "vault.rotate".into(),
         },
     );
     routes
@@ -260,6 +289,9 @@ mod tests {
         assert!(cfg.adapter_routes.contains_key("http.default"));
         assert!(cfg.adapter_routes.contains_key("llm.default"));
         assert!(cfg.adapter_routes.contains_key("timer.default"));
+        assert!(cfg.adapter_routes.contains_key("vault.put.default"));
+        assert!(cfg.adapter_routes.contains_key("vault.rotate.default"));
+        assert!(!cfg.strict_effect_bindings);
     }
 
     #[test]
@@ -282,5 +314,13 @@ mod tests {
                 .map(|spec| spec.adapter_kind.as_str()),
             Some("llm.generate")
         );
+    }
+
+    #[test]
+    fn host_config_from_env_enables_strict_effect_bindings() {
+        let _lock = env_lock().lock().unwrap();
+        let _guard = EnvGuard::set("AOS_STRICT_EFFECT_BINDINGS", "true");
+        let cfg = HostConfig::from_env();
+        assert!(cfg.strict_effect_bindings);
     }
 }

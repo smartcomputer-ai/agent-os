@@ -27,6 +27,7 @@ use crate::config::HostConfig;
 use crate::error::HostError;
 use crate::manifest_loader;
 use aos_kernel::StateReader;
+use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub enum ExternalEvent {
@@ -66,10 +67,20 @@ pub struct CycleOutcome {
     pub final_drain: DrainOutcome,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct EffectRouteDiagnostics {
+    pub strict_effect_bindings: bool,
+    pub compatibility_fallback_enabled: bool,
+    pub world_requires: BTreeMap<String, String>,
+    pub host_provides: BTreeMap<String, String>,
+    pub compatibility_fallback_kinds: Vec<String>,
+}
+
 pub struct WorldHost<S: Store + 'static> {
     kernel: Kernel<S>,
     adapter_registry: AdapterRegistry,
     effect_routes: HashMap<String, String>,
+    route_diagnostics: EffectRouteDiagnostics,
     config: HostConfig,
     store: Arc<S>,
 }
@@ -91,7 +102,12 @@ impl<S: Store + 'static> WorldHost<S> {
         }
         let adapter_registry = default_registry(store.clone(), &host_config);
         let effect_routes = collect_effect_routes(&loaded);
-        preflight_external_effect_routes(&loaded, &effect_routes, &adapter_registry)?;
+        let route_diagnostics = preflight_external_effect_routes(
+            &loaded,
+            &effect_routes,
+            &adapter_registry,
+            host_config.strict_effect_bindings,
+        )?;
 
         let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(root)?;
 
@@ -151,6 +167,7 @@ impl<S: Store + 'static> WorldHost<S> {
             kernel,
             adapter_registry,
             effect_routes,
+            route_diagnostics,
             config: host_config,
             store,
         })
@@ -213,7 +230,12 @@ impl WorldHost<FsStore> {
         }
         let adapter_registry = default_registry(store.clone(), &host_config);
         let effect_routes = collect_effect_routes(&loaded);
-        preflight_external_effect_routes(&loaded, &effect_routes, &adapter_registry)?;
+        let route_diagnostics = preflight_external_effect_routes(
+            &loaded,
+            &effect_routes,
+            &adapter_registry,
+            host_config.strict_effect_bindings,
+        )?;
 
         let mut builder = KernelBuilder::new(store.clone()).with_fs_journal(world_root)?;
 
@@ -273,6 +295,7 @@ impl WorldHost<FsStore> {
             kernel,
             adapter_registry,
             effect_routes,
+            route_diagnostics,
             config: host_config,
             store,
         })
@@ -282,6 +305,10 @@ impl WorldHost<FsStore> {
 impl<S: Store + 'static> WorldHost<S> {
     pub fn config(&self) -> &HostConfig {
         &self.config
+    }
+
+    pub fn effect_route_diagnostics(&self) -> &EffectRouteDiagnostics {
+        &self.route_diagnostics
     }
 
     /// Put a blob into the backing store and return its hex hash string.
@@ -481,20 +508,40 @@ impl<S: Store + 'static> WorldHost<S> {
         effect_routes: HashMap<String, String>,
     ) -> Self {
         let adapter_registry = default_registry(store.clone(), &config);
+        let host_provides = adapter_registry.route_mappings();
+        let world_requires: BTreeMap<String, String> = effect_routes
+            .iter()
+            .map(|(kind, adapter_id)| (kind.clone(), adapter_id.clone()))
+            .collect();
+        let route_diagnostics = EffectRouteDiagnostics {
+            strict_effect_bindings: config.strict_effect_bindings,
+            compatibility_fallback_enabled: !config.strict_effect_bindings,
+            world_requires,
+            host_provides,
+            compatibility_fallback_kinds: Vec::new(),
+        };
         Self {
             kernel,
             adapter_registry,
             effect_routes,
+            route_diagnostics,
             config,
             store,
         }
     }
 
     pub(crate) fn resolve_effect_route_id(&self, effect_kind: &str) -> String {
-        self.effect_routes
-            .get(effect_kind)
-            .cloned()
-            .unwrap_or_else(|| effect_kind.to_string())
+        if let Some(route_id) = self.effect_routes.get(effect_kind) {
+            return route_id.clone();
+        }
+        if self.config.strict_effect_bindings && !is_internal_effect_kind(effect_kind) {
+            log::error!(
+                "strict effect binding mode: missing manifest.effect_bindings route for external kind '{}'",
+                effect_kind
+            );
+            return "adapter.missing.binding".to_string();
+        }
+        effect_kind.to_string()
     }
 
     /// Fire all due timers by building receipts and calling `handle_receipt`.
@@ -575,7 +622,8 @@ fn preflight_external_effect_routes(
     loaded: &LoadedManifest,
     effect_routes: &HashMap<String, String>,
     registry: &AdapterRegistry,
-) -> Result<(), HostError> {
+    strict_effect_bindings: bool,
+) -> Result<EffectRouteDiagnostics, HostError> {
     let mut required_kinds: BTreeSet<String> = BTreeSet::new();
     for effect in loaded.effects.values() {
         let kind = effect.kind.as_str();
@@ -583,8 +631,15 @@ fn preflight_external_effect_routes(
             required_kinds.insert(kind.to_string());
         }
     }
+    let host_provides = registry.route_mappings();
     if required_kinds.is_empty() {
-        return Ok(());
+        return Ok(EffectRouteDiagnostics {
+            strict_effect_bindings,
+            compatibility_fallback_enabled: !strict_effect_bindings,
+            world_requires: BTreeMap::new(),
+            host_provides,
+            compatibility_fallback_kinds: Vec::new(),
+        });
     }
 
     let mut origins: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -605,46 +660,79 @@ fn preflight_external_effect_routes(
     }
 
     let mut world_requires: BTreeMap<String, String> = BTreeMap::new();
+    let mut missing_bindings: Vec<String> = Vec::new();
+    let mut compatibility_fallback_kinds: Vec<String> = Vec::new();
     let mut missing: Vec<(String, String)> = Vec::new();
     for kind in required_kinds {
-        let route_id = effect_routes
-            .get(kind.as_str())
-            .cloned()
-            .unwrap_or_else(|| kind.clone());
-        if !effect_routes.contains_key(kind.as_str()) {
+        let route_id = if let Some(bound_route) = effect_routes.get(kind.as_str()) {
+            bound_route.clone()
+        } else if strict_effect_bindings {
+            world_requires.insert(kind.clone(), "(missing-binding)".to_string());
+            missing_bindings.push(kind.clone());
+            continue;
+        } else {
+            let fallback = kind.clone();
             log::warn!(
                 "external effect kind '{}' has no explicit manifest.effect_bindings entry; using compatibility fallback route '{}'",
                 kind,
-                route_id
+                fallback
             );
-        }
+            compatibility_fallback_kinds.push(kind.clone());
+            fallback
+        };
+
         world_requires.insert(kind.clone(), route_id.clone());
         if !registry.has_route(&route_id) {
             missing.push((kind, route_id));
         }
     }
 
-    if missing.is_empty() {
-        return Ok(());
+    compatibility_fallback_kinds.sort();
+    compatibility_fallback_kinds.dedup();
+
+    if !missing_bindings.is_empty() {
+        let missing_kinds = missing_bindings.join(", ");
+        return Err(HostError::Manifest(format!(
+            "strict effect binding mode requires explicit manifest.effect_bindings for external kinds: {missing_kinds}; world_requires={}; host_provides={}",
+            format_route_map(&world_requires),
+            format_route_map(&host_provides),
+        )));
     }
 
-    let host_provides = registry.route_mappings();
-    let mut details = Vec::new();
-    for (kind, route_id) in &missing {
-        let origin_modules = origins
-            .get(kind.as_str())
-            .map(|mods| mods.join(", "))
-            .unwrap_or_else(|| "unknown".to_string());
-        details.push(format!(
-            "kind='{kind}' route='{route_id}' origins=[{origin_modules}]"
-        ));
+    if !missing.is_empty() {
+        let mut details = Vec::new();
+        for (kind, route_id) in &missing {
+            let origin_modules = origins
+                .get(kind.as_str())
+                .map(|mods| mods.join(", "))
+                .unwrap_or_else(|| "unknown".to_string());
+            details.push(format!(
+                "kind='{kind}' route='{route_id}' origins=[{origin_modules}]"
+            ));
+        }
+        return Err(HostError::Manifest(format!(
+            "missing adapter routes for external effects: {}; world_requires={}; host_provides={}",
+            details.join("; "),
+            format_route_map(&world_requires),
+            format_route_map(&host_provides),
+        )));
     }
-    Err(HostError::Manifest(format!(
-        "missing adapter routes for external effects: {}; world_requires={}; host_provides={}",
-        details.join("; "),
-        format_route_map(&world_requires),
-        format_route_map(&host_provides),
-    )))
+
+    let diagnostics = EffectRouteDiagnostics {
+        strict_effect_bindings,
+        compatibility_fallback_enabled: !strict_effect_bindings,
+        world_requires,
+        host_provides,
+        compatibility_fallback_kinds,
+    };
+    log::info!(
+        "effect route diagnostics: strict_effect_bindings={} world_requires={} host_provides={} compatibility_fallback_kinds={}",
+        diagnostics.strict_effect_bindings,
+        format_route_map(&diagnostics.world_requires),
+        format_route_map(&diagnostics.host_provides),
+        diagnostics.compatibility_fallback_kinds.join(", "),
+    );
+    Ok(diagnostics)
 }
 
 fn default_registry<S: Store + 'static>(store: Arc<S>, config: &HostConfig) -> AdapterRegistry {
@@ -964,5 +1052,91 @@ mod tests {
 
         WorldHost::from_loaded_manifest(store, loaded, tmp.path(), config, KernelConfig::default())
             .expect("custom host profile route should pass preflight");
+    }
+
+    #[test]
+    fn startup_preflight_strict_mode_requires_explicit_bindings() {
+        let tmp = TempDir::new().unwrap();
+        let store = Arc::new(FsStore::open(tmp.path()).expect("fs store"));
+        let loaded = loaded_manifest_with_effect_routes(&[EffectKind::HTTP_REQUEST], &[]);
+        let mut config = HostConfig::default();
+        config.strict_effect_bindings = true;
+
+        let err = match WorldHost::from_loaded_manifest(
+            store,
+            loaded,
+            tmp.path(),
+            config,
+            KernelConfig::default(),
+        ) {
+            Ok(_) => panic!("strict mode should fail without manifest bindings"),
+            Err(err) => err,
+        };
+
+        let HostError::Manifest(message) = err else {
+            panic!("expected manifest error from strict preflight");
+        };
+        assert!(message.contains("strict effect binding mode"));
+        assert!(message.contains(EffectKind::HTTP_REQUEST));
+    }
+
+    #[test]
+    fn startup_preflight_strict_mode_accepts_explicit_bindings() {
+        let tmp = TempDir::new().unwrap();
+        let store = Arc::new(FsStore::open(tmp.path()).expect("fs store"));
+        let loaded = loaded_manifest_with_effect_routes(
+            &[EffectKind::HTTP_REQUEST],
+            &[(EffectKind::HTTP_REQUEST, "http.default")],
+        );
+        let mut config = HostConfig::default();
+        config.strict_effect_bindings = true;
+
+        let host = WorldHost::from_loaded_manifest(
+            store,
+            loaded,
+            tmp.path(),
+            config,
+            KernelConfig::default(),
+        )
+        .expect("strict mode should pass with explicit route bindings");
+        assert!(host.effect_route_diagnostics().strict_effect_bindings);
+        assert!(
+            !host
+                .effect_route_diagnostics()
+                .compatibility_fallback_enabled
+        );
+    }
+
+    #[test]
+    fn host_route_diagnostics_capture_compatibility_fallback_kinds() {
+        let tmp = TempDir::new().unwrap();
+        let store = Arc::new(FsStore::open(tmp.path()).expect("fs store"));
+        let loaded = loaded_manifest_with_effect_routes(
+            &[EffectKind::HTTP_REQUEST, EffectKind::BLOB_GET],
+            &[(EffectKind::BLOB_GET, "blob.get.default")],
+        );
+
+        let host = WorldHost::from_loaded_manifest(
+            store,
+            loaded,
+            tmp.path(),
+            HostConfig::default(),
+            KernelConfig::default(),
+        )
+        .expect("preflight should pass with compatibility fallback enabled");
+
+        let diag = host.effect_route_diagnostics();
+        assert_eq!(
+            diag.world_requires.get(EffectKind::HTTP_REQUEST),
+            Some(&EffectKind::HTTP_REQUEST.to_string())
+        );
+        assert_eq!(
+            diag.world_requires.get(EffectKind::BLOB_GET),
+            Some(&"blob.get.default".to_string())
+        );
+        assert_eq!(
+            diag.compatibility_fallback_kinds,
+            vec![EffectKind::HTTP_REQUEST.to_string()]
+        );
     }
 }

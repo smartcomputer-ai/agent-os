@@ -8,6 +8,7 @@ use base64::Engine as _;
 use serde_json::{Value, json};
 
 use crate::error::HostError;
+use crate::host::EffectRouteDiagnostics;
 
 #[derive(Debug, Clone, Default)]
 pub struct TraceQuery {
@@ -274,6 +275,13 @@ pub fn trace_get<S: Store + 'static>(
 }
 
 pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<Value, HostError> {
+    workflow_trace_summary_with_routes(kernel, None)
+}
+
+pub fn workflow_trace_summary_with_routes<S: Store + 'static>(
+    kernel: &Kernel<S>,
+    route_diagnostics: Option<&EffectRouteDiagnostics>,
+) -> Result<Value, HostError> {
     let mut effect_intents = 0u64;
     let mut receipt_ok = 0u64;
     let mut receipt_error = 0u64;
@@ -349,6 +357,16 @@ pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<
         }
     }
 
+    let adapter_routes = route_diagnostics.map(|diag| {
+        json!({
+            "strict_effect_bindings": diag.strict_effect_bindings,
+            "compatibility_fallback_enabled": diag.compatibility_fallback_enabled,
+            "world_requires": diag.world_requires,
+            "host_provides": diag.host_provides,
+            "compatibility_fallback_kinds": diag.compatibility_fallback_kinds,
+        })
+    });
+
     Ok(json!({
         "totals": {
             "effects": {
@@ -394,6 +412,7 @@ pub fn workflow_trace_summary<S: Store + 'static>(kernel: &Kernel<S>) -> Result<
             "queued_effects": queued_effects.len(),
         },
         "continuations": continuations,
+        "adapter_routes": adapter_routes,
     }))
 }
 
