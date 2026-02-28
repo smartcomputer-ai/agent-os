@@ -36,65 +36,96 @@ Introduce a process-session effect family:
 1. `process.session.open`
 2. `process.exec`
 3. `process.session.signal`
-4. `process.session.close` (optional alias; can map to signal semantics)
 
 Primary security boundary is session definition (`process.session.open`).
 Per-command gating is operational (timeouts/size limits), not semantic command allowlisting.
 
-## Effect Contracts (v1)
+## Minimal Interface (v0.12)
+
+The minimal interface for this slice is exactly these three effects:
+
+1. `process.session.open`
+2. `process.exec`
+3. `process.session.signal`
+
+`process.session.close` is deferred; use `process.session.signal` with `term`.
+
+## Effect Contracts (Minimal v1)
 
 ## `process.session.open`
 
 Purpose: create a sandboxed execution session.
 
-Params (conceptual):
+Params (minimal):
 
-1. `runtime`: `local` in initial implementation; container/microvm/remote reserved.
-2. `identity`: user/uid/gid/privileged flags.
-3. `mounts`: host path refs + guest path + mode (`ro`/`rw`).
-4. `workdir`, `env`.
-5. `network` mode (`none`/`restricted`/`full`).
-6. `resources` limits (cpu/mem/time ceilings).
-7. `labels` for audit/trace correlation.
+1. `target`: runtime-tagged variant (nested object).
+2. v0.12 requires only `target.local` with:
+   - `mounts?`: optional list of host/guest path bindings with `ro|rw` mode.
+   - `workdir?`
+   - `env?`
+   - `network_mode`: `none|full`
+3. `session_ttl_ns?`
+4. `labels?`
 
-Receipt (conceptual):
+Receipt (minimal):
 
 1. `session_id`
-2. runtime metadata (`adapter_id`, host/runtime details)
-3. timestamps/cost summary
+2. `status`: `ready|error`
+3. `started_at_ns`
+4. `expires_at_ns?`
 
 ## `process.exec`
 
 Purpose: execute a command in an existing session.
 
-Params:
+Params (minimal):
 
 1. `session_id`
 2. `argv: list<text>` (structured args; avoid shell-string semantics)
-3. `stdin_ref?`
+3. `cwd?`
 4. `timeout_ns?`
-5. optional `cwd` and `env_patch`
+5. `env_patch?`
+6. `stdin_ref?`
+7. `output_mode?`: `auto|require_inline`
 
-Receipt:
+`output_mode` semantics:
+
+1. `auto` (default): adapter chooses `inline_text`/`inline_bytes`/`blob`.
+2. `require_inline`: adapter must return inline output (`inline_text` or
+   `inline_bytes`) for available stdout/stderr; if output cannot be safely
+   returned inline due to host limits, return `status: error` with a
+   machine-readable reason (for example `inline_required_too_large`).
+
+Receipt (minimal):
 
 1. `exit_code`
-2. `stdout_ref?`, `stderr_ref?` (prefer refs, not large inline bytes)
-3. timings/cost
+2. `status`: `ok|timeout|signaled|error`
+3. `stdout?`, `stderr?` as `option<variant>`:
+   - `inline_text { text }` for small UTF-8 output
+   - `inline_bytes { bytes }` for small non-UTF8 output
+   - `blob { blob_ref, size_bytes, preview_bytes? }` for large output
+4. `started_at_ns`
+5. `ended_at_ns`
 
-## `process.session.signal` / `process.session.close`
+Adapter chooses arm based on `output_mode` and size/encoding constraints. This
+avoids mandatory follow-up blob reads for common small textual outputs while
+keeping large outputs CAS-backed under `auto`.
+
+## `process.session.signal`
 
 Purpose: terminate or gracefully stop a session.
 
-Params:
+Params (minimal):
 
 1. `session_id`
 2. `signal` (`term`/`kill`/`int`...)
-3. optional graceful timeout
+3. `grace_timeout_ns?`
 
-Receipt:
+Receipt (minimal):
 
-1. terminal status (`exited`/`killed`/`not_found`...)
-2. optional exit code and end timestamp
+1. `status`: `signaled|not_found|already_exited|error`
+2. `exit_code?`
+3. `ended_at_ns?`
 
 ## Capability and Policy Model
 
@@ -109,11 +140,13 @@ Add built-in cap + enforcer pair:
 
 Cap schema should constrain session-open envelope:
 
-1. allowed runtime modes,
-2. privileged/root allowance,
-3. mount path/mode constraints,
-4. network modes,
-5. resource ceilings.
+1. allowed `target` variant arms (v0.12: `local` only),
+2. per-arm constraints (for `local`: optional mount path/mode constraints, network modes, identity/privilege policy),
+3. resource ceilings.
+
+Use a tagged nested shape (`target`) instead of a flat cross-runtime record.
+This keeps future runtime expansion (`docker`/`microvm`/`remote`) compatible
+with canonical schema normalization and current cap-enforcer mechanics.
 
 ## Gating posture
 
@@ -132,7 +165,7 @@ Given current host adapter API shape, land in two steps:
 ## Step A (in-scope now)
 
 1. Terminal receipts only for `open`/`exec`/`signal`.
-2. Put large stdout/stderr/progress artifacts in CAS and return refs in receipts.
+2. Under `output_mode: auto`, return small stdout/stderr inline (`inline_text`/`inline_bytes`) and put large outputs in CAS (`blob` arm with `blob_ref`); callers may request `require_inline` when they need immediate inline output.
 
 ## Step B (follow-up)
 
@@ -162,9 +195,8 @@ This keeps v0.12 grounded while preserving the target UX.
    - `process.session.open`
    - `process.exec`
    - `process.session.signal`
-   - optional `process.session.close`
 3. In-process adapter implementation for local runtime.
-4. Receipt-first contract with blob refs for large outputs.
+4. Receipt-first output contract: inline for small UTF-8/bytes, blob refs for large outputs.
 
 ## Deferred
 
