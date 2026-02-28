@@ -1098,11 +1098,19 @@ impl<S: Store + 'static> Kernel<S> {
         intent: &EffectIntent,
         origin: IntentOriginRecord,
     ) -> Result<(), KernelError> {
+        let stored_params = if intent.kind.as_str() == aos_effects::EffectKind::BLOB_PUT {
+            self.externalize_journal_cbor(&intent.params_cbor)?
+        } else {
+            JournalCborStorage::inline(intent.params_cbor.clone())
+        };
         let record = JournalRecord::EffectIntent(EffectIntentRecord {
             intent_hash: intent.intent_hash,
             kind: intent.kind.as_str().to_string(),
             cap_name: intent.cap_name.clone(),
-            params_cbor: intent.params_cbor.clone(),
+            params_cbor: stored_params.inline,
+            params_ref: stored_params.cbor_ref,
+            params_size: stored_params.size,
+            params_sha256: stored_params.sha256,
             idempotency_key: intent.idempotency_key,
             origin,
         });
@@ -1117,11 +1125,23 @@ impl<S: Store + 'static> Kernel<S> {
         if self.suppress_journal {
             return Ok(());
         }
+        let externalize_payload = self
+            .pending_workflow_receipts
+            .get(&receipt.intent_hash)
+            .is_some_and(|ctx| ctx.effect_kind == aos_effects::EffectKind::BLOB_GET);
+        let stored_payload = if externalize_payload {
+            self.externalize_journal_cbor(&receipt.payload_cbor)?
+        } else {
+            JournalCborStorage::inline(receipt.payload_cbor.clone())
+        };
         let record = JournalRecord::EffectReceipt(EffectReceiptRecord {
             intent_hash: receipt.intent_hash,
             adapter_id: receipt.adapter_id.clone(),
             status: receipt.status.clone(),
-            payload_cbor: receipt.payload_cbor.clone(),
+            payload_cbor: stored_payload.inline,
+            payload_ref: stored_payload.cbor_ref,
+            payload_size: stored_payload.size,
+            payload_sha256: stored_payload.sha256,
             cost_cents: receipt.cost_cents,
             signature: receipt.signature.clone(),
             now_ns: stamp.now_ns,
@@ -1172,6 +1192,85 @@ impl<S: Store + 'static> Kernel<S> {
             self.append_record(JournalRecord::PolicyDecision(record))?;
         }
         Ok(())
+    }
+
+    fn externalize_journal_cbor(&self, cbor: &[u8]) -> Result<JournalCborStorage, KernelError> {
+        let computed = Hash::of_bytes(cbor);
+        let stored = self.store.put_blob(cbor)?;
+        if stored != computed {
+            return Err(KernelError::Journal(
+                "externalized_journal_payload_hash_mismatch".into(),
+            ));
+        }
+        let hash_ref = aos_air_types::HashRef::new(stored.to_hex())
+            .map_err(|err| KernelError::Journal(err.to_string()))?;
+        Ok(JournalCborStorage {
+            inline: Vec::new(),
+            cbor_ref: Some(hash_ref.clone()),
+            size: Some(cbor.len() as u64),
+            sha256: Some(hash_ref),
+        })
+    }
+
+    pub(crate) fn hydrate_externalized_cbor(
+        &self,
+        inline: Vec<u8>,
+        cbor_ref: Option<&aos_air_types::HashRef>,
+        size: Option<u64>,
+        sha256: Option<&aos_air_types::HashRef>,
+        field: &'static str,
+    ) -> Result<Vec<u8>, KernelError> {
+        let Some(cbor_ref) = cbor_ref else {
+            return Ok(inline);
+        };
+        let hash = Hash::from_hex_str(cbor_ref.as_str())
+            .map_err(|err| KernelError::Journal(format!("invalid {field}_ref: {err}")))?;
+        let bytes = self.store.get_blob(hash).map_err(|err| {
+            KernelError::Journal(format!(
+                "missing_cas_dependency: {} ({} ref={})",
+                err, field, cbor_ref
+            ))
+        })?;
+        if let Some(expected_size) = size
+            && bytes.len() as u64 != expected_size
+        {
+            return Err(KernelError::Journal(format!(
+                "missing_cas_dependency: {} size mismatch (expected={}, got={})",
+                field,
+                expected_size,
+                bytes.len()
+            )));
+        }
+        if let Some(expected_hash) = sha256 {
+            let actual = Hash::of_bytes(&bytes);
+            let actual_ref = aos_air_types::HashRef::new(actual.to_hex())
+                .map_err(|err| KernelError::Journal(err.to_string()))?;
+            if &actual_ref != expected_hash {
+                return Err(KernelError::Journal(format!(
+                    "missing_cas_dependency: {} sha256 mismatch (expected={}, got={})",
+                    field, expected_hash, actual_ref
+                )));
+            }
+        }
+        Ok(bytes)
+    }
+}
+
+struct JournalCborStorage {
+    inline: Vec<u8>,
+    cbor_ref: Option<aos_air_types::HashRef>,
+    size: Option<u64>,
+    sha256: Option<aos_air_types::HashRef>,
+}
+
+impl JournalCborStorage {
+    fn inline(bytes: Vec<u8>) -> Self {
+        Self {
+            inline: bytes,
+            cbor_ref: None,
+            size: None,
+            sha256: None,
+        }
     }
 }
 

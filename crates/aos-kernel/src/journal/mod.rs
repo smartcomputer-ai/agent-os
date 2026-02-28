@@ -1,6 +1,7 @@
 pub mod fs;
 pub mod mem;
 
+use aos_air_types::HashRef;
 use aos_effects::ReceiptStatus;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -148,6 +149,12 @@ pub struct EffectIntentRecord {
     pub cap_name: String,
     #[serde(with = "serde_bytes")]
     pub params_cbor: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params_ref: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params_sha256: Option<HashRef>,
     #[serde(with = "serde_bytes")]
     pub idempotency_key: [u8; 32],
     pub origin: IntentOriginRecord,
@@ -180,6 +187,12 @@ pub struct EffectReceiptRecord {
     pub status: ReceiptStatus,
     #[serde(with = "serde_bytes")]
     pub payload_cbor: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_ref: Option<HashRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_sha256: Option<HashRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_cents: Option<u64>,
     #[serde(with = "serde_bytes")]
